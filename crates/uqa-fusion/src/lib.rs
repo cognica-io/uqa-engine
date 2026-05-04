@@ -5,3 +5,9 @@
 //
 
 //! Multi-signal fusion: log-odds, attention, learned weights.
+
+pub mod boolean;
+pub mod log_odds;
+
+pub use boolean::ProbabilisticBoolean;
+pub use log_odds::{AdaptiveLogOddsFusion, LogOddsFusion, SignalQuality};

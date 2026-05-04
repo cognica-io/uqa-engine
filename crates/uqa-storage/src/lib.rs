@@ -10,6 +10,8 @@
 
 pub mod document_store;
 pub mod inverted_index;
+pub mod vector_index;
 
 pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use inverted_index::{InvertedIndex, MemoryInvertedIndex};
+pub use vector_index::{cosine_similarity, MemoryVectorIndex, VectorIndex};

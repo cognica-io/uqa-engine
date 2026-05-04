@@ -9,5 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+uqa-scoring = { workspace = true }
+
 [lints]
 workspace = true

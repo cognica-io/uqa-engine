@@ -586,8 +586,11 @@ name = "uqa-engine"
 version = "0.1.0"
 dependencies = [
  "parking_lot",
+ "serde",
+ "serde_json",
  "uqa-analysis",
  "uqa-core",
+ "uqa-fusion",
  "uqa-operators",
  "uqa-scoring",
  "uqa-storage",
@@ -604,6 +607,9 @@ version = "0.1.0"
 [[package]]
 name = "uqa-fusion"
 version = "0.1.0"
+dependencies = [
+ "uqa-scoring",
+]
 
 [[package]]
 name = "uqa-graph"
@@ -618,6 +624,7 @@ name = "uqa-operators"
 version = "0.1.0"
 dependencies = [
  "uqa-core",
+ "uqa-fusion",
  "uqa-scoring",
  "uqa-storage",
 ]

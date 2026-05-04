@@ -15,6 +15,7 @@ uqa-analysis = { workspace = true }
 uqa-storage = { workspace = true }
 uqa-scoring = { workspace = true }
 uqa-operators = { workspace = true }
+uqa-fusion = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]

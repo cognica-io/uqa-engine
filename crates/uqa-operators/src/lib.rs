@@ -13,8 +13,12 @@
 
 pub mod base;
 pub mod boolean;
+pub mod hybrid;
 pub mod primitive;
+pub mod vector;
 
 pub use base::{ComposedOperator, ExecutionContext, Operator};
 pub use boolean::{ComplementOperator, IntersectOperator, UnionOperator};
+pub use hybrid::{HybridTextVectorOperator, LogOddsFusionOperator, SemanticFilterOperator};
 pub use primitive::{FacetOperator, FilterOperator, ScoreOperator, TermOperator};
+pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

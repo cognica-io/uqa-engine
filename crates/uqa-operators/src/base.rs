@@ -7,10 +7,11 @@
 //! `Operator` trait, [`ExecutionContext`] holding storage backends, and
 //! the monoidal [`ComposedOperator`].
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{IndexStats, PostingList};
-use uqa_storage::{DocumentStore, InvertedIndex};
+use uqa_core::{FieldName, IndexStats, PostingList};
+use uqa_storage::{DocumentStore, InvertedIndex, VectorIndex};
 
 /// Storage handles passed to every operator's `execute` call.
 ///
@@ -22,6 +23,7 @@ use uqa_storage::{DocumentStore, InvertedIndex};
 pub struct ExecutionContext {
     pub document_store: Option<Arc<dyn DocumentStore>>,
     pub inverted_index: Option<Arc<dyn InvertedIndex>>,
+    pub vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
     pub stats: Option<IndexStats>,
 }
 
@@ -37,6 +39,15 @@ impl ExecutionContext {
 
     pub fn with_document_store(mut self, ds: Arc<dyn DocumentStore>) -> Self {
         self.document_store = Some(ds);
+        self
+    }
+
+    pub fn with_vector_index(
+        mut self,
+        field: impl Into<FieldName>,
+        idx: Arc<dyn VectorIndex>,
+    ) -> Self {
+        self.vector_indexes.insert(field.into(), idx);
         self
     }
 

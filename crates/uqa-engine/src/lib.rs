@@ -14,12 +14,15 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, Analyzer};
-use uqa_core::{DocId, FieldName, PostingEntry, Value};
-use uqa_operators::{ExecutionContext, Operator, ScoreOperator, TermOperator};
+use uqa_core::{DocId, FieldName, PostingEntry, PostingList, Value};
+use uqa_operators::{
+    CosineProbabilityOperator, ExecutionContext, KNNOperator, LogOddsFusionOperator, Operator,
+    ScoreOperator, TermOperator, VectorSimilarityOperator,
+};
 use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
 use uqa_storage::{
     document_store::Document, DocumentStore, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex,
+    MemoryInvertedIndex, MemoryVectorIndex, VectorIndex,
 };
 
 #[derive(Debug, Clone)]
@@ -62,6 +65,7 @@ pub struct Engine {
 struct TableState {
     document_store: RwLock<MemoryDocumentStore>,
     inverted_index: RwLock<MemoryInvertedIndex>,
+    vector_indexes: RwLock<BTreeMap<FieldName, MemoryVectorIndex>>,
     fts_fields: Vec<FieldName>,
 }
 
@@ -92,9 +96,53 @@ impl Engine {
         let table = TableState {
             document_store: RwLock::new(MemoryDocumentStore::new()),
             inverted_index: RwLock::new(MemoryInvertedIndex::new(analyzer)),
+            vector_indexes: RwLock::new(BTreeMap::new()),
             fts_fields,
         };
         self.tables.write().insert(name, Arc::new(table));
+    }
+
+    /// Register a vector field on a table. The vector index starts empty;
+    /// call [`Engine::add_vector`] (or pass embeddings to
+    /// [`Engine::add_document_with_vectors`]) to populate it.
+    pub fn create_vector_field(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+    ) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        t.vector_indexes
+            .write()
+            .insert(field.into(), MemoryVectorIndex::new(dimensions));
+        true
+    }
+
+    pub fn add_vector(&self, table: &str, doc_id: DocId, field: &str, vector: Vec<f32>) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let mut idxs = t.vector_indexes.write();
+        let Some(idx) = idxs.get_mut(field) else {
+            return false;
+        };
+        idx.add(doc_id, vector);
+        true
+    }
+
+    pub fn add_document_with_vectors(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        vectors: BTreeMap<FieldName, Vec<f32>>,
+    ) {
+        self.add_document(table, doc_id, document);
+        for (field, vector) in vectors {
+            self.add_vector(table, doc_id, &field, vector);
+        }
     }
 
     pub fn create_default_table(&self, name: impl Into<String>, fts_fields: Vec<FieldName>) {
@@ -134,11 +182,63 @@ impl Engine {
         };
         t.document_store.write().delete(doc_id);
         t.inverted_index.write().remove_document(doc_id);
+        for idx in t.vector_indexes.write().values_mut() {
+            idx.delete(doc_id);
+        }
     }
 
     pub fn document_count(&self, table: &str) -> u64 {
         self.table(table)
             .map_or(0, |t| t.inverted_index.read().doc_count())
+    }
+
+    /// Snapshot a table into an [`ExecutionContext`] together with an
+    /// `Arc<IndexStats>` that scorers can hold without juggling lifetimes.
+    fn snapshot_context(
+        &self,
+        table: &str,
+    ) -> Option<(ExecutionContext, Arc<uqa_core::IndexStats>)> {
+        let t = self.table(table)?;
+        let inv: Arc<dyn InvertedIndex> = Arc::new(t.inverted_index.read().clone());
+        let stats = inv.stats();
+        let stats_arc = Arc::new(stats.clone());
+
+        let mut ctx = ExecutionContext::new()
+            .with_inverted_index(inv)
+            .with_document_store({
+                let ds_clone = t.document_store.read().clone();
+                Arc::new(ds_clone) as Arc<dyn DocumentStore>
+            })
+            .with_stats(stats);
+
+        for (field, idx) in t.vector_indexes.read().iter() {
+            ctx =
+                ctx.with_vector_index(field.clone(), Arc::new(idx.clone()) as Arc<dyn VectorIndex>);
+        }
+
+        Some((ctx, stats_arc))
+    }
+
+    fn build_text_scorer(
+        mode: &ScoringMode,
+        stats_arc: Arc<uqa_core::IndexStats>,
+    ) -> Arc<dyn Scorer> {
+        match mode {
+            ScoringMode::BM25(p) => Arc::new(BM25Scorer::new(*p, stats_arc)),
+            ScoringMode::BayesianBM25(p) => Arc::new(BayesianBM25Scorer::new(*p, stats_arc)),
+        }
+    }
+
+    fn rank_top_k(pl: &PostingList, top_k: usize) -> Vec<ScoredEntry> {
+        let mut entries: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
+        entries.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.doc_id.cmp(&b.doc_id))
+        });
+        entries.truncate(top_k);
+        entries
     }
 
     /// Run a single-term or multi-term `text_match` query against `field`
@@ -151,53 +251,140 @@ impl Engine {
         mode: &ScoringMode,
         top_k: usize,
     ) -> Vec<ScoredEntry> {
-        let Some(t) = self.table(table) else {
+        let Some((ctx, stats_arc)) = self.snapshot_context(table) else {
             return Vec::new();
         };
-
-        // Snapshot the inverted index and document store so the operator
-        // pipeline runs without holding write locks. The clones are
-        // Arc-internal handles, not deep copies of the data.
-        let idx_snapshot: Arc<dyn InvertedIndex> = Arc::new(t.inverted_index.read().clone());
-        let stats = idx_snapshot.stats();
-        let analyzer = idx_snapshot.analyzer().clone();
-        let stats_arc = Arc::new(stats.clone());
-
-        let ctx = ExecutionContext::new()
-            .with_inverted_index(idx_snapshot.clone())
-            .with_document_store({
-                let ds_clone = t.document_store.read().clone();
-                Arc::new(ds_clone) as Arc<dyn DocumentStore>
-            })
-            .with_stats(stats);
-
-        let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
-
-        let scorer: Arc<dyn Scorer> = match mode {
-            ScoringMode::BM25(p) => Arc::new(BM25Scorer::new(*p, stats_arc.clone())),
-            ScoringMode::BayesianBM25(p) => {
-                Arc::new(BayesianBM25Scorer::new(*p, stats_arc.clone()))
-            }
-        };
-
+        let analyzer = ctx
+            .inverted_index
+            .as_ref()
+            .expect("snapshot_context populates the inverted index")
+            .analyzer()
+            .clone();
         let analyzed_terms = analyzer.analyze(query);
         if analyzed_terms.is_empty() {
             return Vec::new();
         }
-
+        let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
+        let scorer = Self::build_text_scorer(mode, stats_arc);
         let score_op = ScoreOperator::new(scorer, term_op, analyzed_terms, field);
         let result = score_op.execute(&ctx);
+        Self::rank_top_k(&result, top_k)
+    }
 
-        let mut entries: Vec<ScoredEntry> = result.iter().map(ScoredEntry::from_entry).collect();
-        entries.sort_by(|a, b| {
+    /// Top-`k` nearest neighbors against the named vector field.
+    pub fn knn_search(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: Vec<f32>,
+        top_k: usize,
+    ) -> Vec<ScoredEntry> {
+        let Some((ctx, _)) = self.snapshot_context(table) else {
+            return Vec::new();
+        };
+        let knn = KNNOperator::new(query_vector, top_k, field);
+        let pl = knn.execute(&ctx);
+        Self::rank_top_k(&pl, top_k)
+    }
+
+    /// All documents whose cosine similarity to `query_vector` is at least
+    /// `threshold`.
+    pub fn vector_similarity_search(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: Vec<f32>,
+        threshold: f32,
+    ) -> Vec<ScoredEntry> {
+        let Some((ctx, _)) = self.snapshot_context(table) else {
+            return Vec::new();
+        };
+        let op = VectorSimilarityOperator::new(query_vector, threshold, field);
+        let pl = op.execute(&ctx);
+        let mut out: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
+        out.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.doc_id.cmp(&b.doc_id))
         });
-        entries.truncate(top_k);
-        entries
+        out
     }
+
+    /// Hybrid search: Bayesian BM25 over `text_field` AND KNN over
+    /// `vector_field`, combined via log-odds conjunction (Section 4,
+    /// Paper 4). Both signals are pre-calibrated to (0, 1) before
+    /// fusion: BM25 via the three-term posterior, vector via
+    /// `cosine_to_probability`. Returns top-`top_k` by fused score
+    /// descending.
+    pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
+        let Some((ctx, stats_arc)) = self.snapshot_context(params.table) else {
+            return Vec::new();
+        };
+        let analyzer = ctx
+            .inverted_index
+            .as_ref()
+            .expect("snapshot_context populates the inverted index")
+            .analyzer()
+            .clone();
+        let analyzed_terms = analyzer.analyze(params.text_query);
+        if analyzed_terms.is_empty() && !ctx.vector_indexes.contains_key(params.vector_field) {
+            return Vec::new();
+        }
+
+        let mut signals: Vec<Arc<dyn Operator>> = Vec::new();
+
+        if !analyzed_terms.is_empty() {
+            let term_op: Arc<dyn Operator> =
+                Arc::new(TermOperator::new(params.text_query, params.text_field));
+            let bayes = Arc::new(BayesianBM25Scorer::new(
+                BayesianBM25Params::default(),
+                stats_arc,
+            )) as Arc<dyn Scorer>;
+            let scored: Arc<dyn Operator> = Arc::new(ScoreOperator::new(
+                bayes,
+                term_op,
+                analyzed_terms,
+                params.text_field,
+            ));
+            signals.push(scored);
+        }
+
+        if ctx.vector_indexes.contains_key(params.vector_field) {
+            let knn: Arc<dyn Operator> = Arc::new(KNNOperator::new(
+                params.query_vector.clone(),
+                params.knn_pool,
+                params.vector_field,
+            ));
+            let cosine_prob: Arc<dyn Operator> = Arc::new(CosineProbabilityOperator::new(knn));
+            signals.push(cosine_prob);
+        }
+
+        if signals.is_empty() {
+            return Vec::new();
+        }
+
+        let fusion = LogOddsFusionOperator::new(signals, params.alpha);
+        let result = fusion.execute(&ctx);
+        Self::rank_top_k(&result, params.top_k)
+    }
+}
+
+/// Bundle of hybrid-search arguments. Keeps [`Engine::hybrid_search`]
+/// borrowing-friendly without an explosion of positional parameters.
+#[derive(Debug, Clone)]
+pub struct HybridSearchParams<'a> {
+    pub table: &'a str,
+    pub text_field: &'a str,
+    pub text_query: &'a str,
+    pub vector_field: &'a str,
+    pub query_vector: Vec<f32>,
+    /// How many KNN candidates to pull from the vector index before
+    /// fusion. Tune above `top_k` to widen the recall pool.
+    pub knn_pool: usize,
+    /// Confidence-scaling exponent for log-odds fusion (Paper 4 Section 4).
+    pub alpha: f64,
+    pub top_k: usize,
 }
 
 #[cfg(test)]
@@ -276,6 +463,83 @@ mod tests {
             );
         }
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
+    }
+
+    #[test]
+    fn knn_returns_top_k_in_descending_similarity() {
+        let eng = Engine::new();
+        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_vector_field("articles", "embedding", 3);
+        eng.add_document_with_vectors(
+            "articles",
+            1,
+            doc([("title", s("a"))]),
+            BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
+        );
+        eng.add_document_with_vectors(
+            "articles",
+            2,
+            doc([("title", s("b"))]),
+            BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
+        );
+        eng.add_document_with_vectors(
+            "articles",
+            3,
+            doc([("title", s("c"))]),
+            BTreeMap::from([("embedding".into(), vec![0.7, 0.7, 0.0])]),
+        );
+
+        let hits = eng.knn_search("articles", "embedding", vec![1.0, 0.0, 0.0], 2);
+        assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
+        // doc 3 (cos ~0.707) beats doc 2 (cos 0.0).
+        assert_eq!(hits.get(1).map(|h| h.doc_id), Some(3));
+    }
+
+    #[test]
+    fn hybrid_search_combines_text_and_vector_signals() {
+        let eng = Engine::new();
+        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_vector_field("articles", "embedding", 3);
+
+        // Doc 1: title matches "rust", embedding pointing toward query.
+        eng.add_document_with_vectors(
+            "articles",
+            1,
+            doc([("title", s("rust language"))]),
+            BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
+        );
+        // Doc 2: title matches "rust", embedding orthogonal to query.
+        eng.add_document_with_vectors(
+            "articles",
+            2,
+            doc([("title", s("rust ecosystem"))]),
+            BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
+        );
+        // Doc 3: no text match, embedding near query.
+        eng.add_document_with_vectors(
+            "articles",
+            3,
+            doc([("title", s("python programming"))]),
+            BTreeMap::from([("embedding".into(), vec![0.95, 0.1, 0.0])]),
+        );
+
+        let hits = eng.hybrid_search(&HybridSearchParams {
+            table: "articles",
+            text_field: "title",
+            text_query: "rust",
+            vector_field: "embedding",
+            query_vector: vec![1.0, 0.0, 0.0],
+            knn_pool: 10,
+            alpha: 0.5,
+            top_k: 10,
+        });
+
+        // Doc 1 should rank highest: text match AND high cosine.
+        assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
+        // All three should appear (after coverage-based defaults fill
+        // missing signals).
+        let ids: Vec<DocId> = hits.iter().map(|h| h.doc_id).collect();
+        assert!(ids.contains(&1) && ids.contains(&2) && ids.contains(&3));
     }
 
     #[test]
