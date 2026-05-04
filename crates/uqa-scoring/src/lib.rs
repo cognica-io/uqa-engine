@@ -12,6 +12,7 @@ pub mod bayesian_bm25;
 pub mod bm25;
 pub mod calibration;
 pub mod prob;
+pub mod scorer;
 
 pub use bayesian::BayesianProbabilityTransform;
 pub use bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
@@ -21,3 +22,4 @@ pub use prob::{
     cosine_to_probability, log_odds_conjunction, logit, prob_and, prob_not, prob_or, sigmoid,
     PROB_EPSILON,
 };
+pub use scorer::Scorer;

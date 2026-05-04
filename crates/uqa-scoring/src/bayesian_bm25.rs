@@ -6,6 +6,8 @@
 
 //! Bayesian BM25 scorer (Section 4, Paper 3).
 
+use std::sync::Arc;
+
 use uqa_core::IndexStats;
 
 use crate::bayesian::BayesianProbabilityTransform;
@@ -34,14 +36,14 @@ impl Default for BayesianBM25Params {
 }
 
 #[derive(Debug, Clone)]
-pub struct BayesianBM25Scorer<'a> {
+pub struct BayesianBM25Scorer {
     pub params: BayesianBM25Params,
-    pub bm25: BM25Scorer<'a>,
+    pub bm25: BM25Scorer,
     transform: BayesianProbabilityTransform,
 }
 
-impl<'a> BayesianBM25Scorer<'a> {
-    pub fn new(params: BayesianBM25Params, stats: &'a IndexStats) -> Self {
+impl BayesianBM25Scorer {
+    pub fn new(params: BayesianBM25Params, stats: Arc<IndexStats>) -> Self {
         let base_rate = if (params.base_rate - 0.5).abs() < f64::EPSILON {
             None
         } else {
@@ -100,17 +102,17 @@ impl<'a> BayesianBM25Scorer<'a> {
 mod tests {
     use super::*;
 
-    fn stats(n: u64, avgdl: f64) -> IndexStats {
+    fn stats(n: u64, avgdl: f64) -> Arc<IndexStats> {
         let mut s = IndexStats::default();
         s.total_docs = n;
         s.avg_doc_length = avgdl;
-        s
+        Arc::new(s)
     }
 
     #[test]
     fn score_in_unit_interval() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), &s);
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
         let p = scorer.score(3, 10, 50);
         assert!(p > 0.0 && p < 1.0, "got {p}");
     }
@@ -118,7 +120,7 @@ mod tests {
     #[test]
     fn score_monotone_in_tf() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), &s);
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
         let mut last = scorer.score(0, 10, 50);
         for tf in 1..20 {
             let cur = scorer.score(tf, 10, 50);
@@ -130,7 +132,7 @@ mod tests {
     #[test]
     fn upper_bound_dominates_observed_scores() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), &s);
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
         let ub = scorer.upper_bound(50);
         for tf in [1, 5, 10, 100] {
             for dl in [1, 5, 50, 500] {

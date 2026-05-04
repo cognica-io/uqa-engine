@@ -219,13 +219,13 @@ mod tests {
         idx.add_document(2, fields([("title", "Programming with Rust")]));
 
         let pl = idx.get_posting_list("title", "rust");
-        let ids: Vec<_> = pl.doc_ids().collect();
-        assert_eq!(ids, vec![1, 2]);
+        let docs: Vec<_> = pl.doc_ids().collect();
+        assert_eq!(docs, vec![1, 2]);
 
         // standard analyzer stems "programming" -> "program"
         let pl2 = idx.get_posting_list("title", "program");
-        let ids2: Vec<_> = pl2.doc_ids().collect();
-        assert_eq!(ids2, vec![1, 2]);
+        let docs2: Vec<_> = pl2.doc_ids().collect();
+        assert_eq!(docs2, vec![1, 2]);
     }
 
     #[test]

@@ -11,6 +11,8 @@
 //! - monotonically decreasing in document length,
 //! - upper bound `boost * IDF` (Theorem 3.2.3).
 
+use std::sync::Arc;
+
 use uqa_core::IndexStats;
 
 #[derive(Debug, Clone, Copy)]
@@ -31,13 +33,13 @@ impl Default for BM25Params {
 }
 
 #[derive(Debug, Clone)]
-pub struct BM25Scorer<'a> {
+pub struct BM25Scorer {
     pub params: BM25Params,
-    pub stats: &'a IndexStats,
+    pub stats: Arc<IndexStats>,
 }
 
-impl<'a> BM25Scorer<'a> {
-    pub fn new(params: BM25Params, stats: &'a IndexStats) -> Self {
+impl BM25Scorer {
+    pub fn new(params: BM25Params, stats: Arc<IndexStats>) -> Self {
         Self { params, stats }
     }
 
@@ -86,17 +88,17 @@ impl<'a> BM25Scorer<'a> {
 mod tests {
     use super::*;
 
-    fn stats(n: u64, avgdl: f64) -> IndexStats {
+    fn stats(n: u64, avgdl: f64) -> Arc<IndexStats> {
         let mut s = IndexStats::default();
         s.total_docs = n;
         s.avg_doc_length = avgdl;
-        s
+        Arc::new(s)
     }
 
     #[test]
     fn idf_rises_as_df_falls() {
         let s = stats(1000, 10.0);
-        let bm = BM25Scorer::new(BM25Params::default(), &s);
+        let bm = BM25Scorer::new(BM25Params::default(), s.clone());
         let high_df = bm.idf(900);
         let low_df = bm.idf(10);
         assert!(low_df > high_df);
@@ -106,7 +108,7 @@ mod tests {
     #[test]
     fn score_strictly_increases_in_tf() {
         let s = stats(1000, 10.0);
-        let bm = BM25Scorer::new(BM25Params::default(), &s);
+        let bm = BM25Scorer::new(BM25Params::default(), s.clone());
         let mut last = bm.score(0, 10, 50);
         for tf in 1..30 {
             let cur = bm.score(tf, 10, 50);
@@ -118,7 +120,7 @@ mod tests {
     #[test]
     fn score_strictly_decreases_in_dl_for_fixed_tf() {
         let s = stats(1000, 10.0);
-        let bm = BM25Scorer::new(BM25Params::default(), &s);
+        let bm = BM25Scorer::new(BM25Params::default(), s.clone());
         let mut last = bm.score(5, 1, 50);
         for dl in 2..30 {
             let cur = bm.score(5, dl, 50);
@@ -130,7 +132,7 @@ mod tests {
     #[test]
     fn supremum_is_boost_times_idf() {
         let s = stats(1000, 10.0);
-        let bm = BM25Scorer::new(BM25Params::default(), &s);
+        let bm = BM25Scorer::new(BM25Params::default(), s.clone());
         let bound = bm.upper_bound(50);
         // For very large tf the score approaches w = boost * IDF.
         let very_large = bm.score(1_000_000, 10, 50);

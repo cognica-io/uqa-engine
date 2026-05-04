@@ -10,9 +10,11 @@
 //! algebraic invariants this crate must preserve.
 
 pub mod posting_list;
+pub mod predicate;
 pub mod types;
 
 pub use posting_list::{GeneralizedPostingList, PostingList};
+pub use predicate::Predicate;
 pub use types::{
     DocId, FieldName, GeneralizedPayload, GeneralizedPostingEntry, IndexStats, Payload,
     PostingEntry, Value,
