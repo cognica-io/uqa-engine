@@ -51,6 +51,8 @@ thiserror = "2.0"
 tracing = "0.1"
 parking_lot = "0.12"
 rayon = "1.10"
+regex = "1.11"
+unicode-normalization = "0.1"
 
 # Dev / test
 proptest = "1.5"
