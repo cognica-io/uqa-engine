@@ -16,7 +16,7 @@ use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, Analyzer};
 use uqa_core::{DocId, FieldName, PostingEntry, Value};
 use uqa_operators::{ExecutionContext, Operator, ScoreOperator, TermOperator};
-use uqa_scoring::{BayesianBM25Params, BayesianBM25Scorer, BM25Params, BM25Scorer, Scorer};
+use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
 use uqa_storage::{
     document_store::Document, DocumentStore, InvertedIndex, MemoryDocumentStore,
     MemoryInvertedIndex,
@@ -283,11 +283,7 @@ mod tests {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);
         for i in 0..5 {
-            eng.add_document(
-                "articles",
-                i,
-                doc([("title", s(&format!("doc {i}")))]),
-            );
+            eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))]));
         }
         assert_eq!(eng.document_count("articles"), 5);
     }

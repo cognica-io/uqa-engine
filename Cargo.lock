@@ -584,6 +584,14 @@ dependencies = [
 [[package]]
 name = "uqa-engine"
 version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "uqa-analysis",
+ "uqa-core",
+ "uqa-operators",
+ "uqa-scoring",
+ "uqa-storage",
+]
 
 [[package]]
 name = "uqa-execution"
@@ -608,6 +616,11 @@ version = "0.1.0"
 [[package]]
 name = "uqa-operators"
 version = "0.1.0"
+dependencies = [
+ "uqa-core",
+ "uqa-scoring",
+ "uqa-storage",
+]
 
 [[package]]
 name = "uqa-planner"
@@ -616,6 +629,9 @@ version = "0.1.0"
 [[package]]
 name = "uqa-scoring"
 version = "0.1.0"
+dependencies = [
+ "uqa-core",
+]
 
 [[package]]
 name = "uqa-sql"
@@ -624,6 +640,10 @@ version = "0.1.0"
 [[package]]
 name = "uqa-storage"
 version = "0.1.0"
+dependencies = [
+ "uqa-analysis",
+ "uqa-core",
+]
 
 [[package]]
 name = "wait-timeout"

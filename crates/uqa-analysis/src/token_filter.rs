@@ -58,7 +58,8 @@ impl TokenFilter {
                 language,
                 custom_words,
             } => {
-                let mut words: BTreeSet<&str> = builtin_stop_words(language).iter().copied().collect();
+                let mut words: BTreeSet<&str> =
+                    builtin_stop_words(language).iter().copied().collect();
                 let custom: Vec<&str> = custom_words.iter().map(String::as_str).collect();
                 words.extend(custom);
                 tokens
@@ -195,7 +196,10 @@ mod tests {
             language: "english".to_string(),
             custom_words: vec![],
         };
-        assert_eq!(f.filter(v(&["the", "rust", "is", "fast"])), v(&["rust", "fast"]));
+        assert_eq!(
+            f.filter(v(&["the", "rust", "is", "fast"])),
+            v(&["rust", "fast"])
+        );
     }
 
     #[test]
@@ -228,9 +232,15 @@ mod tests {
     #[test]
     fn synonym_appends_alternatives() {
         let mut m: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        m.insert("car".to_string(), vec!["auto".to_string(), "vehicle".to_string()]);
+        m.insert(
+            "car".to_string(),
+            vec!["auto".to_string(), "vehicle".to_string()],
+        );
         let f = TokenFilter::Synonym { synonyms: m };
-        assert_eq!(f.filter(v(&["fast", "car"])), v(&["fast", "car", "auto", "vehicle"]));
+        assert_eq!(
+            f.filter(v(&["fast", "car"])),
+            v(&["fast", "car", "auto", "vehicle"])
+        );
     }
 
     #[test]
@@ -275,6 +285,9 @@ mod tests {
             min_length: 2,
             max_length: 4,
         };
-        assert_eq!(f.filter(v(&["a", "ab", "abcd", "abcde"])), v(&["ab", "abcd"]));
+        assert_eq!(
+            f.filter(v(&["a", "ab", "abcd", "abcde"])),
+            v(&["ab", "abcd"])
+        );
     }
 }

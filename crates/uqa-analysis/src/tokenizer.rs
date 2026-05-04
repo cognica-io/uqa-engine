@@ -20,13 +20,8 @@ pub enum Tokenizer {
     Whitespace,
     Standard,
     Letter,
-    NGram {
-        min_gram: usize,
-        max_gram: usize,
-    },
-    Pattern {
-        pattern: String,
-    },
+    NGram { min_gram: usize, max_gram: usize },
+    Pattern { pattern: String },
     Keyword,
 }
 
@@ -60,7 +55,12 @@ impl Tokenizer {
                 out
             }
             Tokenizer::Pattern { pattern } => Regex::new(pattern)
-                .map(|re| re.split(text).filter(|s| !s.is_empty()).map(str::to_owned).collect())
+                .map(|re| {
+                    re.split(text)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
                 .unwrap_or_default(),
             Tokenizer::Keyword => {
                 if text.is_empty() {
@@ -90,7 +90,10 @@ mod tests {
     #[test]
     fn whitespace_splits_on_whitespace() {
         let t = Tokenizer::Whitespace;
-        assert_eq!(t.tokenize("hello  world\n  rust"), vec!["hello", "world", "rust"]);
+        assert_eq!(
+            t.tokenize("hello  world\n  rust"),
+            vec!["hello", "world", "rust"]
+        );
     }
 
     #[test]

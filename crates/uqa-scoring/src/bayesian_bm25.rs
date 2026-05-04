@@ -75,7 +75,8 @@ impl BayesianBM25Scorer {
         } else {
             1.0
         };
-        self.transform.score_to_probability(raw, term_freq as f64, doc_len_ratio)
+        self.transform
+            .score_to_probability(raw, term_freq as f64, doc_len_ratio)
     }
 
     /// Combine per-term Bayesian probabilities via log-odds conjunction

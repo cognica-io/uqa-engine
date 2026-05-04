@@ -14,7 +14,9 @@ use std::sync::OnceLock;
 
 use parking_lot::RwLock;
 
-use crate::analyzer::{keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer};
+use crate::analyzer::{
+    keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
+};
 
 /// Built-in default analyzer name.
 pub const DEFAULT_ANALYZER_NAME: &str = "standard";

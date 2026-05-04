@@ -192,7 +192,11 @@ mod tests {
         let t = BayesianProbabilityTransform::new(1.0, 0.0, None);
         // For score=0 the likelihood is 0.5, posterior collapses to the prior.
         let p_zero = t.score_to_probability(0.0, 0.0, 1.0);
-        approx_eq(p_zero, BayesianProbabilityTransform::composite_prior(0.0, 1.0), 1e-12);
+        approx_eq(
+            p_zero,
+            BayesianProbabilityTransform::composite_prior(0.0, 1.0),
+            1e-12,
+        );
     }
 
     #[test]

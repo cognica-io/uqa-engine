@@ -108,7 +108,10 @@ impl InvertedIndex for MemoryInvertedIndex {
                     },
                 );
                 let key = (field.clone(), term);
-                self.index.entry(key.clone()).or_default().insert(doc_id, entry);
+                self.index
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(doc_id, entry);
                 term_set.insert(key);
             }
         }

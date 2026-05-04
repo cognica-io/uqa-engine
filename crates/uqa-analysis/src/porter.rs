@@ -148,7 +148,8 @@ fn step_1b(w: &mut Vec<char>) {
     }
     let mut matched = false;
     for suffix in ["ed", "ing"] {
-        if ends_with_str(w, suffix) && vowel_in_stem(w, w.len() as isize - suffix.len() as isize - 1)
+        if ends_with_str(w, suffix)
+            && vowel_in_stem(w, w.len() as isize - suffix.len() as isize - 1)
         {
             truncate(w, suffix.len());
             matched = true;
