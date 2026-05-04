@@ -22,7 +22,8 @@
     clippy::items_after_statements,
     clippy::unnecessary_map_or,
     clippy::match_same_arms,
-    clippy::unnested_or_patterns
+    clippy::unnested_or_patterns,
+    clippy::too_many_lines
 )]
 
 use std::collections::BTreeMap;
@@ -30,7 +31,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::ast::{
     ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
-    InsertStmt, JoinKind, Projection, SelectStmt, Statement, UpdateStmt,
+    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt, WindowSpec,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -245,11 +246,12 @@ fn run_select(
         .as_ref()
         .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
 
-    // Single-table FROM keeps the existing search-aware fast path; JOIN
-    // shapes drop into the multi-table executor that builds row tuples
-    // up-front and filters them via the expression evaluator.
+    // Single-table FROM with no alias and no window function keeps the
+    // search-aware fast path. JOIN shapes and window queries drop into
+    // the multi-table executor that builds row tuples up-front and
+    // filters them via the expression evaluator.
     if let FromClause::Table { name, alias } = from {
-        if alias.is_none() {
+        if alias.is_none() && !has_window(&stmt.projections) {
             return run_single_table_select(engine, name, &stmt, params);
         }
     }
@@ -317,6 +319,17 @@ fn run_joined_select(
         return Ok(SqlResult::from_rows(columns, rows));
     }
 
+    if has_window(&stmt.projections) {
+        let columns = projection_columns(&stmt.projections);
+        let with_windows = compute_window_columns(&stmt.projections, joined, params)?;
+        let mut rows: Vec<ResultRow> = with_windows
+            .iter()
+            .map(|src| project_join_row(src, &stmt.projections, params))
+            .collect::<Result<_, _>>()?;
+        rows = apply_row_order_limit(rows, stmt, params)?;
+        return Ok(SqlResult::from_rows(columns, rows));
+    }
+
     let columns = projection_columns(&stmt.projections);
     let mut rows: Vec<ResultRow> = joined
         .iter()
@@ -324,6 +337,208 @@ fn run_joined_select(
         .collect::<Result<_, _>>()?;
     rows = apply_row_order_limit(rows, stmt, params)?;
     Ok(SqlResult::from_rows(columns, rows))
+}
+
+fn has_window(projections: &[Projection]) -> bool {
+    projections
+        .iter()
+        .any(|p| matches!(p.expr, Expr::WindowCall { .. }))
+}
+
+fn compute_window_columns(
+    projections: &[Projection],
+    rows: Vec<ResultRow>,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    let mut rows = rows;
+    for proj in projections {
+        let Expr::WindowCall { name, args, spec } = &proj.expr else {
+            continue;
+        };
+        let label = projection_label(proj);
+        let values = evaluate_window(name, args, spec, &rows, params)?;
+        for (row, value) in rows.iter_mut().zip(values) {
+            row.insert(label.clone(), value);
+        }
+    }
+    Ok(rows)
+}
+
+fn evaluate_window(
+    name: &str,
+    args: &[Expr],
+    spec: &WindowSpec,
+    rows: &[ResultRow],
+    params: &[SqlParam],
+) -> Result<Vec<Value>, SqlError> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut partitions: BTreeMap<Vec<Value>, Vec<usize>> = BTreeMap::new();
+    for (i, row) in rows.iter().enumerate() {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        let key: Vec<Value> = spec
+            .partition_by
+            .iter()
+            .map(|e| uqa_sql::expr::eval(e, &ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        partitions.entry(key).or_default().push(i);
+    }
+    let mut output = vec![Value::Null; rows.len()];
+    let lower = name.to_ascii_lowercase();
+    for (_, indices) in partitions {
+        let mut indexed: Vec<(usize, Vec<Value>)> = indices
+            .into_iter()
+            .map(|i| -> Result<_, SqlError> {
+                let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[i]), params);
+                let key: Vec<Value> = spec
+                    .order_by
+                    .iter()
+                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((i, key))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        indexed.sort_by(|a, b| sort_keys(&a.1, &b.1, &spec.order_by));
+
+        match lower.as_str() {
+            "row_number" => {
+                for (rank, (orig, _)) in indexed.iter().enumerate() {
+                    output[*orig] = Value::Int((rank + 1) as i64);
+                }
+            }
+            "rank" => {
+                let mut last_key: Option<Vec<Value>> = None;
+                let mut last_rank = 0i64;
+                for (i, (orig, key)) in indexed.iter().enumerate() {
+                    let rank = if last_key.as_ref() == Some(key) {
+                        last_rank
+                    } else {
+                        last_key = Some(key.clone());
+                        last_rank = (i + 1) as i64;
+                        last_rank
+                    };
+                    output[*orig] = Value::Int(rank);
+                }
+            }
+            "dense_rank" => {
+                let mut last_key: Option<Vec<Value>> = None;
+                let mut last_rank = 0i64;
+                for (orig, key) in &indexed {
+                    if last_key.as_ref() != Some(key) {
+                        last_rank += 1;
+                        last_key = Some(key.clone());
+                    }
+                    output[*orig] = Value::Int(last_rank);
+                }
+            }
+            "lag" | "lead" => {
+                let direction: i64 = if lower == "lag" { -1 } else { 1 };
+                let target_expr = args.first().ok_or_else(|| SqlError::BadArity {
+                    name: lower.clone(),
+                    expected: ">=1".into(),
+                    actual: 0,
+                })?;
+                let offset_value = match args.get(1) {
+                    None => 1i64,
+                    Some(expr) => {
+                        let ctx =
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                        match uqa_sql::expr::eval(expr, &ctx)? {
+                            Value::Int(n) => n,
+                            other => {
+                                return Err(SqlError::TypeMismatch(format!(
+                                    "lag/lead offset must be integer, got {other:?}"
+                                )));
+                            }
+                        }
+                    }
+                };
+                let default_value = match args.get(2) {
+                    None => Value::Null,
+                    Some(expr) => {
+                        let ctx =
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                        uqa_sql::expr::eval(expr, &ctx)?
+                    }
+                };
+                for (i, (orig, _)) in indexed.iter().enumerate() {
+                    let target_idx = i as i64 + direction * offset_value;
+                    let value = if target_idx < 0 || target_idx as usize >= indexed.len() {
+                        default_value.clone()
+                    } else {
+                        let target_orig = indexed[target_idx as usize].0;
+                        let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[target_orig]), params);
+                        uqa_sql::expr::eval(target_expr, &ctx)?
+                    };
+                    output[*orig] = value;
+                }
+            }
+            "ntile" => {
+                let n = match args.first() {
+                    Some(expr) => {
+                        let ctx =
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                        match uqa_sql::expr::eval(expr, &ctx)? {
+                            Value::Int(n) if n > 0 => n,
+                            other => {
+                                return Err(SqlError::TypeMismatch(format!(
+                                    "ntile bucket count must be positive integer, got {other:?}"
+                                )));
+                            }
+                        }
+                    }
+                    None => {
+                        return Err(SqlError::BadArity {
+                            name: "ntile".into(),
+                            expected: "1".into(),
+                            actual: 0,
+                        });
+                    }
+                };
+                let len = indexed.len() as i64;
+                let base = len / n;
+                let extra = len % n;
+                let mut bucket = 1i64;
+                let mut consumed_in_bucket = 0i64;
+                let mut bucket_size = if 1 <= extra { base + 1 } else { base };
+                for (orig, _) in &indexed {
+                    if bucket_size == 0 {
+                        output[*orig] = Value::Int(bucket);
+                        bucket += 1;
+                        continue;
+                    }
+                    output[*orig] = Value::Int(bucket);
+                    consumed_in_bucket += 1;
+                    if consumed_in_bucket == bucket_size {
+                        bucket += 1;
+                        consumed_in_bucket = 0;
+                        bucket_size = if bucket <= extra { base + 1 } else { base };
+                    }
+                }
+            }
+            other => {
+                return Err(SqlError::UnknownFunction(format!(
+                    "window function `{other}` is not supported"
+                )));
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn sort_keys(a: &[Value], b: &[Value], order: &[OrderBy]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {
+        let mut cmp = compare_values(av, bv);
+        if order.get(i).map_or(false, |o| o.descending) {
+            cmp = cmp.reverse();
+        }
+        if cmp != Ordering::Equal {
+            return cmp;
+        }
+    }
+    Ordering::Equal
 }
 
 fn qualifier_for(name: &str, alias: Option<&str>) -> String {
@@ -508,6 +723,14 @@ fn project_join_row(
             for (k, v) in src {
                 out.insert(k.clone(), v.clone());
             }
+            continue;
+        }
+        // Window calls are pre-evaluated in `compute_window_columns`
+        // and stored on the source row under the projection label;
+        // read the cached value through.
+        if matches!(proj.expr, Expr::WindowCall { .. }) {
+            let value = src.get(&label).cloned().unwrap_or(Value::Null);
+            out.insert(label, value);
             continue;
         }
         let value = uqa_sql::expr::eval(&proj.expr, &ctx)?;

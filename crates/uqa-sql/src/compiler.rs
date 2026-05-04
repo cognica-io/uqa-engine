@@ -18,7 +18,7 @@ use uqa_core::Value;
 
 use crate::ast::{
     BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
-    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt,
+    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt, WindowSpec,
 };
 use crate::error::{Result, SqlError};
 
@@ -683,7 +683,38 @@ fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {
         .iter()
         .map(compile_expr)
         .collect::<Result<Vec<_>>>()?;
+    if let Some(over) = f.over.as_ref() {
+        let spec = compile_window_spec(over)?;
+        return Ok(Expr::WindowCall { name, args, spec });
+    }
     Ok(Expr::Func { name, args })
+}
+
+fn compile_window_spec(w: &pg_query::protobuf::WindowDef) -> Result<WindowSpec> {
+    let partition_by: Vec<Expr> = w
+        .partition_clause
+        .iter()
+        .map(compile_expr)
+        .collect::<Result<Vec<_>>>()?;
+    let mut order_by = Vec::new();
+    for sort_node in &w.order_clause {
+        let Some(inner) = sort_node.node.as_ref() else {
+            continue;
+        };
+        if let NodeEnum::SortBy(sb) = inner {
+            let expr_node = sb
+                .node
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("SortBy without expr".into()))?;
+            let expr = compile_expr(expr_node)?;
+            let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
+            order_by.push(OrderBy { expr, descending });
+        }
+    }
+    Ok(WindowSpec {
+        partition_by,
+        order_by,
+    })
 }
 
 fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {

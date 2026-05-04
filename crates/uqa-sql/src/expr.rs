@@ -75,6 +75,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Func { name, .. } => Err(SqlError::Unsupported(format!(
             "scalar evaluation of `{name}` is not supported (use the function registry)"
         ))),
+        Expr::WindowCall { name, .. } => Err(SqlError::Unsupported(format!(
+            "window function `{name}` must be evaluated by the window-aware executor"
+        ))),
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
         Expr::Not(inner) => {
             let v = eval(inner, ctx)?;

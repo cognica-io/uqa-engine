@@ -109,6 +109,12 @@ pub struct OrderBy {
     pub descending: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct WindowSpec {
+    pub partition_by: Vec<Expr>,
+    pub order_by: Vec<OrderBy>,
+}
+
 /// Scalar expression nodes the compiler handles.
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -160,6 +166,12 @@ pub enum Expr {
         expr: Box<Expr>,
         list: Vec<Expr>,
         negated: bool,
+    },
+    /// `func(args) OVER (PARTITION BY ... ORDER BY ...)`.
+    WindowCall {
+        name: String,
+        args: Vec<Expr>,
+        spec: WindowSpec,
     },
 }
 
