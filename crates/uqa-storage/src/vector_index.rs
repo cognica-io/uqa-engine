@@ -16,24 +16,26 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 /// Cosine similarity between two equal-length vectors. Returns `0.0` when
 /// either vector has zero norm or the dimensions differ.
+///
+/// Arithmetic stays in `f32` end-to-end so the result is bit-equal to
+/// the reference NumPy implementation (`np.dot(q, v) / (||q|| * ||v||)`
+/// over `float32` arrays).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
-    let mut dot = 0.0f64;
-    let mut norm_a = 0.0f64;
-    let mut norm_b = 0.0f64;
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
     for (x, y) in a.iter().zip(b.iter()) {
-        let xf = f64::from(*x);
-        let yf = f64::from(*y);
-        dot += xf * yf;
-        norm_a += xf * xf;
-        norm_b += yf * yf;
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
     }
     if norm_a == 0.0 || norm_b == 0.0 {
         return 0.0;
     }
-    (dot / (norm_a.sqrt() * norm_b.sqrt())) as f32
+    dot / (norm_a.sqrt() * norm_b.sqrt())
 }
 
 pub trait VectorIndex: Send + Sync {

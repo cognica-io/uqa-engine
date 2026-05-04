@@ -1,0 +1,240 @@
+{
+  "version": 1,
+  "vector_dim": 3,
+  "corpus": [
+    {
+      "id": 1,
+      "title": "the rust programming language",
+      "embedding": [
+        1.0,
+        0.1,
+        0.0
+      ]
+    },
+    {
+      "id": 2,
+      "title": "rust ecosystem and crates",
+      "embedding": [
+        0.9,
+        0.0,
+        0.1
+      ]
+    },
+    {
+      "id": 3,
+      "title": "python programming guide",
+      "embedding": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    {
+      "id": 4,
+      "title": "java enterprise patterns",
+      "embedding": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": 5,
+      "title": "rust idioms and ownership",
+      "embedding": [
+        0.95,
+        0.05,
+        0.05
+      ]
+    },
+    {
+      "id": 6,
+      "title": "go concurrency primitives",
+      "embedding": [
+        0.1,
+        0.9,
+        0.0
+      ]
+    },
+    {
+      "id": 7,
+      "title": "rust standard library",
+      "embedding": [
+        0.85,
+        0.1,
+        0.15
+      ]
+    },
+    {
+      "id": 8,
+      "title": "memory safety zero overhead",
+      "embedding": [
+        0.7,
+        0.3,
+        0.1
+      ]
+    },
+    {
+      "id": 9,
+      "title": "garbage collection tradeoffs",
+      "embedding": [
+        0.05,
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "id": 10,
+      "title": "no nonsense systems language",
+      "embedding": [
+        0.5,
+        0.5,
+        0.5
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "text_field": "title",
+      "text_query": "rust",
+      "query_vector": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "knn_pool": 10,
+      "alpha": 0.5,
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 5,
+          "score": 0.9868259858128692
+        },
+        {
+          "doc_id": 1,
+          "score": 0.9801639205992598
+        },
+        {
+          "doc_id": 2,
+          "score": 0.9770684775919596
+        },
+        {
+          "doc_id": 7,
+          "score": 0.9452708445841804
+        },
+        {
+          "doc_id": 8,
+          "score": 0.8299805682432687
+        },
+        {
+          "doc_id": 10,
+          "score": 0.5855302278621076
+        },
+        {
+          "doc_id": 6,
+          "score": 0.39438932613055383
+        },
+        {
+          "doc_id": 9,
+          "score": 0.3808846062707713
+        },
+        {
+          "doc_id": 3,
+          "score": 0.35761930727562047
+        },
+        {
+          "doc_id": 4,
+          "score": 0.35761930727562047
+        }
+      ]
+    },
+    {
+      "text_field": "title",
+      "text_query": "language",
+      "query_vector": [
+        1.0,
+        0.1,
+        0.0
+      ],
+      "knn_pool": 5,
+      "alpha": 0.5,
+      "top_k": 5,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 0.9999909672358395
+        },
+        {
+          "doc_id": 5,
+          "score": 0.9859433098989194
+        },
+        {
+          "doc_id": 2,
+          "score": 0.9605505356377796
+        },
+        {
+          "doc_id": 7,
+          "score": 0.951069707701965
+        },
+        {
+          "doc_id": 8,
+          "score": 0.8860062710248825
+        }
+      ]
+    },
+    {
+      "text_field": "title",
+      "text_query": "rust",
+      "query_vector": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "knn_pool": 10,
+      "alpha": 0.0,
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 3,
+          "score": 0.999984869221463
+        },
+        {
+          "doc_id": 6,
+          "score": 0.9226766265539463
+        },
+        {
+          "doc_id": 9,
+          "score": 0.6138913242739561
+        },
+        {
+          "doc_id": 10,
+          "score": 0.5607774650703137
+        },
+        {
+          "doc_id": 8,
+          "score": 0.4995769162709512
+        },
+        {
+          "doc_id": 7,
+          "score": 0.46885329969319184
+        },
+        {
+          "doc_id": 1,
+          "score": 0.46492930718096986
+        },
+        {
+          "doc_id": 5,
+          "score": 0.45318430284999217
+        },
+        {
+          "doc_id": 2,
+          "score": 0.4402006954051623
+        },
+        {
+          "doc_id": 4,
+          "score": 0.3979148172624531
+        }
+      ]
+    }
+  ]
+}
