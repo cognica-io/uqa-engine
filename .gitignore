@@ -1,0 +1,29 @@
+# Cargo build output
+/target
+**/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Rust analyzer
+rust-project.json
+
+# Profiling
+perf.data
+perf.data.old
+flamegraph.svg
+
+# Local environment
+.env
+.env.local
+
+# Generated docs (we publish via cargo doc, not committed)
+/target/doc/
