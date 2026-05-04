@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use uqa_core::IndexStats;
+use uqa_storage::BlockMaxScorer;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BM25Params {
@@ -81,6 +82,12 @@ impl BM25Scorer {
     /// BM25 scores combine additively across query terms.
     pub fn combine_scores(scores: &[f64]) -> f64 {
         scores.iter().sum()
+    }
+}
+
+impl BlockMaxScorer for BM25Scorer {
+    fn score(&self, term_freq: u64, doc_length: u64, doc_freq: u64) -> f64 {
+        BM25Scorer::score(self, term_freq, doc_length, doc_freq)
     }
 }
 

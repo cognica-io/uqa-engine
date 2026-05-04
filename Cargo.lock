@@ -734,7 +734,9 @@ version = "0.1.0"
 name = "uqa-scoring"
 version = "0.1.0"
 dependencies = [
+ "uqa-analysis",
  "uqa-core",
+ "uqa-storage",
 ]
 
 [[package]]

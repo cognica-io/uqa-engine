@@ -8,11 +8,13 @@
 //! index, vector indexes (IVF), B-tree, `R*Tree`, block-max, and the
 //! `SQLite` catalog.
 
+pub mod block_max_index;
 pub mod document_store;
 pub mod inverted_index;
 pub mod sqlite;
 pub mod vector_index;
 
+pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use inverted_index::{InvertedIndex, MemoryInvertedIndex};
 pub use sqlite::{

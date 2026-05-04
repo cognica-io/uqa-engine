@@ -13,6 +13,7 @@ pub mod bm25;
 pub mod calibration;
 pub mod prob;
 pub mod scorer;
+pub mod wand;
 
 pub use bayesian::BayesianProbabilityTransform;
 pub use bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
@@ -23,3 +24,6 @@ pub use prob::{
     PROB_EPSILON,
 };
 pub use scorer::Scorer;
+pub use wand::{
+    BlockMaxWandScorer, BoundTightnessAnalyzer, WandQuery, WandResult, WandScorer, WandStats,
+};
