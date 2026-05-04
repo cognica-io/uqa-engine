@@ -1,0 +1,13 @@
+[package]
+name = "uqa-joins"
+description = "Hash, outer, semi, sort-merge, and cross-paradigm joins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

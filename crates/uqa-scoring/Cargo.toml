@@ -1,0 +1,13 @@
+[package]
+name = "uqa-scoring"
+description = "BM25, Bayesian BM25, WAND, BMW, calibration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

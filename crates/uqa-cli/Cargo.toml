@@ -1,0 +1,17 @@
+[package]
+name = "uqa-cli"
+description = "usql: interactive REPL for UQA"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "usql"
+path = "src/main.rs"
+
+[lints]
+workspace = true

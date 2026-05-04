@@ -1,0 +1,84 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/uqa-core",
+    "crates/uqa-analysis",
+    "crates/uqa-storage",
+    "crates/uqa-scoring",
+    "crates/uqa-fusion",
+    "crates/uqa-operators",
+    "crates/uqa-graph",
+    "crates/uqa-joins",
+    "crates/uqa-planner",
+    "crates/uqa-execution",
+    "crates/uqa-sql",
+    "crates/uqa-fdw",
+    "crates/uqa-engine",
+    "crates/uqa-api",
+    "crates/uqa-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+authors = ["Jaepil Jeong <jaepil@cognica.io>"]
+repository = "https://github.com/cognica-io/uqa-rs"
+homepage = "https://github.com/cognica-io/uqa-rs"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Internal crates
+uqa-core = { version = "0.1.0", path = "crates/uqa-core" }
+uqa-analysis = { version = "0.1.0", path = "crates/uqa-analysis" }
+uqa-storage = { version = "0.1.0", path = "crates/uqa-storage" }
+uqa-scoring = { version = "0.1.0", path = "crates/uqa-scoring" }
+uqa-fusion = { version = "0.1.0", path = "crates/uqa-fusion" }
+uqa-operators = { version = "0.1.0", path = "crates/uqa-operators" }
+uqa-graph = { version = "0.1.0", path = "crates/uqa-graph" }
+uqa-joins = { version = "0.1.0", path = "crates/uqa-joins" }
+uqa-planner = { version = "0.1.0", path = "crates/uqa-planner" }
+uqa-execution = { version = "0.1.0", path = "crates/uqa-execution" }
+uqa-sql = { version = "0.1.0", path = "crates/uqa-sql" }
+uqa-fdw = { version = "0.1.0", path = "crates/uqa-fdw" }
+uqa-engine = { version = "0.1.0", path = "crates/uqa-engine" }
+uqa-api = { version = "0.1.0", path = "crates/uqa-api" }
+
+# Shared external dependencies (versions added when first consumer pulls them in)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+parking_lot = "0.12"
+rayon = "1.10"
+
+# Dev / test
+proptest = "1.5"
+rstest = "0.23"
+criterion = { version = "0.5", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Pedantic lints that fight with idiomatic numerics-heavy code
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"
+debug = true

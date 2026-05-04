@@ -1,0 +1,13 @@
+[package]
+name = "uqa-fusion"
+description = "Log-odds, attention, and learned multi-signal fusion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
