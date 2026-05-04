@@ -57,7 +57,10 @@ The Rust port must satisfy a small list of invariants drawn directly from the pa
 ### 2.4 Paper 4 (log-odds fusion)
 
 - **Confidence-scaled log-odds.** `P_final = sigmoid((1 / n^(1-alpha)) * sum(logit(P_i)))`; default `alpha = 0.5` gives the `sqrt(n)` law.
-- **Identity laws.** `n=1` returns `P_1`; all `P_i == p` returns `p` for any `n`; sign preservation (Theorem 4.2.2); irrelevance preservation (`max P_i < 0.5 => P_final < 0.5`); relevance preservation (dual); symmetric disagreement collapses to 0.5.
+- **Identity laws.** `n=1` always returns `P_1` (Proposition 4.3.2). Scale neutrality (`P_i = p` for all i implies `P_final = p`) holds only at `alpha = 0`; the default `alpha = 0.5` deliberately amplifies agreement.
+- **Sign preservation.** `sgn(P_final - 0.5) = sgn(mean_logit(P_i))` (Theorem 4.2.2).
+- **Irrelevance / relevance preservation.** `max P_i < 0.5 => P_final < 0.5`; `min P_i > 0.5 => P_final > 0.5`.
+- **Symmetric disagreement.** Logits that sum to zero collapse `P_final` to `0.5`.
 - **Logit-sigmoid duality.** `sigmoid(logit(p)) == p` and `logit(sigmoid(x)) == x` numerically (within machine epsilon away from 0 and 1).
 
 ### 2.5 Paper 5 (vector calibration)
