@@ -10,6 +10,8 @@
 //! ([`Engine::new`]) or by `SQLite` ([`Engine::open`]); the operator
 //! pipeline is identical across backends.
 
+pub mod sql;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -22,12 +24,25 @@ use uqa_operators::{
     ScoreOperator, TermOperator, VectorSimilarityOperator,
 };
 use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
+use uqa_sql::SqlError;
 use uqa_storage::{
     document_store::Document, Catalog, DocumentStore, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore,
     SQLiteInvertedIndex, SQLiteVectorIndex, SqliteError, TableSchema, VectorFieldSchema,
     VectorIndex,
 };
+
+pub use uqa_sql::{SqlParam, SqlResult};
+
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error("SQL error: {0}")]
+    Sql(#[from] SqlError),
+    #[error("storage error: {0}")]
+    Storage(#[from] SqliteError),
+}
+
+pub type EngineResult<T> = std::result::Result<T, EngineError>;
 
 #[derive(Debug, Clone)]
 pub struct ScoredEntry {
