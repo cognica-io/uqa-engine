@@ -43,7 +43,26 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let row = ctx
                 .row
                 .ok_or_else(|| SqlError::Internal("column reference without row context".into()))?;
-            Ok(row.get(name).cloned().unwrap_or(Value::Null))
+            // Plain column refs match either an unqualified key or the
+            // suffix of a qualified `table.col` key, so the same row
+            // shape works for single-table SELECTs and JOIN tuples.
+            if let Some(v) = row.get(name) {
+                return Ok(v.clone());
+            }
+            let suffix = format!(".{name}");
+            for (key, value) in row {
+                if key.ends_with(&suffix) {
+                    return Ok(value.clone());
+                }
+            }
+            Ok(Value::Null)
+        }
+        Expr::QualifiedColumn { qualifier, column } => {
+            let row = ctx
+                .row
+                .ok_or_else(|| SqlError::Internal("column reference without row context".into()))?;
+            let key = format!("{qualifier}.{column}");
+            Ok(row.get(&key).cloned().unwrap_or(Value::Null))
         }
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());

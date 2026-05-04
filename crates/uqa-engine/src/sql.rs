@@ -29,8 +29,8 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, InsertStmt,
-    Projection, SelectStmt, Statement, UpdateStmt,
+    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
+    InsertStmt, JoinKind, Projection, SelectStmt, Statement, UpdateStmt,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -240,14 +240,29 @@ fn run_select(
     stmt: SelectStmt,
     params: &[SqlParam],
 ) -> Result<SqlResult, SqlError> {
-    let table = stmt
+    let from = stmt
         .from
-        .as_deref()
+        .as_ref()
         .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
 
-    // The WHERE clause picks the search strategy. A function call at
-    // the top level routes to a UQA search; everything else falls
-    // through to a per-row filter scan.
+    // Single-table FROM keeps the existing search-aware fast path; JOIN
+    // shapes drop into the multi-table executor that builds row tuples
+    // up-front and filters them via the expression evaluator.
+    if let FromClause::Table { name, alias } = from {
+        if alias.is_none() {
+            return run_single_table_select(engine, name, &stmt, params);
+        }
+    }
+
+    run_joined_select(engine, from, &stmt, params)
+}
+
+fn run_single_table_select(
+    engine: &Engine,
+    table: &str,
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+) -> Result<SqlResult, SqlError> {
     let scored = match stmt.r#where.as_ref() {
         None => engine
             .table_doc_ids(table)
@@ -262,16 +277,353 @@ fn run_select(
 
     if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
         let columns = projection_columns(&stmt.projections);
-        let rows = build_aggregate_rows(engine, table, &scored, &stmt, params)?;
-        let mut rows = rows;
-        rows = apply_row_order_limit(rows, &stmt, params)?;
+        let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
+        let rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SqlResult::from_rows(columns, rows));
     }
 
-    let scored = apply_order_limit(scored, &stmt);
+    let scored = apply_order_limit(scored, stmt);
     let columns = projection_columns(&stmt.projections);
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SqlResult::from_rows(columns, rows))
+}
+
+/// Multi-table SELECT path. Each input table contributes a row set
+/// keyed by `<alias>.<column>` (the alias falls back to the bare table
+/// name when no `AS` is given). The same key shape feeds the WHERE
+/// expression evaluator, the GROUP BY accumulators, and the projection
+/// resolver.
+fn run_joined_select(
+    engine: &Engine,
+    from: &FromClause,
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+) -> Result<SqlResult, SqlError> {
+    let mut joined = build_join_rows(engine, from, params)?;
+
+    if let Some(filter) = stmt.r#where.as_ref() {
+        joined.retain(|row| {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+            uqa_sql::expr::eval(filter, &ctx)
+                .map(|v| uqa_sql::expr::truthy(&v))
+                .unwrap_or(false)
+        });
+    }
+
+    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+        let columns = projection_columns(&stmt.projections);
+        let rows = aggregate_join_rows(stmt, &joined, params)?;
+        let rows = apply_row_order_limit(rows, stmt, params)?;
+        return Ok(SqlResult::from_rows(columns, rows));
+    }
+
+    let columns = projection_columns(&stmt.projections);
+    let mut rows: Vec<ResultRow> = joined
+        .iter()
+        .map(|src| project_join_row(src, &stmt.projections, params))
+        .collect::<Result<_, _>>()?;
+    rows = apply_row_order_limit(rows, stmt, params)?;
+    Ok(SqlResult::from_rows(columns, rows))
+}
+
+fn qualifier_for(name: &str, alias: Option<&str>) -> String {
+    alias.unwrap_or(name).to_string()
+}
+
+fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
+    engine
+        .table_doc_ids(table)
+        .into_iter()
+        .filter_map(|id| engine.get_document(table, id))
+        .collect()
+}
+
+fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
+    let mut out = ResultRow::new();
+    for (k, v) in doc {
+        out.insert(format!("{qual}.{k}"), v.clone());
+    }
+    out
+}
+
+fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
+    let mut out = left.clone();
+    for (k, v) in right {
+        out.insert(k.clone(), v.clone());
+    }
+    out
+}
+
+fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow {
+    let qual = qualifier_for(table, alias);
+    let mut out = ResultRow::new();
+    // Emit NULLs for any column that ever appeared in the table; for an
+    // empty table we still know the keys via document_count, but the
+    // safe default is just an empty row — a missing key resolves to
+    // NULL through Expr::Column / QualifiedColumn lookup anyway.
+    let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for id in engine.table_doc_ids(table) {
+        if let Some(doc) = engine.get_document(table, id) {
+            for k in doc.keys() {
+                sample_keys.insert(k.clone());
+            }
+        }
+        if sample_keys.len() > 16 {
+            break;
+        }
+    }
+    for k in sample_keys {
+        out.insert(format!("{qual}.{k}"), Value::Null);
+    }
+    out
+}
+
+fn build_join_rows(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    match from {
+        FromClause::Table { name, alias } => {
+            let qual = qualifier_for(name, alias.as_deref());
+            Ok(load_table_rows(engine, name)
+                .iter()
+                .map(|d| prefix_row(&qual, d))
+                .collect())
+        }
+        FromClause::Join {
+            left,
+            right,
+            kind,
+            on,
+        } => {
+            let left_rows = build_join_rows(engine, left, params)?;
+            let right_rows = build_join_rows(engine, right, params)?;
+            let on_expr = on.as_ref();
+
+            match kind {
+                JoinKind::Inner | JoinKind::Cross => {
+                    Ok(cross_filter(&left_rows, &right_rows, on_expr, params)?)
+                }
+                JoinKind::Left => Ok(left_outer(
+                    &left_rows,
+                    &right_rows,
+                    right,
+                    on_expr,
+                    params,
+                    engine,
+                )?),
+                JoinKind::Right => Ok(left_outer(
+                    &right_rows,
+                    &left_rows,
+                    left,
+                    on_expr,
+                    params,
+                    engine,
+                )?),
+                JoinKind::Full => Err(SqlError::Unsupported("FULL OUTER JOIN".into())),
+            }
+        }
+    }
+}
+
+fn cross_filter(
+    left_rows: &[ResultRow],
+    right_rows: &[ResultRow],
+    on: Option<&Expr>,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    let mut out = Vec::with_capacity(left_rows.len() * right_rows.len());
+    for l in left_rows {
+        for r in right_rows {
+            let merged = merge_rows(l, r);
+            let keep = match on {
+                None => true,
+                Some(expr) => {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params);
+                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                }
+            };
+            if keep {
+                out.push(merged);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn left_outer(
+    outer_rows: &[ResultRow],
+    inner_rows: &[ResultRow],
+    inner_from: &FromClause,
+    on: Option<&Expr>,
+    params: &[SqlParam],
+    engine: &Engine,
+) -> Result<Vec<ResultRow>, SqlError> {
+    let mut out = Vec::new();
+    for l in outer_rows {
+        let mut matched = false;
+        for r in inner_rows {
+            let merged = merge_rows(l, r);
+            let keep = match on {
+                None => true,
+                Some(expr) => {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params);
+                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                }
+            };
+            if keep {
+                out.push(merged);
+                matched = true;
+            }
+        }
+        if !matched {
+            // Pad with NULLs for every column the inner side would
+            // have contributed.
+            let mut pad = l.clone();
+            let mut tables = Vec::new();
+            inner_from.collect_tables(&mut tables);
+            for (name, alias) in &tables {
+                let null_keys = null_row_for(name, alias.as_deref(), engine);
+                for (k, v) in null_keys {
+                    pad.entry(k).or_insert(v);
+                }
+            }
+            out.push(pad);
+        }
+    }
+    Ok(out)
+}
+
+fn project_join_row(
+    src: &ResultRow,
+    projections: &[Projection],
+    params: &[SqlParam],
+) -> Result<ResultRow, SqlError> {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
+    let mut out = ResultRow::new();
+    for proj in projections {
+        let label = projection_label(proj);
+        if let Expr::Star = proj.expr {
+            for (k, v) in src {
+                out.insert(k.clone(), v.clone());
+            }
+            continue;
+        }
+        let value = uqa_sql::expr::eval(&proj.expr, &ctx)?;
+        out.insert(label, value);
+    }
+    Ok(out)
+}
+
+fn aggregate_join_rows(
+    stmt: &SelectStmt,
+    rows: &[ResultRow],
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    let agg_targets: Vec<&Projection> = stmt
+        .projections
+        .iter()
+        .filter(|p| is_aggregate(&p.expr))
+        .collect();
+
+    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
+
+    for row in rows {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        let group_values: Vec<Value> = stmt
+            .group_by
+            .iter()
+            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                group_values,
+            )
+        });
+        for (i, proj) in agg_targets.iter().enumerate() {
+            let Expr::Func { name, args } = &proj.expr else {
+                continue;
+            };
+            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                (_, args) => {
+                    let arg = args
+                        .first()
+                        .ok_or_else(|| SqlError::Internal("aggregate missing arg".into()))?;
+                    uqa_sql::expr::eval(arg, &ctx)?
+                }
+            };
+            bucket.0[i].observe(&value);
+        }
+    }
+
+    if groups.is_empty() && stmt.group_by.is_empty() {
+        groups.insert(
+            Vec::new(),
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                Vec::new(),
+            ),
+        );
+    }
+
+    let mut out = Vec::with_capacity(groups.len());
+    for (_, (accs, group_values)) in groups {
+        let mut row = ResultRow::new();
+        let mut agg_idx = 0;
+        for proj in &stmt.projections {
+            let label = projection_label(proj);
+            if is_aggregate(&proj.expr) {
+                let Expr::Func { name, .. } = &proj.expr else {
+                    return Err(SqlError::Internal("aggregate expr lost".into()));
+                };
+                let acc = &accs[agg_idx];
+                agg_idx += 1;
+                row.insert(label, aggregate_value(name, acc));
+            } else {
+                let mut placed = false;
+                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
+                    if exprs_match(&proj.expr, g_expr) {
+                        row.insert(label.clone(), g_value.clone());
+                        placed = true;
+                        break;
+                    }
+                }
+                if !placed {
+                    return Err(SqlError::Unsupported(format!(
+                        "non-aggregated projection `{label}` must appear in GROUP BY"
+                    )));
+                }
+            }
+        }
+        out.push(row);
+    }
+    Ok(out)
+}
+
+fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
+    match (lhs, rhs) {
+        (Expr::Column(a), Expr::Column(b)) => a == b,
+        (
+            Expr::QualifiedColumn {
+                qualifier: aq,
+                column: ac,
+            },
+            Expr::QualifiedColumn {
+                qualifier: bq,
+                column: bc,
+            },
+        ) => aq == bq && ac == bc,
+        (Expr::Column(c), Expr::QualifiedColumn { column, .. })
+        | (Expr::QualifiedColumn { column, .. }, Expr::Column(c)) => c == column,
+        _ => false,
+    }
 }
 
 fn filter_table_rows(

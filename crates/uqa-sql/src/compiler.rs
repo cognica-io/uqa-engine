@@ -17,8 +17,8 @@ use pg_query::NodeEnum;
 use uqa_core::Value;
 
 use crate::ast::{
-    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, InsertStmt,
-    OrderBy, Projection, SelectStmt, Statement, UpdateStmt,
+    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
+    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt,
 };
 use crate::error::{Result, SqlError};
 
@@ -319,15 +319,56 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
 // SELECT
 // -------------------------------------------------------------------------
 
+fn compile_from_node(node: &Node) -> Result<FromClause> {
+    let Some(inner) = node.node.as_ref() else {
+        return Err(SqlError::Internal("empty FROM node".into()));
+    };
+    match inner {
+        NodeEnum::RangeVar(r) => Ok(FromClause::Table {
+            name: r.relname.clone(),
+            alias: r.alias.as_ref().and_then(|a| {
+                if a.aliasname.is_empty() {
+                    None
+                } else {
+                    Some(a.aliasname.clone())
+                }
+            }),
+        }),
+        NodeEnum::JoinExpr(j) => {
+            let left = j
+                .larg
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("JOIN missing left".into()))?;
+            let right = j
+                .rarg
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("JOIN missing right".into()))?;
+            let kind = match j.jointype() {
+                pg_query::protobuf::JoinType::JoinInner => JoinKind::Inner,
+                pg_query::protobuf::JoinType::JoinLeft => JoinKind::Left,
+                pg_query::protobuf::JoinType::JoinRight => JoinKind::Right,
+                pg_query::protobuf::JoinType::JoinFull => JoinKind::Full,
+                other => {
+                    return Err(SqlError::Unsupported(format!("JOIN type {other:?}")));
+                }
+            };
+            let on = j.quals.as_deref().map(compile_expr).transpose()?;
+            Ok(FromClause::Join {
+                left: Box::new(compile_from_node(left)?),
+                right: Box::new(compile_from_node(right)?),
+                kind,
+                on,
+            })
+        }
+        other => Err(SqlError::Unsupported(format!("FROM form: {other:?}"))),
+    }
+}
+
 fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
-    let from = stmt
-        .from_clause
-        .first()
-        .and_then(|n| n.node.as_ref())
-        .and_then(|inner| match inner {
-            NodeEnum::RangeVar(r) => Some(r.relname.clone()),
-            _ => None,
-        });
+    let from = match stmt.from_clause.first() {
+        Some(node) => Some(compile_from_node(node)?),
+        None => None,
+    };
 
     let mut projections = Vec::new();
     for target_node in &stmt.target_list {
@@ -610,11 +651,17 @@ fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
             _ => {}
         }
     }
-    if parts.is_empty() {
-        return Err(SqlError::Internal("empty ColumnRef".into()));
+    match parts.len() {
+        0 => Err(SqlError::Internal("empty ColumnRef".into())),
+        1 => Ok(Expr::Column(parts.pop().unwrap())),
+        _ => {
+            // `schema.table.col` collapses to `table.col`; `t.col`
+            // round-trips as a qualified ref.
+            let column = parts.pop().unwrap();
+            let qualifier = parts.pop().unwrap();
+            Ok(Expr::QualifiedColumn { qualifier, column })
+        }
     }
-    // Phase 5 ignores qualifying table names (e.g. `t.col` -> `col`).
-    Ok(Expr::Column(parts.last().cloned().unwrap()))
 }
 
 fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {
@@ -722,7 +769,10 @@ mod tests {
         };
         assert_eq!(s.projections.len(), 3);
         assert_eq!(s.projections[2].alias.as_deref(), Some("s"));
-        assert_eq!(s.from.as_deref(), Some("docs"));
+        match &s.from {
+            Some(FromClause::Table { name, .. }) => assert_eq!(name, "docs"),
+            other => panic!("expected single-table FROM, got {other:?}"),
+        }
         assert!(matches!(s.r#where, Some(Expr::Func { .. })));
         assert_eq!(s.order_by.len(), 1);
         assert!(s.order_by[0].descending);

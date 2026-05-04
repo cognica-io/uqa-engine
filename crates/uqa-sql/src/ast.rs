@@ -53,12 +53,48 @@ pub struct InsertStmt {
 #[derive(Debug, Clone)]
 pub struct SelectStmt {
     pub projections: Vec<Projection>,
-    pub from: Option<String>,
+    pub from: Option<FromClause>,
     pub r#where: Option<Expr>,
     pub group_by: Vec<Expr>,
     pub order_by: Vec<OrderBy>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub enum FromClause {
+    /// `FROM <table> [AS <alias>]`.
+    Table { name: String, alias: Option<String> },
+    /// `FROM left <kind> right ON predicate`.
+    Join {
+        left: Box<FromClause>,
+        right: Box<FromClause>,
+        kind: JoinKind,
+        on: Option<Expr>,
+    },
+}
+
+impl FromClause {
+    /// All table names referenced under this clause, in declaration
+    /// order. Used by the compiler to resolve unqualified column refs.
+    pub fn collect_tables(&self, out: &mut Vec<(String, Option<String>)>) {
+        match self {
+            FromClause::Table { name, alias } => out.push((name.clone(), alias.clone())),
+            FromClause::Join { left, right, .. } => {
+                left.collect_tables(out);
+                right.collect_tables(out);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +113,13 @@ pub struct OrderBy {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Star,
+    /// Unqualified column reference (`col`).
     Column(String),
+    /// Qualified column reference (`table.col` or `alias.col`).
+    QualifiedColumn {
+        qualifier: String,
+        column: String,
+    },
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),
