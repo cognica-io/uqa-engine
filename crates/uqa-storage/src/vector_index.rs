@@ -11,6 +11,7 @@
 //! backends slot in by implementing the same surface.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
@@ -46,6 +47,9 @@ pub trait VectorIndex: Send + Sync {
     fn search_knn(&self, query: &[f32], k: usize) -> PostingList;
     fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList;
     fn count(&self) -> usize;
+
+    /// Read-only handle suitable for an `ExecutionContext`.
+    fn snapshot(&self) -> Arc<dyn VectorIndex>;
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +144,10 @@ impl VectorIndex for MemoryVectorIndex {
 
     fn count(&self) -> usize {
         self.vectors.len()
+    }
+
+    fn snapshot(&self) -> Arc<dyn VectorIndex> {
+        Arc::new(self.clone())
     }
 }
 

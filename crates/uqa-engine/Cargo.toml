@@ -17,10 +17,11 @@ uqa-scoring = { workspace = true }
 uqa-operators = { workspace = true }
 uqa-fusion = { workspace = true }
 parking_lot = { workspace = true }
-
-[dev-dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"
 
 [lints]
 workspace = true

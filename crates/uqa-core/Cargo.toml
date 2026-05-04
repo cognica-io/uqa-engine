@@ -9,6 +9,9 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+serde = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 

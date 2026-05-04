@@ -100,9 +100,9 @@ impl Operator for FilterOperator {
         for entry in candidates {
             let value = doc_store.get_field(entry.doc_id, &self.field);
             let matched = if null_aware {
-                self.predicate.evaluate(value)
+                self.predicate.evaluate(value.as_ref())
             } else {
-                value.is_some() && self.predicate.evaluate(value)
+                value.is_some() && self.predicate.evaluate(value.as_ref())
             };
             if matched {
                 out.push(entry);
@@ -145,7 +145,7 @@ impl Operator for FacetOperator {
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for doc_id in candidate_ids {
             if let Some(v) = doc_store.get_field(doc_id, &self.field) {
-                let key = value_to_string(v);
+                let key = value_to_string(&v);
                 *counts.entry(key).or_insert(0) += 1;
             }
         }

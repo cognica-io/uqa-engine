@@ -22,7 +22,8 @@ pub type FieldName = String;
 ///
 /// Covers the JSON-like values the engine round-trips through a posting
 /// list. Date and datetime variants land with the SQL type system.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
 pub enum Value {
     #[default]
     Null,

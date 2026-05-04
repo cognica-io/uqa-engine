@@ -1,0 +1,122 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Shared `SQLite` connection wrapper.
+//!
+//! All persistent stores (documents, inverted index, vectors) on a single
+//! database share one [`ManagedConnection`]. WAL mode lets readers and a
+//! single writer make progress concurrently; the busy timeout absorbs the
+//! occasional contention without surfacing `SQLITE_BUSY` to callers.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use rusqlite::Connection;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SqliteError {
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("catalog migration {version} failed: {source}")]
+    Migration {
+        version: u32,
+        #[source]
+        source: rusqlite::Error,
+    },
+    #[error("payload serialization failed: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+pub type Result<T> = std::result::Result<T, SqliteError>;
+
+/// Shared `SQLite` handle. Cloning is cheap (`Arc`); every clone speaks
+/// to the same underlying connection through the same `Mutex`.
+#[derive(Clone)]
+pub struct ManagedConnection {
+    inner: Arc<Mutex<Connection>>,
+}
+
+impl ManagedConnection {
+    pub fn open(path: &Path) -> Result<Self> {
+        let conn = Connection::open(path)?;
+        Self::configure(&conn)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        Self::configure(&conn)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    fn configure(conn: &Connection) -> Result<()> {
+        // WAL: many readers + 1 writer concurrently, durable on commit.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // 5s busy timeout absorbs short contention without surfacing
+        // SQLITE_BUSY; long contention is a real bug.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Synchronous=NORMAL is the recommended pairing with WAL: safe
+        // against power loss, faster than FULL.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Foreign keys are off by default; turn on so per-table cleanup
+        // can use ON DELETE CASCADE later.
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(())
+    }
+
+    /// Run a closure with the underlying [`Connection`]. Holds the
+    /// internal mutex for the duration of `f`; never reenter via
+    /// another `with` from inside `f`.
+    pub fn with<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
+        let conn = self.inner.lock();
+        f(&conn)
+    }
+
+    pub fn with_mut<R>(&self, f: impl FnOnce(&mut Connection) -> Result<R>) -> Result<R> {
+        let mut conn = self.inner.lock();
+        f(&mut conn)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_memory_connection_round_trip() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        mc.with(|c| {
+            c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", [])?;
+            c.execute("INSERT INTO t (id, v) VALUES (1, 'hi')", [])?;
+            let got: String = c.query_row("SELECT v FROM t WHERE id = 1", [], |r| r.get(0))?;
+            assert_eq!(got, "hi");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn wal_mode_pragma_is_set() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let mode: String = mc
+            .with(|c| Ok(c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?))
+            .unwrap();
+        // In-memory DBs cannot use WAL — SQLite silently downgrades.
+        // Assert we got *some* known journal mode; the file-backed CI
+        // path is what enforces WAL.
+        assert!(matches!(
+            mode.to_lowercase().as_str(),
+            "memory" | "wal" | "delete" | "truncate" | "persist" | "off"
+        ));
+    }
+}

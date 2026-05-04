@@ -6,10 +6,12 @@
 
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
-//! text-only round trips. Catalog restore, schemas, and the SQL frontend
-//! are added in subsequent phases.
+//! text-only round trips. Backed either by in-memory stores
+//! ([`Engine::new`]) or by `SQLite` ([`Engine::open`]); the operator
+//! pipeline is identical across backends.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -21,8 +23,10 @@ use uqa_operators::{
 };
 use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
 use uqa_storage::{
-    document_store::Document, DocumentStore, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, VectorIndex,
+    document_store::Document, Catalog, DocumentStore, InvertedIndex, ManagedConnection,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore,
+    SQLiteInvertedIndex, SQLiteVectorIndex, SqliteError, TableSchema, VectorFieldSchema,
+    VectorIndex,
 };
 
 #[derive(Debug, Clone)]
@@ -53,20 +57,21 @@ impl Default for ScoringMode {
     }
 }
 
-/// In-memory engine: one [`MemoryDocumentStore`] and one
-/// [`MemoryInvertedIndex`] per registered table. The pair is held under a
-/// shared [`RwLock`] so mutations from `add_document` and reads from
-/// `search` interleave safely. Multi-table layout, persistence, and the
-/// schema-aware namespace land later.
+/// Engine: per-table document store + inverted index + vector indexes,
+/// each behind a `RwLock<Box<dyn ...>>` so the `Memory*` and `SQLite*`
+/// backends drop in interchangeably.
 pub struct Engine {
     tables: RwLock<BTreeMap<String, Arc<TableState>>>,
+    catalog: Option<Arc<Catalog>>,
+    conn: Option<ManagedConnection>,
 }
 
 struct TableState {
-    document_store: RwLock<MemoryDocumentStore>,
-    inverted_index: RwLock<MemoryInvertedIndex>,
-    vector_indexes: RwLock<BTreeMap<FieldName, MemoryVectorIndex>>,
+    document_store: RwLock<Box<dyn DocumentStore>>,
+    inverted_index: RwLock<Box<dyn InvertedIndex>>,
+    vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
     fts_fields: Vec<FieldName>,
+    analyzer: Analyzer,
 }
 
 impl Default for Engine {
@@ -76,10 +81,94 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
         Self {
             tables: RwLock::new(BTreeMap::new()),
+            catalog: None,
+            conn: None,
         }
+    }
+
+    /// SQLite-backed engine. Opens (or creates) the database at `path`,
+    /// runs catalog migrations, and rebuilds the in-memory table
+    /// registry from the persisted catalog.
+    pub fn open(path: &Path) -> Result<Self, SqliteError> {
+        let conn = ManagedConnection::open(path)?;
+        let catalog = Arc::new(Catalog::open(conn.clone())?);
+        let mut engine = Self {
+            tables: RwLock::new(BTreeMap::new()),
+            catalog: Some(catalog.clone()),
+            conn: Some(conn.clone()),
+        };
+        engine.restore_from_catalog(&catalog, &conn)?;
+        Ok(engine)
+    }
+
+    fn restore_from_catalog(
+        &mut self,
+        catalog: &Catalog,
+        conn: &ManagedConnection,
+    ) -> Result<(), SqliteError> {
+        for schema in catalog.load_tables()? {
+            let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
+            let docs: Box<dyn DocumentStore> =
+                Box::new(SQLiteDocumentStore::new(conn.clone(), &schema.name));
+            let inv: Box<dyn InvertedIndex> = Box::new(SQLiteInvertedIndex::new(
+                conn.clone(),
+                &schema.name,
+                analyzer.clone(),
+            ));
+            let mut vectors: BTreeMap<FieldName, Box<dyn VectorIndex>> = BTreeMap::new();
+            for vf in &schema.vector_fields {
+                vectors.insert(
+                    vf.field.clone(),
+                    Box::new(SQLiteVectorIndex::new(
+                        conn.clone(),
+                        &schema.name,
+                        &vf.field,
+                        vf.dimensions,
+                    )),
+                );
+            }
+            let table = TableState {
+                document_store: RwLock::new(docs),
+                inverted_index: RwLock::new(inv),
+                vector_indexes: RwLock::new(vectors),
+                fts_fields: schema.fts_fields.clone(),
+                analyzer,
+            };
+            self.tables.write().insert(schema.name, Arc::new(table));
+        }
+        Ok(())
+    }
+
+    fn is_persistent(&self) -> bool {
+        self.catalog.is_some()
+    }
+
+    fn save_table_schema(&self, name: &str, table: &TableState) {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        let Ok(analyzer_json) = serde_json::to_string(&table.analyzer) else {
+            return;
+        };
+        let vector_fields: Vec<VectorFieldSchema> = table
+            .vector_indexes
+            .read()
+            .iter()
+            .map(|(field, idx)| VectorFieldSchema {
+                field: field.clone(),
+                dimensions: idx.dimensions(),
+            })
+            .collect();
+        let _ = catalog.save_table(&TableSchema {
+            name: name.to_string(),
+            analyzer_json,
+            fts_fields: table.fts_fields.clone(),
+            vector_fields,
+        });
     }
 
     /// Register a table. `fts_fields` is the list of field names that are
@@ -93,13 +182,34 @@ impl Engine {
         fts_fields: Vec<FieldName>,
     ) {
         let name = name.into();
+        let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
+            if let Some(conn) = self.conn.as_ref() {
+                (
+                    Box::new(SQLiteDocumentStore::new(conn.clone(), &name)),
+                    Box::new(SQLiteInvertedIndex::new(
+                        conn.clone(),
+                        &name,
+                        analyzer.clone(),
+                    )),
+                )
+            } else {
+                (
+                    Box::new(MemoryDocumentStore::new()),
+                    Box::new(MemoryInvertedIndex::new(analyzer.clone())),
+                )
+            };
         let table = TableState {
-            document_store: RwLock::new(MemoryDocumentStore::new()),
-            inverted_index: RwLock::new(MemoryInvertedIndex::new(analyzer)),
+            document_store: RwLock::new(docs),
+            inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(BTreeMap::new()),
             fts_fields,
+            analyzer,
         };
-        self.tables.write().insert(name, Arc::new(table));
+        let table_arc = Arc::new(table);
+        self.tables.write().insert(name.clone(), table_arc.clone());
+        if self.is_persistent() {
+            self.save_table_schema(&name, &table_arc);
+        }
     }
 
     /// Register a vector field on a table. The vector index starts empty;
@@ -114,9 +224,21 @@ impl Engine {
         let Some(t) = self.table(table) else {
             return false;
         };
-        t.vector_indexes
-            .write()
-            .insert(field.into(), MemoryVectorIndex::new(dimensions));
+        let field = field.into();
+        let idx: Box<dyn VectorIndex> = if let Some(conn) = self.conn.as_ref() {
+            Box::new(SQLiteVectorIndex::new(
+                conn.clone(),
+                table,
+                &field,
+                dimensions,
+            ))
+        } else {
+            Box::new(MemoryVectorIndex::new(dimensions))
+        };
+        t.vector_indexes.write().insert(field, idx);
+        if self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
         true
     }
 
@@ -128,7 +250,7 @@ impl Engine {
         let Some(idx) = idxs.get_mut(field) else {
             return false;
         };
-        idx.add(doc_id, vector);
+        idx.as_mut().add(doc_id, vector);
         true
     }
 
@@ -172,8 +294,8 @@ impl Engine {
 
     pub fn get_document(&self, table: &str, doc_id: DocId) -> Option<Document> {
         let t = self.table(table)?;
-        let cloned = t.document_store.read().get(doc_id).cloned();
-        cloned
+        let got = t.document_store.read().get(doc_id);
+        got
     }
 
     pub fn delete_document(&self, table: &str, doc_id: DocId) {
@@ -183,7 +305,7 @@ impl Engine {
         t.document_store.write().delete(doc_id);
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
-            idx.delete(doc_id);
+            idx.as_mut().delete(doc_id);
         }
     }
 
@@ -199,21 +321,18 @@ impl Engine {
         table: &str,
     ) -> Option<(ExecutionContext, Arc<uqa_core::IndexStats>)> {
         let t = self.table(table)?;
-        let inv: Arc<dyn InvertedIndex> = Arc::new(t.inverted_index.read().clone());
+        let inv = t.inverted_index.read().snapshot();
         let stats = inv.stats();
         let stats_arc = Arc::new(stats.clone());
+        let docs = t.document_store.read().snapshot();
 
         let mut ctx = ExecutionContext::new()
             .with_inverted_index(inv)
-            .with_document_store({
-                let ds_clone = t.document_store.read().clone();
-                Arc::new(ds_clone) as Arc<dyn DocumentStore>
-            })
+            .with_document_store(docs)
             .with_stats(stats);
 
         for (field, idx) in t.vector_indexes.read().iter() {
-            ctx =
-                ctx.with_vector_index(field.clone(), Arc::new(idx.clone()) as Arc<dyn VectorIndex>);
+            ctx = ctx.with_vector_index(field.clone(), idx.snapshot());
         }
 
         Some((ctx, stats_arc))

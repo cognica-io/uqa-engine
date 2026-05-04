@@ -11,6 +11,7 @@
 //! an [`Analyzer`] over each field's text.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
@@ -39,6 +40,9 @@ pub trait InvertedIndex: Send + Sync {
     /// Fully-populated [`IndexStats`] snapshot for the cost model and
     /// scoring layer. Implementations may cache this between mutations.
     fn stats(&self) -> IndexStats;
+
+    /// Read-only handle suitable for an `ExecutionContext`.
+    fn snapshot(&self) -> Arc<dyn InvertedIndex>;
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +204,10 @@ impl InvertedIndex for MemoryInvertedIndex {
             s.set_doc_freq(field.clone(), term.clone(), inner.len() as u64);
         }
         s
+    }
+
+    fn snapshot(&self) -> Arc<dyn InvertedIndex> {
+        Arc::new(self.clone())
     }
 }
 

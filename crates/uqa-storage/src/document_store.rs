@@ -11,6 +11,7 @@
 //! `SQLite`-backed implementations land alongside the catalog.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use uqa_core::{DocId, FieldName, Value};
 
@@ -19,12 +20,15 @@ pub type Document = BTreeMap<FieldName, Value>;
 
 pub trait DocumentStore: Send + Sync {
     fn put(&mut self, doc_id: DocId, document: Document);
-    fn get(&self, doc_id: DocId) -> Option<&Document>;
+    fn get(&self, doc_id: DocId) -> Option<Document>;
     fn delete(&mut self, doc_id: DocId);
     fn clear(&mut self);
 
-    fn get_field(&self, doc_id: DocId, field: &str) -> Option<&Value> {
-        self.get(doc_id).and_then(|d| d.get(field))
+    /// Read a single field. Returns an owned [`Value`] so persistent
+    /// backends (`SQLite`, ...) can decode on demand without reaching
+    /// for a reference into a transient row.
+    fn get_field(&self, doc_id: DocId, field: &str) -> Option<Value> {
+        self.get(doc_id).and_then(|d| d.get(field).cloned())
     }
 
     fn doc_ids(&self) -> Vec<DocId>;
@@ -34,6 +38,11 @@ pub trait DocumentStore: Send + Sync {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Read-only handle suitable for an `ExecutionContext`. Persistent
+    /// backends share their connection; memory backends deep-clone so the
+    /// snapshot is isolated from later mutations.
+    fn snapshot(&self) -> Arc<dyn DocumentStore>;
 }
 
 #[derive(Debug, Default, Clone)]
@@ -56,8 +65,14 @@ impl DocumentStore for MemoryDocumentStore {
         self.documents.insert(doc_id, document);
     }
 
-    fn get(&self, doc_id: DocId) -> Option<&Document> {
-        self.documents.get(&doc_id)
+    fn get(&self, doc_id: DocId) -> Option<Document> {
+        self.documents.get(&doc_id).cloned()
+    }
+
+    fn get_field(&self, doc_id: DocId, field: &str) -> Option<Value> {
+        self.documents
+            .get(&doc_id)
+            .and_then(|d| d.get(field).cloned())
     }
 
     fn delete(&mut self, doc_id: DocId) {
@@ -74,6 +89,10 @@ impl DocumentStore for MemoryDocumentStore {
 
     fn len(&self) -> usize {
         self.documents.len()
+    }
+
+    fn snapshot(&self) -> Arc<dyn DocumentStore> {
+        Arc::new(self.clone())
     }
 }
 
@@ -97,7 +116,7 @@ mod tests {
     fn get_field_returns_value() {
         let mut s = MemoryDocumentStore::new();
         s.put(1, doc([("year", Value::Int(2026))]));
-        assert_eq!(s.get_field(1, "year"), Some(&Value::Int(2026)));
+        assert_eq!(s.get_field(1, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(1, "missing"), None);
         assert_eq!(s.get_field(99, "year"), None);
     }

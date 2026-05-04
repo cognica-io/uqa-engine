@@ -53,6 +53,7 @@ parking_lot = "0.12"
 rayon = "1.10"
 regex = "1.11"
 unicode-normalization = "0.1"
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 
 # Dev / test
 proptest = "1.5"
