@@ -17,8 +17,8 @@ use pg_query::NodeEnum;
 use uqa_core::Value;
 
 use crate::ast::{
-    ColumnDef, ColumnType, CreateIndex, CreateTable, Expr, InsertStmt, OrderBy, Projection,
-    SelectStmt, Statement,
+    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, InsertStmt,
+    OrderBy, Projection, SelectStmt, Statement, UpdateStmt,
 };
 use crate::error::{Result, SqlError};
 
@@ -41,6 +41,8 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::IndexStmt(stmt) => compile_create_index(stmt).map(Statement::CreateIndex),
         NodeEnum::InsertStmt(stmt) => compile_insert(stmt).map(Statement::Insert),
         NodeEnum::SelectStmt(stmt) => compile_select(stmt).map(Statement::Select),
+        NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
+        NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
         other => Err(SqlError::Unsupported(format!(
             "{}",
             other_node_label(other)
@@ -48,10 +50,53 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
     }
 }
 
+fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
+    let table = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SqlError::Internal("UPDATE without relation".into()))?;
+    let mut assignments = Vec::new();
+    for target_node in &stmt.target_list {
+        let Some(inner) = target_node.node.as_ref() else {
+            continue;
+        };
+        if let NodeEnum::ResTarget(rt) = inner {
+            let value = rt
+                .val
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("UPDATE assignment without value".into()))?;
+            assignments.push((rt.name.clone(), compile_expr(value)?));
+        }
+    }
+    let r#where = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| compile_expr(w))
+        .transpose()?;
+    Ok(UpdateStmt {
+        table,
+        assignments,
+        r#where,
+    })
+}
+
+fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
+    let table = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SqlError::Internal("DELETE without relation".into()))?;
+    let r#where = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| compile_expr(w))
+        .transpose()?;
+    Ok(DeleteStmt { table, r#where })
+}
+
 fn other_node_label(node: &NodeEnum) -> &'static str {
     match node {
-        NodeEnum::UpdateStmt(_) => "UPDATE",
-        NodeEnum::DeleteStmt(_) => "DELETE",
         NodeEnum::DropStmt(_) => "DROP",
         NodeEnum::ExplainStmt(_) => "EXPLAIN",
         NodeEnum::ViewStmt(_) => "CREATE VIEW",
@@ -332,10 +377,17 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
     let limit = compile_int_const(stmt.limit_count.as_deref())?;
     let offset = compile_int_const(stmt.limit_offset.as_deref())?;
 
+    let group_by: Vec<Expr> = stmt
+        .group_clause
+        .iter()
+        .map(compile_expr)
+        .collect::<Result<Vec<_>>>()?;
+
     Ok(SelectStmt {
         projections,
         from,
         r#where,
+        group_by,
         order_by,
         limit,
         offset,
@@ -385,8 +437,141 @@ fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Array(elements))
         }
         NodeEnum::TypeCast(tc) => compile_type_cast(tc),
+        NodeEnum::AExpr(a) => compile_a_expr(a),
+        NodeEnum::BoolExpr(b) => compile_bool_expr(b),
+        NodeEnum::NullTest(n) => compile_null_test(n),
         other => Err(SqlError::Unsupported(format!("expression form: {other:?}"))),
     }
+}
+
+fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
+    use pg_query::protobuf::AExprKind;
+    let kind = a.kind();
+    match kind {
+        AExprKind::AexprOp => {
+            let op_name = a
+                .name
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect::<Vec<_>>()
+                .join("");
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("AExpr missing lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("AExpr missing rhs".into()))?;
+            let op = match op_name.as_str() {
+                "=" => BinaryOp::Equal,
+                "<>" | "!=" => BinaryOp::NotEqual,
+                "<" => BinaryOp::Less,
+                "<=" => BinaryOp::LessEqual,
+                ">" => BinaryOp::Greater,
+                ">=" => BinaryOp::GreaterEqual,
+                "+" => BinaryOp::Add,
+                "-" => BinaryOp::Subtract,
+                "*" => BinaryOp::Multiply,
+                "/" => BinaryOp::Divide,
+                other => return Err(SqlError::Unsupported(format!("operator `{other}`"))),
+            };
+            Ok(Expr::Binary {
+                op,
+                lhs: Box::new(compile_expr(lhs)?),
+                rhs: Box::new(compile_expr(rhs)?),
+            })
+        }
+        AExprKind::AexprBetween | AExprKind::AexprNotBetween => {
+            let expr = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("BETWEEN without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("BETWEEN without rhs".into()))?;
+            let bounds = match rhs.node.as_ref() {
+                Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
+                _ => return Err(SqlError::Internal("BETWEEN expects 2 bounds".into())),
+            };
+            let between = Expr::Between {
+                expr: Box::new(compile_expr(expr)?),
+                low: Box::new(compile_expr(&bounds[0])?),
+                high: Box::new(compile_expr(&bounds[1])?),
+            };
+            Ok(if matches!(kind, AExprKind::AexprNotBetween) {
+                Expr::Not(Box::new(between))
+            } else {
+                between
+            })
+        }
+        AExprKind::AexprIn => {
+            let expr = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("IN without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("IN without rhs".into()))?;
+            let items = match rhs.node.as_ref() {
+                Some(NodeEnum::List(l)) => l.items.clone(),
+                _ => return Err(SqlError::Internal("IN expects list".into())),
+            };
+            let list: Vec<Expr> = items.iter().map(compile_expr).collect::<Result<Vec<_>>>()?;
+            let negated = a
+                .name
+                .first()
+                .and_then(|n| n.node.as_ref())
+                .and_then(|inner| match inner {
+                    NodeEnum::String(s) => Some(s.sval == "<>"),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            Ok(Expr::InList {
+                expr: Box::new(compile_expr(expr)?),
+                list,
+                negated,
+            })
+        }
+        other => Err(SqlError::Unsupported(format!("AExpr kind: {other:?}"))),
+    }
+}
+
+fn compile_bool_expr(b: &pg_query::protobuf::BoolExpr) -> Result<Expr> {
+    use pg_query::protobuf::BoolExprType;
+    let kind = b.boolop();
+    let args: Vec<Expr> = b
+        .args
+        .iter()
+        .map(compile_expr)
+        .collect::<Result<Vec<_>>>()?;
+    match kind {
+        BoolExprType::AndExpr => Ok(Expr::And(args)),
+        BoolExprType::OrExpr => Ok(Expr::Or(args)),
+        BoolExprType::NotExpr => {
+            let arg = args
+                .into_iter()
+                .next()
+                .ok_or_else(|| SqlError::Internal("NOT without operand".into()))?;
+            Ok(Expr::Not(Box::new(arg)))
+        }
+        _ => Err(SqlError::Unsupported(format!("BoolExpr {kind:?}"))),
+    }
+}
+
+fn compile_null_test(n: &pg_query::protobuf::NullTest) -> Result<Expr> {
+    use pg_query::protobuf::NullTestType;
+    let arg = n
+        .arg
+        .as_ref()
+        .ok_or_else(|| SqlError::Internal("NullTest without arg".into()))?;
+    let negated = matches!(n.nulltesttype(), NullTestType::IsNotNull);
+    Ok(Expr::IsNull {
+        expr: Box::new(compile_expr(arg)?),
+        negated,
+    })
 }
 
 fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {

@@ -13,7 +13,11 @@
     clippy::match_wildcard_for_single_variants,
     clippy::items_after_statements,
     clippy::needless_pass_by_value,
-    clippy::unnecessary_wraps
+    clippy::unnecessary_wraps,
+    clippy::match_same_arms,
+    clippy::unnested_or_patterns,
+    clippy::unnecessary_join,
+    clippy::unnecessary_map_or
 )]
 
 pub mod ast;

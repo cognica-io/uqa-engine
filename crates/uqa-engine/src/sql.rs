@@ -19,15 +19,18 @@
     clippy::manual_let_else,
     clippy::needless_pass_by_value,
     clippy::unnecessary_wraps,
-    clippy::items_after_statements
+    clippy::items_after_statements,
+    clippy::unnecessary_map_or,
+    clippy::match_same_arms,
+    clippy::unnested_or_patterns
 )]
 
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, Expr, InsertStmt, Projection,
-    SelectStmt, Statement,
+    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, InsertStmt,
+    Projection, SelectStmt, Statement, UpdateStmt,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -56,7 +59,72 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<Sql
         Statement::CreateIndex(c) => run_create_index(engine, c),
         Statement::Insert(i) => run_insert(engine, i, params),
         Statement::Select(s) => run_select(engine, s, params),
+        Statement::Update(u) => run_update(engine, u, params),
+        Statement::Delete(d) => run_delete(engine, d, params),
     }
+}
+
+fn run_update(
+    engine: &Engine,
+    stmt: UpdateStmt,
+    params: &[SqlParam],
+) -> Result<SqlResult, SqlError> {
+    let mut affected = 0u64;
+    for doc_id in engine.table_doc_ids(&stmt.table) {
+        let mut doc = engine
+            .get_document(&stmt.table, doc_id)
+            .ok_or_else(|| SqlError::Internal("missing document during UPDATE".into()))?;
+        if let Some(filter) = stmt.r#where.as_ref() {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+            if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+                continue;
+            }
+        }
+        let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+        for (col, expr) in &stmt.assignments {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+            let value = uqa_sql::expr::eval(expr, &ctx)?;
+            if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
+                new_vectors.insert(col.clone(), vec);
+            }
+            doc.insert(col.clone(), value);
+        }
+        engine.add_document_with_vectors(&stmt.table, doc_id, doc, new_vectors);
+        affected += 1;
+    }
+    Ok(SqlResult::from_affected(affected))
+}
+
+fn run_delete(
+    engine: &Engine,
+    stmt: DeleteStmt,
+    params: &[SqlParam],
+) -> Result<SqlResult, SqlError> {
+    let mut affected = 0u64;
+    let to_delete: Vec<uqa_core::DocId> = engine
+        .table_doc_ids(&stmt.table)
+        .into_iter()
+        .filter(|&doc_id| {
+            let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
+                return false;
+            };
+            match stmt.r#where.as_ref() {
+                None => true,
+                Some(filter) => {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+                    matches!(
+                        uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
+                        Ok(true)
+                    )
+                }
+            }
+        })
+        .collect();
+    for doc_id in to_delete {
+        engine.delete_document(&stmt.table, doc_id);
+        affected += 1;
+    }
+    Ok(SqlResult::from_affected(affected))
 }
 
 // -------------------------------------------------------------------------
@@ -177,27 +245,309 @@ fn run_select(
         .as_deref()
         .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
 
-    // The WHERE clause picks the search strategy. Phase 5 handles a
-    // single function call (text_match / knn_match / fuse_log_odds) at
-    // the top level; richer Boolean / nested forms land in Phase 6.
+    // The WHERE clause picks the search strategy. A function call at
+    // the top level routes to a UQA search; everything else falls
+    // through to a per-row filter scan.
     let scored = match stmt.r#where.as_ref() {
         None => engine
             .table_doc_ids(table)
             .into_iter()
             .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
             .collect::<Vec<_>>(),
-        Some(Expr::Func { name, args }) => execute_function(engine, table, name, args, params)?,
-        Some(other) => {
-            return Err(SqlError::Unsupported(format!(
-                "WHERE form not supported in Phase 5: {other:?}"
-            )));
+        Some(Expr::Func { name, args }) if uqa_sql::registry::is_registered(name) => {
+            execute_function(engine, table, name, args, params)?
         }
+        Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
     };
+
+    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+        let columns = projection_columns(&stmt.projections);
+        let rows = build_aggregate_rows(engine, table, &scored, &stmt, params)?;
+        let mut rows = rows;
+        rows = apply_row_order_limit(rows, &stmt, params)?;
+        return Ok(SqlResult::from_rows(columns, rows));
+    }
 
     let scored = apply_order_limit(scored, &stmt);
     let columns = projection_columns(&stmt.projections);
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SqlResult::from_rows(columns, rows))
+}
+
+fn filter_table_rows(
+    engine: &Engine,
+    table: &str,
+    filter: &Expr,
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    let mut out = Vec::new();
+    for doc_id in engine.table_doc_ids(table) {
+        let document = engine.get_document(table, doc_id).unwrap_or_default();
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params);
+        let v = uqa_sql::expr::eval(filter, &ctx)?;
+        if uqa_sql::expr::truthy(&v) {
+            out.push(ScoredEntry { doc_id, score: 0.0 });
+        }
+    }
+    Ok(out)
+}
+
+fn has_aggregate(projections: &[Projection]) -> bool {
+    projections.iter().any(|p| is_aggregate(&p.expr))
+}
+
+fn is_aggregate(expr: &Expr) -> bool {
+    matches!(expr, Expr::Func { name, .. } if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "count" | "sum" | "avg" | "min" | "max"
+    ))
+}
+
+#[derive(Default)]
+struct AggregateAccumulator {
+    count: u64,
+    sum: f64,
+    min: Option<Value>,
+    max: Option<Value>,
+}
+
+impl AggregateAccumulator {
+    fn observe(&mut self, value: &Value) {
+        if matches!(value, Value::Null) {
+            return;
+        }
+        self.count += 1;
+        if let Ok(f) = value_as_f64(value) {
+            self.sum += f;
+        }
+        match &self.min {
+            Some(cur) if !value_lt(value, cur) => {}
+            _ => self.min = Some(value.clone()),
+        }
+        match &self.max {
+            Some(cur) if !value_gt(value, cur) => {}
+            _ => self.max = Some(value.clone()),
+        }
+    }
+}
+
+fn value_as_f64(v: &Value) -> Result<f64, SqlError> {
+    match v {
+        Value::Int(n) => Ok(*n as f64),
+        Value::Float(f) => Ok(*f),
+        other => Err(SqlError::TypeMismatch(format!(
+            "expected number, got {other:?}"
+        ))),
+    }
+}
+
+fn value_lt(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x < y,
+        (Value::Float(x), Value::Float(y)) => x < y,
+        (Value::Int(x), Value::Float(y)) => (*x as f64) < *y,
+        (Value::Float(x), Value::Int(y)) => *x < (*y as f64),
+        (Value::Str(x), Value::Str(y)) => x < y,
+        _ => false,
+    }
+}
+
+fn value_gt(a: &Value, b: &Value) -> bool {
+    value_lt(b, a)
+}
+
+fn build_aggregate_rows(
+    engine: &Engine,
+    table: &str,
+    scored: &[ScoredEntry],
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    // group_key -> per-aggregate accumulator vector + the raw group key
+    // values used to project the GROUP BY columns.
+    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
+    let agg_targets: Vec<&Projection> = stmt
+        .projections
+        .iter()
+        .filter(|p| is_aggregate(&p.expr))
+        .collect();
+
+    for entry in scored {
+        let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params);
+        let group_values: Vec<Value> = stmt
+            .group_by
+            .iter()
+            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                group_values,
+            )
+        });
+        for (i, proj) in agg_targets.iter().enumerate() {
+            let Expr::Func { name, args } = &proj.expr else {
+                continue;
+            };
+            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                (_, args) => {
+                    let arg = args
+                        .first()
+                        .ok_or_else(|| SqlError::Internal("aggregate missing arg".into()))?;
+                    uqa_sql::expr::eval(arg, &ctx)?
+                }
+            };
+            bucket.0[i].observe(&value);
+        }
+    }
+
+    if groups.is_empty() && stmt.group_by.is_empty() {
+        // SELECT count(*) FROM t with no rows still produces a row of
+        // zeros so downstream consumers see a stable shape.
+        groups.insert(
+            Vec::new(),
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                Vec::new(),
+            ),
+        );
+    }
+
+    let mut rows: Vec<ResultRow> = Vec::with_capacity(groups.len());
+    for (_, (accs, group_values)) in groups {
+        let mut row = ResultRow::new();
+        let mut agg_idx = 0;
+        for proj in &stmt.projections {
+            let label = projection_label(proj);
+            if is_aggregate(&proj.expr) {
+                let Expr::Func { name, .. } = &proj.expr else {
+                    return Err(SqlError::Internal("aggregate expr lost".into()));
+                };
+                let acc = &accs[agg_idx];
+                agg_idx += 1;
+                row.insert(label, aggregate_value(name, acc));
+            } else if let Expr::Column(col) = &proj.expr {
+                let mut placed = false;
+                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
+                    if let Expr::Column(g_col) = g_expr {
+                        if g_col == col {
+                            row.insert(label.clone(), g_value.clone());
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+                if !placed {
+                    return Err(SqlError::Unsupported(format!(
+                        "non-aggregated projection `{col}` must appear in GROUP BY"
+                    )));
+                }
+            } else {
+                return Err(SqlError::Unsupported(
+                    "complex non-aggregate projections in GROUP BY are not supported".into(),
+                ));
+            }
+        }
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
+    match name.to_ascii_lowercase().as_str() {
+        "count" => Value::Int(acc.count as i64),
+        "sum" => Value::Float(acc.sum),
+        "avg" => {
+            if acc.count == 0 {
+                Value::Null
+            } else {
+                Value::Float(acc.sum / acc.count as f64)
+            }
+        }
+        "min" => acc.min.clone().unwrap_or(Value::Null),
+        "max" => acc.max.clone().unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
+
+fn projection_label(proj: &Projection) -> String {
+    match (&proj.alias, &proj.expr) {
+        (Some(a), _) => a.clone(),
+        (None, Expr::Column(c)) => c.clone(),
+        (None, Expr::Star) => "*".into(),
+        (None, Expr::Func { name, .. }) => name.clone(),
+        (None, _) => "expr".into(),
+    }
+}
+
+fn apply_row_order_limit(
+    mut rows: Vec<ResultRow>,
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    if !stmt.order_by.is_empty() {
+        let order = stmt.order_by.clone();
+        let mut keyed: Vec<(Vec<Value>, ResultRow)> = rows
+            .into_iter()
+            .map(|row| -> Result<_, SqlError> {
+                let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params);
+                let key: Vec<Value> = order
+                    .iter()
+                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((key, row))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        keyed.sort_by(|a, b| {
+            for (i, (av, bv)) in a.0.iter().zip(b.0.iter()).enumerate() {
+                let cmp = compare_values(av, bv);
+                let cmp = if order.get(i).map_or(false, |o| o.descending) {
+                    cmp.reverse()
+                } else {
+                    cmp
+                };
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+        rows = keyed.into_iter().map(|(_, r)| r).collect();
+    }
+    if let Some(offset) = stmt.offset {
+        let off = offset as usize;
+        if off >= rows.len() {
+            rows.clear();
+        } else {
+            rows.drain(0..off);
+        }
+    }
+    if let Some(limit) = stmt.limit {
+        rows.truncate(limit as usize);
+    }
+    Ok(rows)
+}
+
+fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (Value::Null, _) => Ordering::Less,
+        (_, Value::Null) => Ordering::Greater,
+        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
+        (Value::Str(x), Value::Str(y)) => x.cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        _ => Ordering::Equal,
+    }
 }
 
 fn execute_function(

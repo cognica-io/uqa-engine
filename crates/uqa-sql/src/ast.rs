@@ -55,6 +55,7 @@ pub struct SelectStmt {
     pub projections: Vec<Projection>,
     pub from: Option<String>,
     pub r#where: Option<Expr>,
+    pub group_by: Vec<Expr>,
     pub order_by: Vec<OrderBy>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
@@ -89,10 +90,66 @@ pub enum Expr {
     /// `ARRAY[1.0, 2.0, ...]` literal — currently restricted to numeric
     /// elements (vectors).
     Array(Vec<Expr>),
+    /// `lhs op rhs` — comparison or arithmetic.
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    /// `NOT expr`.
+    Not(Box<Expr>),
+    /// `cond_1 AND cond_2 AND ...` (n-ary).
+    And(Vec<Expr>),
+    /// `cond_1 OR cond_2 OR ...` (n-ary).
+    Or(Vec<Expr>),
+    /// `expr IS NULL` / `expr IS NOT NULL`.
+    IsNull {
+        expr: Box<Expr>,
+        negated: bool,
+    },
+    /// `expr BETWEEN low AND high`.
+    Between {
+        expr: Box<Expr>,
+        low: Box<Expr>,
+        high: Box<Expr>,
+    },
+    /// `expr IN (a, b, c)` literal list.
+    InList {
+        expr: Box<Expr>,
+        list: Vec<Expr>,
+        negated: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
 }
 
 /// `Expr` restricted to value-producing forms used by `INSERT` rows.
 pub type ValueExpr = Expr;
+
+#[derive(Debug, Clone)]
+pub struct UpdateStmt {
+    pub table: String,
+    pub assignments: Vec<(String, Expr)>,
+    pub r#where: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteStmt {
+    pub table: String,
+    pub r#where: Option<Expr>,
+}
 
 #[derive(Debug, Clone)]
 pub enum Statement {
@@ -100,4 +157,6 @@ pub enum Statement {
     CreateIndex(CreateIndex),
     Insert(InsertStmt),
     Select(SelectStmt),
+    Update(UpdateStmt),
+    Delete(DeleteStmt),
 }

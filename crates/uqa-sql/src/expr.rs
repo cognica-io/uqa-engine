@@ -9,7 +9,7 @@
 
 use uqa_core::Value;
 
-use crate::ast::Expr;
+use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SqlError};
 use crate::params::SqlParam;
 use crate::result::ResultRow;
@@ -55,6 +55,150 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Star => Err(SqlError::Internal("`*` cannot be evaluated".into())),
         Expr::Func { name, .. } => Err(SqlError::Unsupported(format!(
             "scalar evaluation of `{name}` is not supported (use the function registry)"
+        ))),
+        Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
+        Expr::Not(inner) => {
+            let v = eval(inner, ctx)?;
+            Ok(Value::Bool(!truthy(&v)))
+        }
+        Expr::And(items) => {
+            for item in items {
+                let v = eval(item, ctx)?;
+                if !truthy(&v) {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
+        }
+        Expr::Or(items) => {
+            for item in items {
+                let v = eval(item, ctx)?;
+                if truthy(&v) {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            Ok(Value::Bool(false))
+        }
+        Expr::IsNull { expr, negated } => {
+            let v = eval(expr, ctx)?;
+            let is_null = matches!(v, Value::Null);
+            Ok(Value::Bool(if *negated { !is_null } else { is_null }))
+        }
+        Expr::Between { expr, low, high } => {
+            let v = eval(expr, ctx)?;
+            let lo = eval(low, ctx)?;
+            let hi = eval(high, ctx)?;
+            let ge = compare(&v, &lo)?.is_ge();
+            let le = compare(&v, &hi)?.is_le();
+            Ok(Value::Bool(ge && le))
+        }
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => {
+            let v = eval(expr, ctx)?;
+            for item in list {
+                let candidate = eval(item, ctx)?;
+                if values_equal(&v, &candidate) {
+                    return Ok(Value::Bool(!*negated));
+                }
+            }
+            Ok(Value::Bool(*negated))
+        }
+    }
+}
+
+fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+    let l = eval(lhs, ctx)?;
+    let r = eval(rhs, ctx)?;
+    match op {
+        BinaryOp::Equal => Ok(Value::Bool(values_equal(&l, &r))),
+        BinaryOp::NotEqual => Ok(Value::Bool(!values_equal(&l, &r))),
+        BinaryOp::Less => Ok(Value::Bool(compare(&l, &r)?.is_lt())),
+        BinaryOp::LessEqual => Ok(Value::Bool(compare(&l, &r)?.is_le())),
+        BinaryOp::Greater => Ok(Value::Bool(compare(&l, &r)?.is_gt())),
+        BinaryOp::GreaterEqual => Ok(Value::Bool(compare(&l, &r)?.is_ge())),
+        BinaryOp::Add => arith(&l, &r, op),
+        BinaryOp::Subtract => arith(&l, &r, op),
+        BinaryOp::Multiply => arith(&l, &r, op),
+        BinaryOp::Divide => arith(&l, &r, op),
+    }
+}
+
+/// `NULL` is falsy; otherwise truthy iff the value coerces to a non-zero
+/// boolean / number / non-empty string.
+pub fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Int(n) => *n != 0,
+        Value::Float(f) => *f != 0.0,
+        Value::Str(s) => !s.is_empty(),
+        _ => true,
+    }
+}
+
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Null, _) | (_, Value::Null) => false,
+        (Value::Int(x), Value::Float(y)) => (*x as f64) == *y,
+        (Value::Float(x), Value::Int(y)) => *x == (*y as f64),
+        _ => a == b,
+    }
+}
+
+fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Value::Null, _) | (_, Value::Null) => Ok(Ordering::Equal),
+        (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
+        (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y).unwrap_or(Ordering::Equal)),
+        (Value::Int(x), Value::Float(y)) => {
+            Ok((*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal))
+        }
+        (Value::Float(x), Value::Int(y)) => {
+            Ok(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal))
+        }
+        (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
+        (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
+        (lhs, rhs) => Err(SqlError::TypeMismatch(format!(
+            "cannot compare {lhs:?} with {rhs:?}"
+        ))),
+    }
+}
+
+fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
+    let lf = to_f64(a)?;
+    let rf = to_f64(b)?;
+    let result = match op {
+        BinaryOp::Add => lf + rf,
+        BinaryOp::Subtract => lf - rf,
+        BinaryOp::Multiply => lf * rf,
+        BinaryOp::Divide => {
+            if rf == 0.0 {
+                return Err(SqlError::TypeMismatch("division by zero".into()));
+            }
+            lf / rf
+        }
+        _ => unreachable!("non-arith op routed through arith"),
+    };
+    // Preserve integer-ness when both operands were ints and the result
+    // is whole.
+    if matches!((a, b), (Value::Int(_), Value::Int(_))) && result.fract() == 0.0 {
+        Ok(Value::Int(result as i64))
+    } else {
+        Ok(Value::Float(result))
+    }
+}
+
+fn to_f64(v: &Value) -> Result<f64> {
+    match v {
+        Value::Int(n) => Ok(*n as f64),
+        Value::Float(f) => Ok(*f),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        other => Err(SqlError::TypeMismatch(format!(
+            "expected number, got {other:?}"
         ))),
     }
 }
