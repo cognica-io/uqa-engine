@@ -18,7 +18,7 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 /// either vector has zero norm or the dimensions differ.
 ///
 /// Arithmetic stays in `f32` end-to-end so the result is bit-equal to
-/// the reference NumPy implementation (`np.dot(q, v) / (||q|| * ||v||)`
+/// the reference `NumPy` implementation (`np.dot(q, v) / (||q|| * ||v||)`
 /// over `float32` arrays).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
