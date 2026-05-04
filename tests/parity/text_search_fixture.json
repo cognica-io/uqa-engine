@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "corpus": [
+    {
+      "id": 1,
+      "title": "the rust programming language",
+      "body": "Rust is a systems language."
+    },
+    {
+      "id": 2,
+      "title": "python programming guide",
+      "body": "Dynamic typing and garbage collection."
+    },
+    {
+      "id": 3,
+      "title": "rust rust rust everywhere",
+      "body": "How rust ate the systems world."
+    },
+    {
+      "id": 4,
+      "title": "the c programming language",
+      "body": "Classic systems language."
+    },
+    {
+      "id": 5,
+      "title": "go in action",
+      "body": "Concurrency primitives in the Go language."
+    },
+    {
+      "id": 6,
+      "title": "advanced rust idioms",
+      "body": "Lifetimes, ownership, and borrowing in rust."
+    },
+    {
+      "id": 7,
+      "title": "fearless concurrency",
+      "body": "Rust's ownership model prevents data races."
+    },
+    {
+      "id": 8,
+      "title": "java enterprise patterns",
+      "body": "Spring framework and the JVM."
+    },
+    {
+      "id": 9,
+      "title": "the rust standard library",
+      "body": "Iterators, collections, and traits in rust."
+    },
+    {
+      "id": 10,
+      "title": "memory safety without gc",
+      "body": "How rust achieves safety with zero overhead."
+    }
+  ],
+  "queries": [
+    {
+      "field": "title",
+      "query": "rust",
+      "scoring": "bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 3,
+          "score": 0.7043403906500427
+        },
+        {
+          "doc_id": 1,
+          "score": 0.5319452573140726
+        },
+        {
+          "doc_id": 6,
+          "score": 0.5319452573140726
+        },
+        {
+          "doc_id": 9,
+          "score": 0.5319452573140726
+        }
+      ]
+    },
+    {
+      "field": "title",
+      "query": "language",
+      "scoring": "bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 0.8817596178174293
+        },
+        {
+          "doc_id": 4,
+          "score": 0.8817596178174293
+        }
+      ]
+    },
+    {
+      "field": "title",
+      "query": "rust language",
+      "scoring": "bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 1.413704875131502
+        },
+        {
+          "doc_id": 4,
+          "score": 0.8817596178174293
+        },
+        {
+          "doc_id": 3,
+          "score": 0.7043403906500427
+        },
+        {
+          "doc_id": 6,
+          "score": 0.5319452573140726
+        },
+        {
+          "doc_id": 9,
+          "score": 0.5319452573140726
+        }
+      ]
+    },
+    {
+      "field": "title",
+      "query": "rust",
+      "scoring": "bayesian_bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 3,
+          "score": 0.6987360797556432
+        },
+        {
+          "doc_id": 1,
+          "score": 0.5633163504521036
+        },
+        {
+          "doc_id": 6,
+          "score": 0.5633163504521036
+        },
+        {
+          "doc_id": 9,
+          "score": 0.5633163504521036
+        }
+      ]
+    },
+    {
+      "field": "title",
+      "query": "language",
+      "scoring": "bayesian_bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 0.6466729839829621
+        },
+        {
+          "doc_id": 4,
+          "score": 0.6466729839829621
+        }
+      ]
+    },
+    {
+      "field": "title",
+      "query": "rust language",
+      "scoring": "bayesian_bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 0.6057637078182105
+        },
+        {
+          "doc_id": 3,
+          "score": 0.5476199694975085
+        },
+        {
+          "doc_id": 4,
+          "score": 0.5154770695929956
+        },
+        {
+          "doc_id": 6,
+          "score": 0.4717852259297948
+        },
+        {
+          "doc_id": 9,
+          "score": 0.4717852259297948
+        }
+      ]
+    },
+    {
+      "field": "body",
+      "query": "rust",
+      "scoring": "bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 1,
+          "score": 0.313098154305711
+        },
+        {
+          "doc_id": 3,
+          "score": 0.291134916669301
+        },
+        {
+          "doc_id": 6,
+          "score": 0.291134916669301
+        },
+        {
+          "doc_id": 9,
+          "score": 0.291134916669301
+        },
+        {
+          "doc_id": 10,
+          "score": 0.2720510546880649
+        },
+        {
+          "doc_id": 7,
+          "score": 0.24051905865210121
+        }
+      ]
+    },
+    {
+      "field": "body",
+      "query": "ownership",
+      "scoring": "bm25",
+      "top_k": 10,
+      "expected": [
+        {
+          "doc_id": 6,
+          "score": 0.8199058644241568
+        },
+        {
+          "doc_id": 7,
+          "score": 0.6773594488449408
+        }
+      ]
+    }
+  ]
+}
