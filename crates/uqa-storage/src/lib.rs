@@ -9,14 +9,18 @@
 //! `SQLite` catalog.
 
 pub mod block_max_index;
+pub mod btree_index;
 pub mod document_store;
 pub mod inverted_index;
+pub mod spatial_index;
 pub mod sqlite;
 pub mod vector_index;
 
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
+pub use btree_index::BTreeIndex;
 pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use inverted_index::{InvertedIndex, MemoryInvertedIndex};
+pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
     Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteInvertedIndex, SQLiteVectorIndex,
     SqliteError, TableSchema, VectorFieldSchema,
