@@ -871,8 +871,768 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             };
             Ok(Value::Float((a - b).num_milliseconds() as f64 / 1000.0))
         }
+        "date_trunc" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("date_trunc takes 2 args".into()));
+            }
+            let unit = value_to_string(&args[0]).to_ascii_lowercase();
+            let dt = parse_timestamp(&value_to_string(&args[1]))?;
+            date_trunc(&unit, &dt)
+        }
+        "make_timestamp" => {
+            if !(6..=7).contains(&args.len()) {
+                return Err(SQLError::TypeMismatch(
+                    "make_timestamp takes 6-7 args".into(),
+                ));
+            }
+            let year = to_i64(&args[0])? as i32;
+            let month = to_i64(&args[1])? as u32;
+            let day = to_i64(&args[2])? as u32;
+            let hour = to_i64(&args[3])? as u32;
+            let minute = to_i64(&args[4])? as u32;
+            let second = to_f64(&args[5])?;
+            make_timestamp(year, month, day, hour, minute, second)
+        }
+        "make_date" => {
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch("make_date takes 3 args".into()));
+            }
+            let year = to_i64(&args[0])? as i32;
+            let month = to_i64(&args[1])? as u32;
+            let day = to_i64(&args[2])? as u32;
+            chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .map(|d| Value::Str(d.format("%Y-%m-%d").to_string()))
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "make_date: invalid date {year:04}-{month:02}-{day:02}"
+                    ))
+                })
+        }
+        "make_interval" => {
+            // make_interval(years, months, weeks, days, hours, mins, secs)
+            // Returns ISO 8601 duration P[n]Y[n]M[n]DT[n]H[n]M[n]S.
+            let mut iso = String::from("P");
+            let years = args.first().map(to_i64).transpose()?.unwrap_or(0);
+            let months = args.get(1).map(to_i64).transpose()?.unwrap_or(0);
+            let weeks = args.get(2).map(to_i64).transpose()?.unwrap_or(0);
+            let days = args.get(3).map(to_i64).transpose()?.unwrap_or(0);
+            let hours = args.get(4).map(to_i64).transpose()?.unwrap_or(0);
+            let mins = args.get(5).map(to_i64).transpose()?.unwrap_or(0);
+            let secs = args.get(6).map(to_f64).transpose()?.unwrap_or(0.0);
+            use std::fmt::Write;
+            if years != 0 {
+                let _ = write!(iso, "{years}Y");
+            }
+            if months != 0 {
+                let _ = write!(iso, "{months}M");
+            }
+            let total_days = weeks * 7 + days;
+            if total_days != 0 {
+                let _ = write!(iso, "{total_days}D");
+            }
+            if hours != 0 || mins != 0 || secs != 0.0 {
+                iso.push('T');
+                if hours != 0 {
+                    let _ = write!(iso, "{hours}H");
+                }
+                if mins != 0 {
+                    let _ = write!(iso, "{mins}M");
+                }
+                if secs != 0.0 {
+                    let _ = write!(iso, "{secs}S");
+                }
+            }
+            if iso == "P" {
+                iso.push_str("0D");
+            }
+            Ok(Value::Str(iso))
+        }
+        "to_char" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("to_char takes 2 args".into()));
+            }
+            let fmt = value_to_string(&args[1]);
+            match &args[0] {
+                Value::Int(i) => Ok(Value::Str(format_pg_number(*i as f64, &fmt))),
+                Value::Float(f) => Ok(Value::Str(format_pg_number(*f, &fmt))),
+                Value::Str(s) => {
+                    let dt = parse_timestamp(s)?;
+                    Ok(Value::Str(format_pg_datetime(&dt, &fmt)))
+                }
+                other => Err(SQLError::TypeMismatch(format!(
+                    "to_char: unsupported source {other:?}"
+                ))),
+            }
+        }
+        "to_date" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("to_date takes 2 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let fmt = pg_to_chrono_fmt(&value_to_string(&args[1]));
+            let date = chrono::NaiveDate::parse_from_str(&s, &fmt)
+                .map_err(|e| SQLError::TypeMismatch(format!("to_date: {e}")))?;
+            Ok(Value::Str(date.format("%Y-%m-%d").to_string()))
+        }
+        "to_number" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("to_number takes 2 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let cleaned: String = s
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
+                .collect();
+            cleaned
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|e| SQLError::TypeMismatch(format!("to_number: {e}")))
+        }
+        "isfinite" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("isfinite takes 1 arg".into()));
+            }
+            match &args[0] {
+                Value::Float(f) => Ok(Value::Bool(f.is_finite())),
+                Value::Int(_) | Value::Str(_) => Ok(Value::Bool(true)),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "isfinite: unsupported {other:?}"
+                ))),
+            }
+        }
+        "clock_timestamp" | "statement_timestamp" => Ok(Value::Str(
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        )),
+        "timeofday" => Ok(Value::Str(
+            chrono::Utc::now()
+                .format("%a %b %d %H:%M:%S%.6f %Y UTC")
+                .to_string(),
+        )),
+        "typeof" | "pg_typeof" => Ok(Value::Str(typeof_value(&args[0]))),
+        "gen_random_uuid" => {
+            // Time + counter-based UUIDv4-like (not RFC 4122 cryptographically
+            // strong, but unique per call within a process). Used for
+            // expression-time UUID generation only.
+            Ok(Value::Str(generate_random_uuid()))
+        }
+        // -------------------------------------------------------------
+        // JSON functions
+        // -------------------------------------------------------------
+        "json_build_object" | "jsonb_build_object" => json_build_object(args),
+        "json_build_array" | "jsonb_build_array" => Ok(Value::Str(
+            serde_json::to_string(&args.iter().map(value_to_json).collect::<Vec<_>>())
+                .map_err(|e| SQLError::TypeMismatch(format!("json_build_array: {e}")))?,
+        )),
+        "json_typeof" | "jsonb_typeof" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("json_typeof takes 1 arg".into()));
+            }
+            let parsed = parse_json(&value_to_string(&args[0]))?;
+            Ok(Value::Str(json_typeof(&parsed).to_string()))
+        }
+        "json_array_length" | "jsonb_array_length" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch(
+                    "json_array_length takes 1 arg".into(),
+                ));
+            }
+            let parsed = parse_json(&value_to_string(&args[0]))?;
+            match parsed {
+                serde_json::Value::Array(arr) => Ok(Value::Int(arr.len() as i64)),
+                _ => Err(SQLError::TypeMismatch(
+                    "json_array_length: argument is not an array".into(),
+                )),
+            }
+        }
+        "json_extract_path" | "jsonb_extract_path" => json_extract_path(args, false),
+        "json_extract_path_text" | "jsonb_extract_path_text" => json_extract_path(args, true),
+        "to_json" | "to_jsonb" | "row_to_json" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
+            }
+            let json = value_to_json(&args[0]);
+            Ok(Value::Str(serde_json::to_string(&json).map_err(|e| {
+                SQLError::TypeMismatch(format!("to_json: {e}"))
+            })?))
+        }
+        "jsonb_set" | "jsonb_insert" => jsonb_set(args),
+        "json_strip_nulls" | "jsonb_strip_nulls" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch(
+                    "json_strip_nulls takes 1 arg".into(),
+                ));
+            }
+            let mut parsed = parse_json(&value_to_string(&args[0]))?;
+            strip_nulls(&mut parsed);
+            Ok(Value::Str(serde_json::to_string(&parsed).map_err(|e| {
+                SQLError::TypeMismatch(format!("json_strip_nulls: {e}"))
+            })?))
+        }
+        "json_object_keys" | "jsonb_object_keys" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch(
+                    "json_object_keys takes 1 arg".into(),
+                ));
+            }
+            let parsed = parse_json(&value_to_string(&args[0]))?;
+            match parsed {
+                serde_json::Value::Object(map) => Ok(Value::List(
+                    map.keys().map(|k| Value::Str(k.clone())).collect(),
+                )),
+                _ => Err(SQLError::TypeMismatch(
+                    "json_object_keys: argument is not an object".into(),
+                )),
+            }
+        }
+        // -------------------------------------------------------------
+        // Array functions
+        // -------------------------------------------------------------
+        "array_length" | "array_upper" => {
+            if args.is_empty() {
+                return Err(SQLError::TypeMismatch("array_length takes >= 1 arg".into()));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_length: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_lower" => Ok(Value::Int(1)),
+        "cardinality" => match &args[0] {
+            Value::List(items) => Ok(Value::Int(items.len() as i64)),
+            Value::Null => Ok(Value::Null),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cardinality: not an array {other:?}"
+            ))),
+        },
+        "array_cat" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_cat takes 2 args".into()));
+            }
+            match (&args[0], &args[1]) {
+                (Value::List(a), Value::List(b)) => {
+                    let mut out = a.clone();
+                    out.extend(b.iter().cloned());
+                    Ok(Value::List(out))
+                }
+                _ => Err(SQLError::TypeMismatch(
+                    "array_cat: both args must be arrays".into(),
+                )),
+            }
+        }
+        "array_append" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_append takes 2 args".into()));
+            }
+            match &args[0] {
+                Value::List(items) => {
+                    let mut out = items.clone();
+                    out.push(args[1].clone());
+                    Ok(Value::List(out))
+                }
+                Value::Null => Ok(Value::List(vec![args[1].clone()])),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_append: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_prepend" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_prepend takes 2 args".into()));
+            }
+            match &args[1] {
+                Value::List(items) => {
+                    let mut out = vec![args[0].clone()];
+                    out.extend(items.iter().cloned());
+                    Ok(Value::List(out))
+                }
+                Value::Null => Ok(Value::List(vec![args[0].clone()])),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_prepend: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_remove" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_remove takes 2 args".into()));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(Value::List(
+                    items.iter().filter(|v| **v != args[1]).cloned().collect(),
+                )),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_remove: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_position" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_position takes 2 args".into()));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(items
+                    .iter()
+                    .position(|v| *v == args[1])
+                    .map(|i| Value::Int((i + 1) as i64))
+                    .unwrap_or(Value::Null)),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_position: not an array {other:?}"
+                ))),
+            }
+        }
+        "unnest" => match &args[0] {
+            Value::List(items) => Ok(Value::List(items.clone())),
+            Value::Null => Ok(Value::List(Vec::new())),
+            other => Err(SQLError::TypeMismatch(format!(
+                "unnest: not an array {other:?}"
+            ))),
+        },
+        // -------------------------------------------------------------
+        // Geospatial primitives (point, distance, within, dwithin)
+        // -------------------------------------------------------------
+        "point" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("point takes 2 args".into()));
+            }
+            let x = to_f64(&args[0])?;
+            let y = to_f64(&args[1])?;
+            Ok(Value::List(vec![Value::Float(x), Value::Float(y)]))
+        }
+        "st_distance" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("st_distance takes 2 args".into()));
+            }
+            let (x1, y1) = point_xy(&args[0])?;
+            let (x2, y2) = point_xy(&args[1])?;
+            Ok(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt()))
+        }
+        "st_within" | "st_dwithin" => {
+            // Polygon containment is not yet modeled; for now interpret
+            // dwithin as a Euclidean radius check matching Python's
+            // simplified semantics.
+            if args.len() < 2 {
+                return Err(SQLError::TypeMismatch(format!("{name} takes 2-3 args")));
+            }
+            let (x1, y1) = point_xy(&args[0])?;
+            let (x2, y2) = point_xy(&args[1])?;
+            let d = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
+            let radius = if args.len() == 3 {
+                to_f64(&args[2])?
+            } else {
+                0.0
+            };
+            Ok(Value::Bool(d <= radius))
+        }
+        "overlaps" => {
+            if args.len() != 4 {
+                return Err(SQLError::TypeMismatch(
+                    "overlaps takes 4 args (start1, end1, start2, end2)".into(),
+                ));
+            }
+            let s1 = parse_timestamp(&value_to_string(&args[0]))?;
+            let e1 = parse_timestamp(&value_to_string(&args[1]))?;
+            let s2 = parse_timestamp(&value_to_string(&args[2]))?;
+            let e2 = parse_timestamp(&value_to_string(&args[3]))?;
+            Ok(Value::Bool(s1 < e2 && s2 < e1))
+        }
         other => Err(SQLError::Unsupported(format!("scalar function `{other}`"))),
     }
+}
+
+// --------------------------------------------------------------------
+// JSON helpers
+// --------------------------------------------------------------------
+
+fn parse_json(s: &str) -> Result<serde_json::Value> {
+    serde_json::from_str::<serde_json::Value>(s)
+        .map_err(|e| SQLError::TypeMismatch(format!("invalid JSON: {e}")))
+}
+
+fn value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int(i) => serde_json::Value::Number((*i).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::Str(s) => {
+            // Try to parse strings already containing JSON; otherwise
+            // wrap as a JSON string. Mirrors Python `to_json` semantics
+            // for nested expressions.
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                if matches!(
+                    parsed,
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_)
+                ) {
+                    return parsed;
+                }
+            }
+            serde_json::Value::String(s.clone())
+        }
+        Value::Bytes(b) => serde_json::Value::String(format!("0x{}", hex_encode(b))),
+        Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
+        Value::Map(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                obj.insert(k.clone(), value_to_json(v));
+            }
+            serde_json::Value::Object(obj)
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn json_to_value(json: &serde_json::Value) -> Value {
+    match json {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                Value::Null
+            }
+        }
+        serde_json::Value::String(s) => Value::Str(s.clone()),
+        serde_json::Value::Array(arr) => Value::List(arr.iter().map(json_to_value).collect()),
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::BTreeMap::new();
+            for (k, v) in obj {
+                map.insert(k.clone(), json_to_value(v));
+            }
+            Value::Map(map)
+        }
+    }
+}
+
+fn json_typeof(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+fn json_build_object(args: &[Value]) -> Result<Value> {
+    if args.len() % 2 != 0 {
+        return Err(SQLError::TypeMismatch(
+            "json_build_object requires an even number of args".into(),
+        ));
+    }
+    let mut obj = serde_json::Map::new();
+    for chunk in args.chunks_exact(2) {
+        let key = value_to_string(&chunk[0]);
+        let val = value_to_json(&chunk[1]);
+        obj.insert(key, val);
+    }
+    serde_json::to_string(&serde_json::Value::Object(obj))
+        .map(Value::Str)
+        .map_err(|e| SQLError::TypeMismatch(format!("json_build_object: {e}")))
+}
+
+fn json_extract_path(args: &[Value], as_text: bool) -> Result<Value> {
+    if args.len() < 2 {
+        return Err(SQLError::TypeMismatch(
+            "json_extract_path takes 2+ args".into(),
+        ));
+    }
+    let mut current = parse_json(&value_to_string(&args[0]))?;
+    for key in &args[1..] {
+        let key_str = value_to_string(key);
+        current = match current {
+            serde_json::Value::Object(mut obj) => {
+                obj.remove(&key_str).unwrap_or(serde_json::Value::Null)
+            }
+            serde_json::Value::Array(arr) => match key_str.parse::<usize>() {
+                Ok(idx) => arr.into_iter().nth(idx).unwrap_or(serde_json::Value::Null),
+                Err(_) => serde_json::Value::Null,
+            },
+            _ => serde_json::Value::Null,
+        };
+    }
+    if as_text {
+        Ok(Value::Str(match current {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Null => return Ok(Value::Null),
+            other => serde_json::to_string(&other).unwrap_or_default(),
+        }))
+    } else if matches!(current, serde_json::Value::Null) {
+        Ok(Value::Null)
+    } else {
+        Ok(Value::Str(
+            serde_json::to_string(&current).unwrap_or_default(),
+        ))
+    }
+}
+
+fn jsonb_set(args: &[Value]) -> Result<Value> {
+    if !(3..=4).contains(&args.len()) {
+        return Err(SQLError::TypeMismatch("jsonb_set takes 3-4 args".into()));
+    }
+    let mut current = parse_json(&value_to_string(&args[0]))?;
+    let path: Vec<String> = match &args[1] {
+        Value::List(items) => items.iter().map(value_to_string).collect(),
+        Value::Str(s) => {
+            // Accept "{a,b,c}" PostgreSQL array literal.
+            s.trim_matches(|c| c == '{' || c == '}')
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect()
+        }
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "jsonb_set: path must be array, got {other:?}"
+            )));
+        }
+    };
+    let new_val = parse_json(&value_to_string(&args[2]))
+        .unwrap_or_else(|_| serde_json::Value::String(value_to_string(&args[2])));
+    json_set_path(&mut current, &path, new_val);
+    Ok(Value::Str(serde_json::to_string(&current).map_err(
+        |e| SQLError::TypeMismatch(format!("jsonb_set: {e}")),
+    )?))
+}
+
+fn json_set_path(current: &mut serde_json::Value, path: &[String], new_val: serde_json::Value) {
+    if path.is_empty() {
+        *current = new_val;
+        return;
+    }
+    let head = &path[0];
+    let rest = &path[1..];
+    match current {
+        serde_json::Value::Object(obj) => {
+            let entry = obj.entry(head.clone()).or_insert(serde_json::Value::Null);
+            json_set_path(entry, rest, new_val);
+        }
+        serde_json::Value::Array(arr) => {
+            if let Ok(idx) = head.parse::<usize>() {
+                while arr.len() <= idx {
+                    arr.push(serde_json::Value::Null);
+                }
+                json_set_path(&mut arr[idx], rest, new_val);
+            }
+        }
+        _ => {
+            let mut new_obj = serde_json::Map::new();
+            new_obj.insert(head.clone(), serde_json::Value::Null);
+            let mut wrapper = serde_json::Value::Object(new_obj);
+            json_set_path(&mut wrapper, path, new_val);
+            *current = wrapper;
+        }
+    }
+}
+
+fn strip_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(obj) => {
+            obj.retain(|_, v| !v.is_null());
+            for v in obj.values_mut() {
+                strip_nulls(v);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                strip_nulls(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn typeof_value(v: &Value) -> String {
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(_) => "boolean".into(),
+        Value::Int(_) => "integer".into(),
+        Value::Float(_) => "double precision".into(),
+        Value::Str(_) => "text".into(),
+        Value::Bytes(_) => "bytea".into(),
+        Value::List(_) => "array".into(),
+        Value::Map(_) => "jsonb".into(),
+    }
+}
+
+fn point_xy(v: &Value) -> Result<(f64, f64)> {
+    match v {
+        Value::List(items) if items.len() == 2 => Ok((to_f64(&items[0])?, to_f64(&items[1])?)),
+        Value::Str(s) => {
+            let cleaned = s.trim_matches(|c: char| c == '(' || c == ')' || c == '[' || c == ']');
+            let parts: Vec<&str> = cleaned.split(',').map(str::trim).collect();
+            if parts.len() != 2 {
+                return Err(SQLError::TypeMismatch(format!("point: cannot parse {s:?}")));
+            }
+            let x: f64 = parts[0]
+                .parse()
+                .map_err(|e| SQLError::TypeMismatch(format!("point.x: {e}")))?;
+            let y: f64 = parts[1]
+                .parse()
+                .map_err(|e| SQLError::TypeMismatch(format!("point.y: {e}")))?;
+            Ok((x, y))
+        }
+        other => Err(SQLError::TypeMismatch(format!(
+            "point: not coercible {other:?}"
+        ))),
+    }
+}
+
+fn date_trunc(unit: &str, dt: &chrono::DateTime<chrono::Utc>) -> Result<Value> {
+    use chrono::{Datelike, NaiveDate, TimeZone, Timelike, Utc};
+    let truncated = match unit {
+        "year" => Utc
+            .with_ymd_and_hms(dt.year(), 1, 1, 0, 0, 0)
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad year".into()))?,
+        "quarter" => {
+            let q_start_month = ((dt.month() - 1) / 3) * 3 + 1;
+            Utc.with_ymd_and_hms(dt.year(), q_start_month, 1, 0, 0, 0)
+                .single()
+                .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad quarter".into()))?
+        }
+        "month" => Utc
+            .with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0)
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad month".into()))?,
+        "week" => {
+            // Truncate to the Monday of the ISO week.
+            let weekday_offset = dt.weekday().num_days_from_monday() as i64;
+            let date = NaiveDate::from_ymd_opt(dt.year(), dt.month(), dt.day())
+                .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad week".into()))?
+                - chrono::Duration::days(weekday_offset);
+            let naive = date.and_hms_opt(0, 0, 0).unwrap();
+            Utc.from_utc_datetime(&naive)
+        }
+        "day" => Utc
+            .with_ymd_and_hms(dt.year(), dt.month(), dt.day(), 0, 0, 0)
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad day".into()))?,
+        "hour" => Utc
+            .with_ymd_and_hms(dt.year(), dt.month(), dt.day(), dt.hour(), 0, 0)
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad hour".into()))?,
+        "minute" => Utc
+            .with_ymd_and_hms(dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), 0)
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad minute".into()))?,
+        "second" => Utc
+            .with_ymd_and_hms(
+                dt.year(),
+                dt.month(),
+                dt.day(),
+                dt.hour(),
+                dt.minute(),
+                dt.second(),
+            )
+            .single()
+            .ok_or_else(|| SQLError::TypeMismatch("date_trunc: bad second".into()))?,
+        other => {
+            return Err(SQLError::Unsupported(format!("date_trunc unit `{other}`")));
+        }
+    };
+    Ok(Value::Str(
+        truncated.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+    ))
+}
+
+fn make_timestamp(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: f64,
+) -> Result<Value> {
+    use chrono::{NaiveDate, TimeZone, Utc};
+    let secs = second.trunc() as u32;
+    let nanos = (second.fract() * 1e9).round() as u32;
+    let date = NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad date".into()))?;
+    let naive = date
+        .and_hms_nano_opt(hour, minute, secs, nanos)
+        .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad time".into()))?;
+    let dt = Utc.from_utc_datetime(&naive);
+    Ok(Value::Str(
+        dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+    ))
+}
+
+fn pg_to_chrono_fmt(fmt: &str) -> String {
+    // Translate a small subset of PostgreSQL `to_date` template tokens
+    // into chrono format specifiers. The Python reference relies on
+    // datetime.strptime; this routine mirrors the most common patterns
+    // (`YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`).
+    fmt.replace("YYYY", "%Y")
+        .replace("YY", "%y")
+        .replace("MM", "%m")
+        .replace("DD", "%d")
+        .replace("HH24", "%H")
+        .replace("HH12", "%I")
+        .replace("MI", "%M")
+        .replace("SS", "%S")
+}
+
+fn format_pg_number(n: f64, fmt: &str) -> String {
+    // Minimal `to_char(numeric, '999...')` support: count `9` digits
+    // and zero-pad the integral part. Falls back to plain Display.
+    let digits = fmt.chars().filter(|c| *c == '9' || *c == '0').count();
+    if digits == 0 {
+        return n.to_string();
+    }
+    let int_part = n.trunc() as i64;
+    if fmt.contains('.') {
+        let frac_digits = fmt.split('.').nth(1).map(str::len).unwrap_or(0);
+        format!("{n:.frac_digits$}")
+    } else {
+        format!("{int_part:0digits$}")
+    }
+}
+
+fn format_pg_datetime(dt: &chrono::DateTime<chrono::Utc>, fmt: &str) -> String {
+    dt.format(&pg_to_chrono_fmt(fmt)).to_string()
+}
+
+fn generate_random_uuid() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let now_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&now_ns.to_be_bytes());
+    bytes[8..].copy_from_slice(&counter.to_be_bytes());
+    // Set version 4 + variant per RFC 4122.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+    )
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 /// Parse a timestamp string into a UTC `DateTime`. Accepts:
