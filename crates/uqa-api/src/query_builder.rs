@@ -236,6 +236,144 @@ impl<'a> QueryBuilder<'a> {
     pub fn execute(&self) -> Result<SQLResult, SQLError> {
         self.engine.sql(&self.to_sql(), &[])
     }
+
+    // -----------------------------------------------------------------
+    // Convenience methods porting `uqa.api.query_builder.QueryBuilder`.
+    // -----------------------------------------------------------------
+
+    /// Add a bare term filter (`text_match(field, 'term')`). When
+    /// `field` is `None`, the SQL function falls back to all-field
+    /// search via the engine's analyzer registry.
+    pub fn term(self, term: &str, field: Option<&str>) -> Self {
+        match field {
+            Some(f) => self.text_match(f, term),
+            None => self.r#where(format!("text_match({})", quote_str(term))),
+        }
+    }
+
+    /// Combine two builders' filter lists with `AND`. The resulting
+    /// builder keeps the receiver's projection / order / limit /
+    /// offset state and absorbs `other`'s filters.
+    pub fn and(mut self, other: &QueryBuilder<'a>) -> Self {
+        for f in &other.filters {
+            self.filters.push(f.clone());
+        }
+        self
+    }
+
+    /// Wrap the builder's filter list in an `OR` group with `other`'s
+    /// filters: `((self_filters) OR (other_filters))`.
+    pub fn or(mut self, other: &QueryBuilder<'a>) -> Self {
+        let lhs = self.filters.join(" AND ");
+        let rhs = other.filters.join(" AND ");
+        let merged = match (lhs.is_empty(), rhs.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => lhs,
+            (true, false) => rhs,
+            (false, false) => format!("({lhs}) OR ({rhs})"),
+        };
+        self.filters = if merged.is_empty() {
+            Vec::new()
+        } else {
+            vec![merged]
+        };
+        self
+    }
+
+    /// Negate the current filter list. Renders to `NOT (a AND b ...)`.
+    #[allow(clippy::should_implement_trait)]
+    pub fn not(mut self) -> Self {
+        if self.filters.is_empty() {
+            return self;
+        }
+        let combined = self.filters.join(" AND ");
+        self.filters = vec![format!("NOT ({combined})")];
+        self
+    }
+
+    /// Add a vector similarity filter via the
+    /// `vector_similarity_match` SQL function.
+    pub fn vector(self, query: &[f32], threshold: f32, field: &str) -> Self {
+        let arr = render_vector(query);
+        self.r#where(format!(
+            "vector_similarity_match({field}, ARRAY[{arr}], {threshold})"
+        ))
+    }
+
+    /// Promote the projection list to a single aggregate over `field`,
+    /// e.g. `SELECT count(field) FROM ...`. Resets any previous
+    /// projections.
+    pub fn aggregate(mut self, field: &str, agg: &str) -> Self {
+        self.projections.clear();
+        self.projections.push(format!("{agg}({field})"));
+        self
+    }
+
+    /// Replace projections with `field, count(*)` and add a
+    /// `GROUP BY field` ordering hint. The engine's GROUP BY pipeline
+    /// picks up the projection.
+    pub fn facet(mut self, field: &str) -> Self {
+        self.projections.clear();
+        self.projections.push(field.to_string());
+        self.projections.push("count(*) AS _facet_count".into());
+        // The engine's grouping picks the leading non-aggregate column
+        // automatically; for explicitness we surface a deterministic
+        // ORDER BY on the count.
+        self.order_by_desc("_facet_count")
+    }
+
+    /// Add `score_bm25(field, 'query')` to the projection list.
+    pub fn score_bm25(mut self, query: &str, field: Option<&str>) -> Self {
+        let proj = match field {
+            Some(f) => format!("score_bm25({f}, {})", quote_str(query)),
+            None => format!("score_bm25({})", quote_str(query)),
+        };
+        self.projections.push(proj);
+        self
+    }
+
+    /// Add `score_bayesian_bm25(field, 'query')` to the projection
+    /// list.
+    pub fn score_bayesian_bm25(mut self, query: &str, field: Option<&str>) -> Self {
+        let proj = match field {
+            Some(f) => format!("score_bayesian_bm25({f}, {})", quote_str(query)),
+            None => format!("score_bayesian_bm25({})", quote_str(query)),
+        };
+        self.projections.push(proj);
+        self
+    }
+
+    /// Add a `fuse_log_odds(...)` projection over a list of signals.
+    /// `signals` is a sequence of pre-rendered SQL expressions (e.g.
+    /// `text_match(...)`, `knn_match(...)`); the wrapper adds the
+    /// `alpha` argument verbatim.
+    pub fn fuse_log_odds(mut self, signals: &[&str], alpha: f64) -> Self {
+        let inner = signals.join(", ");
+        self.projections
+            .push(format!("fuse_log_odds({inner}, {alpha})"));
+        self
+    }
+
+    /// Add a `multi_stage(...)` projection that mirrors Python's
+    /// `multi_stage` builder. Each stage is `(signal, top_k)`.
+    pub fn multi_stage(mut self, stages: &[(&str, usize)]) -> Self {
+        let mut parts: Vec<String> = Vec::with_capacity(stages.len() * 2);
+        for (signal, top_k) in stages {
+            parts.push((*signal).to_string());
+            parts.push(top_k.to_string());
+        }
+        self.projections
+            .push(format!("multi_stage({})", parts.join(", ")));
+        self
+    }
+}
+
+fn render_vector(query: &[f32]) -> String {
+    query
+        .iter()
+        .map(f32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn render_value(value: &Value) -> String {
