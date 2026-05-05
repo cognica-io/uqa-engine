@@ -11,6 +11,7 @@
 //! [`ComposedOperator`] is associative with the empty operator as
 //! identity.
 
+pub mod aggregation;
 pub mod base;
 pub mod boolean;
 pub mod deep_fusion;
@@ -22,6 +23,10 @@ pub mod progressive_fusion;
 pub mod sparse;
 pub mod vector;
 
+pub use aggregation::{
+    AggState, AggregateOperator, AggregationMonoid, AvgMonoid, AvgState, CountMonoid,
+    GroupByOperator, MaxMonoid, MinMonoid, QuantileMonoid, SumMonoid,
+};
 pub use base::{
     ComposedOperator, Direction as DeepGraphDirection, ExecutionContext, GraphNeighborLookup,
     Operator,
