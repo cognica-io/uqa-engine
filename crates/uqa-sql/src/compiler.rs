@@ -793,8 +793,83 @@ fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::BoolExpr(b) => compile_bool_expr(b),
         NodeEnum::NullTest(n) => compile_null_test(n),
+        NodeEnum::CaseExpr(c) => compile_case_expr(c),
+        NodeEnum::CoalesceExpr(ce) => {
+            let args: Vec<Expr> = ce
+                .args
+                .iter()
+                .map(compile_expr)
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Expr::Func {
+                name: "coalesce".into(),
+                args,
+            })
+        }
+        NodeEnum::MinMaxExpr(me) => {
+            use pg_query::protobuf::MinMaxOp;
+            let name = match me.op() {
+                MinMaxOp::IsGreatest => "greatest",
+                MinMaxOp::IsLeast => "least",
+                _ => {
+                    return Err(SqlError::Unsupported(format!(
+                        "MinMaxExpr op {:?}",
+                        me.op()
+                    )));
+                }
+            };
+            let args: Vec<Expr> = me
+                .args
+                .iter()
+                .map(compile_expr)
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Expr::Func {
+                name: name.into(),
+                args,
+            })
+        }
         other => Err(SqlError::Unsupported(format!("expression form: {other:?}"))),
     }
+}
+
+fn compile_case_expr(c: &pg_query::protobuf::CaseExpr) -> Result<Expr> {
+    let base = c
+        .arg
+        .as_ref()
+        .map(|n| compile_expr(n))
+        .transpose()?
+        .map(Box::new);
+    let mut when: Vec<(Expr, Expr)> = Vec::with_capacity(c.args.len());
+    for arm in &c.args {
+        let inner = arm
+            .node
+            .as_ref()
+            .ok_or_else(|| SqlError::Internal("CASE arm without body".into()))?;
+        let NodeEnum::CaseWhen(cw) = inner else {
+            return Err(SqlError::Internal(format!(
+                "CASE arm expected CaseWhen, got {inner:?}"
+            )));
+        };
+        let cond = cw
+            .expr
+            .as_ref()
+            .ok_or_else(|| SqlError::Internal("CASE WHEN without cond".into()))?;
+        let result = cw
+            .result
+            .as_ref()
+            .ok_or_else(|| SqlError::Internal("CASE WHEN without THEN".into()))?;
+        when.push((compile_expr(cond)?, compile_expr(result)?));
+    }
+    let else_branch = c
+        .defresult
+        .as_ref()
+        .map(|n| compile_expr(n))
+        .transpose()?
+        .map(Box::new);
+    Ok(Expr::Case {
+        base,
+        when,
+        else_branch,
+    })
 }
 
 fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
@@ -858,6 +933,48 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             } else {
                 between
             })
+        }
+        AExprKind::AexprNullif => {
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("NULLIF without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("NULLIF without rhs".into()))?;
+            return Ok(Expr::Func {
+                name: "nullif".into(),
+                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            });
+        }
+        AExprKind::AexprLike => {
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("LIKE without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("LIKE without rhs".into()))?;
+            return Ok(Expr::Func {
+                name: "like".into(),
+                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            });
+        }
+        AExprKind::AexprIlike => {
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("ILIKE without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SqlError::Internal("ILIKE without rhs".into()))?;
+            return Ok(Expr::Func {
+                name: "ilike".into(),
+                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            });
         }
         AExprKind::AexprIn => {
             let expr = a
@@ -1030,13 +1147,41 @@ fn compile_window_spec(w: &pg_query::protobuf::WindowDef) -> Result<WindowSpec> 
 }
 
 fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {
-    // Phase 5 accepts the cast but only carries forward the underlying
-    // value; type-aware coercion lands when the type system widens.
     let arg = tc
         .arg
         .as_ref()
         .ok_or_else(|| SqlError::Internal("TypeCast without arg".into()))?;
-    compile_expr(arg)
+    let inner = compile_expr(arg)?;
+    let raw_names: Vec<String> = tc
+        .type_name
+        .as_ref()
+        .map(|t| {
+            t.names
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    // libpg_query reports built-in types qualified as `pg_catalog.<name>`;
+    // peel the schema off so the evaluator only ever sees the bare type
+    // and treat aliases (`int4` -> `integer`, `float8` -> `double
+    // precision`) up front.
+    let ty = raw_names.last().cloned().unwrap_or_default().to_lowercase();
+    let ty = match ty.as_str() {
+        "int2" => "smallint".to_string(),
+        "int4" => "integer".to_string(),
+        "int8" => "bigint".to_string(),
+        "float4" => "real".to_string(),
+        "float8" => "double precision".to_string(),
+        _ => ty,
+    };
+    if ty.is_empty() {
+        return Ok(inner);
+    }
+    Ok(Expr::Cast {
+        expr: Box::new(inner),
+        ty,
+    })
 }
 
 /// Convenience for tests that only need to round-trip through the

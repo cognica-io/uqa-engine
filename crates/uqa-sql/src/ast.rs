@@ -256,6 +256,21 @@ pub enum Expr {
         args: Vec<Expr>,
         spec: WindowSpec,
     },
+    /// `CASE [base] WHEN cond THEN result ... [ELSE default] END`.
+    /// `base` lifts simple-form `CASE expr WHEN val THEN ...` into an
+    /// optional comparison anchor; searched-form `CASE WHEN cond ...`
+    /// leaves it `None`.
+    Case {
+        base: Option<Box<Expr>>,
+        when: Vec<(Expr, Expr)>,
+        else_branch: Option<Box<Expr>>,
+    },
+    /// `CAST(expr AS type)`. The type name is preserved verbatim so
+    /// the evaluator can apply the correct coercion.
+    Cast {
+        expr: Box<Expr>,
+        ty: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

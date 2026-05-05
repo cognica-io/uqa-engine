@@ -17,7 +17,14 @@
     clippy::match_same_arms,
     clippy::unnested_or_patterns,
     clippy::unnecessary_join,
-    clippy::unnecessary_map_or
+    clippy::unnecessary_map_or,
+    clippy::too_many_lines,
+    clippy::needless_return,
+    clippy::redundant_closure,
+    clippy::redundant_closure_for_method_calls,
+    clippy::map_unwrap_or,
+    clippy::manual_string_new,
+    clippy::option_if_let_else
 )]
 
 pub mod ast;

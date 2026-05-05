@@ -1592,50 +1592,50 @@ fn projection_label_at(proj: &Projection, position: usize) -> String {
 }
 
 fn apply_row_order_limit(
-    mut rows: Vec<ResultRow>,
+    rows: Vec<ResultRow>,
     stmt: &SelectStmt,
     params: &[SqlParam],
 ) -> Result<Vec<ResultRow>, SqlError> {
+    // Build a Volcano sub-pipeline:  Sort? -> Limit?  on top of an
+    // in-memory TableScan over the rows the caller already projected.
+    use uqa_execution::physical::{run_to_rows, PhysicalOperator};
+    use uqa_execution::relational::{Limit, Sort, SortKey};
+    use uqa_execution::scan::TableScan;
+
+    if rows.is_empty() {
+        return Ok(rows);
+    }
+    if stmt.order_by.is_empty() && stmt.offset.is_none() && stmt.limit.is_none() {
+        return Ok(rows);
+    }
+
+    let columns: Vec<String> = rows
+        .first()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let mut op: Box<dyn PhysicalOperator> = Box::new(TableScan::from_rows(columns, rows));
+
     if !stmt.order_by.is_empty() {
-        let order = stmt.order_by.clone();
-        let mut keyed: Vec<(Vec<Value>, ResultRow)> = rows
-            .into_iter()
-            .map(|row| -> Result<_, SqlError> {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params);
-                let key: Vec<Value> = order
-                    .iter()
-                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok((key, row))
+        let keys: Vec<SortKey> = stmt
+            .order_by
+            .iter()
+            .map(|o| SortKey {
+                expr: o.expr.clone(),
+                descending: o.descending,
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        keyed.sort_by(|a, b| {
-            for (i, (av, bv)) in a.0.iter().zip(b.0.iter()).enumerate() {
-                let cmp = compare_values(av, bv);
-                let cmp = if order.get(i).map_or(false, |o| o.descending) {
-                    cmp.reverse()
-                } else {
-                    cmp
-                };
-                if cmp != std::cmp::Ordering::Equal {
-                    return cmp;
-                }
-            }
-            std::cmp::Ordering::Equal
-        });
-        rows = keyed.into_iter().map(|(_, r)| r).collect();
+            .collect();
+        op = Box::new(Sort::new(op, keys, params.to_vec()));
     }
-    if let Some(offset) = stmt.offset {
-        let off = offset as usize;
-        if off >= rows.len() {
-            rows.clear();
-        } else {
-            rows.drain(0..off);
-        }
+
+    if stmt.offset.is_some() || stmt.limit.is_some() {
+        op = Box::new(Limit::new(op, stmt.offset.unwrap_or(0), stmt.limit));
     }
-    if let Some(limit) = stmt.limit {
-        rows.truncate(limit as usize);
-    }
+
+    let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
+        uqa_execution::physical::ExecError::Sql(err) => err,
+        uqa_execution::physical::ExecError::Other(msg) => SqlError::Internal(msg),
+    })?;
     Ok(rows)
 }
 
