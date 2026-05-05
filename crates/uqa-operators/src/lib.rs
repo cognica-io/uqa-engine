@@ -48,7 +48,9 @@ pub use hierarchical::{
 };
 pub use hybrid::{HybridTextVectorOperator, LogOddsFusionOperator, SemanticFilterOperator};
 pub use multi_stage::{Cutoff, MultiStageOperator};
-pub use primitive::{FacetOperator, FilterOperator, ScoreOperator, TermOperator};
+pub use primitive::{
+    FacetOperator, FilterOperator, ScoreOperator, SpatialWithinOperator, TermOperator,
+};
 pub use progressive_fusion::ProgressiveFusionOperator;
 pub use sparse::SparseThresholdOperator;
 pub use tree::{

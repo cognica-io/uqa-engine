@@ -57,6 +57,82 @@ impl Operator for TermOperator {
     }
 }
 
+/// `SpatialWithin_{f, center, distance}`: return all documents whose
+/// `field` value lies within `distance` (great-circle metres) of
+/// `(center_x, center_y)`. Mirrors
+/// `uqa.operators.primitive.SpatialWithinOperator`. Brute-force
+/// scans the document store using
+/// [`uqa_storage::haversine_distance`]; spatial indexes plug in via
+/// the engine layer.
+pub struct SpatialWithinOperator {
+    pub field: String,
+    pub center_x: f64,
+    pub center_y: f64,
+    pub distance: f64,
+}
+
+impl SpatialWithinOperator {
+    pub fn new(field: impl Into<String>, center_x: f64, center_y: f64, distance: f64) -> Self {
+        Self {
+            field: field.into(),
+            center_x,
+            center_y,
+            distance,
+        }
+    }
+}
+
+impl Operator for SpatialWithinOperator {
+    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+        let Some(doc_store) = ctx.document_store.as_ref() else {
+            return PostingList::new();
+        };
+        let mut entries: Vec<PostingEntry> = Vec::new();
+        let mut ids = doc_store.doc_ids();
+        ids.sort_unstable();
+        for doc_id in ids {
+            let Some(pt) = doc_store.get_field(doc_id, &self.field) else {
+                continue;
+            };
+            let coords = match &pt {
+                Value::List(items) if items.len() == 2 => items.clone(),
+                _ => continue,
+            };
+            let (Some(x), Some(y)) = (value_to_f64(&coords[0]), value_to_f64(&coords[1])) else {
+                continue;
+            };
+            let dist = uqa_storage::haversine_distance(self.center_x, self.center_y, x, y);
+            if dist <= self.distance {
+                let score = if self.distance > 0.0 {
+                    1.0 - (dist / self.distance)
+                } else {
+                    1.0
+                };
+                entries.push(PostingEntry::new(
+                    doc_id,
+                    Payload {
+                        score,
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+        PostingList::from_sorted_unchecked(entries)
+    }
+
+    fn cost_estimate(&self, stats: &IndexStats) -> f64 {
+        ((stats.total_docs + 1) as f64).log2()
+    }
+}
+
+fn value_to_f64(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(i) => Some(*i as f64),
+        Value::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
 /// `Filter_{f, predicate}`: filter a source posting list (or the universe
 /// of documents) by applying a predicate to a field.
 pub struct FilterOperator {
