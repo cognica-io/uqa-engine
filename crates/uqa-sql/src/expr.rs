@@ -262,6 +262,9 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
 /// `_call_scalar_function` in `uqa/sql/expr_evaluator.py`. Function
 /// names are lower-cased before lookup.
 fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
+    // libpg_query qualifies built-in functions as `pg_catalog.<name>`;
+    // strip the schema for the dispatcher's lookup table.
+    let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
     match name {
         "coalesce" => {
             for a in args {
@@ -521,7 +524,113 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 .ok_or_else(|| SqlError::TypeMismatch(format!("chr: invalid code point {n}")))?;
             Ok(Value::Str(c.to_string()))
         }
+        "now" | "current_timestamp" => {
+            use chrono::Utc;
+            Ok(Value::Str(
+                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+            ))
+        }
+        "current_date" => {
+            use chrono::Utc;
+            Ok(Value::Str(Utc::now().format("%Y-%m-%d").to_string()))
+        }
+        "to_timestamp" => {
+            if args.len() != 1 {
+                return Err(SqlError::TypeMismatch("to_timestamp takes 1 arg".into()));
+            }
+            let secs = to_f64(&args[0])?;
+            let ns = ((secs.fract() * 1e9).round() as i64).rem_euclid(1_000_000_000);
+            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, ns as u32)
+                .ok_or_else(|| {
+                    SqlError::TypeMismatch(format!("to_timestamp out of range {secs}"))
+                })?;
+            Ok(Value::Str(
+                dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+            ))
+        }
+        "extract" | "date_part" => {
+            if args.len() != 2 {
+                return Err(SqlError::TypeMismatch(
+                    "extract takes 2 args (field, ts)".into(),
+                ));
+            }
+            let field = value_to_string(&args[0]).to_ascii_lowercase();
+            let ts_str = value_to_string(&args[1]);
+            let dt = parse_timestamp(&ts_str)?;
+            extract_field(&field, &dt)
+        }
+        "age" => {
+            let now = chrono::Utc::now();
+            let (a, b) = match args.len() {
+                1 => (parse_timestamp(&value_to_string(&args[0]))?, now),
+                2 => (
+                    parse_timestamp(&value_to_string(&args[0]))?,
+                    parse_timestamp(&value_to_string(&args[1]))?,
+                ),
+                _ => return Err(SqlError::TypeMismatch("age takes 1-2 args".into())),
+            };
+            Ok(Value::Float((a - b).num_milliseconds() as f64 / 1000.0))
+        }
         other => Err(SqlError::Unsupported(format!("scalar function `{other}`"))),
+    }
+}
+
+/// Parse a timestamp string into a UTC `DateTime`. Accepts:
+/// - RFC3339 (`2025-01-31T12:00:00Z`, `2025-01-31T12:00:00+09:00`)
+/// - PostgreSQL-ish `YYYY-MM-DD HH:MM:SS[.fff]` (assumed UTC)
+/// - Bare date `YYYY-MM-DD` (midnight UTC).
+fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    let formats: &[&str] = &[
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+    ];
+    for fmt in formats {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Ok(Utc.from_utc_datetime(&naive));
+        }
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let naive = date
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| SqlError::TypeMismatch(format!("bad date {s}")))?;
+        return Ok(Utc.from_utc_datetime(&naive));
+    }
+    Err(SqlError::TypeMismatch(format!(
+        "cannot parse timestamp {s:?}"
+    )))
+}
+
+/// `EXTRACT(field FROM ts)` field selectors. Mirrors the Python
+/// reference's `_sf_extract` implementation.
+fn extract_field(field: &str, dt: &chrono::DateTime<chrono::Utc>) -> Result<Value> {
+    use chrono::{Datelike, Timelike};
+    match field {
+        "year" => Ok(Value::Int(i64::from(dt.year()))),
+        "month" => Ok(Value::Int(i64::from(dt.month()))),
+        "day" => Ok(Value::Int(i64::from(dt.day()))),
+        "hour" => Ok(Value::Int(i64::from(dt.hour()))),
+        "minute" => Ok(Value::Int(i64::from(dt.minute()))),
+        "second" => {
+            let secs = f64::from(dt.second()) + f64::from(dt.nanosecond()) / 1_000_000_000.0;
+            Ok(Value::Float(secs))
+        }
+        "millisecond" => Ok(Value::Int(i64::from(dt.timestamp_subsec_millis()))),
+        "microsecond" => Ok(Value::Int(i64::from(dt.timestamp_subsec_micros()))),
+        "dow" => Ok(Value::Int(i64::from(dt.weekday().num_days_from_sunday()))),
+        "isodow" => Ok(Value::Int(i64::from(dt.weekday().number_from_monday()))),
+        "doy" => Ok(Value::Int(i64::from(dt.ordinal()))),
+        "epoch" => Ok(Value::Float(
+            dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_micros()) / 1_000_000.0,
+        )),
+        "quarter" => Ok(Value::Int(i64::from(dt.month() - 1) / 3 + 1)),
+        "week" => Ok(Value::Int(i64::from(dt.iso_week().week()))),
+        other => Err(SqlError::Unsupported(format!("EXTRACT field `{other}`"))),
     }
 }
 

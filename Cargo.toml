@@ -58,6 +58,7 @@ regex = "1.11"
 unicode-normalization = "0.1"
 rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 pg_query = "6.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Dev / test
 proptest = "1.5"
