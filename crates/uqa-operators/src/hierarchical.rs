@@ -71,6 +71,63 @@ pub fn eval_path(doc: &Document, path: &[PathSegment]) -> Option<Value> {
     Some(current)
 }
 
+/// Project `paths` out of `doc` into a flat map keyed by the dotted
+/// path string. Mirrors `uqa.core.hierarchical.project_paths` --
+/// segments stringify in the same way (numeric indices render as
+/// their integer literal).
+pub fn project_paths(
+    doc: &Document,
+    paths: &[PathExpr],
+) -> std::collections::BTreeMap<String, Value> {
+    let mut out = std::collections::BTreeMap::new();
+    for path in paths {
+        let key = path
+            .iter()
+            .map(|seg| match seg {
+                PathSegment::Key(k) => k.clone(),
+                PathSegment::Index(i) => i.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(".");
+        let value = eval_path(doc, path).unwrap_or(Value::Null);
+        out.insert(key, value);
+    }
+    out
+}
+
+/// Unnest an array at `path` into a sequence of synthesised
+/// documents. Mirrors `uqa.core.hierarchical.unnest_array`. Each
+/// emitted document is a clone of the source merged with two
+/// metadata fields:
+///
+/// * `<path>._unnested` -- the array element value.
+/// * `_unnest_index`    -- the element's 0-based index.
+pub fn unnest_array(doc: &Document, path: &[PathSegment]) -> Vec<Document> {
+    let resolved = eval_path(doc, path);
+    let Some(Value::List(items)) = resolved else {
+        return Vec::new();
+    };
+    let path_key = path
+        .iter()
+        .map(|seg| match seg {
+            PathSegment::Key(k) => k.clone(),
+            PathSegment::Index(i) => i.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(".");
+    let unnest_key = format!("{path_key}._unnested");
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            let mut nested = doc.clone();
+            nested.insert(unnest_key.clone(), item);
+            nested.insert("_unnest_index".to_string(), Value::Int(idx as i64));
+            nested
+        })
+        .collect()
+}
+
 // -------------------------------------------------------------------------
 // PathFilter
 // -------------------------------------------------------------------------

@@ -43,8 +43,9 @@ pub use fusion_wrappers::{
     MultiFieldSearchOperator, WeightSource,
 };
 pub use hierarchical::{
-    parse_path, AggregationKind as PathAggKind, PathAggregateOperator, PathExpr,
-    PathFilterOperator, PathProjectOperator, PathSegment, UnifiedFilterOperator,
+    eval_path, parse_path, project_paths, unnest_array, AggregationKind as PathAggKind,
+    PathAggregateOperator, PathExpr, PathFilterOperator, PathProjectOperator, PathSegment,
+    UnifiedFilterOperator,
 };
 pub use hybrid::{HybridTextVectorOperator, LogOddsFusionOperator, SemanticFilterOperator};
 pub use multi_stage::{Cutoff, MultiStageOperator};

@@ -17,6 +17,7 @@ mod cross_paradigm;
 pub mod cypher;
 mod delta;
 mod embedding;
+pub mod functor;
 mod incremental_match;
 mod index;
 mod memory_store;
@@ -37,6 +38,7 @@ pub use cross_paradigm::{
 };
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::GraphEmbedding;
+pub use functor::{GraphToRelationalFunctor, RelationalToGraphFunctor, TextToVectorFunctor};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex};
 pub use memory_store::MemoryGraphStore;
