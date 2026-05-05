@@ -988,6 +988,16 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             });
         }
         AExprKind::AexprLike => {
+            // libpg_query encodes LIKE as `~~` and NOT LIKE as `!~~` in
+            // `a.name`. The keyword form lands here regardless of the
+            // user's syntax (LIKE / NOT LIKE / ~~ / !~~), so we have to
+            // peek at the name to recover the negation.
+            let op_name = a
+                .name
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect::<Vec<_>>()
+                .join("");
             let lhs = a
                 .lexpr
                 .as_ref()
@@ -996,12 +1006,24 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SqlError::Internal("LIKE without rhs".into()))?;
-            return Ok(Expr::Func {
+            let func = Expr::Func {
                 name: "like".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            };
+            return Ok(if op_name == "!~~" {
+                Expr::Not(Box::new(func))
+            } else {
+                func
             });
         }
         AExprKind::AexprIlike => {
+            // Same shape as AexprLike: ILIKE -> `~~*`, NOT ILIKE -> `!~~*`.
+            let op_name = a
+                .name
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect::<Vec<_>>()
+                .join("");
             let lhs = a
                 .lexpr
                 .as_ref()
@@ -1010,9 +1032,14 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 .rexpr
                 .as_ref()
                 .ok_or_else(|| SqlError::Internal("ILIKE without rhs".into()))?;
-            return Ok(Expr::Func {
+            let func = Expr::Func {
                 name: "ilike".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+            };
+            return Ok(if op_name == "!~~*" {
+                Expr::Not(Box::new(func))
+            } else {
+                func
             });
         }
         AExprKind::AexprIn => {
