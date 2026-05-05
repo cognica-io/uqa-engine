@@ -486,28 +486,38 @@ fn run_query_block(
         .as_ref()
         .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
 
-    // If the only FROM is a single CTE-backed table with no alias and
-    // no window/aggregate, route through the joined path so the CTE
-    // rows get the correct qualifier prefixing.
-    let mut joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
+    let joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
 
-    if let Some(filter) = stmt.r#where.as_ref() {
-        joined.retain(|row| {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
-            uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
-        });
-    }
+    // Aggregates and window functions still go through their dedicated
+    // routines because they need access to the SQL function registry
+    // (e.g. text_match calls in projection lists). Pure projection
+    // SELECTs flow through a Volcano sub-pipeline:
+    //   TableScan -> [Filter] -> Project -> [Sort] -> [Limit]
+    // built on the operators in `uqa-execution` so the planner-driven
+    // execution layer is exercised on every projection-only SELECT.
+    let filtered = if let Some(filter) = stmt.r#where.as_ref() {
+        let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
+        for row in joined {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params);
+            if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
+                out.push(row);
+            }
+        }
+        out
+    } else {
+        joined
+    };
 
     if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(stmt, &joined, params)?;
+        let rows = aggregate_join_rows(stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SqlResult::from_rows(columns, rows));
     }
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(&stmt.projections, joined, params)?;
+        let with_windows = compute_window_columns(&stmt.projections, filtered, params)?;
         let mut rows: Vec<ResultRow> = with_windows
             .iter()
             .map(|src| project_join_row(src, &stmt.projections, params))
@@ -516,13 +526,141 @@ fn run_query_block(
         return Ok(SqlResult::from_rows(columns, rows));
     }
 
+    // Pure projection: use the Volcano Project + Sort + Limit chain.
+    let projected = volcano_project_sort_limit(&filtered, stmt, params)?;
     let columns = projection_columns(&stmt.projections);
-    let mut rows: Vec<ResultRow> = joined
+    Ok(SqlResult::from_rows(columns, projected))
+}
+
+fn volcano_project_sort_limit(
+    src_rows: &[ResultRow],
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+) -> Result<Vec<ResultRow>, SqlError> {
+    // Some projection callsites (e.g. `text_match` in the SELECT
+    // list) need the engine-side function registry, which the
+    // execution-layer Project operator does not understand. Detect
+    // those and fall back to the row-by-row engine projector so the
+    // contract stays the same for SQL-function-bearing projections.
+    let has_engine_funcs = stmt.projections.iter().any(|p| {
+        let mut found = false;
+        walk_expr(&p.expr, &mut |e| {
+            if let Expr::Func { name, .. } = e {
+                if uqa_sql::registry::is_registered(&name.to_ascii_lowercase()) {
+                    found = true;
+                }
+            }
+        });
+        found
+    });
+    let has_star = stmt
+        .projections
         .iter()
-        .map(|src| project_join_row(src, &stmt.projections, params))
-        .collect::<Result<_, _>>()?;
-    rows = apply_row_order_limit(rows, stmt, params)?;
-    Ok(SqlResult::from_rows(columns, rows))
+        .any(|p| matches!(p.expr, Expr::Star));
+    if has_engine_funcs || has_star {
+        let mut rows: Vec<ResultRow> = src_rows
+            .iter()
+            .map(|src| project_join_row(src, &stmt.projections, params))
+            .collect::<Result<_, _>>()?;
+        rows = apply_row_order_limit(rows, stmt, params)?;
+        return Ok(rows);
+    }
+    use uqa_execution::physical::{run_to_rows, ExecError, PhysicalOperator};
+    use uqa_execution::relational::{Limit, Project, Sort, SortKey};
+    use uqa_execution::scan::TableScan;
+
+    let columns: Vec<String> = src_rows
+        .first()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut op: Box<dyn PhysicalOperator> =
+        Box::new(TableScan::from_rows(columns, src_rows.to_vec()));
+
+    let labels = projection_columns(&stmt.projections);
+    let projections: Vec<(String, Expr)> = stmt
+        .projections
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (labels[i].clone(), p.expr.clone()))
+        .collect();
+    op = Box::new(Project::new(op, projections, params.to_vec()));
+
+    if !stmt.order_by.is_empty() {
+        let keys: Vec<SortKey> = stmt
+            .order_by
+            .iter()
+            .map(|o| SortKey {
+                expr: o.expr.clone(),
+                descending: o.descending,
+            })
+            .collect();
+        op = Box::new(Sort::new(op, keys, params.to_vec()));
+    }
+    if stmt.offset.is_some() || stmt.limit.is_some() {
+        op = Box::new(Limit::new(op, stmt.offset.unwrap_or(0), stmt.limit));
+    }
+
+    let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
+        ExecError::Sql(err) => err,
+        ExecError::Other(msg) => SqlError::Internal(msg),
+    })?;
+    Ok(rows)
+}
+
+fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
+    f(expr);
+    match expr {
+        Expr::And(parts) | Expr::Or(parts) => {
+            for p in parts {
+                walk_expr(p, f);
+            }
+        }
+        Expr::Not(inner) => walk_expr(inner, f),
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_expr(lhs, f);
+            walk_expr(rhs, f);
+        }
+        Expr::IsNull { expr, .. } => walk_expr(expr, f),
+        Expr::Between { expr, low, high } => {
+            walk_expr(expr, f);
+            walk_expr(low, f);
+            walk_expr(high, f);
+        }
+        Expr::InList { expr, list, .. } => {
+            walk_expr(expr, f);
+            for p in list {
+                walk_expr(p, f);
+            }
+        }
+        Expr::Func { args, .. } | Expr::WindowCall { args, .. } => {
+            for p in args {
+                walk_expr(p, f);
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(b) = base {
+                walk_expr(b, f);
+            }
+            for (c, r) in when {
+                walk_expr(c, f);
+                walk_expr(r, f);
+            }
+            if let Some(e) = else_branch {
+                walk_expr(e, f);
+            }
+        }
+        Expr::Cast { expr, .. } => walk_expr(expr, f),
+        Expr::Array(items) => {
+            for p in items {
+                walk_expr(p, f);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn materialize_ctes(
