@@ -21,6 +21,26 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, Expr};
 
+/// Graph-level statistics for cardinality estimation. Mirrors
+/// `uqa.planner.cardinality.GraphStats`.
+#[derive(Debug, Clone, Default)]
+pub struct GraphStats {
+    pub num_vertices: u64,
+    pub num_edges: u64,
+    pub label_counts: BTreeMap<String, u64>,
+    pub avg_out_degree: f64,
+    pub degree_distribution: BTreeMap<u64, u64>,
+    pub min_timestamp: Option<f64>,
+    pub max_timestamp: Option<f64>,
+    pub graph_name: String,
+    pub vertex_label_counts: BTreeMap<String, u64>,
+    pub label_degree_map: BTreeMap<String, f64>,
+}
+
+const JACCARD_JOIN_SELECTIVITY: f64 = 0.05;
+const VECTOR_JOIN_SELECTIVITY: f64 = 0.1;
+const GRAPH_AVG_DEGREE_DEFAULT: f64 = 10.0;
+
 #[derive(Debug, Clone, Default)]
 pub struct ColumnStats {
     pub distinct_count: u64,

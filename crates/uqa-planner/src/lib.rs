@@ -40,7 +40,13 @@
     clippy::similar_names,
     clippy::needless_pass_by_value,
     clippy::too_many_lines,
-    clippy::unnecessary_wraps
+    clippy::unnecessary_wraps,
+    dead_code,
+    unused_imports,
+    clippy::struct_excessive_bools,
+    clippy::only_used_in_recursion,
+    clippy::self_only_used_in_recursion,
+    clippy::question_mark
 )]
 
 pub mod cardinality;
@@ -50,11 +56,13 @@ pub mod join_enumerator;
 pub mod join_graph;
 pub mod optimizer;
 pub mod parallel;
+pub mod query_optimizer;
 
-pub use cardinality::{CardinalityEstimator, ColumnStats, RelationStats, Selectivity};
+pub use cardinality::{CardinalityEstimator, ColumnStats, GraphStats, RelationStats, Selectivity};
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
 pub use executor::PlannedQuery;
 pub use join_enumerator::{enumerate_dpccp, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph};
 pub use optimizer::{optimize, OptimizerConfig};
 pub use parallel::run_parallel;
+pub use query_optimizer::{OptimizerConfig as TreeOptimizerConfig, QueryOptimizer};

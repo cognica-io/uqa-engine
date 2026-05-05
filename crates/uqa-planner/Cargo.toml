@@ -12,6 +12,8 @@ rust-version.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
+uqa-operators = { workspace = true }
+uqa-storage = { workspace = true }
 uqa-execution = { workspace = true }
 uqa-joins = { workspace = true }
 rayon = { workspace = true }

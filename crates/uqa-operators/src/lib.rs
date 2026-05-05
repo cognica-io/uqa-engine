@@ -22,6 +22,7 @@ pub mod multi_stage;
 pub mod primitive;
 pub mod progressive_fusion;
 pub mod sparse;
+pub mod tree;
 pub mod vector;
 
 pub use aggregation::{
@@ -50,4 +51,9 @@ pub use multi_stage::{Cutoff, MultiStageOperator};
 pub use primitive::{FacetOperator, FilterOperator, ScoreOperator, TermOperator};
 pub use progressive_fusion::ProgressiveFusionOperator;
 pub use sparse::SparseThresholdOperator;
+pub use tree::{
+    AttentionFuserDyn, AttentionRef, EdgeConstraint, EdgePatternIR, GatingSpec, GraphPatternIR,
+    LearnedFuserDyn, LearnedFusionRef, OperatorTree, ProbBoolMode, ScorerRef, VertexConstraint,
+    VertexPatternIR, VertexPredicate,
+};
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

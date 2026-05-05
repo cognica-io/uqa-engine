@@ -1379,7 +1379,9 @@ dependencies = [
  "uqa-core",
  "uqa-execution",
  "uqa-joins",
+ "uqa-operators",
  "uqa-sql",
+ "uqa-storage",
 ]
 
 [[package]]
