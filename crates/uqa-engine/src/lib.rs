@@ -139,8 +139,22 @@ struct TableState {
     document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
-    fts_fields: Vec<FieldName>,
-    analyzer: Analyzer,
+    fts_fields: RwLock<Vec<FieldName>>,
+    /// Column schema captured at CREATE TABLE / ALTER TABLE time.
+    /// Drives auto-id allocation and ALTER COLUMN bookkeeping.
+    columns: RwLock<Vec<uqa_sql::ast::ColumnDef>>,
+    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first
+    /// allocated value is `1`; the watermark grows past
+    /// `max(existing_doc_id, allocated)` so reopened catalogs do not
+    /// collide with existing rows.
+    next_id: parking_lot::Mutex<u64>,
+    analyzer: RwLock<Analyzer>,
+}
+
+impl TableState {
+    fn fts_fields(&self) -> Vec<FieldName> {
+        self.fts_fields.read().clone()
+    }
 }
 
 impl Default for Engine {
@@ -213,12 +227,26 @@ impl Engine {
                     )),
                 );
             }
+            let columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&schema.columns_json).unwrap_or_default()
+            };
+            // Restore the per-table id watermark to one past the largest
+            // existing doc id so reopened catalogs do not collide on
+            // SERIAL/BIGSERIAL columns.
+            let max_id = {
+                let store = docs.snapshot();
+                store.doc_ids().into_iter().max().unwrap_or(0)
+            };
             let table = TableState {
                 document_store: RwLock::new(docs),
                 inverted_index: RwLock::new(inv),
                 vector_indexes: RwLock::new(vectors),
-                fts_fields: schema.fts_fields.clone(),
-                analyzer,
+                fts_fields: RwLock::new(schema.fts_fields.clone()),
+                columns: RwLock::new(columns),
+                next_id: parking_lot::Mutex::new(max_id + 1),
+                analyzer: RwLock::new(analyzer),
             };
             self.tables.write().insert(schema.name, Arc::new(table));
         }
@@ -233,7 +261,7 @@ impl Engine {
         let Some(catalog) = self.catalog.as_ref() else {
             return;
         };
-        let Ok(analyzer_json) = serde_json::to_string(&table.analyzer) else {
+        let Ok(analyzer_json) = serde_json::to_string(&*table.analyzer.read()) else {
             return;
         };
         let vector_fields: Vec<VectorFieldSchema> = table
@@ -245,11 +273,13 @@ impl Engine {
                 dimensions: idx.dimensions(),
             })
             .collect();
+        let columns_json = serde_json::to_string(&*table.columns.read()).unwrap_or_default();
         let _ = catalog.save_table(&TableSchema {
             name: name.to_string(),
             analyzer_json,
-            fts_fields: table.fts_fields.clone(),
+            fts_fields: table.fts_fields(),
             vector_fields,
+            columns_json,
         });
     }
 
@@ -284,8 +314,10 @@ impl Engine {
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(BTreeMap::new()),
-            fts_fields,
-            analyzer,
+            fts_fields: RwLock::new(fts_fields),
+            columns: RwLock::new(Vec::new()),
+            next_id: parking_lot::Mutex::new(1),
+            analyzer: RwLock::new(analyzer),
         };
         let table_arc = Arc::new(table);
         self.tables.write().insert(name.clone(), table_arc.clone());
@@ -440,7 +472,7 @@ impl Engine {
         };
         // Index the FTS fields whose values are strings.
         let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-        for name in &t.fts_fields {
+        for name in &t.fts_fields() {
             if let Some(Value::Str(s)) = document.get(name) {
                 text_fields.insert(name.clone(), s.clone());
             }
@@ -449,6 +481,201 @@ impl Engine {
             t.inverted_index.write().add_document(doc_id, text_fields);
         }
         t.document_store.write().put(doc_id, document);
+        // Keep the auto-id watermark monotonic over manual inserts as well.
+        let mut nx = t.next_id.lock();
+        if doc_id >= *nx {
+            *nx = doc_id + 1;
+        }
+    }
+
+    /// Drop a table from the catalog and release its in-memory state.
+    /// Returns `true` if the table existed.
+    pub fn drop_table(&self, name: &str) -> bool {
+        let removed = self.tables.write().remove(name).is_some();
+        if !removed {
+            return false;
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.drop_table(name);
+            let _ = catalog.purge_table_data(name);
+        }
+        true
+    }
+
+    pub fn has_table(&self, name: &str) -> bool {
+        self.tables.read().contains_key(name)
+    }
+
+    /// All schema-declared columns for `table`, in declaration order.
+    pub fn table_columns(&self, table: &str) -> Vec<String> {
+        self.table(table)
+            .map(|t| t.columns.read().iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn table_has_column(&self, table: &str, column: &str) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let cols = t.columns.read();
+        cols.iter().any(|c| c.name == column)
+    }
+
+    /// Return the SERIAL/BIGSERIAL column name for `table`, if any.
+    pub(crate) fn auto_increment_column(&self, table: &str) -> Option<String> {
+        let t = self.table(table)?;
+        let cols = t.columns.read();
+        cols.iter()
+            .find(|c| c.auto_increment)
+            .map(|c| c.name.clone())
+    }
+
+    /// Allocate the next id from the per-table watermark, returning the
+    /// allocated value. Updates the watermark in place.
+    pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SqlError> {
+        let t = self
+            .table(table)
+            .ok_or_else(|| SqlError::Internal(format!("unknown table `{table}`")))?;
+        let mut g = t.next_id.lock();
+        let id = *g;
+        *g = id.saturating_add(1);
+        Ok(id)
+    }
+
+    /// Move the watermark past `doc_id` if needed (called after a manual
+    /// id assignment so the next allocation does not collide).
+    pub(crate) fn advance_next_id(&self, table: &str, doc_id: DocId) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        let mut g = t.next_id.lock();
+        if doc_id >= *g {
+            *g = doc_id + 1;
+        }
+    }
+
+    /// Append a column to the schema. No data migration is needed because
+    /// the document store is sparse; rows missing the column read back as
+    /// `Value::Null`.
+    pub fn register_column(&self, table: &str, column: uqa_sql::ast::ColumnDef) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        if t.columns.read().iter().any(|c| c.name == column.name) {
+            return;
+        }
+        t.columns.write().push(column);
+        if self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+    }
+
+    pub fn drop_column(&self, table: &str, column: &str) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        {
+            let mut cols = t.columns.write();
+            cols.retain(|c| c.name != column);
+        }
+        // Remove from FTS field list if present.
+        {
+            let mut fts = t.fts_fields.write();
+            fts.retain(|f| f != column);
+        }
+        // Drop the vector index for this field if it exists.
+        {
+            let mut vs = t.vector_indexes.write();
+            vs.remove(column);
+        }
+        if self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+    }
+
+    pub fn rename_column(&self, table: &str, from: &str, to: &str) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        {
+            let mut cols = t.columns.write();
+            for c in cols.iter_mut() {
+                if c.name == from {
+                    c.name = to.to_string();
+                }
+            }
+        }
+        {
+            let mut fts = t.fts_fields.write();
+            for f in fts.iter_mut() {
+                if f == from {
+                    *f = to.to_string();
+                }
+            }
+        }
+        // Vector index keys are immutable; rename means remove + re-add
+        // an entry pointing at the same backing data. We swap the entry
+        // by reinserting under the new key.
+        {
+            let mut vs = t.vector_indexes.write();
+            if let Some(idx) = vs.remove(from) {
+                vs.insert(to.to_string(), idx);
+            }
+        }
+        if self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+    }
+
+    pub fn rename_table(&self, from: &str, to: &str) -> bool {
+        let mut tables = self.tables.write();
+        if tables.contains_key(to) {
+            return false;
+        }
+        let Some(state) = tables.remove(from) else {
+            return false;
+        };
+        tables.insert(to.to_string(), state.clone());
+        drop(tables);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.drop_table(from);
+        }
+        if self.is_persistent() {
+            self.save_table_schema(to, &state);
+        }
+        true
+    }
+
+    /// Append `field` to the table's FTS field list. The analyzer is
+    /// the table-level default. Re-indexing of existing rows happens
+    /// lazily on the next mutation; documents already in the store stay
+    /// queryable through the original analyzer until then.
+    pub fn add_fts_field(&self, table: &str, field: FieldName) -> Result<(), String> {
+        self.add_fts_field_with_analyzer(table, field, None)
+    }
+
+    /// Same as [`Engine::add_fts_field`], but allows registering a
+    /// per-field analyzer name (e.g. `standard_cjk`). When `None`, the
+    /// table-level analyzer continues to apply.
+    pub fn add_fts_field_with_analyzer(
+        &self,
+        table: &str,
+        field: FieldName,
+        _analyzer: Option<&str>,
+    ) -> Result<(), String> {
+        let t = self
+            .table(table)
+            .ok_or_else(|| format!("unknown table `{table}`"))?;
+        {
+            let mut fts = t.fts_fields.write();
+            if !fts.contains(&field) {
+                fts.push(field);
+            }
+        }
+        if self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+        Ok(())
     }
 
     pub fn get_document(&self, table: &str, doc_id: DocId) -> Option<Document> {

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
@@ -26,6 +26,12 @@ pub struct TableSchema {
     pub analyzer_json: String,
     pub fts_fields: Vec<String>,
     pub vector_fields: Vec<VectorFieldSchema>,
+    /// Serialized `Vec<uqa_sql::ast::ColumnDef>` capturing the schema
+    /// columns (name, type, `auto_increment`, flags). Empty for
+    /// tables created by the legacy code path before column tracking
+    /// existed.
+    #[serde(default)]
+    pub columns_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,11 +93,13 @@ impl Catalog {
         let analyzer = schema.analyzer_json.clone();
         let fts = serde_json::to_string(&schema.fts_fields)?;
         let vectors = serde_json::to_string(&schema.vector_fields)?;
+        let columns = schema.columns_json.clone();
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO _tables (name, analyzer, fts_fields, vector_fields)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![schema.name, analyzer, fts, vectors],
+                "INSERT OR REPLACE INTO _tables
+                    (name, analyzer, fts_fields, vector_fields, columns)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![schema.name, analyzer, fts, vectors, columns],
             )?;
             Ok(())
         })
@@ -100,7 +108,8 @@ impl Catalog {
     pub fn load_tables(&self) -> Result<Vec<TableSchema>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT name, analyzer, fts_fields, vector_fields FROM _tables ORDER BY name",
+                "SELECT name, analyzer, fts_fields, vector_fields, columns
+                   FROM _tables ORDER BY name",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -108,11 +117,12 @@ impl Catalog {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (name, analyzer_json, fts_str, vec_str) = row?;
+                let (name, analyzer_json, fts_str, vec_str, cols_opt) = row?;
                 let fts_fields: Vec<String> = serde_json::from_str(&fts_str)?;
                 let vector_fields: Vec<VectorFieldSchema> = serde_json::from_str(&vec_str)?;
                 out.push(TableSchema {
@@ -120,6 +130,7 @@ impl Catalog {
                     analyzer_json,
                     fts_fields,
                     vector_fields,
+                    columns_json: cols_opt.unwrap_or_default(),
                 });
             }
             Ok(out)
@@ -129,6 +140,30 @@ impl Catalog {
     pub fn drop_table(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute("DELETE FROM _tables WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
+
+    /// Wipe the rows owned by `table` from the per-table data tables
+    /// (`_documents`, `_postings`, `_doc_lengths`, `_field_stats`,
+    /// `_vectors`). Run after [`Catalog::drop_table`] when the engine
+    /// drops the table from its in-memory registry as well.
+    pub fn purge_table_data(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _documents WHERE table_name = ?1",
+                params![name],
+            )?;
+            c.execute("DELETE FROM _postings WHERE table_name = ?1", params![name])?;
+            c.execute(
+                "DELETE FROM _doc_lengths WHERE table_name = ?1",
+                params![name],
+            )?;
+            c.execute(
+                "DELETE FROM _field_stats WHERE table_name = ?1",
+                params![name],
+            )?;
+            c.execute("DELETE FROM _vectors WHERE table_name = ?1", params![name])?;
             Ok(())
         })
     }
@@ -241,6 +276,12 @@ const MIGRATIONS: &[(u32, &str)] = &[
     );
     ",
     ),
+    (
+        3,
+        r"
+    ALTER TABLE _tables ADD COLUMN columns TEXT;
+    ",
+    ),
 ];
 
 #[cfg(test)]
@@ -281,6 +322,7 @@ mod tests {
                 field: "embedding".into(),
                 dimensions: 768,
             }],
+            columns_json: String::new(),
         };
         cat.save_table(&schema).unwrap();
         let loaded = cat.load_tables().unwrap();
@@ -290,6 +332,7 @@ mod tests {
         assert_eq!(loaded[0].vector_fields.len(), 1);
         assert_eq!(loaded[0].vector_fields[0].field, "embedding");
         assert_eq!(loaded[0].vector_fields[0].dimensions, 768);
+        assert!(loaded[0].columns_json.is_empty());
     }
 
     #[test]

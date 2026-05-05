@@ -1219,6 +1219,7 @@ version = "0.1.0"
 dependencies = [
  "pg_query",
  "proptest",
+ "serde",
  "thiserror 2.0.18",
  "uqa-analysis",
  "uqa-core",

@@ -30,9 +30,9 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, Cte, DeleteStmt, Expr,
-    FromClause, InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, SetOpKind, Statement,
-    UpdateStmt, WindowSpec,
+    AlterTableAction, AlterTableStmt, ColumnDef as SqlColumnDef, ColumnType, CreateIndex,
+    CreateTable, Cte, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind,
+    OrderBy, Projection, SelectStmt, SetOpKind, Statement, UpdateStmt, WindowSpec,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -63,7 +63,109 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<Sql
         Statement::Select(s) => run_select(engine, *s, params),
         Statement::Update(u) => run_update(engine, u, params),
         Statement::Delete(d) => run_delete(engine, d, params),
+        Statement::Drop(d) => run_drop(engine, d),
+        Statement::AlterTable(a) => run_alter_table(engine, a),
     }
+}
+
+fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SqlResult, SqlError> {
+    match stmt.kind {
+        DropKind::Table => {
+            for name in &stmt.names {
+                if !engine.drop_table(name) && !stmt.if_exists {
+                    return Err(SqlError::Unsupported(format!(
+                        "DROP TABLE: relation `{name}` does not exist"
+                    )));
+                }
+            }
+        }
+        DropKind::Index => {
+            // Indexes in this engine are catalog metadata only; dropping
+            // by name is informational. With IF EXISTS we always succeed;
+            // without it we still succeed because we never registered
+            // the index by name in the first place.
+            for _ in &stmt.names {}
+        }
+        DropKind::View => {
+            return Err(SqlError::Unsupported("DROP VIEW".into()));
+        }
+        DropKind::Schema => {
+            return Err(SqlError::Unsupported("DROP SCHEMA".into()));
+        }
+    }
+    Ok(SqlResult::empty())
+}
+
+fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, SqlError> {
+    if !engine.has_table(&stmt.table) {
+        if stmt.if_exists {
+            return Ok(SqlResult::empty());
+        }
+        return Err(SqlError::Unsupported(format!(
+            "ALTER TABLE: relation `{}` does not exist",
+            stmt.table
+        )));
+    }
+    match stmt.action {
+        AlterTableAction::AddColumn {
+            column,
+            if_not_exists,
+        } => {
+            let col_name = column.name.clone();
+            if engine.table_has_column(&stmt.table, &col_name) {
+                if if_not_exists {
+                    return Ok(SqlResult::empty());
+                }
+                return Err(SqlError::Unsupported(format!(
+                    "ALTER TABLE ADD COLUMN: column `{col_name}` already exists"
+                )));
+            }
+            match column.ty {
+                ColumnType::Vector(dim) => {
+                    engine.create_vector_field(&stmt.table, col_name.clone(), dim);
+                }
+                ColumnType::Text => {
+                    if let Err(e) = engine.add_fts_field(&stmt.table, col_name.clone()) {
+                        return Err(SqlError::Internal(format!("add_fts_field: {e}")));
+                    }
+                }
+                _ => {}
+            }
+            engine.register_column(&stmt.table, column);
+        }
+        AlterTableAction::DropColumn {
+            name,
+            if_exists,
+            cascade: _,
+        } => {
+            if !engine.table_has_column(&stmt.table, &name) {
+                if if_exists {
+                    return Ok(SqlResult::empty());
+                }
+                return Err(SqlError::Unsupported(format!(
+                    "ALTER TABLE DROP COLUMN: column `{name}` does not exist"
+                )));
+            }
+            engine.drop_column(&stmt.table, &name);
+        }
+        AlterTableAction::RenameColumn { from, to } => {
+            if !engine.table_has_column(&stmt.table, &from) {
+                return Err(SqlError::Unsupported(format!(
+                    "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
+                )));
+            }
+            engine.rename_column(&stmt.table, &from, &to);
+        }
+        AlterTableAction::RenameTable { to } => {
+            if !engine.rename_table(&stmt.table, &to) {
+                return Err(SqlError::Unsupported(format!(
+                    "ALTER TABLE RENAME: rename of `{}` failed",
+                    stmt.table
+                )));
+            }
+        }
+    }
+    Ok(SqlResult::empty())
 }
 
 fn run_update(
@@ -134,6 +236,15 @@ fn run_delete(
 // -------------------------------------------------------------------------
 
 fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SqlResult, SqlError> {
+    if engine.has_table(&c.name) {
+        if c.if_not_exists {
+            return Ok(SqlResult::empty());
+        }
+        return Err(SqlError::Unsupported(format!(
+            "CREATE TABLE: relation `{}` already exists",
+            c.name
+        )));
+    }
     let mut fts_fields = Vec::new();
     let mut vector_fields: Vec<(String, u32)> = Vec::new();
     for col in &c.columns {
@@ -147,7 +258,10 @@ fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SqlResult, SqlErr
     for (field, dim) in vector_fields {
         engine.create_vector_field(&c.name, field, dim);
     }
-    let _ = column_names(&c.columns); // sanity, used by future EXPLAIN
+    for col in &c.columns {
+        engine.register_column(&c.name, col.clone());
+    }
+    let _ = column_names(&c.columns);
     Ok(SqlResult::empty())
 }
 
@@ -155,10 +269,24 @@ fn column_names(cols: &[SqlColumnDef]) -> Vec<String> {
     cols.iter().map(|c| c.name.clone()).collect()
 }
 
-fn run_create_index(_engine: &Engine, _c: CreateIndex) -> Result<SqlResult, SqlError> {
-    // FTS fields are derived from TEXT columns at CREATE TABLE time, so
-    // CREATE INDEX is informational only in Phase 5. We accept any
-    // access method (gin, btree, ivf, rtree) and treat it as a no-op.
+fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SqlResult, SqlError> {
+    // CREATE INDEX is metadata-bearing now: `gin` registers the column
+    // as an FTS field with the analyzer specified in `WITH (analyzer = ...)`,
+    // `ivf` / `hnsw` register vector fields if not already declared,
+    // others are informational.
+    let am = c.access_method.to_ascii_lowercase();
+    if am.is_empty() || am == "gin" {
+        for col in &c.columns {
+            let analyzer = c
+                .options
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
+                .map(|(_, v)| v.as_str());
+            if let Err(e) = engine.add_fts_field_with_analyzer(&c.table, col.clone(), analyzer) {
+                return Err(SqlError::Internal(format!("add_fts_field: {e}")));
+            }
+        }
+    }
     Ok(SqlResult::empty())
 }
 
@@ -171,35 +299,48 @@ fn run_insert(
     stmt: InsertStmt,
     params: &[SqlParam],
 ) -> Result<SqlResult, SqlError> {
-    if stmt.columns.is_empty() {
+    let auto_id_col = engine.auto_increment_column(&stmt.table);
+    let id_column = auto_id_col.clone().unwrap_or_else(|| "id".into());
+
+    let columns: Vec<String> = if stmt.columns.is_empty() {
+        // INSERT without explicit column list: project the table schema.
+        let cols = engine.table_columns(&stmt.table);
+        if cols.is_empty() {
+            return Err(SqlError::Unsupported(
+                "INSERT without column list against a table with no schema".into(),
+            ));
+        }
+        cols
+    } else {
+        stmt.columns.clone()
+    };
+
+    let id_index = columns.iter().position(|c| c == &id_column);
+    if id_index.is_none() && auto_id_col.is_none() {
         return Err(SqlError::Unsupported(
-            "INSERT without explicit column list".into(),
+            "INSERT requires an `id` column or a SERIAL/BIGSERIAL primary key".into(),
         ));
     }
-    let id_index = stmt
-        .columns
-        .iter()
-        .position(|c| c == "id")
-        .ok_or_else(|| SqlError::Unsupported("INSERT requires an `id` column".into()))?;
 
     let mut affected = 0u64;
     let ctx = EvalContext::new(None, params);
     for row in &stmt.rows {
-        if row.len() != stmt.columns.len() {
+        if row.len() != columns.len() {
             return Err(SqlError::Internal(format!(
                 "row width {} != column count {}",
                 row.len(),
-                stmt.columns.len()
+                columns.len()
             )));
         }
         let mut document = Document::new();
         let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
         let mut doc_id: Option<u64> = None;
-        for (i, col) in stmt.columns.iter().enumerate() {
+        for (i, col) in columns.iter().enumerate() {
             let v = eval(&row[i], &ctx)?;
-            if i == id_index {
+            if Some(i) == id_index {
                 doc_id = match &v {
                     Value::Int(n) if *n >= 0 => Some(*n as u64),
+                    Value::Null => None,
                     other => {
                         return Err(SqlError::TypeMismatch(format!(
                             "id must be a non-negative integer, got {other:?}"
@@ -207,15 +348,19 @@ fn run_insert(
                     }
                 };
             }
-            // Heuristic: rows whose value compiles to a list go to the
-            // vector index; the document store keeps the raw value too
-            // so the projection can read it back later.
             if let Ok(vec) = value_to_vector(&v) {
                 vectors.insert(col.clone(), vec);
             }
             document.insert(col.clone(), v);
         }
-        let doc_id = doc_id.ok_or_else(|| SqlError::Internal("INSERT missing id value".into()))?;
+        let doc_id = if let Some(id) = doc_id {
+            id
+        } else {
+            let id = engine.allocate_next_id(&stmt.table)?;
+            document.insert(id_column.clone(), Value::Int(id as i64));
+            id
+        };
+        engine.advance_next_id(&stmt.table, doc_id);
         engine.add_document_with_vectors(
             &stmt.table,
             doc_id,

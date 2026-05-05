@@ -17,9 +17,9 @@ use pg_query::NodeEnum;
 use uqa_core::Value;
 
 use crate::ast::{
-    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, Cte, DeleteStmt, Expr, FromClause,
-    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt,
-    WindowSpec,
+    AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable,
+    Cte, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
+    Projection, SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt, WindowSpec,
 };
 use crate::error::{Result, SqlError};
 
@@ -44,6 +44,9 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::SelectStmt(stmt) => compile_select(stmt).map(|s| Statement::Select(Box::new(s))),
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
+        NodeEnum::DropStmt(stmt) => compile_drop(stmt).map(Statement::Drop),
+        NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt).map(Statement::AlterTable),
+        NodeEnum::RenameStmt(stmt) => compile_rename(stmt).map(Statement::AlterTable),
         other => Err(SqlError::Unsupported(format!(
             "{}",
             other_node_label(other)
@@ -98,13 +101,168 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
 
 fn other_node_label(node: &NodeEnum) -> &'static str {
     match node {
-        NodeEnum::DropStmt(_) => "DROP",
         NodeEnum::ExplainStmt(_) => "EXPLAIN",
         NodeEnum::ViewStmt(_) => "CREATE VIEW",
         NodeEnum::TransactionStmt(_) => "BEGIN/COMMIT/ROLLBACK",
         NodeEnum::PrepareStmt(_) | NodeEnum::ExecuteStmt(_) => "PREPARE/EXECUTE",
         _ => "unknown statement",
     }
+}
+
+// -------------------------------------------------------------------------
+// DROP TABLE / DROP INDEX [IF EXISTS] [CASCADE]
+// -------------------------------------------------------------------------
+
+fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<DropStmt> {
+    use pg_query::protobuf::{DropBehavior, ObjectType};
+    let kind = match stmt.remove_type() {
+        ObjectType::ObjectTable => DropKind::Table,
+        ObjectType::ObjectIndex => DropKind::Index,
+        ObjectType::ObjectView => DropKind::View,
+        ObjectType::ObjectSchema => DropKind::Schema,
+        other => {
+            return Err(SqlError::Unsupported(format!(
+                "DROP target {other:?} not supported"
+            )));
+        }
+    };
+    let mut names = Vec::new();
+    for object in &stmt.objects {
+        let Some(inner) = object.node.as_ref() else {
+            continue;
+        };
+        match inner {
+            NodeEnum::List(list) => {
+                let parts: Vec<String> = list
+                    .items
+                    .iter()
+                    .filter_map(|n| extract_string(n).ok())
+                    .collect();
+                if let Some(last) = parts.last() {
+                    names.push(last.clone());
+                }
+            }
+            NodeEnum::String(s) => names.push(s.sval.clone()),
+            other => {
+                return Err(SqlError::Unsupported(format!(
+                    "DROP object node {other:?} not supported"
+                )));
+            }
+        }
+    }
+    if names.is_empty() {
+        return Err(SqlError::Internal("DROP without target name".into()));
+    }
+    let cascade = matches!(stmt.behavior(), DropBehavior::DropCascade);
+    Ok(DropStmt {
+        kind,
+        names,
+        if_exists: stmt.missing_ok,
+        cascade,
+    })
+}
+
+// -------------------------------------------------------------------------
+// ALTER TABLE { ADD COLUMN | DROP COLUMN | RENAME COLUMN | RENAME TO }
+// -------------------------------------------------------------------------
+
+fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<AlterTableStmt> {
+    use pg_query::protobuf::{AlterTableType, DropBehavior};
+    let table = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SqlError::Internal("ALTER TABLE without relation".into()))?;
+    let if_exists = stmt.missing_ok;
+    let cmd = stmt
+        .cmds
+        .first()
+        .ok_or_else(|| SqlError::Internal("ALTER TABLE without command".into()))?;
+    let inner = cmd
+        .node
+        .as_ref()
+        .ok_or_else(|| SqlError::Internal("ALTER TABLE command body empty".into()))?;
+    let cmd = match inner {
+        NodeEnum::AlterTableCmd(c) => c,
+        other => {
+            return Err(SqlError::Unsupported(format!(
+                "ALTER TABLE command {other:?}"
+            )));
+        }
+    };
+    let action = match cmd.subtype() {
+        AlterTableType::AtAddColumn => {
+            let def_inner = cmd
+                .def
+                .as_ref()
+                .and_then(|d| d.node.as_ref())
+                .ok_or_else(|| SqlError::Internal("ADD COLUMN without ColumnDef".into()))?;
+            let col_def = match def_inner {
+                NodeEnum::ColumnDef(c) => compile_column_def(c)?,
+                other => {
+                    return Err(SqlError::Internal(format!(
+                        "ADD COLUMN expected ColumnDef, got {other:?}"
+                    )));
+                }
+            };
+            AlterTableAction::AddColumn {
+                column: col_def,
+                if_not_exists: cmd.missing_ok,
+            }
+        }
+        AlterTableType::AtDropColumn => AlterTableAction::DropColumn {
+            name: cmd.name.clone(),
+            if_exists: cmd.missing_ok,
+            cascade: matches!(cmd.behavior(), DropBehavior::DropCascade),
+        },
+        AlterTableType::AtAlterColumnType
+        | AlterTableType::AtSetNotNull
+        | AlterTableType::AtDropNotNull
+        | AlterTableType::AtColumnDefault => {
+            return Err(SqlError::Unsupported(format!(
+                "ALTER COLUMN action {:?}",
+                cmd.subtype()
+            )));
+        }
+        other => {
+            return Err(SqlError::Unsupported(format!(
+                "ALTER TABLE action {other:?}"
+            )));
+        }
+    };
+    Ok(AlterTableStmt {
+        table,
+        if_exists,
+        action,
+    })
+}
+
+fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStmt> {
+    use pg_query::protobuf::ObjectType;
+    let table = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SqlError::Internal("RENAME without relation".into()))?;
+    let action = match stmt.rename_type() {
+        ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
+            from: stmt.subname.clone(),
+            to: stmt.newname.clone(),
+        },
+        ObjectType::ObjectTable => AlterTableAction::RenameTable {
+            to: stmt.newname.clone(),
+        },
+        other => {
+            return Err(SqlError::Unsupported(format!(
+                "RENAME target {other:?} not supported"
+            )));
+        }
+    };
+    Ok(AlterTableStmt {
+        table,
+        if_exists: stmt.missing_ok,
+        action,
+    })
 }
 
 fn extract_string(node: &Node) -> Result<String> {
@@ -141,12 +299,18 @@ fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateT
             columns.push(compile_column_def(col)?);
         }
     }
-    Ok(CreateTable { name, columns })
+    Ok(CreateTable {
+        name,
+        columns,
+        if_not_exists: stmt.if_not_exists,
+    })
 }
 
 fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> {
     let name = col.colname.clone();
+    let raw_type = raw_type_name(col).unwrap_or_default();
     let ty = compile_type_name(col)?;
+    let auto_increment = matches!(raw_type.as_str(), "serial" | "bigserial");
     let mut primary_key = false;
     let mut not_null = false;
     for c in &col.constraints {
@@ -161,12 +325,27 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
             }
         }
     }
+    // Postgres treats `SERIAL` / `BIGSERIAL` as `NOT NULL` by definition.
+    if auto_increment {
+        not_null = true;
+    }
     Ok(ColumnDef {
         name,
         ty,
         primary_key,
         not_null,
+        auto_increment,
     })
+}
+
+fn raw_type_name(col: &pg_query::protobuf::ColumnDef) -> Option<String> {
+    let type_name = col.type_name.as_ref()?;
+    let names: Vec<String> = type_name
+        .names
+        .iter()
+        .filter_map(|n| extract_string(n).ok())
+        .collect();
+    Some(names.last().cloned().unwrap_or_default().to_lowercase())
 }
 
 fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> {
@@ -183,11 +362,25 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
         .collect();
     let raw = names.last().cloned().unwrap_or_default().to_lowercase();
     match raw.as_str() {
-        "int" | "int4" | "integer" | "bigint" | "int8" | "smallint" | "int2" => {
-            Ok(ColumnType::Integer)
+        "int" | "int4" | "integer" | "bigint" | "int8" | "smallint" | "int2" | "serial"
+        | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
+        "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
+            Ok(ColumnType::Text)
         }
-        "text" | "varchar" | "character" | "char" | "bpchar" => Ok(ColumnType::Text),
-        "real" | "float4" | "float8" | "double" | "numeric" | "decimal" => Ok(ColumnType::Real),
+        "bool" | "boolean" => Ok(ColumnType::Integer),
+        "real" | "float4" | "float8" | "double" | "double precision" | "numeric" | "decimal" => {
+            Ok(ColumnType::Real)
+        }
+        "date"
+        | "time"
+        | "timetz"
+        | "timestamp"
+        | "timestamptz"
+        | "timestamp without time zone"
+        | "timestamp with time zone"
+        | "time without time zone"
+        | "time with time zone" => Ok(ColumnType::Text),
+        "json" | "jsonb" => Ok(ColumnType::Text),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
             let Some(arg) = type_name.typmods.first() else {
@@ -253,11 +446,40 @@ fn compile_create_index(stmt: &pg_query::protobuf::IndexStmt) -> Result<CreateIn
     } else {
         Some(stmt.idxname.clone())
     };
+    let mut options = Vec::new();
+    for opt in &stmt.options {
+        let Some(inner) = opt.node.as_ref() else {
+            continue;
+        };
+        if let NodeEnum::DefElem(elem) = inner {
+            let key = elem.defname.clone();
+            let value = elem
+                .arg
+                .as_ref()
+                .and_then(|n| n.node.as_ref())
+                .map(|inner| match inner {
+                    NodeEnum::String(s) => s.sval.clone(),
+                    NodeEnum::Integer(i) => i.ival.to_string(),
+                    NodeEnum::Float(f) => f.fval.clone(),
+                    NodeEnum::TypeName(t) => t
+                        .names
+                        .iter()
+                        .filter_map(|n| extract_string(n).ok())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    other => format!("{other:?}"),
+                })
+                .unwrap_or_default();
+            options.push((key, value));
+        }
+    }
     Ok(CreateIndex {
         name,
         table,
         access_method,
         columns,
+        if_not_exists: stmt.if_not_exists,
+        options,
     })
 }
 

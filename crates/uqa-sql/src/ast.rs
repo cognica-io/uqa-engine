@@ -9,9 +9,10 @@
 //! yet supported parse cleanly but compile to
 //! [`crate::SqlError::Unsupported`].
 
+use serde::{Deserialize, Serialize};
 use uqa_core::Value;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ColumnType {
     Integer,
     Text,
@@ -20,27 +21,83 @@ pub enum ColumnType {
     Vector(u32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnDef {
     pub name: String,
     pub ty: ColumnType,
     pub primary_key: bool,
     pub not_null: bool,
+    /// `SERIAL` / `BIGSERIAL` columns auto-allocate from a per-table
+    /// monotonic counter when the value is omitted from `INSERT`.
+    #[serde(default)]
+    pub auto_increment: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct CreateTable {
     pub name: String,
     pub columns: Vec<ColumnDef>,
+    /// `CREATE TABLE IF NOT EXISTS` — silently ignore the statement
+    /// when a table with this name already exists.
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
-    /// `gin`, `btree`, `ivf`, `rtree`, ...
+    /// `gin`, `btree`, `ivf`, `rtree`, `hnsw`, ...
     pub access_method: String,
     pub columns: Vec<String>,
+    /// `CREATE INDEX IF NOT EXISTS`.
+    pub if_not_exists: bool,
+    /// Storage parameters from `WITH (k = v, ...)`. Stored verbatim;
+    /// known keys (`analyzer`, `lists`, `m`, `ef_construction`, ...)
+    /// are interpreted by the engine.
+    pub options: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DropStmt {
+    pub kind: DropKind,
+    pub names: Vec<String>,
+    pub if_exists: bool,
+    pub cascade: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropKind {
+    Table,
+    Index,
+    View,
+    Schema,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlterTableStmt {
+    pub table: String,
+    pub if_exists: bool,
+    pub action: AlterTableAction,
+}
+
+#[derive(Debug, Clone)]
+pub enum AlterTableAction {
+    AddColumn {
+        column: ColumnDef,
+        if_not_exists: bool,
+    },
+    DropColumn {
+        name: String,
+        if_exists: bool,
+        cascade: bool,
+    },
+    RenameColumn {
+        from: String,
+        to: String,
+    },
+    RenameTable {
+        to: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -242,4 +299,6 @@ pub enum Statement {
     Select(Box<SelectStmt>),
     Update(UpdateStmt),
     Delete(DeleteStmt),
+    Drop(DropStmt),
+    AlterTable(AlterTableStmt),
 }
