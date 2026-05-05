@@ -1,0 +1,60 @@
+# cargo-deny configuration for uqa-rs.
+#
+# Run locally (after `cargo install cargo-deny --locked`):
+#
+#   cargo deny --workspace check
+#
+# CI runs the same command; any drift in advisories, licenses, or
+# banned crates fails the build.
+
+[graph]
+# Match the workspace's MSRV target tier.
+all-features = true
+
+[advisories]
+version = 2
+# Refuse to ship code with a known security advisory. `unmaintained`
+# is informational only, since stable upstream crates often go quiet.
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# Allow only OSI-approved permissive or copyleft licenses we have
+# already vetted. Anything outside this list trips the gate so it
+# gets a human review.
+allow = [
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+# Crates without a SPDX-recognised license must be opted in here
+# explicitly with a known-good license file hash.
+exceptions = []
+
+[bans]
+# Set to `deny` once we've audited the dep tree for accidental
+# duplicates. Today we surface them as warnings so the gate doesn't
+# false-fire on transitive churn during early development.
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

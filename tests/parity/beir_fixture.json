@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "field": "body",
+  "k": 5,
+  "scorers": [
+    {"name": "bm25",          "min_ndcg": 0.85, "min_map": 0.75},
+    {"name": "bayesian_bm25", "min_ndcg": 0.85, "min_map": 0.75}
+  ],
+  "corpus": [
+    {"id": 1, "body": "rust async story with futures and tokio runtime in rust"},
+    {"id": 2, "body": "rust language guide a deep dive into rust generics and traits"},
+    {"id": 3, "body": "python web frameworks flask and django and python tooling"},
+    {"id": 4, "body": "rust embedded systems on no_std targets and async drivers"},
+    {"id": 5, "body": "go networking channels and goroutines for go programs"},
+    {"id": 6, "body": "rust web servers axum hyper and reqwest for rust web servers"},
+    {"id": 7, "body": "data pipelines etl jobs in python and rust"}
+  ],
+  "queries": [
+    {
+      "id": "q1",
+      "text": "rust async",
+      "judgments": {"1": 3.0, "4": 2.0, "2": 1.0}
+    },
+    {
+      "id": "q2",
+      "text": "python web",
+      "judgments": {"3": 3.0, "7": 1.0}
+    },
+    {
+      "id": "q3",
+      "text": "rust generics",
+      "judgments": {"2": 3.0, "6": 1.0, "4": 1.0}
+    }
+  ]
+}
