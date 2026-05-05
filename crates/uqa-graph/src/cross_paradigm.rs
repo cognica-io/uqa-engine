@@ -203,15 +203,13 @@ impl TextToGraph {
                 "default",
             );
         }
-        let mut edge_counter = 1u64;
-        for ((t1, t2), weight) in cooccurrences {
+        for (edge_counter, ((t1, t2), weight)) in (1u64..).zip(cooccurrences) {
             let src = token_to_id[&t1];
             let tgt = token_to_id[&t2];
             let mut edge = Edge::new(edge_counter, src, tgt, "co_occurs");
             edge.properties
                 .insert("weight".into(), Value::Int(weight as i64));
             graph.add_edge(edge, "default");
-            edge_counter += 1;
         }
         graph
     }

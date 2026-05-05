@@ -72,13 +72,7 @@ impl<'a> MessagePassing<'a> {
                 (Some(key), Some(vertex)) => match vertex.properties.get(key) {
                     Some(Value::Int(n)) => *n as f64,
                     Some(Value::Float(f)) => *f,
-                    Some(Value::Bool(b)) => {
-                        if *b {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    }
+                    Some(Value::Bool(b)) if *b => 1.0,
                     _ => 0.0,
                 },
                 _ => 1.0,

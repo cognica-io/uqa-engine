@@ -339,9 +339,7 @@ fn run_query_block(
     if let Some(filter) = stmt.r#where.as_ref() {
         joined.retain(|row| {
             let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
-            uqa_sql::expr::eval(filter, &ctx)
-                .map(|v| uqa_sql::expr::truthy(&v))
-                .unwrap_or(false)
+            uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
         });
     }
 
@@ -554,9 +552,7 @@ fn run_joined_select(
     if let Some(filter) = stmt.r#where.as_ref() {
         joined.retain(|row| {
             let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
-            uqa_sql::expr::eval(filter, &ctx)
-                .map(|v| uqa_sql::expr::truthy(&v))
-                .unwrap_or(false)
+            uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
         });
     }
 
