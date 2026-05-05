@@ -347,6 +347,20 @@ impl InvertedIndex for SQLiteInvertedIndex {
     fn snapshot(&self) -> Arc<dyn InvertedIndex> {
         Arc::new(self.clone())
     }
+
+    fn field_names(&self) -> Vec<FieldName> {
+        self.conn
+            .with(|c| {
+                let mut stmt =
+                    c.prepare("SELECT DISTINCT field FROM _doc_lengths WHERE table_name = ?1")?;
+                let rows = stmt
+                    .query_map([&self.table], |row| row.get::<_, String>(0))?
+                    .filter_map(Result::ok)
+                    .collect::<Vec<_>>();
+                Ok(rows)
+            })
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

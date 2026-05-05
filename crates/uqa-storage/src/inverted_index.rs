@@ -43,6 +43,78 @@ pub trait InvertedIndex: Send + Sync {
 
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> Arc<dyn InvertedIndex>;
+
+    // -- Mirrors `uqa.storage.abc.InvertedIndex` extended surface ---
+
+    /// Names of every field with at least one indexed document.
+    /// Default implementation walks the [`IndexStats`] snapshot's
+    /// total-length map. Backends with a richer schema can override.
+    fn field_names(&self) -> Vec<FieldName> {
+        Vec::new()
+    }
+
+    /// Posting list for `term` across every indexed field, unioned
+    /// together. Default implementation sums per-field posting lists
+    /// via [`PostingList::union`].
+    fn get_posting_list_any_field(&self, term: &str) -> PostingList {
+        let mut result = PostingList::new();
+        for field in self.field_names() {
+            let pl = self.get_posting_list(&field, term);
+            result = result.union(&pl);
+        }
+        result
+    }
+
+    /// Document frequency of `term` across every indexed field.
+    fn doc_freq_any_field(&self, term: &str) -> u64 {
+        let mut total = 0_u64;
+        for field in self.field_names() {
+            total = total.saturating_add(self.doc_freq(&field, term));
+        }
+        total
+    }
+
+    /// Sum of all per-field token lengths for a single doc.
+    fn get_total_doc_length(&self, doc_id: DocId) -> u64 {
+        let mut total = 0_u64;
+        for field in self.field_names() {
+            total = total.saturating_add(self.get_doc_length(doc_id, &field));
+        }
+        total
+    }
+
+    /// Bulk doc-length lookup. Default falls back to per-id calls.
+    fn get_doc_lengths_bulk(&self, doc_ids: &[DocId], field: &str) -> BTreeMap<DocId, u64> {
+        doc_ids
+            .iter()
+            .copied()
+            .map(|d| (d, self.get_doc_length(d, field)))
+            .collect()
+    }
+
+    /// Bulk term-frequency lookup. Default falls back to per-id calls.
+    fn get_term_freqs_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        term: &str,
+    ) -> BTreeMap<DocId, u64> {
+        doc_ids
+            .iter()
+            .copied()
+            .map(|d| (d, self.get_term_freq(d, field, term)))
+            .collect()
+    }
+
+    /// Total term frequency for a doc summed across every indexed
+    /// field.
+    fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> u64 {
+        let mut total = 0_u64;
+        for field in self.field_names() {
+            total = total.saturating_add(self.get_term_freq(doc_id, &field, term));
+        }
+        total
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +280,10 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn snapshot(&self) -> Arc<dyn InvertedIndex> {
         Arc::new(self.clone())
+    }
+
+    fn field_names(&self) -> Vec<FieldName> {
+        self.total_length.keys().cloned().collect()
     }
 }
 
