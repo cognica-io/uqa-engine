@@ -543,19 +543,20 @@ fn run_query_block(
         let with_windows = compute_window_columns(&stmt.projections, filtered, params)?;
         let mut rows: Vec<ResultRow> = with_windows
             .iter()
-            .map(|src| project_join_row(src, &stmt.projections, params))
+            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
     // Pure projection: use the Volcano Project + Sort + Limit chain.
-    let projected = volcano_project_sort_limit(&filtered, stmt, params)?;
+    let projected = volcano_project_sort_limit(engine, &filtered, stmt, params)?;
     let columns = projection_columns(&stmt.projections);
     Ok(SQLResult::from_rows(columns, projected))
 }
 
 fn volcano_project_sort_limit(
+    engine: &Engine,
     src_rows: &[ResultRow],
     stmt: &SelectStmt,
     params: &[SQLParam],
@@ -583,7 +584,7 @@ fn volcano_project_sort_limit(
     if has_engine_funcs || has_star {
         let mut rows: Vec<ResultRow> = src_rows
             .iter()
-            .map(|src| project_join_row(src, &stmt.projections, params))
+            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(rows);
@@ -884,7 +885,7 @@ fn run_joined_select(
         let with_windows = compute_window_columns(&stmt.projections, joined, params)?;
         let mut rows: Vec<ResultRow> = with_windows
             .iter()
-            .map(|src| project_join_row(src, &stmt.projections, params))
+            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
@@ -893,7 +894,7 @@ fn run_joined_select(
     let columns = projection_columns(&stmt.projections);
     let mut rows: Vec<ResultRow> = joined
         .iter()
-        .map(|src| project_join_row(src, &stmt.projections, params))
+        .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
         .collect::<Result<_, _>>()?;
     rows = apply_row_order_limit(rows, stmt, params)?;
     Ok(SQLResult::from_rows(columns, rows))
@@ -1392,7 +1393,17 @@ fn left_outer(
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn project_join_row(
+    src: &ResultRow,
+    projections: &[Projection],
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
+    project_join_row_with_engine(None, src, projections, params)
+}
+
+fn project_join_row_with_engine(
+    engine: Option<&Engine>,
     src: &ResultRow,
     projections: &[Projection],
     params: &[SQLParam],
@@ -1422,8 +1433,7 @@ fn project_join_row(
         // query, and emit the wrapped text through
         // `uqa_analysis::highlight`.
         if let Expr::Func { name, args } = &proj.expr {
-            if name.eq_ignore_ascii_case("uqa_highlight") {
-                let value = run_uqa_highlight(src, args, params)?;
+            if let Some(value) = engine_func_intercept(engine, name, args, src, params)? {
                 out.insert(label, value);
                 continue;
             }
@@ -1432,6 +1442,36 @@ fn project_join_row(
         out.insert(label, value);
     }
     Ok(out)
+}
+
+/// Intercept registry functions that need engine-level access (the
+/// scalar evaluator does not see the engine, just the row context).
+/// Returns `Ok(Some(_))` when the function was handled, `Ok(None)`
+/// to defer to the default scalar evaluator.
+fn engine_func_intercept(
+    engine: Option<&Engine>,
+    name: &str,
+    args: &[Expr],
+    row: &ResultRow,
+    params: &[SQLParam],
+) -> Result<Option<Value>, SQLError> {
+    let lower = name.to_ascii_lowercase();
+    match lower.as_str() {
+        "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, params)?)),
+        "graph_create" => {
+            if let Some(eng) = engine {
+                let _ = run_graph_create(eng, args, params)?;
+            }
+            Ok(Some(Value::Bool(true)))
+        }
+        "graph_drop" => {
+            if let Some(eng) = engine {
+                let _ = run_graph_drop(eng, args, params)?;
+            }
+            Ok(Some(Value::Bool(true)))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Evaluate a `uqa_highlight(field, query[, start_tag, end_tag,
@@ -1961,18 +2001,17 @@ fn execute_function(
         FunctionKind::MultiFieldMatch => run_multi_field_match(engine, table, args, params),
         FunctionKind::StagedRetrieval => run_staged_retrieval(engine, table, args, params),
         FunctionKind::DeepPredict => run_deep_predict(engine, args, params),
+        FunctionKind::TraverseMatch => run_graph_traverse(engine, args, params),
+        FunctionKind::TemporalTraverse => run_temporal_traverse(engine, args, params),
+        FunctionKind::GraphCreate => run_graph_create(engine, args, params),
+        FunctionKind::GraphDrop => run_graph_drop(engine, args, params),
+        FunctionKind::GraphEdges => run_graph_edges(engine, args, params),
         // The remaining UQA functions either return a non-posting
-        // shape or are construction-time helpers; they should never
-        // reach the row-emitting dispatcher and are surfaced as
-        // Unsupported here so the projection / WHERE paths can route
-        // them through their dedicated branches instead.
+        // shape or are construction-time helpers; they reach the
+        // projection-side handler instead of this row-emitting
+        // dispatcher.
         FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
-        | FunctionKind::TraverseMatch
-        | FunctionKind::TemporalTraverse
-        | FunctionKind::GraphCreate
-        | FunctionKind::GraphDrop
-        | FunctionKind::GraphEdges
         | FunctionKind::AttentionFusion
         | FunctionKind::LearnedFusion
         | FunctionKind::CalibratedVectorMatch
@@ -2246,6 +2285,187 @@ fn run_graph_neighbors(
             });
         }
     }
+    Ok(out)
+}
+
+fn run_graph_create(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 1 {
+        return Err(SQLError::BadArity {
+            name: "graph_create".into(),
+            expected: "1".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_create.name", &ctx)?;
+    engine.create_graph(name);
+    Ok(Vec::new())
+}
+
+fn run_graph_drop(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 1 {
+        return Err(SQLError::BadArity {
+            name: "graph_drop".into(),
+            expected: "1".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_drop.name", &ctx)?;
+    engine.drop_graph(&name);
+    Ok(Vec::new())
+}
+
+/// `graph_edges(graph [, label])` -- emit one entry per edge in the
+/// named graph. The `doc_id` carries the edge id; the score is the
+/// raw edge weight (`1.0` when no `weight` property is present).
+fn run_graph_edges(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.is_empty() || args.len() > 2 {
+        return Err(SQLError::BadArity {
+            name: "graph_edges".into(),
+            expected: "1..=2".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_edges.graph", &ctx)?;
+    let label = if args.len() == 2 {
+        expect_optional_string(&args[1], "graph_edges.label", &ctx)?
+    } else {
+        None
+    };
+    let edges = engine
+        .graph_with(&name, |store| {
+            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::edges_in_graph(store, &name)
+        })
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
+    let mut out = Vec::new();
+    for edge in edges {
+        if let Some(target_label) = label.as_deref() {
+            if edge.label != target_label {
+                continue;
+            }
+        }
+        let weight = match edge.properties.get("weight") {
+            Some(Value::Float(f)) => *f,
+            Some(Value::Int(i)) => *i as f64,
+            _ => 1.0,
+        };
+        out.push(ScoredEntry {
+            doc_id: edge.edge_id,
+            score: weight,
+        });
+    }
+    Ok(out)
+}
+
+/// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
+/// -- BFS traversal that respects edge `valid_from` / `valid_to`
+/// properties. Emits `(vertex_id, score)` weighted by hop distance,
+/// matching the Python reference's shape.
+fn run_temporal_traverse(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 6 {
+        return Err(SQLError::BadArity {
+            name: "temporal_traverse".into(),
+            expected: "6".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "temporal_traverse.graph", &ctx)?;
+    let start = expect_u64(&args[1], "temporal_traverse.start", &ctx)?;
+    let label = expect_optional_string(&args[2], "temporal_traverse.label", &ctx)?;
+    let max_hops = expect_usize(&args[3], "temporal_traverse.max_hops", &ctx)?;
+    let t_min = match eval(&args[4], &ctx)? {
+        Value::Int(n) => n as f64,
+        Value::Float(f) => f,
+        Value::Null => f64::NEG_INFINITY,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "temporal_traverse.t_min must be numeric, got {other:?}"
+            )));
+        }
+    };
+    let t_max = match eval(&args[5], &ctx)? {
+        Value::Int(n) => n as f64,
+        Value::Float(f) => f,
+        Value::Null => f64::INFINITY,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "temporal_traverse.t_max must be numeric, got {other:?}"
+            )));
+        }
+    };
+    let traversed = engine
+        .graph_with(&name, |store| {
+            use std::collections::VecDeque;
+            use uqa_graph::GraphStore;
+            let mut visited: std::collections::BTreeMap<u64, f64> =
+                std::collections::BTreeMap::new();
+            let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
+            queue.push_back((start, 0));
+            visited.insert(start, 1.0);
+            while let Some((v, depth)) = queue.pop_front() {
+                if depth >= max_hops {
+                    continue;
+                }
+                let edges = store.out_edge_ids(v, &name);
+                for eid in edges {
+                    let Some(edge) = store.get_edge(eid) else {
+                        continue;
+                    };
+                    if let Some(target_label) = label.as_deref() {
+                        if edge.label != target_label {
+                            continue;
+                        }
+                    }
+                    // Read the edge's temporal range; fall back to
+                    // unbounded when the property is missing.
+                    let edge_from = match edge.properties.get("valid_from") {
+                        Some(Value::Int(n)) => *n as f64,
+                        Some(Value::Float(f)) => *f,
+                        _ => f64::NEG_INFINITY,
+                    };
+                    let edge_to = match edge.properties.get("valid_to") {
+                        Some(Value::Int(n)) => *n as f64,
+                        Some(Value::Float(f)) => *f,
+                        _ => f64::INFINITY,
+                    };
+                    if edge_to < t_min || edge_from > t_max {
+                        continue;
+                    }
+                    let nbr = edge.target_id;
+                    let score = 1.0 / ((depth + 1) as f64 + 1.0);
+                    if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(nbr) {
+                        slot.insert(score);
+                        queue.push_back((nbr, depth + 1));
+                    }
+                }
+            }
+            visited
+        })
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
+    let mut out: Vec<ScoredEntry> = traversed
+        .into_iter()
+        .map(|(v, score)| ScoredEntry { doc_id: v, score })
+        .collect();
+    out.sort_by_key(|e| e.doc_id);
     Ok(out)
 }
 
@@ -2539,13 +2759,14 @@ fn build_rows(
     for entry in scored {
         let mut document = engine.get_document(table, entry.doc_id).unwrap_or_default();
         document.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
-        let row = build_projection_row(&document, projections, params)?;
+        let row = build_projection_row(Some(engine), &document, projections, params)?;
         rows.push(row);
     }
     Ok(rows)
 }
 
 fn build_projection_row(
+    engine: Option<&Engine>,
     document: &Document,
     projections: &[Projection],
     params: &[SQLParam],
@@ -2564,12 +2785,11 @@ fn build_projection_row(
             }
             continue;
         }
-        // `uqa_highlight()` runs against the analyzer for the matched
-        // field, which the evaluator does not see. Intercept it here
-        // and emit the wrapped text directly.
+        // Engine-side registry hooks (uqa_highlight / graph_create /
+        // graph_drop) need access to the engine; intercept them
+        // before falling through to the scalar evaluator.
         if let Expr::Func { name, args } = &proj.expr {
-            if name.eq_ignore_ascii_case("uqa_highlight") {
-                let value = run_uqa_highlight(document, args, params)?;
+            if let Some(value) = engine_func_intercept(engine, name, args, document, params)? {
                 row.insert(label, value);
                 continue;
             }
