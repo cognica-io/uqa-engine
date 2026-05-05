@@ -12,6 +12,7 @@ rust-version.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-storage = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 uqa-analysis = { workspace = true }

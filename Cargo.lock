@@ -1388,6 +1388,7 @@ dependencies = [
 name = "uqa-scoring"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "criterion",
  "proptest",
  "uqa-analysis",

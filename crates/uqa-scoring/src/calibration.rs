@@ -8,6 +8,89 @@
 
 use crate::prob::PROB_EPSILON;
 
+/// Likelihood-ratio calibrator for vector distances (Theorem 3.1.1,
+/// Paper 5). Mirrors the `VectorProbabilityTransform` referenced by
+/// `uqa.scoring.vector.VectorScorer.calibrated_probabilities`.
+///
+/// The transform models distances to relevant documents (`f_R`) and
+/// to background (random) documents (`f_G`) as Gaussian distributions.
+/// Calibration converts a distance into a posterior probability by
+/// applying Bayes' rule with the configured base rate:
+///
+/// ```text
+/// log f_R(d) - log f_G(d) + logit(base_rate)  ->  sigmoid
+/// ```
+///
+/// The Rust port keeps the formulation deliberately small; downstream
+/// callers fit the means / std dev offline (e.g. via the parameter
+/// learner) and pass the transform through. Optional per-distance
+/// weights bias the computed log-odds before the sigmoid.
+#[derive(Debug, Clone, Copy)]
+pub struct VectorProbabilityTransform {
+    /// Mean distance for relevant documents (numerator distribution).
+    pub mu_match: f64,
+    /// Mean distance for background documents (denominator distribution).
+    pub mu_random: f64,
+    /// Shared standard deviation. Must be positive.
+    pub sigma: f64,
+    /// Prior probability of relevance. Default 0.5 (neutral).
+    pub base_rate: f64,
+}
+
+impl VectorProbabilityTransform {
+    pub fn new(mu_match: f64, mu_random: f64, sigma: f64, base_rate: f64) -> Self {
+        let base = base_rate.clamp(PROB_EPSILON, 1.0 - PROB_EPSILON);
+        let sigma = if sigma > 0.0 { sigma } else { 1.0 };
+        Self {
+            mu_match,
+            mu_random,
+            sigma,
+            base_rate: base,
+        }
+    }
+
+    /// Convert a single distance to a probability via the likelihood
+    /// ratio + base-rate logit.
+    pub fn calibrate_one(&self, distance: f64) -> f64 {
+        let log_lr = self.log_likelihood_ratio(distance);
+        let logit_prior = (self.base_rate / (1.0 - self.base_rate)).ln();
+        let logit_post = log_lr + logit_prior;
+        1.0 / (1.0 + (-logit_post).exp())
+    }
+
+    /// Vectorized calibration. Optional `weights` bias the per-distance
+    /// log-odds before the sigmoid -- mirrors the Python reference's
+    /// `weights` keyword argument.
+    pub fn calibrate(&self, distances: &[f64], weights: Option<&[f64]>) -> Vec<f64> {
+        let logit_prior = (self.base_rate / (1.0 - self.base_rate)).ln();
+        distances
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let mut logit = self.log_likelihood_ratio(*d) + logit_prior;
+                if let Some(ws) = weights {
+                    if let Some(w) = ws.get(i) {
+                        logit += w;
+                    }
+                }
+                1.0 / (1.0 + (-logit).exp())
+            })
+            .collect()
+    }
+
+    fn log_likelihood_ratio(&self, distance: f64) -> f64 {
+        // Gaussian log-LR with shared sigma:
+        // (mu_R - d)^2 / (2 sigma^2) - (mu_G - d)^2 / (2 sigma^2)
+        // collapses to a linear function of d.
+        let twosq = 2.0 * self.sigma * self.sigma;
+        let r = (self.mu_match - distance).powi(2) / twosq;
+        let g = (self.mu_random - distance).powi(2) / twosq;
+        // Numerator should DOMINATE for small (near-relevant) distances,
+        // so the log-LR is `g - r`.
+        g - r
+    }
+}
+
 pub struct CalibrationMetrics;
 
 #[derive(Debug, Clone, PartialEq)]
