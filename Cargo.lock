@@ -1279,6 +1279,7 @@ dependencies = [
  "criterion",
  "proptest",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

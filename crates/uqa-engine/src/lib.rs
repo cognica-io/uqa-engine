@@ -132,6 +132,11 @@ pub struct Engine {
     /// Saved deep-fusion models. Mirrors the catalog `_models` table
     /// when the engine is SQLite-backed.
     models: RwLock<BTreeMap<String, deep::DeepModel>>,
+    /// Per-engine cancellation token. Operators cloned through
+    /// [`Engine::cancellation_token`] check the flag at chunk
+    /// boundaries; calling [`Engine::cancel`] from any thread tears
+    /// every in-flight query down with `SQLError::Cancelled`.
+    cancel: uqa_core::CancellationToken,
 }
 
 struct TableState {
@@ -171,7 +176,32 @@ impl Engine {
             conn: None,
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            cancel: uqa_core::CancellationToken::new(),
         }
+    }
+
+    /// Cancel every in-flight query that holds a clone of this
+    /// engine's cancellation token. Mirrors `Engine.cancel()` in
+    /// the Python reference; surfaces to operator hot loops as
+    /// [`uqa_core::QueryCancelled`] which the SQL layer maps to
+    /// `SQLError::Cancelled` (`PostgreSQL` `SQLSTATE 57014`).
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+
+    /// Reset the cancellation flag so subsequent queries run
+    /// normally. Call between query batches when reusing the same
+    /// engine for many cancellable executions.
+    pub fn reset_cancellation(&self) {
+        self.cancel.reset();
+    }
+
+    pub fn cancellation_token(&self) -> uqa_core::CancellationToken {
+        self.cancel.clone()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.is_cancelled()
     }
 
     /// SQLite-backed engine. Opens (or creates) the database at `path`,
@@ -186,6 +216,7 @@ impl Engine {
             conn: Some(conn.clone()),
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            cancel: uqa_core::CancellationToken::new(),
         };
         engine.restore_from_catalog(&catalog, &conn)?;
         // Eagerly populate the model cache from the catalog so

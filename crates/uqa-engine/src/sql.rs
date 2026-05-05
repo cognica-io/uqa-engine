@@ -44,12 +44,18 @@ use crate::{Engine, HybridSearchParams, ScoredEntry};
 const SCORE_COLUMN: &str = "_score";
 
 pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
+    // Reject cancelled tokens up-front so a stale cancel signal does
+    // not leak into a fresh batch. Callers that want the
+    // cancellation flag preserved across statements should use
+    // [`crate::Engine::reset_cancellation`] explicitly between calls.
+    engine.cancellation_token().check()?;
     let stmts = compile(sql)?;
     if stmts.is_empty() {
         return Ok(SQLResult::empty());
     }
     let mut last = SQLResult::empty();
     for stmt in stmts {
+        engine.cancellation_token().check()?;
         last = run_stmt(engine, stmt, params)?;
     }
     Ok(last)
@@ -184,7 +190,9 @@ fn run_update(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
+    let cancel = engine.cancellation_token();
     for doc_id in engine.table_doc_ids(&stmt.table) {
+        cancel.check()?;
         let mut doc = engine
             .get_document(&stmt.table, doc_id)
             .ok_or_else(|| SQLError::Internal("missing document during UPDATE".into()))?;
@@ -215,25 +223,27 @@ fn run_delete(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
-    let to_delete: Vec<uqa_core::DocId> = engine
-        .table_doc_ids(&stmt.table)
-        .into_iter()
-        .filter(|&doc_id| {
-            let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
-                return false;
-            };
-            match stmt.r#where.as_ref() {
-                None => true,
-                Some(filter) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
-                    matches!(
-                        uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
-                        Ok(true)
-                    )
-                }
+    let cancel = engine.cancellation_token();
+    let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
+    for doc_id in engine.table_doc_ids(&stmt.table) {
+        cancel.check()?;
+        let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
+            continue;
+        };
+        let keep = match stmt.r#where.as_ref() {
+            None => true,
+            Some(filter) => {
+                let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+                matches!(
+                    uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
+                    Ok(true)
+                )
             }
-        })
-        .collect();
+        };
+        if keep {
+            to_delete.push(doc_id);
+        }
+    }
     for doc_id in to_delete {
         engine.delete_document(&stmt.table, doc_id);
         affected += 1;
@@ -334,7 +344,9 @@ fn run_insert(
 
     let mut affected = 0u64;
     let ctx = EvalContext::new(None, params);
+    let cancel = engine.cancellation_token();
     for row in &stmt.rows {
+        cancel.check()?;
         if row.len() != columns.len() {
             return Err(SQLError::Internal(format!(
                 "row width {} != column count {}",

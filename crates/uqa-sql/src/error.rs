@@ -30,8 +30,31 @@ pub enum SQLError {
     MissingParam(usize),
     #[error("vector dimension mismatch: expected {expected}, got {actual}")]
     VectorDimMismatch { expected: usize, actual: usize },
+    #[error("{0}")]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl SQLError {
+    /// `PostgreSQL` `SQLSTATE` code for the error, mirroring the
+    /// Python reference's exception-to-state mapping. `None` for
+    /// errors that do not carry a defined `SQLSTATE`.
+    pub fn sqlstate(&self) -> Option<&'static str> {
+        match self {
+            SQLError::Cancelled(_) => Some(uqa_core::SQLSTATE_QUERY_CANCELED),
+            SQLError::Parse(_) => Some("42601"), // syntax_error
+            SQLError::Unsupported(_) => Some("0A000"), // feature_not_supported
+            SQLError::UnknownTable(_) => Some("42P01"), // undefined_table
+            SQLError::UnknownColumn(_) => Some("42703"), // undefined_column
+            SQLError::UnknownFunction(_) => Some("42883"), // undefined_function
+            SQLError::TypeMismatch(_) => Some("42804"), // datatype_mismatch
+            SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)
+            SQLError::MissingParam(_) => Some("S1002"), // ERRCODE_INVALID_PARAMETER_VALUE
+            SQLError::VectorDimMismatch { .. } => Some("22023"), // invalid_parameter_value
+            SQLError::Internal(_) => Some("XX000"), // internal_error
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SQLError>;
