@@ -171,6 +171,9 @@ struct TableState {
     /// collide with existing rows.
     next_id: parking_lot::Mutex<u64>,
     analyzer: RwLock<Analyzer>,
+    /// Per-column statistics refreshed by `ANALYZE table_name`. Keyed
+    /// by column name. Empty until `run_analyze` runs at least once.
+    column_stats: RwLock<BTreeMap<String, uqa_planner::ColumnStats>>,
 }
 
 impl TableState {
@@ -301,6 +304,7 @@ impl Engine {
                 columns: RwLock::new(columns),
                 next_id: parking_lot::Mutex::new(max_id + 1),
                 analyzer: RwLock::new(analyzer),
+                column_stats: RwLock::new(BTreeMap::new()),
             };
             self.tables.write().insert(schema.name, Arc::new(table));
         }
@@ -372,6 +376,7 @@ impl Engine {
             columns: RwLock::new(Vec::new()),
             next_id: parking_lot::Mutex::new(1),
             analyzer: RwLock::new(analyzer),
+            column_stats: RwLock::new(BTreeMap::new()),
         };
         let table_arc = Arc::new(table);
         self.tables.write().insert(name.clone(), table_arc.clone());
@@ -570,14 +575,105 @@ impl Engine {
     }
 
     /// Refresh per-column statistics for a single table or every
-    /// table when `table` is `None`. The Rust port currently ships
-    /// no incremental-stats path, so this helper is a hook the
-    /// future ANALYZE driver picks up; today it is a no-op.
-    pub fn run_analyze(&self, _table: Option<&str>) {
-        // Reserved for the cardinality estimator's stats refresh
-        // hook. The Python reference walks every column to refresh
-        // the histogram + MCV; the Rust port lifts the same shape
-        // through the planner's cardinality module in a follow-up.
+    /// table when `table` is `None`. Mirrors `Table.analyze` in
+    /// the Python reference: scans every document, collects per-
+    /// column distinct count / null count / min / max / equi-depth
+    /// histogram (100 buckets) / MCV list (top 10 above-average
+    /// frequency), and stores the result in [`TableState::column_stats`]
+    /// so the cardinality estimator can read it on subsequent
+    /// queries.
+    pub fn run_analyze(&self, table: Option<&str>) {
+        let names: Vec<String> = match table {
+            Some(t) => vec![t.to_string()],
+            None => self.tables.read().keys().cloned().collect(),
+        };
+        for name in names {
+            let Some(t) = self.table(&name) else { continue };
+            self.analyze_table(&t);
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    fn analyze_table(&self, t: &Arc<TableState>) {
+        let snapshot = t.document_store.read().snapshot();
+        let doc_ids: Vec<DocId> = {
+            let mut v = snapshot.doc_ids();
+            v.sort_unstable();
+            v
+        };
+        let n = doc_ids.len() as u64;
+        let columns: Vec<String> = t.columns.read().iter().map(|c| c.name.clone()).collect();
+
+        let mut col_values: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        let mut col_nulls: BTreeMap<String, u64> = BTreeMap::new();
+        for col in &columns {
+            col_values.insert(col.clone(), Vec::new());
+            col_nulls.insert(col.clone(), 0);
+        }
+
+        for doc_id in &doc_ids {
+            let Some(doc) = snapshot.get(*doc_id) else {
+                for col in &columns {
+                    *col_nulls.get_mut(col).unwrap() += 1;
+                }
+                continue;
+            };
+            for col in &columns {
+                match doc.get(col) {
+                    None | Some(Value::Null) => {
+                        *col_nulls.get_mut(col).unwrap() += 1;
+                    }
+                    Some(v) => {
+                        col_values.get_mut(col).unwrap().push(v.clone());
+                    }
+                }
+            }
+        }
+
+        let mut stats_out: BTreeMap<String, uqa_planner::ColumnStats> = BTreeMap::new();
+        for col in &columns {
+            let values = col_values.remove(col).unwrap_or_default();
+            let null_count = col_nulls.remove(col).unwrap_or(0);
+            let distinct = distinct_count(&values);
+            let comparable: Vec<&Value> = values
+                .iter()
+                .filter(|v| {
+                    matches!(
+                        v,
+                        Value::Int(_) | Value::Float(_) | Value::Str(_) | Value::Bool(_)
+                    )
+                })
+                .collect();
+            let min_val = comparable.iter().min().map(|v| (*v).clone());
+            let max_val = comparable.iter().max().map(|v| (*v).clone());
+
+            let histogram = build_histogram(&comparable);
+            let (mcv_values, mcv_frequencies) = build_mcv(&values, n);
+
+            stats_out.insert(
+                col.clone(),
+                uqa_planner::ColumnStats {
+                    distinct_count: distinct,
+                    null_count,
+                    min_value: min_val,
+                    max_value: max_val,
+                    row_count: n,
+                    histogram,
+                    mcv_values,
+                    mcv_frequencies,
+                },
+            );
+        }
+
+        *t.column_stats.write() = stats_out;
+    }
+
+    /// Snapshot of the cardinality estimator's per-column statistics
+    /// for `table`, or an empty map when ANALYZE has not been run.
+    pub fn column_stats(&self, table: &str) -> BTreeMap<String, uqa_planner::ColumnStats> {
+        self.table(table)
+            .map(|t| t.column_stats.read().clone())
+            .unwrap_or_default()
     }
 
     /// Wipe every row from the named table while keeping the schema
@@ -1055,6 +1151,75 @@ pub struct HybridSearchParams<'a> {
     pub top_k: usize,
 }
 
+// -----------------------------------------------------------------
+// ANALYZE helpers (mirror Table._build_histogram / _build_mcv).
+// -----------------------------------------------------------------
+
+const HISTOGRAM_BUCKETS: usize = 100;
+const MCV_COUNT: usize = 10;
+
+fn distinct_count(values: &[Value]) -> u64 {
+    use std::collections::BTreeSet;
+    let mut set: BTreeSet<&Value> = BTreeSet::new();
+    for v in values {
+        set.insert(v);
+    }
+    set.len() as u64
+}
+
+fn build_histogram(values: &[&Value]) -> Vec<Value> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let mut sorted: Vec<Value> = values.iter().map(|v| (*v).clone()).collect();
+    sorted.sort();
+    let n = sorted.len();
+    let num_buckets = HISTOGRAM_BUCKETS.min(n);
+    if num_buckets <= 1 {
+        return vec![sorted[0].clone(), sorted[n - 1].clone()];
+    }
+    let mut boundaries: Vec<Value> = vec![sorted[0].clone()];
+    for i in 1..num_buckets {
+        let idx = (i * n) / num_buckets;
+        let val = &sorted[idx];
+        if Some(val) != boundaries.last() {
+            boundaries.push(val.clone());
+        }
+    }
+    if boundaries.last() != Some(&sorted[n - 1]) {
+        boundaries.push(sorted[n - 1].clone());
+    }
+    boundaries
+}
+
+fn build_mcv(values: &[Value], total: u64) -> (Vec<Value>, Vec<f64>) {
+    if values.is_empty() || total == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let mut counts: BTreeMap<&Value, u64> = BTreeMap::new();
+    for v in values {
+        *counts.entry(v).or_insert(0) += 1;
+    }
+    let ndv = counts.len();
+    if ndv == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let avg_freq = 1.0 / ndv as f64;
+    let mut sorted: Vec<(&Value, u64)> = counts.into_iter().collect();
+    sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    let total_f = total as f64;
+    let mut mcv_values: Vec<Value> = Vec::new();
+    let mut mcv_freqs: Vec<f64> = Vec::new();
+    for (val, cnt) in sorted.into_iter().take(MCV_COUNT) {
+        let freq = cnt as f64 / total_f;
+        if freq > avg_freq {
+            mcv_values.push(val.clone());
+            mcv_freqs.push(freq);
+        }
+    }
+    (mcv_values, mcv_freqs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1065,6 +1230,34 @@ mod tests {
 
     fn s(v: &str) -> Value {
         Value::Str(v.to_string())
+    }
+
+    #[test]
+    fn run_analyze_populates_column_stats() {
+        let eng = Engine::new();
+        eng.create_default_table("docs", vec!["title".into()]);
+        // Register the columns directly through the table state so we
+        // don't depend on the SQL DDL path here.
+        if let Some(t) = eng.table("docs") {
+            *t.columns.write() = vec![uqa_sql::ast::ColumnDef {
+                name: "title".into(),
+                ty: uqa_sql::ast::ColumnType::Text,
+                primary_key: false,
+                not_null: false,
+                auto_increment: false,
+            }];
+        }
+        eng.add_document("docs", 1, doc([("title", s("alpha"))]));
+        eng.add_document("docs", 2, doc([("title", s("alpha"))]));
+        eng.add_document("docs", 3, doc([("title", s("beta"))]));
+        eng.run_analyze(Some("docs"));
+        let stats = eng.column_stats("docs");
+        let title_stats = stats.get("title").expect("title stats");
+        assert_eq!(title_stats.row_count, 3);
+        assert_eq!(title_stats.distinct_count, 2);
+        assert_eq!(title_stats.null_count, 0);
+        // "alpha" appears twice and dominates the MCV list.
+        assert_eq!(title_stats.mcv_values.first(), Some(&s("alpha")));
     }
 
     #[test]
