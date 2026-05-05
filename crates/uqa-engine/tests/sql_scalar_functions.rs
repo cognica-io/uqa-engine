@@ -175,6 +175,37 @@ fn regexp_replace_global_flag() {
 }
 
 #[test]
+fn string_concat_operator() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql("SELECT 'a' || '_' || 'b' AS joined FROM t", &[])
+        .unwrap();
+    assert_eq!(res.rows[0]["joined"], Value::Str("a_b".into()));
+}
+
+#[test]
+fn like_operator_filter() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY, body TEXT)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (body) VALUES ('hello world')", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (body) VALUES ('goodbye world')", &[])
+        .unwrap();
+    let res = eng
+        .sql(
+            "SELECT body FROM t WHERE body LIKE 'hello%' ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(res.rows.len(), 1);
+    assert_eq!(res.rows[0]["body"], Value::Str("hello world".into()));
+}
+
+#[test]
 fn split_part_one_indexed() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])

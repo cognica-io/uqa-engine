@@ -902,6 +902,45 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 "-" => BinaryOp::Subtract,
                 "*" => BinaryOp::Multiply,
                 "/" => BinaryOp::Divide,
+                // String concatenation: rewrite `a || b` into a
+                // concat() call so the scalar dispatcher handles
+                // null-safety and stringification uniformly.
+                "||" => {
+                    return Ok(Expr::Func {
+                        name: "concat".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    });
+                }
+                "%" => {
+                    return Ok(Expr::Func {
+                        name: "mod".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    });
+                }
+                "~~" => {
+                    return Ok(Expr::Func {
+                        name: "like".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    });
+                }
+                "~~*" => {
+                    return Ok(Expr::Func {
+                        name: "ilike".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    });
+                }
+                "!~~" => {
+                    return Ok(Expr::Not(Box::new(Expr::Func {
+                        name: "like".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    })));
+                }
+                "!~~*" => {
+                    return Ok(Expr::Not(Box::new(Expr::Func {
+                        name: "ilike".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    })));
+                }
                 other => return Err(SqlError::Unsupported(format!("operator `{other}`"))),
             };
             Ok(Expr::Binary {
