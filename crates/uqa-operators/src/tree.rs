@@ -252,12 +252,167 @@ pub enum OperatorTree {
         monoid: Arc<dyn AggregationMonoid>,
     },
 
+    // -----------------------------------------------------------------
+    // Cross-paradigm operators (mirrors `_estimate_cross_paradigm`).
+    // -----------------------------------------------------------------
+    /// `MultiStageOperator(stages=[(child, cutoff), ...])`. The cutoff
+    /// determines the cardinality at the final stage.
+    MultiStage { stages: Vec<MultiStageEntry> },
+    /// `MultiFieldSearchOperator(fields, query, weights)`.
+    MultiFieldSearch {
+        fields: Vec<String>,
+        query: String,
+        weights: Option<Vec<f64>>,
+    },
+    /// `HybridTextVectorOperator(term_op, vector_op, alpha)`.
+    HybridTextVector {
+        term_op: Box<OperatorTree>,
+        vector_op: Box<OperatorTree>,
+        alpha: f64,
+    },
+    /// `SemanticFilterOperator(source, vector_op)`.
+    SemanticFilter {
+        source: Box<OperatorTree>,
+        vector_op: Box<OperatorTree>,
+    },
+    /// `VectorExclusionOperator(positive, negative_op)`.
+    VectorExclusion {
+        positive: Box<OperatorTree>,
+        negative: Box<OperatorTree>,
+    },
+    /// `FacetVectorOperator(vector_op, facet_field)`.
+    FacetVector {
+        vector_op: Box<OperatorTree>,
+        facet_field: String,
+    },
+    /// `VertexAggregationOperator(source, monoid)` -- single-row result.
+    VertexAggregation {
+        source: Box<OperatorTree>,
+        monoid: Arc<dyn AggregationMonoid>,
+    },
+    /// `WeightedPathQueryOperator(rpq, start, graph, predicate)`.
+    WeightedPathQuery {
+        rpq_source: String,
+        start_vertex: u64,
+        graph: String,
+        predicate_selectivity: f64,
+    },
+    /// `MessagePassingOperator(source, ...)` -- pass-through cardinality.
+    MessagePassing { source: Box<OperatorTree> },
+    /// `GraphEmbeddingOperator(source, ...)` -- pass-through cardinality.
+    GraphEmbedding { source: Box<OperatorTree> },
+    /// `PageRankOperator(graph)` -- one score per vertex.
+    PageRank { graph: String },
+    /// `HITSOperator(graph)` -- one score per vertex.
+    HITS { graph: String },
+    /// `BetweennessCentralityOperator(graph)` -- one score per vertex.
+    BetweennessCentrality { graph: String },
+    /// `TextSimilarityJoinOperator(left, right, threshold)`.
+    TextSimilarityJoin {
+        left: Box<OperatorTree>,
+        right: Box<OperatorTree>,
+        threshold: f64,
+    },
+    /// `VectorSimilarityJoinOperator(left, right, threshold)`.
+    VectorSimilarityJoin {
+        left: Box<OperatorTree>,
+        right: Box<OperatorTree>,
+        threshold: f64,
+    },
+    /// `HybridJoinOperator(left, right)`.
+    HybridJoin {
+        left: Box<OperatorTree>,
+        right: Box<OperatorTree>,
+    },
+    /// `CrossParadigmJoinOperator(left, right)`. Distinct from
+    /// [`OperatorTree::GraphJoin`]: it joins arbitrary operands via a
+    /// graph traversal step but does not carry an edge label.
+    CrossParadigmJoin {
+        left: Box<OperatorTree>,
+        right: Box<OperatorTree>,
+    },
+    /// `TemporalTraverseOperator(start, graph, label, hops, filter)`.
+    TemporalTraverse {
+        start_vertex: u64,
+        graph: String,
+        label: Option<String>,
+        max_hops: usize,
+        temporal_filter: Option<TemporalFilterIR>,
+    },
+    /// `TemporalPatternMatchOperator(pattern, graph, filter)`.
+    TemporalPatternMatch {
+        pattern: GraphPatternIR,
+        graph: String,
+        temporal_filter: Option<TemporalFilterIR>,
+    },
+    /// `ProgressiveFusionOperator(stages=[(signal, k), ...])`. The
+    /// final stage `k` determines the result cardinality.
+    ProgressiveFusion { stages: Vec<ProgressiveFusionEntry> },
+    /// `DeepFusionOperator(layers, alpha, gating)`.
+    DeepFusion {
+        layers: Vec<DeepFusionLayer>,
+        alpha: f64,
+        gating: GatingSpec,
+    },
+
     /// Catch-all for opaque operators the optimizer should not rewrite.
     Opaque {
         kind: String,
         children: Vec<OperatorTree>,
         meta: BTreeMap<String, Value>,
     },
+}
+
+/// A single entry in a [`OperatorTree::MultiStage`] cascade. Mirrors
+/// `MultiStageOperator.stages` -- `(child, cutoff)` -- where the
+/// cutoff is either a fixed top-K or a fractional ratio.
+#[derive(Clone)]
+pub struct MultiStageEntry {
+    pub child: OperatorTree,
+    pub cutoff: MultiStageCutoff,
+}
+
+/// Mirrors `multi_stage.Cutoff`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MultiStageCutoff {
+    /// Top-K results -- final cardinality is `k`.
+    TopK(usize),
+    /// Fractional cutoff -- final cardinality is `n * ratio`.
+    Ratio(f64),
+}
+
+/// One stage of a [`OperatorTree::ProgressiveFusion`].
+#[derive(Clone)]
+pub struct ProgressiveFusionEntry {
+    pub signal: OperatorTree,
+    pub k: usize,
+}
+
+/// Layer in a [`OperatorTree::DeepFusion`] pipeline. Mirrors
+/// `uqa.operators.deep_fusion.{ConvLayer, FlattenLayer, PoolLayer,
+/// PropagateLayer, SignalLayer, DenseLayer, SoftmaxLayer,
+/// BatchNormLayer, DropoutLayer}`.
+#[derive(Clone)]
+pub enum DeepFusionLayer {
+    Signal { signals: Vec<OperatorTree> },
+    Propagate { edge_label: Option<String> },
+    Conv,
+    Pool { pool_size: f64 },
+    Flatten,
+    Dense,
+    Softmax,
+    BatchNorm,
+    Dropout,
+}
+
+/// Tree-local view of a temporal filter. Mirrors
+/// `uqa.graph.temporal_filter.TemporalFilter`. The filter accepts
+/// either an exact timestamp or a `[low, high]` time range; both can
+/// be present (Python's class follows the same shape).
+#[derive(Clone, Debug, Default)]
+pub struct TemporalFilterIR {
+    pub timestamp: Option<f64>,
+    pub time_range: Option<(f64, f64)>,
 }
 
 impl OperatorTree {

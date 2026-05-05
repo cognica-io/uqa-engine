@@ -31,7 +31,7 @@ mod temporal;
 mod types;
 mod versioned_store;
 
-pub use centrality::{BetweennessCentrality, Hits, PageRank};
+pub use centrality::{BetweennessCentrality, PageRank, HITS};
 pub use cross_paradigm::{
     Document, SemanticGraphSearch, TextToGraph, ToGraph, VectorEnhancedMatch, VertexEmbedding,
 };

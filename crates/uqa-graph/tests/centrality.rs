@@ -8,8 +8,8 @@
 
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{
-    AggregationKind, BetweennessCentrality, GraphStore, Hits, MemoryGraphStore, MessagePassing,
-    PageRank,
+    AggregationKind, BetweennessCentrality, GraphStore, MemoryGraphStore, MessagePassing, PageRank,
+    HITS,
 };
 
 fn linear_corpus() -> MemoryGraphStore {
@@ -66,7 +66,7 @@ fn pagerank_normalizes_scores_into_unit_interval() {
 #[test]
 fn hits_sets_hub_authority_fields() {
     let g = star_corpus();
-    let result = Hits::new("g").execute(&g);
+    let result = HITS::new("g").execute(&g);
     let entry = result
         .inner()
         .entries()

@@ -113,13 +113,13 @@ impl<'a> PageRank<'a> {
 /// by L2 norm. Final hub and authority scores are min-max normalized
 /// to `[0, 1]`. The payload's `score` is the authority; the per-entry
 /// fields carry both `hub_score` and `authority_score`.
-pub struct Hits<'a> {
+pub struct HITS<'a> {
     pub graph: &'a str,
     pub max_iterations: u32,
     pub tolerance: f64,
 }
 
-impl<'a> Hits<'a> {
+impl<'a> HITS<'a> {
     pub fn new(graph: &'a str) -> Self {
         Self {
             graph,

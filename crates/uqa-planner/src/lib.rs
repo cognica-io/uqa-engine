@@ -46,7 +46,9 @@
     clippy::struct_excessive_bools,
     clippy::only_used_in_recursion,
     clippy::self_only_used_in_recursion,
-    clippy::question_mark
+    clippy::question_mark,
+    clippy::unused_self,
+    clippy::single_match_else
 )]
 
 pub mod cardinality;

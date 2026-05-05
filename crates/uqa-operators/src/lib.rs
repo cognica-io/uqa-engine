@@ -52,8 +52,9 @@ pub use primitive::{FacetOperator, FilterOperator, ScoreOperator, TermOperator};
 pub use progressive_fusion::ProgressiveFusionOperator;
 pub use sparse::SparseThresholdOperator;
 pub use tree::{
-    AttentionFuserDyn, AttentionRef, EdgeConstraint, EdgePatternIR, GatingSpec, GraphPatternIR,
-    LearnedFuserDyn, LearnedFusionRef, OperatorTree, ProbBoolMode, ScorerRef, VertexConstraint,
-    VertexPatternIR, VertexPredicate,
+    AttentionFuserDyn, AttentionRef, DeepFusionLayer, EdgeConstraint, EdgePatternIR, GatingSpec,
+    GraphPatternIR, LearnedFuserDyn, LearnedFusionRef, MultiStageCutoff, MultiStageEntry,
+    OperatorTree, ProbBoolMode, ProgressiveFusionEntry, ScorerRef, TemporalFilterIR,
+    VertexConstraint, VertexPatternIR, VertexPredicate,
 };
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};
