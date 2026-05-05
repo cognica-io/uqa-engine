@@ -24,7 +24,7 @@ use crate::vector::VectorSimilarityOperator;
 /// where `r = n_hits / n_total`. A signal that returns nothing reports
 /// neutral evidence (0.5, logit 0); a signal that covers everything
 /// flags absence as strong negative evidence (= floor, default 0.01).
-fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
+pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
     if n_total == 0 {
         return 0.5;
     }
