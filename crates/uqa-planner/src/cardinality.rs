@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{Predicate, Value};
+use uqa_core::{IndexStats, Predicate, Value};
 use uqa_operators::{
     DeepFusionLayer, GraphPatternIR, MultiStageCutoff, OperatorTree, ProbBoolMode,
     TemporalFilterIR, VertexConstraint,
@@ -94,49 +94,6 @@ impl GraphStats {
         }
         let nv = self.num_vertices as f64;
         self.num_edges as f64 / (nv * nv)
-    }
-}
-
-// ---------------------------------------------------------------------
-// Per-(field, term) IndexStats. Mirrors `uqa.core.types.IndexStats`.
-// ---------------------------------------------------------------------
-
-/// Document-frequency statistics for an inverted index. The Python
-/// reference exposes `total_docs` plus `doc_freq(field, term)`; the
-/// Rust port stores frequencies as a `BTreeMap<(field, term), u64>`
-/// for deterministic iteration.
-#[derive(Debug, Clone, Default)]
-pub struct IndexStats {
-    pub total_docs: u64,
-    pub doc_freqs: BTreeMap<(String, String), u64>,
-}
-
-impl IndexStats {
-    pub fn new(total_docs: u64) -> Self {
-        Self {
-            total_docs,
-            doc_freqs: BTreeMap::new(),
-        }
-    }
-
-    /// Document frequency of `term` in `field`. Returns 0 when the
-    /// (field, term) pair has no recorded frequency.
-    pub fn doc_freq(&self, field: &str, term: &str) -> u64 {
-        self.doc_freqs
-            .get(&(field.to_string(), term.to_string()))
-            .copied()
-            .unwrap_or(0)
-    }
-
-    /// Set the frequency of `term` in `field`.
-    pub fn with_doc_freq(
-        mut self,
-        field: impl Into<String>,
-        term: impl Into<String>,
-        n: u64,
-    ) -> Self {
-        self.doc_freqs.insert((field.into(), term.into()), n);
-        self
     }
 }
 

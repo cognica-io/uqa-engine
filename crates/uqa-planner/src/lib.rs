@@ -56,15 +56,23 @@ pub mod cost_model;
 pub mod executor;
 pub mod join_enumerator;
 pub mod join_graph;
+pub mod join_order;
 pub mod optimizer;
 pub mod parallel;
 pub mod query_optimizer;
 
-pub use cardinality::{CardinalityEstimator, ColumnStats, GraphStats, RelationStats, Selectivity};
+pub use cardinality::{
+    CardinalityEstimator, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, RelationStats,
+    Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
+};
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use executor::PlannedQuery;
+pub use executor::{ExecutionStats, OperatorTreeDriver, PlanExecutor, PlannedQuery};
 pub use join_enumerator::{enumerate_dpccp, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph};
+pub use join_order::{
+    JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,
+    JoinPredicate, JoinRelation, INDEX_JOIN_THRESHOLD,
+};
 pub use optimizer::{optimize, OptimizerConfig};
 pub use parallel::run_parallel;
 pub use query_optimizer::{OptimizerConfig as TreeOptimizerConfig, QueryOptimizer};
