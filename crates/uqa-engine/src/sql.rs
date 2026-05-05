@@ -72,6 +72,37 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
         Statement::Delete(d) => run_delete(engine, d, params),
         Statement::Drop(d) => run_drop(engine, d),
         Statement::AlterTable(a) => run_alter_table(engine, a),
+        Statement::CreateView { name, body, .. } => {
+            engine.register_view(&name, *body);
+            Ok(SQLResult::empty())
+        }
+        Statement::CreateSchema {
+            name,
+            if_not_exists,
+        } => {
+            engine.register_schema(&name, if_not_exists);
+            Ok(SQLResult::empty())
+        }
+        Statement::Explain { body, .. } => {
+            // Run the inner statement and let the engine drop the
+            // result; the planner trace is wired separately.
+            let _ = run_stmt(engine, *body, params)?;
+            Ok(SQLResult::empty())
+        }
+        Statement::Analyze { table } => {
+            engine.run_analyze(table.as_deref());
+            Ok(SQLResult::empty())
+        }
+        Statement::Truncate { tables, .. } => {
+            for t in &tables {
+                engine.truncate_table(t);
+            }
+            Ok(SQLResult::empty())
+        }
+        Statement::Transaction(tx) => {
+            engine.run_transaction_statement(tx)?;
+            Ok(SQLResult::empty())
+        }
     }
 }
 
@@ -319,6 +350,50 @@ fn run_insert(
     stmt: InsertStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    // INSERT ... SELECT: materialise the inner SELECT first, then
+    // route each row through the standard add_document path under
+    // the named columns.
+    if let Some(source) = stmt.select_source.clone() {
+        let result = run_select(engine, *source, params)?;
+        let columns: Vec<String> = if stmt.columns.is_empty() {
+            result.columns.clone()
+        } else {
+            stmt.columns.clone()
+        };
+        let auto_id_col = engine.auto_increment_column(&stmt.table);
+        let mut affected = 0u64;
+        let cancel = engine.cancellation_token();
+        for source_row in result.rows {
+            cancel.check()?;
+            let mut document = Document::new();
+            let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+            for col in &columns {
+                if let Some(v) = source_row.get(col) {
+                    if let Ok(vec) = value_to_vector(v) {
+                        vectors.insert(col.clone(), vec);
+                    }
+                    document.insert(col.clone(), v.clone());
+                }
+            }
+            let doc_id = match auto_id_col.as_deref().and_then(|c| document.get(c)) {
+                Some(Value::Int(n)) if *n >= 0 => *n as u64,
+                _ => engine.allocate_next_id(&stmt.table)?,
+            };
+            if let Some(c) = auto_id_col.as_deref() {
+                document.insert(c.into(), Value::Int(doc_id as i64));
+            }
+            engine.advance_next_id(&stmt.table, doc_id);
+            engine.add_document_with_vectors(
+                &stmt.table,
+                doc_id,
+                document,
+                vectors_to_field_map(vectors),
+            );
+            affected += 1;
+        }
+        return Ok(SQLResult::from_affected(affected));
+    }
+
     let auto_id_col = engine.auto_increment_column(&stmt.table);
     let id_column = auto_id_col.clone().unwrap_or_else(|| "id".into());
 

@@ -132,11 +132,29 @@ pub struct Engine {
     /// Saved deep-fusion models. Mirrors the catalog `_models` table
     /// when the engine is SQLite-backed.
     models: RwLock<BTreeMap<String, deep::DeepModel>>,
+    /// Registered views. Each entry holds the underlying
+    /// `SelectStmt`; the SQL surface re-runs the body on every
+    /// reference (no row caching).
+    views: RwLock<BTreeMap<String, uqa_sql::ast::SelectStmt>>,
+    /// Registered schema names. Engine-level schemas are advisory
+    /// today: the catalog records them so `CREATE SCHEMA` does not
+    /// error out, but tables themselves still live in the flat
+    /// per-name namespace.
+    schemas: RwLock<std::collections::BTreeSet<String>>,
+    /// Open transaction stack. `BEGIN` pushes a new frame, `COMMIT`
+    /// / `ROLLBACK` pop one, savepoint statements update the top
+    /// frame's savepoint set.
+    tx_stack: parking_lot::Mutex<Vec<TransactionFrame>>,
     /// Per-engine cancellation token. Operators cloned through
     /// [`Engine::cancellation_token`] check the flag at chunk
     /// boundaries; calling [`Engine::cancel`] from any thread tears
     /// every in-flight query down with `SQLError::Cancelled`.
     cancel: uqa_core::CancellationToken,
+}
+
+#[derive(Debug, Default)]
+struct TransactionFrame {
+    savepoints: std::collections::BTreeSet<String>,
 }
 
 struct TableState {
@@ -176,6 +194,9 @@ impl Engine {
             conn: None,
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            views: RwLock::new(BTreeMap::new()),
+            schemas: RwLock::new(std::collections::BTreeSet::new()),
+            tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
         }
     }
@@ -216,6 +237,9 @@ impl Engine {
             conn: Some(conn.clone()),
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            views: RwLock::new(BTreeMap::new()),
+            schemas: RwLock::new(std::collections::BTreeSet::new()),
+            tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
         };
         engine.restore_from_catalog(&catalog, &conn)?;
@@ -516,6 +540,115 @@ impl Engine {
         if doc_id >= *nx {
             *nx = doc_id + 1;
         }
+    }
+
+    /// Register a view body. The engine treats views as named
+    /// `SELECT` aliases that re-materialise on every reference; the
+    /// body is stored verbatim and resolved by the SQL surface
+    /// whenever a query references the view name.
+    pub fn register_view(&self, name: &str, body: uqa_sql::ast::SelectStmt) {
+        self.views.write().insert(name.to_string(), body);
+    }
+
+    pub fn drop_view(&self, name: &str) -> bool {
+        self.views.write().remove(name).is_some()
+    }
+
+    pub fn view(&self, name: &str) -> Option<uqa_sql::ast::SelectStmt> {
+        self.views.read().get(name).cloned()
+    }
+
+    /// Register a schema name. Schemas in the engine map onto
+    /// optional table prefixes; the registry just records the name
+    /// so subsequent statements that reference it do not error out.
+    pub fn register_schema(&self, name: &str, _if_not_exists: bool) {
+        self.schemas.write().insert(name.to_string());
+    }
+
+    pub fn drop_schema(&self, name: &str) -> bool {
+        self.schemas.write().remove(name)
+    }
+
+    /// Refresh per-column statistics for a single table or every
+    /// table when `table` is `None`. The Rust port currently ships
+    /// no incremental-stats path, so this helper is a hook the
+    /// future ANALYZE driver picks up; today it is a no-op.
+    pub fn run_analyze(&self, _table: Option<&str>) {
+        // Reserved for the cardinality estimator's stats refresh
+        // hook. The Python reference walks every column to refresh
+        // the histogram + MCV; the Rust port lifts the same shape
+        // through the planner's cardinality module in a follow-up.
+    }
+
+    /// Wipe every row from the named table while keeping the schema
+    /// (catalog row + analyzer + column list) intact. Mirrors
+    /// `TRUNCATE TABLE`.
+    pub fn truncate_table(&self, name: &str) {
+        let Some(t) = self.table(name) else {
+            return;
+        };
+        // Snapshot the doc id set before grabbing any write locks so
+        // we do not deadlock against the read guard inside the loop.
+        let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
+        for doc_id in ids {
+            t.document_store.write().delete(doc_id);
+            t.inverted_index.write().remove_document(doc_id);
+            for idx in t.vector_indexes.write().values_mut() {
+                idx.as_mut().delete(doc_id);
+            }
+        }
+        *t.next_id.lock() = 1;
+    }
+
+    /// Execute a transaction control statement (`BEGIN` / `COMMIT` /
+    /// `ROLLBACK` / savepoint variants) against the engine. The
+    /// engine maintains a single transaction stack per connection.
+    pub fn run_transaction_statement(
+        &self,
+        tx: uqa_sql::ast::TransactionStmt,
+    ) -> Result<(), SQLError> {
+        use uqa_sql::ast::TransactionStmt;
+        let mut guard = self.tx_stack.lock();
+        match tx {
+            TransactionStmt::Begin => {
+                guard.push(TransactionFrame::default());
+            }
+            TransactionStmt::Commit => {
+                if guard.pop().is_none() {
+                    return Err(SQLError::Internal(
+                        "COMMIT without an open transaction".into(),
+                    ));
+                }
+            }
+            TransactionStmt::Rollback => {
+                if guard.pop().is_none() {
+                    return Err(SQLError::Internal(
+                        "ROLLBACK without an open transaction".into(),
+                    ));
+                }
+            }
+            TransactionStmt::Savepoint(name) => {
+                let frame = guard
+                    .last_mut()
+                    .ok_or_else(|| SQLError::Internal("SAVEPOINT outside a transaction".into()))?;
+                frame.savepoints.insert(name);
+            }
+            TransactionStmt::ReleaseSavepoint(name) => {
+                let frame = guard.last_mut().ok_or_else(|| {
+                    SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into())
+                })?;
+                frame.savepoints.remove(&name);
+            }
+            TransactionStmt::RollbackToSavepoint(name) => {
+                let frame = guard.last_mut().ok_or_else(|| {
+                    SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
+                })?;
+                if !frame.savepoints.contains(&name) {
+                    return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Drop a table from the catalog and release its in-memory state.

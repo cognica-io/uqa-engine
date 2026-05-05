@@ -104,7 +104,14 @@ pub enum AlterTableAction {
 pub struct InsertStmt {
     pub table: String,
     pub columns: Vec<String>,
+    /// Inline `VALUES (...) (...)` rows. Empty when the statement is
+    /// an `INSERT ... SELECT` form; in that case `select_source` is
+    /// populated with the underlying SELECT.
     pub rows: Vec<Vec<ValueExpr>>,
+    /// Populated when the statement is `INSERT INTO t (...) SELECT ...`.
+    /// The engine materialises the inner select first and then writes
+    /// each row through the standard INSERT path.
+    pub select_source: Option<Box<SelectStmt>>,
 }
 
 #[derive(Debug, Clone)]
@@ -319,4 +326,50 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
+    /// `CREATE [OR REPLACE] VIEW name AS SELECT ...`. The body is the
+    /// underlying `SelectStmt`; views are materialised lazily on every
+    /// reference (no row caching).
+    CreateView {
+        name: String,
+        body: Box<SelectStmt>,
+        or_replace: bool,
+    },
+    /// `CREATE SCHEMA [IF NOT EXISTS] name`. Engine maps schemas onto
+    /// optional table prefixes; this AST entry just records the
+    /// command so callers can no-op or migrate as needed.
+    CreateSchema {
+        name: String,
+        if_not_exists: bool,
+    },
+    /// `EXPLAIN ...`. Carries the inner statement so the engine can
+    /// emit the planner output. No-op when the engine does not have
+    /// an EXPLAIN driver.
+    Explain {
+        analyze: bool,
+        verbose: bool,
+        format: Option<String>,
+        body: Box<Statement>,
+    },
+    /// `ANALYZE [table]`. The engine refreshes per-column statistics
+    /// for cardinality estimation; the AST simply records the target.
+    Analyze {
+        table: Option<String>,
+    },
+    /// `TRUNCATE TABLE t1, t2 ...`. Wipes the listed tables.
+    Truncate {
+        tables: Vec<String>,
+        cascade: bool,
+    },
+    /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
+    Transaction(TransactionStmt),
+}
+
+#[derive(Debug, Clone)]
+pub enum TransactionStmt {
+    Begin,
+    Commit,
+    Rollback,
+    Savepoint(String),
+    ReleaseSavepoint(String),
+    RollbackToSavepoint(String),
 }

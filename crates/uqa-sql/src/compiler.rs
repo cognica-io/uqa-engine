@@ -19,7 +19,7 @@ use uqa_core::Value;
 use crate::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable,
     DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy, Projection,
-    SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt, WindowSpec, CTE,
+    SelectStmt, SetOp, SetOpKind, Statement, TransactionStmt, UpdateStmt, WindowSpec, CTE,
 };
 use crate::error::{Result, SQLError};
 
@@ -47,11 +47,135 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::DropStmt(stmt) => compile_drop(stmt).map(Statement::Drop),
         NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt).map(Statement::AlterTable),
         NodeEnum::RenameStmt(stmt) => compile_rename(stmt).map(Statement::AlterTable),
+        NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
+        NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
+        NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),
+        NodeEnum::VacuumStmt(_) => {
+            // Treat ANALYZE / VACUUM ANALYZE the same way: ask the
+            // engine to refresh stats. The Python reference parses
+            // ANALYZE through the same node.
+            Ok(Statement::Analyze { table: None })
+        }
+        NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),
+        NodeEnum::TransactionStmt(stmt) => compile_transaction(stmt),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
         ))),
     }
+}
+
+fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
+    let name = stmt
+        .view
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("CREATE VIEW without name".into()))?;
+    let body = stmt
+        .query
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("CREATE VIEW without body".into()))?;
+    let inner = body
+        .node
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE VIEW body empty".into()))?;
+    let select = match inner {
+        NodeEnum::SelectStmt(s) => compile_select(s)?,
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE VIEW body must be SELECT, got {other:?}"
+            )));
+        }
+    };
+    Ok(Statement::CreateView {
+        name,
+        body: Box::new(select),
+        or_replace: stmt.replace,
+    })
+}
+
+fn compile_create_schema(stmt: &pg_query::protobuf::CreateSchemaStmt) -> Result<Statement> {
+    let name = if stmt.schemaname.is_empty() {
+        return Err(SQLError::Internal("CREATE SCHEMA without name".into()));
+    } else {
+        stmt.schemaname.clone()
+    };
+    Ok(Statement::CreateSchema {
+        name,
+        if_not_exists: stmt.if_not_exists,
+    })
+}
+
+fn compile_explain(stmt: &pg_query::protobuf::ExplainStmt) -> Result<Statement> {
+    let body = stmt
+        .query
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("EXPLAIN without body".into()))?;
+    let mut analyze = false;
+    let mut verbose = false;
+    let mut format: Option<String> = None;
+    for opt in &stmt.options {
+        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
+            let name = elem.defname.to_ascii_lowercase();
+            match name.as_str() {
+                "analyze" => analyze = true,
+                "verbose" => verbose = true,
+                "format" => {
+                    if let Some(NodeEnum::String(s)) =
+                        elem.arg.as_ref().and_then(|a| a.node.as_ref())
+                    {
+                        format = Some(s.sval.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let inner = compile_stmt(body)?;
+    Ok(Statement::Explain {
+        analyze,
+        verbose,
+        format,
+        body: Box::new(inner),
+    })
+}
+
+fn compile_truncate(stmt: &pg_query::protobuf::TruncateStmt) -> Result<Statement> {
+    let mut tables = Vec::new();
+    for r in &stmt.relations {
+        if let Some(NodeEnum::RangeVar(rv)) = r.node.as_ref() {
+            tables.push(rv.relname.clone());
+        }
+    }
+    let cascade = matches!(
+        stmt.behavior(),
+        pg_query::protobuf::DropBehavior::DropCascade
+    );
+    Ok(Statement::Truncate { tables, cascade })
+}
+
+fn compile_transaction(stmt: &pg_query::protobuf::TransactionStmt) -> Result<Statement> {
+    use pg_query::protobuf::TransactionStmtKind;
+    let kind = match stmt.kind() {
+        TransactionStmtKind::TransStmtBegin | TransactionStmtKind::TransStmtStart => {
+            TransactionStmt::Begin
+        }
+        TransactionStmtKind::TransStmtCommit => TransactionStmt::Commit,
+        TransactionStmtKind::TransStmtRollback => TransactionStmt::Rollback,
+        TransactionStmtKind::TransStmtSavepoint => {
+            TransactionStmt::Savepoint(stmt.savepoint_name.clone())
+        }
+        TransactionStmtKind::TransStmtRelease => {
+            TransactionStmt::ReleaseSavepoint(stmt.savepoint_name.clone())
+        }
+        TransactionStmtKind::TransStmtRollbackTo => {
+            TransactionStmt::RollbackToSavepoint(stmt.savepoint_name.clone())
+        }
+        other => {
+            return Err(SQLError::Unsupported(format!("transaction kind {other:?}")));
+        }
+    };
+    Ok(Statement::Transaction(kind))
 }
 
 fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
@@ -513,7 +637,7 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
         .ok_or_else(|| SQLError::Internal("INSERT select_stmt empty".into()))?;
     let select = match select_inner {
         NodeEnum::SelectStmt(s) => s,
-        _ => return Err(SQLError::Unsupported("INSERT FROM SELECT".into())),
+        _ => return Err(SQLError::Unsupported("INSERT body must be SELECT".into())),
     };
     let mut rows = Vec::new();
     for row_node in &select.values_lists {
@@ -531,10 +655,20 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
             .collect::<Result<Vec<_>>>()?;
         rows.push(row);
     }
+    // INSERT ... SELECT: when the body has no values_lists but does
+    // have a from_clause / target_list, treat it as `INSERT FROM
+    // SELECT` and forward the inner SELECT.
+    let select_source =
+        if rows.is_empty() && (!select.from_clause.is_empty() || !select.target_list.is_empty()) {
+            Some(Box::new(compile_select(select)?))
+        } else {
+            None
+        };
     Ok(InsertStmt {
         table,
         columns,
         rows,
+        select_source,
     })
 }
 
