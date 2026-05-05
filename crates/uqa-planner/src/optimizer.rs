@@ -416,6 +416,7 @@ mod tests {
             offset: None,
             with: vec![],
             set_op: None,
+            distinct: false,
         };
         let optimised = pushdown_filters(stmt);
         assert!(optimised.r#where.is_some());

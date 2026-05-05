@@ -65,7 +65,7 @@ impl RegularPathExpr {
 // -------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum RpqParseError {
+pub enum RPQParseError {
     #[error("unexpected token at position {position}: {token:?}")]
     Unexpected { position: usize, token: String },
     #[error("unexpected end of expression")]
@@ -76,11 +76,11 @@ pub enum RpqParseError {
     MalformedBound(String),
 }
 
-pub fn parse_rpq(expr: &str) -> Result<RegularPathExpr, RpqParseError> {
+pub fn parse_rpq(expr: &str) -> Result<RegularPathExpr, RPQParseError> {
     let tokens = tokenize(expr);
     let (result, pos) = parse_alternation(&tokens, 0)?;
     if pos != tokens.len() {
-        return Err(RpqParseError::Unexpected {
+        return Err(RPQParseError::Unexpected {
             position: pos,
             token: tokens[pos].clone(),
         });
@@ -121,7 +121,7 @@ fn tokenize(expr: &str) -> Vec<String> {
 fn parse_alternation(
     tokens: &[String],
     mut pos: usize,
-) -> Result<(RegularPathExpr, usize), RpqParseError> {
+) -> Result<(RegularPathExpr, usize), RPQParseError> {
     let (mut left, p) = parse_concat(tokens, pos)?;
     pos = p;
     while pos < tokens.len() && tokens[pos] == "|" {
@@ -136,7 +136,7 @@ fn parse_alternation(
 fn parse_concat(
     tokens: &[String],
     mut pos: usize,
-) -> Result<(RegularPathExpr, usize), RpqParseError> {
+) -> Result<(RegularPathExpr, usize), RPQParseError> {
     let (mut left, p) = parse_star(tokens, pos)?;
     pos = p;
     while pos < tokens.len() && tokens[pos] == "/" {
@@ -151,7 +151,7 @@ fn parse_concat(
 fn parse_star(
     tokens: &[String],
     mut pos: usize,
-) -> Result<(RegularPathExpr, usize), RpqParseError> {
+) -> Result<(RegularPathExpr, usize), RPQParseError> {
     let (mut expr, p) = parse_atom(tokens, pos)?;
     pos = p;
     while pos < tokens.len() && (tokens[pos] == "*" || tokens[pos] == "{") {
@@ -162,22 +162,22 @@ fn parse_star(
             pos += 1;
             let min = tokens
                 .get(pos)
-                .ok_or_else(|| RpqParseError::MalformedBound("missing min".into()))?
+                .ok_or_else(|| RPQParseError::MalformedBound("missing min".into()))?
                 .parse::<u32>()
-                .map_err(|e| RpqParseError::MalformedBound(format!("min: {e}")))?;
+                .map_err(|e| RPQParseError::MalformedBound(format!("min: {e}")))?;
             pos += 1;
             if tokens.get(pos).map(String::as_str) != Some(",") {
-                return Err(RpqParseError::MalformedBound("expected ','".into()));
+                return Err(RPQParseError::MalformedBound("expected ','".into()));
             }
             pos += 1;
             let max = tokens
                 .get(pos)
-                .ok_or_else(|| RpqParseError::MalformedBound("missing max".into()))?
+                .ok_or_else(|| RPQParseError::MalformedBound("missing max".into()))?
                 .parse::<u32>()
-                .map_err(|e| RpqParseError::MalformedBound(format!("max: {e}")))?;
+                .map_err(|e| RPQParseError::MalformedBound(format!("max: {e}")))?;
             pos += 1;
             if tokens.get(pos).map(String::as_str) != Some("}") {
-                return Err(RpqParseError::MalformedBound("expected '}'".into()));
+                return Err(RPQParseError::MalformedBound("expected '}'".into()));
             }
             pos += 1;
             expr = RegularPathExpr::bounded(expr, min, max);
@@ -189,19 +189,19 @@ fn parse_star(
 fn parse_atom(
     tokens: &[String],
     mut pos: usize,
-) -> Result<(RegularPathExpr, usize), RpqParseError> {
-    let token = tokens.get(pos).ok_or(RpqParseError::Eof)?;
+) -> Result<(RegularPathExpr, usize), RPQParseError> {
+    let token = tokens.get(pos).ok_or(RPQParseError::Eof)?;
     if token == "(" {
         pos += 1;
         let (inner, p) = parse_alternation(tokens, pos)?;
         pos = p;
         if tokens.get(pos).map(String::as_str) != Some(")") {
-            return Err(RpqParseError::MissingParen);
+            return Err(RPQParseError::MissingParen);
         }
         pos += 1;
         Ok((inner, pos))
     } else if matches!(token.as_str(), ")" | "/" | "|" | "*" | "{" | "}" | ",") {
-        Err(RpqParseError::Unexpected {
+        Err(RPQParseError::Unexpected {
             position: pos,
             token: token.clone(),
         })

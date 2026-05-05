@@ -22,7 +22,7 @@ pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use inverted_index::{InvertedIndex, MemoryInvertedIndex};
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
-    Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteInvertedIndex, SQLiteVectorIndex,
-    SqliteError, TableSchema, VectorFieldSchema,
+    Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteInvertedIndex,
+    SQLiteVectorIndex, TableSchema, VectorFieldSchema,
 };
 pub use vector_index::{cosine_similarity, MemoryVectorIndex, VectorIndex};

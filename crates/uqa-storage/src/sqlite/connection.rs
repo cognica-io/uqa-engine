@@ -18,9 +18,9 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 #[derive(Debug, thiserror::Error)]
-pub enum SqliteError {
+pub enum SQLiteError {
     #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    SQLite(#[from] rusqlite::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog migration {version} failed: {source}")]
@@ -33,7 +33,7 @@ pub enum SqliteError {
     Serde(#[from] serde_json::Error),
 }
 
-pub type Result<T> = std::result::Result<T, SqliteError>;
+pub type Result<T> = std::result::Result<T, SQLiteError>;
 
 /// Shared `SQLite` handle. Cloning is cheap (`Arc`); every clone speaks
 /// to the same underlying connection through the same `Mutex`.

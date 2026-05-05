@@ -32,7 +32,7 @@ use crate::base::{Direction, ExecutionContext, Operator};
 pub enum Gating {
     #[default]
     None,
-    Relu,
+    ReLU,
     Swish,
 }
 
@@ -755,7 +755,7 @@ fn safe_logit(p: f64) -> f64 {
 fn apply_gating(x: f64, gating: Gating) -> f64 {
     match gating {
         Gating::None => x,
-        Gating::Relu => x.max(0.0),
+        Gating::ReLU => x.max(0.0),
         Gating::Swish => x * sigmoid(x),
     }
 }

@@ -24,7 +24,7 @@ pub enum TokenFilter {
         custom_words: Vec<String>,
     },
     PorterStem,
-    AsciiFolding,
+    ASCIIFolding,
     Synonym {
         synonyms: BTreeMap<String, Vec<String>>,
     },
@@ -68,7 +68,7 @@ impl TokenFilter {
                     .collect()
             }
             TokenFilter::PorterStem => tokens.into_iter().map(|t| porter::stem(&t)).collect(),
-            TokenFilter::AsciiFolding => tokens.into_iter().map(|t| ascii_fold(&t)).collect(),
+            TokenFilter::ASCIIFolding => tokens.into_iter().map(|t| ascii_fold(&t)).collect(),
             TokenFilter::Synonym { synonyms } => {
                 let mut out = Vec::with_capacity(tokens.len());
                 for t in tokens {
@@ -219,13 +219,13 @@ mod tests {
 
     #[test]
     fn ascii_folding_strips_diacritics() {
-        let f = TokenFilter::AsciiFolding;
+        let f = TokenFilter::ASCIIFolding;
         assert_eq!(f.filter(v(&["café", "naïve"])), v(&["cafe", "naive"]));
     }
 
     #[test]
     fn ascii_folding_preserves_cjk() {
-        let f = TokenFilter::AsciiFolding;
+        let f = TokenFilter::ASCIIFolding;
         assert_eq!(f.filter(v(&["한글"])), v(&["한글"]));
     }
 

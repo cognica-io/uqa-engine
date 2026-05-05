@@ -63,7 +63,7 @@ impl Ord for HeapEntry {
 }
 
 /// Common per-term cursor state: the entry slice and current position.
-/// Field, term, and scorer live on [`WandQuery`] so a single cursor
+/// Field, term, and scorer live on [`WANDQuery`] so a single cursor
 /// stays small and pivot reordering touches just one cache line.
 struct TermCursor<'a> {
     entries: &'a [PostingEntry],
@@ -99,7 +99,7 @@ impl<'a> TermCursor<'a> {
 }
 
 /// WAND configuration shared by both algorithms.
-pub struct WandQuery {
+pub struct WANDQuery {
     pub posting_lists: Vec<PostingList>,
     pub scorers: Vec<Arc<dyn Scorer>>,
     pub fields: Vec<FieldName>,
@@ -107,7 +107,7 @@ pub struct WandQuery {
     pub k: usize,
 }
 
-impl WandQuery {
+impl WANDQuery {
     pub fn new(
         posting_lists: Vec<PostingList>,
         scorers: Vec<Arc<dyn Scorer>>,
@@ -138,13 +138,13 @@ impl WandQuery {
 /// the full BM25 sum for; `cursor_advances` counts pivot-driven binary
 /// search steps and is informational only.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct WandStats {
+pub struct WANDStats {
     pub scored: u64,
     pub total_candidates: u64,
     pub cursor_advances: u64,
 }
 
-impl WandStats {
+impl WANDStats {
     pub fn skip_rate(&self) -> f64 {
         if self.total_candidates == 0 {
             0.0
@@ -155,26 +155,26 @@ impl WandStats {
 }
 
 #[derive(Debug, Clone)]
-pub struct WandResult {
+pub struct WANDResult {
     pub top_k: PostingList,
-    pub stats: WandStats,
+    pub stats: WANDStats,
 }
 
 /// Standard WAND with per-term `upper_bound(df)` pruning.
-pub struct WandScorer<'a> {
-    query: &'a WandQuery,
+pub struct WANDScorer<'a> {
+    query: &'a WANDQuery,
     inverted_index: Option<&'a dyn InvertedIndex>,
 }
 
-impl<'a> WandScorer<'a> {
-    pub fn new(query: &'a WandQuery, inverted_index: Option<&'a dyn InvertedIndex>) -> Self {
+impl<'a> WANDScorer<'a> {
+    pub fn new(query: &'a WANDQuery, inverted_index: Option<&'a dyn InvertedIndex>) -> Self {
         Self {
             query,
             inverted_index,
         }
     }
 
-    pub fn score_top_k(&self) -> WandResult {
+    pub fn score_top_k(&self) -> WANDResult {
         let mut cursors = build_cursors(self.query);
         run_pivot_loop(self.query, &mut cursors, self.inverted_index, |_, _| None)
     }
@@ -182,16 +182,16 @@ impl<'a> WandScorer<'a> {
 
 /// Block-Max WAND: pivot pruning uses per-block max scores from
 /// [`BlockMaxIndex`] for tighter bounds.
-pub struct BlockMaxWandScorer<'a> {
-    query: &'a WandQuery,
+pub struct BlockMaxWANDScorer<'a> {
+    query: &'a WANDQuery,
     inverted_index: Option<&'a dyn InvertedIndex>,
     block_max_index: &'a BlockMaxIndex,
     table: String,
 }
 
-impl<'a> BlockMaxWandScorer<'a> {
+impl<'a> BlockMaxWANDScorer<'a> {
     pub fn new(
-        query: &'a WandQuery,
+        query: &'a WANDQuery,
         inverted_index: Option<&'a dyn InvertedIndex>,
         block_max_index: &'a BlockMaxIndex,
         table: impl Into<String>,
@@ -204,7 +204,7 @@ impl<'a> BlockMaxWandScorer<'a> {
         }
     }
 
-    pub fn score_top_k(&self) -> WandResult {
+    pub fn score_top_k(&self) -> WANDResult {
         let mut cursors = build_cursors(self.query);
         let q = self.query;
         let bmi = self.block_max_index;
@@ -238,7 +238,7 @@ impl<'a> BlockMaxWandScorer<'a> {
     }
 }
 
-fn build_cursors(query: &WandQuery) -> Vec<TermCursor<'_>> {
+fn build_cursors(query: &WANDQuery) -> Vec<TermCursor<'_>> {
     let mut cursors = Vec::with_capacity(query.posting_lists.len());
     for i in 0..query.posting_lists.len() {
         let entries = query.posting_lists[i].entries();
@@ -258,27 +258,27 @@ fn build_cursors(query: &WandQuery) -> Vec<TermCursor<'_>> {
 /// order; `None` means "use each cursor's pre-computed `upper_bound`"
 /// (plain WAND). BMW returns `Some` with the per-block bounds.
 fn run_pivot_loop<F>(
-    query: &WandQuery,
+    query: &WANDQuery,
     cursors: &mut [TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     mut bound_provider: F,
-) -> WandResult
+) -> WANDResult
 where
     F: FnMut(&[(u64, usize)], &[TermCursor<'_>]) -> Option<Vec<f64>>,
 {
     let num_terms = query.posting_lists.len();
     if num_terms == 0 {
-        return WandResult {
+        return WANDResult {
             top_k: PostingList::new(),
-            stats: WandStats::default(),
+            stats: WANDStats::default(),
         };
     }
 
     let mut top_k: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(query.k);
     let mut threshold = 0.0_f64;
-    let mut stats = WandStats {
+    let mut stats = WANDStats {
         total_candidates: candidate_union(&query.posting_lists),
-        ..WandStats::default()
+        ..WANDStats::default()
     };
 
     let mut sorted_terms: Vec<(u64, usize)> = (0..num_terms)
@@ -371,7 +371,7 @@ where
         .map(|h| PostingEntry::new(h.doc_id, Payload::with_score(h.score)))
         .collect();
     entries.sort_by_key(|e| e.doc_id);
-    WandResult {
+    WANDResult {
         top_k: PostingList::from_sorted_unchecked(entries),
         stats,
     }
@@ -391,7 +391,7 @@ fn candidate_union(posting_lists: &[PostingList]) -> u64 {
 /// point at a different `doc_id` contribute nothing; cursors that point
 /// at `target` contribute `scorer.score(tf, doc_length, df)`.
 fn score_document(
-    query: &WandQuery,
+    query: &WANDQuery,
     cursors: &[TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     target: DocId,
@@ -493,14 +493,14 @@ mod tests {
         let pl_lang = pl_from_tfs(&[(1, 1), (3, 4), (4, 1), (6, 2), (8, 3)]);
         let scorers = vec![bm25(stats.clone()), bm25(stats.clone())];
 
-        let q = WandQuery::new(
+        let q = WANDQuery::new(
             vec![pl_rust.clone(), pl_lang.clone()],
             scorers.clone(),
             vec!["title".into(), "title".into()],
             vec!["rust".into(), "lang".into()],
             3,
         );
-        let wand = WandScorer::new(&q, None);
+        let wand = WANDScorer::new(&q, None);
         let result = wand.score_top_k();
 
         // Exhaustive baseline: score every doc that appears in either

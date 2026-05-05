@@ -31,5 +31,5 @@ pub use prob::{
 };
 pub use scorer::Scorer;
 pub use wand::{
-    BlockMaxWandScorer, BoundTightnessAnalyzer, WandQuery, WandResult, WandScorer, WandStats,
+    BlockMaxWANDScorer, BoundTightnessAnalyzer, WANDQuery, WANDResult, WANDScorer, WANDStats,
 };

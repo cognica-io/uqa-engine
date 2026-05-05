@@ -10,17 +10,17 @@
 use uqa_core::Value;
 
 use crate::ast::{BinaryOp, Expr};
-use crate::error::{Result, SqlError};
-use crate::params::SqlParam;
+use crate::error::{Result, SQLError};
+use crate::params::SQLParam;
 use crate::result::ResultRow;
 
 pub struct EvalContext<'a> {
     pub row: Option<&'a ResultRow>,
-    pub params: &'a [SqlParam],
+    pub params: &'a [SQLParam],
 }
 
 impl<'a> EvalContext<'a> {
-    pub fn new(row: Option<&'a ResultRow>, params: &'a [SqlParam]) -> Self {
+    pub fn new(row: Option<&'a ResultRow>, params: &'a [SQLParam]) -> Self {
         Self { row, params }
     }
 }
@@ -33,16 +33,16 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
         Expr::Literal(v) => Ok(v.clone()),
         Expr::Param(i) => match ctx.params.get(i.saturating_sub(1)) {
-            Some(SqlParam::Scalar(v)) => Ok(v.clone()),
-            Some(SqlParam::Vector(v)) => Ok(Value::List(
+            Some(SQLParam::Scalar(v)) => Ok(v.clone()),
+            Some(SQLParam::Vector(v)) => Ok(Value::List(
                 v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
             )),
-            None => Err(SqlError::MissingParam(*i)),
+            None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {
             let row = ctx
                 .row
-                .ok_or_else(|| SqlError::Internal("column reference without row context".into()))?;
+                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
             // Plain column refs match either an unqualified key or the
             // suffix of a qualified `table.col` key, so the same row
             // shape works for single-table SELECTs and JOIN tuples.
@@ -60,7 +60,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::QualifiedColumn { qualifier, column } => {
             let row = ctx
                 .row
-                .ok_or_else(|| SqlError::Internal("column reference without row context".into()))?;
+                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
             let key = format!("{qualifier}.{column}");
             Ok(row.get(&key).cloned().unwrap_or(Value::Null))
         }
@@ -71,14 +71,14 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
             Ok(Value::List(out))
         }
-        Expr::Star => Err(SqlError::Internal("`*` cannot be evaluated".into())),
+        Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
         Expr::Func { name, args } => {
             // Functions registered in the operator registry (text_match,
             // knn_match, ...) are dispatched by the engine; only pure
             // scalar built-ins are evaluated inline here.
             let lower = name.to_ascii_lowercase();
             if crate::registry::is_registered(&lower) {
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "scalar evaluation of `{name}` is not supported (use the function registry)"
                 )));
             }
@@ -88,7 +88,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 .collect::<Result<Vec<_>>>()?;
             eval_scalar_function(&lower, &evaluated)
         }
-        Expr::WindowCall { name, .. } => Err(SqlError::Unsupported(format!(
+        Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
         ))),
         Expr::Case {
@@ -224,7 +224,7 @@ fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
         }
         (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
         (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
-        (lhs, rhs) => Err(SqlError::TypeMismatch(format!(
+        (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
     }
@@ -239,7 +239,7 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
         BinaryOp::Multiply => lf * rf,
         BinaryOp::Divide => {
             if rf == 0.0 {
-                return Err(SqlError::TypeMismatch("division by zero".into()));
+                return Err(SQLError::TypeMismatch("division by zero".into()));
             }
             lf / rf
         }
@@ -276,7 +276,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "nullif" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("nullif takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("nullif takes 2 args".into()));
             }
             if values_equal(&args[0], &args[1]) {
                 Ok(Value::Null)
@@ -349,7 +349,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "concat_ws" => {
             if args.is_empty() {
-                return Err(SqlError::TypeMismatch("concat_ws needs separator".into()));
+                return Err(SQLError::TypeMismatch("concat_ws needs separator".into()));
             }
             let sep = match &args[0] {
                 Value::Null => return Ok(Value::Null),
@@ -366,7 +366,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "replace" => {
             if args.len() != 3 {
-                return Err(SqlError::TypeMismatch("replace takes 3 args".into()));
+                return Err(SQLError::TypeMismatch("replace takes 3 args".into()));
             }
             let s = value_to_string(&args[0]);
             let from = value_to_string(&args[1]);
@@ -376,7 +376,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "substring" | "substr" => {
             // SUBSTRING(string, start [, length]). 1-indexed per SQL.
             if args.len() < 2 || args.len() > 3 {
-                return Err(SqlError::TypeMismatch("substring takes 2-3 args".into()));
+                return Err(SQLError::TypeMismatch("substring takes 2-3 args".into()));
             }
             let s = value_to_string(&args[0]);
             let start = to_i64(&args[1])?;
@@ -394,7 +394,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "left" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("left takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("left takes 2 args".into()));
             }
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
@@ -404,7 +404,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "right" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("right takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("right takes 2 args".into()));
             }
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
@@ -417,7 +417,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             Value::Int(i) => Ok(Value::Int(i.abs())),
             Value::Float(f) => Ok(Value::Float(f.abs())),
             Value::Null => Ok(Value::Null),
-            other => Err(SqlError::TypeMismatch(format!(
+            other => Err(SQLError::TypeMismatch(format!(
                 "abs() expected number, got {other:?}"
             ))),
         },
@@ -426,7 +426,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 Value::Int(i) => Ok(Value::Int(*i)),
                 Value::Float(f) => Ok(Value::Float(f.round())),
                 Value::Null => Ok(Value::Null),
-                other => Err(SqlError::TypeMismatch(format!("round({other:?})"))),
+                other => Err(SQLError::TypeMismatch(format!("round({other:?})"))),
             },
             2 => {
                 let v = to_f64(&args[0])?;
@@ -434,30 +434,30 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 let scale = 10f64.powi(places as i32);
                 Ok(Value::Float((v * scale).round() / scale))
             }
-            _ => Err(SqlError::TypeMismatch("round takes 1-2 args".into())),
+            _ => Err(SQLError::TypeMismatch("round takes 1-2 args".into())),
         },
         "ceil" | "ceiling" => match &args[0] {
             Value::Int(i) => Ok(Value::Int(*i)),
             Value::Float(f) => Ok(Value::Float(f.ceil())),
             Value::Null => Ok(Value::Null),
-            other => Err(SqlError::TypeMismatch(format!("ceil({other:?})"))),
+            other => Err(SQLError::TypeMismatch(format!("ceil({other:?})"))),
         },
         "floor" => match &args[0] {
             Value::Int(i) => Ok(Value::Int(*i)),
             Value::Float(f) => Ok(Value::Float(f.floor())),
             Value::Null => Ok(Value::Null),
-            other => Err(SqlError::TypeMismatch(format!("floor({other:?})"))),
+            other => Err(SQLError::TypeMismatch(format!("floor({other:?})"))),
         },
         "power" | "pow" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("power takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("power takes 2 args".into()));
             }
             Ok(Value::Float(to_f64(&args[0])?.powf(to_f64(&args[1])?)))
         }
         "sqrt" => Ok(Value::Float(to_f64(&args[0])?.sqrt())),
         "mod" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("mod takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("mod takes 2 args".into()));
             }
             match (&args[0], &args[1]) {
                 (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a % b)),
@@ -465,7 +465,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     let af = to_f64(a)?;
                     let bf = to_f64(b)?;
                     if bf == 0.0 {
-                        Err(SqlError::TypeMismatch("modulo by zero".into()))
+                        Err(SQLError::TypeMismatch("modulo by zero".into()))
                     } else {
                         Ok(Value::Float(af % bf))
                     }
@@ -474,7 +474,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "starts_with" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("starts_with takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("starts_with takes 2 args".into()));
             }
             Ok(Value::Bool(
                 value_to_string(&args[0]).starts_with(&value_to_string(&args[1])),
@@ -482,7 +482,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "position" | "strpos" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("position takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("position takes 2 args".into()));
             }
             let haystack = value_to_string(&args[0]);
             let needle = value_to_string(&args[1]);
@@ -500,7 +500,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "like" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("LIKE takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("LIKE takes 2 args".into()));
             }
             Ok(Value::Bool(like_match(
                 &value_to_string(&args[0]),
@@ -510,7 +510,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "ilike" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch("ILIKE takes 2 args".into()));
+                return Err(SQLError::TypeMismatch("ILIKE takes 2 args".into()));
             }
             Ok(Value::Bool(like_match(
                 &value_to_string(&args[0]),
@@ -521,12 +521,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "chr" => {
             let n = to_i64(&args[0])?;
             let c = char::from_u32(n as u32)
-                .ok_or_else(|| SqlError::TypeMismatch(format!("chr: invalid code point {n}")))?;
+                .ok_or_else(|| SQLError::TypeMismatch(format!("chr: invalid code point {n}")))?;
             Ok(Value::Str(c.to_string()))
         }
         "regexp_match" | "regexp_matches" => {
             if args.len() < 2 || args.len() > 3 {
-                return Err(SqlError::TypeMismatch(
+                return Err(SQLError::TypeMismatch(
                     "regexp_match takes 2 or 3 args".into(),
                 ));
             }
@@ -542,7 +542,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 pat
             };
             let re = regex::Regex::new(&pat)
-                .map_err(|e| SqlError::TypeMismatch(format!("regex: {e}")))?;
+                .map_err(|e| SQLError::TypeMismatch(format!("regex: {e}")))?;
             match re.captures(&s) {
                 None => Ok(Value::Null),
                 Some(caps) => {
@@ -564,7 +564,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "regexp_replace" => {
             if args.len() < 3 {
-                return Err(SqlError::TypeMismatch(
+                return Err(SQLError::TypeMismatch(
                     "regexp_replace takes 3 or 4 args".into(),
                 ));
             }
@@ -579,7 +579,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 pat
             };
             let re = regex::Regex::new(&pat)
-                .map_err(|e| SqlError::TypeMismatch(format!("regex: {e}")))?;
+                .map_err(|e| SQLError::TypeMismatch(format!("regex: {e}")))?;
             let out = if global {
                 re.replace_all(&s, repl.as_str()).into_owned()
             } else {
@@ -589,7 +589,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "split_part" => {
             if args.len() != 3 {
-                return Err(SqlError::TypeMismatch("split_part takes 3 args".into()));
+                return Err(SQLError::TypeMismatch("split_part takes 3 args".into()));
             }
             let s = value_to_string(&args[0]);
             let sep = value_to_string(&args[1]);
@@ -620,13 +620,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "to_timestamp" => {
             if args.len() != 1 {
-                return Err(SqlError::TypeMismatch("to_timestamp takes 1 arg".into()));
+                return Err(SQLError::TypeMismatch("to_timestamp takes 1 arg".into()));
             }
             let secs = to_f64(&args[0])?;
             let ns = ((secs.fract() * 1e9).round() as i64).rem_euclid(1_000_000_000);
             let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, ns as u32)
                 .ok_or_else(|| {
-                    SqlError::TypeMismatch(format!("to_timestamp out of range {secs}"))
+                    SQLError::TypeMismatch(format!("to_timestamp out of range {secs}"))
                 })?;
             Ok(Value::Str(
                 dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
@@ -634,7 +634,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "extract" | "date_part" => {
             if args.len() != 2 {
-                return Err(SqlError::TypeMismatch(
+                return Err(SQLError::TypeMismatch(
                     "extract takes 2 args (field, ts)".into(),
                 ));
             }
@@ -651,11 +651,11 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     parse_timestamp(&value_to_string(&args[0]))?,
                     parse_timestamp(&value_to_string(&args[1]))?,
                 ),
-                _ => return Err(SqlError::TypeMismatch("age takes 1-2 args".into())),
+                _ => return Err(SQLError::TypeMismatch("age takes 1-2 args".into())),
             };
             Ok(Value::Float((a - b).num_milliseconds() as f64 / 1000.0))
         }
-        other => Err(SqlError::Unsupported(format!("scalar function `{other}`"))),
+        other => Err(SQLError::Unsupported(format!("scalar function `{other}`"))),
     }
 }
 
@@ -682,10 +682,10 @@ fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         let naive = date
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| SqlError::TypeMismatch(format!("bad date {s}")))?;
+            .ok_or_else(|| SQLError::TypeMismatch(format!("bad date {s}")))?;
         return Ok(Utc.from_utc_datetime(&naive));
     }
-    Err(SqlError::TypeMismatch(format!(
+    Err(SQLError::TypeMismatch(format!(
         "cannot parse timestamp {s:?}"
     )))
 }
@@ -714,7 +714,7 @@ fn extract_field(field: &str, dt: &chrono::DateTime<chrono::Utc>) -> Result<Valu
         )),
         "quarter" => Ok(Value::Int(i64::from(dt.month() - 1) / 3 + 1)),
         "week" => Ok(Value::Int(i64::from(dt.iso_week().week()))),
-        other => Err(SqlError::Unsupported(format!("EXTRACT field `{other}`"))),
+        other => Err(SQLError::Unsupported(format!("EXTRACT field `{other}`"))),
     }
 }
 
@@ -774,7 +774,7 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
             Ok(Value::Str(value_to_string(v)))
         }
         "boolean" | "bool" => Ok(Value::Bool(truthy(v))),
-        other => Err(SqlError::Unsupported(format!("CAST AS {other}"))),
+        other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }
 }
 
@@ -792,12 +792,12 @@ fn value_to_string(v: &Value) -> String {
 fn expect_str(args: &[Value], idx: usize) -> Result<String> {
     args.get(idx)
         .map(value_to_string)
-        .ok_or_else(|| SqlError::TypeMismatch(format!("missing arg #{idx}")))
+        .ok_or_else(|| SQLError::TypeMismatch(format!("missing arg #{idx}")))
 }
 
 fn string1<F: FnOnce(&str) -> String>(args: &[Value], f: F) -> Result<Value> {
     if args.is_empty() {
-        return Err(SqlError::TypeMismatch("string fn needs 1 arg".into()));
+        return Err(SQLError::TypeMismatch("string fn needs 1 arg".into()));
     }
     if matches!(args[0], Value::Null) {
         return Ok(Value::Null);
@@ -836,8 +836,8 @@ fn to_i64(v: &Value) -> Result<i64> {
         Value::Bool(b) => Ok(i64::from(*b)),
         Value::Str(s) => s
             .parse()
-            .map_err(|_| SqlError::TypeMismatch(format!("cannot parse {s:?} as integer"))),
-        other => Err(SqlError::TypeMismatch(format!(
+            .map_err(|_| SQLError::TypeMismatch(format!("cannot parse {s:?} as integer"))),
+        other => Err(SQLError::TypeMismatch(format!(
             "expected integer, got {other:?}"
         ))),
     }
@@ -848,7 +848,7 @@ fn to_f64(v: &Value) -> Result<f64> {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
     }
@@ -866,7 +866,7 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
                     Value::Float(f) => *f as f32,
                     Value::Int(i) => *i as f32,
                     other => {
-                        return Err(SqlError::TypeMismatch(format!(
+                        return Err(SQLError::TypeMismatch(format!(
                             "vector element must be numeric, got {other:?}"
                         )))
                     }
@@ -875,7 +875,7 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
             }
             Ok(out)
         }
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "expected vector (numeric list), got {other:?}"
         ))),
     }
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn param_scalar_returns_value() {
-        let params = vec![SqlParam::Scalar(Value::Str("hi".into()))];
+        let params = vec![SQLParam::Scalar(Value::Str("hi".into()))];
         let ctx = EvalContext::new(None, &params);
         let got = eval(&Expr::Param(1), &ctx).unwrap();
         assert_eq!(got, Value::Str("hi".into()));

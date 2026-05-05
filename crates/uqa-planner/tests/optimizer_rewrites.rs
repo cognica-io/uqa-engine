@@ -48,6 +48,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
         offset: None,
         with: Vec::new(),
         set_op: None,
+        distinct: false,
     }
 }
 

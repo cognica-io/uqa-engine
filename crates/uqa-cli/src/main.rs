@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use uqa_core::Value;
-use uqa_engine::{Engine, SqlResult};
+use uqa_engine::{Engine, SQLResult};
 
 const PROMPT_PRIMARY: &str = "usql> ";
 const PROMPT_CONTINUATION: &str = "    > ";
@@ -205,7 +205,7 @@ impl Session {
     }
 }
 
-fn print_result(result: &SqlResult, out: &mut impl Write) {
+fn print_result(result: &SQLResult, out: &mut impl Write) {
     if result.rows.is_empty() && result.columns.is_empty() {
         if result.affected_rows > 0 {
             let _ = writeln!(out, "{} row(s) affected", result.affected_rows);

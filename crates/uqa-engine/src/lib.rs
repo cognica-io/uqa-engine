@@ -52,7 +52,7 @@
 //! - [`Engine::graph_with`] — read-only access by name.
 //! - [`Engine::graph_with_mut`] — exclusive mutable access.
 //!
-//! Result types ([`SqlResult`], [`SqlParam`]) are re-exported from
+//! Result types ([`SQLResult`], [`SQLParam`]) are re-exported from
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
@@ -71,22 +71,21 @@ use uqa_operators::{
     ScoreOperator, TermOperator, VectorSimilarityOperator,
 };
 use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
-use uqa_sql::SqlError;
+use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, Catalog, DocumentStore, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore,
-    SQLiteInvertedIndex, SQLiteVectorIndex, SqliteError, TableSchema, VectorFieldSchema,
-    VectorIndex,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore, SQLiteError,
+    SQLiteInvertedIndex, SQLiteVectorIndex, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
-pub use uqa_sql::{SqlParam, SqlResult};
+pub use uqa_sql::{SQLParam, SQLResult};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
     #[error("SQL error: {0}")]
-    Sql(#[from] SqlError),
+    SQL(#[from] SQLError),
     #[error("storage error: {0}")]
-    Storage(#[from] SqliteError),
+    Storage(#[from] SQLiteError),
 }
 
 pub type EngineResult<T> = std::result::Result<T, EngineError>;
@@ -178,7 +177,7 @@ impl Engine {
     /// SQLite-backed engine. Opens (or creates) the database at `path`,
     /// runs catalog migrations, and rebuilds the in-memory table
     /// registry from the persisted catalog.
-    pub fn open(path: &Path) -> Result<Self, SqliteError> {
+    pub fn open(path: &Path) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open(path)?;
         let catalog = Arc::new(Catalog::open(conn.clone())?);
         let mut engine = Self {
@@ -205,7 +204,7 @@ impl Engine {
         &mut self,
         catalog: &Catalog,
         conn: &ManagedConnection,
-    ) -> Result<(), SqliteError> {
+    ) -> Result<(), SQLiteError> {
         for schema in catalog.load_tables()? {
             let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
             let docs: Box<dyn DocumentStore> =
@@ -423,13 +422,13 @@ impl Engine {
     /// through the catalog's `_models` table when the engine is in
     /// `SQLite` mode; in-memory engines keep the latest version per
     /// process.
-    pub fn save_model(&self, name: &str, model: &deep::DeepModel) -> Result<(), SqlError> {
+    pub fn save_model(&self, name: &str, model: &deep::DeepModel) -> Result<(), SQLError> {
         let json = serde_json::to_string(model)
-            .map_err(|e| SqlError::Internal(format!("model serialise: {e}")))?;
+            .map_err(|e| SQLError::Internal(format!("model serialise: {e}")))?;
         if let Some(catalog) = self.catalog.as_ref() {
             catalog
                 .save_model(name, &json)
-                .map_err(|e| SqlError::Internal(format!("catalog save_model: {e}")))?;
+                .map_err(|e| SQLError::Internal(format!("catalog save_model: {e}")))?;
         }
         self.models.write().insert(name.to_string(), model.clone());
         Ok(())
@@ -532,10 +531,10 @@ impl Engine {
 
     /// Allocate the next id from the per-table watermark, returning the
     /// allocated value. Updates the watermark in place.
-    pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SqlError> {
+    pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SQLError> {
         let t = self
             .table(table)
-            .ok_or_else(|| SqlError::Internal(format!("unknown table `{table}`")))?;
+            .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
         let mut g = t.next_id.lock();
         let id = *g;
         *g = id.saturating_add(1);

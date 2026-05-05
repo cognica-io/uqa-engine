@@ -7,7 +7,7 @@
 //! Internal SQL AST. Lifts the relevant subset of the `libpg_query`
 //! protobuf tree into a Rust enum the compiler walks. Statements not
 //! yet supported parse cleanly but compile to
-//! [`crate::SqlError::Unsupported`].
+//! [`crate::SQLError::Unsupported`].
 
 use serde::{Deserialize, Serialize};
 use uqa_core::Value;
@@ -117,14 +117,17 @@ pub struct SelectStmt {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
-    pub with: Vec<Cte>,
+    pub with: Vec<CTE>,
     /// Optional set operation: `Some` for UNION / INTERSECT / EXCEPT,
     /// with the right-hand operand as a sub-select.
     pub set_op: Option<Box<SetOp>>,
+    /// `SELECT DISTINCT` -- de-duplicate the final result rows. Set by
+    /// the compiler whenever the parsed `distinct_clause` is non-empty.
+    pub distinct: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct Cte {
+pub struct CTE {
     pub name: String,
     pub recursive: bool,
     pub query: Box<SelectStmt>,

@@ -6,13 +6,13 @@
 
 //! `Engine::sql` driver: parse SQL via `uqa_sql::compile`, lower each
 //! statement onto the engine's mutation / search APIs, and roll the
-//! result rows into a [`SqlResult`].
+//! result rows into a [`SQLResult`].
 //!
 //! Phase 5 covers the quickstart slice: `CREATE TABLE` (with `VECTOR(N)`
 //! columns), `CREATE INDEX ... USING gin (...)` (recorded as an FTS
 //! field), `INSERT ... VALUES`, and `SELECT` with `text_match`,
 //! `knn_match`, and `fuse_log_odds` calls in `WHERE`. Statements outside
-//! this surface return [`uqa_sql::SqlError::Unsupported`] cleanly.
+//! this surface return [`uqa_sql::SQLError::Unsupported`] cleanly.
 
 #![allow(
     clippy::useless_format,
@@ -30,32 +30,32 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, ColumnDef as SqlColumnDef, ColumnType, CreateIndex,
-    CreateTable, Cte, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind,
-    OrderBy, Projection, SelectStmt, SetOpKind, Statement, UpdateStmt, WindowSpec,
+    AlterTableAction, AlterTableStmt, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
+    CreateTable, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
+    Projection, SelectStmt, SetOpKind, Statement, UpdateStmt, WindowSpec, CTE,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
-use uqa_sql::{compile, ResultRow, SqlError, SqlParam, SqlResult};
+use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
 use crate::{Engine, HybridSearchParams, ScoredEntry};
 
 const SCORE_COLUMN: &str = "_score";
 
-pub fn execute(engine: &Engine, sql: &str, params: &[SqlParam]) -> Result<SqlResult, SqlError> {
+pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     let stmts = compile(sql)?;
     if stmts.is_empty() {
-        return Ok(SqlResult::empty());
+        return Ok(SQLResult::empty());
     }
-    let mut last = SqlResult::empty();
+    let mut last = SQLResult::empty();
     for stmt in stmts {
         last = run_stmt(engine, stmt, params)?;
     }
     Ok(last)
 }
 
-fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<SqlResult, SqlError> {
+fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     let stmt = optimize_statement(stmt);
     match stmt {
         Statement::CreateTable(c) => run_create_table(engine, c),
@@ -78,12 +78,12 @@ fn optimize_statement(stmt: Statement) -> Statement {
     }
 }
 
-fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SqlResult, SqlError> {
+fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     match stmt.kind {
         DropKind::Table => {
             for name in &stmt.names {
                 if !engine.drop_table(name) && !stmt.if_exists {
-                    return Err(SqlError::Unsupported(format!(
+                    return Err(SQLError::Unsupported(format!(
                         "DROP TABLE: relation `{name}` does not exist"
                     )));
                 }
@@ -97,21 +97,21 @@ fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SqlResult, SqlError> {
             for _ in &stmt.names {}
         }
         DropKind::View => {
-            return Err(SqlError::Unsupported("DROP VIEW".into()));
+            return Err(SQLError::Unsupported("DROP VIEW".into()));
         }
         DropKind::Schema => {
-            return Err(SqlError::Unsupported("DROP SCHEMA".into()));
+            return Err(SQLError::Unsupported("DROP SCHEMA".into()));
         }
     }
-    Ok(SqlResult::empty())
+    Ok(SQLResult::empty())
 }
 
-fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, SqlError> {
+fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, SQLError> {
     if !engine.has_table(&stmt.table) {
         if stmt.if_exists {
-            return Ok(SqlResult::empty());
+            return Ok(SQLResult::empty());
         }
-        return Err(SqlError::Unsupported(format!(
+        return Err(SQLError::Unsupported(format!(
             "ALTER TABLE: relation `{}` does not exist",
             stmt.table
         )));
@@ -124,9 +124,9 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, S
             let col_name = column.name.clone();
             if engine.table_has_column(&stmt.table, &col_name) {
                 if if_not_exists {
-                    return Ok(SqlResult::empty());
+                    return Ok(SQLResult::empty());
                 }
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE ADD COLUMN: column `{col_name}` already exists"
                 )));
             }
@@ -136,7 +136,7 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, S
                 }
                 ColumnType::Text => {
                     if let Err(e) = engine.add_fts_field(&stmt.table, col_name.clone()) {
-                        return Err(SqlError::Internal(format!("add_fts_field: {e}")));
+                        return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
                 }
                 _ => {}
@@ -150,9 +150,9 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, S
         } => {
             if !engine.table_has_column(&stmt.table, &name) {
                 if if_exists {
-                    return Ok(SqlResult::empty());
+                    return Ok(SQLResult::empty());
                 }
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE DROP COLUMN: column `{name}` does not exist"
                 )));
             }
@@ -160,7 +160,7 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, S
         }
         AlterTableAction::RenameColumn { from, to } => {
             if !engine.table_has_column(&stmt.table, &from) {
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
                 )));
             }
@@ -168,26 +168,26 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SqlResult, S
         }
         AlterTableAction::RenameTable { to } => {
             if !engine.rename_table(&stmt.table, &to) {
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME: rename of `{}` failed",
                     stmt.table
                 )));
             }
         }
     }
-    Ok(SqlResult::empty())
+    Ok(SQLResult::empty())
 }
 
 fn run_update(
     engine: &Engine,
     stmt: UpdateStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
     for doc_id in engine.table_doc_ids(&stmt.table) {
         let mut doc = engine
             .get_document(&stmt.table, doc_id)
-            .ok_or_else(|| SqlError::Internal("missing document during UPDATE".into()))?;
+            .ok_or_else(|| SQLError::Internal("missing document during UPDATE".into()))?;
         if let Some(filter) = stmt.r#where.as_ref() {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
             if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
@@ -206,14 +206,14 @@ fn run_update(
         engine.add_document_with_vectors(&stmt.table, doc_id, doc, new_vectors);
         affected += 1;
     }
-    Ok(SqlResult::from_affected(affected))
+    Ok(SQLResult::from_affected(affected))
 }
 
 fn run_delete(
     engine: &Engine,
     stmt: DeleteStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
     let to_delete: Vec<uqa_core::DocId> = engine
         .table_doc_ids(&stmt.table)
@@ -238,19 +238,19 @@ fn run_delete(
         engine.delete_document(&stmt.table, doc_id);
         affected += 1;
     }
-    Ok(SqlResult::from_affected(affected))
+    Ok(SQLResult::from_affected(affected))
 }
 
 // -------------------------------------------------------------------------
 // DDL
 // -------------------------------------------------------------------------
 
-fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SqlResult, SqlError> {
+fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLError> {
     if engine.has_table(&c.name) {
         if c.if_not_exists {
-            return Ok(SqlResult::empty());
+            return Ok(SQLResult::empty());
         }
-        return Err(SqlError::Unsupported(format!(
+        return Err(SQLError::Unsupported(format!(
             "CREATE TABLE: relation `{}` already exists",
             c.name
         )));
@@ -272,14 +272,14 @@ fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SqlResult, SqlErr
         engine.register_column(&c.name, col.clone());
     }
     let _ = column_names(&c.columns);
-    Ok(SqlResult::empty())
+    Ok(SQLResult::empty())
 }
 
-fn column_names(cols: &[SqlColumnDef]) -> Vec<String> {
+fn column_names(cols: &[SQLColumnDef]) -> Vec<String> {
     cols.iter().map(|c| c.name.clone()).collect()
 }
 
-fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SqlResult, SqlError> {
+fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLError> {
     // CREATE INDEX is metadata-bearing now: `gin` registers the column
     // as an FTS field with the analyzer specified in `WITH (analyzer = ...)`,
     // `ivf` / `hnsw` register vector fields if not already declared,
@@ -293,11 +293,11 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SqlResult, SqlErr
                 .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
                 .map(|(_, v)| v.as_str());
             if let Err(e) = engine.add_fts_field_with_analyzer(&c.table, col.clone(), analyzer) {
-                return Err(SqlError::Internal(format!("add_fts_field: {e}")));
+                return Err(SQLError::Internal(format!("add_fts_field: {e}")));
             }
         }
     }
-    Ok(SqlResult::empty())
+    Ok(SQLResult::empty())
 }
 
 // -------------------------------------------------------------------------
@@ -307,8 +307,8 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SqlResult, SqlErr
 fn run_insert(
     engine: &Engine,
     stmt: InsertStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     let auto_id_col = engine.auto_increment_column(&stmt.table);
     let id_column = auto_id_col.clone().unwrap_or_else(|| "id".into());
 
@@ -316,7 +316,7 @@ fn run_insert(
         // INSERT without explicit column list: project the table schema.
         let cols = engine.table_columns(&stmt.table);
         if cols.is_empty() {
-            return Err(SqlError::Unsupported(
+            return Err(SQLError::Unsupported(
                 "INSERT without column list against a table with no schema".into(),
             ));
         }
@@ -327,7 +327,7 @@ fn run_insert(
 
     let id_index = columns.iter().position(|c| c == &id_column);
     if id_index.is_none() && auto_id_col.is_none() {
-        return Err(SqlError::Unsupported(
+        return Err(SQLError::Unsupported(
             "INSERT requires an `id` column or a SERIAL/BIGSERIAL primary key".into(),
         ));
     }
@@ -336,7 +336,7 @@ fn run_insert(
     let ctx = EvalContext::new(None, params);
     for row in &stmt.rows {
         if row.len() != columns.len() {
-            return Err(SqlError::Internal(format!(
+            return Err(SQLError::Internal(format!(
                 "row width {} != column count {}",
                 row.len(),
                 columns.len()
@@ -352,7 +352,7 @@ fn run_insert(
                     Value::Int(n) if *n >= 0 => Some(*n as u64),
                     Value::Null => None,
                     other => {
-                        return Err(SqlError::TypeMismatch(format!(
+                        return Err(SQLError::TypeMismatch(format!(
                             "id must be a non-negative integer, got {other:?}"
                         )));
                     }
@@ -379,7 +379,7 @@ fn run_insert(
         );
         affected += 1;
     }
-    Ok(SqlResult::from_affected(affected))
+    Ok(SQLResult::from_affected(affected))
 }
 
 fn vectors_to_field_map(
@@ -395,8 +395,8 @@ fn vectors_to_field_map(
 fn run_select(
     engine: &Engine,
     stmt: SelectStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     if !stmt.with.is_empty() || stmt.set_op.is_some() {
         let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
         return execute_select(engine, &stmt, params, &mut ctes);
@@ -405,7 +405,7 @@ fn run_select(
     let from = stmt
         .from
         .as_ref()
-        .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("SELECT without FROM".into()))?;
 
     // Single-table FROM with no alias and no window function keeps the
     // search-aware fast path. JOIN shapes and window queries drop into
@@ -426,12 +426,23 @@ fn run_select(
 fn execute_select(
     engine: &Engine,
     stmt: &SelectStmt,
-    params: &[SqlParam],
+    params: &[SQLParam],
     ctes: &mut BTreeMap<String, Vec<ResultRow>>,
-) -> Result<SqlResult, SqlError> {
+) -> Result<SQLResult, SQLError> {
     materialize_ctes(engine, &stmt.with, params, ctes)?;
 
-    let lhs = run_query_block(engine, stmt, params, ctes)?;
+    let mut lhs = run_query_block(engine, stmt, params, ctes)?;
+    if stmt.distinct {
+        // SELECT DISTINCT: collapse duplicate output rows.
+        // Stable so the relative order of survivors matches PG.
+        let mut seen: Vec<ResultRow> = Vec::with_capacity(lhs.rows.len());
+        for row in lhs.rows.drain(..) {
+            if !seen.iter().any(|r| r == &row) {
+                seen.push(row);
+            }
+        }
+        lhs.rows = seen;
+    }
 
     let Some(set_op) = stmt.set_op.as_ref() else {
         return Ok(lhs);
@@ -441,13 +452,13 @@ fn execute_select(
         (SetOpKind::Union, true) => {
             let mut rows = lhs.rows;
             rows.extend(rhs.rows);
-            SqlResult::from_rows(lhs.columns, rows)
+            SQLResult::from_rows(lhs.columns, rows)
         }
         (SetOpKind::Union, false) => {
             let mut rows = lhs.rows;
             rows.extend(rhs.rows);
             rows.dedup();
-            SqlResult::from_rows(lhs.columns, rows)
+            SQLResult::from_rows(lhs.columns, rows)
         }
         (SetOpKind::Intersect, _) => {
             let mut rows: Vec<ResultRow> = lhs
@@ -458,7 +469,7 @@ fn execute_select(
             if !set_op.all {
                 rows.dedup();
             }
-            SqlResult::from_rows(lhs.columns, rows)
+            SQLResult::from_rows(lhs.columns, rows)
         }
         (SetOpKind::Except, _) => {
             let mut rows: Vec<ResultRow> = lhs
@@ -469,7 +480,7 @@ fn execute_select(
             if !set_op.all {
                 rows.dedup();
             }
-            SqlResult::from_rows(lhs.columns, rows)
+            SQLResult::from_rows(lhs.columns, rows)
         }
     };
     Ok(combined)
@@ -478,13 +489,13 @@ fn execute_select(
 fn run_query_block(
     engine: &Engine,
     stmt: &SelectStmt,
-    params: &[SqlParam],
+    params: &[SQLParam],
     ctes: &BTreeMap<String, Vec<ResultRow>>,
-) -> Result<SqlResult, SqlError> {
+) -> Result<SQLResult, SQLError> {
     let from = stmt
         .from
         .as_ref()
-        .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("SELECT without FROM".into()))?;
 
     let joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
 
@@ -512,7 +523,7 @@ fn run_query_block(
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
-        return Ok(SqlResult::from_rows(columns, rows));
+        return Ok(SQLResult::from_rows(columns, rows));
     }
 
     if has_window(&stmt.projections) {
@@ -523,20 +534,20 @@ fn run_query_block(
             .map(|src| project_join_row(src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, params)?;
-        return Ok(SqlResult::from_rows(columns, rows));
+        return Ok(SQLResult::from_rows(columns, rows));
     }
 
     // Pure projection: use the Volcano Project + Sort + Limit chain.
     let projected = volcano_project_sort_limit(&filtered, stmt, params)?;
     let columns = projection_columns(&stmt.projections);
-    Ok(SqlResult::from_rows(columns, projected))
+    Ok(SQLResult::from_rows(columns, projected))
 }
 
 fn volcano_project_sort_limit(
     src_rows: &[ResultRow],
     stmt: &SelectStmt,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     // Some projection callsites (e.g. `text_match` in the SELECT
     // list) need the engine-side function registry, which the
     // execution-layer Project operator does not understand. Detect
@@ -601,8 +612,8 @@ fn volcano_project_sort_limit(
     }
 
     let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
-        ExecError::Sql(err) => err,
-        ExecError::Other(msg) => SqlError::Internal(msg),
+        ExecError::SQL(err) => err,
+        ExecError::Other(msg) => SQLError::Internal(msg),
     })?;
     Ok(rows)
 }
@@ -665,10 +676,10 @@ fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
 
 fn materialize_ctes(
     engine: &Engine,
-    list: &[Cte],
-    params: &[SqlParam],
+    list: &[CTE],
+    params: &[SQLParam],
     ctes: &mut BTreeMap<String, Vec<ResultRow>>,
-) -> Result<(), SqlError> {
+) -> Result<(), SQLError> {
     for cte in list {
         let rows = if cte.recursive {
             materialize_recursive_cte(engine, cte, params, ctes)?
@@ -687,17 +698,17 @@ fn materialize_ctes(
 /// Caps at 1024 iterations to keep buggy queries from running away.
 fn materialize_recursive_cte(
     engine: &Engine,
-    cte: &Cte,
-    params: &[SqlParam],
+    cte: &CTE,
+    params: &[SQLParam],
     ctes: &mut BTreeMap<String, Vec<ResultRow>>,
-) -> Result<Vec<ResultRow>, SqlError> {
+) -> Result<Vec<ResultRow>, SQLError> {
     let set_op = cte
         .query
         .set_op
         .as_ref()
-        .ok_or_else(|| SqlError::Unsupported("recursive CTE requires UNION ALL".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("recursive CTE requires UNION ALL".into()))?;
     if set_op.kind != SetOpKind::Union || !set_op.all {
-        return Err(SqlError::Unsupported(
+        return Err(SQLError::Unsupported(
             "recursive CTE only supports UNION ALL".into(),
         ));
     }
@@ -766,8 +777,8 @@ fn run_single_table_select(
     engine: &Engine,
     table: &str,
     stmt: &SelectStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     let scored = match stmt.r#where.as_ref() {
         None => engine
             .table_doc_ids(table)
@@ -784,7 +795,7 @@ fn run_single_table_select(
         let columns = projection_columns(&stmt.projections);
         let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
-        return Ok(SqlResult::from_rows(columns, rows));
+        return Ok(SQLResult::from_rows(columns, rows));
     }
 
     if order_by_references_field(stmt) {
@@ -813,13 +824,13 @@ fn run_single_table_select(
                 row
             })
             .collect();
-        return Ok(SqlResult::from_rows(columns, projected));
+        return Ok(SQLResult::from_rows(columns, projected));
     }
 
     let scored = apply_order_limit(scored, stmt);
     let columns = projection_columns(&stmt.projections);
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
-    Ok(SqlResult::from_rows(columns, rows))
+    Ok(SQLResult::from_rows(columns, rows))
 }
 
 fn order_by_references_field(stmt: &SelectStmt) -> bool {
@@ -838,8 +849,8 @@ fn run_joined_select(
     engine: &Engine,
     from: &FromClause,
     stmt: &SelectStmt,
-    params: &[SqlParam],
-) -> Result<SqlResult, SqlError> {
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     let mut joined = build_join_rows(engine, from, params)?;
 
     if let Some(filter) = stmt.r#where.as_ref() {
@@ -853,7 +864,7 @@ fn run_joined_select(
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(stmt, &joined, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
-        return Ok(SqlResult::from_rows(columns, rows));
+        return Ok(SQLResult::from_rows(columns, rows));
     }
 
     if has_window(&stmt.projections) {
@@ -864,7 +875,7 @@ fn run_joined_select(
             .map(|src| project_join_row(src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, params)?;
-        return Ok(SqlResult::from_rows(columns, rows));
+        return Ok(SQLResult::from_rows(columns, rows));
     }
 
     let columns = projection_columns(&stmt.projections);
@@ -873,7 +884,7 @@ fn run_joined_select(
         .map(|src| project_join_row(src, &stmt.projections, params))
         .collect::<Result<_, _>>()?;
     rows = apply_row_order_limit(rows, stmt, params)?;
-    Ok(SqlResult::from_rows(columns, rows))
+    Ok(SQLResult::from_rows(columns, rows))
 }
 
 fn has_window(projections: &[Projection]) -> bool {
@@ -885,8 +896,8 @@ fn has_window(projections: &[Projection]) -> bool {
 fn compute_window_columns(
     projections: &[Projection],
     rows: Vec<ResultRow>,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = rows;
     let labels = projection_columns(projections);
     for (idx, proj) in projections.iter().enumerate() {
@@ -907,8 +918,8 @@ fn evaluate_window(
     args: &[Expr],
     spec: &WindowSpec,
     rows: &[ResultRow],
-    params: &[SqlParam],
-) -> Result<Vec<Value>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<Value>, SQLError> {
     if rows.is_empty() {
         return Ok(Vec::new());
     }
@@ -927,7 +938,7 @@ fn evaluate_window(
     for (_, indices) in partitions {
         let mut indexed: Vec<(usize, Vec<Value>)> = indices
             .into_iter()
-            .map(|i| -> Result<_, SqlError> {
+            .map(|i| -> Result<_, SQLError> {
                 let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[i]), params);
                 let key: Vec<Value> = spec
                     .order_by
@@ -972,7 +983,7 @@ fn evaluate_window(
             }
             "lag" | "lead" => {
                 let direction: i64 = if lower == "lag" { -1 } else { 1 };
-                let target_expr = args.first().ok_or_else(|| SqlError::BadArity {
+                let target_expr = args.first().ok_or_else(|| SQLError::BadArity {
                     name: lower.clone(),
                     expected: ">=1".into(),
                     actual: 0,
@@ -985,7 +996,7 @@ fn evaluate_window(
                         match uqa_sql::expr::eval(expr, &ctx)? {
                             Value::Int(n) => n,
                             other => {
-                                return Err(SqlError::TypeMismatch(format!(
+                                return Err(SQLError::TypeMismatch(format!(
                                     "lag/lead offset must be integer, got {other:?}"
                                 )));
                             }
@@ -1020,14 +1031,14 @@ fn evaluate_window(
                         match uqa_sql::expr::eval(expr, &ctx)? {
                             Value::Int(n) if n > 0 => n,
                             other => {
-                                return Err(SqlError::TypeMismatch(format!(
+                                return Err(SQLError::TypeMismatch(format!(
                                     "ntile bucket count must be positive integer, got {other:?}"
                                 )));
                             }
                         }
                     }
                     None => {
-                        return Err(SqlError::BadArity {
+                        return Err(SQLError::BadArity {
                             name: "ntile".into(),
                             expected: "1".into(),
                             actual: 0,
@@ -1056,7 +1067,7 @@ fn evaluate_window(
                 }
             }
             other => {
-                return Err(SqlError::UnknownFunction(format!(
+                return Err(SQLError::UnknownFunction(format!(
                     "window function `{other}` is not supported"
                 )));
             }
@@ -1155,17 +1166,17 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
 fn build_join_rows(
     engine: &Engine,
     from: &FromClause,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     build_join_rows_with_ctes(engine, from, params, &BTreeMap::new())
 }
 
 fn build_join_rows_with_ctes(
     engine: &Engine,
     from: &FromClause,
-    params: &[SqlParam],
+    params: &[SQLParam],
     ctes: &BTreeMap<String, Vec<ResultRow>>,
-) -> Result<Vec<ResultRow>, SqlError> {
+) -> Result<Vec<ResultRow>, SQLError> {
     match from {
         FromClause::Table { name, alias } => {
             let qual = qualifier_for(name, alias.as_deref());
@@ -1216,7 +1227,7 @@ fn build_join_rows_with_ctes(
                     params,
                     engine,
                 )?),
-                JoinKind::Full => Err(SqlError::Unsupported("FULL OUTER JOIN".into())),
+                JoinKind::Full => Err(SQLError::Unsupported("FULL OUTER JOIN".into())),
             }
         }
     }
@@ -1232,8 +1243,8 @@ fn try_hash_inner_join(
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
-    params: &[SqlParam],
-) -> Result<Option<Vec<ResultRow>>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(Expr::Binary {
         op: uqa_sql::ast::BinaryOp::Equal,
         lhs,
@@ -1276,7 +1287,7 @@ fn decide_join_sides<'a>(
     right_rows: &[ResultRow],
     lhs: &'a Expr,
     rhs: &'a Expr,
-    params: &[SqlParam],
+    params: &[SQLParam],
 ) -> Option<(&'a Expr, &'a Expr)> {
     if left_rows.is_empty() || right_rows.is_empty() {
         return None;
@@ -1296,7 +1307,7 @@ fn decide_join_sides<'a>(
     None
 }
 
-fn eval_yields_value(row: &ResultRow, expr: &Expr, params: &[SqlParam]) -> bool {
+fn eval_yields_value(row: &ResultRow, expr: &Expr, params: &[SQLParam]) -> bool {
     let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
     matches!(uqa_sql::expr::eval(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
@@ -1305,8 +1316,8 @@ fn cross_filter(
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::with_capacity(left_rows.len() * right_rows.len());
     for l in left_rows {
         for r in right_rows {
@@ -1331,9 +1342,9 @@ fn left_outer(
     inner_rows: &[ResultRow],
     inner_from: &FromClause,
     on: Option<&Expr>,
-    params: &[SqlParam],
+    params: &[SQLParam],
     engine: &Engine,
-) -> Result<Vec<ResultRow>, SqlError> {
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for l in outer_rows {
         let mut matched = false;
@@ -1372,8 +1383,8 @@ fn left_outer(
 fn project_join_row(
     src: &ResultRow,
     projections: &[Projection],
-    params: &[SqlParam],
-) -> Result<ResultRow, SqlError> {
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
     let ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
     let labels = projection_columns(projections);
     let mut out = ResultRow::new();
@@ -1402,8 +1413,8 @@ fn project_join_row(
 fn aggregate_join_rows(
     stmt: &SelectStmt,
     rows: &[ResultRow],
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     let agg_targets: Vec<&Projection> = stmt
         .projections
         .iter()
@@ -1436,7 +1447,7 @@ fn aggregate_join_rows(
                 (_, args) => {
                     let arg = args
                         .first()
-                        .ok_or_else(|| SqlError::Internal("aggregate missing arg".into()))?;
+                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
@@ -1465,7 +1476,7 @@ fn aggregate_join_rows(
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
                 let Expr::Func { name, .. } = &proj.expr else {
-                    return Err(SqlError::Internal("aggregate expr lost".into()));
+                    return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
@@ -1480,7 +1491,7 @@ fn aggregate_join_rows(
                     }
                 }
                 if !placed {
-                    return Err(SqlError::Unsupported(format!(
+                    return Err(SQLError::Unsupported(format!(
                         "non-aggregated projection `{label}` must appear in GROUP BY"
                     )));
                 }
@@ -1514,8 +1525,8 @@ fn filter_table_rows(
     engine: &Engine,
     table: &str,
     filter: &Expr,
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     let mut out = Vec::new();
     for doc_id in engine.table_doc_ids(table) {
         let document = engine.get_document(table, doc_id).unwrap_or_default();
@@ -1567,11 +1578,11 @@ impl AggregateAccumulator {
     }
 }
 
-fn value_as_f64(v: &Value) -> Result<f64, SqlError> {
+fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
     match v {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
     }
@@ -1597,8 +1608,8 @@ fn build_aggregate_rows(
     table: &str,
     scored: &[ScoredEntry],
     stmt: &SelectStmt,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     // group_key -> per-aggregate accumulator vector + the raw group key
     // values used to project the GROUP BY columns.
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
@@ -1633,7 +1644,7 @@ fn build_aggregate_rows(
                 (_, args) => {
                     let arg = args
                         .first()
-                        .ok_or_else(|| SqlError::Internal("aggregate missing arg".into()))?;
+                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
@@ -1664,7 +1675,7 @@ fn build_aggregate_rows(
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
                 let Expr::Func { name, .. } = &proj.expr else {
-                    return Err(SqlError::Internal("aggregate expr lost".into()));
+                    return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
@@ -1681,12 +1692,12 @@ fn build_aggregate_rows(
                     }
                 }
                 if !placed {
-                    return Err(SqlError::Unsupported(format!(
+                    return Err(SQLError::Unsupported(format!(
                         "non-aggregated projection `{col}` must appear in GROUP BY"
                     )));
                 }
             } else {
-                return Err(SqlError::Unsupported(
+                return Err(SQLError::Unsupported(
                     "complex non-aggregate projections in GROUP BY are not supported".into(),
                 ));
             }
@@ -1732,8 +1743,8 @@ fn projection_label_at(proj: &Projection, position: usize) -> String {
 fn apply_row_order_limit(
     rows: Vec<ResultRow>,
     stmt: &SelectStmt,
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     // Build a Volcano sub-pipeline:  Sort? -> Limit?  on top of an
     // in-memory TableScan over the rows the caller already projected.
     use uqa_execution::physical::{run_to_rows, PhysicalOperator};
@@ -1771,8 +1782,8 @@ fn apply_row_order_limit(
     }
 
     let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
-        uqa_execution::physical::ExecError::Sql(err) => err,
-        uqa_execution::physical::ExecError::Other(msg) => SqlError::Internal(msg),
+        uqa_execution::physical::ExecError::SQL(err) => err,
+        uqa_execution::physical::ExecError::Other(msg) => SQLError::Internal(msg),
     })?;
     Ok(rows)
 }
@@ -1798,14 +1809,14 @@ fn execute_function(
     table: &str,
     name: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
-    let kind = lookup(name).ok_or_else(|| SqlError::UnknownFunction(name.to_string()))?;
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
     match kind {
         FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
             run_text_match(engine, table, args, params)
         }
-        FunctionKind::KnnMatch => run_knn_match(engine, table, args, params),
+        FunctionKind::KNNMatch => run_knn_match(engine, table, args, params),
         FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
         FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
         FunctionKind::GraphTraverse => run_graph_traverse(engine, args, params),
@@ -1819,10 +1830,10 @@ fn execute_function(
 fn run_deep_predict(
     engine: &Engine,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 1 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "deep_predict".into(),
             expected: "1".into(),
             actual: args.len(),
@@ -1832,14 +1843,14 @@ fn run_deep_predict(
     let name = match eval(&args[0], &ctx)? {
         Value::Str(s) => s,
         other => {
-            return Err(SqlError::TypeMismatch(format!(
+            return Err(SQLError::TypeMismatch(format!(
                 "deep_predict.model must be a string, got {other:?}"
             )));
         }
     };
     let scores = engine
         .deep_predict(&name)
-        .ok_or_else(|| SqlError::Unsupported(format!("unknown model {name:?}")))?;
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
     Ok(scores
         .into_iter()
         .map(|(doc_id, score)| ScoredEntry { doc_id, score })
@@ -1850,10 +1861,10 @@ fn run_staged_retrieval(
     engine: &Engine,
     table: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.is_empty() || args.len() % 3 != 0 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "staged_retrieval".into(),
             expected: ">= 3, multiple of 3 (field, query, top_k)".into(),
             actual: args.len(),
@@ -1868,7 +1879,7 @@ fn run_staged_retrieval(
         let q = match eval(&args[3 * i + 1], &ctx)? {
             Value::Str(s) => s,
             other => {
-                return Err(SqlError::TypeMismatch(format!(
+                return Err(SQLError::TypeMismatch(format!(
                     "staged_retrieval query must be string, got {other:?}"
                 )));
             }
@@ -1896,10 +1907,10 @@ fn run_multi_field_match(
     engine: &Engine,
     table: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.is_empty() || args.len() % 2 != 0 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "multi_field_match".into(),
             expected: "even, >= 2 (alternating field, query)".into(),
             actual: args.len(),
@@ -1916,7 +1927,7 @@ fn run_multi_field_match(
         let q = match eval(&args[2 * i + 1], &ctx)? {
             Value::Str(s) => s,
             other => {
-                return Err(SqlError::TypeMismatch(format!(
+                return Err(SQLError::TypeMismatch(format!(
                     "multi_field_match query must be string, got {other:?}"
                 )));
             }
@@ -1959,10 +1970,10 @@ fn run_multi_field_match(
 fn run_graph_pagerank(
     engine: &Engine,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 1 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "graph_pagerank".into(),
             expected: "1".into(),
             actual: args.len(),
@@ -1983,17 +1994,17 @@ fn run_graph_pagerank(
                 })
                 .collect::<Vec<_>>()
         })
-        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
     Ok(entries)
 }
 
 fn run_graph_traverse(
     engine: &Engine,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "graph_traverse".into(),
             expected: "4".into(),
             actual: args.len(),
@@ -2021,17 +2032,17 @@ fn run_graph_traverse(
                 })
                 .collect::<Vec<_>>()
         })
-        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
     Ok(entries)
 }
 
 fn run_graph_neighbors(
     engine: &Engine,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "graph_neighbors".into(),
             expected: "4".into(),
             actual: args.len(),
@@ -2047,7 +2058,7 @@ fn run_graph_neighbors(
         "in" => uqa_graph::Direction::In,
         "both" => uqa_graph::Direction::Both,
         other => {
-            return Err(SqlError::TypeMismatch(format!(
+            return Err(SQLError::TypeMismatch(format!(
                 "graph_neighbors.direction must be 'out'/'in'/'both', got {other:?}"
             )));
         }
@@ -2062,7 +2073,7 @@ fn run_graph_neighbors(
                 &name,
             )
         })
-        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for nid in neighbors {
@@ -2076,10 +2087,10 @@ fn run_graph_neighbors(
     Ok(out)
 }
 
-fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SqlError> {
+fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SQLError> {
     match eval(expr, ctx)? {
         Value::Str(s) => Ok(s),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "{name} must be a string, got {other:?}"
         ))),
     }
@@ -2089,31 +2100,31 @@ fn expect_optional_string(
     expr: &Expr,
     name: &str,
     ctx: &EvalContext,
-) -> Result<Option<String>, SqlError> {
+) -> Result<Option<String>, SQLError> {
     match eval(expr, ctx)? {
         Value::Null => Ok(None),
         Value::Str(s) if s.is_empty() => Ok(None),
         Value::Str(s) => Ok(Some(s)),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "{name} must be a string or NULL, got {other:?}"
         ))),
     }
 }
 
-fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SqlError> {
+fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SQLError> {
     match eval(expr, ctx)? {
         Value::Int(n) if n >= 0 => Ok(n as u64),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "{name} must be a non-negative integer, got {other:?}"
         ))),
     }
 }
 
-fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SqlError> {
+fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLError> {
     let max_u32_as_i64: i64 = i64::from(u32::MAX);
     match eval(expr, ctx)? {
         Value::Int(n) if (0..=max_u32_as_i64).contains(&n) => Ok(n as u32),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "{name} must fit in u32, got {other:?}"
         ))),
     }
@@ -2123,10 +2134,10 @@ fn run_text_match(
     engine: &Engine,
     table: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "text_match".into(),
             expected: "2".into(),
             actual: args.len(),
@@ -2138,7 +2149,7 @@ fn run_text_match(
     let query = match query_value {
         Value::Str(s) => s,
         other => {
-            return Err(SqlError::TypeMismatch(format!(
+            return Err(SQLError::TypeMismatch(format!(
                 "text_match query must be a string, got {other:?}"
             )));
         }
@@ -2151,10 +2162,10 @@ fn run_knn_match(
     engine: &Engine,
     table: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 3 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "knn_match".into(),
             expected: "3".into(),
             actual: args.len(),
@@ -2172,10 +2183,10 @@ fn run_fuse_log_odds(
     engine: &Engine,
     table: &str,
     args: &[Expr],
-    params: &[SqlParam],
-) -> Result<Vec<ScoredEntry>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() < 2 {
-        return Err(SqlError::BadArity {
+        return Err(SQLError::BadArity {
             name: "fuse_log_odds".into(),
             expected: ">=2".into(),
             actual: args.len(),
@@ -2192,11 +2203,11 @@ fn run_fuse_log_odds(
     for arg in args {
         match arg {
             Expr::Func { name, args: inner } => {
-                let kind = lookup(name).ok_or_else(|| SqlError::UnknownFunction(name.clone()))?;
+                let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))?;
                 match kind {
                     FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
                         if inner.len() != 2 {
-                            return Err(SqlError::BadArity {
+                            return Err(SQLError::BadArity {
                                 name: name.clone(),
                                 expected: "2".into(),
                                 actual: inner.len(),
@@ -2207,15 +2218,15 @@ fn run_fuse_log_odds(
                         text_query = match q {
                             Value::Str(s) => Some(s),
                             other => {
-                                return Err(SqlError::TypeMismatch(format!(
+                                return Err(SQLError::TypeMismatch(format!(
                                     "text_match query must be string, got {other:?}"
                                 )));
                             }
                         };
                     }
-                    FunctionKind::KnnMatch => {
+                    FunctionKind::KNNMatch => {
                         if inner.len() != 3 {
-                            return Err(SqlError::BadArity {
+                            return Err(SQLError::BadArity {
                                 name: name.clone(),
                                 expected: "3".into(),
                                 actual: inner.len(),
@@ -2226,7 +2237,7 @@ fn run_fuse_log_odds(
                         knn_pool = expect_usize(&inner[2], "knn_match.k", &ctx)?;
                     }
                     FunctionKind::FuseLogOdds => {
-                        return Err(SqlError::Unsupported(
+                        return Err(SQLError::Unsupported(
                             "nested fuse_log_odds is not supported".into(),
                         ));
                     }
@@ -2236,26 +2247,26 @@ fn run_fuse_log_odds(
                     | FunctionKind::MultiFieldMatch
                     | FunctionKind::StagedRetrieval
                     | FunctionKind::DeepPredict => {
-                        return Err(SqlError::Unsupported(format!(
+                        return Err(SQLError::Unsupported(format!(
                             "function {name} cannot be nested under fuse_log_odds"
                         )));
                     }
                 }
             }
             other => {
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "fuse_log_odds argument must be a function call, got {other:?}"
                 )));
             }
         }
     }
     let text_field = text_field
-        .ok_or_else(|| SqlError::Unsupported("fuse_log_odds requires a text_match arm".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("fuse_log_odds requires a text_match arm".into()))?;
     let text_query = text_query.unwrap_or_default();
     let vector_field = vector_field
-        .ok_or_else(|| SqlError::Unsupported("fuse_log_odds requires a knn_match arm".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("fuse_log_odds requires a knn_match arm".into()))?;
     let query_vector =
-        query_vector.ok_or_else(|| SqlError::Internal("missing knn_match vector".into()))?;
+        query_vector.ok_or_else(|| SQLError::Internal("missing knn_match vector".into()))?;
 
     Ok(engine.hybrid_search(&HybridSearchParams {
         table,
@@ -2269,21 +2280,21 @@ fn run_fuse_log_odds(
     }))
 }
 
-fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SqlError> {
+fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SQLError> {
     match expr {
         Expr::Column(name) => Ok(name.clone()),
-        other => Err(SqlError::TypeMismatch(format!(
+        other => Err(SQLError::TypeMismatch(format!(
             "{label} must be a column reference, got {other:?}"
         ))),
     }
 }
 
-fn expect_usize(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<usize, SqlError> {
+fn expect_usize(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<usize, SQLError> {
     let v = eval(expr, ctx)?;
     match v {
         Value::Int(n) if n >= 0 => Ok(n as usize),
-        Value::Int(_) => Err(SqlError::TypeMismatch(format!("{label} must be >= 0"))),
-        other => Err(SqlError::TypeMismatch(format!(
+        Value::Int(_) => Err(SQLError::TypeMismatch(format!("{label} must be >= 0"))),
+        other => Err(SQLError::TypeMismatch(format!(
             "{label} must be an integer, got {other:?}"
         ))),
     }
@@ -2342,8 +2353,8 @@ fn build_rows(
     table: &str,
     scored: &[ScoredEntry],
     projections: &[Projection],
-    params: &[SqlParam],
-) -> Result<Vec<ResultRow>, SqlError> {
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::with_capacity(scored.len());
     for entry in scored {
         let mut document = engine.get_document(table, entry.doc_id).unwrap_or_default();
@@ -2357,8 +2368,8 @@ fn build_rows(
 fn build_projection_row(
     document: &Document,
     projections: &[Projection],
-    params: &[SqlParam],
-) -> Result<ResultRow, SqlError> {
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
     let ctx = EvalContext::new(Some(document), params);
     let labels = projection_columns(projections);
     let mut row = ResultRow::new();
@@ -2383,7 +2394,7 @@ impl Engine {
     /// Run an arbitrary SQL statement against the engine. Phase 5
     /// supports the quickstart slice; statements outside the supported
     /// grammar return a structured `Unsupported` error.
-    pub fn sql(&self, query: &str, params: &[SqlParam]) -> Result<SqlResult, SqlError> {
+    pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         execute(self, query, params)
     }
 

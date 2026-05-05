@@ -12,7 +12,7 @@ use rusqlite::{params, OptionalExtension};
 use uqa_core::DocId;
 
 use crate::document_store::{Document, DocumentStore};
-use crate::sqlite::connection::{ManagedConnection, Result as SqliteResult};
+use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 
 #[derive(Clone)]
 pub struct SQLiteDocumentStore {
@@ -28,7 +28,7 @@ impl SQLiteDocumentStore {
         }
     }
 
-    fn put_inner(&self, doc_id: DocId, document: &Document) -> SqliteResult<()> {
+    fn put_inner(&self, doc_id: DocId, document: &Document) -> SQLiteResult<()> {
         let body = serde_json::to_string(document)?;
         self.conn.with(|c| {
             c.execute(
@@ -40,7 +40,7 @@ impl SQLiteDocumentStore {
         })
     }
 
-    fn get_inner(&self, doc_id: DocId) -> SqliteResult<Option<Document>> {
+    fn get_inner(&self, doc_id: DocId) -> SQLiteResult<Option<Document>> {
         self.conn.with(|c| {
             let body: Option<String> = c
                 .query_row(

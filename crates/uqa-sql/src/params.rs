@@ -10,12 +10,12 @@ use uqa_core::Value;
 
 /// Value bound to a `$N` placeholder.
 #[derive(Debug, Clone)]
-pub enum SqlParam {
+pub enum SQLParam {
     Scalar(Value),
     Vector(Vec<f32>),
 }
 
-impl SqlParam {
+impl SQLParam {
     pub fn scalar(value: Value) -> Self {
         Self::Scalar(value)
     }

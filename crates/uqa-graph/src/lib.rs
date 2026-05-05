@@ -47,7 +47,7 @@ pub use pattern::{EdgePattern, EdgePredicate, GraphPattern, VertexPattern, Verte
 pub use posting_list::{GraphPayload, GraphPostingList};
 pub use rpq::{
     build_nfa, epsilon_closure, parse_rpq, simplify, subset_construction, Dfa, DfaState, Nfa,
-    NfaTransition, RegularPathExpr, RpqParseError, StateId,
+    NfaTransition, RPQParseError, RegularPathExpr, StateId,
 };
 pub use store::GraphStore;
 pub use temporal::{TemporalFilter, TemporalTraverse};

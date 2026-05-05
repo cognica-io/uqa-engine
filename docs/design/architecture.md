@@ -56,7 +56,7 @@ graph TD
   `BTreeIndex`, `BlockMaxIndex`, `SpatialIndex` (R-tree), `Catalog` with
   schema migrations. Both in-memory and SQLite-backed implementations.
 * `uqa-scoring` — `BM25Scorer`, `BayesianBM25Scorer`, three-term posterior
-  transform, `WandScorer`, `BlockMaxWandScorer`, calibration metrics,
+  transform, `WANDScorer`, `BlockMaxWANDScorer`, calibration metrics,
   `MultiFieldBayesianScorer`, `ParameterLearner`.
 * `uqa-fusion` — `LogOddsFusion`, `AdaptiveLogOddsFusion`,
   `ProbabilisticBoolean`, `LearnedFusion`, `AttentionFusion`,
@@ -109,7 +109,7 @@ flowchart LR
     JoinPath --> Storage
     Storage --> Score["BM25 / Bayesian BM25"]
     Score --> Fuse["LogOddsFusion / Attention / Learned"]
-    Fuse --> Result["SqlResult"]
+    Fuse --> Result["SQLResult"]
 ```
 
 Graph and deep-fusion paths slot in via the SQL function registry: the

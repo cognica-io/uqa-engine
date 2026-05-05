@@ -110,7 +110,7 @@ pub enum PoolKindSpec {
 #[serde(rename_all = "snake_case")]
 pub enum GatingSpec {
     None,
-    Relu,
+    ReLU,
     Swish,
 }
 
@@ -129,7 +129,7 @@ impl DeepModel {
     pub fn gating_runtime(&self) -> Gating {
         match self.gating {
             GatingSpec::None => Gating::None,
-            GatingSpec::Relu => Gating::Relu,
+            GatingSpec::ReLU => Gating::ReLU,
             GatingSpec::Swish => Gating::Swish,
         }
     }

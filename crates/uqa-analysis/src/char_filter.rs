@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CharFilter {
-    HtmlStrip,
+    HTMLStrip,
     Mapping {
         mapping: BTreeMap<String, String>,
     },
@@ -29,7 +29,7 @@ pub enum CharFilter {
 impl CharFilter {
     pub fn filter(&self, text: &str) -> String {
         match self {
-            CharFilter::HtmlStrip => {
+            CharFilter::HTMLStrip => {
                 let stripped = html_tag_re().replace_all(text, " ").into_owned();
                 replace_entities(&stripped)
             }
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn html_strip_removes_tags_and_decodes_entities() {
-        let f = CharFilter::HtmlStrip;
+        let f = CharFilter::HTMLStrip;
         assert_eq!(
             f.filter("<p>hello &amp; world</p>"),
             " hello & world ".to_string()

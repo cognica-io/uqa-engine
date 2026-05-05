@@ -14,7 +14,7 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
 use crate::inverted_index::InvertedIndex;
-use crate::sqlite::connection::{ManagedConnection, Result as SqliteResult};
+use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 
 #[derive(Clone)]
 pub struct SQLiteInvertedIndex {
@@ -36,7 +36,7 @@ impl SQLiteInvertedIndex {
         &self,
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
-    ) -> SqliteResult<()> {
+    ) -> SQLiteResult<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.transaction()?;
             // Replacing an existing doc: drop its prior postings + lengths.
@@ -107,7 +107,7 @@ impl SQLiteInvertedIndex {
         })
     }
 
-    fn remove_document_inner(&self, doc_id: DocId) -> SqliteResult<()> {
+    fn remove_document_inner(&self, doc_id: DocId) -> SQLiteResult<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.transaction()?;
             // Subtract length contributions from _field_stats.

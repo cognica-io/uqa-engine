@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{FieldName, Value};
-use uqa_engine::{Engine, HybridSearchParams, ScoringMode, SqlParam};
+use uqa_engine::{Engine, HybridSearchParams, SQLParam, ScoringMode};
 use uqa_scoring::BayesianBM25Params;
 use uqa_storage::document_store::Document;
 
@@ -85,7 +85,7 @@ fn knn_match_select_matches_engine_knn_search() {
         .sql(
             "SELECT id, _score AS s FROM docs \
              WHERE knn_match(embedding, $1, 3) ORDER BY s DESC",
-            &[SqlParam::vector(vec![0.5, 0.5, 0.0, 0.0])],
+            &[SQLParam::vector(vec![0.5, 0.5, 0.0, 0.0])],
         )
         .unwrap();
 
@@ -111,7 +111,7 @@ fn fuse_log_odds_select_matches_engine_hybrid_search() {
                  text_match(body, 'vector search'), \
                  knn_match(embedding, $1, 3) \
              ) ORDER BY s DESC",
-            &[SqlParam::vector(qvec.clone())],
+            &[SQLParam::vector(qvec.clone())],
         )
         .unwrap();
 

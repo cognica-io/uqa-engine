@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use serde_json::Value as JsonValue;
+use serde_json::Value as JSONValue;
 use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -32,7 +32,7 @@ struct Fixture {
 struct GoldenCase {
     name: String,
     sql: String,
-    expected: Vec<JsonValue>,
+    expected: Vec<JSONValue>,
 }
 
 fn fixture_path() -> PathBuf {
@@ -52,11 +52,11 @@ fn load_fixture() -> Fixture {
     serde_json::from_slice(&bytes).expect("fixture parses")
 }
 
-fn json_to_value(v: &JsonValue) -> Value {
+fn json_to_value(v: &JSONValue) -> Value {
     match v {
-        JsonValue::Null | JsonValue::Object(_) => Value::Null,
-        JsonValue::Bool(b) => Value::Bool(*b),
-        JsonValue::Number(n) => {
+        JSONValue::Null | JSONValue::Object(_) => Value::Null,
+        JSONValue::Bool(b) => Value::Bool(*b),
+        JSONValue::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Int(i)
             } else if let Some(f) = n.as_f64() {
@@ -65,8 +65,8 @@ fn json_to_value(v: &JsonValue) -> Value {
                 Value::Null
             }
         }
-        JsonValue::String(s) => Value::Str(s.clone()),
-        JsonValue::Array(items) => Value::List(items.iter().map(json_to_value).collect()),
+        JSONValue::String(s) => Value::Str(s.clone()),
+        JSONValue::Array(items) => Value::List(items.iter().map(json_to_value).collect()),
     }
 }
 

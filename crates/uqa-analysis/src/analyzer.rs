@@ -75,13 +75,13 @@ pub fn whitespace_analyzer() -> Analyzer {
     )
 }
 
-/// `Standard` + `Lowercase` + `AsciiFolding` + `Stop` + `PorterStem`.
+/// `Standard` + `Lowercase` + `ASCIIFolding` + `Stop` + `PorterStem`.
 pub fn standard_analyzer(language: &str) -> Analyzer {
     Analyzer::new(
         Tokenizer::Standard,
         vec![
             TokenFilter::Lowercase,
-            TokenFilter::AsciiFolding,
+            TokenFilter::ASCIIFolding,
             TokenFilter::Stop {
                 language: language.to_string(),
                 custom_words: Vec::new(),
@@ -99,7 +99,7 @@ pub fn standard_cjk_analyzer(language: &str) -> Analyzer {
         Tokenizer::Standard,
         vec![
             TokenFilter::Lowercase,
-            TokenFilter::AsciiFolding,
+            TokenFilter::ASCIIFolding,
             TokenFilter::Stop {
                 language: language.to_string(),
                 custom_words: Vec::new(),

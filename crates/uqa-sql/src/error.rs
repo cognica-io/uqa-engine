@@ -7,7 +7,7 @@
 //! Error types surfaced by the SQL compiler and executor.
 
 #[derive(Debug, thiserror::Error)]
-pub enum SqlError {
+pub enum SQLError {
     #[error("parse error: {0}")]
     Parse(String),
     #[error("unsupported SQL feature: {0}")]
@@ -34,10 +34,10 @@ pub enum SqlError {
     Internal(String),
 }
 
-pub type Result<T> = std::result::Result<T, SqlError>;
+pub type Result<T> = std::result::Result<T, SQLError>;
 
-impl From<pg_query::Error> for SqlError {
+impl From<pg_query::Error> for SQLError {
     fn from(value: pg_query::Error) -> Self {
-        SqlError::Parse(value.to_string())
+        SQLError::Parse(value.to_string())
     }
 }

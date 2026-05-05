@@ -8,8 +8,8 @@
 //! Theorem 4 from the master plan).
 //!
 //! Property: for any random corpus and any random subset of query
-//! terms, both `WandScorer::score_top_k` and
-//! `BlockMaxWandScorer::score_top_k` must return the same top-k doc-id
+//! terms, both `WANDScorer::score_top_k` and
+//! `BlockMaxWANDScorer::score_top_k` must return the same top-k doc-id
 //! set as exhaustive scoring (i.e. compute every doc's BM25 sum and
 //! sort). Pruning may not change correctness, only speed.
 
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use proptest::prelude::*;
 use uqa_core::{DocId, IndexStats, Payload, PostingEntry, PostingList};
 use uqa_scoring::{
-    bm25::BM25Scorer, BM25Params, BlockMaxWandScorer, Scorer, WandQuery, WandScorer,
+    bm25::BM25Scorer, BM25Params, BlockMaxWANDScorer, Scorer, WANDQuery, WANDScorer,
 };
 use uqa_storage::BlockMaxIndex;
 
@@ -132,14 +132,14 @@ proptest! {
             (0..terms_tfs.len()).map(|_| bm25_scorer(&stats)).collect();
 
         let k = (corpus_size / 2).clamp(1, 10);
-        let q = WandQuery::new(
+        let q = WANDQuery::new(
             posting_lists.clone(),
             scorers.clone(),
             (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
             (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
             k,
         );
-        let wand_result = WandScorer::new(&q, None).score_top_k();
+        let wand_result = WANDScorer::new(&q, None).score_top_k();
         let wand_ids: Vec<DocId> = wand_result.top_k.iter().map(|e| e.doc_id).collect();
         let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);
 
@@ -175,14 +175,14 @@ proptest! {
             block_max.build(pl, &scorer, FIELD, &format!("term_{i}"), TABLE);
         }
 
-        let q = WandQuery::new(
+        let q = WANDQuery::new(
             posting_lists.clone(),
             scorers.clone(),
             (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
             (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
             k,
         );
-        let bmw = BlockMaxWandScorer::new(&q, None, &block_max, TABLE);
+        let bmw = BlockMaxWANDScorer::new(&q, None, &block_max, TABLE);
         let bmw_result = bmw.score_top_k();
         let bmw_ids: Vec<DocId> = bmw_result.top_k.iter().map(|e| e.doc_id).collect();
         let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);

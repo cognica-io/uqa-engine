@@ -13,7 +13,7 @@ use uqa_core::Value;
 pub type ResultRow = BTreeMap<String, Value>;
 
 #[derive(Debug, Clone, Default)]
-pub struct SqlResult {
+pub struct SQLResult {
     /// Column order as the SELECT clause specified.
     pub columns: Vec<String>,
     /// One row per result document, with the named columns in
@@ -24,7 +24,7 @@ pub struct SqlResult {
     pub affected_rows: u64,
 }
 
-impl SqlResult {
+impl SQLResult {
     pub fn empty() -> Self {
         Self::default()
     }

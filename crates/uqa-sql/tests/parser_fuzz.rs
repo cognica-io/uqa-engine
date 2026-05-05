@@ -9,13 +9,13 @@
 //! variant — no `cargo fuzz`, no nightly. We drive `compile` with a
 //! mix of pure-random byte strings and randomly stitched fragments of
 //! near-SQL syntax. The harness asserts every input either succeeds
-//! cleanly or returns a `SqlError` — no panics, no UB, no timeouts.
+//! cleanly or returns a `SQLError` — no panics, no UB, no timeouts.
 
 use proptest::prelude::*;
 use uqa_sql::compile;
 
 /// Drive the parser with a payload and assert no panic. Either
-/// `Ok(_)` (parsed) or `Err(SqlError::*)` is acceptable — only a
+/// `Ok(_)` (parsed) or `Err(SQLError::*)` is acceptable — only a
 /// panic is a fuzz failure.
 fn drive(sql: &str) -> Result<(), TestCaseError> {
     match std::panic::catch_unwind(|| compile(sql)) {

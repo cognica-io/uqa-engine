@@ -37,6 +37,6 @@ pub mod result;
 
 pub use ast::{ColumnType, Statement};
 pub use compiler::{compile, plan_only_for_test};
-pub use error::SqlError;
-pub use params::SqlParam;
-pub use result::{ResultRow, SqlResult};
+pub use error::SQLError;
+pub use params::SQLParam;
+pub use result::{ResultRow, SQLResult};

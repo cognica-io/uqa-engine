@@ -23,7 +23,7 @@ pub enum FunctionKind {
     /// `text_match` for now (Phase 5 ships only Bayesian BM25).
     BayesianMatch,
     /// `knn_match(field, query_vector, k)` — top-k cosine KNN.
-    KnnMatch,
+    KNNMatch,
     /// `fuse_log_odds(signal_1, signal_2, ...)` — log-odds fusion of
     /// other UQA function calls.
     FuseLogOdds,
@@ -52,7 +52,7 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         let mut m = BTreeMap::new();
         m.insert("text_match", FunctionKind::TextMatch);
         m.insert("bayesian_match", FunctionKind::BayesianMatch);
-        m.insert("knn_match", FunctionKind::KnnMatch);
+        m.insert("knn_match", FunctionKind::KNNMatch);
         m.insert("fuse_log_odds", FunctionKind::FuseLogOdds);
         m.insert("graph_pagerank", FunctionKind::GraphPagerank);
         m.insert("graph_traverse", FunctionKind::GraphTraverse);
@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn known_names_resolve() {
         assert_eq!(lookup("text_match"), Some(FunctionKind::TextMatch));
-        assert_eq!(lookup("KNN_MATCH"), Some(FunctionKind::KnnMatch));
+        assert_eq!(lookup("KNN_MATCH"), Some(FunctionKind::KNNMatch));
         assert_eq!(lookup("fuse_log_odds"), Some(FunctionKind::FuseLogOdds));
     }
 

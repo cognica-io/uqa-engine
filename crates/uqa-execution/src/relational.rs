@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use uqa_core::Value;
 use uqa_sql::expr::{eval, truthy, EvalContext};
 use uqa_sql::ResultRow;
-use uqa_sql::{ast::Expr, SqlError, SqlParam};
+use uqa_sql::{ast::Expr, SQLError, SQLParam};
 
 use crate::batch::{Batch, RowSchema};
 use crate::physical::{ExecError, ExecResult, PhysicalOperator};
@@ -28,12 +28,12 @@ use crate::physical::{ExecError, ExecResult, PhysicalOperator};
 pub struct Filter {
     child: Box<dyn PhysicalOperator>,
     predicate: Expr,
-    params: Vec<SqlParam>,
+    params: Vec<SQLParam>,
     schema: RowSchema,
 }
 
 impl Filter {
-    pub fn new(child: Box<dyn PhysicalOperator>, predicate: Expr, params: Vec<SqlParam>) -> Self {
+    pub fn new(child: Box<dyn PhysicalOperator>, predicate: Expr, params: Vec<SQLParam>) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
         Self {
             child,
@@ -86,7 +86,7 @@ impl PhysicalOperator for Filter {
 pub struct Project {
     child: Box<dyn PhysicalOperator>,
     projections: Vec<(String, Expr)>,
-    params: Vec<SqlParam>,
+    params: Vec<SQLParam>,
     schema: RowSchema,
     /// When `true`, every input column also flows through to the
     /// output (after any alias rewrite). Useful when projections only
@@ -98,7 +98,7 @@ impl Project {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         projections: Vec<(String, Expr)>,
-        params: Vec<SqlParam>,
+        params: Vec<SQLParam>,
     ) -> Self {
         let schema = RowSchema::new(projections.iter().map(|(name, _)| name.clone()).collect());
         Self {
@@ -115,7 +115,7 @@ impl Project {
     pub fn appending(
         child: Box<dyn PhysicalOperator>,
         projections: Vec<(String, Expr)>,
-        params: Vec<SqlParam>,
+        params: Vec<SQLParam>,
     ) -> Self {
         let mut cols = child.schema().to_vec();
         for (name, _) in &projections {
@@ -184,7 +184,7 @@ pub struct SortKey {
 pub struct Sort {
     child: Box<dyn PhysicalOperator>,
     keys: Vec<SortKey>,
-    params: Vec<SqlParam>,
+    params: Vec<SQLParam>,
     schema: RowSchema,
     materialised: Option<std::vec::IntoIter<Batch>>,
 }
@@ -193,7 +193,7 @@ impl Sort {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         keys: Vec<SortKey>,
-        params: Vec<SqlParam>,
+        params: Vec<SQLParam>,
     ) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
         Self {
@@ -380,7 +380,7 @@ pub struct HashAggregate {
     child: Box<dyn PhysicalOperator>,
     group_keys: Vec<(String, Expr)>,
     aggregates: Vec<AggregateSpec>,
-    params: Vec<SqlParam>,
+    params: Vec<SQLParam>,
     schema: RowSchema,
     materialised: Option<std::vec::IntoIter<Batch>>,
 }
@@ -390,7 +390,7 @@ impl HashAggregate {
         child: Box<dyn PhysicalOperator>,
         group_keys: Vec<(String, Expr)>,
         aggregates: Vec<AggregateSpec>,
-        params: Vec<SqlParam>,
+        params: Vec<SQLParam>,
     ) -> Self {
         let mut cols: Vec<String> = group_keys.iter().map(|(n, _)| n.clone()).collect();
         for a in &aggregates {
@@ -451,7 +451,7 @@ fn fold_into(
     state: &mut AggFold,
     spec: &AggregateSpec,
     row: &ResultRow,
-    params: &[SqlParam],
+    params: &[SQLParam],
 ) -> ExecResult<()> {
     match spec.kind {
         AggregateKind::CountStar => {
@@ -637,7 +637,7 @@ pub struct Window {
     child: Box<dyn PhysicalOperator>,
     spec: WindowSpec,
     functions: Vec<(String, WindowKind)>,
-    params: Vec<SqlParam>,
+    params: Vec<SQLParam>,
     schema: RowSchema,
     out: Option<Batch>,
     served: bool,
@@ -648,7 +648,7 @@ impl Window {
         child: Box<dyn PhysicalOperator>,
         spec: WindowSpec,
         functions: Vec<(String, WindowKind)>,
-        params: Vec<SqlParam>,
+        params: Vec<SQLParam>,
     ) -> Self {
         let mut cols = child.schema().to_vec();
         for (name, _) in &functions {
@@ -705,7 +705,7 @@ impl PhysicalOperator for Window {
         }
         // Stable order-by within each partition.
         for indices in buckets.values_mut() {
-            let keys: Result<Vec<Vec<Value>>, SqlError> = indices
+            let keys: Result<Vec<Vec<Value>>, SQLError> = indices
                 .iter()
                 .map(|&i| {
                     let ctx = EvalContext::new(Some(&rows[i]), &self.params);

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use uqa_analysis::analyzer::standard_analyzer;
 use uqa_core::{DocId, FieldName, IndexStats};
-use uqa_scoring::{BM25Params, BM25Scorer, BlockMaxWandScorer, Scorer, WandQuery, WandScorer};
+use uqa_scoring::{BM25Params, BM25Scorer, BlockMaxWANDScorer, Scorer, WANDQuery, WANDScorer};
 use uqa_storage::{BlockMaxIndex, InvertedIndex, MemoryInvertedIndex, DEFAULT_BLOCK_SIZE};
 
 /// A 1000-doc corpus designed to exercise WAND/BMW pruning. Uses
@@ -132,14 +132,14 @@ fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
         .collect::<Vec<_>>();
     let fields = vec![FieldName::from("body"); terms.len()];
 
-    let q = WandQuery::new(
+    let q = WANDQuery::new(
         posting_lists.clone(),
         scorers.clone(),
         fields.clone(),
         terms.clone(),
         10,
     );
-    let result = WandScorer::new(&q, Some(&idx)).score_top_k();
+    let result = WANDScorer::new(&q, Some(&idx)).score_top_k();
     let mut got: Vec<(DocId, f64)> = result
         .top_k
         .iter()
@@ -190,14 +190,14 @@ fn bmw_top_k_matches_exhaustive_and_skips_at_least_75pct() {
         bmi.build(&posting_lists[i], &bm25, "body", term, "articles");
     }
 
-    let q = WandQuery::new(
+    let q = WANDQuery::new(
         posting_lists,
         scorers.clone(),
         fields.clone(),
         terms.clone(),
         10,
     );
-    let result = BlockMaxWandScorer::new(&q, Some(&idx), &bmi, "articles").score_top_k();
+    let result = BlockMaxWANDScorer::new(&q, Some(&idx), &bmi, "articles").score_top_k();
     let mut got: Vec<(DocId, f64)> = result
         .top_k
         .iter()
@@ -250,15 +250,15 @@ fn bmw_skip_rate_meets_or_exceeds_wand() {
         bmi.build(&posting_lists[i], &bm25, "body", term, "articles");
     }
 
-    let q = WandQuery::new(
+    let q = WANDQuery::new(
         posting_lists,
         scorers.clone(),
         fields.clone(),
         terms.clone(),
         5,
     );
-    let wand_stats = WandScorer::new(&q, Some(&idx)).score_top_k().stats;
-    let bmw_stats = BlockMaxWandScorer::new(&q, Some(&idx), &bmi, "articles")
+    let wand_stats = WANDScorer::new(&q, Some(&idx)).score_top_k().stats;
+    let bmw_stats = BlockMaxWANDScorer::new(&q, Some(&idx), &bmi, "articles")
         .score_top_k()
         .stats;
     assert!(

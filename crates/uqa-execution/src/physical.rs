@@ -18,7 +18,7 @@ pub enum ExecError {
     #[error("execution error: {0}")]
     Other(String),
     #[error("SQL error: {0}")]
-    Sql(#[from] uqa_sql::SqlError),
+    SQL(#[from] uqa_sql::SQLError),
 }
 
 pub type ExecResult<T> = std::result::Result<T, ExecError>;

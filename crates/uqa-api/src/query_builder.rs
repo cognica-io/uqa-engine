@@ -10,8 +10,8 @@
 //! all real work happens in the engine's SQL pipeline.
 
 use uqa_core::Value;
-use uqa_engine::{Engine, SqlResult};
-use uqa_sql::SqlError;
+use uqa_engine::{Engine, SQLResult};
+use uqa_sql::SQLError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
@@ -233,7 +233,7 @@ impl<'a> QueryBuilder<'a> {
         sql
     }
 
-    pub fn execute(&self) -> Result<SqlResult, SqlError> {
+    pub fn execute(&self) -> Result<SQLResult, SQLError> {
         self.engine.sql(&self.to_sql(), &[])
     }
 }

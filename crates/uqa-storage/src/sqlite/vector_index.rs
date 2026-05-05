@@ -11,7 +11,7 @@ use std::sync::Arc;
 use rusqlite::params;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
-use crate::sqlite::connection::{ManagedConnection, Result as SqliteResult};
+use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 use crate::vector_index::{cosine_similarity, VectorIndex};
 
 #[derive(Clone)]
@@ -37,7 +37,7 @@ impl SQLiteVectorIndex {
         }
     }
 
-    fn load_all(&self) -> SqliteResult<Vec<(DocId, Vec<f32>)>> {
+    fn load_all(&self) -> SQLiteResult<Vec<(DocId, Vec<f32>)>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT doc_id, vector FROM _vectors

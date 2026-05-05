@@ -32,7 +32,7 @@ fn corpus() -> Engine {
     eng
 }
 
-fn ints(rows: &[uqa_engine::SqlResult], col: &str) -> Vec<i64> {
+fn ints(rows: &[uqa_engine::SQLResult], col: &str) -> Vec<i64> {
     rows.iter()
         .flat_map(|r| r.rows.iter())
         .filter_map(|row| row.get(col).cloned())

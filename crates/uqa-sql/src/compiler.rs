@@ -10,7 +10,7 @@
 //! `CREATE INDEX`, `INSERT`, and `SELECT` with the subset of clauses the
 //! Phase 5 quickstart and parity fixture exercise. Anything outside that
 //! grammar parses cleanly via `pg_query` but compiles to
-//! [`SqlError::Unsupported`].
+//! [`SQLError::Unsupported`].
 
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
@@ -18,10 +18,10 @@ use uqa_core::Value;
 
 use crate::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable,
-    Cte, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
-    Projection, SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt, WindowSpec,
+    DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy, Projection,
+    SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt, WindowSpec, CTE,
 };
-use crate::error::{Result, SqlError};
+use crate::error::{Result, SQLError};
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {
     let parsed = pg_query::parse(sql)?;
@@ -35,7 +35,7 @@ pub fn compile(sql: &str) -> Result<Vec<Statement>> {
 
 fn compile_stmt(node: &Node) -> Result<Statement> {
     let Some(inner) = node.node.as_ref() else {
-        return Err(SqlError::Unsupported("empty statement".into()));
+        return Err(SQLError::Unsupported("empty statement".into()));
     };
     match inner {
         NodeEnum::CreateStmt(stmt) => compile_create_table(stmt).map(Statement::CreateTable),
@@ -47,7 +47,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::DropStmt(stmt) => compile_drop(stmt).map(Statement::Drop),
         NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt).map(Statement::AlterTable),
         NodeEnum::RenameStmt(stmt) => compile_rename(stmt).map(Statement::AlterTable),
-        other => Err(SqlError::Unsupported(format!(
+        other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
         ))),
@@ -59,7 +59,7 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
         .relation
         .as_ref()
         .map(|r| r.relname.clone())
-        .ok_or_else(|| SqlError::Internal("UPDATE without relation".into()))?;
+        .ok_or_else(|| SQLError::Internal("UPDATE without relation".into()))?;
     let mut assignments = Vec::new();
     for target_node in &stmt.target_list {
         let Some(inner) = target_node.node.as_ref() else {
@@ -69,7 +69,7 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
             let value = rt
                 .val
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("UPDATE assignment without value".into()))?;
+                .ok_or_else(|| SQLError::Internal("UPDATE assignment without value".into()))?;
             assignments.push((rt.name.clone(), compile_expr(value)?));
         }
     }
@@ -90,7 +90,7 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
         .relation
         .as_ref()
         .map(|r| r.relname.clone())
-        .ok_or_else(|| SqlError::Internal("DELETE without relation".into()))?;
+        .ok_or_else(|| SQLError::Internal("DELETE without relation".into()))?;
     let r#where = stmt
         .where_clause
         .as_ref()
@@ -121,7 +121,7 @@ fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<DropStmt> {
         ObjectType::ObjectView => DropKind::View,
         ObjectType::ObjectSchema => DropKind::Schema,
         other => {
-            return Err(SqlError::Unsupported(format!(
+            return Err(SQLError::Unsupported(format!(
                 "DROP target {other:?} not supported"
             )));
         }
@@ -144,14 +144,14 @@ fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<DropStmt> {
             }
             NodeEnum::String(s) => names.push(s.sval.clone()),
             other => {
-                return Err(SqlError::Unsupported(format!(
+                return Err(SQLError::Unsupported(format!(
                     "DROP object node {other:?} not supported"
                 )));
             }
         }
     }
     if names.is_empty() {
-        return Err(SqlError::Internal("DROP without target name".into()));
+        return Err(SQLError::Internal("DROP without target name".into()));
     }
     let cascade = matches!(stmt.behavior(), DropBehavior::DropCascade);
     Ok(DropStmt {
@@ -172,20 +172,20 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
         .relation
         .as_ref()
         .map(|r| r.relname.clone())
-        .ok_or_else(|| SqlError::Internal("ALTER TABLE without relation".into()))?;
+        .ok_or_else(|| SQLError::Internal("ALTER TABLE without relation".into()))?;
     let if_exists = stmt.missing_ok;
     let cmd = stmt
         .cmds
         .first()
-        .ok_or_else(|| SqlError::Internal("ALTER TABLE without command".into()))?;
+        .ok_or_else(|| SQLError::Internal("ALTER TABLE without command".into()))?;
     let inner = cmd
         .node
         .as_ref()
-        .ok_or_else(|| SqlError::Internal("ALTER TABLE command body empty".into()))?;
+        .ok_or_else(|| SQLError::Internal("ALTER TABLE command body empty".into()))?;
     let cmd = match inner {
         NodeEnum::AlterTableCmd(c) => c,
         other => {
-            return Err(SqlError::Unsupported(format!(
+            return Err(SQLError::Unsupported(format!(
                 "ALTER TABLE command {other:?}"
             )));
         }
@@ -196,11 +196,11 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
                 .def
                 .as_ref()
                 .and_then(|d| d.node.as_ref())
-                .ok_or_else(|| SqlError::Internal("ADD COLUMN without ColumnDef".into()))?;
+                .ok_or_else(|| SQLError::Internal("ADD COLUMN without ColumnDef".into()))?;
             let col_def = match def_inner {
                 NodeEnum::ColumnDef(c) => compile_column_def(c)?,
                 other => {
-                    return Err(SqlError::Internal(format!(
+                    return Err(SQLError::Internal(format!(
                         "ADD COLUMN expected ColumnDef, got {other:?}"
                     )));
                 }
@@ -219,13 +219,13 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
         | AlterTableType::AtSetNotNull
         | AlterTableType::AtDropNotNull
         | AlterTableType::AtColumnDefault => {
-            return Err(SqlError::Unsupported(format!(
+            return Err(SQLError::Unsupported(format!(
                 "ALTER COLUMN action {:?}",
                 cmd.subtype()
             )));
         }
         other => {
-            return Err(SqlError::Unsupported(format!(
+            return Err(SQLError::Unsupported(format!(
                 "ALTER TABLE action {other:?}"
             )));
         }
@@ -243,7 +243,7 @@ fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStm
         .relation
         .as_ref()
         .map(|r| r.relname.clone())
-        .ok_or_else(|| SqlError::Internal("RENAME without relation".into()))?;
+        .ok_or_else(|| SQLError::Internal("RENAME without relation".into()))?;
     let action = match stmt.rename_type() {
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
             from: stmt.subname.clone(),
@@ -253,7 +253,7 @@ fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStm
             to: stmt.newname.clone(),
         },
         other => {
-            return Err(SqlError::Unsupported(format!(
+            return Err(SQLError::Unsupported(format!(
                 "RENAME target {other:?} not supported"
             )));
         }
@@ -267,11 +267,11 @@ fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStm
 
 fn extract_string(node: &Node) -> Result<String> {
     let Some(inner) = node.node.as_ref() else {
-        return Err(SqlError::Internal("missing string node".into()));
+        return Err(SQLError::Internal("missing string node".into()));
     };
     match inner {
         NodeEnum::String(s) => Ok(s.sval.clone()),
-        _ => Err(SqlError::Internal(format!(
+        _ => Err(SQLError::Internal(format!(
             "expected String node, got {inner:?}"
         ))),
     }
@@ -288,7 +288,7 @@ fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateT
         .map(|r| r.relname.clone())
         .unwrap_or_default();
     if name.is_empty() {
-        return Err(SqlError::Internal("CREATE TABLE without name".into()));
+        return Err(SQLError::Internal("CREATE TABLE without name".into()));
     }
     let mut columns = Vec::new();
     for elt in &stmt.table_elts {
@@ -350,7 +350,7 @@ fn raw_type_name(col: &pg_query::protobuf::ColumnDef) -> Option<String> {
 
 fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> {
     let Some(type_name) = col.type_name.as_ref() else {
-        return Err(SqlError::Internal(format!(
+        return Err(SQLError::Internal(format!(
             "column `{}` has no type",
             col.colname
         )));
@@ -384,14 +384,14 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
             let Some(arg) = type_name.typmods.first() else {
-                return Err(SqlError::Unsupported(
+                return Err(SQLError::Unsupported(
                     "VECTOR without dimension is not supported".into(),
                 ));
             };
             let dim = expect_integer_const(arg)? as u32;
             Ok(ColumnType::Vector(dim))
         }
-        other => Err(SqlError::Unsupported(format!(
+        other => Err(SQLError::Unsupported(format!(
             "column type `{other}` is not supported"
         ))),
     }
@@ -399,7 +399,7 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
 
 fn expect_integer_const(node: &Node) -> Result<i64> {
     let Some(inner) = node.node.as_ref() else {
-        return Err(SqlError::Internal("missing const node".into()));
+        return Err(SQLError::Internal("missing const node".into()));
     };
     match inner {
         NodeEnum::AConst(c) => match &c.val {
@@ -408,12 +408,12 @@ fn expect_integer_const(node: &Node) -> Result<i64> {
                 .fval
                 .parse::<f64>()
                 .map(|v| v as i64)
-                .map_err(|e| SqlError::Internal(e.to_string())),
-            other => Err(SqlError::Internal(format!(
+                .map_err(|e| SQLError::Internal(e.to_string())),
+            other => Err(SQLError::Internal(format!(
                 "expected integer constant, got {other:?}"
             ))),
         },
-        _ => Err(SqlError::Internal(format!(
+        _ => Err(SQLError::Internal(format!(
             "expected A_Const, got {inner:?}"
         ))),
     }
@@ -492,7 +492,7 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
         .relation
         .as_ref()
         .map(|r| r.relname.clone())
-        .ok_or_else(|| SqlError::Internal("INSERT without relation".into()))?;
+        .ok_or_else(|| SQLError::Internal("INSERT without relation".into()))?;
     let columns: Vec<String> = stmt
         .cols
         .iter()
@@ -506,14 +506,14 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
     let select_node = stmt
         .select_stmt
         .as_ref()
-        .ok_or_else(|| SqlError::Unsupported("INSERT without VALUES".into()))?;
+        .ok_or_else(|| SQLError::Unsupported("INSERT without VALUES".into()))?;
     let select_inner = select_node
         .node
         .as_ref()
-        .ok_or_else(|| SqlError::Internal("INSERT select_stmt empty".into()))?;
+        .ok_or_else(|| SQLError::Internal("INSERT select_stmt empty".into()))?;
     let select = match select_inner {
         NodeEnum::SelectStmt(s) => s,
-        _ => return Err(SqlError::Unsupported("INSERT FROM SELECT".into())),
+        _ => return Err(SQLError::Unsupported("INSERT FROM SELECT".into())),
     };
     let mut rows = Vec::new();
     for row_node in &select.values_lists {
@@ -544,7 +544,7 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
 
 fn compile_from_node(node: &Node) -> Result<FromClause> {
     let Some(inner) = node.node.as_ref() else {
-        return Err(SqlError::Internal("empty FROM node".into()));
+        return Err(SQLError::Internal("empty FROM node".into()));
     };
     match inner {
         NodeEnum::RangeVar(r) => Ok(FromClause::Table {
@@ -561,18 +561,18 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
             let left = j
                 .larg
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("JOIN missing left".into()))?;
+                .ok_or_else(|| SQLError::Internal("JOIN missing left".into()))?;
             let right = j
                 .rarg
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("JOIN missing right".into()))?;
+                .ok_or_else(|| SQLError::Internal("JOIN missing right".into()))?;
             let kind = match j.jointype() {
                 pg_query::protobuf::JoinType::JoinInner => JoinKind::Inner,
                 pg_query::protobuf::JoinType::JoinLeft => JoinKind::Left,
                 pg_query::protobuf::JoinType::JoinRight => JoinKind::Right,
                 pg_query::protobuf::JoinType::JoinFull => JoinKind::Full,
                 other => {
-                    return Err(SqlError::Unsupported(format!("JOIN type {other:?}")));
+                    return Err(SQLError::Unsupported(format!("JOIN type {other:?}")));
                 }
             };
             let on = j.quals.as_deref().map(compile_expr).transpose()?;
@@ -583,7 +583,7 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
                 on,
             })
         }
-        other => Err(SqlError::Unsupported(format!("FROM form: {other:?}"))),
+        other => Err(SQLError::Unsupported(format!("FROM form: {other:?}"))),
     }
 }
 
@@ -638,6 +638,8 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
             )
         };
 
+    let distinct = !stmt.distinct_clause.is_empty();
+
     Ok(SelectStmt {
         projections,
         from,
@@ -648,6 +650,7 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         offset,
         with,
         set_op,
+        distinct,
     })
 }
 
@@ -659,7 +662,7 @@ fn compile_projections(targets: &[pg_query::protobuf::Node]) -> Result<Vec<Proje
         };
         let res_target = match inner {
             NodeEnum::ResTarget(t) => t,
-            _ => return Err(SqlError::Internal(format!("unexpected target {inner:?}"))),
+            _ => return Err(SQLError::Internal(format!("unexpected target {inner:?}"))),
         };
         let alias = if res_target.name.is_empty() {
             None
@@ -668,7 +671,7 @@ fn compile_projections(targets: &[pg_query::protobuf::Node]) -> Result<Vec<Proje
         };
         let expr = match &res_target.val {
             Some(node) => compile_expr(node)?,
-            None => return Err(SqlError::Internal("ResTarget without value".into())),
+            None => return Err(SQLError::Internal("ResTarget without value".into())),
         };
         out.push(Projection { expr, alias });
     }
@@ -685,7 +688,7 @@ fn compile_order_by(sort_clause: &[pg_query::protobuf::Node]) -> Result<Vec<Orde
             let expr_node = sb
                 .node
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("SortBy without expr".into()))?;
+                .ok_or_else(|| SQLError::Internal("SortBy without expr".into()))?;
             let expr = compile_expr(expr_node)?;
             // SortByDir: SortbyDefault = 0, SortbyAsc = 2, SortbyDesc = 3,
             // SortbyUsing = 4 (per libpg_query 6.x).
@@ -702,12 +705,12 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
         pg_query::protobuf::SetOperation::SetopUnion => SetOpKind::Union,
         pg_query::protobuf::SetOperation::SetopIntersect => SetOpKind::Intersect,
         pg_query::protobuf::SetOperation::SetopExcept => SetOpKind::Except,
-        other => return Err(SqlError::Unsupported(format!("set op {other:?}"))),
+        other => return Err(SQLError::Unsupported(format!("set op {other:?}"))),
     };
     let right_node = stmt
         .rarg
         .as_deref()
-        .ok_or_else(|| SqlError::Internal("set op missing right".into()))?;
+        .ok_or_else(|| SQLError::Internal("set op missing right".into()))?;
     let right = compile_select(right_node)?;
     Ok(Some(Box::new(SetOp {
         kind,
@@ -716,7 +719,7 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
     })))
 }
 
-fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<Cte>> {
+fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<CTE>> {
     let mut out = Vec::with_capacity(wc.ctes.len());
     for cte_node in &wc.ctes {
         let Some(inner) = cte_node.node.as_ref() else {
@@ -724,21 +727,21 @@ fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<Cte>> 
         };
         let cte = match inner {
             NodeEnum::CommonTableExpr(c) => c,
-            _ => return Err(SqlError::Internal("expected CommonTableExpr".into())),
+            _ => return Err(SQLError::Internal("expected CommonTableExpr".into())),
         };
         let select_node = cte
             .ctequery
             .as_ref()
-            .ok_or_else(|| SqlError::Internal("CTE without query".into()))?;
+            .ok_or_else(|| SQLError::Internal("CTE without query".into()))?;
         let select_inner = select_node
             .node
             .as_ref()
-            .ok_or_else(|| SqlError::Internal("CTE query node empty".into()))?;
+            .ok_or_else(|| SQLError::Internal("CTE query node empty".into()))?;
         let select = match select_inner {
             NodeEnum::SelectStmt(s) => s,
-            _ => return Err(SqlError::Unsupported("CTE body must be SELECT".into())),
+            _ => return Err(SQLError::Unsupported("CTE body must be SELECT".into())),
         };
-        out.push(Cte {
+        out.push(CTE {
             name: cte.ctename.clone(),
             recursive: wc.recursive,
             query: Box::new(compile_select(select)?),
@@ -756,13 +759,13 @@ fn compile_int_const(node: Option<&Node>) -> Result<Option<u64>> {
     match inner {
         NodeEnum::AConst(c) => match &c.val {
             Some(Val::Ival(i)) if i.ival >= 0 => Ok(Some(u64::from(i.ival as u32))),
-            Some(Val::Ival(_)) => Err(SqlError::Internal("negative LIMIT/OFFSET".into())),
+            Some(Val::Ival(_)) => Err(SQLError::Internal("negative LIMIT/OFFSET".into())),
             None => Ok(None),
-            other => Err(SqlError::Internal(format!(
+            other => Err(SQLError::Internal(format!(
                 "non-integer LIMIT/OFFSET: {other:?}"
             ))),
         },
-        _ => Err(SqlError::Internal(format!(
+        _ => Err(SQLError::Internal(format!(
             "LIMIT/OFFSET expr not supported: {inner:?}"
         ))),
     }
@@ -774,7 +777,7 @@ fn compile_int_const(node: Option<&Node>) -> Result<Option<u64>> {
 
 fn compile_expr(node: &Node) -> Result<Expr> {
     let Some(inner) = node.node.as_ref() else {
-        return Err(SqlError::Internal("missing expr node".into()));
+        return Err(SQLError::Internal("missing expr node".into()));
     };
     match inner {
         NodeEnum::AConst(c) => compile_const(c),
@@ -811,7 +814,7 @@ fn compile_expr(node: &Node) -> Result<Expr> {
                 MinMaxOp::IsGreatest => "greatest",
                 MinMaxOp::IsLeast => "least",
                 _ => {
-                    return Err(SqlError::Unsupported(format!(
+                    return Err(SQLError::Unsupported(format!(
                         "MinMaxExpr op {:?}",
                         me.op()
                     )));
@@ -827,7 +830,7 @@ fn compile_expr(node: &Node) -> Result<Expr> {
                 args,
             })
         }
-        other => Err(SqlError::Unsupported(format!("expression form: {other:?}"))),
+        other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
     }
 }
 
@@ -843,20 +846,20 @@ fn compile_case_expr(c: &pg_query::protobuf::CaseExpr) -> Result<Expr> {
         let inner = arm
             .node
             .as_ref()
-            .ok_or_else(|| SqlError::Internal("CASE arm without body".into()))?;
+            .ok_or_else(|| SQLError::Internal("CASE arm without body".into()))?;
         let NodeEnum::CaseWhen(cw) = inner else {
-            return Err(SqlError::Internal(format!(
+            return Err(SQLError::Internal(format!(
                 "CASE arm expected CaseWhen, got {inner:?}"
             )));
         };
         let cond = cw
             .expr
             .as_ref()
-            .ok_or_else(|| SqlError::Internal("CASE WHEN without cond".into()))?;
+            .ok_or_else(|| SQLError::Internal("CASE WHEN without cond".into()))?;
         let result = cw
             .result
             .as_ref()
-            .ok_or_else(|| SqlError::Internal("CASE WHEN without THEN".into()))?;
+            .ok_or_else(|| SQLError::Internal("CASE WHEN without THEN".into()))?;
         when.push((compile_expr(cond)?, compile_expr(result)?));
     }
     let else_branch = c
@@ -886,11 +889,11 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let lhs = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("AExpr missing lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("AExpr missing lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("AExpr missing rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
             let op = match op_name.as_str() {
                 "=" => BinaryOp::Equal,
                 "<>" | "!=" => BinaryOp::NotEqual,
@@ -941,7 +944,7 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                     })));
                 }
-                other => return Err(SqlError::Unsupported(format!("operator `{other}`"))),
+                other => return Err(SQLError::Unsupported(format!("operator `{other}`"))),
             };
             Ok(Expr::Binary {
                 op,
@@ -953,14 +956,14 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let expr = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("BETWEEN without lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("BETWEEN without lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("BETWEEN without rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("BETWEEN without rhs".into()))?;
             let bounds = match rhs.node.as_ref() {
                 Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
-                _ => return Err(SqlError::Internal("BETWEEN expects 2 bounds".into())),
+                _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
             };
             let between = Expr::Between {
                 expr: Box::new(compile_expr(expr)?),
@@ -977,11 +980,11 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let lhs = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("NULLIF without lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("NULLIF without lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("NULLIF without rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("NULLIF without rhs".into()))?;
             return Ok(Expr::Func {
                 name: "nullif".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -1001,11 +1004,11 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let lhs = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("LIKE without lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("LIKE without lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("LIKE without rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("LIKE without rhs".into()))?;
             let func = Expr::Func {
                 name: "like".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -1027,11 +1030,11 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let lhs = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("ILIKE without lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("ILIKE without lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("ILIKE without rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("ILIKE without rhs".into()))?;
             let func = Expr::Func {
                 name: "ilike".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
@@ -1046,14 +1049,14 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let expr = a
                 .lexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("IN without lhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("IN without lhs".into()))?;
             let rhs = a
                 .rexpr
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("IN without rhs".into()))?;
+                .ok_or_else(|| SQLError::Internal("IN without rhs".into()))?;
             let items = match rhs.node.as_ref() {
                 Some(NodeEnum::List(l)) => l.items.clone(),
-                _ => return Err(SqlError::Internal("IN expects list".into())),
+                _ => return Err(SQLError::Internal("IN expects list".into())),
             };
             let list: Vec<Expr> = items.iter().map(compile_expr).collect::<Result<Vec<_>>>()?;
             let negated = a
@@ -1071,7 +1074,7 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 negated,
             })
         }
-        other => Err(SqlError::Unsupported(format!("AExpr kind: {other:?}"))),
+        other => Err(SQLError::Unsupported(format!("AExpr kind: {other:?}"))),
     }
 }
 
@@ -1090,10 +1093,10 @@ fn compile_bool_expr(b: &pg_query::protobuf::BoolExpr) -> Result<Expr> {
             let arg = args
                 .into_iter()
                 .next()
-                .ok_or_else(|| SqlError::Internal("NOT without operand".into()))?;
+                .ok_or_else(|| SQLError::Internal("NOT without operand".into()))?;
             Ok(Expr::Not(Box::new(arg)))
         }
-        _ => Err(SqlError::Unsupported(format!("BoolExpr {kind:?}"))),
+        _ => Err(SQLError::Unsupported(format!("BoolExpr {kind:?}"))),
     }
 }
 
@@ -1102,7 +1105,7 @@ fn compile_null_test(n: &pg_query::protobuf::NullTest) -> Result<Expr> {
     let arg = n
         .arg
         .as_ref()
-        .ok_or_else(|| SqlError::Internal("NullTest without arg".into()))?;
+        .ok_or_else(|| SQLError::Internal("NullTest without arg".into()))?;
     let negated = matches!(n.nulltesttype(), NullTestType::IsNotNull);
     Ok(Expr::IsNull {
         expr: Box::new(compile_expr(arg)?),
@@ -1123,12 +1126,12 @@ fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
         Val::Fval(f) => Value::Float(
             f.fval
                 .parse::<f64>()
-                .map_err(|e| SqlError::Internal(e.to_string()))?,
+                .map_err(|e| SQLError::Internal(e.to_string()))?,
         ),
         Val::Sval(s) => Value::Str(s.sval.clone()),
         Val::Boolval(b) => Value::Bool(b.boolval),
         other => {
-            return Err(SqlError::Unsupported(format!("constant: {other:?}")));
+            return Err(SQLError::Unsupported(format!("constant: {other:?}")));
         }
     };
     Ok(Expr::Literal(value))
@@ -1147,7 +1150,7 @@ fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
         }
     }
     match parts.len() {
-        0 => Err(SqlError::Internal("empty ColumnRef".into())),
+        0 => Err(SQLError::Internal("empty ColumnRef".into())),
         1 => Ok(Expr::Column(parts.pop().unwrap())),
         _ => {
             // `schema.table.col` collapses to `table.col`; `t.col`
@@ -1200,7 +1203,7 @@ fn compile_window_spec(w: &pg_query::protobuf::WindowDef) -> Result<WindowSpec> 
             let expr_node = sb
                 .node
                 .as_ref()
-                .ok_or_else(|| SqlError::Internal("SortBy without expr".into()))?;
+                .ok_or_else(|| SQLError::Internal("SortBy without expr".into()))?;
             let expr = compile_expr(expr_node)?;
             let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
             order_by.push(OrderBy { expr, descending });
@@ -1216,7 +1219,7 @@ fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {
     let arg = tc
         .arg
         .as_ref()
-        .ok_or_else(|| SqlError::Internal("TypeCast without arg".into()))?;
+        .ok_or_else(|| SQLError::Internal("TypeCast without arg".into()))?;
     let inner = compile_expr(arg)?;
     let raw_names: Vec<String> = tc
         .type_name
