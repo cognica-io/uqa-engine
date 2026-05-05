@@ -460,6 +460,7 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
     let auto_increment = matches!(raw_type.as_str(), "serial" | "bigserial");
     let mut primary_key = false;
     let mut not_null = false;
+    let mut unique = false;
     for c in &col.constraints {
         let Some(inner) = c.node.as_ref() else {
             continue;
@@ -468,6 +469,7 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
             match cstr.contype() {
                 pg_query::protobuf::ConstrType::ConstrPrimary => primary_key = true,
                 pg_query::protobuf::ConstrType::ConstrNotnull => not_null = true,
+                pg_query::protobuf::ConstrType::ConstrUnique => unique = true,
                 _ => {}
             }
         }
@@ -482,6 +484,7 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
         primary_key,
         not_null,
         auto_increment,
+        unique,
     })
 }
 

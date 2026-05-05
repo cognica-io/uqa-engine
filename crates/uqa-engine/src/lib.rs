@@ -789,6 +789,21 @@ impl Engine {
             .map(|c| c.name.clone())
     }
 
+    /// Names of columns with a `UNIQUE` or `PRIMARY KEY` constraint
+    /// declared on the table. Auto-increment columns are excluded
+    /// because the engine guarantees their uniqueness through the
+    /// monotonic id watermark, so re-checking is redundant.
+    pub fn unique_columns(&self, table: &str) -> Vec<String> {
+        let Some(t) = self.table(table) else {
+            return Vec::new();
+        };
+        let cols = t.columns.read();
+        cols.iter()
+            .filter(|c| (c.unique || c.primary_key) && !c.auto_increment)
+            .map(|c| c.name.clone())
+            .collect()
+    }
+
     /// Allocate the next id from the per-table watermark, returning the
     /// allocated value. Updates the watermark in place.
     pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SQLError> {
@@ -1314,6 +1329,7 @@ mod tests {
                 primary_key: false,
                 not_null: false,
                 auto_increment: false,
+                unique: false,
             }];
         }
         eng.add_document("docs", 1, doc([("title", s("alpha"))]));

@@ -451,6 +451,35 @@ fn run_insert(
             document.insert(col.clone(), v);
         }
 
+        // UNIQUE constraint validation -- before any conflict
+        // resolution, every UNIQUE / PRIMARY KEY column whose value
+        // is non-null must not already exist in another row. The
+        // ON CONFLICT branch below intentionally skips this check
+        // because that path explicitly chooses a merge action.
+        if stmt.on_conflict.is_none() {
+            for col in engine.unique_columns(&stmt.table) {
+                let Some(value) = document.get(&col).cloned() else {
+                    continue;
+                };
+                if matches!(value, Value::Null) {
+                    continue;
+                }
+                if engine
+                    .find_conflict(
+                        &stmt.table,
+                        std::slice::from_ref(&col),
+                        std::slice::from_ref(&value),
+                    )
+                    .is_some()
+                {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "UNIQUE constraint violated: duplicate value for column `{col}` in table `{}`",
+                        stmt.table
+                    )));
+                }
+            }
+        }
+
         // ON CONFLICT lookup -- check whether a row with matching
         // conflict-target columns already exists. The conflict
         // columns may include the primary key, so we collect their

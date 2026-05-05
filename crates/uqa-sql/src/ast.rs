@@ -22,6 +22,7 @@ pub enum ColumnType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ColumnDef {
     pub name: String,
     pub ty: ColumnType,
@@ -31,6 +32,10 @@ pub struct ColumnDef {
     /// monotonic counter when the value is omitted from `INSERT`.
     #[serde(default)]
     pub auto_increment: bool,
+    /// `UNIQUE` column constraint -- the engine rejects an INSERT
+    /// whose value for this column already exists in another row.
+    #[serde(default)]
+    pub unique: bool,
 }
 
 #[derive(Debug, Clone)]

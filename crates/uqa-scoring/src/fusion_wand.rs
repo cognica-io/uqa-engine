@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(result.len(), 3);
         // Descending order.
         for w in result.windows(2) {
-            assert!(w[0].1 >= w[1].1, "result not sorted descending: {result:?}",);
+            assert!(w[0].1 >= w[1].1, "result not sorted descending: {result:?}");
         }
         // Doc 1 should win because both signals score it highest.
         assert_eq!(result[0].0, 1);
