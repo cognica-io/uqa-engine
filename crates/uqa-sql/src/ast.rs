@@ -112,6 +112,31 @@ pub struct InsertStmt {
     /// The engine materialises the inner select first and then writes
     /// each row through the standard INSERT path.
     pub select_source: Option<Box<SelectStmt>>,
+    /// `ON CONFLICT (...) DO ...` clause. `None` for plain
+    /// `INSERT INTO ... VALUES ...` without conflict handling.
+    pub on_conflict: Option<OnConflict>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OnConflict {
+    /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
+    /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
+    /// no target.
+    pub conflict_columns: Vec<String>,
+    pub action: OnConflictAction,
+}
+
+#[derive(Debug, Clone)]
+pub enum OnConflictAction {
+    /// `DO NOTHING` -- skip conflicting rows silently.
+    Nothing,
+    /// `DO UPDATE SET col = expr [, ...] [WHERE pred]` -- apply the
+    /// listed assignments to the existing row when the conflict
+    /// target matches.
+    Update {
+        assignments: Vec<(String, Expr)>,
+        r#where: Option<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]

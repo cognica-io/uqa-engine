@@ -450,6 +450,64 @@ fn run_insert(
             }
             document.insert(col.clone(), v);
         }
+
+        // ON CONFLICT lookup -- check whether a row with matching
+        // conflict-target columns already exists. The conflict
+        // columns may include the primary key, so we collect their
+        // current values from the row being inserted.
+        if let Some(on_conflict) = stmt.on_conflict.as_ref() {
+            if !on_conflict.conflict_columns.is_empty() {
+                let conflict_values: Vec<Value> = on_conflict
+                    .conflict_columns
+                    .iter()
+                    .map(|c| document.get(c).cloned().unwrap_or(Value::Null))
+                    .collect();
+                if let Some(existing_id) = engine.find_conflict(
+                    &stmt.table,
+                    &on_conflict.conflict_columns,
+                    &conflict_values,
+                ) {
+                    match &on_conflict.action {
+                        uqa_sql::ast::OnConflictAction::Nothing => {
+                            continue;
+                        }
+                        uqa_sql::ast::OnConflictAction::Update {
+                            assignments,
+                            r#where,
+                        } => {
+                            let existing_doc = engine
+                                .get_document(&stmt.table, existing_id)
+                                .unwrap_or_default();
+                            let row_ctx = EvalContext::new(Some(&existing_doc), params);
+                            if let Some(pred) = r#where {
+                                let keep = eval(pred, &row_ctx)?;
+                                if !uqa_sql::expr::truthy(&keep) {
+                                    continue;
+                                }
+                            }
+                            let mut updates: BTreeMap<String, Value> = BTreeMap::new();
+                            let mut conflict_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+                            for (col, expr) in assignments {
+                                let v = eval(expr, &row_ctx)?;
+                                if let Ok(vec) = value_to_vector(&v) {
+                                    conflict_vectors.insert(col.clone(), vec);
+                                }
+                                updates.insert(col.clone(), v);
+                            }
+                            engine.update_document_fields(
+                                &stmt.table,
+                                existing_id,
+                                updates,
+                                conflict_vectors,
+                            );
+                            affected += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
         let doc_id = if let Some(id) = doc_id {
             id
         } else {

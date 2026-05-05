@@ -687,11 +687,84 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
         } else {
             None
         };
+    let on_conflict = stmt
+        .on_conflict_clause
+        .as_ref()
+        .map(|c| compile_on_conflict(c.as_ref()))
+        .transpose()?;
     Ok(InsertStmt {
         table,
         columns,
         rows,
         select_source,
+        on_conflict,
+    })
+}
+
+fn compile_on_conflict(
+    clause: &pg_query::protobuf::OnConflictClause,
+) -> Result<crate::ast::OnConflict> {
+    use crate::ast::{OnConflict, OnConflictAction};
+    use pg_query::protobuf::OnConflictAction as PgAction;
+
+    let conflict_columns: Vec<String> = clause
+        .infer
+        .as_ref()
+        .map(|infer| {
+            infer
+                .index_elems
+                .iter()
+                .filter_map(|elem| {
+                    elem.node.as_ref().and_then(|inner| match inner {
+                        NodeEnum::IndexElem(ie) => {
+                            if ie.name.is_empty() {
+                                None
+                            } else {
+                                Some(ie.name.clone())
+                            }
+                        }
+                        _ => None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let action = match clause.action() {
+        PgAction::OnconflictNothing => OnConflictAction::Nothing,
+        PgAction::OnconflictUpdate => {
+            let mut assignments: Vec<(String, Expr)> = Vec::new();
+            for tgt in &clause.target_list {
+                let Some(inner) = tgt.node.as_ref() else {
+                    continue;
+                };
+                let NodeEnum::ResTarget(rt) = inner else {
+                    continue;
+                };
+                let Some(val) = rt.val.as_ref() else { continue };
+                let expr = compile_expr(val)?;
+                assignments.push((rt.name.clone(), expr));
+            }
+            let where_clause = clause
+                .where_clause
+                .as_ref()
+                .map(|w| compile_expr(w))
+                .transpose()?;
+            OnConflictAction::Update {
+                assignments,
+                r#where: where_clause,
+            }
+        }
+        PgAction::OnconflictNone | PgAction::Undefined => {
+            return Err(SQLError::Unsupported(
+                "ON CONFLICT without action specifier".into(),
+            ));
+        }
+    };
+
+    Ok(OnConflict {
+        conflict_columns,
+        action,
     })
 }
 

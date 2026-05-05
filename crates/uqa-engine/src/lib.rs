@@ -943,6 +943,75 @@ impl Engine {
         got
     }
 
+    /// Find the first document whose conflict columns all match the
+    /// given values. Returns the existing doc id when a conflict
+    /// exists, `None` when the row would be a fresh insert. Mirrors
+    /// `PostgreSQL`'s `ON CONFLICT (col, ...)` lookup; the conflict
+    /// columns map to the unique-constraint target. The Rust port
+    /// scans every document because the planner does not yet support
+    /// secondary unique indexes; the lookup is still correct for
+    /// small / medium tables, which is where UPSERT is most useful.
+    pub fn find_conflict(
+        &self,
+        table: &str,
+        conflict_columns: &[String],
+        values: &[Value],
+    ) -> Option<DocId> {
+        if conflict_columns.is_empty() || conflict_columns.len() != values.len() {
+            return None;
+        }
+        let t = self.table(table)?;
+        let snap = t.document_store.read().snapshot();
+        for doc_id in snap.doc_ids() {
+            let Some(doc) = snap.get(doc_id) else {
+                continue;
+            };
+            let mut all_match = true;
+            for (col, want) in conflict_columns.iter().zip(values.iter()) {
+                let got = doc.get(col).cloned().unwrap_or(Value::Null);
+                if &got != want {
+                    all_match = false;
+                    break;
+                }
+            }
+            if all_match {
+                return Some(doc_id);
+            }
+        }
+        None
+    }
+
+    /// Apply per-column updates to an existing document. Mirrors the
+    /// `DO UPDATE SET col = expr` branch of an ON CONFLICT clause.
+    /// Returns whether the row was updated; `false` when the document
+    /// no longer exists.
+    pub fn update_document_fields(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        updates: BTreeMap<String, Value>,
+        vectors: BTreeMap<String, Vec<f32>>,
+    ) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let Some(mut doc) = t.document_store.read().get(doc_id) else {
+            return false;
+        };
+        for (k, v) in updates {
+            doc.insert(k, v);
+        }
+        // Re-add the document so the inverted index picks up the new
+        // text fields.
+        t.document_store.write().delete(doc_id);
+        t.inverted_index.write().remove_document(doc_id);
+        for idx in t.vector_indexes.write().values_mut() {
+            idx.as_mut().delete(doc_id);
+        }
+        self.add_document_with_vectors(table, doc_id, doc, vectors);
+        true
+    }
+
     pub fn delete_document(&self, table: &str, doc_id: DocId) {
         let Some(t) = self.table(table) else {
             return;
