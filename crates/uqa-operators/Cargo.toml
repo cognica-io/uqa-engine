@@ -15,5 +15,8 @@ uqa-storage = { workspace = true }
 uqa-scoring = { workspace = true }
 uqa-fusion = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 [lints]
 workspace = true
