@@ -86,6 +86,57 @@ impl ManagedConnection {
         let mut conn = self.inner.lock();
         f(&mut conn)
     }
+
+    /// Open an explicit (non-deferred) transaction. Subsequent
+    /// auto-commit hosts (catalog writes, FTS index updates, ...) all
+    /// flow through the same connection so the transaction enclosing
+    /// them is honoured. Use [`Self::commit_transaction`] /
+    /// [`Self::rollback_transaction`] / [`Self::savepoint`] etc. for
+    /// the lifecycle.
+    pub fn begin_transaction(&self) -> Result<()> {
+        self.with(|c| {
+            c.execute_batch("BEGIN IMMEDIATE")?;
+            Ok(())
+        })
+    }
+
+    pub fn commit_transaction(&self) -> Result<()> {
+        self.with(|c| {
+            c.execute_batch("COMMIT")?;
+            Ok(())
+        })
+    }
+
+    pub fn rollback_transaction(&self) -> Result<()> {
+        self.with(|c| {
+            c.execute_batch("ROLLBACK")?;
+            Ok(())
+        })
+    }
+
+    pub fn savepoint(&self, name: &str) -> Result<()> {
+        let stmt = format!("SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+        self.with(|c| {
+            c.execute_batch(&stmt)?;
+            Ok(())
+        })
+    }
+
+    pub fn release_savepoint(&self, name: &str) -> Result<()> {
+        let stmt = format!("RELEASE SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+        self.with(|c| {
+            c.execute_batch(&stmt)?;
+            Ok(())
+        })
+    }
+
+    pub fn rollback_to_savepoint(&self, name: &str) -> Result<()> {
+        let stmt = format!("ROLLBACK TO SAVEPOINT \"{}\"", name.replace('"', "\"\""));
+        self.with(|c| {
+            c.execute_batch(&stmt)?;
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]
