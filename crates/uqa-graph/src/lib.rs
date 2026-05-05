@@ -52,6 +52,6 @@ pub use rpq::{
 };
 pub use sqlite_store::SQLiteGraphStore;
 pub use store::GraphStore;
-pub use temporal::{TemporalFilter, TemporalTraverse};
+pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;
 pub use versioned_store::VersionedGraphStore;

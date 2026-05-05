@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::{DocId, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
 
 use crate::operators::DEFAULT_GRAPH_SCORE;
+use crate::pattern::GraphPattern;
 use crate::posting_list::{GraphPayload, GraphPostingList};
 use crate::store::GraphStore;
 
@@ -151,5 +152,252 @@ impl<'a> TemporalTraverse<'a> {
             );
         }
         GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+    }
+}
+
+/// Temporal-aware pattern matching (Section 10, Paper 2). Mirrors
+/// `uqa.graph.temporal_pattern_match.TemporalPatternMatchOperator`.
+///
+/// Same algorithm as the standard subgraph matcher but every edge
+/// candidate is filtered through a [`TemporalFilter`] before it is
+/// admitted into the assignment, so only temporally valid edges
+/// participate in pattern matching.
+pub struct TemporalPatternMatch<'a> {
+    pub pattern: GraphPattern,
+    pub graph: &'a str,
+    pub temporal_filter: TemporalFilter,
+    pub score: f64,
+}
+
+impl<'a> TemporalPatternMatch<'a> {
+    pub fn new(pattern: GraphPattern, graph: &'a str) -> Self {
+        Self {
+            pattern,
+            graph,
+            temporal_filter: TemporalFilter::Any,
+            score: DEFAULT_GRAPH_SCORE,
+        }
+    }
+
+    pub fn filter(mut self, filter: TemporalFilter) -> Self {
+        self.temporal_filter = filter;
+        self
+    }
+
+    pub fn score(mut self, score: f64) -> Self {
+        self.score = score;
+        self
+    }
+
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+        let candidates = self.compute_candidates(store);
+
+        // Group edges by both source and target variable so the
+        // backtracking validator can quickly find every edge that
+        // touches a newly-assigned variable.
+        let mut var_edges: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, ep) in self.pattern.edge_patterns.iter().enumerate() {
+            var_edges.entry(ep.source_var.clone()).or_default().push(i);
+            var_edges.entry(ep.target_var.clone()).or_default().push(i);
+        }
+
+        let mut unassigned: BTreeSet<String> = self
+            .pattern
+            .vertex_patterns
+            .iter()
+            .map(|vp| vp.variable.clone())
+            .collect();
+        let mut assignment: BTreeMap<String, VertexId> = BTreeMap::new();
+        let mut assigned_values: BTreeSet<VertexId> = BTreeSet::new();
+        let mut matches: Vec<BTreeMap<String, VertexId>> = Vec::new();
+
+        self.backtrack(
+            store,
+            &candidates,
+            &var_edges,
+            &mut unassigned,
+            &mut assignment,
+            &mut assigned_values,
+            &mut matches,
+        );
+
+        let mut entries: Vec<PostingEntry> = Vec::with_capacity(matches.len());
+        let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
+        for (i, assn) in matches.iter().enumerate() {
+            let doc_id = (i as u64) + 1;
+            let mut fields: BTreeMap<String, Value> = BTreeMap::new();
+            for (k, v) in assn {
+                fields.insert(k.clone(), Value::Int(*v as i64));
+            }
+            entries.push(PostingEntry::new(
+                doc_id,
+                Payload {
+                    score: self.score,
+                    fields,
+                    ..Default::default()
+                },
+            ));
+            let match_vertices: Vec<VertexId> = assn.values().copied().collect();
+            let match_edges = self.collect_match_edges(store, assn);
+            graph_payloads.insert(
+                doc_id,
+                GraphPayload {
+                    subgraph_vertices: match_vertices,
+                    subgraph_edges: match_edges,
+                    graph_name: self.graph.to_string(),
+                    score_override: Some(self.score),
+                },
+            );
+        }
+
+        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+    }
+
+    fn compute_candidates<G: GraphStore>(&self, store: &G) -> BTreeMap<String, Vec<VertexId>> {
+        let mut out: BTreeMap<String, Vec<VertexId>> = BTreeMap::new();
+        let vids = store.vertex_ids_in_graph(self.graph);
+        for vp in &self.pattern.vertex_patterns {
+            let candidates: Vec<VertexId> = vids
+                .iter()
+                .copied()
+                .filter(|vid| {
+                    let Some(vertex) = store.get_vertex(*vid) else {
+                        return false;
+                    };
+                    vp.constraints.iter().all(|c| c.matches(vertex))
+                })
+                .collect();
+            out.insert(vp.variable.clone(), candidates);
+        }
+        out
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn backtrack<G: GraphStore>(
+        &self,
+        store: &G,
+        candidates: &BTreeMap<String, Vec<VertexId>>,
+        var_edges: &BTreeMap<String, Vec<usize>>,
+        unassigned: &mut BTreeSet<String>,
+        assignment: &mut BTreeMap<String, VertexId>,
+        assigned_values: &mut BTreeSet<VertexId>,
+        matches: &mut Vec<BTreeMap<String, VertexId>>,
+    ) {
+        if unassigned.is_empty() {
+            matches.push(assignment.clone());
+            return;
+        }
+        // Pick the variable with the fewest candidates first (MRV
+        // heuristic, same as Python's `min(unassigned, key=lambda v:
+        // len(candidates[v]))`).
+        let pick: String = unassigned
+            .iter()
+            .min_by_key(|v| candidates.get(*v).map_or(usize::MAX, Vec::len))
+            .cloned()
+            .unwrap();
+
+        let cands: Vec<VertexId> = candidates.get(&pick).cloned().unwrap_or_default();
+        unassigned.remove(&pick);
+
+        for vid in cands {
+            if assigned_values.contains(&vid) {
+                continue;
+            }
+            assignment.insert(pick.clone(), vid);
+            assigned_values.insert(vid);
+
+            if self.validate_edges_for(store, &pick, var_edges, assignment) {
+                self.backtrack(
+                    store,
+                    candidates,
+                    var_edges,
+                    unassigned,
+                    assignment,
+                    assigned_values,
+                    matches,
+                );
+            }
+
+            assignment.remove(&pick);
+            assigned_values.remove(&vid);
+        }
+
+        unassigned.insert(pick);
+    }
+
+    fn validate_edges_for<G: GraphStore>(
+        &self,
+        store: &G,
+        var: &str,
+        var_edges: &BTreeMap<String, Vec<usize>>,
+        assignment: &BTreeMap<String, VertexId>,
+    ) -> bool {
+        let Some(edges) = var_edges.get(var) else {
+            return true;
+        };
+        for &ei in edges {
+            let ep = &self.pattern.edge_patterns[ei];
+            let (Some(&src_id), Some(&tgt_id)) = (
+                assignment.get(&ep.source_var),
+                assignment.get(&ep.target_var),
+            ) else {
+                continue;
+            };
+            let mut found = false;
+            for eid in store.out_edge_ids(src_id, self.graph) {
+                let Some(edge) = store.get_edge(eid) else {
+                    continue;
+                };
+                if edge.target_id != tgt_id {
+                    continue;
+                }
+                if let Some(label) = &ep.label {
+                    if edge.label != *label {
+                        continue;
+                    }
+                }
+                if !ep.constraints.iter().all(|c| c.matches(edge)) {
+                    continue;
+                }
+                if !self.temporal_filter.is_valid(&edge.properties) {
+                    continue;
+                }
+                found = true;
+                break;
+            }
+            if !found {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn collect_match_edges<G: GraphStore>(
+        &self,
+        store: &G,
+        assignment: &BTreeMap<String, VertexId>,
+    ) -> Vec<EdgeId> {
+        let mut edge_ids: BTreeSet<EdgeId> = BTreeSet::new();
+        for ep in &self.pattern.edge_patterns {
+            let (Some(&src_id), Some(&tgt_id)) = (
+                assignment.get(&ep.source_var),
+                assignment.get(&ep.target_var),
+            ) else {
+                continue;
+            };
+            for eid in store.out_edge_ids(src_id, self.graph) {
+                let Some(edge) = store.get_edge(eid) else {
+                    continue;
+                };
+                if edge.target_id == tgt_id
+                    && (ep.label.as_deref().is_none_or(|l| edge.label == l))
+                    && self.temporal_filter.is_valid(&edge.properties)
+                {
+                    edge_ids.insert(eid);
+                    break;
+                }
+            }
+        }
+        edge_ids.into_iter().collect()
     }
 }
