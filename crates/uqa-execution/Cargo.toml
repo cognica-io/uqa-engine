@@ -1,6 +1,6 @@
 [package]
 name = "uqa-execution"
-description = "Volcano physical operators with Apache Arrow batches"
+description = "Volcano physical operators with row-batch pipelines"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,12 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+uqa-core = { workspace = true }
+uqa-sql = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
