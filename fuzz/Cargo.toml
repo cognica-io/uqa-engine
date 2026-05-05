@@ -1,0 +1,34 @@
+[package]
+name = "uqa-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+uqa-core = { path = "../crates/uqa-core" }
+uqa-sql = { path = "../crates/uqa-sql" }
+uqa-graph = { path = "../crates/uqa-graph" }
+
+[[bin]]
+name = "sql_compile"
+path = "fuzz_targets/sql_compile.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "cypher_parse"
+path = "fuzz_targets/cypher_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "posting_list_round_trip"
+path = "fuzz_targets/posting_list_round_trip.rs"
+test = false
+doc = false
