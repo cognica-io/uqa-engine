@@ -171,4 +171,3 @@ fn baseline_two_hop_is_non_empty() {
     let sigs = match_signatures(&r);
     assert!(!sigs.is_empty(), "expected non-empty matches, got {sigs:?}");
 }
-
