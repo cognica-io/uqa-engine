@@ -56,6 +56,7 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SqlParam]) -> Result<SqlRes
 }
 
 fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<SqlResult, SqlError> {
+    let stmt = optimize_statement(stmt);
     match stmt {
         Statement::CreateTable(c) => run_create_table(engine, c),
         Statement::CreateIndex(c) => run_create_index(engine, c),
@@ -65,6 +66,15 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<Sql
         Statement::Delete(d) => run_delete(engine, d, params),
         Statement::Drop(d) => run_drop(engine, d),
         Statement::AlterTable(a) => run_alter_table(engine, a),
+    }
+}
+
+fn optimize_statement(stmt: Statement) -> Statement {
+    use uqa_planner::optimizer::{optimize, OptimizerConfig};
+    let cfg = OptimizerConfig::default();
+    match stmt {
+        Statement::Select(s) => Statement::Select(Box::new(optimize(*s, &cfg))),
+        other => other,
     }
 }
 
@@ -1098,30 +1108,24 @@ fn try_hash_inner_join(
     else {
         return Ok(None);
     };
-    // Bucket right rows by their join key.
-    let mut buckets: std::collections::BTreeMap<uqa_core::Value, Vec<&ResultRow>> =
-        std::collections::BTreeMap::new();
-    for row in right_rows {
+    // Use the shared hash-join algorithm from `uqa-joins`. The closures
+    // evaluate the picked join keys against each row and lift the
+    // result into a hashable `JoinKey`; null-valued keys are skipped
+    // so they do not match anything.
+    use uqa_joins::row_join::{hash_inner_join, JoinKey};
+    let key_of = |row: &ResultRow, expr: &Expr| -> Option<JoinKey> {
         let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
-        if let Ok(v) = uqa_sql::expr::eval(right_key, &ctx) {
-            if v != uqa_core::Value::Null {
-                buckets.entry(v).or_default().push(row);
-            }
+        match uqa_sql::expr::eval(expr, &ctx) {
+            Ok(uqa_core::Value::Null) | Err(_) => None,
+            Ok(v) => Some(JoinKey::new(&v)),
         }
-    }
-    let mut out = Vec::with_capacity(left_rows.len());
-    for l in left_rows {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(l), params);
-        let key = match uqa_sql::expr::eval(left_key, &ctx) {
-            Ok(uqa_core::Value::Null) | Err(_) => continue,
-            Ok(v) => v,
-        };
-        if let Some(rows) = buckets.get(&key) {
-            for r in rows {
-                out.push(merge_rows(l, r));
-            }
-        }
-    }
+    };
+    let out = hash_inner_join(
+        left_rows,
+        right_rows,
+        |row| key_of(row, left_key),
+        |row| key_of(row, right_key),
+    );
     Ok(Some(out))
 }
 
