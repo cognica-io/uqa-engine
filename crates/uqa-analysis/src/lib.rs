@@ -9,6 +9,7 @@
 
 pub mod analyzer;
 pub mod char_filter;
+pub mod highlight;
 pub mod porter;
 pub mod registry;
 pub mod token_filter;
@@ -16,6 +17,7 @@ pub mod tokenizer;
 
 pub use analyzer::Analyzer;
 pub use char_filter::CharFilter;
+pub use highlight::{highlight, HighlightOptions};
 pub use registry::{
     drop_analyzer, get_analyzer, list_analyzers, register_analyzer, DEFAULT_ANALYZER_NAME,
 };

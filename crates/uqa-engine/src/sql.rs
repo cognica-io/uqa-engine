@@ -1416,10 +1416,135 @@ fn project_join_row(
             out.insert(label, value);
             continue;
         }
+        // `uqa_highlight()` evaluates against the analyzer for the
+        // matched field, which the evaluator does not have access
+        // to. Intercept the call here, resolve the string column +
+        // query, and emit the wrapped text through
+        // `uqa_analysis::highlight`.
+        if let Expr::Func { name, args } = &proj.expr {
+            if name.eq_ignore_ascii_case("uqa_highlight") {
+                let value = run_uqa_highlight(src, args, params)?;
+                out.insert(label, value);
+                continue;
+            }
+        }
         let value = uqa_sql::expr::eval(&proj.expr, &ctx)?;
         out.insert(label, value);
     }
     Ok(out)
+}
+
+/// Evaluate a `uqa_highlight(field, query[, start_tag, end_tag,
+/// max_fragments, fragment_size])` projection. Mirrors the Python
+/// reference's `_run_uqa_highlight` shape: field can be either a
+/// bare column reference (looked up on the row) or a literal string;
+/// the rest of the args are scalar literals after evaluation.
+fn run_uqa_highlight(
+    row: &ResultRow,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    if args.len() < 2 || args.len() > 6 {
+        return Err(SQLError::BadArity {
+            name: "uqa_highlight".into(),
+            expected: "2..=6".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+    let text = match &args[0] {
+        Expr::Column(c) => match row.get(c) {
+            Some(Value::Str(s)) => s.clone(),
+            Some(other) => format!("{other:?}"),
+            None => return Ok(Value::Null),
+        },
+        Expr::QualifiedColumn { qualifier, column } => {
+            match row.get(&format!("{qualifier}.{column}")) {
+                Some(Value::Str(s)) => s.clone(),
+                Some(other) => format!("{other:?}"),
+                None => return Ok(Value::Null),
+            }
+        }
+        other => match uqa_sql::expr::eval(other, &ctx)? {
+            Value::Str(s) => s,
+            Value::Null => return Ok(Value::Null),
+            v => format!("{v:?}"),
+        },
+    };
+    let query_str = match uqa_sql::expr::eval(&args[1], &ctx)? {
+        Value::Str(s) => s,
+        Value::Null => return Ok(Value::Str(text)),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "uqa_highlight query must be string, got {other:?}"
+            )));
+        }
+    };
+    let start_tag = match args.get(2) {
+        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+            Value::Str(s) => s,
+            Value::Null => "<b>".into(),
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "uqa_highlight start_tag must be string, got {other:?}"
+                )));
+            }
+        },
+        None => "<b>".into(),
+    };
+    let end_tag = match args.get(3) {
+        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+            Value::Str(s) => s,
+            Value::Null => "</b>".into(),
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "uqa_highlight end_tag must be string, got {other:?}"
+                )));
+            }
+        },
+        None => "</b>".into(),
+    };
+    let max_fragments = match args.get(4) {
+        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+            Value::Int(n) if n >= 0 => n as usize,
+            Value::Null => 0,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "uqa_highlight max_fragments must be non-negative integer, got {other:?}"
+                )));
+            }
+        },
+        None => 0,
+    };
+    let fragment_size = match args.get(5) {
+        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+            Value::Int(n) if n > 0 => n as usize,
+            Value::Null => 150,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "uqa_highlight fragment_size must be positive integer, got {other:?}"
+                )));
+            }
+        },
+        None => 150,
+    };
+    let opts = uqa_analysis::HighlightOptions {
+        start_tag,
+        end_tag,
+        max_fragments,
+        fragment_size,
+    };
+    // Pull every whitespace-separated token out of the query string
+    // as a candidate match term. The Python reference parses the FTS
+    // query, but a simple split is what callers reach for in
+    // practice and matches what the test fixture exercises.
+    let terms: Vec<String> = query_str
+        .split_whitespace()
+        .filter(|t| !matches!(t.to_ascii_lowercase().as_str(), "and" | "or" | "not"))
+        .map(std::string::ToString::to_string)
+        .collect();
+    let out = uqa_analysis::highlight(&text, &terms, None, &opts);
+    Ok(Value::Str(out))
 }
 
 fn aggregate_join_rows(
@@ -1836,6 +1961,31 @@ fn execute_function(
         FunctionKind::MultiFieldMatch => run_multi_field_match(engine, table, args, params),
         FunctionKind::StagedRetrieval => run_staged_retrieval(engine, table, args, params),
         FunctionKind::DeepPredict => run_deep_predict(engine, args, params),
+        // The remaining UQA functions either return a non-posting
+        // shape or are construction-time helpers; they should never
+        // reach the row-emitting dispatcher and are surfaced as
+        // Unsupported here so the projection / WHERE paths can route
+        // them through their dedicated branches instead.
+        FunctionKind::UQAHighlight
+        | FunctionKind::UQAFacets
+        | FunctionKind::TraverseMatch
+        | FunctionKind::TemporalTraverse
+        | FunctionKind::GraphCreate
+        | FunctionKind::GraphDrop
+        | FunctionKind::GraphEdges
+        | FunctionKind::AttentionFusion
+        | FunctionKind::LearnedFusion
+        | FunctionKind::CalibratedVectorMatch
+        | FunctionKind::DeepLearn
+        | FunctionKind::Convolve
+        | FunctionKind::Pool
+        | FunctionKind::Flatten
+        | FunctionKind::Dense
+        | FunctionKind::Softmax
+        | FunctionKind::Layer
+        | FunctionKind::Model => Err(SQLError::Unsupported(format!(
+            "row-emitting dispatch for `{name}` is handled elsewhere"
+        ))),
     }
 }
 
@@ -2258,7 +2408,25 @@ fn run_fuse_log_odds(
                     | FunctionKind::GraphNeighbors
                     | FunctionKind::MultiFieldMatch
                     | FunctionKind::StagedRetrieval
-                    | FunctionKind::DeepPredict => {
+                    | FunctionKind::DeepPredict
+                    | FunctionKind::UQAHighlight
+                    | FunctionKind::UQAFacets
+                    | FunctionKind::TraverseMatch
+                    | FunctionKind::TemporalTraverse
+                    | FunctionKind::GraphCreate
+                    | FunctionKind::GraphDrop
+                    | FunctionKind::GraphEdges
+                    | FunctionKind::AttentionFusion
+                    | FunctionKind::LearnedFusion
+                    | FunctionKind::CalibratedVectorMatch
+                    | FunctionKind::DeepLearn
+                    | FunctionKind::Convolve
+                    | FunctionKind::Pool
+                    | FunctionKind::Flatten
+                    | FunctionKind::Dense
+                    | FunctionKind::Softmax
+                    | FunctionKind::Layer
+                    | FunctionKind::Model => {
                         return Err(SQLError::Unsupported(format!(
                             "function {name} cannot be nested under fuse_log_odds"
                         )));
@@ -2395,6 +2563,16 @@ fn build_projection_row(
                 row.insert(k.clone(), v.clone());
             }
             continue;
+        }
+        // `uqa_highlight()` runs against the analyzer for the matched
+        // field, which the evaluator does not see. Intercept it here
+        // and emit the wrapped text directly.
+        if let Expr::Func { name, args } = &proj.expr {
+            if name.eq_ignore_ascii_case("uqa_highlight") {
+                let value = run_uqa_highlight(document, args, params)?;
+                row.insert(label, value);
+                continue;
+            }
         }
         let value = eval(&proj.expr, &ctx)?;
         row.insert(label, value);

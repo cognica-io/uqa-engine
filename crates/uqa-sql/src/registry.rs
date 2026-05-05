@@ -44,6 +44,46 @@ pub enum FunctionKind {
     StagedRetrieval,
     /// `deep_predict(model_name)` — runs the saved deep-fusion model.
     DeepPredict,
+    /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
+    /// fragment_size])` — markup search results around matched terms.
+    UQAHighlight,
+    /// `uqa_facets(field [, field2, ...])` — facet counts over the
+    /// posting list, computed against the current row context.
+    UQAFacets,
+    /// `traverse_match(graph, start, label, max_hops)` — BFS traversal
+    /// emitting `(doc_id, score)` weighted by hop distance.
+    TraverseMatch,
+    /// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
+    /// — `traverse_match` filtered by edge `valid_from`/`valid_to`.
+    TemporalTraverse,
+    /// `graph_create(graph_name)` — register a new in-memory graph.
+    GraphCreate,
+    /// `graph_drop(graph_name)` — drop a registered graph.
+    GraphDrop,
+    /// `graph_edges(graph_name [, label])` — emit every edge in the
+    /// graph as `(source, target, label, weight)` rows.
+    GraphEdges,
+    /// `attention(signal_1, signal_2, ...)` — multi-signal attention
+    /// fusion (single-head).
+    AttentionFusion,
+    /// `learned_fusion(model, signal_1, ...)` — learned per-feature
+    /// weight fusion using a saved `LearnedFusion` model.
+    LearnedFusion,
+    /// `calibrated_vector_match(field, vector, k [, threshold])` —
+    /// KNN with calibrated cosine probabilities (Paper 5).
+    CalibratedVectorMatch,
+    /// `deep_learn(model, training_set)` — kick off analytical
+    /// training (Paper 4) for the named deep-fusion model.
+    DeepLearn,
+    /// Deep-fusion construction helpers used inside `deep_learn` /
+    /// `deep_predict` argument expressions:
+    Convolve,
+    Pool,
+    Flatten,
+    Dense,
+    Softmax,
+    Layer,
+    Model,
 }
 
 fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
@@ -60,6 +100,27 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("multi_field_match", FunctionKind::MultiFieldMatch);
         m.insert("staged_retrieval", FunctionKind::StagedRetrieval);
         m.insert("deep_predict", FunctionKind::DeepPredict);
+        m.insert("uqa_highlight", FunctionKind::UQAHighlight);
+        m.insert("uqa_facets", FunctionKind::UQAFacets);
+        m.insert("traverse_match", FunctionKind::TraverseMatch);
+        m.insert("temporal_traverse", FunctionKind::TemporalTraverse);
+        m.insert("graph_create", FunctionKind::GraphCreate);
+        m.insert("graph_drop", FunctionKind::GraphDrop);
+        m.insert("graph_edges", FunctionKind::GraphEdges);
+        m.insert("attention", FunctionKind::AttentionFusion);
+        m.insert("learned_fusion", FunctionKind::LearnedFusion);
+        m.insert(
+            "calibrated_vector_match",
+            FunctionKind::CalibratedVectorMatch,
+        );
+        m.insert("deep_learn", FunctionKind::DeepLearn);
+        m.insert("convolve", FunctionKind::Convolve);
+        m.insert("pool", FunctionKind::Pool);
+        m.insert("flatten", FunctionKind::Flatten);
+        m.insert("dense", FunctionKind::Dense);
+        m.insert("softmax", FunctionKind::Softmax);
+        m.insert("layer", FunctionKind::Layer);
+        m.insert("model", FunctionKind::Model);
         m
     })
 }
