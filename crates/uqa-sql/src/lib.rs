@@ -33,6 +33,7 @@ pub mod ast;
 pub mod compiler;
 pub mod error;
 pub mod expr;
+pub mod fts_query;
 pub mod params;
 pub mod registry;
 pub mod result;
@@ -40,5 +41,10 @@ pub mod result;
 pub use ast::{ColumnType, Statement};
 pub use compiler::{compile, plan_only_for_test};
 pub use error::SQLError;
+pub use fts_query::{
+    compile as compile_fts_node, compile_query_string as compile_fts_query_string,
+    has_vector_signal, resolve_field as resolve_fts_field, tokenize as fts_tokenize, FTSNode,
+    FTSParser, FTSToken, FTSTokenType, PhraseTokenizer, FTS_VECTOR_K,
+};
 pub use params::SQLParam;
 pub use result::{ResultRow, SQLResult};
