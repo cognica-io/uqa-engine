@@ -30,8 +30,9 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
-    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt, WindowSpec,
+    ColumnDef as SqlColumnDef, ColumnType, CreateIndex, CreateTable, Cte, DeleteStmt, Expr,
+    FromClause, InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, SetOpKind, Statement,
+    UpdateStmt, WindowSpec,
 };
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -59,7 +60,7 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SqlParam]) -> Result<Sql
         Statement::CreateTable(c) => run_create_table(engine, c),
         Statement::CreateIndex(c) => run_create_index(engine, c),
         Statement::Insert(i) => run_insert(engine, i, params),
-        Statement::Select(s) => run_select(engine, s, params),
+        Statement::Select(s) => run_select(engine, *s, params),
         Statement::Update(u) => run_update(engine, u, params),
         Statement::Delete(d) => run_delete(engine, d, params),
     }
@@ -241,6 +242,11 @@ fn run_select(
     stmt: SelectStmt,
     params: &[SqlParam],
 ) -> Result<SqlResult, SqlError> {
+    if !stmt.with.is_empty() || stmt.set_op.is_some() {
+        let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+        return execute_select(engine, &stmt, params, &mut ctes);
+    }
+
     let from = stmt
         .from
         .as_ref()
@@ -257,6 +263,212 @@ fn run_select(
     }
 
     run_joined_select(engine, from, &stmt, params)
+}
+
+/// Execute a SELECT that may carry CTEs and/or set ops, returning the
+/// final result. CTEs are materialized into the `ctes` map first so the
+/// FROM clause can resolve references to them.
+fn execute_select(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+) -> Result<SqlResult, SqlError> {
+    materialize_ctes(engine, &stmt.with, params, ctes)?;
+
+    let lhs = run_query_block(engine, stmt, params, ctes)?;
+
+    let Some(set_op) = stmt.set_op.as_ref() else {
+        return Ok(lhs);
+    };
+    let rhs = execute_select(engine, &set_op.right, params, ctes)?;
+    let combined = match (set_op.kind, set_op.all) {
+        (SetOpKind::Union, true) => {
+            let mut rows = lhs.rows;
+            rows.extend(rhs.rows);
+            SqlResult::from_rows(lhs.columns, rows)
+        }
+        (SetOpKind::Union, false) => {
+            let mut rows = lhs.rows;
+            rows.extend(rhs.rows);
+            rows.dedup();
+            SqlResult::from_rows(lhs.columns, rows)
+        }
+        (SetOpKind::Intersect, _) => {
+            let mut rows: Vec<ResultRow> = lhs
+                .rows
+                .into_iter()
+                .filter(|r| rhs.rows.iter().any(|s| s == r))
+                .collect();
+            if !set_op.all {
+                rows.dedup();
+            }
+            SqlResult::from_rows(lhs.columns, rows)
+        }
+        (SetOpKind::Except, _) => {
+            let mut rows: Vec<ResultRow> = lhs
+                .rows
+                .into_iter()
+                .filter(|r| !rhs.rows.iter().any(|s| s == r))
+                .collect();
+            if !set_op.all {
+                rows.dedup();
+            }
+            SqlResult::from_rows(lhs.columns, rows)
+        }
+    };
+    Ok(combined)
+}
+
+fn run_query_block(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    params: &[SqlParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<SqlResult, SqlError> {
+    let from = stmt
+        .from
+        .as_ref()
+        .ok_or_else(|| SqlError::Unsupported("SELECT without FROM".into()))?;
+
+    // If the only FROM is a single CTE-backed table with no alias and
+    // no window/aggregate, route through the joined path so the CTE
+    // rows get the correct qualifier prefixing.
+    let mut joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
+
+    if let Some(filter) = stmt.r#where.as_ref() {
+        joined.retain(|row| {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+            uqa_sql::expr::eval(filter, &ctx)
+                .map(|v| uqa_sql::expr::truthy(&v))
+                .unwrap_or(false)
+        });
+    }
+
+    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+        let columns = projection_columns(&stmt.projections);
+        let rows = aggregate_join_rows(stmt, &joined, params)?;
+        let rows = apply_row_order_limit(rows, stmt, params)?;
+        return Ok(SqlResult::from_rows(columns, rows));
+    }
+
+    if has_window(&stmt.projections) {
+        let columns = projection_columns(&stmt.projections);
+        let with_windows = compute_window_columns(&stmt.projections, joined, params)?;
+        let mut rows: Vec<ResultRow> = with_windows
+            .iter()
+            .map(|src| project_join_row(src, &stmt.projections, params))
+            .collect::<Result<_, _>>()?;
+        rows = apply_row_order_limit(rows, stmt, params)?;
+        return Ok(SqlResult::from_rows(columns, rows));
+    }
+
+    let columns = projection_columns(&stmt.projections);
+    let mut rows: Vec<ResultRow> = joined
+        .iter()
+        .map(|src| project_join_row(src, &stmt.projections, params))
+        .collect::<Result<_, _>>()?;
+    rows = apply_row_order_limit(rows, stmt, params)?;
+    Ok(SqlResult::from_rows(columns, rows))
+}
+
+fn materialize_ctes(
+    engine: &Engine,
+    list: &[Cte],
+    params: &[SqlParam],
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+) -> Result<(), SqlError> {
+    for cte in list {
+        let rows = if cte.recursive {
+            materialize_recursive_cte(engine, cte, params, ctes)?
+        } else {
+            execute_select(engine, &cte.query, params, ctes)?.rows
+        };
+        ctes.insert(cte.name.clone(), rows);
+    }
+    Ok(())
+}
+
+/// Iterate the recursive CTE: take the anchor (LHS of UNION ALL) as
+/// the initial row set, then repeatedly evaluate the recursive step
+/// (RHS) with the CTE bound to the *new rows from the previous
+/// iteration* (working set), unioning the result back into the total.
+/// Caps at 1024 iterations to keep buggy queries from running away.
+fn materialize_recursive_cte(
+    engine: &Engine,
+    cte: &Cte,
+    params: &[SqlParam],
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Vec<ResultRow>, SqlError> {
+    let set_op = cte
+        .query
+        .set_op
+        .as_ref()
+        .ok_or_else(|| SqlError::Unsupported("recursive CTE requires UNION ALL".into()))?;
+    if set_op.kind != SetOpKind::Union || !set_op.all {
+        return Err(SqlError::Unsupported(
+            "recursive CTE only supports UNION ALL".into(),
+        ));
+    }
+
+    // Anchor: the LHS — the same SelectStmt with set_op stripped.
+    let mut anchor_stmt = cte.query.as_ref().clone();
+    anchor_stmt.set_op = None;
+    anchor_stmt.with.clear();
+    let anchor_columns = projection_columns(&anchor_stmt.projections);
+    let anchor_rows = run_query_block(engine, &anchor_stmt, params, ctes)?.rows;
+
+    let mut all_rows = anchor_rows.clone();
+    let mut working = anchor_rows;
+
+    let mut step_stmt = set_op.right.clone();
+    step_stmt.with.clear();
+    let step_columns = projection_columns(&step_stmt.projections);
+
+    const MAX_ITER: usize = 1024;
+    for _ in 0..MAX_ITER {
+        if working.is_empty() {
+            break;
+        }
+        // Bind the CTE name to the working set under the anchor's
+        // column shape so the recursive step's FROM ... <cte> ... sees
+        // the same keys it saw on the prior pass.
+        let working_normalized: Vec<ResultRow> = working
+            .iter()
+            .map(|row| rename_columns(row, &anchor_columns, &anchor_columns))
+            .collect();
+        ctes.insert(cte.name.clone(), working_normalized);
+        let new_rows = run_query_block(engine, &step_stmt, params, ctes)?.rows;
+        ctes.remove(&cte.name);
+
+        if new_rows.is_empty() {
+            break;
+        }
+        // Rename the step's positional projection labels to the
+        // anchor's so subsequent iterations and the outer SELECT see a
+        // consistent shape (anchor names win, mirroring PostgreSQL).
+        let renamed: Vec<ResultRow> = new_rows
+            .into_iter()
+            .map(|row| rename_columns(&row, &step_columns, &anchor_columns))
+            .collect();
+        all_rows.extend(renamed.clone());
+        working = renamed;
+    }
+    Ok(all_rows)
+}
+
+fn rename_columns(row: &ResultRow, src: &[String], dst: &[String]) -> ResultRow {
+    let mut out = ResultRow::new();
+    for (i, key) in src.iter().enumerate() {
+        if let Some(value) = row.get(key) {
+            let target = dst.get(i).cloned().unwrap_or_else(|| key.clone());
+            out.insert(target, value.clone());
+        }
+    }
+    for (k, v) in row {
+        out.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+    out
 }
 
 fn run_single_table_select(
@@ -284,10 +496,46 @@ fn run_single_table_select(
         return Ok(SqlResult::from_rows(columns, rows));
     }
 
+    if order_by_references_field(stmt) {
+        // ORDER BY references something other than `_score`; defer
+        // ordering / skip / limit to the row-level evaluator that can
+        // resolve arbitrary expressions against the projected
+        // document.
+        let columns = projection_columns(&stmt.projections);
+        let mut all_rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
+        // Bring the underlying document fields into each row so the
+        // row evaluator can read columns like `qty` even when the
+        // SELECT projection drops them.
+        for (entry, row) in scored.iter().zip(all_rows.iter_mut()) {
+            if let Some(doc) = engine.get_document(table, entry.doc_id) {
+                for (k, v) in doc {
+                    row.entry(k).or_insert(v);
+                }
+            }
+        }
+        let rows = apply_row_order_limit(all_rows, stmt, params)?;
+        // Strip the helper fields to keep the projection honest.
+        let projected: Vec<_> = rows
+            .into_iter()
+            .map(|mut row| {
+                row.retain(|k, _| columns.iter().any(|c| c == k));
+                row
+            })
+            .collect();
+        return Ok(SqlResult::from_rows(columns, projected));
+    }
+
     let scored = apply_order_limit(scored, stmt);
     let columns = projection_columns(&stmt.projections);
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SqlResult::from_rows(columns, rows))
+}
+
+fn order_by_references_field(stmt: &SelectStmt) -> bool {
+    stmt.order_by.iter().any(|o| match &o.expr {
+        Expr::Column(name) => name != "_score",
+        _ => true,
+    })
 }
 
 /// Multi-table SELECT path. Each input table contributes a row set
@@ -351,11 +599,12 @@ fn compute_window_columns(
     params: &[SqlParam],
 ) -> Result<Vec<ResultRow>, SqlError> {
     let mut rows = rows;
-    for proj in projections {
+    let labels = projection_columns(projections);
+    for (idx, proj) in projections.iter().enumerate() {
         let Expr::WindowCall { name, args, spec } = &proj.expr else {
             continue;
         };
-        let label = projection_label(proj);
+        let label = labels[idx].clone();
         let values = evaluate_window(name, args, spec, &rows, params)?;
         for (row, value) in rows.iter_mut().zip(values) {
             row.insert(label.clone(), value);
@@ -561,6 +810,27 @@ fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
     out
 }
 
+/// Re-key a row that already has unprefixed column labels onto a new
+/// qualifier. Used to plug CTE materializations into the JOIN executor
+/// under whatever alias the outer query referenced them by.
+fn reprefix_row(qual: &str, row: &ResultRow) -> ResultRow {
+    let mut out = ResultRow::new();
+    for (k, v) in row {
+        // CTE rows are already keyed by their projection labels; lift
+        // unqualified labels under the new qualifier so qualified refs
+        // (`alias.col`) and unqualified suffix matches both resolve.
+        let key = if k.contains('.') {
+            // Strip an existing qualifier and re-prefix.
+            let (_, col) = k.split_once('.').unwrap_or((qual, k.as_str()));
+            format!("{qual}.{col}")
+        } else {
+            format!("{qual}.{k}")
+        };
+        out.insert(key, v.clone());
+    }
+    out
+}
+
 fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
     let mut out = left.clone();
     for (k, v) in right {
@@ -598,9 +868,23 @@ fn build_join_rows(
     from: &FromClause,
     params: &[SqlParam],
 ) -> Result<Vec<ResultRow>, SqlError> {
+    build_join_rows_with_ctes(engine, from, params, &BTreeMap::new())
+}
+
+fn build_join_rows_with_ctes(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SqlParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Vec<ResultRow>, SqlError> {
     match from {
         FromClause::Table { name, alias } => {
             let qual = qualifier_for(name, alias.as_deref());
+            // CTE reference takes precedence over a real table of the
+            // same name (matches PostgreSQL semantics).
+            if let Some(rows) = ctes.get(name) {
+                return Ok(rows.iter().map(|row| reprefix_row(&qual, row)).collect());
+            }
             Ok(load_table_rows(engine, name)
                 .iter()
                 .map(|d| prefix_row(&qual, d))
@@ -612,12 +896,19 @@ fn build_join_rows(
             kind,
             on,
         } => {
-            let left_rows = build_join_rows(engine, left, params)?;
-            let right_rows = build_join_rows(engine, right, params)?;
+            let left_rows = build_join_rows_with_ctes(engine, left, params, ctes)?;
+            let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
             let on_expr = on.as_ref();
 
             match kind {
                 JoinKind::Inner | JoinKind::Cross => {
+                    if matches!(kind, JoinKind::Inner) {
+                        if let Some(rows) =
+                            try_hash_inner_join(&left_rows, &right_rows, on_expr, params)?
+                        {
+                            return Ok(rows);
+                        }
+                    }
                     Ok(cross_filter(&left_rows, &right_rows, on_expr, params)?)
                 }
                 JoinKind::Left => Ok(left_outer(
@@ -640,6 +931,91 @@ fn build_join_rows(
             }
         }
     }
+}
+
+/// Detect an equijoin shape `<col_a> = <col_b>` and run a hash join.
+///
+/// Returns `Some(rows)` when the predicate is a clean equality
+/// between qualified columns from the two sides. Returns `None` for
+/// every other shape; the caller then falls back to the nested-loop
+/// cross filter.
+fn try_hash_inner_join(
+    left_rows: &[ResultRow],
+    right_rows: &[ResultRow],
+    on: Option<&Expr>,
+    params: &[SqlParam],
+) -> Result<Option<Vec<ResultRow>>, SqlError> {
+    let Some(Expr::Binary {
+        op: uqa_sql::ast::BinaryOp::Equal,
+        lhs,
+        rhs,
+    }) = on
+    else {
+        return Ok(None);
+    };
+    let Some((left_key, right_key)) = decide_join_sides(left_rows, right_rows, lhs, rhs, params)
+    else {
+        return Ok(None);
+    };
+    // Bucket right rows by their join key.
+    let mut buckets: std::collections::BTreeMap<uqa_core::Value, Vec<&ResultRow>> =
+        std::collections::BTreeMap::new();
+    for row in right_rows {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        if let Ok(v) = uqa_sql::expr::eval(right_key, &ctx) {
+            if v != uqa_core::Value::Null {
+                buckets.entry(v).or_default().push(row);
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(left_rows.len());
+    for l in left_rows {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(l), params);
+        let key = match uqa_sql::expr::eval(left_key, &ctx) {
+            Ok(uqa_core::Value::Null) | Err(_) => continue,
+            Ok(v) => v,
+        };
+        if let Some(rows) = buckets.get(&key) {
+            for r in rows {
+                out.push(merge_rows(l, r));
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
+/// Pick which expression evaluates over the left side and which over
+/// the right by sampling the first row of each side. Returns
+/// `(left_key_expr, right_key_expr)` when one direction works,
+/// `None` when the predicate isn't separable across sides.
+fn decide_join_sides<'a>(
+    left_rows: &[ResultRow],
+    right_rows: &[ResultRow],
+    lhs: &'a Expr,
+    rhs: &'a Expr,
+    params: &[SqlParam],
+) -> Option<(&'a Expr, &'a Expr)> {
+    if left_rows.is_empty() || right_rows.is_empty() {
+        return None;
+    }
+    let l_sample = &left_rows[0];
+    let r_sample = &right_rows[0];
+    let lhs_on_left = eval_yields_value(l_sample, lhs, params);
+    let rhs_on_right = eval_yields_value(r_sample, rhs, params);
+    if lhs_on_left && rhs_on_right {
+        return Some((lhs, rhs));
+    }
+    let rhs_on_left = eval_yields_value(l_sample, rhs, params);
+    let lhs_on_right = eval_yields_value(r_sample, lhs, params);
+    if rhs_on_left && lhs_on_right {
+        return Some((rhs, lhs));
+    }
+    None
+}
+
+fn eval_yields_value(row: &ResultRow, expr: &Expr, params: &[SqlParam]) -> bool {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+    matches!(uqa_sql::expr::eval(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
 
 fn cross_filter(
@@ -716,9 +1092,10 @@ fn project_join_row(
     params: &[SqlParam],
 ) -> Result<ResultRow, SqlError> {
     let ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
+    let labels = projection_columns(projections);
     let mut out = ResultRow::new();
-    for proj in projections {
-        let label = projection_label(proj);
+    for (idx, proj) in projections.iter().enumerate() {
+        let label = labels[idx].clone();
         if let Expr::Star = proj.expr {
             for (k, v) in src {
                 out.insert(k.clone(), v.clone());
@@ -797,11 +1174,12 @@ fn aggregate_join_rows(
     }
 
     let mut out = Vec::with_capacity(groups.len());
+    let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
         let mut agg_idx = 0;
-        for proj in &stmt.projections {
-            let label = projection_label(proj);
+        for (idx, proj) in stmt.projections.iter().enumerate() {
+            let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
                 let Expr::Func { name, .. } = &proj.expr else {
                     return Err(SqlError::Internal("aggregate expr lost".into()));
@@ -995,11 +1373,12 @@ fn build_aggregate_rows(
     }
 
     let mut rows: Vec<ResultRow> = Vec::with_capacity(groups.len());
+    let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
         let mut agg_idx = 0;
-        for proj in &stmt.projections {
-            let label = projection_label(proj);
+        for (idx, proj) in stmt.projections.iter().enumerate() {
+            let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
                 let Expr::Func { name, .. } = &proj.expr else {
                     return Err(SqlError::Internal("aggregate expr lost".into()));
@@ -1051,13 +1430,19 @@ fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
     }
 }
 
-fn projection_label(proj: &Projection) -> String {
-    match (&proj.alias, &proj.expr) {
-        (Some(a), _) => a.clone(),
-        (None, Expr::Column(c)) => c.clone(),
-        (None, Expr::Star) => "*".into(),
-        (None, Expr::Func { name, .. }) => name.clone(),
-        (None, _) => "expr".into(),
+/// Compute a projection's output column name. The position is folded
+/// into the fallback so two unaliased expressions in the same SELECT
+/// don't collide on a single key.
+fn projection_label_at(proj: &Projection, position: usize) -> String {
+    if let Some(a) = &proj.alias {
+        return a.clone();
+    }
+    match &proj.expr {
+        Expr::Column(c) => c.clone(),
+        Expr::QualifiedColumn { column, .. } => column.clone(),
+        Expr::Star => "*".into(),
+        Expr::Func { name, .. } => name.clone(),
+        _ => format!("expr_{position}"),
     }
 }
 
@@ -1139,6 +1524,315 @@ fn execute_function(
         }
         FunctionKind::KnnMatch => run_knn_match(engine, table, args, params),
         FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
+        FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
+        FunctionKind::GraphTraverse => run_graph_traverse(engine, args, params),
+        FunctionKind::GraphNeighbors => run_graph_neighbors(engine, args, params),
+        FunctionKind::MultiFieldMatch => run_multi_field_match(engine, table, args, params),
+        FunctionKind::StagedRetrieval => run_staged_retrieval(engine, table, args, params),
+        FunctionKind::DeepPredict => run_deep_predict(engine, args, params),
+    }
+}
+
+fn run_deep_predict(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.len() != 1 {
+        return Err(SqlError::BadArity {
+            name: "deep_predict".into(),
+            expected: "1".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = match eval(&args[0], &ctx)? {
+        Value::Str(s) => s,
+        other => {
+            return Err(SqlError::TypeMismatch(format!(
+                "deep_predict.model must be a string, got {other:?}"
+            )));
+        }
+    };
+    let scores = engine
+        .deep_predict(&name)
+        .ok_or_else(|| SqlError::Unsupported(format!("unknown model {name:?}")))?;
+    Ok(scores
+        .into_iter()
+        .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+        .collect())
+}
+
+fn run_staged_retrieval(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.is_empty() || args.len() % 3 != 0 {
+        return Err(SqlError::BadArity {
+            name: "staged_retrieval".into(),
+            expected: ">= 3, multiple of 3 (field, query, top_k)".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
+    let n_stages = args.len() / 3;
+    let mut current: Option<Vec<ScoredEntry>> = None;
+    for i in 0..n_stages {
+        let field = expect_column_name(&args[3 * i], "staged_retrieval.field")?;
+        let q = match eval(&args[3 * i + 1], &ctx)? {
+            Value::Str(s) => s,
+            other => {
+                return Err(SqlError::TypeMismatch(format!(
+                    "staged_retrieval query must be string, got {other:?}"
+                )));
+            }
+        };
+        let top_k = expect_usize(&args[3 * i + 2], "staged_retrieval.top_k", &ctx)?;
+        let mut scored = engine.search(table, &field, &q, &mode, usize::MAX);
+        if let Some(prior) = &current {
+            let prior_ids: std::collections::BTreeSet<u64> =
+                prior.iter().map(|e| e.doc_id).collect();
+            scored.retain(|e| prior_ids.contains(&e.doc_id));
+        }
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scored.truncate(top_k);
+        scored.sort_by_key(|e| e.doc_id);
+        current = Some(scored);
+    }
+    Ok(current.unwrap_or_default())
+}
+
+fn run_multi_field_match(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.is_empty() || args.len() % 2 != 0 {
+        return Err(SqlError::BadArity {
+            name: "multi_field_match".into(),
+            expected: "even, >= 2 (alternating field, query)".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    // Run a text_match per (field, query) pair, accumulate per-doc
+    // probability vectors with 0.5 prior for missing fields, then fuse
+    // via log-odds conjunction with uniform weights.
+    let n_fields = args.len() / 2;
+    let mut per_doc: std::collections::BTreeMap<u64, Vec<f64>> = std::collections::BTreeMap::new();
+    for i in 0..n_fields {
+        let field = expect_column_name(&args[2 * i], "multi_field_match.field")?;
+        let q = match eval(&args[2 * i + 1], &ctx)? {
+            Value::Str(s) => s,
+            other => {
+                return Err(SqlError::TypeMismatch(format!(
+                    "multi_field_match query must be string, got {other:?}"
+                )));
+            }
+        };
+        let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
+        let scored = engine.search(table, &field, &q, &mode, usize::MAX);
+        for entry in scored {
+            let slot = per_doc
+                .entry(entry.doc_id)
+                .or_insert_with(|| vec![0.5; n_fields]);
+            slot[i] = entry.score;
+        }
+    }
+    // Pad missing slots so every doc has a full vector.
+    for slot in per_doc.values_mut() {
+        if slot.len() < n_fields {
+            slot.resize(n_fields, 0.5);
+        }
+    }
+    let weights = vec![1.0 / n_fields as f64; n_fields];
+    let mut out: Vec<ScoredEntry> = per_doc
+        .into_iter()
+        .map(|(doc_id, probs)| {
+            let fused = if probs.len() == 1 {
+                probs[0]
+            } else {
+                uqa_scoring::prob::log_odds_conjunction_weighted(&probs, &weights, 0.0)
+                    .unwrap_or(0.5)
+            };
+            ScoredEntry {
+                doc_id,
+                score: fused,
+            }
+        })
+        .collect();
+    out.sort_by_key(|e| e.doc_id);
+    Ok(out)
+}
+
+fn run_graph_pagerank(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.len() != 1 {
+        return Err(SqlError::BadArity {
+            name: "graph_pagerank".into(),
+            expected: "1".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_pagerank.graph", &ctx)?;
+    let entries = engine
+        .graph_with(&name, |store| {
+            uqa_graph::PageRank::new(&name)
+                .execute(store)
+                .inner()
+                .entries()
+                .iter()
+                .map(|e| ScoredEntry {
+                    doc_id: e.doc_id,
+                    score: e.payload.score,
+                })
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+    Ok(entries)
+}
+
+fn run_graph_traverse(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.len() != 4 {
+        return Err(SqlError::BadArity {
+            name: "graph_traverse".into(),
+            expected: "4".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_traverse.graph", &ctx)?;
+    let start = expect_u64(&args[1], "graph_traverse.start", &ctx)?;
+    let label = expect_optional_string(&args[2], "graph_traverse.label", &ctx)?;
+    let max_hops = expect_u32(&args[3], "graph_traverse.max_hops", &ctx)?;
+    let entries = engine
+        .graph_with(&name, |store| {
+            let mut traverse = uqa_graph::Traverse::new(start, &name).max_hops(max_hops);
+            if let Some(l) = label.as_deref() {
+                traverse = traverse.label(l);
+            }
+            traverse
+                .execute(store)
+                .inner()
+                .entries()
+                .iter()
+                .map(|e| ScoredEntry {
+                    doc_id: e.doc_id,
+                    score: e.payload.score,
+                })
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+    Ok(entries)
+}
+
+fn run_graph_neighbors(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SqlParam],
+) -> Result<Vec<ScoredEntry>, SqlError> {
+    if args.len() != 4 {
+        return Err(SqlError::BadArity {
+            name: "graph_neighbors".into(),
+            expected: "4".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params);
+    let name = expect_string(&args[0], "graph_neighbors.graph", &ctx)?;
+    let vertex = expect_u64(&args[1], "graph_neighbors.vertex", &ctx)?;
+    let label = expect_optional_string(&args[2], "graph_neighbors.label", &ctx)?;
+    let direction_str = expect_string(&args[3], "graph_neighbors.direction", &ctx)?;
+    let direction = match direction_str.to_ascii_lowercase().as_str() {
+        "out" => uqa_graph::Direction::Out,
+        "in" => uqa_graph::Direction::In,
+        "both" => uqa_graph::Direction::Both,
+        other => {
+            return Err(SqlError::TypeMismatch(format!(
+                "graph_neighbors.direction must be 'out'/'in'/'both', got {other:?}"
+            )));
+        }
+    };
+    let neighbors = engine
+        .graph_with(&name, |store| {
+            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::neighbors(
+                store,
+                vertex,
+                label.as_deref(),
+                direction,
+                &name,
+            )
+        })
+        .ok_or_else(|| SqlError::Unsupported(format!("unknown graph {name:?}")))?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for nid in neighbors {
+        if seen.insert(nid) {
+            out.push(ScoredEntry {
+                doc_id: nid,
+                score: 1.0,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SqlError> {
+    match eval(expr, ctx)? {
+        Value::Str(s) => Ok(s),
+        other => Err(SqlError::TypeMismatch(format!(
+            "{name} must be a string, got {other:?}"
+        ))),
+    }
+}
+
+fn expect_optional_string(
+    expr: &Expr,
+    name: &str,
+    ctx: &EvalContext,
+) -> Result<Option<String>, SqlError> {
+    match eval(expr, ctx)? {
+        Value::Null => Ok(None),
+        Value::Str(s) if s.is_empty() => Ok(None),
+        Value::Str(s) => Ok(Some(s)),
+        other => Err(SqlError::TypeMismatch(format!(
+            "{name} must be a string or NULL, got {other:?}"
+        ))),
+    }
+}
+
+fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SqlError> {
+    match eval(expr, ctx)? {
+        Value::Int(n) if n >= 0 => Ok(n as u64),
+        other => Err(SqlError::TypeMismatch(format!(
+            "{name} must be a non-negative integer, got {other:?}"
+        ))),
+    }
+}
+
+fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SqlError> {
+    let max_u32_as_i64: i64 = i64::from(u32::MAX);
+    match eval(expr, ctx)? {
+        Value::Int(n) if (0..=max_u32_as_i64).contains(&n) => Ok(n as u32),
+        other => Err(SqlError::TypeMismatch(format!(
+            "{name} must fit in u32, got {other:?}"
+        ))),
     }
 }
 
@@ -1253,6 +1947,16 @@ fn run_fuse_log_odds(
                             "nested fuse_log_odds is not supported".into(),
                         ));
                     }
+                    FunctionKind::GraphPagerank
+                    | FunctionKind::GraphTraverse
+                    | FunctionKind::GraphNeighbors
+                    | FunctionKind::MultiFieldMatch
+                    | FunctionKind::StagedRetrieval
+                    | FunctionKind::DeepPredict => {
+                        return Err(SqlError::Unsupported(format!(
+                            "function {name} cannot be nested under fuse_log_odds"
+                        )));
+                    }
                 }
             }
             other => {
@@ -1336,15 +2040,18 @@ fn apply_order_limit(mut entries: Vec<ScoredEntry>, stmt: &SelectStmt) -> Vec<Sc
 }
 
 fn projection_columns(projections: &[Projection]) -> Vec<String> {
-    projections
-        .iter()
-        .map(|p| match (&p.alias, &p.expr) {
-            (Some(a), _) => a.clone(),
-            (None, Expr::Column(c)) => c.clone(),
-            (None, Expr::Star) => "*".to_string(),
-            (None, _) => "expr".to_string(),
-        })
-        .collect()
+    let mut out = Vec::with_capacity(projections.len());
+    for (idx, proj) in projections.iter().enumerate() {
+        let base = projection_label_at(proj, idx);
+        let mut label = base.clone();
+        let mut suffix = 1usize;
+        while out.iter().any(|existing: &String| existing == &label) {
+            label = format!("{base}_{suffix}");
+            suffix += 1;
+        }
+        out.push(label);
+    }
+    out
 }
 
 fn build_rows(
@@ -1370,14 +2077,10 @@ fn build_projection_row(
     params: &[SqlParam],
 ) -> Result<ResultRow, SqlError> {
     let ctx = EvalContext::new(Some(document), params);
+    let labels = projection_columns(projections);
     let mut row = ResultRow::new();
-    for proj in projections {
-        let label = match (&proj.alias, &proj.expr) {
-            (Some(a), _) => a.clone(),
-            (None, Expr::Column(c)) => c.clone(),
-            (None, Expr::Star) => "*".into(),
-            (None, _) => "expr".into(),
-        };
+    for (idx, proj) in projections.iter().enumerate() {
+        let label = labels[idx].clone();
         if let Expr::Star = proj.expr {
             for (k, v) in document {
                 if k.as_str() == SCORE_COLUMN {

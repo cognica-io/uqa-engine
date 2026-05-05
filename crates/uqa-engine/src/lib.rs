@@ -9,7 +9,54 @@
 //! text-only round trips. Backed either by in-memory stores
 //! ([`Engine::new`]) or by `SQLite` ([`Engine::open`]); the operator
 //! pipeline is identical across backends.
+//!
+//! # Public API surface
+//!
+//! Construction:
+//! - [`Engine::new`] — purely in-memory; great for tests and the REPL.
+//! - [`Engine::open`] — `SQLite`-backed catalog at the given path; reopens
+//!   restore tables, models, and graphs from disk.
+//!
+//! Schema and table lifecycle:
+//! - [`Engine::create_table`] — register a table with declared columns.
+//! - [`Engine::create_default_table`] — convenience for FTS-only tables.
+//! - [`Engine::create_vector_field`] — attach a vector field to an
+//!   existing table.
+//!
+//! Document mutation:
+//! - [`Engine::add_document`], [`Engine::add_document_with_vectors`]
+//! - [`Engine::add_vector`] — set or replace a vector for an existing doc.
+//! - [`Engine::get_document`], [`Engine::delete_document`]
+//! - [`Engine::document_count`]
+//!
+//! Querying:
+//! - `Engine::sql` (defined in [`sql`]) — full SQL surface (select /
+//!   insert / update / delete / create-table, plus the registered
+//!   functions: `text_match`, `knn_match`, `fuse_log_odds`,
+//!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
+//! - [`Engine::search`] — direct text-only retrieval returning a posting
+//!   list.
+//! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] — k-NN
+//!   over a vector field.
+//! - [`Engine::hybrid_search`] — log-odds fusion of text and vector
+//!   posting lists (no SQL parsing in the hot path).
+//!
+//! Deep-model persistence:
+//! - [`Engine::save_model`], [`Engine::load_model`], [`Engine::drop_model`]
+//! - [`Engine::deep_predict`] — runs a stored model against the cached
+//!   feature row and returns ranked `(doc_id, score)` pairs.
+//!
+//! Graph workspaces (used by the Cypher front-end and the `graph_*`
+//! SQL functions):
+//! - [`Engine::create_graph`], [`Engine::drop_graph`]
+//! - [`Engine::graph_with`] — read-only access by name.
+//! - [`Engine::graph_with_mut`] — exclusive mutable access.
+//!
+//! Result types ([`SqlResult`], [`SqlParam`]) are re-exported from
+//! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
+//! storage errors so callers only need to match one enum.
 
+pub mod deep;
 pub mod sql;
 
 use std::collections::BTreeMap;
@@ -79,6 +126,13 @@ pub struct Engine {
     tables: RwLock<BTreeMap<String, Arc<TableState>>>,
     catalog: Option<Arc<Catalog>>,
     conn: Option<ManagedConnection>,
+    /// Named in-memory graphs reachable from SQL via the
+    /// `graph_*` function family. Persistence to the catalog is left
+    /// to a follow-up slice.
+    graphs: RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    /// Saved deep-fusion models. Mirrors the catalog `_models` table
+    /// when the engine is SQLite-backed.
+    models: RwLock<BTreeMap<String, deep::DeepModel>>,
 }
 
 struct TableState {
@@ -102,6 +156,8 @@ impl Engine {
             tables: RwLock::new(BTreeMap::new()),
             catalog: None,
             conn: None,
+            graphs: RwLock::new(BTreeMap::new()),
+            models: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -115,8 +171,19 @@ impl Engine {
             tables: RwLock::new(BTreeMap::new()),
             catalog: Some(catalog.clone()),
             conn: Some(conn.clone()),
+            graphs: RwLock::new(BTreeMap::new()),
+            models: RwLock::new(BTreeMap::new()),
         };
         engine.restore_from_catalog(&catalog, &conn)?;
+        // Eagerly populate the model cache from the catalog so
+        // `load_model` is one read deep.
+        if let Ok(rows) = catalog.load_models() {
+            for (name, json) in rows {
+                if let Ok(model) = serde_json::from_str::<deep::DeepModel>(&json) {
+                    engine.models.write().insert(name, model);
+                }
+            }
+        }
         Ok(engine)
     }
 
@@ -284,6 +351,83 @@ impl Engine {
 
     pub fn create_default_table(&self, name: impl Into<String>, fts_fields: Vec<FieldName>) {
         self.create_table(name, standard_analyzer("english"), fts_fields);
+    }
+
+    /// Create a named in-memory graph. No-op if it already exists.
+    pub fn create_graph(&self, name: impl Into<String>) {
+        let name = name.into();
+        let mut graphs = self.graphs.write();
+        graphs.entry(name).or_default();
+    }
+
+    /// Drop a named graph. No-op when the graph is missing.
+    pub fn drop_graph(&self, name: &str) {
+        self.graphs.write().remove(name);
+    }
+
+    /// Read-only borrow of a named graph for ad-hoc query construction
+    /// outside the SQL function path. Returns `None` when the graph
+    /// is unknown.
+    pub fn graph_with<R>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&uqa_graph::MemoryGraphStore) -> R,
+    ) -> Option<R> {
+        let graphs = self.graphs.read();
+        graphs.get(name).map(f)
+    }
+
+    /// Mutable borrow of a named graph for vertex / edge insertion.
+    pub fn graph_with_mut<R>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> R,
+    ) -> Option<R> {
+        let mut graphs = self.graphs.write();
+        graphs.get_mut(name).map(f)
+    }
+
+    /// Persist a deep-fusion model under `name`. Round-trips as JSON
+    /// through the catalog's `_models` table when the engine is in
+    /// `SQLite` mode; in-memory engines keep the latest version per
+    /// process.
+    pub fn save_model(&self, name: &str, model: &deep::DeepModel) -> Result<(), SqlError> {
+        let json = serde_json::to_string(model)
+            .map_err(|e| SqlError::Internal(format!("model serialise: {e}")))?;
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog
+                .save_model(name, &json)
+                .map_err(|e| SqlError::Internal(format!("catalog save_model: {e}")))?;
+        }
+        self.models.write().insert(name.to_string(), model.clone());
+        Ok(())
+    }
+
+    pub fn load_model(&self, name: &str) -> Option<deep::DeepModel> {
+        if let Some(m) = self.models.read().get(name).cloned() {
+            return Some(m);
+        }
+        let catalog = self.catalog.as_ref()?;
+        let json = catalog.load_model(name).ok().flatten()?;
+        let model: deep::DeepModel = serde_json::from_str(&json).ok()?;
+        self.models.write().insert(name.to_string(), model.clone());
+        Some(model)
+    }
+
+    pub fn drop_model(&self, name: &str) {
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.drop_model(name);
+        }
+        self.models.write().remove(name);
+    }
+
+    /// Run inference for a saved model against a fresh execution
+    /// context. Returns `(doc_id, score)` pairs ordered by `doc_id`.
+    pub fn deep_predict(&self, name: &str) -> Option<Vec<(DocId, f64)>> {
+        let model = self.load_model(name)?;
+        let ctx = ExecutionContext::new();
+        let (scores, _) = model.predict(&ctx);
+        Some(scores)
     }
 
     fn table(&self, name: &str) -> Option<Arc<TableState>> {

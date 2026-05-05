@@ -17,6 +17,9 @@ members = [
     "crates/uqa-api",
     "crates/uqa-cli",
 ]
+# `fuzz/` is its own cargo-fuzz workspace; only nightly + cargo-fuzz
+# can build it, so we exclude it from the regular workspace.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

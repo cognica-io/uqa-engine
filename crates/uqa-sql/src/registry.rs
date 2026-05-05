@@ -27,6 +27,23 @@ pub enum FunctionKind {
     /// `fuse_log_odds(signal_1, signal_2, ...)` — log-odds fusion of
     /// other UQA function calls.
     FuseLogOdds,
+    /// `graph_pagerank(graph_name)` — `PageRank` over a named graph.
+    GraphPagerank,
+    /// `graph_traverse(graph_name, start_vertex, label, max_hops)` —
+    /// BFS traversal scoring.
+    GraphTraverse,
+    /// `graph_neighbors(graph_name, vertex_id, label, direction)` —
+    /// 1-hop neighbor expansion.
+    GraphNeighbors,
+    /// `multi_field_match(field_1, query_1, field_2, query_2, ...)` —
+    /// per-field BM25 with uniform-weight log-odds conjunction.
+    MultiFieldMatch,
+    /// `staged_retrieval(field_1, query_1, top_k_1, field_2, query_2,
+    /// top_k_2, ...)` — cascading `text_match`: each stage filters the
+    /// candidate set from the previous stage and keeps top-k.
+    StagedRetrieval,
+    /// `deep_predict(model_name)` — runs the saved deep-fusion model.
+    DeepPredict,
 }
 
 fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
@@ -37,6 +54,12 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("bayesian_match", FunctionKind::BayesianMatch);
         m.insert("knn_match", FunctionKind::KnnMatch);
         m.insert("fuse_log_odds", FunctionKind::FuseLogOdds);
+        m.insert("graph_pagerank", FunctionKind::GraphPagerank);
+        m.insert("graph_traverse", FunctionKind::GraphTraverse);
+        m.insert("graph_neighbors", FunctionKind::GraphNeighbors);
+        m.insert("multi_field_match", FunctionKind::MultiFieldMatch);
+        m.insert("staged_retrieval", FunctionKind::StagedRetrieval);
+        m.insert("deep_predict", FunctionKind::DeepPredict);
         m
     })
 }

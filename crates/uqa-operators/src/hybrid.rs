@@ -96,8 +96,8 @@ impl Operator for SemanticFilterOperator {
 /// Multi-signal fusion via log-odds conjunction (Section 4, Paper 4).
 ///
 /// Each signal must produce calibrated probabilities in `(0, 1)`. Missing
-/// documents fall back to a coverage-based default (see
-/// [`coverage_based_default`]).
+/// documents fall back to a coverage-based default (see the private
+/// `coverage_based_default` helper).
 pub struct LogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,

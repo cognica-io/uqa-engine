@@ -9,5 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+uqa-engine = { workspace = true }
+uqa-core = { workspace = true }
+uqa-sql = { workspace = true }
+
 [lints]
 workspace = true

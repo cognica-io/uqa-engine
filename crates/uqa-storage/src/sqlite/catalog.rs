@@ -132,13 +132,55 @@ impl Catalog {
             Ok(())
         })
     }
+
+    pub fn save_model(&self, name: &str, json: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _models (name, body) VALUES (?1, ?2)",
+                params![name, json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn load_models(&self) -> Result<Vec<(String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare("SELECT name, body FROM _models ORDER BY name")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn load_model(&self, name: &str) -> Result<Option<String>> {
+        self.conn.with(|c| {
+            Ok(c.query_row(
+                "SELECT body FROM _models WHERE name = ?1",
+                params![name],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+        })
+    }
+
+    pub fn drop_model(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute("DELETE FROM _models WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
 }
 
 /// Migrations applied in order. Each `(version, sql)` is run in a single
 /// transaction; the `_meta.schema_version` row is bumped on success.
-const MIGRATIONS: &[(u32, &str)] = &[(
-    1,
-    r"
+const MIGRATIONS: &[(u32, &str)] = &[
+    (
+        1,
+        r"
     CREATE TABLE IF NOT EXISTS _tables (
         name           TEXT PRIMARY KEY,
         analyzer       TEXT NOT NULL,
@@ -189,7 +231,17 @@ const MIGRATIONS: &[(u32, &str)] = &[(
         PRIMARY KEY (table_name, field, doc_id)
     );
     ",
-)];
+    ),
+    (
+        2,
+        r"
+    CREATE TABLE IF NOT EXISTS _models (
+        name TEXT PRIMARY KEY,
+        body TEXT NOT NULL
+    );
+    ",
+    ),
+];
 
 #[cfg(test)]
 mod tests {

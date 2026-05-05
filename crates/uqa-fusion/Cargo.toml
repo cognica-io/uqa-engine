@@ -10,7 +10,11 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+uqa-core = { workspace = true }
 uqa-scoring = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
 
 [lints]
 workspace = true

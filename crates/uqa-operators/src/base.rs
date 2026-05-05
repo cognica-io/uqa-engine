@@ -25,6 +25,25 @@ pub struct ExecutionContext {
     pub inverted_index: Option<Arc<dyn InvertedIndex>>,
     pub vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
     pub stats: Option<IndexStats>,
+    /// Optional named graph (label-only neighbor lookup) for the
+    /// graph-aware deep-fusion layers (`Propagate`, `Conv`, `Pool`).
+    /// Held as a generic neighbor-lookup callback so this crate stays
+    /// independent of `uqa-graph`.
+    pub graph: Option<Arc<dyn GraphNeighborLookup>>,
+}
+
+/// Minimal trait capturing the only graph operation deep-fusion's
+/// graph layers need: enumerate the neighbors of a vertex along a
+/// label in a chosen direction.
+pub trait GraphNeighborLookup: Send + Sync {
+    fn neighbors(&self, vertex: u64, label: &str, direction: Direction) -> Vec<u64>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Out,
+    In,
+    Both,
 }
 
 impl ExecutionContext {
@@ -53,6 +72,11 @@ impl ExecutionContext {
 
     pub fn with_stats(mut self, stats: IndexStats) -> Self {
         self.stats = Some(stats);
+        self
+    }
+
+    pub fn with_graph(mut self, graph: Arc<dyn GraphNeighborLookup>) -> Self {
+        self.graph = Some(graph);
         self
     }
 }

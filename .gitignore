@@ -27,3 +27,6 @@ flamegraph.svg
 
 # Generated docs (we publish via cargo doc, not committed)
 /target/doc/
+
+# Claude Code workspace metadata (local only)
+/.claude/

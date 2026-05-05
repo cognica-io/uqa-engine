@@ -59,6 +59,32 @@ pub struct SelectStmt {
     pub order_by: Vec<OrderBy>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+    /// Common table expressions defined with `WITH [RECURSIVE] ...`.
+    pub with: Vec<Cte>,
+    /// Optional set operation: `Some` for UNION / INTERSECT / EXCEPT,
+    /// with the right-hand operand as a sub-select.
+    pub set_op: Option<Box<SetOp>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cte {
+    pub name: String,
+    pub recursive: bool,
+    pub query: Box<SelectStmt>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetOp {
+    pub kind: SetOpKind,
+    pub all: bool,
+    pub right: SelectStmt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetOpKind {
+    Union,
+    Intersect,
+    Except,
 }
 
 #[derive(Debug, Clone)]
@@ -210,7 +236,10 @@ pub enum Statement {
     CreateTable(CreateTable),
     CreateIndex(CreateIndex),
     Insert(InsertStmt),
-    Select(SelectStmt),
+    /// `SelectStmt` is the largest variant by far (CTEs + set-ops + n-ary
+    /// expression trees), so we box it to keep the enum's stack footprint
+    /// proportional to the smaller variants.
+    Select(Box<SelectStmt>),
     Update(UpdateStmt),
     Delete(DeleteStmt),
 }

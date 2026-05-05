@@ -9,5 +9,18 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+uqa-core = { workspace = true }
+uqa-analysis = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "rpq"
+harness = false
+
 [lints]
 workspace = true

@@ -17,8 +17,9 @@ use pg_query::NodeEnum;
 use uqa_core::Value;
 
 use crate::ast::{
-    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, DeleteStmt, Expr, FromClause,
-    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, Statement, UpdateStmt, WindowSpec,
+    BinaryOp, ColumnDef, ColumnType, CreateIndex, CreateTable, Cte, DeleteStmt, Expr, FromClause,
+    InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, SetOp, SetOpKind, Statement, UpdateStmt,
+    WindowSpec,
 };
 use crate::error::{Result, SqlError};
 
@@ -40,7 +41,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateStmt(stmt) => compile_create_table(stmt).map(Statement::CreateTable),
         NodeEnum::IndexStmt(stmt) => compile_create_index(stmt).map(Statement::CreateIndex),
         NodeEnum::InsertStmt(stmt) => compile_insert(stmt).map(Statement::Insert),
-        NodeEnum::SelectStmt(stmt) => compile_select(stmt).map(Statement::Select),
+        NodeEnum::SelectStmt(stmt) => compile_select(stmt).map(|s| Statement::Select(Box::new(s))),
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
         other => Err(SqlError::Unsupported(format!(
@@ -369,9 +370,68 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
+    let projections = compile_projections(&stmt.target_list)?;
+    let r#where = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| compile_expr(w))
+        .transpose()?;
+    let order_by = compile_order_by(&stmt.sort_clause)?;
+    let limit = compile_int_const(stmt.limit_count.as_deref())?;
+    let offset = compile_int_const(stmt.limit_offset.as_deref())?;
+    let group_by: Vec<Expr> = stmt
+        .group_clause
+        .iter()
+        .map(compile_expr)
+        .collect::<Result<Vec<_>>>()?;
+    let with = match stmt.with_clause.as_ref() {
+        Some(wc) => compile_with_clause(wc)?,
+        None => Vec::new(),
+    };
+    let set_op = compile_set_op(stmt)?;
 
-    let mut projections = Vec::new();
-    for target_node in &stmt.target_list {
+    // For UNION shapes the LHS lives inside `larg`; pull projections /
+    // FROM from there since the top-level node carries only the set op.
+    let (projections, from, r#where, group_by, order_by, limit, offset) =
+        if set_op.is_some() && stmt.larg.is_some() {
+            let lhs = compile_select(stmt.larg.as_deref().unwrap())?;
+            (
+                lhs.projections,
+                lhs.from,
+                lhs.r#where,
+                lhs.group_by,
+                lhs.order_by,
+                lhs.limit,
+                lhs.offset,
+            )
+        } else {
+            (
+                projections,
+                from,
+                r#where,
+                group_by,
+                order_by,
+                limit,
+                offset,
+            )
+        };
+
+    Ok(SelectStmt {
+        projections,
+        from,
+        r#where,
+        group_by,
+        order_by,
+        limit,
+        offset,
+        with,
+        set_op,
+    })
+}
+
+fn compile_projections(targets: &[pg_query::protobuf::Node]) -> Result<Vec<Projection>> {
+    let mut out = Vec::with_capacity(targets.len());
+    for target_node in targets {
         let Some(inner) = target_node.node.as_ref() else {
             continue;
         };
@@ -388,17 +448,14 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
             Some(node) => compile_expr(node)?,
             None => return Err(SqlError::Internal("ResTarget without value".into())),
         };
-        projections.push(Projection { expr, alias });
+        out.push(Projection { expr, alias });
     }
+    Ok(out)
+}
 
-    let r#where = stmt
-        .where_clause
-        .as_ref()
-        .map(|w| compile_expr(w))
-        .transpose()?;
-
-    let mut order_by = Vec::new();
-    for sort_node in &stmt.sort_clause {
+fn compile_order_by(sort_clause: &[pg_query::protobuf::Node]) -> Result<Vec<OrderBy>> {
+    let mut out = Vec::with_capacity(sort_clause.len());
+    for sort_node in sort_clause {
         let Some(inner) = sort_node.node.as_ref() else {
             continue;
         };
@@ -408,31 +465,64 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
                 .as_ref()
                 .ok_or_else(|| SqlError::Internal("SortBy without expr".into()))?;
             let expr = compile_expr(expr_node)?;
-            // SortByDir enum: SortbyDefault = 0, SortbyAsc = 2,
-            // SortbyDesc = 3, SortbyUsing = 4 (per libpg_query 6.x).
+            // SortByDir: SortbyDefault = 0, SortbyAsc = 2, SortbyDesc = 3,
+            // SortbyUsing = 4 (per libpg_query 6.x).
             let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
-            order_by.push(OrderBy { expr, descending });
+            out.push(OrderBy { expr, descending });
         }
     }
+    Ok(out)
+}
 
-    let limit = compile_int_const(stmt.limit_count.as_deref())?;
-    let offset = compile_int_const(stmt.limit_offset.as_deref())?;
+fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<SetOp>>> {
+    let kind = match stmt.op() {
+        pg_query::protobuf::SetOperation::SetopNone => return Ok(None),
+        pg_query::protobuf::SetOperation::SetopUnion => SetOpKind::Union,
+        pg_query::protobuf::SetOperation::SetopIntersect => SetOpKind::Intersect,
+        pg_query::protobuf::SetOperation::SetopExcept => SetOpKind::Except,
+        other => return Err(SqlError::Unsupported(format!("set op {other:?}"))),
+    };
+    let right_node = stmt
+        .rarg
+        .as_deref()
+        .ok_or_else(|| SqlError::Internal("set op missing right".into()))?;
+    let right = compile_select(right_node)?;
+    Ok(Some(Box::new(SetOp {
+        kind,
+        all: stmt.all,
+        right,
+    })))
+}
 
-    let group_by: Vec<Expr> = stmt
-        .group_clause
-        .iter()
-        .map(compile_expr)
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(SelectStmt {
-        projections,
-        from,
-        r#where,
-        group_by,
-        order_by,
-        limit,
-        offset,
-    })
+fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<Cte>> {
+    let mut out = Vec::with_capacity(wc.ctes.len());
+    for cte_node in &wc.ctes {
+        let Some(inner) = cte_node.node.as_ref() else {
+            continue;
+        };
+        let cte = match inner {
+            NodeEnum::CommonTableExpr(c) => c,
+            _ => return Err(SqlError::Internal("expected CommonTableExpr".into())),
+        };
+        let select_node = cte
+            .ctequery
+            .as_ref()
+            .ok_or_else(|| SqlError::Internal("CTE without query".into()))?;
+        let select_inner = select_node
+            .node
+            .as_ref()
+            .ok_or_else(|| SqlError::Internal("CTE query node empty".into()))?;
+        let select = match select_inner {
+            NodeEnum::SelectStmt(s) => s,
+            _ => return Err(SqlError::Unsupported("CTE body must be SELECT".into())),
+        };
+        out.push(Cte {
+            name: cte.ctename.clone(),
+            recursive: wc.recursive,
+            query: Box::new(compile_select(select)?),
+        });
+    }
+    Ok(out)
 }
 
 fn compile_int_const(node: Option<&Node>) -> Result<Option<u64>> {

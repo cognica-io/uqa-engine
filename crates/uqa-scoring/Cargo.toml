@@ -15,6 +15,16 @@ uqa-storage = { workspace = true }
 
 [dev-dependencies]
 uqa-analysis = { workspace = true }
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[[bench]]
+name = "bm25"
+harness = false
+
+[[bench]]
+name = "calibration"
+harness = false
 
 [lints]
 workspace = true
