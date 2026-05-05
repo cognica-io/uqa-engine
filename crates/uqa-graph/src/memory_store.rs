@@ -126,6 +126,65 @@ impl MemoryGraphStore {
             self.edge_membership.remove(&edge_id);
         }
     }
+
+    /// Insert a vertex into the global registry without attaching it
+    /// to any graph. Used by the `SQLite`-backed store on hydration
+    /// before membership is restored from the persisted catalog.
+    pub fn insert_raw_vertex(&mut self, vertex: Vertex) {
+        if vertex.vertex_id >= self.next_vertex_id {
+            self.next_vertex_id = vertex.vertex_id + 1;
+        }
+        self.vertices.insert(vertex.vertex_id, vertex);
+    }
+
+    pub fn insert_raw_edge(&mut self, edge: Edge) {
+        if edge.edge_id >= self.next_edge_id {
+            self.next_edge_id = edge.edge_id + 1;
+        }
+        self.edges.insert(edge.edge_id, edge);
+    }
+
+    /// Attach a previously inserted vertex to the named graph. The
+    /// graph must already exist (`create_graph`).
+    pub fn attach_vertex(&mut self, vertex_id: VertexId, graph: &str) {
+        self.ensure_partition(graph);
+        let part = self.require_partition_mut(graph);
+        part.vertex_ids.insert(vertex_id);
+        self.vertex_membership
+            .entry(vertex_id)
+            .or_default()
+            .insert(graph.to_string());
+    }
+
+    pub fn attach_edge(&mut self, edge_id: EdgeId, graph: &str) {
+        self.ensure_partition(graph);
+        // Snapshot the edge fields so we can populate the partition's
+        // adjacency indexes without re-borrowing `self.edges`.
+        let edge_info = self
+            .edges
+            .get(&edge_id)
+            .map(|e| (e.source_id, e.target_id, e.label.clone()));
+        let part = self.require_partition_mut(graph);
+        part.edge_ids.insert(edge_id);
+        if let Some((src, tgt, label)) = edge_info {
+            part.adj_out.entry(src).or_default().insert(edge_id);
+            part.adj_in.entry(tgt).or_default().insert(edge_id);
+            part.label_index.entry(label).or_default().insert(edge_id);
+        }
+        self.edge_membership
+            .entry(edge_id)
+            .or_default()
+            .insert(graph.to_string());
+    }
+
+    /// All edge ids that participate in `graph`, in stable id order.
+    /// Helper for the `SQLite`-backed store's bulk write paths.
+    pub fn out_edge_ids_for_graph(&self, graph: &str) -> std::collections::BTreeSet<EdgeId> {
+        match self.graphs.get(graph) {
+            Some(part) => part.edge_ids.clone(),
+            None => std::collections::BTreeSet::new(),
+        }
+    }
 }
 
 impl GraphStore for MemoryGraphStore {

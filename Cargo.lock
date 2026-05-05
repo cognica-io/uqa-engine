@@ -1339,9 +1339,13 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "proptest",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "uqa-analysis",
  "uqa-core",
+ "uqa-storage",
 ]
 
 [[package]]

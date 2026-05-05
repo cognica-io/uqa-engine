@@ -25,6 +25,7 @@ mod operators;
 mod pattern;
 mod posting_list;
 mod rpq;
+mod sqlite_store;
 mod store;
 mod temporal;
 mod types;
@@ -49,6 +50,7 @@ pub use rpq::{
     build_nfa, epsilon_closure, parse_rpq, simplify, subset_construction, Dfa, DfaState, Nfa,
     NfaTransition, RPQParseError, RegularPathExpr, StateId,
 };
+pub use sqlite_store::SQLiteGraphStore;
 pub use store::GraphStore;
 pub use temporal::{TemporalFilter, TemporalTraverse};
 pub use types::Direction;
