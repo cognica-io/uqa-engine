@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tempfile = "3.13"
 criterion = { workspace = true }
+proptest = { workspace = true }
 
 [[bench]]
 name = "spatial"
