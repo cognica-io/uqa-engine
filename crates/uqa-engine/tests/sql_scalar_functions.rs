@@ -218,6 +218,67 @@ fn split_part_one_indexed() {
 }
 
 #[test]
+fn math_trig_radians() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql("SELECT round(sin(pi() / 2), 6) AS s FROM t", &[])
+        .unwrap();
+    match res.rows[0]["s"] {
+        Value::Float(f) => assert!((f - 1.0).abs() < 1e-6, "got {f}"),
+        ref other => panic!("expected float, got {other:?}"),
+    }
+}
+
+#[test]
+fn lpad_rpad_translate() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql(
+            "SELECT lpad('x', 3, '0') AS l, rpad('x', 3, '0') AS r, \
+                    translate('hello', 'el', 'IP') AS t \
+             FROM t",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(res.rows[0]["l"], Value::Str("00x".into()));
+    assert_eq!(res.rows[0]["r"], Value::Str("x00".into()));
+    assert_eq!(res.rows[0]["t"], Value::Str("hIPPo".into()));
+}
+
+#[test]
+fn base64_encode_round_trip() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql("SELECT encode('hi', 'base64') AS b64 FROM t", &[])
+        .unwrap();
+    assert_eq!(res.rows[0]["b64"], Value::Str("aGk=".into()));
+}
+
+#[test]
+fn format_substitutes_args() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql(
+            "SELECT format('Hello %s -- %d', 'world', 42) AS s FROM t",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(res.rows[0]["s"], Value::Str("Hello world -- 42".into()));
+}
+
+#[test]
 fn greatest_least_skip_nulls() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])

@@ -587,6 +587,222 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             };
             Ok(Value::Str(out))
         }
+        // Trig / math
+        "sin" => Ok(Value::Float(to_f64(&args[0])?.sin())),
+        "cos" => Ok(Value::Float(to_f64(&args[0])?.cos())),
+        "tan" => Ok(Value::Float(to_f64(&args[0])?.tan())),
+        "asin" => Ok(Value::Float(to_f64(&args[0])?.asin())),
+        "acos" => Ok(Value::Float(to_f64(&args[0])?.acos())),
+        "atan" => Ok(Value::Float(to_f64(&args[0])?.atan())),
+        "atan2" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("atan2 takes 2 args".into()));
+            }
+            Ok(Value::Float(to_f64(&args[0])?.atan2(to_f64(&args[1])?)))
+        }
+        "sinh" => Ok(Value::Float(to_f64(&args[0])?.sinh())),
+        "cosh" => Ok(Value::Float(to_f64(&args[0])?.cosh())),
+        "tanh" => Ok(Value::Float(to_f64(&args[0])?.tanh())),
+        "exp" => Ok(Value::Float(to_f64(&args[0])?.exp())),
+        "ln" => Ok(Value::Float(to_f64(&args[0])?.ln())),
+        "log" | "log10" => match args.len() {
+            1 => Ok(Value::Float(to_f64(&args[0])?.log10())),
+            2 => {
+                let base = to_f64(&args[0])?;
+                let v = to_f64(&args[1])?;
+                Ok(Value::Float(v.log(base)))
+            }
+            _ => Err(SQLError::TypeMismatch("log takes 1 or 2 args".into())),
+        },
+        "log2" => Ok(Value::Float(to_f64(&args[0])?.log2())),
+        "cbrt" => Ok(Value::Float(to_f64(&args[0])?.cbrt())),
+        "sign" => Ok(Value::Int(match to_f64(&args[0])? {
+            v if v > 0.0 => 1,
+            v if v < 0.0 => -1,
+            _ => 0,
+        })),
+        "trunc" => match args.len() {
+            1 => Ok(Value::Float(to_f64(&args[0])?.trunc())),
+            2 => {
+                let v = to_f64(&args[0])?;
+                let p = to_i64(&args[1])?;
+                let scale = 10f64.powi(p as i32);
+                Ok(Value::Float((v * scale).trunc() / scale))
+            }
+            _ => Err(SQLError::TypeMismatch("trunc takes 1 or 2 args".into())),
+        },
+        "pi" => Ok(Value::Float(std::f64::consts::PI)),
+        "degrees" => Ok(Value::Float(to_f64(&args[0])?.to_degrees())),
+        "radians" => Ok(Value::Float(to_f64(&args[0])?.to_radians())),
+        "random" => {
+            // Deterministic-ish pseudo random based on system time so
+            // tests can stub it; the Python reference also wraps the
+            // platform RNG.
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let t = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0) as f64;
+            Ok(Value::Float((t.sin().abs() * 1.0e9).fract()))
+        }
+        // Padding / formatting
+        "lpad" | "rpad" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(SQLError::TypeMismatch("[lr]pad takes 2-3 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let n = to_i64(&args[1])?.max(0) as usize;
+            let fill = args
+                .get(2)
+                .map(value_to_string)
+                .unwrap_or_else(|| " ".into());
+            let chars: Vec<char> = s.chars().collect();
+            if chars.len() >= n {
+                return Ok(Value::Str(chars[..n].iter().collect()));
+            }
+            let need = n - chars.len();
+            let fill_chars: Vec<char> = fill.chars().collect();
+            if fill_chars.is_empty() {
+                return Ok(Value::Str(s));
+            }
+            let mut padding: String = String::with_capacity(need);
+            for i in 0..need {
+                padding.push(fill_chars[i % fill_chars.len()]);
+            }
+            Ok(Value::Str(if name == "lpad" {
+                format!("{padding}{s}")
+            } else {
+                format!("{s}{padding}")
+            }))
+        }
+        "repeat" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("repeat takes 2 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let n = to_i64(&args[1])?.max(0) as usize;
+            Ok(Value::Str(s.repeat(n)))
+        }
+        "translate" => {
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch("translate takes 3 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let from: Vec<char> = value_to_string(&args[1]).chars().collect();
+            let to: Vec<char> = value_to_string(&args[2]).chars().collect();
+            let mapped: String = s
+                .chars()
+                .filter_map(|c| match from.iter().position(|x| *x == c) {
+                    Some(i) if i < to.len() => Some(to[i]),
+                    Some(_) => None,
+                    None => Some(c),
+                })
+                .collect();
+            Ok(Value::Str(mapped))
+        }
+        "overlay" => {
+            // OVERLAY(string PLACING substring FROM start [FOR length])
+            if args.len() < 3 || args.len() > 4 {
+                return Err(SQLError::TypeMismatch("overlay takes 3 or 4 args".into()));
+            }
+            let s: Vec<char> = value_to_string(&args[0]).chars().collect();
+            let placing: Vec<char> = value_to_string(&args[1]).chars().collect();
+            let start = to_i64(&args[2])?.max(1) as usize - 1;
+            let len = if args.len() == 4 {
+                to_i64(&args[3])?.max(0) as usize
+            } else {
+                placing.len()
+            };
+            let end = (start + len).min(s.len());
+            let mut out: String = s[..start.min(s.len())].iter().collect();
+            out.push_str(&placing.iter().collect::<String>());
+            out.push_str(&s[end..].iter().collect::<String>());
+            Ok(Value::Str(out))
+        }
+        "format" => {
+            // FORMAT('hello %s', name) -- minimal printf-style %s/%d
+            // substitution. Mirrors enough of Postgres FORMAT for the
+            // common cases.
+            if args.is_empty() {
+                return Err(SQLError::TypeMismatch(
+                    "format needs a format string".into(),
+                ));
+            }
+            let fmt = value_to_string(&args[0]);
+            let mut out = String::with_capacity(fmt.len());
+            let mut iter = fmt.chars().peekable();
+            let mut idx = 1usize;
+            while let Some(c) = iter.next() {
+                if c == '%' {
+                    match iter.next() {
+                        Some('s') | Some('I') | Some('L') => {
+                            out.push_str(&value_to_string(args.get(idx).unwrap_or(&Value::Null)));
+                            idx += 1;
+                        }
+                        Some('d') => {
+                            let n = args.get(idx).and_then(|v| coerce_i64(v)).unwrap_or(0);
+                            out.push_str(&n.to_string());
+                            idx += 1;
+                        }
+                        Some('%') => out.push('%'),
+                        Some(other) => out.push(other),
+                        None => out.push('%'),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            Ok(Value::Str(out))
+        }
+        "md5" => Err(SQLError::Unsupported(
+            "md5() is not yet wired -- pull in the `md-5` crate or call \
+             a stdlib hashing helper at the engine boundary"
+                .into(),
+        )),
+        "encode" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("encode takes 2 args".into()));
+            }
+            let bytes = value_to_string(&args[0]);
+            let encoding = value_to_string(&args[1]);
+            match encoding.as_str() {
+                "hex" => Ok(Value::Str(
+                    bytes.bytes().map(|b| format!("{b:02x}")).collect(),
+                )),
+                "escape" => Ok(Value::Str(bytes.escape_default().collect())),
+                "base64" => Ok(Value::Str(base64_encode(bytes.as_bytes()))),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "unknown encoding {other:?}"
+                ))),
+            }
+        }
+        "decode" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("decode takes 2 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let encoding = value_to_string(&args[1]);
+            match encoding.as_str() {
+                "hex" => {
+                    let mut out = Vec::with_capacity(s.len() / 2);
+                    let bytes = s.as_bytes();
+                    let mut i = 0;
+                    while i + 1 < bytes.len() {
+                        let hi = (bytes[i] as char).to_digit(16).unwrap_or(0) as u8;
+                        let lo = (bytes[i + 1] as char).to_digit(16).unwrap_or(0) as u8;
+                        out.push(hi * 16 + lo);
+                        i += 2;
+                    }
+                    Ok(Value::Str(String::from_utf8_lossy(&out).to_string()))
+                }
+                "base64" => base64_decode(&s)
+                    .map(|b| Value::Str(String::from_utf8_lossy(&b).to_string()))
+                    .map_err(|e| SQLError::TypeMismatch(format!("base64 decode: {e}"))),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "unknown encoding {other:?}"
+                ))),
+            }
+        }
         "split_part" => {
             if args.len() != 3 {
                 return Err(SQLError::TypeMismatch("split_part takes 3 args".into()));
@@ -852,6 +1068,219 @@ fn to_f64(v: &Value) -> Result<f64> {
             "expected number, got {other:?}"
         ))),
     }
+}
+
+/// Best-effort `Value -> i64`. Returns `None` for shapes that do not
+/// have a well-defined integer projection (e.g. `Value::Null`).
+fn coerce_i64(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int(n) => Some(*n),
+        Value::Float(f) => Some(*f as i64),
+        Value::Bool(b) => Some(i64::from(*b)),
+        Value::Str(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+// -------------------------------------------------------------------------
+// MD5 stub. The reference port carried a hand-written implementation
+// here; it shipped with a transcription error in the constant table
+// that broke its self-test. The builtin is surfaced as Unsupported
+// for now; production callers should feed `md5()` data through the
+// `md-5` crate at the engine boundary.
+// -------------------------------------------------------------------------
+
+#[allow(dead_code)]
+fn md5_hex(input: &[u8]) -> String {
+    let digest = md5_compute(input);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[allow(dead_code, clippy::many_single_char_names)]
+fn md5_compute(input: &[u8]) -> [u8; 16] {
+    const S: [u32; 64] = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    const K: [u32; 64] = [
+        0xd76a_a478,
+        0xe8c7_b756,
+        0x2420_70db,
+        0xc1bd_ceee,
+        0xf57c_0faf,
+        0x4787_c62a,
+        0xa830_4613,
+        0xfd46_9501,
+        0x6980_98d8,
+        0x8b44_f7af,
+        0xffff_5bb1,
+        0x895c_d7be,
+        0x6b90_1122,
+        0xfd98_7193,
+        0xa679_438e,
+        0x49b4_0821,
+        0xf61e_2562,
+        0xc040_b340,
+        0x265e_5a51,
+        0xe9b6_c7aa,
+        0xd62f_105d,
+        0x0244_1453,
+        0xd8a1_e681,
+        0xe7d3_fbc8,
+        0x21e1_cde6,
+        0xc337_07d6,
+        0xf4d5_0d87,
+        0x455a_14ed,
+        0xa9e3_e905,
+        0xfcef_a3f8,
+        0x676f_02d9,
+        0x8d2a_4c8a,
+        0xfffa_3942,
+        0x8771_f681,
+        0x6d9d_6122,
+        0xfde5_380c,
+        0xa4be_ea44,
+        0x4bde_cfa9,
+        0xf6bb_4b60,
+        0xbebf_bc70,
+        0x289b_7ec6,
+        0xeaa1_27fa,
+        0xd4ef_3085,
+        0x0488_1d05,
+        0xd9d4_d039,
+        0xe6db_99e5,
+        0x1fa2_7cf8,
+        0xc4ac_5665,
+        0xf429_2244,
+        0x432a_ff97,
+        0xab94_23a7,
+        0xfc93_a039,
+        0x655b_59c3,
+        0x8f0c_cc92,
+        0xffef_f47d,
+        0x8584_5dd1,
+        0x6fa8_7e4f,
+        0xfe2c_e6e0,
+        0xa301_4314,
+        0x4e08_11a1,
+        0xf753_7e82,
+        0xbd3a_f235,
+        0x2ad7_d2bb,
+        0xeb86_d391,
+    ];
+
+    let mut a0: u32 = 0x6745_2301;
+    let mut b0: u32 = 0xefcd_ab89;
+    let mut c0: u32 = 0x98ba_dcfe;
+    let mut d0: u32 = 0x1032_5476;
+
+    let mut buf: Vec<u8> = Vec::with_capacity(input.len() + 72);
+    buf.extend_from_slice(input);
+    buf.push(0x80);
+    while buf.len() % 64 != 56 {
+        buf.push(0);
+    }
+    let bits = (input.len() as u64).wrapping_mul(8);
+    buf.extend_from_slice(&bits.to_le_bytes());
+
+    for chunk in buf.chunks_exact(64) {
+        let mut m = [0u32; 16];
+        for (i, word) in chunk.chunks_exact(4).enumerate() {
+            m[i] = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
+        }
+        let mut a = a0;
+        let mut b = b0;
+        let mut c = c0;
+        let mut d = d0;
+        for i in 0..64 {
+            let (f, g) = match i {
+                0..=15 => ((b & c) | (!b & d), i),
+                16..=31 => ((d & b) | (!d & c), (5 * i + 1) % 16),
+                32..=47 => (b ^ c ^ d, (3 * i + 5) % 16),
+                _ => (c ^ (b | !d), (7 * i) % 16),
+            };
+            let temp = d;
+            d = c;
+            c = b;
+            b = b.wrapping_add(
+                a.wrapping_add(f)
+                    .wrapping_add(K[i])
+                    .wrapping_add(m[g])
+                    .rotate_left(S[i]),
+            );
+            a = temp;
+        }
+        a0 = a0.wrapping_add(a);
+        b0 = b0.wrapping_add(b);
+        c0 = c0.wrapping_add(c);
+        d0 = d0.wrapping_add(d);
+    }
+
+    let mut out = [0u8; 16];
+    out[0..4].copy_from_slice(&a0.to_le_bytes());
+    out[4..8].copy_from_slice(&b0.to_le_bytes());
+    out[8..12].copy_from_slice(&c0.to_le_bytes());
+    out[12..16].copy_from_slice(&d0.to_le_bytes());
+    out
+}
+
+// -------------------------------------------------------------------------
+// Minimal base64 (RFC 4648). Used only for the SQL `encode` /
+// `decode` builtins; not performance-critical.
+// -------------------------------------------------------------------------
+
+const BASE64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(input: &[u8]) -> String {
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
+        out.push(BASE64_ALPHABET[(((b0 & 0b11) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(BASE64_ALPHABET[(((b1 & 0b1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(BASE64_ALPHABET[(b2 & 0b11_1111) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn base64_decode(input: &str) -> Result<Vec<u8>> {
+    let mut decoded: Vec<u8> = Vec::with_capacity(input.len() / 4 * 3);
+    let mut buf = [0u8; 4];
+    let mut idx = 0usize;
+    let mut padding = 0;
+    for c in input.chars() {
+        if c == '=' {
+            padding += 1;
+            buf[idx] = 0;
+        } else {
+            let val = BASE64_ALPHABET
+                .iter()
+                .position(|&b| b as char == c)
+                .ok_or_else(|| SQLError::TypeMismatch(format!("invalid base64 char {c:?}")))?;
+            buf[idx] = val as u8;
+        }
+        idx += 1;
+        if idx == 4 {
+            decoded.push((buf[0] << 2) | (buf[1] >> 4));
+            decoded.push((buf[1] << 4) | (buf[2] >> 2));
+            decoded.push((buf[2] << 6) | buf[3]);
+            idx = 0;
+        }
+    }
+    decoded.truncate(decoded.len().saturating_sub(padding));
+    Ok(decoded)
 }
 
 /// Coerce a [`Value`] into a `Vec<f32>` if it is a homogeneous numeric

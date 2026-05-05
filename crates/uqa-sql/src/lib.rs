@@ -24,7 +24,9 @@
     clippy::redundant_closure_for_method_calls,
     clippy::map_unwrap_or,
     clippy::manual_string_new,
-    clippy::option_if_let_else
+    clippy::option_if_let_else,
+    clippy::cast_lossless,
+    clippy::format_collect
 )]
 
 pub mod ast;
