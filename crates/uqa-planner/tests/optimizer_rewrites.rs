@@ -171,5 +171,5 @@ fn nested_and_flattens() {
 /// Equality helper: panics with a useful message instead of using
 /// proptest macros (these are regular `#[test]` cases).
 fn prop_assert_eq_helper(got: &Expr, expected: &Expr) {
-    assert!(expr_eq(got, expected), "expected {expected:?}, got {got:?}",);
+    assert!(expr_eq(got, expected), "expected {expected:?}, got {got:?}");
 }
