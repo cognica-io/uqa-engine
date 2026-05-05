@@ -524,6 +524,90 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 .ok_or_else(|| SqlError::TypeMismatch(format!("chr: invalid code point {n}")))?;
             Ok(Value::Str(c.to_string()))
         }
+        "regexp_match" | "regexp_matches" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(SqlError::TypeMismatch(
+                    "regexp_match takes 2 or 3 args".into(),
+                ));
+            }
+            let s = value_to_string(&args[0]);
+            let pat = value_to_string(&args[1]);
+            let case_insensitive = args
+                .get(2)
+                .map(|v| value_to_string(v).contains('i'))
+                .unwrap_or(false);
+            let pat = if case_insensitive {
+                format!("(?i){pat}")
+            } else {
+                pat
+            };
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| SqlError::TypeMismatch(format!("regex: {e}")))?;
+            match re.captures(&s) {
+                None => Ok(Value::Null),
+                Some(caps) => {
+                    let groups: Vec<Value> = caps
+                        .iter()
+                        .skip(1)
+                        .map(|m| {
+                            m.map(|x| Value::Str(x.as_str().into()))
+                                .unwrap_or(Value::Null)
+                        })
+                        .collect();
+                    if groups.is_empty() {
+                        Ok(Value::Str(caps.get(0).unwrap().as_str().into()))
+                    } else {
+                        Ok(Value::List(groups))
+                    }
+                }
+            }
+        }
+        "regexp_replace" => {
+            if args.len() < 3 {
+                return Err(SqlError::TypeMismatch(
+                    "regexp_replace takes 3 or 4 args".into(),
+                ));
+            }
+            let s = value_to_string(&args[0]);
+            let pat = value_to_string(&args[1]);
+            let repl = value_to_string(&args[2]);
+            let flags = args.get(3).map(|v| value_to_string(v)).unwrap_or_default();
+            let global = flags.contains('g');
+            let pat = if flags.contains('i') {
+                format!("(?i){pat}")
+            } else {
+                pat
+            };
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| SqlError::TypeMismatch(format!("regex: {e}")))?;
+            let out = if global {
+                re.replace_all(&s, repl.as_str()).into_owned()
+            } else {
+                re.replace(&s, repl.as_str()).into_owned()
+            };
+            Ok(Value::Str(out))
+        }
+        "split_part" => {
+            if args.len() != 3 {
+                return Err(SqlError::TypeMismatch("split_part takes 3 args".into()));
+            }
+            let s = value_to_string(&args[0]);
+            let sep = value_to_string(&args[1]);
+            let idx = to_i64(&args[2])?;
+            let parts: Vec<&str> = if sep.is_empty() {
+                vec![s.as_str()]
+            } else {
+                s.split(sep.as_str()).collect()
+            };
+            let idx_usize = if idx >= 1 {
+                (idx - 1) as usize
+            } else {
+                return Ok(Value::Str(String::new()));
+            };
+            Ok(Value::Str(
+                parts.get(idx_usize).copied().unwrap_or("").to_string(),
+            ))
+        }
         "now" | "current_timestamp" => {
             use chrono::Utc;
             Ok(Value::Str(

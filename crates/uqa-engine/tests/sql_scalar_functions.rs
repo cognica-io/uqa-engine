@@ -141,6 +141,52 @@ fn round_with_precision() {
 }
 
 #[test]
+fn regexp_match_returns_capture_group() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql(
+            "SELECT regexp_match('Order #42 placed', '#(\\d+)') AS m FROM t",
+            &[],
+        )
+        .unwrap();
+    let m = match &res.rows[0]["m"] {
+        Value::List(items) if items.len() == 1 => items[0].clone(),
+        other => panic!("expected list with 1 group, got {other:?}"),
+    };
+    assert_eq!(m, Value::Str("42".into()));
+}
+
+#[test]
+fn regexp_replace_global_flag() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql(
+            "SELECT regexp_replace('a-b-c-d', '-', '_', 'g') AS s FROM t",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(res.rows[0]["s"], Value::Str("a_b_c_d".into()));
+}
+
+#[test]
+fn split_part_one_indexed() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
+    let res = eng
+        .sql("SELECT split_part('a/b/c', '/', 2) AS mid FROM t", &[])
+        .unwrap();
+    assert_eq!(res.rows[0]["mid"], Value::Str("b".into()));
+}
+
+#[test]
 fn greatest_least_skip_nulls() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE t (id BIGSERIAL PRIMARY KEY)", &[])

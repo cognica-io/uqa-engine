@@ -1395,6 +1395,7 @@ dependencies = [
  "chrono",
  "pg_query",
  "proptest",
+ "regex",
  "serde",
  "thiserror 2.0.18",
  "uqa-analysis",

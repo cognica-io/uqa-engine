@@ -19,6 +19,7 @@ uqa-operators = { workspace = true }
 pg_query = { workspace = true }
 serde = { workspace = true }
 chrono = { workspace = true }
+regex = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
