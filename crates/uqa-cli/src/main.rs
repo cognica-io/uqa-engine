@@ -87,6 +87,8 @@ struct Session {
     location: String,
     history: Vec<String>,
     history_path: Option<PathBuf>,
+    show_timing: bool,
+    expanded: bool,
 }
 
 impl Session {
@@ -107,6 +109,8 @@ impl Session {
             location: "<memory>".into(),
             history,
             history_path,
+            show_timing: false,
+            expanded: false,
         }
     }
 
@@ -132,15 +136,29 @@ impl Session {
 
     fn run_statement(&mut self, sql: &str, out: &mut impl Write) {
         self.record_statement(sql);
-        match self.engine.sql(sql, &[]) {
-            Ok(result) => print_result(&result, out),
+        let start = std::time::Instant::now();
+        let outcome = self.engine.sql(sql, &[]);
+        let elapsed = start.elapsed();
+        match outcome {
+            Ok(result) => {
+                if self.expanded {
+                    print_result_expanded(&result, out);
+                } else {
+                    print_result(&result, out);
+                }
+            }
             Err(err) => {
                 let _ = writeln!(out, "error: {err}");
             }
         }
+        if self.show_timing {
+            let ms = elapsed.as_secs_f64() * 1000.0;
+            let _ = writeln!(out, "Time: {ms:.3} ms");
+        }
     }
 
     /// Returns `false` when the meta command requested an exit.
+    #[allow(clippy::too_many_lines)]
     fn handle_meta(&mut self, command: &str, out: &mut impl Write) -> bool {
         let mut parts = command.trim().splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");
@@ -153,7 +171,7 @@ impl Session {
             "help" | "h" => {
                 let _ = writeln!(
                     out,
-                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file"
+                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file\n  \\timing                  toggle per-statement execution timing\n  \\expanded                toggle column-per-line output\n  \\dt                      list registered tables\n  \\describe <table>        show the schema of a table\n  \\run <file>              execute SQL from a file"
                 );
             }
             "history" => match arg {
@@ -197,12 +215,117 @@ impl Session {
             "where" => {
                 let _ = writeln!(out, "{}", self.location);
             }
+            "timing" => {
+                self.show_timing = !self.show_timing;
+                let state = if self.show_timing { "on" } else { "off" };
+                let _ = writeln!(out, "timing {state}");
+            }
+            "expanded" | "x" => {
+                self.expanded = !self.expanded;
+                let state = if self.expanded { "on" } else { "off" };
+                let _ = writeln!(out, "expanded display {state}");
+            }
+            "dt" | "tables" => {
+                let names = self.engine.table_names();
+                if names.is_empty() {
+                    let _ = writeln!(out, "no tables registered");
+                } else {
+                    for name in names {
+                        let _ = writeln!(out, "  {name}");
+                    }
+                }
+            }
+            "describe" | "d" => {
+                if arg.is_empty() {
+                    let _ = writeln!(out, "usage: \\describe <table>");
+                } else if let Some(cols) = self.engine.describe_table(arg) {
+                    for col in cols {
+                        let _ = writeln!(out, "  {}: {:?}", col.name, col.ty);
+                    }
+                } else {
+                    let _ = writeln!(out, "no such table: {arg}");
+                }
+            }
+            "run" => {
+                if arg.is_empty() {
+                    let _ = writeln!(out, "usage: \\run <file>");
+                } else {
+                    match std::fs::read_to_string(arg) {
+                        Ok(text) => {
+                            for stmt in split_statements(&text) {
+                                self.run_statement(&stmt, out);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = writeln!(out, "could not read {arg}: {e}");
+                        }
+                    }
+                }
+            }
             other => {
                 let _ = writeln!(out, "unknown command: \\{other}. \\help for the list.");
             }
         }
         true
     }
+}
+
+fn split_statements(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    for ch in text.chars() {
+        if ch == '\'' {
+            in_string = !in_string;
+            current.push(ch);
+            continue;
+        }
+        if ch == ';' && !in_string {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                out.push(trimmed);
+            }
+            current.clear();
+        } else {
+            current.push(ch);
+        }
+    }
+    let trailing = current.trim().to_string();
+    if !trailing.is_empty() {
+        out.push(trailing);
+    }
+    out
+}
+
+/// Render the result one column per line per row -- mirrors
+/// `PostgreSQL` `psql`'s `\x` expanded display mode.
+fn print_result_expanded(result: &SQLResult, out: &mut impl Write) {
+    if result.rows.is_empty() && result.columns.is_empty() {
+        if result.affected_rows > 0 {
+            let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
+        }
+        return;
+    }
+    let columns: Vec<String> = if result.columns.is_empty() {
+        let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
+        for row in &result.rows {
+            for k in row.keys() {
+                keys.insert(k);
+            }
+        }
+        keys.into_iter().cloned().collect()
+    } else {
+        result.columns.clone()
+    };
+    let label_width = columns.iter().map(String::len).max().unwrap_or(0);
+    for (idx, row) in result.rows.iter().enumerate() {
+        let _ = writeln!(out, "-[ RECORD {} ]-", idx + 1);
+        for col in &columns {
+            let value = value_to_display(row.get(col));
+            let _ = writeln!(out, "{col:<label_width$} | {value}");
+        }
+    }
+    let _ = writeln!(out, "({} row(s))", result.rows.len());
 }
 
 fn print_result(result: &SQLResult, out: &mut impl Write) {

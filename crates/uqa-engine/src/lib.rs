@@ -789,6 +789,17 @@ impl Engine {
             .map(|c| c.name.clone())
     }
 
+    /// Sorted list of every registered table name.
+    pub fn table_names(&self) -> Vec<String> {
+        self.tables.read().keys().cloned().collect()
+    }
+
+    /// Snapshot the column schema of `table`. Returns `None` when no
+    /// table by that name is registered.
+    pub fn describe_table(&self, table: &str) -> Option<Vec<uqa_sql::ast::ColumnDef>> {
+        self.table(table).map(|t| t.columns.read().clone())
+    }
+
     /// Names of columns with a `UNIQUE` or `PRIMARY KEY` constraint
     /// declared on the table. Auto-increment columns are excluded
     /// because the engine guarantees their uniqueness through the
