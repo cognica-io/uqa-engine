@@ -142,6 +142,11 @@ crates/
 See [CHANGELOG.md](CHANGELOG.md) for what is in each release and what
 is still open.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development gates,
+test conventions, and PR guidelines.
+
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE).
