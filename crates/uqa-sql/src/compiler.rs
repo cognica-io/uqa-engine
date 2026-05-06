@@ -58,11 +58,151 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),
         NodeEnum::TransactionStmt(stmt) => compile_transaction(stmt),
+        NodeEnum::CreateSeqStmt(stmt) => {
+            compile_create_sequence(stmt).map(Statement::CreateSequence)
+        }
+        NodeEnum::AlterSeqStmt(stmt) => compile_alter_sequence(stmt).map(Statement::AlterSequence),
+        NodeEnum::CreateTableAsStmt(stmt) => compile_create_table_as(stmt),
+        NodeEnum::PrepareStmt(stmt) => compile_prepare(stmt),
+        NodeEnum::ExecuteStmt(stmt) => compile_execute(stmt),
+        NodeEnum::DeallocateStmt(stmt) => compile_deallocate(stmt),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
         ))),
     }
+}
+
+fn compile_create_sequence(
+    stmt: &pg_query::protobuf::CreateSeqStmt,
+) -> Result<crate::ast::CreateSequence> {
+    use crate::ast::CreateSequence;
+    let name = stmt
+        .sequence
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("CREATE SEQUENCE without name".into()))?;
+    let mut start = 1_i64;
+    let mut increment = 1_i64;
+    for opt in &stmt.options {
+        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
+            let key = elem.defname.to_ascii_lowercase();
+            let v = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                Some(NodeEnum::Integer(i)) => i64::from(i.ival),
+                Some(NodeEnum::Float(f)) => f.fval.parse::<f64>().unwrap_or(0.0) as i64,
+                Some(NodeEnum::String(s)) => s.sval.parse::<i64>().unwrap_or(0),
+                _ => continue,
+            };
+            match key.as_str() {
+                "start" => start = v,
+                "increment" => increment = v,
+                _ => {}
+            }
+        }
+    }
+    Ok(CreateSequence {
+        name,
+        if_not_exists: stmt.if_not_exists,
+        start,
+        increment,
+    })
+}
+
+fn compile_alter_sequence(
+    stmt: &pg_query::protobuf::AlterSeqStmt,
+) -> Result<crate::ast::AlterSequence> {
+    use crate::ast::AlterSequence;
+    let name = stmt
+        .sequence
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("ALTER SEQUENCE without name".into()))?;
+    let mut alter = AlterSequence {
+        name,
+        ..Default::default()
+    };
+    for opt in &stmt.options {
+        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
+            let key = elem.defname.to_ascii_lowercase();
+            let v_opt: Option<i64> = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                Some(NodeEnum::Integer(i)) => Some(i64::from(i.ival)),
+                Some(NodeEnum::Float(f)) => Some(f.fval.parse::<f64>().unwrap_or(0.0) as i64),
+                Some(NodeEnum::String(s)) => s.sval.parse::<i64>().ok(),
+                _ => None,
+            };
+            match key.as_str() {
+                "restart" => alter.restart = Some(v_opt),
+                "increment" => alter.increment = v_opt,
+                "start" => alter.start = v_opt,
+                _ => {}
+            }
+        }
+    }
+    Ok(alter)
+}
+
+fn compile_create_table_as(stmt: &pg_query::protobuf::CreateTableAsStmt) -> Result<Statement> {
+    let into = stmt
+        .into
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE TABLE AS without target".into()))?;
+    let name = into
+        .rel
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("CREATE TABLE AS target has no name".into()))?;
+    let body = stmt
+        .query
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("CREATE TABLE AS without body".into()))?;
+    let inner = body
+        .node
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE TABLE AS body empty".into()))?;
+    let select = match inner {
+        NodeEnum::SelectStmt(s) => compile_select(s)?,
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE TABLE AS body must be SELECT, got {other:?}"
+            )));
+        }
+    };
+    Ok(Statement::CreateTableAs {
+        name,
+        if_not_exists: stmt.if_not_exists,
+        body: Box::new(select),
+    })
+}
+
+fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<Statement> {
+    let name = stmt.name.clone();
+    let body = stmt
+        .query
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("PREPARE without body".into()))?;
+    let inner = compile_stmt(body)?;
+    Ok(Statement::Prepare {
+        name,
+        body: Box::new(inner),
+    })
+}
+
+fn compile_execute(stmt: &pg_query::protobuf::ExecuteStmt) -> Result<Statement> {
+    let name = stmt.name.clone();
+    let mut params: Vec<Expr> = Vec::with_capacity(stmt.params.len());
+    for p in &stmt.params {
+        params.push(compile_expr(p)?);
+    }
+    Ok(Statement::Execute { name, params })
+}
+
+fn compile_deallocate(stmt: &pg_query::protobuf::DeallocateStmt) -> Result<Statement> {
+    let name = if stmt.name.is_empty() {
+        None
+    } else {
+        Some(stmt.name.clone())
+    };
+    Ok(Statement::Deallocate { name })
 }
 
 fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
@@ -429,6 +569,7 @@ fn json_path_args(lhs: Expr, rhs: Expr) -> Vec<Expr> {
 // -------------------------------------------------------------------------
 
 fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateTable> {
+    use crate::ast::{ForeignKey, TableCheck};
     let name = stmt
         .relation
         .as_ref()
@@ -438,18 +579,70 @@ fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateT
         return Err(SQLError::Internal("CREATE TABLE without name".into()));
     }
     let mut columns = Vec::new();
+    let mut checks: Vec<TableCheck> = Vec::new();
+    let mut foreign_keys: Vec<ForeignKey> = Vec::new();
     for elt in &stmt.table_elts {
         let Some(inner) = elt.node.as_ref() else {
             continue;
         };
-        if let NodeEnum::ColumnDef(col) = inner {
-            columns.push(compile_column_def(col)?);
+        match inner {
+            NodeEnum::ColumnDef(col) => {
+                columns.push(compile_column_def(col)?);
+            }
+            NodeEnum::Constraint(cstr) => match cstr.contype() {
+                pg_query::protobuf::ConstrType::ConstrCheck => {
+                    if let Some(raw) = cstr.raw_expr.as_deref() {
+                        let expr = compile_expr(raw)?;
+                        let cname = if cstr.conname.is_empty() {
+                            None
+                        } else {
+                            Some(cstr.conname.clone())
+                        };
+                        checks.push(TableCheck { name: cname, expr });
+                    }
+                }
+                pg_query::protobuf::ConstrType::ConstrForeign => {
+                    let local_columns: Vec<String> = cstr
+                        .fk_attrs
+                        .iter()
+                        .filter_map(|n| extract_string(n).ok())
+                        .collect();
+                    let ref_table = cstr
+                        .pktable
+                        .as_ref()
+                        .map(|r| r.relname.clone())
+                        .unwrap_or_default();
+                    let ref_columns: Vec<String> = cstr
+                        .pk_attrs
+                        .iter()
+                        .filter_map(|n| extract_string(n).ok())
+                        .collect();
+                    if !local_columns.is_empty() && !ref_table.is_empty() && !ref_columns.is_empty()
+                    {
+                        let cname = if cstr.conname.is_empty() {
+                            None
+                        } else {
+                            Some(cstr.conname.clone())
+                        };
+                        foreign_keys.push(ForeignKey {
+                            name: cname,
+                            local_columns,
+                            ref_table,
+                            ref_columns,
+                        });
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
         }
     }
     Ok(CreateTable {
         name,
         columns,
         if_not_exists: stmt.if_not_exists,
+        checks,
+        foreign_keys,
     })
 }
 
@@ -461,6 +654,9 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
     let mut primary_key = false;
     let mut not_null = false;
     let mut unique = false;
+    let mut default: Option<Expr> = None;
+    let mut check: Option<Expr> = None;
+    let mut references: Option<crate::ast::ForeignKeyRef> = None;
     for c in &col.constraints {
         let Some(inner) = c.node.as_ref() else {
             continue;
@@ -470,6 +666,31 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
                 pg_query::protobuf::ConstrType::ConstrPrimary => primary_key = true,
                 pg_query::protobuf::ConstrType::ConstrNotnull => not_null = true,
                 pg_query::protobuf::ConstrType::ConstrUnique => unique = true,
+                pg_query::protobuf::ConstrType::ConstrDefault => {
+                    if let Some(raw) = cstr.raw_expr.as_deref() {
+                        default = Some(compile_expr(raw)?);
+                    }
+                }
+                pg_query::protobuf::ConstrType::ConstrCheck => {
+                    if let Some(raw) = cstr.raw_expr.as_deref() {
+                        check = Some(compile_expr(raw)?);
+                    }
+                }
+                pg_query::protobuf::ConstrType::ConstrForeign => {
+                    let table = cstr
+                        .pktable
+                        .as_ref()
+                        .map(|r| r.relname.clone())
+                        .unwrap_or_default();
+                    let column = cstr
+                        .pk_attrs
+                        .iter()
+                        .find_map(|n| extract_string(n).ok())
+                        .unwrap_or_default();
+                    if !table.is_empty() && !column.is_empty() {
+                        references = Some(crate::ast::ForeignKeyRef { table, column });
+                    }
+                }
                 _ => {}
             }
         }
@@ -485,6 +706,9 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
         not_null,
         auto_increment,
         unique,
+        default,
+        check,
+        references,
     })
 }
 

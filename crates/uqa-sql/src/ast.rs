@@ -36,6 +36,28 @@ pub struct ColumnDef {
     /// whose value for this column already exists in another row.
     #[serde(default)]
     pub unique: bool,
+    /// `DEFAULT <expr>`. Evaluated at INSERT time when the column is
+    /// not present in the row tuple. Skipped from serde because
+    /// `Expr` is not serializable; catalog reload re-parses the
+    /// `CREATE TABLE` text from the catalog body.
+    #[serde(skip)]
+    pub default: Option<Expr>,
+    /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
+    /// (and UPDATE-replace) time against the row being written.
+    #[serde(skip)]
+    pub check: Option<Expr>,
+    /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
+    /// rejects INSERT / UPDATE whose value is not present in the
+    /// referenced (table, column) pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<ForeignKeyRef>,
+}
+
+/// `REFERENCES table(column)` reference target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignKeyRef {
+    pub table: String,
+    pub column: String,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +67,31 @@ pub struct CreateTable {
     /// `CREATE TABLE IF NOT EXISTS` — silently ignore the statement
     /// when a table with this name already exists.
     pub if_not_exists: bool,
+    /// Table-level `CHECK (...)` constraints. Each entry is an
+    /// expression that must evaluate truthy against every row.
+    #[allow(dead_code)]
+    pub checks: Vec<TableCheck>,
+    /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
+    pub foreign_keys: Vec<ForeignKey>,
+}
+
+/// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
+/// CHECK (...)`).
+#[derive(Debug, Clone)]
+pub struct TableCheck {
+    pub name: Option<String>,
+    pub expr: Expr,
+}
+
+/// Table-level foreign key. `local_columns.len()` matches
+/// `ref_columns.len()`; the engine joins on the position-aligned
+/// pairs.
+#[derive(Debug, Clone)]
+pub struct ForeignKey {
+    pub name: Option<String>,
+    pub local_columns: Vec<String>,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +133,7 @@ pub struct AlterTableStmt {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum AlterTableAction {
     AddColumn {
         column: ColumnDef,
@@ -392,6 +440,54 @@ pub enum Statement {
     },
     /// `BEGIN` / `COMMIT` / `ROLLBACK` / `SAVEPOINT name`.
     Transaction(TransactionStmt),
+    /// `CREATE SEQUENCE name [START n] [INCREMENT n]`.
+    CreateSequence(CreateSequence),
+    /// `ALTER SEQUENCE name [RESTART [WITH n]] [INCREMENT [BY] n]
+    /// [START [WITH] n]`.
+    AlterSequence(AlterSequence),
+    /// `CREATE TABLE name AS SELECT ...`.
+    CreateTableAs {
+        name: String,
+        if_not_exists: bool,
+        body: Box<SelectStmt>,
+    },
+    /// `PREPARE name AS <inner>`.
+    Prepare {
+        name: String,
+        body: Box<Statement>,
+    },
+    /// `EXECUTE name (param1, param2, ...)`.
+    Execute {
+        name: String,
+        params: Vec<Expr>,
+    },
+    /// `DEALLOCATE name | DEALLOCATE ALL`. `None` means ALL.
+    Deallocate {
+        name: Option<String>,
+    },
+    /// `SELECT * FROM (VALUES ...) [AS alias]` -- a standalone VALUES
+    /// statement (also reachable from a SET-OP body).
+    Values {
+        rows: Vec<Vec<Expr>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateSequence {
+    pub name: String,
+    pub if_not_exists: bool,
+    pub start: i64,
+    pub increment: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AlterSequence {
+    pub name: String,
+    /// `RESTART [WITH n]`. `Some(None)` for `RESTART` (uses `start`),
+    /// `Some(Some(n))` for explicit value, `None` when not specified.
+    pub restart: Option<Option<i64>>,
+    pub increment: Option<i64>,
+    pub start: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

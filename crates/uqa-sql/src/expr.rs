@@ -14,14 +14,34 @@ use crate::error::{Result, SQLError};
 use crate::params::SQLParam;
 use crate::result::ResultRow;
 
+/// Engine-side hook that the expression evaluator calls into for
+/// stateful scalar functions. Currently covers sequence access
+/// (`nextval` / `currval` / `setval`); the trait keeps `uqa-sql`
+/// independent of `uqa-engine`.
+pub trait EngineHook {
+    fn nextval(&self, name: &str) -> std::result::Result<i64, String>;
+    fn currval(&self, name: &str) -> std::result::Result<i64, String>;
+    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String>;
+}
+
 pub struct EvalContext<'a> {
     pub row: Option<&'a ResultRow>,
     pub params: &'a [SQLParam],
+    pub engine: Option<&'a dyn EngineHook>,
 }
 
 impl<'a> EvalContext<'a> {
     pub fn new(row: Option<&'a ResultRow>, params: &'a [SQLParam]) -> Self {
-        Self { row, params }
+        Self {
+            row,
+            params,
+            engine: None,
+        }
+    }
+
+    pub fn with_engine(mut self, engine: &'a dyn EngineHook) -> Self {
+        self.engine = Some(engine);
+        self
     }
 }
 
@@ -86,6 +106,14 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 .iter()
                 .map(|a| eval(a, ctx))
                 .collect::<Result<Vec<_>>>()?;
+            // Sequence functions need the engine hook because they
+            // mutate per-engine state (`_engine._sequences` in the
+            // Python reference). Routed before the pure-scalar
+            // dispatch so they take precedence over any future
+            // built-in named the same.
+            if matches!(lower.as_str(), "nextval" | "currval" | "setval") {
+                return eval_sequence_function(&lower, &evaluated, ctx);
+            }
             eval_scalar_function(&lower, &evaluated)
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
@@ -261,6 +289,40 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
 /// Dispatch table for built-in scalar SQL functions. Mirrors
 /// `_call_scalar_function` in `uqa/sql/expr_evaluator.py`. Function
 /// names are lower-cased before lookup.
+fn eval_sequence_function(name: &str, args: &[Value], ctx: &EvalContext<'_>) -> Result<Value> {
+    let engine = ctx.engine.ok_or_else(|| {
+        SQLError::Unsupported(format!(
+            "sequence function `{name}` requires an engine hook on the EvalContext"
+        ))
+    })?;
+    if args.is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name}() requires the sequence name"
+        )));
+    }
+    let seq_name = value_to_string(&args[0]);
+    let result: std::result::Result<i64, String> = match name {
+        "nextval" => engine.nextval(&seq_name),
+        "currval" => engine.currval(&seq_name),
+        "setval" => {
+            if args.len() < 2 {
+                return Err(SQLError::TypeMismatch(
+                    "setval() requires 2 arguments".into(),
+                ));
+            }
+            let n = to_i64(&args[1])?;
+            engine.setval(&seq_name, n)
+        }
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "unknown sequence function `{other}`"
+            )));
+        }
+    };
+    let v = result.map_err(SQLError::Unsupported)?;
+    Ok(Value::Int(v))
+}
+
 fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
     // libpg_query qualifies built-in functions as `pg_catalog.<name>`;
     // strip the schema for the dispatcher's lookup table.

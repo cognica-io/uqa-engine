@@ -150,6 +150,19 @@ pub struct Engine {
     /// boundaries; calling [`Engine::cancel`] from any thread tears
     /// every in-flight query down with `SQLError::Cancelled`.
     cancel: uqa_core::CancellationToken,
+    /// Named sequences. Mirrors `_engine._sequences` in the Python
+    /// reference. Each entry tracks `(start, increment, current)`.
+    sequences: RwLock<BTreeMap<String, SequenceState>>,
+    /// Prepared statements. Mirrors `_engine._prepared`.
+    prepared: RwLock<BTreeMap<String, uqa_sql::ast::Statement>>,
+}
+
+/// Mutable state of a single SQL sequence.
+#[derive(Debug, Clone, Copy)]
+pub struct SequenceState {
+    pub start: i64,
+    pub increment: i64,
+    pub current: i64,
 }
 
 #[derive(Debug, Default)]
@@ -201,6 +214,115 @@ impl Engine {
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
+            sequences: RwLock::new(BTreeMap::new()),
+            prepared: RwLock::new(BTreeMap::new()),
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Sequences. Mirrors `_engine._sequences` and the
+    // `_compile_create_sequence` / `_compile_alter_sequence` paths in
+    // the Python reference.
+    // -----------------------------------------------------------------
+
+    pub fn create_sequence(
+        &self,
+        name: &str,
+        start: i64,
+        increment: i64,
+        if_not_exists: bool,
+    ) -> bool {
+        let mut seqs = self.sequences.write();
+        if seqs.contains_key(name) {
+            return if_not_exists;
+        }
+        seqs.insert(
+            name.to_string(),
+            SequenceState {
+                start,
+                increment,
+                current: start - increment,
+            },
+        );
+        true
+    }
+
+    pub fn alter_sequence(
+        &self,
+        name: &str,
+        restart: Option<Option<i64>>,
+        increment: Option<i64>,
+        start: Option<i64>,
+    ) -> Result<(), String> {
+        let mut seqs = self.sequences.write();
+        let seq = seqs
+            .get_mut(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        if let Some(start_val) = start {
+            seq.start = start_val;
+        }
+        if let Some(inc) = increment {
+            seq.increment = inc;
+        }
+        if let Some(opt) = restart {
+            let restart_val = opt.unwrap_or(seq.start);
+            seq.current = restart_val - seq.increment;
+        }
+        Ok(())
+    }
+
+    pub fn drop_sequence(&self, name: &str) -> bool {
+        self.sequences.write().remove(name).is_some()
+    }
+
+    pub fn nextval(&self, name: &str) -> Result<i64, String> {
+        let mut seqs = self.sequences.write();
+        let seq = seqs
+            .get_mut(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        seq.current += seq.increment;
+        Ok(seq.current)
+    }
+
+    pub fn currval(&self, name: &str) -> Result<i64, String> {
+        let seqs = self.sequences.read();
+        seqs.get(name)
+            .map(|s| s.current)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))
+    }
+
+    pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
+        let mut seqs = self.sequences.write();
+        let seq = seqs
+            .get_mut(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        seq.current = value;
+        Ok(value)
+    }
+
+    /// Snapshot of all registered sequences as `(name, state)` pairs.
+    pub fn sequences_snapshot(&self) -> BTreeMap<String, SequenceState> {
+        self.sequences.read().clone()
+    }
+
+    // -----------------------------------------------------------------
+    // Prepared statements. Mirrors `_engine._prepared`.
+    // -----------------------------------------------------------------
+
+    pub fn register_prepared(&self, name: String, stmt: uqa_sql::ast::Statement) {
+        self.prepared.write().insert(name, stmt);
+    }
+
+    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::ast::Statement> {
+        self.prepared.read().get(name).cloned()
+    }
+
+    pub fn deallocate_prepared(&self, name: Option<&str>) {
+        match name {
+            Some(n) => {
+                self.prepared.write().remove(n);
+            }
+            None => self.prepared.write().clear(),
         }
     }
 
@@ -244,6 +366,8 @@ impl Engine {
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
+            sequences: RwLock::new(BTreeMap::new()),
+            prepared: RwLock::new(BTreeMap::new()),
         };
         engine.restore_from_catalog(&catalog, &conn)?;
         // Eagerly populate the model cache from the catalog so
@@ -1229,6 +1353,18 @@ impl Engine {
     }
 }
 
+impl uqa_sql::expr::EngineHook for Engine {
+    fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
+        Engine::nextval(self, name)
+    }
+    fn currval(&self, name: &str) -> std::result::Result<i64, String> {
+        Engine::currval(self, name)
+    }
+    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
+        Engine::setval(self, name, value)
+    }
+}
+
 /// Bundle of hybrid-search arguments. Keeps [`Engine::hybrid_search`]
 /// borrowing-friendly without an explosion of positional parameters.
 #[derive(Debug, Clone)]
@@ -1341,6 +1477,9 @@ mod tests {
                 not_null: false,
                 auto_increment: false,
                 unique: false,
+                default: None,
+                check: None,
+                references: None,
             }];
         }
         eng.add_document("docs", 1, doc([("title", s("alpha"))]));

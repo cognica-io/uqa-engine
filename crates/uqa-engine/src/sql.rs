@@ -103,7 +103,143 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
             engine.run_transaction_statement(tx)?;
             Ok(SQLResult::empty())
         }
+        Statement::CreateSequence(s) => run_create_sequence(engine, s),
+        Statement::AlterSequence(s) => run_alter_sequence(engine, s),
+        Statement::CreateTableAs {
+            name,
+            if_not_exists,
+            body,
+        } => run_create_table_as(engine, name, if_not_exists, *body, params),
+        Statement::Prepare { name, body } => {
+            engine.register_prepared(name, *body);
+            Ok(SQLResult::empty())
+        }
+        Statement::Execute { name, params: ps } => run_execute_prepared(engine, &name, &ps, params),
+        Statement::Deallocate { name } => {
+            engine.deallocate_prepared(name.as_deref());
+            Ok(SQLResult::empty())
+        }
+        Statement::Values { rows } => run_values(engine, rows, params),
     }
+}
+
+fn run_create_sequence(
+    engine: &Engine,
+    s: uqa_sql::ast::CreateSequence,
+) -> Result<SQLResult, SQLError> {
+    if !engine.create_sequence(&s.name, s.start, s.increment, s.if_not_exists) {
+        return Err(SQLError::Unsupported(format!(
+            "Sequence `{}` already exists",
+            s.name
+        )));
+    }
+    Ok(SQLResult::empty())
+}
+
+fn run_alter_sequence(
+    engine: &Engine,
+    s: uqa_sql::ast::AlterSequence,
+) -> Result<SQLResult, SQLError> {
+    engine
+        .alter_sequence(&s.name, s.restart, s.increment, s.start)
+        .map_err(SQLError::Unsupported)?;
+    Ok(SQLResult::empty())
+}
+
+fn run_create_table_as(
+    engine: &Engine,
+    name: String,
+    if_not_exists: bool,
+    body: uqa_sql::ast::SelectStmt,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    if engine.table(&name).is_some() {
+        if if_not_exists {
+            return Ok(SQLResult::empty());
+        }
+        return Err(SQLError::Unsupported(format!(
+            "Table `{name}` already exists"
+        )));
+    }
+    let result = run_select(engine, body, params)?;
+    let cols: Vec<uqa_sql::ast::ColumnDef> = result
+        .columns
+        .iter()
+        .map(|c| uqa_sql::ast::ColumnDef {
+            name: c.clone(),
+            ty: uqa_sql::ast::ColumnType::Text,
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            unique: false,
+            default: None,
+            check: None,
+            references: None,
+        })
+        .collect();
+    let analyzer = uqa_analysis::analyzer::standard_analyzer("english");
+    engine.create_table(name.clone(), analyzer, Vec::new());
+    if let Some(t) = engine.table(&name) {
+        (*t.columns.write()).clone_from(&cols);
+    }
+    let mut affected: u64 = 0;
+    for (idx, row) in result.rows.iter().enumerate() {
+        let doc_id = (idx as u64) + 1;
+        let mut document = Document::new();
+        for (k, v) in row {
+            document.insert(k.clone(), v.clone());
+        }
+        engine.add_document(&name, doc_id, document);
+        affected += 1;
+    }
+    Ok(SQLResult::from_affected(affected))
+}
+
+fn run_execute_prepared(
+    engine: &Engine,
+    name: &str,
+    args: &[uqa_sql::ast::Expr],
+    outer_params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let stmt = engine.lookup_prepared(name).ok_or_else(|| {
+        SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
+    })?;
+    let ctx = uqa_sql::expr::EvalContext::new(None, outer_params).with_engine(engine);
+    let mut bound: Vec<SQLParam> = Vec::with_capacity(args.len());
+    for a in args {
+        let v = uqa_sql::expr::eval(a, &ctx)?;
+        bound.push(SQLParam::Scalar(v));
+    }
+    run_stmt(engine, stmt, &bound)
+}
+
+fn run_values(
+    engine: &Engine,
+    rows: Vec<Vec<uqa_sql::ast::Expr>>,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    use uqa_sql::expr::{eval, EvalContext};
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    if rows.is_empty() {
+        return Ok(SQLResult::empty());
+    }
+    let columns: Vec<String> = (0..rows[0].len())
+        .map(|i| format!("column{}", i + 1))
+        .collect();
+    let mut out_rows: Vec<uqa_sql::result::ResultRow> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut r = uqa_sql::result::ResultRow::new();
+        for (i, expr) in row.iter().enumerate() {
+            let v = eval(expr, &ctx)?;
+            r.insert(columns[i].clone(), v);
+        }
+        out_rows.push(r);
+    }
+    Ok(SQLResult {
+        columns,
+        rows: out_rows,
+        affected_rows: 0,
+    })
 }
 
 fn optimize_statement(stmt: Statement) -> Statement {
@@ -228,14 +364,14 @@ fn run_update(
             .get_document(&stmt.table, doc_id)
             .ok_or_else(|| SQLError::Internal("missing document during UPDATE".into()))?;
         if let Some(filter) = stmt.r#where.as_ref() {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
             if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
                 continue;
             }
         }
         let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
         for (col, expr) in &stmt.assignments {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
             let value = uqa_sql::expr::eval(expr, &ctx)?;
             if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
                 new_vectors.insert(col.clone(), vec);
@@ -264,7 +400,7 @@ fn run_delete(
         let keep = match stmt.r#where.as_ref() {
             None => true,
             Some(filter) => {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params);
+                let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
                 matches!(
                     uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
                     Ok(true)
@@ -418,7 +554,7 @@ fn run_insert(
     }
 
     let mut affected = 0u64;
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
         cancel.check()?;
@@ -507,7 +643,8 @@ fn run_insert(
                             let existing_doc = engine
                                 .get_document(&stmt.table, existing_id)
                                 .unwrap_or_default();
-                            let row_ctx = EvalContext::new(Some(&existing_doc), params);
+                            let row_ctx =
+                                EvalContext::new(Some(&existing_doc), params).with_engine(engine);
                             if let Some(pred) = r#where {
                                 let keep = eval(pred, &row_ctx)?;
                                 if !uqa_sql::expr::truthy(&keep) {
@@ -683,7 +820,7 @@ fn run_query_block(
     let filtered = if let Some(filter) = stmt.r#where.as_ref() {
         let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
         for row in joined {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
             if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
                 out.push(row);
             }
@@ -695,14 +832,14 @@ fn run_query_block(
 
     if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(stmt, &filtered, params)?;
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(&stmt.projections, filtered, params)?;
+        let with_windows = compute_window_columns(engine, &stmt.projections, filtered, params)?;
         let mut rows: Vec<ResultRow> = with_windows
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
@@ -1030,21 +1167,21 @@ fn run_joined_select(
 
     if let Some(filter) = stmt.r#where.as_ref() {
         joined.retain(|row| {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
             uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
         });
     }
 
     if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(stmt, &joined, params)?;
+        let rows = aggregate_join_rows(engine, stmt, &joined, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(&stmt.projections, joined, params)?;
+        let with_windows = compute_window_columns(engine, &stmt.projections, joined, params)?;
         let mut rows: Vec<ResultRow> = with_windows
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
@@ -1069,6 +1206,7 @@ fn has_window(projections: &[Projection]) -> bool {
 }
 
 fn compute_window_columns(
+    engine: &Engine,
     projections: &[Projection],
     rows: Vec<ResultRow>,
     params: &[SQLParam],
@@ -1080,7 +1218,7 @@ fn compute_window_columns(
             continue;
         };
         let label = labels[idx].clone();
-        let values = evaluate_window(name, args, spec, &rows, params)?;
+        let values = evaluate_window(engine, name, args, spec, &rows, params)?;
         for (row, value) in rows.iter_mut().zip(values) {
             row.insert(label.clone(), value);
         }
@@ -1089,6 +1227,7 @@ fn compute_window_columns(
 }
 
 fn evaluate_window(
+    engine: &Engine,
     name: &str,
     args: &[Expr],
     spec: &WindowSpec,
@@ -1100,7 +1239,7 @@ fn evaluate_window(
     }
     let mut partitions: BTreeMap<Vec<Value>, Vec<usize>> = BTreeMap::new();
     for (i, row) in rows.iter().enumerate() {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
         let key: Vec<Value> = spec
             .partition_by
             .iter()
@@ -1114,7 +1253,8 @@ fn evaluate_window(
         let mut indexed: Vec<(usize, Vec<Value>)> = indices
             .into_iter()
             .map(|i| -> Result<_, SQLError> {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[i]), params);
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&rows[i]), params).with_engine(engine);
                 let key: Vec<Value> = spec
                     .order_by
                     .iter()
@@ -1192,7 +1332,8 @@ fn evaluate_window(
                         default_value.clone()
                     } else {
                         let target_orig = indexed[target_idx as usize].0;
-                        let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[target_orig]), params);
+                        let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[target_orig]), params)
+                            .with_engine(engine);
                         uqa_sql::expr::eval(target_expr, &ctx)?
                     };
                     output[*orig] = value;
@@ -1379,12 +1520,18 @@ fn build_join_rows_with_ctes(
                 JoinKind::Inner | JoinKind::Cross => {
                     if matches!(kind, JoinKind::Inner) {
                         if let Some(rows) =
-                            try_hash_inner_join(&left_rows, &right_rows, on_expr, params)?
+                            try_hash_inner_join(engine, &left_rows, &right_rows, on_expr, params)?
                         {
                             return Ok(rows);
                         }
                     }
-                    Ok(cross_filter(&left_rows, &right_rows, on_expr, params)?)
+                    Ok(cross_filter(
+                        engine,
+                        &left_rows,
+                        &right_rows,
+                        on_expr,
+                        params,
+                    )?)
                 }
                 JoinKind::Left => Ok(left_outer(
                     &left_rows,
@@ -1415,6 +1562,7 @@ fn build_join_rows_with_ctes(
 /// every other shape; the caller then falls back to the nested-loop
 /// cross filter.
 fn try_hash_inner_join(
+    engine: &Engine,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
@@ -1428,7 +1576,8 @@ fn try_hash_inner_join(
     else {
         return Ok(None);
     };
-    let Some((left_key, right_key)) = decide_join_sides(left_rows, right_rows, lhs, rhs, params)
+    let Some((left_key, right_key)) =
+        decide_join_sides(engine, left_rows, right_rows, lhs, rhs, params)
     else {
         return Ok(None);
     };
@@ -1438,7 +1587,7 @@ fn try_hash_inner_join(
     // so they do not match anything.
     use uqa_joins::row_join::{hash_inner_join, JoinKey};
     let key_of = |row: &ResultRow, expr: &Expr| -> Option<JoinKey> {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
         match uqa_sql::expr::eval(expr, &ctx) {
             Ok(uqa_core::Value::Null) | Err(_) => None,
             Ok(v) => Some(JoinKey::new(&v)),
@@ -1458,6 +1607,7 @@ fn try_hash_inner_join(
 /// `(left_key_expr, right_key_expr)` when one direction works,
 /// `None` when the predicate isn't separable across sides.
 fn decide_join_sides<'a>(
+    engine: &Engine,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     lhs: &'a Expr,
@@ -1469,25 +1619,26 @@ fn decide_join_sides<'a>(
     }
     let l_sample = &left_rows[0];
     let r_sample = &right_rows[0];
-    let lhs_on_left = eval_yields_value(l_sample, lhs, params);
-    let rhs_on_right = eval_yields_value(r_sample, rhs, params);
+    let lhs_on_left = eval_yields_value(engine, l_sample, lhs, params);
+    let rhs_on_right = eval_yields_value(engine, r_sample, rhs, params);
     if lhs_on_left && rhs_on_right {
         return Some((lhs, rhs));
     }
-    let rhs_on_left = eval_yields_value(l_sample, rhs, params);
-    let lhs_on_right = eval_yields_value(r_sample, lhs, params);
+    let rhs_on_left = eval_yields_value(engine, l_sample, rhs, params);
+    let lhs_on_right = eval_yields_value(engine, r_sample, lhs, params);
     if rhs_on_left && lhs_on_right {
         return Some((rhs, lhs));
     }
     None
 }
 
-fn eval_yields_value(row: &ResultRow, expr: &Expr, params: &[SQLParam]) -> bool {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+fn eval_yields_value(engine: &Engine, row: &ResultRow, expr: &Expr, params: &[SQLParam]) -> bool {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
     matches!(uqa_sql::expr::eval(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
 
 fn cross_filter(
+    engine: &Engine,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
@@ -1500,7 +1651,8 @@ fn cross_filter(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params);
+                    let ctx =
+                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
                     uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
                 }
             };
@@ -1528,7 +1680,8 @@ fn left_outer(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params);
+                    let ctx =
+                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
                     uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
                 }
             };
@@ -1557,11 +1710,12 @@ fn left_outer(
 
 #[allow(dead_code)]
 fn project_join_row(
+    engine: &Engine,
     src: &ResultRow,
     projections: &[Projection],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    project_join_row_with_engine(None, src, projections, params)
+    project_join_row_with_engine(Some(engine), src, projections, params)
 }
 
 fn project_join_row_with_engine(
@@ -1570,7 +1724,10 @@ fn project_join_row_with_engine(
     projections: &[Projection],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
+    let mut ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
+    if let Some(e) = engine {
+        ctx = ctx.with_engine(e);
+    }
     let labels = projection_columns(projections);
     let mut out = ResultRow::new();
     for (idx, proj) in projections.iter().enumerate() {
@@ -1619,7 +1776,7 @@ fn engine_func_intercept(
 ) -> Result<Option<Value>, SQLError> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, params)?)),
+        "uqa_highlight" => Ok(Some(run_uqa_highlight(engine, row, args, params)?)),
         "graph_create" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
@@ -1642,6 +1799,7 @@ fn engine_func_intercept(
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
 fn run_uqa_highlight(
+    engine: Option<&Engine>,
     row: &ResultRow,
     args: &[Expr],
     params: &[SQLParam],
@@ -1653,7 +1811,10 @@ fn run_uqa_highlight(
             actual: args.len(),
         });
     }
-    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+    let mut ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+    if let Some(e) = engine {
+        ctx = ctx.with_engine(e);
+    }
     let text = match &args[0] {
         Expr::Column(c) => match row.get(c) {
             Some(Value::Str(s)) => s.clone(),
@@ -1750,6 +1911,7 @@ fn run_uqa_highlight(
 }
 
 fn aggregate_join_rows(
+    engine: &Engine,
     stmt: &SelectStmt,
     rows: &[ResultRow],
     params: &[SQLParam],
@@ -1763,7 +1925,7 @@ fn aggregate_join_rows(
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
 
     for row in rows {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
@@ -1869,7 +2031,7 @@ fn filter_table_rows(
     let mut out = Vec::new();
     for doc_id in engine.table_doc_ids(table) {
         let document = engine.get_document(table, doc_id).unwrap_or_default();
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
         let v = uqa_sql::expr::eval(filter, &ctx)?;
         if uqa_sql::expr::truthy(&v) {
             out.push(ScoredEntry { doc_id, score: 0.0 });
@@ -1960,7 +2122,7 @@ fn build_aggregate_rows(
 
     for entry in scored {
         let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
@@ -2202,7 +2364,7 @@ fn run_deep_predict(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = match eval(&args[0], &ctx)? {
         Value::Str(s) => s,
         other => {
@@ -2233,7 +2395,7 @@ fn run_staged_retrieval(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
     let n_stages = args.len() / 3;
     let mut current: Option<Vec<ScoredEntry>> = None;
@@ -2279,7 +2441,7 @@ fn run_multi_field_match(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     // Run a text_match per (field, query) pair, accumulate per-doc
     // probability vectors with 0.5 prior for missing fields, then fuse
     // via log-odds conjunction with uniform weights.
@@ -2342,7 +2504,7 @@ fn run_graph_pagerank(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_pagerank.graph", &ctx)?;
     let entries = engine
         .graph_with(&name, |store| {
@@ -2373,7 +2535,7 @@ fn run_graph_traverse(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_traverse.graph", &ctx)?;
     let start = expect_u64(&args[1], "graph_traverse.start", &ctx)?;
     let label = expect_optional_string(&args[2], "graph_traverse.label", &ctx)?;
@@ -2411,7 +2573,7 @@ fn run_graph_neighbors(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_neighbors.graph", &ctx)?;
     let vertex = expect_u64(&args[1], "graph_neighbors.vertex", &ctx)?;
     let label = expect_optional_string(&args[2], "graph_neighbors.label", &ctx)?;
@@ -2462,7 +2624,7 @@ fn run_graph_create(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_create.name", &ctx)?;
     engine.create_graph(name);
     Ok(Vec::new())
@@ -2480,7 +2642,7 @@ fn run_graph_drop(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_drop.name", &ctx)?;
     engine.drop_graph(&name);
     Ok(Vec::new())
@@ -2501,7 +2663,7 @@ fn run_graph_edges(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_edges.graph", &ctx)?;
     let label = if args.len() == 2 {
         expect_optional_string(&args[1], "graph_edges.label", &ctx)?
@@ -2549,7 +2711,7 @@ fn run_temporal_traverse(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "temporal_traverse.graph", &ctx)?;
     let start = expect_u64(&args[1], "temporal_traverse.start", &ctx)?;
     let label = expect_optional_string(&args[2], "temporal_traverse.label", &ctx)?;
@@ -2688,7 +2850,7 @@ fn run_text_match(
         });
     }
     let field = expect_column_name(&args[0], "text_match.field")?;
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let query_value = eval(&args[1], &ctx)?;
     let query = match query_value {
         Value::Str(s) => s,
@@ -2716,7 +2878,7 @@ fn run_knn_match(
         });
     }
     let field = expect_column_name(&args[0], "knn_match.field")?;
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     let vec_value = eval(&args[1], &ctx)?;
     let query_vector = value_to_vector(&vec_value)?;
     let k = expect_usize(&args[2], "knn_match.k", &ctx)?;
@@ -2743,7 +2905,7 @@ fn run_fuse_log_odds(
     let mut vector_field: Option<String> = None;
     let mut query_vector: Option<Vec<f32>> = None;
     let mut knn_pool: usize = 10;
-    let ctx = EvalContext::new(None, params);
+    let ctx = EvalContext::new(None, params).with_engine(engine);
     for arg in args {
         match arg {
             Expr::Func { name, args: inner } => {
@@ -2933,7 +3095,10 @@ fn build_projection_row(
     projections: &[Projection],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    let ctx = EvalContext::new(Some(document), params);
+    let mut ctx = EvalContext::new(Some(document), params);
+    if let Some(e) = engine {
+        ctx = ctx.with_engine(e);
+    }
     let labels = projection_columns(projections);
     let mut row = ResultRow::new();
     for (idx, proj) in projections.iter().enumerate() {
