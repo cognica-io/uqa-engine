@@ -411,6 +411,39 @@ fn run_delete(
             to_delete.push(doc_id);
         }
     }
+    // FOREIGN KEY check: refuse DELETE when any child table has a
+    // row referencing one of the about-to-be-deleted tuples. Mirrors
+    // PostgreSQL's RESTRICT default. CASCADE is left to a follow-up.
+    let referrers = engine.referrers_to(&stmt.table);
+    if !referrers.is_empty() {
+        for doc_id in &to_delete {
+            let Some(target) = engine.get_document(&stmt.table, *doc_id) else {
+                continue;
+            };
+            for (ref_table, fk) in &referrers {
+                let key_values: Vec<Value> = fk
+                    .ref_columns
+                    .iter()
+                    .map(|c| target.get(c).cloned().unwrap_or(Value::Null))
+                    .collect();
+                if key_values.iter().any(|v| matches!(v, Value::Null)) {
+                    continue;
+                }
+                if engine
+                    .find_conflict(ref_table, &fk.local_columns, &key_values)
+                    .is_some()
+                {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "DELETE on `{}` violates FOREIGN KEY constraint from `{}` ({} -> {})",
+                        stmt.table,
+                        ref_table,
+                        fk.local_columns.join(", "),
+                        fk.ref_columns.join(", "),
+                    )));
+                }
+            }
+        }
+    }
     for doc_id in to_delete {
         engine.delete_document(&stmt.table, doc_id);
         affected += 1;
@@ -448,6 +481,7 @@ fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLErr
     for col in &c.columns {
         engine.register_column(&c.name, col.clone());
     }
+    engine.register_table_constraints(&c.name, c.checks.clone(), c.foreign_keys.clone());
     let _ = column_names(&c.columns);
     Ok(SQLResult::empty())
 }
@@ -585,6 +619,83 @@ fn run_insert(
                 vectors.insert(col.clone(), vec);
             }
             document.insert(col.clone(), v);
+        }
+
+        // DEFAULT expression -- evaluate when the column was absent
+        // from the INSERT column list. Mirrors the Python reference's
+        // _evaluate_default. The engine hook is in scope so DEFAULT
+        // nextval('seq') resolves through the sequence store.
+        for col in engine.table_columns(&stmt.table) {
+            if document.contains_key(&col) {
+                continue;
+            }
+            if let Some(default_expr) = engine.column_default_expr(&stmt.table, &col) {
+                let v = eval(&default_expr, &ctx)?;
+                if let Ok(vec) = value_to_vector(&v) {
+                    vectors.insert(col.clone(), vec);
+                }
+                document.insert(col.clone(), v);
+            }
+        }
+
+        // NOT NULL validation -- after defaults are applied, every
+        // declared NOT NULL column must have a non-null value.
+        // Auto-increment columns are exempt because the engine fills
+        // them in below.
+        for col_def in engine.describe_table(&stmt.table).unwrap_or_default() {
+            if !col_def.not_null || col_def.auto_increment {
+                continue;
+            }
+            match document.get(&col_def.name) {
+                Some(Value::Null) | None => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "NOT NULL constraint violated: column `{}` in table `{}`",
+                        col_def.name, stmt.table
+                    )));
+                }
+                _ => {}
+            }
+        }
+
+        // CHECK constraints -- evaluate every column-level + table-
+        // level CHECK against the row and reject when any returns a
+        // non-truthy value.
+        for (cname, expr) in engine.check_constraints(&stmt.table) {
+            let row_ctx = EvalContext::new(Some(&document), params).with_engine(engine);
+            let result = eval(&expr, &row_ctx)?;
+            if !uqa_sql::expr::truthy(&result) {
+                let label = cname.unwrap_or_else(|| "<unnamed>".into());
+                return Err(SQLError::TypeMismatch(format!(
+                    "CHECK constraint `{label}` violated in table `{}`",
+                    stmt.table
+                )));
+            }
+        }
+
+        // FOREIGN KEY constraints -- every (local_columns) tuple
+        // whose values are all non-null must have a matching row in
+        // (ref_table, ref_columns). Null tuples are skipped to mirror
+        // PostgreSQL's MATCH SIMPLE default.
+        for fk in engine.foreign_keys(&stmt.table) {
+            let local_values: Vec<Value> = fk
+                .local_columns
+                .iter()
+                .map(|c| document.get(c).cloned().unwrap_or(Value::Null))
+                .collect();
+            if local_values.iter().any(|v| matches!(v, Value::Null)) {
+                continue;
+            }
+            if engine
+                .find_conflict(&fk.ref_table, &fk.ref_columns, &local_values)
+                .is_none()
+            {
+                let cols = fk.local_columns.join(", ");
+                return Err(SQLError::TypeMismatch(format!(
+                    "FOREIGN KEY constraint violated: ({cols}) -> {}({}) has no matching row",
+                    fk.ref_table,
+                    fk.ref_columns.join(", ")
+                )));
+            }
         }
 
         // UNIQUE constraint validation -- before any conflict

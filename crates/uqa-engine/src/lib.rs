@@ -187,6 +187,12 @@ struct TableState {
     /// Per-column statistics refreshed by `ANALYZE table_name`. Keyed
     /// by column name. Empty until `run_analyze` runs at least once.
     column_stats: RwLock<BTreeMap<String, uqa_planner::ColumnStats>>,
+    /// Table-level `CHECK` constraints, evaluated against every row
+    /// at INSERT / UPDATE time.
+    table_checks: RwLock<Vec<uqa_sql::ast::TableCheck>>,
+    /// Table-level `FOREIGN KEY` constraints. Each entry binds local
+    /// columns to a `(ref_table, ref_columns)` lookup target.
+    foreign_keys: RwLock<Vec<uqa_sql::ast::ForeignKey>>,
 }
 
 impl TableState {
@@ -429,6 +435,8 @@ impl Engine {
                 next_id: parking_lot::Mutex::new(max_id + 1),
                 analyzer: RwLock::new(analyzer),
                 column_stats: RwLock::new(BTreeMap::new()),
+                table_checks: RwLock::new(Vec::new()),
+                foreign_keys: RwLock::new(Vec::new()),
             };
             self.tables.write().insert(schema.name, Arc::new(table));
         }
@@ -501,6 +509,8 @@ impl Engine {
             next_id: parking_lot::Mutex::new(1),
             analyzer: RwLock::new(analyzer),
             column_stats: RwLock::new(BTreeMap::new()),
+            table_checks: RwLock::new(Vec::new()),
+            foreign_keys: RwLock::new(Vec::new()),
         };
         let table_arc = Arc::new(table);
         self.tables.write().insert(name.clone(), table_arc.clone());
@@ -922,6 +932,90 @@ impl Engine {
     /// table by that name is registered.
     pub fn describe_table(&self, table: &str) -> Option<Vec<uqa_sql::ast::ColumnDef>> {
         self.table(table).map(|t| t.columns.read().clone())
+    }
+
+    /// DEFAULT expression for `column` on `table`, when one was
+    /// declared via `... <col> <type> DEFAULT <expr>`.
+    pub fn column_default_expr(&self, table: &str, column: &str) -> Option<uqa_sql::ast::Expr> {
+        let t = self.table(table)?;
+        let cols = t.columns.read();
+        cols.iter()
+            .find(|c| c.name == column)
+            .and_then(|c| c.default.clone())
+    }
+
+    /// Register table-level CHECK + FK constraints. Called by the
+    /// SQL `CREATE TABLE` path after the columns are in place.
+    pub fn register_table_constraints(
+        &self,
+        table: &str,
+        checks: Vec<uqa_sql::ast::TableCheck>,
+        foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+    ) {
+        let Some(t) = self.table(table) else { return };
+        *t.table_checks.write() = checks;
+        *t.foreign_keys.write() = foreign_keys;
+    }
+
+    /// Snapshot of every CHECK constraint that applies to `table`,
+    /// merging the column-level CHECKs into the table-level list.
+    /// Returns `(name, expr)` pairs where `name` is the constraint
+    /// name when one was supplied (synthesised as `<col>_check` for
+    /// column-level constraints).
+    pub fn check_constraints(&self, table: &str) -> Vec<(Option<String>, uqa_sql::ast::Expr)> {
+        let Some(t) = self.table(table) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(Option<String>, uqa_sql::ast::Expr)> = Vec::new();
+        for col in t.columns.read().iter() {
+            if let Some(expr) = col.check.clone() {
+                out.push((Some(format!("{}_check", col.name)), expr));
+            }
+        }
+        for c in t.table_checks.read().iter() {
+            out.push((c.name.clone(), c.expr.clone()));
+        }
+        out
+    }
+
+    /// Snapshot of every FOREIGN KEY constraint that applies to
+    /// `table`. Column-level `REFERENCES` are lifted to single-column
+    /// `ForeignKey` entries.
+    pub fn foreign_keys(&self, table: &str) -> Vec<uqa_sql::ast::ForeignKey> {
+        let Some(t) = self.table(table) else {
+            return Vec::new();
+        };
+        let mut out: Vec<uqa_sql::ast::ForeignKey> = t.foreign_keys.read().clone();
+        for col in t.columns.read().iter() {
+            if let Some(reference) = col.references.clone() {
+                out.push(uqa_sql::ast::ForeignKey {
+                    name: Some(format!("{}_fkey", col.name)),
+                    local_columns: vec![col.name.clone()],
+                    ref_table: reference.table,
+                    ref_columns: vec![reference.column],
+                });
+            }
+        }
+        out
+    }
+
+    /// Tables that hold a FOREIGN KEY pointing at `table`. Used by
+    /// DELETE / DROP CASCADE to refuse the operation when a referrer
+    /// has at least one row matching the target value.
+    pub fn referrers_to(&self, table: &str) -> Vec<(String, uqa_sql::ast::ForeignKey)> {
+        let mut out: Vec<(String, uqa_sql::ast::ForeignKey)> = Vec::new();
+        let names: Vec<String> = self.tables.read().keys().cloned().collect();
+        for other in names {
+            if other == table {
+                continue;
+            }
+            for fk in self.foreign_keys(&other) {
+                if fk.ref_table == table {
+                    out.push((other.clone(), fk));
+                }
+            }
+        }
+        out
     }
 
     /// Names of columns with a `UNIQUE` or `PRIMARY KEY` constraint
