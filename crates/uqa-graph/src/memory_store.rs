@@ -625,6 +625,14 @@ impl GraphStore for MemoryGraphStore {
         self.next_vertex_id = 1;
         self.next_edge_id = 1;
     }
+
+    fn vertices(&self) -> BTreeMap<VertexId, Vertex> {
+        self.vertices.clone()
+    }
+
+    fn edges(&self) -> BTreeMap<EdgeId, Edge> {
+        self.edges.clone()
+    }
 }
 
 #[cfg(test)]

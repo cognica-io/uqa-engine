@@ -540,6 +540,14 @@ impl GraphStore for SQLiteGraphStore {
         });
         self.inner.clear();
     }
+
+    fn vertices(&self) -> BTreeMap<VertexId, Vertex> {
+        self.inner.vertices()
+    }
+
+    fn edges(&self) -> BTreeMap<EdgeId, Edge> {
+        self.inner.edges()
+    }
 }
 
 #[cfg(test)]

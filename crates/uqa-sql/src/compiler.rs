@@ -93,11 +93,47 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
             compile_create_foreign_table(stmt).map(Statement::CreateForeignTable)
         }
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
+        NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
         ))),
     }
+}
+
+fn compile_variable_set(stmt: &pg_query::protobuf::VariableSetStmt) -> Result<Statement> {
+    // Capture each argument as a string and join with commas. PG's
+    // SET search_path TO a, b, c arrives as a list of A_Const nodes.
+    let mut parts: Vec<String> = Vec::new();
+    for arg in &stmt.args {
+        if let Some(node) = arg.node.as_ref() {
+            match node {
+                NodeEnum::AConst(c) => match c.val.as_ref() {
+                    Some(pg_query::protobuf::a_const::Val::Sval(sval)) => {
+                        parts.push(sval.sval.clone());
+                    }
+                    Some(pg_query::protobuf::a_const::Val::Ival(iv)) => {
+                        parts.push(iv.ival.to_string());
+                    }
+                    _ => {}
+                },
+                NodeEnum::TypeCast(tc) => {
+                    if let Some(NodeEnum::AConst(c)) = tc.arg.as_ref().and_then(|a| a.node.as_ref())
+                    {
+                        if let Some(pg_query::protobuf::a_const::Val::Sval(sval)) = c.val.as_ref() {
+                            parts.push(sval.sval.clone());
+                        }
+                    }
+                }
+                NodeEnum::String(s) => parts.push(s.sval.clone()),
+                _ => {}
+            }
+        }
+    }
+    Ok(Statement::SetVariable {
+        name: stmt.name.clone(),
+        value: parts.join(","),
+    })
 }
 
 fn compile_create_sequence(
@@ -770,7 +806,13 @@ fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateT
     let name = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(|r| {
+            if r.schemaname.is_empty() {
+                r.relname.clone()
+            } else {
+                format!("{}.{}", r.schemaname, r.relname)
+            }
+        })
         .unwrap_or_default();
     if name.is_empty() {
         return Err(SQLError::Internal("CREATE TABLE without name".into()));
@@ -1543,7 +1585,19 @@ fn compile_order_by(sort_clause: &[pg_query::protobuf::Node]) -> Result<Vec<Orde
             // SortByDir: SortbyDefault = 0, SortbyAsc = 2, SortbyDesc = 3,
             // SortbyUsing = 4 (per libpg_query 6.x).
             let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
-            out.push(OrderBy { expr, descending });
+            // SortByNulls: SortbyNullsDefault = 0, SortbyNullsFirst = 1,
+            // SortbyNullsLast = 2.
+            // pg_query enum values: SortbyNullsDefault=1, First=2, Last=3.
+            let nulls = match sb.sortby_nulls {
+                2 => Some(crate::ast::NullsOrder::First),
+                3 => Some(crate::ast::NullsOrder::Last),
+                _ => None,
+            };
+            out.push(OrderBy {
+                expr,
+                descending,
+                nulls,
+            });
         }
     }
     Ok(out)
@@ -2129,13 +2183,110 @@ fn compile_window_spec(w: &pg_query::protobuf::WindowDef) -> Result<WindowSpec> 
                 .ok_or_else(|| SQLError::Internal("SortBy without expr".into()))?;
             let expr = compile_expr(expr_node)?;
             let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
-            order_by.push(OrderBy { expr, descending });
+            // pg_query enum values: SortbyNullsDefault=1, First=2, Last=3.
+            let nulls = match sb.sortby_nulls {
+                2 => Some(crate::ast::NullsOrder::First),
+                3 => Some(crate::ast::NullsOrder::Last),
+                _ => None,
+            };
+            order_by.push(OrderBy {
+                expr,
+                descending,
+                nulls,
+            });
         }
     }
+    let frame = compile_window_frame(w)?;
     Ok(WindowSpec {
         partition_by,
         order_by,
+        frame,
     })
+}
+
+fn compile_window_frame(
+    w: &pg_query::protobuf::WindowDef,
+) -> Result<Option<crate::ast::WindowFrame>> {
+    use crate::ast::{FrameBound, FrameMode, WindowFrame};
+    if w.frame_options == 0 {
+        return Ok(None);
+    }
+    // pg_query bit constants for frame_options.
+    const FRAMEOPTION_NONDEFAULT: u32 = 0x000_0001;
+    const FRAMEOPTION_ROWS: u32 = 0x000_0004;
+    const FRAMEOPTION_GROUPS: u32 = 0x000_0008;
+    const FRAMEOPTION_BETWEEN: u32 = 0x000_0010;
+    const FRAMEOPTION_START_UNBOUNDED_PRECEDING: u32 = 0x000_0020;
+    const FRAMEOPTION_END_UNBOUNDED_PRECEDING: u32 = 0x000_0040;
+    const FRAMEOPTION_START_UNBOUNDED_FOLLOWING: u32 = 0x000_0080;
+    const FRAMEOPTION_END_UNBOUNDED_FOLLOWING: u32 = 0x000_0100;
+    const FRAMEOPTION_START_CURRENT_ROW: u32 = 0x000_0200;
+    const FRAMEOPTION_END_CURRENT_ROW: u32 = 0x000_0400;
+    const FRAMEOPTION_START_OFFSET_PRECEDING: u32 = 0x000_0800;
+    const FRAMEOPTION_END_OFFSET_PRECEDING: u32 = 0x000_1000;
+    const FRAMEOPTION_START_OFFSET_FOLLOWING: u32 = 0x000_2000;
+    const FRAMEOPTION_END_OFFSET_FOLLOWING: u32 = 0x000_4000;
+    let f = w.frame_options as u32;
+    let _ = FRAMEOPTION_BETWEEN;
+    // PostgreSQL always encodes a default frame in `frame_options`
+    // (RANGE UNBOUNDED PRECEDING TO CURRENT ROW). Only honor the
+    // frame when the user explicitly wrote one — that's exactly what
+    // the `FRAMEOPTION_NONDEFAULT` bit indicates.
+    if f & FRAMEOPTION_NONDEFAULT == 0 {
+        return Ok(None);
+    }
+    let mode = if f & FRAMEOPTION_ROWS != 0 {
+        FrameMode::Rows
+    } else if f & FRAMEOPTION_GROUPS != 0 {
+        FrameMode::Groups
+    } else {
+        // FRAMEOPTION_RANGE is the default mode bit when neither ROWS
+        // nor GROUPS is set; an unset flag also defaults to RANGE.
+        FrameMode::Range
+    };
+    let start = if f & FRAMEOPTION_START_UNBOUNDED_PRECEDING != 0 {
+        FrameBound::UnboundedPreceding
+    } else if f & FRAMEOPTION_START_UNBOUNDED_FOLLOWING != 0 {
+        FrameBound::UnboundedFollowing
+    } else if f & FRAMEOPTION_START_CURRENT_ROW != 0 {
+        FrameBound::CurrentRow
+    } else if f & FRAMEOPTION_START_OFFSET_PRECEDING != 0 {
+        let n = w
+            .start_offset
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("PRECEDING without offset".into()))?;
+        FrameBound::Preceding(Box::new(compile_expr(n)?))
+    } else if f & FRAMEOPTION_START_OFFSET_FOLLOWING != 0 {
+        let n = w
+            .start_offset
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("FOLLOWING without offset".into()))?;
+        FrameBound::Following(Box::new(compile_expr(n)?))
+    } else {
+        FrameBound::UnboundedPreceding
+    };
+    let end = if f & FRAMEOPTION_END_UNBOUNDED_PRECEDING != 0 {
+        FrameBound::UnboundedPreceding
+    } else if f & FRAMEOPTION_END_UNBOUNDED_FOLLOWING != 0 {
+        FrameBound::UnboundedFollowing
+    } else if f & FRAMEOPTION_END_CURRENT_ROW != 0 {
+        FrameBound::CurrentRow
+    } else if f & FRAMEOPTION_END_OFFSET_PRECEDING != 0 {
+        let n = w
+            .end_offset
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("PRECEDING without offset".into()))?;
+        FrameBound::Preceding(Box::new(compile_expr(n)?))
+    } else if f & FRAMEOPTION_END_OFFSET_FOLLOWING != 0 {
+        let n = w
+            .end_offset
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("FOLLOWING without offset".into()))?;
+        FrameBound::Following(Box::new(compile_expr(n)?))
+    } else {
+        FrameBound::CurrentRow
+    };
+    Ok(Some(WindowFrame { mode, start, end }))
 }
 
 fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {

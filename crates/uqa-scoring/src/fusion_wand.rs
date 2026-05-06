@@ -9,7 +9,7 @@
 //!
 //! Treats each input posting list as a "term" in the WAND framework.
 //! Per-signal upper bounds compose into a fused upper bound through
-//! [`prob::log_odds_conjunction`], which is monotone in each input
+//! [`crate::prob::log_odds_conjunction`], which is monotone in each input
 //! probability so the bound is safe for pruning. Documents whose
 //! fused upper bound cannot beat the current top-k threshold are
 //! skipped without scoring.

@@ -177,6 +177,10 @@ impl PhysicalOperator for Project {
 pub struct SortKey {
     pub expr: Expr,
     pub descending: bool,
+    /// `Some(true)` forces NULLS FIRST, `Some(false)` forces NULLS
+    /// LAST. `None` falls back to the SQL-standard default — NULLS
+    /// LAST for ASC and NULLS FIRST for DESC.
+    pub nulls_first: Option<bool>,
 }
 
 /// Blocking sort. Pulls every row from the child during `open`, then
@@ -244,14 +248,42 @@ impl PhysicalOperator for Sort {
             decorated.push((key_vals, row));
         }
         decorated.sort_by(|(av, _), (bv, _)| {
+            use std::cmp::Ordering;
             for (i, k) in self.keys.iter().enumerate() {
+                let a_null = matches!(av[i], Value::Null);
+                let b_null = matches!(bv[i], Value::Null);
+                let nulls_first = k.nulls_first.unwrap_or(k.descending);
+                if a_null || b_null {
+                    let null_cmp = match (a_null, b_null) {
+                        (true, true) => Ordering::Equal,
+                        (true, false) => {
+                            if nulls_first {
+                                Ordering::Less
+                            } else {
+                                Ordering::Greater
+                            }
+                        }
+                        (false, true) => {
+                            if nulls_first {
+                                Ordering::Greater
+                            } else {
+                                Ordering::Less
+                            }
+                        }
+                        (false, false) => unreachable!(),
+                    };
+                    if null_cmp != Ordering::Equal {
+                        return null_cmp;
+                    }
+                    continue;
+                }
                 let ord = compare_values(&av[i], &bv[i]);
                 let ord = if k.descending { ord.reverse() } else { ord };
-                if ord != std::cmp::Ordering::Equal {
+                if ord != Ordering::Equal {
                     return ord;
                 }
             }
-            std::cmp::Ordering::Equal
+            Ordering::Equal
         });
         let sorted: Vec<ResultRow> = decorated.into_iter().map(|(_, r)| r).collect();
         let batches = Batch::chunked(self.schema.clone(), sorted);
@@ -1035,6 +1067,7 @@ mod tests {
             vec![SortKey {
                 expr: col("x"),
                 descending: true,
+                nulls_first: None,
             }],
             vec![],
         );
@@ -1112,6 +1145,7 @@ mod tests {
                 order_by: vec![SortKey {
                     expr: col("v"),
                     descending: false,
+                    nulls_first: None,
                 }],
             },
             vec![

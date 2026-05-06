@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d5efaae44fa9ceca852334952f7859a326614acedc369bf077dd247e54ddd91c # shrinks to (terms_tfs, corpus_size) = ([[(5, 1), (8, 1), (9, 1), (10, 1), (13, 1), (14, 7)], [(1, 8), (4, 8), (8, 4), (10, 5), (11, 3), (12, 8)], [(1, 4), (2, 2), (7, 5), (8, 6), (10, 3), (11, 4), (12, 6), (13, 4), (14, 8)], [(1, 2), (4, 4), (5, 4), (6, 2), (7, 1), (9, 5)]], 14)

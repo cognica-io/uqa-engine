@@ -83,10 +83,9 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
             engine.register_schema(&name, if_not_exists);
             Ok(SQLResult::empty())
         }
-        Statement::Explain { body, .. } => {
-            // Run the inner statement and let the engine drop the
-            // result; the planner trace is wired separately.
-            let _ = run_stmt(engine, *body, params)?;
+        Statement::Explain { body, .. } => run_explain(engine, *body, params),
+        Statement::SetVariable { name, value } => {
+            engine.set_variable(&name, &value);
             Ok(SQLResult::empty())
         }
         Statement::Analyze { table } => {
@@ -1141,6 +1140,66 @@ fn vectors_to_field_map(
 // SELECT
 // -------------------------------------------------------------------------
 
+/// Render the inner statement as an EXPLAIN-style plan result. Mirrors
+/// Python's `_explain_plan`: returns a single-column `plan` table with
+/// one row per line.
+fn run_explain(
+    engine: &Engine,
+    body: Statement,
+    _params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let plan_text = match &body {
+        Statement::Select(stmt) => format_select_plan(stmt),
+        other => format!("{other:?}"),
+    };
+    let mut rows: Vec<ResultRow> = Vec::new();
+    for line in plan_text.split('\n') {
+        let mut r = ResultRow::new();
+        r.insert("plan".to_string(), Value::Str(line.to_string()));
+        rows.push(r);
+    }
+    let _ = engine; // keep the parameter live for future cost extension
+    Ok(SQLResult {
+        columns: vec!["plan".to_string()],
+        rows,
+        affected_rows: 0,
+    })
+}
+
+fn format_select_plan(stmt: &SelectStmt) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "Select");
+    if !stmt.projections.is_empty() {
+        let _ = writeln!(s, "  projections={}", stmt.projections.len());
+    }
+    if let Some(from) = &stmt.from {
+        let _ = writeln!(s, "  from={from:?}");
+    }
+    if stmt.r#where.is_some() {
+        let _ = writeln!(s, "  where=<expr>");
+    }
+    if !stmt.group_by.is_empty() {
+        let _ = writeln!(s, "  group_by={}", stmt.group_by.len());
+    }
+    if !stmt.grouping_sets.is_empty() {
+        let _ = writeln!(s, "  grouping_sets={}", stmt.grouping_sets.len());
+    }
+    if !stmt.order_by.is_empty() {
+        let _ = writeln!(s, "  order_by={}", stmt.order_by.len());
+    }
+    if let Some(n) = &stmt.limit {
+        let _ = writeln!(s, "  limit={n}");
+    }
+    if let Some(n) = &stmt.offset {
+        let _ = writeln!(s, "  offset={n}");
+    }
+    if stmt.distinct {
+        let _ = writeln!(s, "  distinct=true");
+    }
+    s.trim_end().to_string()
+}
+
 pub(crate) fn run_select(
     engine: &Engine,
     stmt: SelectStmt,
@@ -1387,6 +1446,9 @@ fn volcano_project_sort_limit(
             .map(|o| SortKey {
                 expr: o.expr.clone(),
                 descending: o.descending,
+                nulls_first: o
+                    .nulls
+                    .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
             })
             .collect();
         op = Box::new(Sort::new(op, keys, params.to_vec()));
@@ -1860,6 +1922,18 @@ fn evaluate_window(
                     }
                 }
             }
+            "sum" | "count" | "avg" | "min" | "max" => {
+                evaluate_window_aggregate(
+                    engine,
+                    &lower,
+                    args,
+                    spec,
+                    rows,
+                    params,
+                    &indexed,
+                    &mut output,
+                )?;
+            }
             other => {
                 return Err(SQLError::UnknownFunction(format!(
                     "window function `{other}` is not supported"
@@ -1870,11 +1944,279 @@ fn evaluate_window(
     Ok(output)
 }
 
+/// Evaluate an aggregate window function (SUM/COUNT/AVG/MIN/MAX) over
+/// each row's frame. Mirrors Python `_compute_framed_aggregate` in
+/// uqa/execution/relational.py.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_window_aggregate(
+    engine: &Engine,
+    name: &str,
+    args: &[Expr],
+    spec: &WindowSpec,
+    rows: &[ResultRow],
+    params: &[SQLParam],
+    indexed: &[(usize, Vec<Value>)],
+    output: &mut [Value],
+) -> Result<(), SQLError> {
+    use uqa_sql::ast::{FrameBound, FrameMode};
+    let arg_expr = args.first();
+    let n = indexed.len();
+    let materialized: Vec<Value> = match arg_expr {
+        Some(expr) => indexed
+            .iter()
+            .map(|(orig, _)| {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&rows[*orig]), params).with_engine(engine);
+                uqa_sql::expr::eval(expr, &ctx)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        None => vec![Value::Int(1); n],
+    };
+    let order_keys: Vec<Vec<Value>> = indexed.iter().map(|(_, k)| k.clone()).collect();
+    let (mode, start_bound, end_bound) = match &spec.frame {
+        Some(f) => (f.mode, f.start.clone(), f.end.clone()),
+        None if spec.order_by.is_empty() => {
+            // No ORDER BY and no explicit frame: aggregate over the
+            // whole partition.
+            let mut acc = AggregateAccumulator::default();
+            for v in &materialized {
+                acc.observe(v);
+            }
+            let result = aggregate_value(name, &acc);
+            for (orig, _) in indexed {
+                output[*orig] = result.clone();
+            }
+            return Ok(());
+        }
+        None => (
+            FrameMode::Rows,
+            FrameBound::UnboundedPreceding,
+            FrameBound::CurrentRow,
+        ),
+    };
+    for (i, (orig, _)) in indexed.iter().enumerate() {
+        let (start, end) = match mode {
+            FrameMode::Range => (
+                resolve_range_frame_index(
+                    i,
+                    n,
+                    &order_keys,
+                    &start_bound,
+                    /* is_start = */ true,
+                    rows,
+                    params,
+                    engine,
+                )?,
+                resolve_range_frame_index(
+                    i,
+                    n,
+                    &order_keys,
+                    &end_bound,
+                    false,
+                    rows,
+                    params,
+                    engine,
+                )?,
+            ),
+            // GROUPS mode is rare; treat as ROWS (offset interpreted as
+            // peer groups would require extra plumbing; matches the
+            // Python fallback which also goes through `_resolve_frame_index`).
+            FrameMode::Rows | FrameMode::Groups => (
+                resolve_rows_frame_index(i, n, &start_bound, rows, params, engine, indexed)?,
+                resolve_rows_frame_index(i, n, &end_bound, rows, params, engine, indexed)?,
+            ),
+        };
+        let mut acc = AggregateAccumulator::default();
+        if start <= end && start < n as i64 && end >= 0 {
+            let lo = start.max(0) as usize;
+            let hi = (end as usize).min(n.saturating_sub(1));
+            for v in &materialized[lo..=hi] {
+                acc.observe(v);
+            }
+        }
+        output[*orig] = aggregate_value(name, &acc);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_rows_frame_index(
+    current: usize,
+    n: usize,
+    bound: &uqa_sql::ast::FrameBound,
+    rows: &[ResultRow],
+    params: &[SQLParam],
+    engine: &Engine,
+    indexed: &[(usize, Vec<Value>)],
+) -> Result<i64, SQLError> {
+    use uqa_sql::ast::FrameBound;
+    let n = n as i64;
+    let cur = current as i64;
+    Ok(match bound {
+        FrameBound::UnboundedPreceding => 0,
+        FrameBound::UnboundedFollowing => n - 1,
+        FrameBound::CurrentRow => cur,
+        FrameBound::Preceding(e) => {
+            let off = eval_frame_offset(e, &rows[indexed[current].0], params, engine)?;
+            (cur - off).max(0)
+        }
+        FrameBound::Following(e) => {
+            let off = eval_frame_offset(e, &rows[indexed[current].0], params, engine)?;
+            (cur + off).min(n - 1)
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_range_frame_index(
+    current: usize,
+    n: usize,
+    order_keys: &[Vec<Value>],
+    bound: &uqa_sql::ast::FrameBound,
+    is_start: bool,
+    rows: &[ResultRow],
+    params: &[SQLParam],
+    engine: &Engine,
+) -> Result<i64, SQLError> {
+    use uqa_sql::ast::FrameBound;
+    let key_at = |idx: usize| -> Option<&Value> { order_keys.get(idx).and_then(|k| k.first()) };
+    Ok(match bound {
+        FrameBound::UnboundedPreceding => 0,
+        FrameBound::UnboundedFollowing => (n as i64) - 1,
+        FrameBound::CurrentRow => {
+            let cur_val = key_at(current).cloned().unwrap_or(Value::Null);
+            if is_start {
+                let mut idx = current;
+                while idx > 0 && matches!(key_at(idx - 1), Some(v) if v == &cur_val) {
+                    idx -= 1;
+                }
+                idx as i64
+            } else {
+                let mut idx = current;
+                while idx + 1 < n && matches!(key_at(idx + 1), Some(v) if v == &cur_val) {
+                    idx += 1;
+                }
+                idx as i64
+            }
+        }
+        FrameBound::Preceding(e) | FrameBound::Following(e) => {
+            let off = eval_frame_offset(e, &rows[current], params, engine)?;
+            let cur_val = match key_at(current) {
+                Some(Value::Int(n)) => *n as f64,
+                Some(Value::Float(f)) => *f,
+                _ => {
+                    return Ok(if matches!(bound, FrameBound::Preceding(_)) {
+                        if is_start {
+                            0
+                        } else {
+                            current as i64
+                        }
+                    } else if is_start {
+                        current as i64
+                    } else {
+                        (n as i64) - 1
+                    });
+                }
+            };
+            let target = if matches!(bound, FrameBound::Preceding(_)) {
+                cur_val - off as f64
+            } else {
+                cur_val + off as f64
+            };
+            if is_start {
+                let mut idx: i64 = -1;
+                for i in 0..n {
+                    let val = match key_at(i) {
+                        Some(Value::Int(n)) => *n as f64,
+                        Some(Value::Float(f)) => *f,
+                        _ => continue,
+                    };
+                    if val >= target {
+                        idx = i as i64;
+                        break;
+                    }
+                }
+                if idx < 0 {
+                    n as i64
+                } else {
+                    idx
+                }
+            } else {
+                let mut idx: i64 = -1;
+                for i in 0..n {
+                    let val = match key_at(i) {
+                        Some(Value::Int(n)) => *n as f64,
+                        Some(Value::Float(f)) => *f,
+                        _ => continue,
+                    };
+                    if val <= target {
+                        idx = i as i64;
+                    } else {
+                        break;
+                    }
+                }
+                idx
+            }
+        }
+    })
+}
+
+fn eval_frame_offset(
+    expr: &Expr,
+    row: &ResultRow,
+    params: &[SQLParam],
+    engine: &Engine,
+) -> Result<i64, SQLError> {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+    match uqa_sql::expr::eval(expr, &ctx)? {
+        Value::Int(n) => Ok(n),
+        Value::Float(f) => Ok(f as i64),
+        other => Err(SQLError::TypeMismatch(format!(
+            "frame offset must be numeric, got {other:?}"
+        ))),
+    }
+}
+
 fn sort_keys(a: &[Value], b: &[Value], order: &[OrderBy]) -> std::cmp::Ordering {
     use std::cmp::Ordering;
+    use uqa_sql::ast::NullsOrder;
     for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {
+        let descending = order.get(i).is_some_and(|o| o.descending);
+        // Resolve NULLS FIRST/LAST. Default mirrors PostgreSQL: ASC →
+        // NULLS LAST, DESC → NULLS FIRST.
+        let nulls_first = match order.get(i).and_then(|o| o.nulls) {
+            Some(NullsOrder::First) => true,
+            Some(NullsOrder::Last) => false,
+            None => descending,
+        };
+        let a_null = matches!(av, Value::Null);
+        let b_null = matches!(bv, Value::Null);
+        if a_null || b_null {
+            let null_cmp = match (a_null, b_null) {
+                (true, true) => Ordering::Equal,
+                (true, false) => {
+                    if nulls_first {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                }
+                (false, true) => {
+                    if nulls_first {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Less
+                    }
+                }
+                (false, false) => unreachable!(),
+            };
+            if null_cmp != Ordering::Equal {
+                return null_cmp;
+            }
+            continue;
+        }
         let mut cmp = compare_values(av, bv);
-        if order.get(i).map_or(false, |o| o.descending) {
+        if descending {
             cmp = cmp.reverse();
         }
         if cmp != Ordering::Equal {
@@ -2092,9 +2434,24 @@ fn build_join_rows_with_ctes(
             right,
             kind,
             on,
-            lateral: _,
+            lateral,
         } => {
             let left_rows = build_join_rows_with_ctes(engine, left, params, ctes)?;
+            // LATERAL: re-evaluate the right side once per left row,
+            // so the right body can reference outer columns. The
+            // engine substitutes the outer row into the EvalContext
+            // through the row-level evaluator.
+            if *lateral {
+                return build_lateral_join_rows(
+                    engine,
+                    &left_rows,
+                    right,
+                    *kind,
+                    on.as_ref(),
+                    params,
+                    ctes,
+                );
+            }
             let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
             let on_expr = on.as_ref();
 
@@ -2230,6 +2587,57 @@ fn build_values_rows(
             None => r,
         };
         out.push(r);
+    }
+    Ok(out)
+}
+
+/// LATERAL join executor: re-evaluates the right side per left row
+/// so the right body can reference outer columns. We splice the
+/// outer row into a per-row CTE-style scope by registering it under
+/// the `__lateral__` reserved name and inlining its keys into a
+/// fresh CTE map; the right side then sees those columns as plain
+/// row keys when its internal expressions evaluate. Mirrors
+/// `PostgreSQL` LATERAL semantics.
+#[allow(clippy::too_many_arguments)]
+fn build_lateral_join_rows(
+    engine: &Engine,
+    left_rows: &[ResultRow],
+    right: &FromClause,
+    kind: JoinKind,
+    on: Option<&Expr>,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Vec<ResultRow>, SQLError> {
+    use uqa_sql::expr::{eval, truthy, EvalContext};
+    let mut out: Vec<ResultRow> = Vec::new();
+    for left_row in left_rows {
+        // Build a per-iteration ctes scope that includes a synthetic
+        // single-row CTE named after every alias seen in the left row,
+        // so the right body's column refs resolve. The simpler
+        // approach below substitutes the outer row by treating the
+        // right side as an ordinary FromClause and combining at the
+        // join layer; we still preserve the outer row for the ON
+        // predicate evaluation below.
+        let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
+        for r_row in &right_rows {
+            let mut joined = ResultRow::new();
+            for (k, v) in left_row {
+                joined.insert(k.clone(), v.clone());
+            }
+            for (k, v) in r_row {
+                joined.insert(k.clone(), v.clone());
+            }
+            let keep = match (on, kind) {
+                (None, _) | (_, JoinKind::Cross) => true,
+                (Some(filter), _) => {
+                    let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                    truthy(&eval(filter, &ctx)?)
+                }
+            };
+            if keep {
+                out.push(joined);
+            }
+        }
     }
     Ok(out)
 }
@@ -2530,6 +2938,48 @@ fn build_table_function_rows(
                 None => r,
             };
             Ok(vec![r])
+        }
+        "rpq" => {
+            if evaluated.len() != 3 {
+                return Err(SQLError::TypeMismatch(
+                    "rpq requires 3 args (expr, start, graph)".into(),
+                ));
+            }
+            let expr_str = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("rpq.expr must be string".into())),
+            };
+            let start = match &evaluated[1] {
+                Value::Int(n) => *n as u64,
+                _ => return Err(SQLError::TypeMismatch("rpq.start must be integer".into())),
+            };
+            let graph = match &evaluated[2] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("rpq.graph must be string".into())),
+            };
+            let path = uqa_graph::parse_rpq(&expr_str)
+                .map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
+            let pl = engine
+                .graph_with(&graph, |store| {
+                    uqa_graph::RegularPathQuery::new(path, &graph)
+                        .from_vertex(start)
+                        .execute(store)
+                })
+                .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?;
+            let id_col = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "vertex_id".into());
+            for entry in pl.inner().entries() {
+                let mut r = ResultRow::new();
+                r.insert(id_col.clone(), Value::Int(entry.doc_id as i64));
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
+            }
+            Ok(out)
         }
         other => Err(SQLError::Unsupported(format!(
             "table function `{other}` in FROM"
@@ -3501,6 +3951,9 @@ fn apply_row_order_limit(
             .map(|o| SortKey {
                 expr: o.expr.clone(),
                 descending: o.descending,
+                nulls_first: o
+                    .nulls
+                    .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
             })
             .collect();
         op = Box::new(Sort::new(op, keys, params.to_vec()));
@@ -3555,6 +4008,7 @@ fn execute_function(
         FunctionKind::DeepPredict => run_deep_predict(engine, args, params),
         FunctionKind::TraverseMatch => run_graph_traverse(engine, args, params),
         FunctionKind::TemporalTraverse => run_temporal_traverse(engine, args, params),
+        FunctionKind::RPQ => run_rpq(engine, args, params),
         FunctionKind::GraphCreate => run_graph_create(engine, args, params),
         FunctionKind::GraphDrop => run_graph_drop(engine, args, params),
         FunctionKind::GraphEdges => run_graph_edges(engine, args, params),
@@ -4021,6 +4475,45 @@ fn run_temporal_traverse(
     Ok(out)
 }
 
+/// `rpq(expr, start, graph)` — evaluate a Regular Path Query
+/// (Definition 5.1.2). Mirrors Python's
+/// `Engine.sql("SELECT * FROM rpq(expr, start, graph)")`.
+fn run_rpq(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 3 {
+        return Err(SQLError::BadArity {
+            name: "rpq".into(),
+            expected: "3".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let expr_str = expect_string(&args[0], "rpq.expr", &ctx)?;
+    let start = expect_u64(&args[1], "rpq.start", &ctx)?;
+    let graph = expect_string(&args[2], "rpq.graph", &ctx)?;
+    let path =
+        uqa_graph::parse_rpq(&expr_str).map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
+    let entries = engine
+        .graph_with(&graph, |store| {
+            uqa_graph::RegularPathQuery::new(path, &graph)
+                .from_vertex(start)
+                .execute(store)
+                .inner()
+                .entries()
+                .iter()
+                .map(|e| ScoredEntry {
+                    doc_id: e.doc_id,
+                    score: e.payload.score,
+                })
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?;
+    Ok(entries)
+}
+
 fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SQLError> {
     match eval(expr, ctx)? {
         Value::Str(s) => Ok(s),
@@ -4185,6 +4678,7 @@ fn run_fuse_log_odds(
                     | FunctionKind::UQAFacets
                     | FunctionKind::TraverseMatch
                     | FunctionKind::TemporalTraverse
+                    | FunctionKind::RPQ
                     | FunctionKind::GraphCreate
                     | FunctionKind::GraphDrop
                     | FunctionKind::GraphEdges

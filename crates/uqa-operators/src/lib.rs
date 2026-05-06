@@ -44,8 +44,7 @@ pub use fusion_wrappers::{
 };
 pub use hierarchical::{
     eval_path, parse_path, project_paths, unnest_array, AggregationKind as PathAggKind,
-    PathAggregateOperator, PathExpr, PathFilterOperator, PathProjectOperator, PathSegment,
-    UnifiedFilterOperator,
+    PathAggregateOperator, PathFilterOperator, PathProjectOperator, UnifiedFilterOperator,
 };
 pub use hybrid::{HybridTextVectorOperator, LogOddsFusionOperator, SemanticFilterOperator};
 pub use multi_stage::{Cutoff, MultiStageOperator};
@@ -60,4 +59,5 @@ pub use tree::{
     OperatorTree, ProbBoolMode, ProgressiveFusionEntry, ScorerRef, TemporalFilterIR,
     VertexConstraint, VertexPatternIR, VertexPredicate,
 };
+pub use uqa_core::{PathExpr, PathSegment};
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

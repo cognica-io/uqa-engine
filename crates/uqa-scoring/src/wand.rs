@@ -220,8 +220,21 @@ impl<'a> BlockMaxWANDScorer<'a> {
                         bounds.push(0.0);
                         continue;
                     }
-                    let block_idx = bmi.block_index_for(cursors[ti].position);
-                    let bm = bmi.block_max(table, &q.fields[ti], &q.terms[ti], block_idx);
+                    let cur_block = bmi.block_index_for(cursors[ti].position);
+                    let total_blocks = bmi.num_blocks(table, &q.fields[ti], &q.terms[ti]);
+                    // Take the max block-max across the remaining blocks
+                    // for this term so the bound stays valid for any
+                    // pivot doc the cursor could still reach. Anchoring
+                    // on just `cur_block` under-counts a later block
+                    // whose max score exceeds the current block, which
+                    // would prune candidates BMW must still consider.
+                    let mut bm = 0.0_f64;
+                    for b in cur_block..total_blocks {
+                        let v = bmi.block_max(table, &q.fields[ti], &q.terms[ti], b);
+                        if v > bm {
+                            bm = v;
+                        }
+                    }
                     // Fall back to the per-term `upper_bound(df)` if no
                     // block was recorded; an unindexed term must not get
                     // pruned more aggressively than plain WAND.

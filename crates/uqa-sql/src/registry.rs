@@ -56,6 +56,10 @@ pub enum FunctionKind {
     /// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
     /// — `traverse_match` filtered by edge `valid_from`/`valid_to`.
     TemporalTraverse,
+    /// `rpq(expr, start, graph)` — evaluate a Regular Path Query
+    /// (Definition 5.1.2) and emit endpoint vertex ids reachable from
+    /// `start` along paths matching `expr`.
+    RPQ,
     /// `graph_create(graph_name)` — register a new in-memory graph.
     GraphCreate,
     /// `graph_drop(graph_name)` — drop a registered graph.
@@ -104,6 +108,7 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("uqa_facets", FunctionKind::UQAFacets);
         m.insert("traverse_match", FunctionKind::TraverseMatch);
         m.insert("temporal_traverse", FunctionKind::TemporalTraverse);
+        m.insert("rpq", FunctionKind::RPQ);
         m.insert("graph_create", FunctionKind::GraphCreate);
         m.insert("graph_drop", FunctionKind::GraphDrop);
         m.insert("graph_edges", FunctionKind::GraphEdges);

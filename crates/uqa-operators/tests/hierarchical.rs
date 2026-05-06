@@ -23,8 +23,8 @@
 use std::collections::BTreeMap;
 
 use proptest::prelude::*;
-use uqa_core::Value;
-use uqa_operators::hierarchical::{eval_path, parse_path, PathExpr, PathSegment};
+use uqa_core::{PathExpr, PathSegment, Value};
+use uqa_operators::hierarchical::{eval_path, parse_path};
 use uqa_storage::document_store::Document;
 
 /// Build a small two-level nested Document, returning the doc plus

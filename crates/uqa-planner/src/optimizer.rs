@@ -59,6 +59,7 @@ pub fn optimize(stmt: SelectStmt, cfg: &OptimizerConfig) -> SelectStmt {
             .map(|o| OrderBy {
                 expr: simplify_bool(o.expr),
                 descending: o.descending,
+                nulls: o.nulls,
             })
             .collect();
     }
@@ -163,8 +164,10 @@ fn simplify_bool(expr: Expr) -> Expr {
                     .map(|o| OrderBy {
                         expr: simplify_bool(o.expr),
                         descending: o.descending,
+                        nulls: o.nulls,
                     })
                     .collect(),
+                frame: spec.frame,
             },
         },
         Expr::Array(items) => Expr::Array(items.into_iter().map(simplify_bool).collect()),

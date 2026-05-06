@@ -17,19 +17,13 @@
 
 use std::sync::Arc;
 
-use uqa_core::{IndexStats, Payload, PostingEntry, PostingList, Predicate, Value};
+use uqa_core::{
+    IndexStats, PathExpr, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value,
+};
 use uqa_storage::document_store::Document;
 
 use crate::base::{ExecutionContext, Operator};
 use crate::primitive::FilterOperator;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PathSegment {
-    Key(String),
-    Index(usize),
-}
-
-pub type PathExpr = Vec<PathSegment>;
 
 /// Parse a dotted path: each numeric segment becomes an index, every
 /// other segment a key lookup.

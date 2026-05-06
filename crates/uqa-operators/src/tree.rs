@@ -7,7 +7,7 @@
 //! Operator tree IR for the planner.
 //!
 //! Mirrors `uqa/operators/base.py` + the concrete operator subclass
-//! taxonomy. Python's [`QueryOptimizer`] uses `isinstance` to walk an
+//! taxonomy. Python's `QueryOptimizer` uses `isinstance` to walk an
 //! operator tree and rewrite it; the Rust port lifts every concrete
 //! operator into a single [`OperatorTree`] enum so the rewriter can
 //! pattern-match the same way.

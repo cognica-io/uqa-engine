@@ -110,4 +110,14 @@ pub trait GraphStore {
     fn next_edge_id(&mut self) -> EdgeId;
 
     fn clear(&mut self);
+
+    // --- Bulk accessors ---
+
+    /// Snapshot every vertex in the store, keyed by id. Mirrors the
+    /// `vertices` property on Python's abstract `GraphStore`.
+    fn vertices(&self) -> BTreeMap<VertexId, Vertex>;
+
+    /// Snapshot every edge in the store, keyed by id. Mirrors the
+    /// `edges` property on Python's abstract `GraphStore`.
+    fn edges(&self) -> BTreeMap<EdgeId, Edge>;
 }

@@ -132,6 +132,10 @@ pub struct Engine {
     /// Saved deep-fusion models. Mirrors the catalog `_models` table
     /// when the engine is SQLite-backed.
     models: RwLock<BTreeMap<String, deep::DeepModel>>,
+    /// Bayesian calibration parameters (`alpha`, `beta`, `base_rate`, ...)
+    /// keyed by signal name. Round-trips through the catalog when the
+    /// engine is `SQLite`-backed.
+    scoring_params: RwLock<BTreeMap<String, String>>,
     /// Registered views. Each entry holds the underlying
     /// `SelectStmt`; the SQL surface re-runs the body on every
     /// reference (no row caching).
@@ -141,6 +145,13 @@ pub struct Engine {
     /// error out, but tables themselves still live in the flat
     /// per-name namespace.
     schemas: RwLock<std::collections::BTreeSet<String>>,
+    /// Resolution order for unqualified table names. Mirrors Python's
+    /// `Engine._tables._search_path`. Defaults to `["public"]`.
+    search_path: RwLock<Vec<String>>,
+    /// Pre-built RPQ path indexes keyed by `<graph>::<name>`. Each
+    /// entry materialises a fixed set of label sequences so RPQ can
+    /// short-circuit NFA simulation when the expression matches.
+    path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
     /// Open transaction stack. `BEGIN` pushes a new frame, `COMMIT`
     /// / `ROLLBACK` pop one, savepoint statements update the top
     /// frame's savepoint set.
@@ -229,8 +240,11 @@ impl Engine {
             conn: None,
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
+            search_path: RwLock::new(vec!["public".to_string()]),
+            path_indexes: RwLock::new(BTreeMap::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
@@ -418,6 +432,47 @@ impl Engine {
             .cloned()
     }
 
+    /// Python-parity alias for [`Engine::register_named_analyzer`].
+    pub fn create_analyzer(
+        &self,
+        name: &str,
+        config_json: &str,
+    ) -> std::result::Result<(), String> {
+        self.register_named_analyzer(name, config_json)
+    }
+
+    /// Python-parity alias for [`Engine::drop_named_analyzer`].
+    pub fn drop_analyzer(&self, name: &str) -> bool {
+        self.drop_named_analyzer(name)
+    }
+
+    /// Python-parity alias for [`Engine::set_table_field_analyzer`].
+    pub fn set_table_analyzer(
+        &self,
+        table: &str,
+        field: &str,
+        analyzer_name: &str,
+        phase: &str,
+    ) -> std::result::Result<(), String> {
+        self.set_table_field_analyzer(table, field, analyzer_name, phase)
+    }
+
+    /// Resolve the analyzer assigned to `(table, field)` for the given
+    /// phase. `phase` is `"index"`, `"search"`, or `"both"`. Returns the
+    /// analyzer config JSON (the raw form the engine persists).
+    /// Mirrors Python's `Engine.get_table_analyzer`.
+    pub fn get_table_analyzer(&self, table: &str, field: &str, phase: &str) -> Option<String> {
+        let (name, stored_phase) = self.table_field_analyzer(table, field)?;
+        // Python returns the field's index/search analyzer based on the
+        // requested phase; "both" means the override applies on both
+        // sides. Honour the same precedence here.
+        let resolved = match (stored_phase.as_str(), phase) {
+            ("both", _) | ("index", "index") | ("query" | "search", "search") => name,
+            _ => return None,
+        };
+        self.named_analyzers.read().get(&resolved).cloned()
+    }
+
     // -----------------------------------------------------------------
     // Foreign Data Wrapper registry. Mirrors `_engine._foreign_servers`
     // / `_engine._foreign_tables` in the Python reference.
@@ -565,6 +620,11 @@ impl Engine {
         self.cancel.clone()
     }
 
+    /// Python-parity alias for [`Engine::cancellation_token`].
+    pub fn cancel_token(&self) -> uqa_core::CancellationToken {
+        self.cancellation_token()
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.cancel.is_cancelled()
     }
@@ -581,8 +641,11 @@ impl Engine {
             conn: Some(conn.clone()),
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
+            scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
+            search_path: RwLock::new(vec!["public".to_string()]),
+            path_indexes: RwLock::new(BTreeMap::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
@@ -807,6 +870,104 @@ impl Engine {
         self.graphs.write().remove(name);
     }
 
+    /// Sorted list of every named graph registered on this engine.
+    /// Mirrors Python's `Engine.list_graphs`.
+    pub fn list_graphs(&self) -> Vec<String> {
+        self.graphs.read().keys().cloned().collect()
+    }
+
+    /// Return `true` when a graph with `name` is registered.
+    /// Mirrors Python's `Engine.has_graph`.
+    pub fn has_graph(&self, name: &str) -> bool {
+        self.graphs.read().contains_key(name)
+    }
+
+    /// Insert a vertex into a named graph. Auto-creates the graph if
+    /// missing. Mirrors Python's `Engine.add_graph_vertex`.
+    pub fn add_graph_vertex(&self, vertex: uqa_core::Vertex, graph: &str) {
+        use uqa_graph::GraphStore as _;
+        let mut graphs = self.graphs.write();
+        let store = graphs.entry(graph.to_string()).or_default();
+        if !store.has_graph(graph) {
+            store.create_graph(graph);
+        }
+        store.add_vertex(vertex, graph);
+    }
+
+    /// Insert an edge into a named graph. Auto-creates the graph if
+    /// missing. Mirrors Python's `Engine.add_graph_edge`.
+    pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) {
+        use uqa_graph::GraphStore as _;
+        let mut graphs = self.graphs.write();
+        let store = graphs.entry(graph.to_string()).or_default();
+        if !store.has_graph(graph) {
+            store.create_graph(graph);
+        }
+        store.add_edge(edge, graph);
+    }
+
+    /// Apply a [`uqa_graph::GraphDelta`] to a named graph as a single
+    /// atomic batch of `add/remove vertex/edge` ops. Mirrors Python's
+    /// `Engine.apply_graph_delta`.
+    pub fn apply_graph_delta(&self, graph: &str, delta: &uqa_graph::GraphDelta) {
+        use uqa_graph::DeltaOp;
+        use uqa_graph::GraphStore as _;
+        let mut graphs = self.graphs.write();
+        let store = graphs.entry(graph.to_string()).or_default();
+        if !store.has_graph(graph) {
+            store.create_graph(graph);
+        }
+        for op in delta.ops() {
+            match op {
+                DeltaOp::AddVertex(v) => store.add_vertex(v.clone(), graph),
+                DeltaOp::RemoveVertex(id) => store.remove_vertex(*id, graph),
+                DeltaOp::AddEdge(e) => store.add_edge(e.clone(), graph),
+                DeltaOp::RemoveEdge(id) => store.remove_edge(*id, graph),
+            }
+        }
+        // Invalidate any cached path indexes for this graph: a path
+        // index is built against a snapshot, so the safe move is to
+        // drop them and let the caller rebuild on demand.
+        self.path_indexes
+            .write()
+            .retain(|key, _| !key.starts_with(&format!("{graph}::")));
+    }
+
+    /// Build (or replace) a path index for `graph` keyed by `name`.
+    /// `label_sequences` is the set of label sequences to materialise
+    /// — each sequence becomes a hash-friendly direct lookup for RPQ.
+    /// Mirrors Python's `Engine.build_path_index`.
+    pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
+        let graphs = self.graphs.read();
+        let Some(store) = graphs.get(graph) else {
+            return;
+        };
+        let idx = uqa_graph::PathIndex::build(store, graph, label_sequences);
+        let key = format!("{graph}::{name}");
+        self.path_indexes.write().insert(key, idx);
+    }
+
+    /// Drop a path index by `(graph, name)`. Returns `true` when an
+    /// index was removed. Mirrors Python's `Engine.drop_path_index`.
+    pub fn drop_path_index(&self, name: &str, graph: &str) -> bool {
+        let key = format!("{graph}::{name}");
+        self.path_indexes.write().remove(&key).is_some()
+    }
+
+    /// Look up a path index by `(graph, name)`. Returns a clone so the
+    /// caller is not tied to the engine's lock. Mirrors Python's
+    /// `Engine.get_path_index`.
+    pub fn get_path_index(&self, name: &str, graph: &str) -> Option<uqa_graph::PathIndex> {
+        let key = format!("{graph}::{name}");
+        self.path_indexes.read().get(&key).cloned()
+    }
+
+    /// Sorted list of registered path index keys. Each key has the
+    /// shape `<graph>::<name>` so the caller can split as needed.
+    pub fn list_path_indexes(&self) -> Vec<String> {
+        self.path_indexes.read().keys().cloned().collect()
+    }
+
     /// Read-only borrow of a named graph for ad-hoc query construction
     /// outside the SQL function path. Returns `None` when the graph
     /// is unknown.
@@ -827,6 +988,36 @@ impl Engine {
     ) -> Option<R> {
         let mut graphs = self.graphs.write();
         graphs.get_mut(name).map(f)
+    }
+
+    /// Run a Cypher query against a named graph and return the
+    /// `(columns, rows)` projected by the query's `RETURN` clause (or
+    /// empty vectors when the query has no `RETURN`).
+    ///
+    /// This wires the full `CREATE` / `MERGE` / `SET` / `DELETE` /
+    /// `UNWIND` surface through to the in-memory store. The graph is
+    /// auto-created on first use, mirroring Python's
+    /// `CypherCompiler.execute` behaviour.
+    pub fn run_cypher(
+        &self,
+        graph: &str,
+        query: &str,
+        params: BTreeMap<String, Value>,
+    ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
+    {
+        use uqa_graph::cypher::{parse_cypher, CypherWriter};
+        use uqa_graph::GraphStore as _;
+        let q = parse_cypher(query)?;
+        let mut graphs = self.graphs.write();
+        let store = graphs.entry(graph.to_string()).or_default();
+        // Ensure the named partition exists inside the store as well.
+        // The outer map only owns the store; create_graph populates the
+        // store's own partition registry that mutations key off of.
+        if !store.has_graph(graph) {
+            store.create_graph(graph);
+        }
+        let mut writer = CypherWriter::new(store, graph).with_params(params);
+        writer.execute(&q)
     }
 
     /// Persist a deep-fusion model under `name`. Round-trips as JSON
@@ -861,6 +1052,73 @@ impl Engine {
             let _ = catalog.drop_model(name);
         }
         self.models.write().remove(name);
+    }
+
+    /// Python-parity alias for [`Engine::drop_model`].
+    pub fn delete_model(&self, name: &str) {
+        self.drop_model(name);
+    }
+
+    /// Persist Bayesian calibration parameters for a named signal. The
+    /// parameters arrive serialised as a JSON string so callers can
+    /// stuff arbitrary `(alpha, beta, base_rate, ...)` shapes through
+    /// without forcing a struct. Mirrors Python's `save_scoring_params`.
+    pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<(), SQLError> {
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog
+                .save_scoring_params(name, params_json)
+                .map_err(|e| SQLError::Internal(format!("catalog save_scoring_params: {e}")))?;
+        }
+        self.scoring_params
+            .write()
+            .insert(name.to_string(), params_json.to_string());
+        Ok(())
+    }
+
+    /// Load persisted scoring parameters for a single signal. Falls
+    /// back to the in-memory cache when the engine is not catalog-
+    /// backed. Mirrors Python's `Engine.load_scoring_params`.
+    pub fn load_scoring_params(&self, name: &str) -> Option<String> {
+        if let Some(p) = self.scoring_params.read().get(name).cloned() {
+            return Some(p);
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            if let Ok(Some(json)) = catalog.load_scoring_params(name) {
+                self.scoring_params
+                    .write()
+                    .insert(name.to_string(), json.clone());
+                return Some(json);
+            }
+        }
+        None
+    }
+
+    /// Snapshot every persisted `(name, params_json)` pair. Mirrors
+    /// Python's `Engine.load_all_scoring_params`.
+    pub fn load_all_scoring_params(&self) -> Vec<(String, String)> {
+        if let Some(catalog) = self.catalog.as_ref() {
+            if let Ok(rows) = catalog.load_all_scoring_params() {
+                let mut cache = self.scoring_params.write();
+                for (name, json) in &rows {
+                    cache.insert(name.clone(), json.clone());
+                }
+                return rows;
+            }
+        }
+        let map = self.scoring_params.read();
+        let mut out: Vec<_> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// Drop persisted scoring parameters for a single signal. Returns
+    /// `true` when something was removed.
+    pub fn drop_scoring_params(&self, name: &str) -> bool {
+        let mut removed = self.scoring_params.write().remove(name).is_some();
+        if let Some(catalog) = self.catalog.as_ref() {
+            removed = catalog.drop_scoring_params(name).is_ok() || removed;
+        }
+        removed
     }
 
     /// Run inference for a saved model against a fresh execution
@@ -925,14 +1183,69 @@ impl Engine {
         self.schemas.write().remove(name)
     }
 
+    /// Sorted list of every registered schema. Mirrors Python's
+    /// `Engine._tables.schemas`.
+    pub fn list_schemas(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.schemas.read().iter().cloned().collect();
+        if !out.iter().any(|s| s == "public") {
+            out.insert(0, "public".to_string());
+        }
+        out
+    }
+
+    /// Tables that belong to a schema. Names matching `<schema>.X`
+    /// are bucketed under `<schema>`; everything else falls under
+    /// `public`. Mirrors Python's `Engine._tables.tables_in_schema`.
+    pub fn tables_in_schema(&self, schema: &str) -> Vec<String> {
+        let prefix = format!("{schema}.");
+        let mut out: Vec<String> = Vec::new();
+        for name in self.tables.read().keys() {
+            if let Some(rest) = name.strip_prefix(&prefix) {
+                out.push(rest.to_string());
+            } else if schema == "public" && !name.contains('.') {
+                out.push(name.clone());
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Current `search_path`. Mirrors Python's
+    /// `Engine._tables.search_path`.
+    pub fn search_path(&self) -> Vec<String> {
+        self.search_path.read().clone()
+    }
+
+    /// Replace the `search_path`. Empty input falls back to `["public"]`.
+    pub fn set_search_path(&self, path: Vec<String>) {
+        let mut value = path;
+        if value.is_empty() {
+            value.push("public".to_string());
+        }
+        *self.search_path.write() = value;
+    }
+
+    /// Apply `SET <name> [TO|=] <value>`. Today only `search_path` has
+    /// engine-level semantics; everything else is recorded as a no-op
+    /// for forward compatibility.
+    pub fn set_variable(&self, name: &str, value: &str) {
+        if name.eq_ignore_ascii_case("search_path") {
+            let parts: Vec<String> = value
+                .split(',')
+                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            self.set_search_path(parts);
+        }
+    }
+
     /// Refresh per-column statistics for a single table or every
     /// table when `table` is `None`. Mirrors `Table.analyze` in
     /// the Python reference: scans every document, collects per-
     /// column distinct count / null count / min / max / equi-depth
     /// histogram (100 buckets) / MCV list (top 10 above-average
-    /// frequency), and stores the result in [`TableState::column_stats`]
-    /// so the cardinality estimator can read it on subsequent
-    /// queries.
+    /// frequency), and stores the result on the per-table state so the
+    /// cardinality estimator can read it on subsequent queries.
     pub fn run_analyze(&self, table: Option<&str>) {
         let names: Vec<String> = match table {
             Some(t) => vec![t.to_string()],
@@ -1050,6 +1363,70 @@ impl Engine {
     /// Execute a transaction control statement (`BEGIN` / `COMMIT` /
     /// `ROLLBACK` / savepoint variants) against the engine. The
     /// engine maintains a single transaction stack per connection.
+    /// Start an explicit transaction frame. Mirrors Python
+    /// `Engine.begin`. Equivalent to running `BEGIN` through `sql`.
+    pub fn begin(&self) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Begin)
+    }
+
+    /// Commit the top-most transaction frame. Mirrors Python
+    /// `Engine.commit`.
+    pub fn commit(&self) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Commit)
+    }
+
+    /// Roll back the top-most transaction frame. Mirrors Python
+    /// `Engine.rollback`.
+    pub fn rollback(&self) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback)
+    }
+
+    /// Mark a savepoint inside the current transaction. Mirrors Python
+    /// `Engine.savepoint(name)`.
+    pub fn savepoint(&self, name: &str) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Savepoint(name.to_string()))
+    }
+
+    /// Release a savepoint. Mirrors Python `Engine.release_savepoint`.
+    pub fn release_savepoint(&self, name: &str) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::ReleaseSavepoint(
+            name.to_string(),
+        ))
+    }
+
+    /// Roll back to a named savepoint. Mirrors Python
+    /// `Engine.rollback_to_savepoint`.
+    pub fn rollback_to_savepoint(&self, name: &str) -> Result<(), SQLError> {
+        self.run_transaction_statement(uqa_sql::ast::TransactionStmt::RollbackToSavepoint(
+            name.to_string(),
+        ))
+    }
+
+    /// Number of currently-open transaction frames (`BEGIN` count
+    /// minus `COMMIT/ROLLBACK` count). Useful for assertions in tests
+    /// and for status displays in the CLI.
+    pub fn transaction_depth(&self) -> usize {
+        self.tx_stack.lock().len()
+    }
+
+    /// Tear down engine state cleanly. Rolls back any open transaction
+    /// frames and clears registries. Mirrors Python `Engine.close`.
+    /// The engine value can no longer be used afterwards in a
+    /// well-defined sense; idiomatic Rust drops the value at scope
+    /// exit, but this method exists for parity with the Python
+    /// reference and for explicit shutdown ordering.
+    pub fn close(&self) {
+        // Roll back every open transaction.
+        let mut guard = self.tx_stack.lock();
+        guard.clear();
+        drop(guard);
+        // Clear FDW registries — closing connections is up to the
+        // handler, but dropping the catalog entries is enough to free
+        // the registered handles.
+        self.foreign_servers.write().clear();
+        self.foreign_tables.write().clear();
+    }
+
     pub fn run_transaction_statement(
         &self,
         tx: uqa_sql::ast::TransactionStmt,

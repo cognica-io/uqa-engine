@@ -171,7 +171,7 @@ impl Session {
             "help" | "h" => {
                 let _ = writeln!(
                     out,
-                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file\n  \\timing                  toggle per-statement execution timing\n  \\expanded                toggle column-per-line output\n  \\dt                      list registered tables\n  \\describe <table>        show the schema of a table\n  \\run <file>              execute SQL from a file"
+                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file\n  \\timing                  toggle per-statement execution timing\n  \\expanded                toggle column-per-line output\n  \\dt                      list registered tables\n  \\describe <table>        show the schema of a table\n  \\stats <table>           show ANALYZE column statistics\n  \\dg | \\graphs            list registered graphs\n  \\dfs                     list registered foreign servers\n  \\dft                     list registered foreign tables\n  \\da | \\analyzers         list registered named analyzers\n  \\run <file>              execute SQL from a file"
                 );
             }
             "history" => match arg {
@@ -244,6 +244,64 @@ impl Session {
                     }
                 } else {
                     let _ = writeln!(out, "no such table: {arg}");
+                }
+            }
+            "stats" => {
+                if arg.is_empty() {
+                    let _ = writeln!(out, "usage: \\stats <table>");
+                } else {
+                    let stats = self.engine.column_stats(arg);
+                    if stats.is_empty() {
+                        let _ = writeln!(out, "no stats — run ANALYZE {arg}");
+                    } else {
+                        for (col, s) in stats {
+                            let _ = writeln!(
+                                out,
+                                "  {col}: distinct={} nulls={} min={:?} max={:?}",
+                                s.distinct_count, s.null_count, s.min_value, s.max_value
+                            );
+                        }
+                    }
+                }
+            }
+            "dg" | "graphs" => {
+                let names = self.engine.list_graphs();
+                if names.is_empty() {
+                    let _ = writeln!(out, "no graphs registered");
+                } else {
+                    for name in names {
+                        let _ = writeln!(out, "  {name}");
+                    }
+                }
+            }
+            "dfs" => {
+                let names = self.engine.list_foreign_servers();
+                if names.is_empty() {
+                    let _ = writeln!(out, "no foreign servers registered");
+                } else {
+                    for name in names {
+                        let _ = writeln!(out, "  {name}");
+                    }
+                }
+            }
+            "dft" => {
+                let names = self.engine.list_foreign_tables();
+                if names.is_empty() {
+                    let _ = writeln!(out, "no foreign tables registered");
+                } else {
+                    for name in names {
+                        let _ = writeln!(out, "  {name}");
+                    }
+                }
+            }
+            "da" | "analyzers" => {
+                let names = self.engine.list_named_analyzers();
+                if names.is_empty() {
+                    let _ = writeln!(out, "no analyzers registered");
+                } else {
+                    for name in names {
+                        let _ = writeln!(out, "  {name}");
+                    }
                 }
             }
             "run" => {

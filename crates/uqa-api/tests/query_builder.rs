@@ -101,3 +101,68 @@ fn multi_field_match_through_builder() {
         .unwrap();
     assert!(!result.rows.is_empty());
 }
+
+#[test]
+fn fuse_attention_renders_attention_call() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .fuse_attention(&["text_match('rust')", "text_match('embedded')"])
+        .to_sql();
+    assert!(sql.contains("attention(text_match('rust'), text_match('embedded'))"));
+}
+
+#[test]
+fn fuse_learned_quotes_model_name_and_includes_signals() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .fuse_learned("my_model", &["text_match('a')", "knn_match('v', '[1]', 5)"])
+        .to_sql();
+    assert!(sql.contains("learned_fusion('my_model', text_match('a'), knn_match('v', '[1]', 5))"));
+}
+
+#[test]
+fn rpq_replaces_from_clause() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "_unused")
+        .select_columns(&["*"])
+        .rpq("manages*", 1, "g")
+        .to_sql();
+    assert!(sql.contains("FROM rpq('manages*', 1, 'g')"));
+}
+
+#[test]
+fn highlight_and_facets_render_function_calls() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .highlight("title", "rust")
+        .facets(&["author", "year"])
+        .to_sql();
+    assert!(sql.contains("uqa_highlight('title', 'rust')"));
+    assert!(sql.contains("uqa_facets('author', 'year')"));
+}
+
+#[test]
+fn bayesian_match_renders_where_clause() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .bayesian_match("title", "rust")
+        .to_sql();
+    assert!(sql.contains("WHERE bayesian_match(title, 'rust')"));
+}
+
+#[test]
+fn explain_returns_plan_lines() {
+    let engine = engine_with_corpus();
+    let plan = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .where_eq("id", &Value::Int(1))
+        .limit(2)
+        .explain()
+        .unwrap();
+    assert!(plan.contains("Select"));
+    assert!(plan.contains("limit=2"));
+}

@@ -18,6 +18,18 @@ pub type DocId = u64;
 /// Field name within a document.
 pub type FieldName = String;
 
+/// One step of a hierarchical-document path. Mirrors Python's
+/// `PathExpr = list[str | int]`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum PathSegment {
+    Key(String),
+    Index(usize),
+}
+
+/// A path expression — a sequence of [`PathSegment`]s navigating a
+/// hierarchical document.
+pub type PathExpr = Vec<PathSegment>;
+
 /// Dynamic value type for document fields and posting payload extras.
 ///
 /// Covers the JSON-like values the engine round-trips through a posting

@@ -318,12 +318,48 @@ pub struct Projection {
 pub struct OrderBy {
     pub expr: Expr,
     pub descending: bool,
+    /// `NULLS FIRST` / `NULLS LAST` placement. `None` means the
+    /// SQL-standard default — `NULLS LAST` for ASC and `NULLS FIRST`
+    /// for DESC. Mirrors `PostgreSQL` semantics.
+    pub nulls: Option<NullsOrder>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NullsOrder {
+    First,
+    Last,
 }
 
 #[derive(Debug, Clone)]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderBy>,
+    /// `ROWS` / `RANGE` frame, or `None` when not specified (defaults
+    /// to `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`).
+    pub frame: Option<WindowFrame>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowFrame {
+    pub mode: FrameMode,
+    pub start: FrameBound,
+    pub end: FrameBound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameMode {
+    Rows,
+    Range,
+    Groups,
+}
+
+#[derive(Debug, Clone)]
+pub enum FrameBound {
+    UnboundedPreceding,
+    UnboundedFollowing,
+    CurrentRow,
+    Preceding(Box<Expr>),
+    Following(Box<Expr>),
 }
 
 /// Scalar expression nodes the compiler handles.
@@ -482,6 +518,13 @@ pub enum Statement {
     CreateSchema {
         name: String,
         if_not_exists: bool,
+    },
+    /// `SET <name> [TO|=] <value>` — runtime parameter assignment.
+    /// Currently the engine recognises `search_path`; everything else
+    /// is recorded as a no-op for forward compatibility.
+    SetVariable {
+        name: String,
+        value: String,
     },
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
     /// emit the planner output. No-op when the engine does not have

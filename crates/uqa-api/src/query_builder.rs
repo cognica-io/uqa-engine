@@ -366,6 +366,153 @@ impl<'a> QueryBuilder<'a> {
             .push(format!("multi_stage({})", parts.join(", ")));
         self
     }
+
+    /// Multi-signal attention fusion. `signals` are pre-rendered SQL
+    /// expressions like `text_match('q')`, `knn_match('field', '[..]', k)`.
+    /// Mirrors Python `QueryBuilder.fuse_attention`.
+    pub fn fuse_attention(mut self, signals: &[&str]) -> Self {
+        self.projections
+            .push(format!("attention({})", signals.join(", ")));
+        self
+    }
+
+    /// Learned per-feature fusion using a saved `LearnedFusion` model.
+    /// Mirrors Python `QueryBuilder.fuse_learned`.
+    pub fn fuse_learned(mut self, model: &str, signals: &[&str]) -> Self {
+        let mut parts = vec![quote_str(model)];
+        parts.extend(signals.iter().map(|s| (*s).to_string()));
+        self.projections
+            .push(format!("learned_fusion({})", parts.join(", ")));
+        self
+    }
+
+    /// Calibrated KNN with cosine probabilities. Mirrors Python
+    /// `QueryBuilder.calibrated_vector_match`.
+    pub fn calibrated_vector_match(
+        mut self,
+        field: &str,
+        vector: &[f32],
+        k: usize,
+        threshold: Option<f32>,
+    ) -> Self {
+        let v = render_vector(vector);
+        let proj = match threshold {
+            Some(t) => format!(
+                "calibrated_vector_match({}, ARRAY[{v}], {k}, {t})",
+                quote_str(field)
+            ),
+            None => format!(
+                "calibrated_vector_match({}, ARRAY[{v}], {k})",
+                quote_str(field)
+            ),
+        };
+        self.projections.push(proj);
+        self
+    }
+
+    /// `RPQ` (Regular Path Query) over a named graph. Mirrors Python
+    /// `QueryBuilder.rpq`. Replaces the FROM clause with a table-
+    /// function reference, since RPQ is a relation-producing function.
+    pub fn rpq(mut self, expr: &str, start: u64, graph: &str) -> Self {
+        self.table = format!("rpq({}, {start}, {})", quote_str(expr), quote_str(graph));
+        self
+    }
+
+    /// Graph traversal as a relation. Mirrors Python
+    /// `QueryBuilder.traverse`.
+    pub fn traverse(mut self, graph: &str, start: u64, label: Option<&str>, max_hops: u32) -> Self {
+        let lbl = match label {
+            Some(s) => quote_str(s),
+            None => "NULL".into(),
+        };
+        self.table = format!(
+            "traverse_match({}, {start}, {lbl}, {max_hops})",
+            quote_str(graph)
+        );
+        self
+    }
+
+    /// Temporally-bounded graph traversal. Mirrors Python
+    /// `QueryBuilder.temporal_traverse`.
+    pub fn temporal_traverse(
+        mut self,
+        graph: &str,
+        start: u64,
+        label: Option<&str>,
+        max_hops: u32,
+        t_min: f64,
+        t_max: f64,
+    ) -> Self {
+        let lbl = match label {
+            Some(s) => quote_str(s),
+            None => "NULL".into(),
+        };
+        self.table = format!(
+            "temporal_traverse({}, {start}, {lbl}, {max_hops}, {t_min}, {t_max})",
+            quote_str(graph)
+        );
+        self
+    }
+
+    /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
+    /// fragment_size])` projection. Mirrors Python `QueryBuilder`'s
+    /// highlight helper.
+    pub fn highlight(mut self, field: &str, query: &str) -> Self {
+        self.projections.push(format!(
+            "uqa_highlight({}, {})",
+            quote_str(field),
+            quote_str(query)
+        ));
+        self
+    }
+
+    /// `uqa_facets(field [, field2, ...])` projection. Mirrors Python's
+    /// facet builder.
+    pub fn facets(mut self, fields: &[&str]) -> Self {
+        let inner = fields
+            .iter()
+            .map(|f| quote_str(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.projections.push(format!("uqa_facets({inner})"));
+        self
+    }
+
+    /// `deep_learn(model, training_set)` projection. Mirrors Python's
+    /// analytical training trigger.
+    pub fn deep_learn(mut self, model: &str, training_set: &str) -> Self {
+        self.projections.push(format!(
+            "deep_learn({}, {})",
+            quote_str(model),
+            quote_str(training_set)
+        ));
+        self
+    }
+
+    /// `bayesian_match(field, '<query>')` filter — Bayesian BM25
+    /// scoring with calibrated probabilities. Mirrors Python's
+    /// `QueryBuilder.score_bayesian_bm25` style search.
+    pub fn bayesian_match(self, field: &str, query: &str) -> Self {
+        self.r#where(format!("bayesian_match({field}, {})", quote_str(query)))
+    }
+
+    /// Run `EXPLAIN <assembled SELECT>` and return the planner's
+    /// rendered plan as a single string. Mirrors Python
+    /// `QueryBuilder.explain`.
+    pub fn explain(&self) -> Result<String, SQLError> {
+        let stmt = self.to_sql();
+        let result = self.engine.sql(&format!("EXPLAIN {stmt}"), &[])?;
+        let mut out = String::new();
+        for row in &result.rows {
+            if let Some(Value::Str(line)) = row.get("plan") {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(line);
+            }
+        }
+        Ok(out)
+    }
 }
 
 fn render_vector(query: &[f32]) -> String {

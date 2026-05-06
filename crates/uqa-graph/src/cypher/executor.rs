@@ -97,6 +97,14 @@ pub enum CypherError {
     Unsupported(String),
     #[error("type error: {0}")]
     TypeError(String),
+    #[error("parse error: {0}")]
+    Parse(String),
+}
+
+impl From<crate::cypher::parser::ParseError> for CypherError {
+    fn from(err: crate::cypher::parser::ParseError) -> Self {
+        CypherError::Parse(err.to_string())
+    }
 }
 
 /// Read-only execution context.

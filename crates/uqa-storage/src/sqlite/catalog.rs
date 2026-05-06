@@ -208,6 +208,52 @@ impl Catalog {
             Ok(())
         })
     }
+
+    /// Persist Bayesian calibration parameters for a named signal.
+    /// Mirrors Python `Catalog.save_scoring_params`.
+    pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _scoring_params (name, params) VALUES (?1, ?2)",
+                params![name, params_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Load persisted scoring parameters for a single signal.
+    pub fn load_scoring_params(&self, name: &str) -> Result<Option<String>> {
+        self.conn.with(|c| {
+            Ok(c.query_row(
+                "SELECT params FROM _scoring_params WHERE name = ?1",
+                params![name],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+        })
+    }
+
+    /// Load every persisted `(name, params_json)` pair sorted by name.
+    pub fn load_all_scoring_params(&self) -> Result<Vec<(String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare("SELECT name, params FROM _scoring_params ORDER BY name")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Delete persisted scoring parameters for a single signal.
+    pub fn drop_scoring_params(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute("DELETE FROM _scoring_params WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
 }
 
 /// Migrations applied in order. Each `(version, sql)` is run in a single
@@ -280,6 +326,15 @@ const MIGRATIONS: &[(u32, &str)] = &[
         3,
         r"
     ALTER TABLE _tables ADD COLUMN columns TEXT;
+    ",
+    ),
+    (
+        4,
+        r"
+    CREATE TABLE IF NOT EXISTS _scoring_params (
+        name TEXT PRIMARY KEY,
+        params TEXT NOT NULL
+    );
     ",
     ),
 ];
