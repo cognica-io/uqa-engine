@@ -301,6 +301,9 @@ fn from_contains_qualifier(from: Option<&FromClause>, qual: &str) -> bool {
         FromClause::Join { left, right, .. } => {
             from_contains_qualifier(Some(left), qual) || from_contains_qualifier(Some(right), qual)
         }
+        FromClause::Values { alias, .. }
+        | FromClause::Function { alias, .. }
+        | FromClause::Subquery { alias, .. } => alias.as_deref() == Some(qual),
     }
 }
 
@@ -315,12 +318,17 @@ fn inject_pushdowns(from: FromClause, pushed: &mut Vec<(String, Expr)>) -> FromC
             right,
             kind,
             on,
+            lateral,
         } => FromClause::Join {
             left: Box::new(inject_pushdowns(*left, pushed)),
             right: Box::new(inject_pushdowns(*right, pushed)),
             kind,
             on,
+            lateral,
         },
+        other @ (FromClause::Values { .. }
+        | FromClause::Function { .. }
+        | FromClause::Subquery { .. }) => other,
     }
 }
 

@@ -255,11 +255,38 @@ fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     match stmt.kind {
         DropKind::Table => {
             for name in &stmt.names {
-                if !engine.drop_table(name) && !stmt.if_exists {
+                if !engine.has_table(name) {
+                    if stmt.if_exists {
+                        continue;
+                    }
                     return Err(SQLError::Unsupported(format!(
                         "DROP TABLE: relation `{name}` does not exist"
                     )));
                 }
+                let referrers = engine.referrers_to(name);
+                if !referrers.is_empty() {
+                    if stmt.cascade {
+                        // CASCADE: drop every referrer first. The
+                        // recursive walk catches transitive
+                        // dependencies (A -> B -> C).
+                        let referrer_names: Vec<String> =
+                            referrers.iter().map(|(n, _)| n.clone()).collect();
+                        let mut queue: Vec<String> = referrer_names;
+                        while let Some(other) = queue.pop() {
+                            for (next, _) in engine.referrers_to(&other) {
+                                queue.push(next);
+                            }
+                            engine.drop_table(&other);
+                        }
+                    } else {
+                        let names: Vec<String> = referrers.iter().map(|(n, _)| n.clone()).collect();
+                        return Err(SQLError::TypeMismatch(format!(
+                            "DROP TABLE `{name}` rejected: still referenced by `{}`. Use CASCADE.",
+                            names.join(", ")
+                        )));
+                    }
+                }
+                engine.drop_table(name);
             }
         }
         DropKind::Index => {
@@ -270,10 +297,22 @@ fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
             for _ in &stmt.names {}
         }
         DropKind::View => {
-            return Err(SQLError::Unsupported("DROP VIEW".into()));
+            for name in &stmt.names {
+                if !engine.drop_view(name) && !stmt.if_exists {
+                    return Err(SQLError::Unsupported(format!(
+                        "DROP VIEW: relation `{name}` does not exist"
+                    )));
+                }
+            }
         }
         DropKind::Schema => {
-            return Err(SQLError::Unsupported("DROP SCHEMA".into()));
+            for name in &stmt.names {
+                if !engine.drop_schema(name) && !stmt.if_exists {
+                    return Err(SQLError::Unsupported(format!(
+                        "DROP SCHEMA: schema `{name}` does not exist"
+                    )));
+                }
+            }
         }
     }
     Ok(SQLResult::empty())
@@ -1622,6 +1661,7 @@ fn build_join_rows_with_ctes(
             right,
             kind,
             on,
+            lateral: _,
         } => {
             let left_rows = build_join_rows_with_ctes(engine, left, params, ctes)?;
             let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
@@ -1663,6 +1703,280 @@ fn build_join_rows_with_ctes(
                 JoinKind::Full => Err(SQLError::Unsupported("FULL OUTER JOIN".into())),
             }
         }
+        FromClause::Values {
+            rows,
+            alias,
+            column_aliases,
+        } => Ok(build_values_rows(
+            engine,
+            rows,
+            alias.as_deref(),
+            column_aliases,
+            params,
+        )?),
+        FromClause::Function {
+            name,
+            args,
+            alias,
+            column_aliases,
+        } => Ok(build_table_function_rows(
+            engine,
+            name,
+            args,
+            alias.as_deref(),
+            column_aliases,
+            params,
+        )?),
+        FromClause::Subquery {
+            body,
+            alias,
+            column_aliases,
+        } => {
+            let result = run_select(engine, (**body).clone(), params)?;
+            let qual = alias.clone();
+            let cols = column_aliases.clone();
+            let rows: Vec<ResultRow> = result
+                .rows
+                .into_iter()
+                .map(|mut r| {
+                    if !cols.is_empty() {
+                        let pairs: Vec<(String, Value)> = result
+                            .columns
+                            .iter()
+                            .zip(cols.iter())
+                            .filter_map(|(orig, new)| r.remove(orig).map(|v| (new.clone(), v)))
+                            .collect();
+                        let mut renamed = ResultRow::new();
+                        for (k, v) in pairs {
+                            renamed.insert(k, v);
+                        }
+                        if let Some(q) = &qual {
+                            return prefix_row(q, &renamed);
+                        }
+                        renamed
+                    } else if let Some(q) = &qual {
+                        prefix_row(q, &r)
+                    } else {
+                        r
+                    }
+                })
+                .collect();
+            Ok(rows)
+        }
+    }
+}
+
+fn build_values_rows(
+    engine: &Engine,
+    rows: &[Vec<Expr>],
+    alias: Option<&str>,
+    column_aliases: &[String],
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    use uqa_sql::expr::{eval, EvalContext};
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let n_cols = rows[0].len();
+    let columns: Vec<String> = (0..n_cols)
+        .map(|i| {
+            column_aliases
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| format!("column{}", i + 1))
+        })
+        .collect();
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let mut out: Vec<ResultRow> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut r = ResultRow::new();
+        for (i, expr) in row.iter().enumerate() {
+            let v = eval(expr, &ctx)?;
+            r.insert(columns[i].clone(), v);
+        }
+        let r = match alias {
+            Some(a) => prefix_row(a, &r),
+            None => r,
+        };
+        out.push(r);
+    }
+    Ok(out)
+}
+
+#[allow(clippy::similar_names)]
+fn build_table_function_rows(
+    engine: &Engine,
+    name: &str,
+    args: &[Expr],
+    alias: Option<&str>,
+    column_aliases: &[String],
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    use uqa_sql::expr::{eval, EvalContext};
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let lower = name.to_ascii_lowercase();
+    let evaluated: Vec<Value> = args
+        .iter()
+        .map(|a| eval(a, &ctx))
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let default_col = column_aliases
+        .first()
+        .cloned()
+        .unwrap_or_else(|| name.to_string());
+    let qual = alias;
+    let mut out: Vec<ResultRow> = Vec::new();
+    let push_scalar = |out: &mut Vec<ResultRow>, value: Value| {
+        let mut r = ResultRow::new();
+        r.insert(default_col.clone(), value);
+        let r = match qual {
+            Some(a) => prefix_row(a, &r),
+            None => r,
+        };
+        out.push(r);
+    };
+    match lower.as_str() {
+        "generate_series" => {
+            if !(2..=3).contains(&evaluated.len()) {
+                return Err(SQLError::TypeMismatch(
+                    "generate_series requires 2-3 args".into(),
+                ));
+            }
+            let start = match &evaluated[0] {
+                Value::Int(i) => *i,
+                Value::Float(f) => *f as i64,
+                _ => return Err(SQLError::TypeMismatch("generate_series start".into())),
+            };
+            let stop = match &evaluated[1] {
+                Value::Int(i) => *i,
+                Value::Float(f) => *f as i64,
+                _ => return Err(SQLError::TypeMismatch("generate_series stop".into())),
+            };
+            let step = if evaluated.len() == 3 {
+                match &evaluated[2] {
+                    Value::Int(i) => *i,
+                    Value::Float(f) => *f as i64,
+                    _ => return Err(SQLError::TypeMismatch("generate_series step".into())),
+                }
+            } else {
+                1
+            };
+            if step == 0 {
+                return Err(SQLError::TypeMismatch(
+                    "generate_series step cannot be 0".into(),
+                ));
+            }
+            let mut current = start;
+            if step > 0 {
+                while current <= stop {
+                    push_scalar(&mut out, Value::Int(current));
+                    current += step;
+                }
+            } else {
+                while current >= stop {
+                    push_scalar(&mut out, Value::Int(current));
+                    current += step;
+                }
+            }
+            Ok(out)
+        }
+        "unnest" => {
+            for value in &evaluated {
+                if let Value::List(items) = value {
+                    for item in items {
+                        push_scalar(&mut out, item.clone());
+                    }
+                } else {
+                    push_scalar(&mut out, value.clone());
+                }
+            }
+            Ok(out)
+        }
+        "regexp_split_to_table" => {
+            if evaluated.len() != 2 {
+                return Err(SQLError::TypeMismatch(
+                    "regexp_split_to_table requires 2 args".into(),
+                ));
+            }
+            let s = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 1".into())),
+            };
+            let pat = match &evaluated[1] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 2".into())),
+            };
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| SQLError::TypeMismatch(format!("invalid regex: {e}")))?;
+            for piece in re.split(&s) {
+                push_scalar(&mut out, Value::Str(piece.to_string()));
+            }
+            Ok(out)
+        }
+        "json_each" | "jsonb_each" => {
+            if evaluated.len() != 1 {
+                return Err(SQLError::TypeMismatch(format!("{lower} takes 1 arg")));
+            }
+            let s = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                Value::Map(_) => format!("{:?}", evaluated[0]),
+                _ => return Err(SQLError::TypeMismatch(format!("{lower} arg type"))),
+            };
+            let parsed: serde_json::Value = serde_json::from_str(&s)
+                .map_err(|e| SQLError::TypeMismatch(format!("{lower}: invalid JSON: {e}")))?;
+            let serde_json::Value::Object(obj) = parsed else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "{lower}: argument is not an object"
+                )));
+            };
+            let key_col = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "key".into());
+            let val_col = column_aliases
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| "value".into());
+            for (k, v) in obj {
+                let mut r = ResultRow::new();
+                r.insert(key_col.clone(), Value::Str(k));
+                r.insert(
+                    val_col.clone(),
+                    Value::Str(serde_json::to_string(&v).unwrap_or_default()),
+                );
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
+            }
+            Ok(out)
+        }
+        "json_array_elements" | "jsonb_array_elements" => {
+            if evaluated.len() != 1 {
+                return Err(SQLError::TypeMismatch(format!("{lower} takes 1 arg")));
+            }
+            let s = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch(format!("{lower} arg type"))),
+            };
+            let parsed: serde_json::Value = serde_json::from_str(&s)
+                .map_err(|e| SQLError::TypeMismatch(format!("{lower}: invalid JSON: {e}")))?;
+            let serde_json::Value::Array(arr) = parsed else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "{lower}: argument is not an array"
+                )));
+            };
+            for v in arr {
+                push_scalar(
+                    &mut out,
+                    Value::Str(serde_json::to_string(&v).unwrap_or_default()),
+                );
+            }
+            Ok(out)
+        }
+        other => Err(SQLError::Unsupported(format!(
+            "table function `{other}` in FROM"
+        ))),
     }
 }
 

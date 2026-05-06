@@ -41,7 +41,27 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateStmt(stmt) => compile_create_table(stmt).map(Statement::CreateTable),
         NodeEnum::IndexStmt(stmt) => compile_create_index(stmt).map(Statement::CreateIndex),
         NodeEnum::InsertStmt(stmt) => compile_insert(stmt).map(Statement::Insert),
-        NodeEnum::SelectStmt(stmt) => compile_select(stmt).map(|s| Statement::Select(Box::new(s))),
+        NodeEnum::SelectStmt(stmt) => {
+            // Standalone `VALUES (...) (...)` parses as a SelectStmt
+            // with empty target_list + populated values_lists. Treat
+            // it as a relation-producing statement directly.
+            if stmt.target_list.is_empty() && !stmt.values_lists.is_empty() {
+                let mut rows: Vec<Vec<Expr>> = Vec::new();
+                for r in &stmt.values_lists {
+                    let Some(NodeEnum::List(list)) = r.node.as_ref() else {
+                        continue;
+                    };
+                    let row: Vec<Expr> = list
+                        .items
+                        .iter()
+                        .map(compile_expr)
+                        .collect::<Result<Vec<_>>>()?;
+                    rows.push(row);
+                }
+                return Ok(Statement::Values { rows });
+            }
+            compile_select(stmt).map(|s| Statement::Select(Box::new(s)))
+        }
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
         NodeEnum::DropStmt(stmt) => compile_drop(stmt).map(Statement::Drop),
@@ -1033,15 +1053,125 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
                 }
             };
             let on = j.quals.as_deref().map(compile_expr).transpose()?;
+            let lateral = right_is_lateral(right);
             Ok(FromClause::Join {
                 left: Box::new(compile_from_node(left)?),
                 right: Box::new(compile_from_node(right)?),
                 kind,
                 on,
+                lateral,
+            })
+        }
+        NodeEnum::RangeSubselect(rs) => {
+            let body_node = rs
+                .subquery
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("FROM (subquery) without body".into()))?;
+            let inner = body_node
+                .node
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("subquery body empty".into()))?;
+            let select = match inner {
+                NodeEnum::SelectStmt(s) => compile_select(s)?,
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "FROM (subquery) body must be SELECT, got {other:?}"
+                    )));
+                }
+            };
+            // Standalone VALUES land here as a SelectStmt with empty
+            // target_list and a values_lists -- promote to
+            // FromClause::Values for the engine fast path.
+            let (alias, column_aliases) = compile_alias(rs.alias.as_ref());
+            let body_inner = body_node.node.as_ref().unwrap();
+            if let NodeEnum::SelectStmt(s) = body_inner {
+                if !s.values_lists.is_empty() {
+                    let mut rows: Vec<Vec<Expr>> = Vec::new();
+                    for r in &s.values_lists {
+                        let Some(NodeEnum::List(list)) = r.node.as_ref() else {
+                            continue;
+                        };
+                        let row: Vec<Expr> = list
+                            .items
+                            .iter()
+                            .map(compile_expr)
+                            .collect::<Result<Vec<_>>>()?;
+                        rows.push(row);
+                    }
+                    return Ok(FromClause::Values {
+                        rows,
+                        alias,
+                        column_aliases,
+                    });
+                }
+            }
+            Ok(FromClause::Subquery {
+                body: Box::new(select),
+                alias,
+                column_aliases,
+            })
+        }
+        NodeEnum::RangeFunction(rf) => {
+            // The first function in `functions` carries the call. Take
+            // that node verbatim and re-use compile_expr to lift it
+            // into an Expr::Func, then peel back the name + args.
+            let Some(first_node) = rf.functions.first() else {
+                return Err(SQLError::Internal("RangeFunction without functions".into()));
+            };
+            // RangeFunction.functions is a list of `[FuncCall, alias_definition]`
+            // pairs encoded as a List. Take the first element of the
+            // first pair as the call.
+            let call = match first_node.node.as_ref() {
+                Some(NodeEnum::List(l)) => l
+                    .items
+                    .first()
+                    .ok_or_else(|| SQLError::Internal("RangeFunction empty pair".into()))?,
+                _ => first_node,
+            };
+            let expr = compile_expr(call)?;
+            let (name, args) = match expr {
+                Expr::Func { name, args } => (name, args),
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "RangeFunction body must be a function call, got {other:?}"
+                    )));
+                }
+            };
+            let (alias, column_aliases) = compile_alias(rf.alias.as_ref());
+            Ok(FromClause::Function {
+                name,
+                args,
+                alias,
+                column_aliases,
             })
         }
         other => Err(SQLError::Unsupported(format!("FROM form: {other:?}"))),
     }
+}
+
+fn right_is_lateral(node: &Node) -> bool {
+    match node.node.as_ref() {
+        Some(NodeEnum::RangeSubselect(rs)) => rs.lateral,
+        Some(NodeEnum::RangeFunction(rf)) => rf.lateral,
+        _ => false,
+    }
+}
+
+fn compile_alias(alias: Option<&pg_query::protobuf::Alias>) -> (Option<String>, Vec<String>) {
+    let Some(a) = alias else {
+        return (None, Vec::new());
+    };
+    let name = if a.aliasname.is_empty() {
+        None
+    } else {
+        Some(a.aliasname.clone())
+    };
+    let cols: Vec<String> = a
+        .colnames
+        .iter()
+        .filter_map(|n| extract_string(n).ok())
+        .collect();
+    (name, cols)
 }
 
 fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {

@@ -1289,6 +1289,7 @@ dependencies = [
  "criterion",
  "parking_lot",
  "proptest",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

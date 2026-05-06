@@ -236,12 +236,39 @@ pub enum SetOpKind {
 pub enum FromClause {
     /// `FROM <table> [AS <alias>]`.
     Table { name: String, alias: Option<String> },
-    /// `FROM left <kind> right ON predicate`.
+    /// `FROM left <kind> right ON predicate`. `lateral` is true when
+    /// the right side is a LATERAL subquery / function -- the engine
+    /// re-evaluates it for every left row.
     Join {
         left: Box<FromClause>,
         right: Box<FromClause>,
         kind: JoinKind,
         on: Option<Expr>,
+        #[allow(dead_code)]
+        lateral: bool,
+    },
+    /// `FROM (VALUES (...)...) [AS <alias>(<col_aliases>)]`.
+    Values {
+        rows: Vec<Vec<Expr>>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+    },
+    /// `FROM <fn>(<args>) [AS <alias>(<col_aliases>)]` -- e.g.
+    /// `generate_series(1, 5)`, `unnest(arr)`, `regexp_split_to_table`,
+    /// `json_each(...)`. The engine dispatches by name.
+    Function {
+        name: String,
+        args: Vec<Expr>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+    },
+    /// `FROM (SELECT ...) AS <alias>` -- subquery as a relation.
+    /// The body re-runs as if a CTE; the alias renames the result
+    /// columns when supplied.
+    Subquery {
+        body: Box<SelectStmt>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
     },
 }
 
@@ -254,6 +281,13 @@ impl FromClause {
             FromClause::Join { left, right, .. } => {
                 left.collect_tables(out);
                 right.collect_tables(out);
+            }
+            FromClause::Values { alias, .. }
+            | FromClause::Function { alias, .. }
+            | FromClause::Subquery { alias, .. } => {
+                if let Some(a) = alias {
+                    out.push((a.clone(), Some(a.clone())));
+                }
             }
         }
     }
