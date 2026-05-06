@@ -853,7 +853,7 @@ fn vectors_to_field_map(
 // SELECT
 // -------------------------------------------------------------------------
 
-fn run_select(
+pub(crate) fn run_select(
     engine: &Engine,
     stmt: SelectStmt,
     params: &[SQLParam],
@@ -863,10 +863,12 @@ fn run_select(
         return execute_select(engine, &stmt, params, &mut ctes);
     }
 
-    let from = stmt
-        .from
-        .as_ref()
-        .ok_or_else(|| SQLError::Unsupported("SELECT without FROM".into()))?;
+    let Some(from) = stmt.from.as_ref() else {
+        // SELECT without FROM -- evaluate the projection list against
+        // an empty single-row context. Mirrors Python's standalone
+        // SELECT 1 / SELECT (SELECT ...).
+        return run_select_without_from(engine, &stmt, params);
+    };
 
     // Single-table FROM with no alias and no window function keeps the
     // search-aware fast path. JOIN shapes and window queries drop into
@@ -879,6 +881,30 @@ fn run_select(
     }
 
     run_joined_select(engine, from, &stmt, params)
+}
+
+fn run_select_without_from(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let row = ResultRow::new();
+    let projected = build_projection_row(Some(engine), &row, &stmt.projections, params)?;
+    let columns: Vec<String> = stmt
+        .projections
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            p.alias
+                .clone()
+                .unwrap_or_else(|| format!("column{}", i + 1))
+        })
+        .collect();
+    Ok(SQLResult {
+        columns,
+        rows: vec![projected],
+        affected_rows: 0,
+    })
 }
 
 /// Execute a SELECT that may carry CTEs and/or set ops, returning the

@@ -15,13 +15,28 @@ use crate::params::SQLParam;
 use crate::result::ResultRow;
 
 /// Engine-side hook that the expression evaluator calls into for
-/// stateful scalar functions. Currently covers sequence access
-/// (`nextval` / `currval` / `setval`); the trait keeps `uqa-sql`
-/// independent of `uqa-engine`.
+/// stateful scalar functions and subquery execution. Keeps
+/// `uqa-sql` independent of `uqa-engine` while still letting the
+/// evaluator drive `nextval` / `currval` / `setval` and run
+/// `(SELECT ...)` / `EXISTS (...)` / `IN (SELECT ...)` subqueries.
 pub trait EngineHook {
     fn nextval(&self, name: &str) -> std::result::Result<i64, String>;
     fn currval(&self, name: &str) -> std::result::Result<i64, String>;
     fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String>;
+    /// Run a subquery and return its rows + column ordering. The
+    /// evaluator extracts a scalar (single-row, single-column) from
+    /// the result for `ScalarSubquery`, sees whether the row count
+    /// is zero for `Exists`, and tests membership for `InSubquery`.
+    /// Default returns Unsupported so backends that don't surface
+    /// subqueries still satisfy the trait.
+    fn run_subquery(
+        &self,
+        _stmt: &crate::ast::SelectStmt,
+        _row: Option<&crate::result::ResultRow>,
+        _params: &[crate::params::SQLParam],
+    ) -> std::result::Result<(Vec<String>, Vec<crate::result::ResultRow>), String> {
+        Err("subquery execution not supported by this engine".into())
+    }
 }
 
 pub struct EvalContext<'a> {
@@ -145,6 +160,62 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Cast { expr, ty } => {
             let v = eval(expr, ctx)?;
             cast_value(&v, ty)
+        }
+        Expr::ScalarSubquery(body) => {
+            let engine = ctx.engine.ok_or_else(|| {
+                SQLError::Unsupported(
+                    "scalar subquery requires an engine hook on the EvalContext".into(),
+                )
+            })?;
+            let (cols, rows) = engine
+                .run_subquery(body, ctx.row, ctx.params)
+                .map_err(SQLError::Unsupported)?;
+            if rows.is_empty() {
+                return Ok(Value::Null);
+            }
+            if rows.len() > 1 {
+                return Err(SQLError::TypeMismatch(
+                    "scalar subquery returned more than one row".into(),
+                ));
+            }
+            let first_col = cols.first().ok_or_else(|| {
+                SQLError::TypeMismatch("scalar subquery returned no columns".into())
+            })?;
+            Ok(rows[0].get(first_col).cloned().unwrap_or(Value::Null))
+        }
+        Expr::Exists { body, negated } => {
+            let engine = ctx.engine.ok_or_else(|| {
+                SQLError::Unsupported(
+                    "EXISTS subquery requires an engine hook on the EvalContext".into(),
+                )
+            })?;
+            let (_cols, rows) = engine
+                .run_subquery(body, ctx.row, ctx.params)
+                .map_err(SQLError::Unsupported)?;
+            let exists = !rows.is_empty();
+            Ok(Value::Bool(if *negated { !exists } else { exists }))
+        }
+        Expr::InSubquery {
+            expr,
+            body,
+            negated,
+        } => {
+            let needle = eval(expr, ctx)?;
+            let engine = ctx.engine.ok_or_else(|| {
+                SQLError::Unsupported(
+                    "IN (SELECT ...) requires an engine hook on the EvalContext".into(),
+                )
+            })?;
+            let (cols, rows) = engine
+                .run_subquery(body, ctx.row, ctx.params)
+                .map_err(SQLError::Unsupported)?;
+            let Some(first_col) = cols.first() else {
+                return Ok(Value::Bool(*negated));
+            };
+            let found = rows
+                .iter()
+                .any(|r| r.get(first_col).is_some_and(|v| v == &needle));
+            Ok(Value::Bool(if *negated { !found } else { found }))
         }
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
         Expr::Not(inner) => {

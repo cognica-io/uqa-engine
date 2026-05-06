@@ -393,6 +393,23 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: String,
     },
+    /// `(SELECT ...)` scalar subquery: yields a single row / single
+    /// column value at evaluation time.
+    ScalarSubquery(Box<SelectStmt>),
+    /// `EXISTS (SELECT ...)` -- truthy when the body produces at
+    /// least one row.
+    Exists {
+        body: Box<SelectStmt>,
+        negated: bool,
+    },
+    /// `expr [NOT] IN (SELECT ...)` set membership against a
+    /// subquery. Evaluator runs the body once per top-level
+    /// expression and tests membership.
+    InSubquery {
+        expr: Box<Expr>,
+        body: Box<SelectStmt>,
+        negated: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

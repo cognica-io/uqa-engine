@@ -1457,6 +1457,20 @@ impl uqa_sql::expr::EngineHook for Engine {
     fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
         Engine::setval(self, name, value)
     }
+    fn run_subquery(
+        &self,
+        stmt: &uqa_sql::ast::SelectStmt,
+        outer_row: Option<&uqa_sql::result::ResultRow>,
+        params: &[uqa_sql::SQLParam],
+    ) -> std::result::Result<(Vec<String>, Vec<uqa_sql::result::ResultRow>), String> {
+        let _ = outer_row; // correlated SELECT not yet wired -- the
+                           // outer row would feed Expr::Column
+                           // resolution for LATERAL.
+        match crate::sql::run_select(self, stmt.clone(), params) {
+            Ok(r) => Ok((r.columns, r.rows)),
+            Err(e) => Err(format!("subquery failed: {e}")),
+        }
+    }
 }
 
 /// Bundle of hybrid-search arguments. Keeps [`Engine::hybrid_search`]

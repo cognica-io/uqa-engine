@@ -1417,7 +1417,56 @@ fn compile_expr(node: &Node) -> Result<Expr> {
                 args,
             })
         }
+        NodeEnum::SubLink(sl) => compile_sublink(sl),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
+    }
+}
+
+fn compile_sublink(sl: &pg_query::protobuf::SubLink) -> Result<Expr> {
+    use pg_query::protobuf::SubLinkType;
+    let body_node = sl
+        .subselect
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("SubLink without subselect".into()))?;
+    let inner_select = match body_node.node.as_ref() {
+        Some(NodeEnum::SelectStmt(s)) => compile_select(s)?,
+        _ => {
+            return Err(SQLError::Unsupported("SubLink body must be SELECT".into()));
+        }
+    };
+    let body = Box::new(inner_select);
+    match sl.sub_link_type() {
+        SubLinkType::ExprSublink => Ok(Expr::ScalarSubquery(body)),
+        SubLinkType::ExistsSublink => Ok(Expr::Exists {
+            body,
+            negated: false,
+        }),
+        SubLinkType::AnySublink => {
+            let testexpr = sl
+                .testexpr
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("ANY SubLink without testexpr".into()))?;
+            Ok(Expr::InSubquery {
+                expr: Box::new(compile_expr(testexpr)?),
+                body,
+                negated: false,
+            })
+        }
+        SubLinkType::AllSublink => {
+            // ALL is the negation of ANY <> for the dual operator. We
+            // promote to InSubquery semantics with a clear marker; the
+            // evaluator treats ALL like NOT IN for equality.
+            let testexpr = sl
+                .testexpr
+                .as_deref()
+                .ok_or_else(|| SQLError::Internal("ALL SubLink without testexpr".into()))?;
+            Ok(Expr::InSubquery {
+                expr: Box::new(compile_expr(testexpr)?),
+                body,
+                negated: true,
+            })
+        }
+        other => Err(SQLError::Unsupported(format!("SubLink type {other:?}"))),
     }
 }
 
