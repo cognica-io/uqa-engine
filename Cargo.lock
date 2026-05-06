@@ -1321,6 +1321,7 @@ name = "uqa-fdw"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "thiserror 2.0.18",
  "uqa-core",
 ]
 

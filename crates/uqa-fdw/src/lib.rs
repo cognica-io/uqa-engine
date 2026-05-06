@@ -13,6 +13,19 @@
 //! stores pre-loaded rows and applies projection, pushdown predicate
 //! filtering, and a row limit before returning.
 
+pub mod arrow_flight;
+pub mod duckdb;
+
+pub use arrow_flight::{
+    build_where_clause as build_arrow_flight_where_clause,
+    prepare_query as arrow_flight_prepare_query, quote_literal as arrow_flight_quote_literal,
+    ArrowFlightPrepareError,
+};
+pub use duckdb::{
+    build_where_clause as build_duckdb_where_clause, normalize_source as duckdb_normalize_source,
+    prepare_query as duckdb_prepare_query, DuckDBPrepareError, FILE_READERS,
+};
+
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
@@ -62,6 +75,29 @@ pub enum PredicateOp {
     In,
     Like,
     NotLike,
+    ILike,
+    NotILike,
+}
+
+impl PredicateOp {
+    /// Render the operator as the SQL token used in a `WHERE` clause.
+    /// `In` is intentionally absent here -- callers wrap the IN list
+    /// with the column themselves.
+    pub fn sql_token(self) -> &'static str {
+        match self {
+            PredicateOp::Eq => "=",
+            PredicateOp::NotEq => "!=",
+            PredicateOp::Lt => "<",
+            PredicateOp::LtEq => "<=",
+            PredicateOp::Gt => ">",
+            PredicateOp::GtEq => ">=",
+            PredicateOp::In => "IN",
+            PredicateOp::Like => "LIKE",
+            PredicateOp::NotLike => "NOT LIKE",
+            PredicateOp::ILike => "ILIKE",
+            PredicateOp::NotILike => "NOT ILIKE",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -156,14 +192,22 @@ fn eval_predicate(p: &FDWPredicate, row: &Row) -> bool {
             (Value::List(items), Some(v)) => items.iter().any(|item| item == v),
             _ => false,
         },
-        PredicateOp::Like => string_matches(lhs, &p.value),
-        PredicateOp::NotLike => !string_matches(lhs, &p.value),
+        PredicateOp::Like => string_matches(lhs, &p.value, false),
+        PredicateOp::NotLike => !string_matches(lhs, &p.value, false),
+        PredicateOp::ILike => string_matches(lhs, &p.value, true),
+        PredicateOp::NotILike => !string_matches(lhs, &p.value, true),
     }
 }
 
-fn string_matches(lhs: Option<&Value>, rhs: &Value) -> bool {
+fn string_matches(lhs: Option<&Value>, rhs: &Value, case_insensitive: bool) -> bool {
     match (lhs, rhs) {
-        (Some(Value::Str(haystack)), Value::Str(pattern)) => sql_like(haystack, pattern),
+        (Some(Value::Str(haystack)), Value::Str(pattern)) => {
+            if case_insensitive {
+                sql_like(&haystack.to_lowercase(), &pattern.to_lowercase())
+            } else {
+                sql_like(haystack, pattern)
+            }
+        }
         _ => false,
     }
 }

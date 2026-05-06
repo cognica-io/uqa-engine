@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
