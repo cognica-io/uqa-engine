@@ -92,6 +92,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateForeignTableStmt(stmt) => {
             compile_create_foreign_table(stmt).map(Statement::CreateForeignTable)
         }
+        NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
@@ -268,6 +269,107 @@ fn compile_create_foreign_table(
         columns,
         options: collect_def_elem_options(&stmt.options),
         if_not_exists: base.if_not_exists,
+    })
+}
+
+fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::MergeStmt> {
+    use crate::ast::{MergeStmt, MergeWhen};
+    use pg_query::protobuf::{CmdType, MergeMatchKind};
+    let target = stmt
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("MERGE without target".into()))?;
+    let target_alias = stmt
+        .relation
+        .as_ref()
+        .and_then(|r| r.alias.as_ref())
+        .map(|a| a.aliasname.clone())
+        .filter(|s| !s.is_empty());
+    let source_node = stmt
+        .source_relation
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("MERGE without USING".into()))?;
+    let source = compile_from_node(source_node)?;
+    let join_condition_node = stmt
+        .join_condition
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("MERGE without ON".into()))?;
+    let join_condition = compile_expr(join_condition_node)?;
+
+    let mut when_clauses: Vec<MergeWhen> = Vec::with_capacity(stmt.merge_when_clauses.len());
+    for clause in &stmt.merge_when_clauses {
+        let Some(NodeEnum::MergeWhenClause(w)) = clause.node.as_ref() else {
+            continue;
+        };
+        let condition = w
+            .condition
+            .as_deref()
+            .map(|c| compile_expr(c))
+            .transpose()?;
+        let matched = matches!(w.match_kind(), MergeMatchKind::MergeWhenMatched);
+        let cmd = w.command_type();
+        match cmd {
+            CmdType::CmdUpdate => {
+                let mut assignments: Vec<(String, Expr)> = Vec::new();
+                for tgt in &w.target_list {
+                    let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
+                        continue;
+                    };
+                    let val = rt
+                        .val
+                        .as_ref()
+                        .ok_or_else(|| SQLError::Internal("MERGE UPDATE without value".into()))?;
+                    assignments.push((rt.name.clone(), compile_expr(val)?));
+                }
+                when_clauses.push(MergeWhen::UpdateMatched {
+                    condition,
+                    assignments,
+                });
+                let _ = matched; // Update only legal after MATCHED.
+            }
+            CmdType::CmdDelete => {
+                when_clauses.push(MergeWhen::DeleteMatched { condition });
+            }
+            CmdType::CmdInsert => {
+                let mut columns: Vec<String> = Vec::with_capacity(w.target_list.len());
+                for tgt in &w.target_list {
+                    if let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() {
+                        columns.push(rt.name.clone());
+                    }
+                }
+                let values: Vec<Expr> = w
+                    .values
+                    .iter()
+                    .map(compile_expr)
+                    .collect::<Result<Vec<_>>>()?;
+                when_clauses.push(MergeWhen::InsertNotMatched {
+                    condition,
+                    columns,
+                    values,
+                });
+            }
+            CmdType::CmdNothing => {
+                if matched {
+                    when_clauses.push(MergeWhen::NothingMatched { condition });
+                } else {
+                    when_clauses.push(MergeWhen::NothingNotMatched { condition });
+                }
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "MERGE WHEN command {other:?}"
+                )));
+            }
+        }
+    }
+
+    Ok(MergeStmt {
+        target,
+        target_alias,
+        source,
+        join_condition,
+        when_clauses,
     })
 }
 

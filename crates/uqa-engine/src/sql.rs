@@ -138,7 +138,176 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
                 .map_err(SQLError::Unsupported)?;
             Ok(SQLResult::empty())
         }
+        Statement::Merge(m) => run_merge(engine, m, params),
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_merge(
+    engine: &Engine,
+    stmt: uqa_sql::ast::MergeStmt,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    use uqa_sql::ast::MergeWhen;
+    use uqa_sql::expr::{eval, truthy, EvalContext};
+    let target_table = stmt.target.clone();
+    let target_qual = stmt
+        .target_alias
+        .clone()
+        .unwrap_or_else(|| target_table.clone());
+    let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+    let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &ctes)?;
+    let mut affected = 0_u64;
+
+    struct Pairing {
+        doc_id: Option<uqa_core::DocId>,
+        target_row: ResultRow,
+        source_row: Option<ResultRow>,
+    }
+    let mut pairings: Vec<Pairing> = Vec::new();
+    let mut matched_source: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+
+    for doc_id in &engine.table_doc_ids(&target_table) {
+        let Some(doc) = engine.get_document(&target_table, *doc_id) else {
+            continue;
+        };
+        let target_row = prefix_row(&target_qual, &doc);
+        let mut paired_idx: Option<usize> = None;
+        for (idx, src) in source_rows.iter().enumerate() {
+            if matched_source.contains(&idx) {
+                continue;
+            }
+            let mut joined = ResultRow::new();
+            for (k, v) in &target_row {
+                joined.insert(k.clone(), v.clone());
+            }
+            for (k, v) in src {
+                joined.insert(k.clone(), v.clone());
+            }
+            let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+            if truthy(&eval(&stmt.join_condition, &ctx)?) {
+                paired_idx = Some(idx);
+                matched_source.insert(idx);
+                break;
+            }
+        }
+        // Skip target rows that don't pair with any source row --
+        // MERGE only emits an action when the join condition holds.
+        if let Some(idx) = paired_idx {
+            pairings.push(Pairing {
+                doc_id: Some(*doc_id),
+                target_row,
+                source_row: Some(source_rows[idx].clone()),
+            });
+        }
+    }
+    for (idx, src) in source_rows.iter().enumerate() {
+        if matched_source.contains(&idx) {
+            continue;
+        }
+        pairings.push(Pairing {
+            doc_id: None,
+            target_row: ResultRow::new(),
+            source_row: Some(src.clone()),
+        });
+    }
+
+    for pair in pairings {
+        // MERGE matched semantics: a target row is "matched" only when
+        // the join produced a source pairing. A target row that has
+        // no corresponding source counts as unmatched and falls
+        // through to the WHEN NOT MATCHED branches.
+        let matched = pair.doc_id.is_some() && pair.source_row.is_some();
+        let mut joined = pair.target_row.clone();
+        if let Some(src) = &pair.source_row {
+            for (k, v) in src {
+                joined.insert(k.clone(), v.clone());
+            }
+        }
+        for clause in &stmt.when_clauses {
+            let (condition, action_idx, applies) = match clause {
+                MergeWhen::UpdateMatched { condition, .. } if matched => {
+                    (condition.as_ref(), 0_u8, true)
+                }
+                MergeWhen::DeleteMatched { condition } if matched => (condition.as_ref(), 1, true),
+                MergeWhen::NothingMatched { condition } if matched => (condition.as_ref(), 2, true),
+                MergeWhen::InsertNotMatched { condition, .. } if !matched => {
+                    (condition.as_ref(), 3, true)
+                }
+                MergeWhen::NothingNotMatched { condition } if !matched => {
+                    (condition.as_ref(), 2, true)
+                }
+                _ => (None, 0, false),
+            };
+            if !applies {
+                continue;
+            }
+            if let Some(c) = condition {
+                let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                if !truthy(&eval(c, &ctx)?) {
+                    continue;
+                }
+            }
+            match (action_idx, clause) {
+                (0, MergeWhen::UpdateMatched { assignments, .. }) => {
+                    if let Some(doc_id) = pair.doc_id {
+                        let Some(mut doc) = engine.get_document(&target_table, doc_id) else {
+                            break;
+                        };
+                        let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                        let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+                        for (col, expr) in assignments {
+                            let value = eval(expr, &ctx)?;
+                            if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
+                                new_vectors.insert(col.clone(), vec);
+                            }
+                            doc.insert(col.clone(), value);
+                        }
+                        engine.add_document_with_vectors(&target_table, doc_id, doc, new_vectors);
+                        affected += 1;
+                    }
+                }
+                (1, MergeWhen::DeleteMatched { .. }) => {
+                    if let Some(doc_id) = pair.doc_id {
+                        engine.delete_document(&target_table, doc_id);
+                        affected += 1;
+                    }
+                }
+                (
+                    3,
+                    MergeWhen::InsertNotMatched {
+                        columns, values, ..
+                    },
+                ) => {
+                    let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                    let mut document = Document::new();
+                    let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+                    for (i, col) in columns.iter().enumerate() {
+                        let v = eval(&values[i], &ctx)?;
+                        if let Ok(vec) = uqa_sql::expr::value_to_vector(&v) {
+                            vectors.insert(col.clone(), vec);
+                        }
+                        document.insert(col.clone(), v);
+                    }
+                    let id_col = engine.auto_increment_column(&target_table);
+                    let doc_id = match id_col.as_deref().and_then(|c| document.get(c)) {
+                        Some(Value::Int(n)) if *n >= 0 => *n as u64,
+                        _ => engine.allocate_next_id(&target_table)?,
+                    };
+                    if let Some(c) = id_col.as_deref() {
+                        document.insert(c.into(), Value::Int(doc_id as i64));
+                    }
+                    engine.advance_next_id(&target_table, doc_id);
+                    engine.add_document_with_vectors(&target_table, doc_id, document, vectors);
+                    affected += 1;
+                }
+                (2, _) => {}
+                _ => {}
+            }
+            break;
+        }
+    }
+    Ok(SQLResult::from_affected(affected))
 }
 
 fn run_create_sequence(

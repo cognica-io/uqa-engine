@@ -532,6 +532,39 @@ pub enum Statement {
     CreateForeignServer(CreateForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
     CreateForeignTable(CreateForeignTable),
+    /// `MERGE INTO target USING source ON cond WHEN MATCHED THEN ...
+    /// WHEN NOT MATCHED THEN ...`. SQL:2003 conditional UPSERT.
+    Merge(MergeStmt),
+}
+
+#[derive(Debug, Clone)]
+pub struct MergeStmt {
+    pub target: String,
+    pub target_alias: Option<String>,
+    pub source: FromClause,
+    pub join_condition: Expr,
+    pub when_clauses: Vec<MergeWhen>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MergeWhen {
+    /// `WHEN MATCHED [AND <cond>] THEN UPDATE SET ...`.
+    UpdateMatched {
+        condition: Option<Expr>,
+        assignments: Vec<(String, Expr)>,
+    },
+    /// `WHEN MATCHED [AND <cond>] THEN DELETE`.
+    DeleteMatched { condition: Option<Expr> },
+    /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) VALUES (vals)`.
+    InsertNotMatched {
+        condition: Option<Expr>,
+        columns: Vec<String>,
+        values: Vec<Expr>,
+    },
+    /// `WHEN MATCHED [AND <cond>] THEN DO NOTHING`.
+    NothingMatched { condition: Option<Expr> },
+    /// `WHEN NOT MATCHED [AND <cond>] THEN DO NOTHING`.
+    NothingNotMatched { condition: Option<Expr> },
 }
 
 #[derive(Debug, Clone)]
