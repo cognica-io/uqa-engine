@@ -1369,11 +1369,7 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
     let order_by = compile_order_by(&stmt.sort_clause)?;
     let limit = compile_int_const(stmt.limit_count.as_deref())?;
     let offset = compile_int_const(stmt.limit_offset.as_deref())?;
-    let group_by: Vec<Expr> = stmt
-        .group_clause
-        .iter()
-        .map(compile_expr)
-        .collect::<Result<Vec<_>>>()?;
+    let (group_by, grouping_sets) = compile_group_clause(&stmt.group_clause)?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
@@ -1413,6 +1409,7 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         from,
         r#where,
         group_by,
+        grouping_sets,
         order_by,
         limit,
         offset,
@@ -1420,6 +1417,91 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         set_op,
         distinct,
     })
+}
+
+fn compile_group_clause(nodes: &[pg_query::protobuf::Node]) -> Result<(Vec<Expr>, Vec<Vec<Expr>>)> {
+    use pg_query::protobuf::GroupingSetKind;
+    let mut plain: Vec<Expr> = Vec::new();
+    let mut sets: Vec<Vec<Expr>> = Vec::new();
+    let mut has_grouping_set = false;
+    for n in nodes {
+        let Some(inner) = n.node.as_ref() else {
+            continue;
+        };
+        if let NodeEnum::GroupingSet(gs) = inner {
+            has_grouping_set = true;
+            let kind = gs.kind();
+            // The content list holds either column refs or nested
+            // GroupingSet nodes (for nested ROLLUP / CUBE).
+            let inner_exprs: Vec<Expr> = gs
+                .content
+                .iter()
+                .filter_map(|c| compile_expr(c).ok())
+                .collect();
+            match kind {
+                GroupingSetKind::GroupingSetEmpty => {
+                    sets.push(Vec::new());
+                }
+                GroupingSetKind::GroupingSetSimple => {
+                    sets.push(inner_exprs);
+                }
+                GroupingSetKind::GroupingSetRollup => {
+                    // ROLLUP(a, b, c) -> (a, b, c), (a, b), (a), ()
+                    let n = inner_exprs.len();
+                    for i in (0..=n).rev() {
+                        sets.push(inner_exprs[..i].to_vec());
+                    }
+                }
+                GroupingSetKind::GroupingSetCube => {
+                    // CUBE(a, b) -> all 2^n subsets.
+                    let n = inner_exprs.len();
+                    for mask in 0_usize..(1 << n) {
+                        let mut s: Vec<Expr> = Vec::new();
+                        for (i, e) in inner_exprs.iter().enumerate() {
+                            if mask & (1 << i) != 0 {
+                                s.push(e.clone());
+                            }
+                        }
+                        sets.push(s);
+                    }
+                }
+                GroupingSetKind::GroupingSetSets => {
+                    // Explicit GROUPING SETS ((a, b), (a), ()): every
+                    // child of `content` is itself a GroupingSet.
+                    for child in &gs.content {
+                        if let Some(NodeEnum::GroupingSet(child_gs)) = child.node.as_ref() {
+                            let exprs: Vec<Expr> = child_gs
+                                .content
+                                .iter()
+                                .filter_map(|c| compile_expr(c).ok())
+                                .collect();
+                            sets.push(exprs);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            plain.push(compile_expr(n)?);
+        }
+    }
+    if !has_grouping_set {
+        return Ok((plain, Vec::new()));
+    }
+    // Standard plain group-by columns are AND-merged with every
+    // grouping set: each set acquires the plain prefix.
+    let merged: Vec<Vec<Expr>> = if plain.is_empty() {
+        sets
+    } else {
+        sets.into_iter()
+            .map(|s| {
+                let mut combined = plain.clone();
+                combined.extend(s);
+                combined
+            })
+            .collect()
+    };
+    Ok((Vec::new(), merged))
 }
 
 fn compile_projections(targets: &[pg_query::protobuf::Node]) -> Result<Vec<Projection>> {

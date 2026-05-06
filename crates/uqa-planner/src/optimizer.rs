@@ -419,6 +419,7 @@ mod tests {
             }),
             r#where: Some(pred),
             group_by: vec![],
+            grouping_sets: Vec::new(),
             order_by: vec![],
             limit: None,
             offset: None,

@@ -740,7 +740,7 @@ fn run_delete(
     }
     // FOREIGN KEY check: refuse DELETE when any child table has a
     // row referencing one of the about-to-be-deleted tuples. Mirrors
-    // PostgreSQL's RESTRICT default. CASCADE is left to a follow-up.
+    // `PostgreSQL`'s RESTRICT default. CASCADE is left to a follow-up.
     let referrers = engine.referrers_to(&stmt.table);
     if !referrers.is_empty() {
         for doc_id in &to_delete {
@@ -1002,7 +1002,7 @@ fn run_insert(
         // FOREIGN KEY constraints -- every (local_columns) tuple
         // whose values are all non-null must have a matching row in
         // (ref_table, ref_columns). Null tuples are skipped to mirror
-        // PostgreSQL's MATCH SIMPLE default.
+        // `PostgreSQL`'s MATCH SIMPLE default.
         for fk in engine.foreign_keys(&stmt.table) {
             let local_values: Vec<Value> = fk
                 .local_columns
@@ -1299,7 +1299,10 @@ fn run_query_block(
         joined
     };
 
-    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+    if has_aggregate(&stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
@@ -1529,7 +1532,7 @@ fn materialize_recursive_cte(
         }
         // Rename the step's positional projection labels to the
         // anchor's so subsequent iterations and the outer SELECT see a
-        // consistent shape (anchor names win, mirroring PostgreSQL).
+        // consistent shape (anchor names win, mirroring `PostgreSQL`).
         let renamed: Vec<ResultRow> = new_rows
             .into_iter()
             .map(|row| rename_columns(&row, &step_columns, &anchor_columns))
@@ -1572,7 +1575,10 @@ fn run_single_table_select(
         Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
     };
 
-    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+    if has_aggregate(&stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
         let columns = projection_columns(&stmt.projections);
         let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
@@ -1641,7 +1647,10 @@ fn run_joined_select(
         });
     }
 
-    if has_aggregate(&stmt.projections) || !stmt.group_by.is_empty() {
+    if has_aggregate(&stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &joined, params)?;
         let rows = apply_row_order_limit(rows, stmt, params)?;
@@ -2065,7 +2074,7 @@ fn build_join_rows_with_ctes(
         FromClause::Table { name, alias } => {
             let qual = qualifier_for(name, alias.as_deref());
             // CTE reference takes precedence over a real table of the
-            // same name (matches PostgreSQL semantics).
+            // same name (matches `PostgreSQL` semantics).
             if let Some(rows) = ctes.get(name) {
                 return Ok(rows.iter().map(|row| reprefix_row(&qual, row)).collect());
             }
@@ -2889,6 +2898,36 @@ fn aggregate_join_rows(
     rows: &[ResultRow],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
+    // GROUPING SETS / ROLLUP / CUBE: run the aggregator once per
+    // grouping set, then concatenate the result rows. Columns that
+    // aren't in the active grouping set come out as NULL.
+    if !stmt.grouping_sets.is_empty() {
+        let mut combined: Vec<ResultRow> = Vec::new();
+        let sets = stmt.grouping_sets.clone();
+        let labels = projection_columns(&stmt.projections);
+        for set in sets {
+            let mut sub = stmt.clone();
+            sub.group_by.clone_from(&set);
+            sub.grouping_sets = Vec::new();
+            let part = aggregate_join_rows_relaxed(engine, &sub, rows, params)?;
+            // Columns from the parent projection that aren't in the
+            // active grouping set get filled with NULL on every row.
+            for mut row in part {
+                for (idx, proj) in stmt.projections.iter().enumerate() {
+                    let label = labels[idx].clone();
+                    if is_aggregate(&proj.expr) {
+                        continue;
+                    }
+                    let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
+                    if !in_set {
+                        row.insert(label, Value::Null);
+                    }
+                }
+                combined.push(row);
+            }
+        }
+        return Ok(combined);
+    }
     let agg_targets: Vec<&Projection> = stmt
         .projections
         .iter()
@@ -2968,6 +3007,97 @@ fn aggregate_join_rows(
                     return Err(SQLError::Unsupported(format!(
                         "non-aggregated projection `{label}` must appear in GROUP BY"
                     )));
+                }
+            }
+        }
+        out.push(row);
+    }
+    Ok(out)
+}
+
+/// Variant of [`aggregate_join_rows`] used by the GROUPING SETS
+/// dispatcher: projections that aren't in the active `group_by` are
+/// emitted as NULL (matching `PostgreSQL`'s ROLLUP / CUBE semantics)
+/// instead of raising an error.
+fn aggregate_join_rows_relaxed(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    rows: &[ResultRow],
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let agg_targets: Vec<&Projection> = stmt
+        .projections
+        .iter()
+        .filter(|p| is_aggregate(&p.expr))
+        .collect();
+    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
+    for row in rows {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+        let group_values: Vec<Value> = stmt
+            .group_by
+            .iter()
+            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                group_values,
+            )
+        });
+        for (i, proj) in agg_targets.iter().enumerate() {
+            let Expr::Func { name, args } = &proj.expr else {
+                continue;
+            };
+            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                (_, args) => {
+                    let arg = args
+                        .first()
+                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
+                    uqa_sql::expr::eval(arg, &ctx)?
+                }
+            };
+            bucket.0[i].observe(&value);
+        }
+    }
+    if groups.is_empty() && stmt.group_by.is_empty() {
+        groups.insert(
+            Vec::new(),
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                Vec::new(),
+            ),
+        );
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    let labels = projection_columns(&stmt.projections);
+    for (_, (accs, group_values)) in groups {
+        let mut row = ResultRow::new();
+        let mut agg_idx = 0;
+        for (idx, proj) in stmt.projections.iter().enumerate() {
+            let label = labels[idx].clone();
+            if is_aggregate(&proj.expr) {
+                let Expr::Func { name, .. } = &proj.expr else {
+                    return Err(SQLError::Internal("aggregate expr lost".into()));
+                };
+                let acc = &accs[agg_idx];
+                agg_idx += 1;
+                row.insert(label, aggregate_value(name, acc));
+            } else {
+                let mut placed = false;
+                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
+                    if exprs_match(&proj.expr, g_expr) {
+                        row.insert(label.clone(), g_value.clone());
+                        placed = true;
+                        break;
+                    }
+                }
+                if !placed {
+                    row.insert(label, Value::Null);
                 }
             }
         }
@@ -3084,6 +3214,32 @@ fn build_aggregate_rows(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
+    // GROUPING SETS / ROLLUP / CUBE: run the aggregator per set, then
+    // mask out columns not in the active set with NULL.
+    if !stmt.grouping_sets.is_empty() {
+        let mut combined: Vec<ResultRow> = Vec::new();
+        let labels = projection_columns(&stmt.projections);
+        for set in &stmt.grouping_sets {
+            let mut sub = stmt.clone();
+            sub.group_by.clone_from(set);
+            sub.grouping_sets = Vec::new();
+            let part = build_aggregate_rows_relaxed(engine, table, scored, &sub, params)?;
+            for mut row in part {
+                for (idx, proj) in stmt.projections.iter().enumerate() {
+                    let label = labels[idx].clone();
+                    if is_aggregate(&proj.expr) {
+                        continue;
+                    }
+                    let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
+                    if !in_set {
+                        row.insert(label, Value::Null);
+                    }
+                }
+                combined.push(row);
+            }
+        }
+        return Ok(combined);
+    }
     // group_key -> per-aggregate accumulator vector + the raw group key
     // values used to project the GROUP BY columns.
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
@@ -3174,6 +3330,105 @@ fn build_aggregate_rows(
                 return Err(SQLError::Unsupported(
                     "complex non-aggregate projections in GROUP BY are not supported".into(),
                 ));
+            }
+        }
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+/// Single-table aggregator variant used by the GROUPING SETS
+/// dispatcher: projections that aren't in the active `group_by` come
+/// out as NULL instead of erroring (`PostgreSQL` ROLLUP / CUBE
+/// semantics).
+fn build_aggregate_rows_relaxed(
+    engine: &Engine,
+    table: &str,
+    scored: &[ScoredEntry],
+    stmt: &SelectStmt,
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
+    let agg_targets: Vec<&Projection> = stmt
+        .projections
+        .iter()
+        .filter(|p| is_aggregate(&p.expr))
+        .collect();
+    for entry in scored {
+        let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
+        let group_values: Vec<Value> = stmt
+            .group_by
+            .iter()
+            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                group_values,
+            )
+        });
+        for (i, proj) in agg_targets.iter().enumerate() {
+            let Expr::Func { name, args } = &proj.expr else {
+                continue;
+            };
+            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                (_, args) => {
+                    let arg = args
+                        .first()
+                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
+                    uqa_sql::expr::eval(arg, &ctx)?
+                }
+            };
+            bucket.0[i].observe(&value);
+        }
+    }
+    if groups.is_empty() && stmt.group_by.is_empty() {
+        groups.insert(
+            Vec::new(),
+            (
+                (0..agg_targets.len())
+                    .map(|_| AggregateAccumulator::default())
+                    .collect(),
+                Vec::new(),
+            ),
+        );
+    }
+    let mut rows: Vec<ResultRow> = Vec::with_capacity(groups.len());
+    let labels = projection_columns(&stmt.projections);
+    for (_, (accs, group_values)) in groups {
+        let mut row = ResultRow::new();
+        let mut agg_idx = 0;
+        for (idx, proj) in stmt.projections.iter().enumerate() {
+            let label = labels[idx].clone();
+            if is_aggregate(&proj.expr) {
+                let Expr::Func { name, .. } = &proj.expr else {
+                    return Err(SQLError::Internal("aggregate expr lost".into()));
+                };
+                let acc = &accs[agg_idx];
+                agg_idx += 1;
+                row.insert(label, aggregate_value(name, acc));
+            } else if let Expr::Column(col) = &proj.expr {
+                let mut placed = false;
+                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
+                    if let Expr::Column(g_col) = g_expr {
+                        if g_col == col {
+                            row.insert(label.clone(), g_value.clone());
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+                if !placed {
+                    row.insert(label, Value::Null);
+                }
+            } else {
+                // Complex non-aggregate projections in ROLLUP / CUBE
+                // also fall back to NULL.
+                row.insert(label, Value::Null);
             }
         }
         rows.push(row);

@@ -198,6 +198,12 @@ pub struct SelectStmt {
     pub from: Option<FromClause>,
     pub r#where: Option<Expr>,
     pub group_by: Vec<Expr>,
+    /// Expanded GROUPING SETS / ROLLUP / CUBE specification. When
+    /// non-empty the executor produces one row per grouping set;
+    /// `group_by` is treated as a single grouping set in that case.
+    /// Each inner Vec lists the grouping-key expressions for that
+    /// set (an empty inner Vec means the global grand-total bucket).
+    pub grouping_sets: Vec<Vec<Expr>>,
     pub order_by: Vec<OrderBy>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
