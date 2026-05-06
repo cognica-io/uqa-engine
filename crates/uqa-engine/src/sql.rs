@@ -976,7 +976,12 @@ pub(crate) fn run_select(
     // the multi-table executor that builds row tuples up-front and
     // filters them via the expression evaluator.
     if let FromClause::Table { name, alias } = from {
-        if alias.is_none() && !has_window(&stmt.projections) {
+        // Schema-qualified names (information_schema.tables /
+        // pg_catalog.pg_*) and CTE references skip the search-aware
+        // fast path because they don't correspond to a registered
+        // engine table.
+        let is_virtual = name.contains('.') || engine.table(name).is_none();
+        if alias.is_none() && !has_window(&stmt.projections) && !is_virtual {
             return run_single_table_select(engine, name, &stmt, params);
         }
     }
@@ -1695,6 +1700,105 @@ fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
         .collect()
 }
 
+/// Synthesize rows for `information_schema` / `pg_catalog` virtual
+/// views. Mirrors Python's `_build_info_schema_*` /
+/// `_build_pg_*` helpers. Returns `None` for any unknown name so the
+/// caller falls back to the regular table lookup.
+fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<ResultRow>> {
+    let lower = name.to_ascii_lowercase();
+    let stripped: &str = lower
+        .strip_prefix("information_schema.")
+        .or_else(|| lower.strip_prefix("pg_catalog."))
+        .unwrap_or(&lower);
+    match stripped {
+        "tables" | "pg_tables" => Some(build_pg_tables(engine)),
+        "columns" => Some(build_info_columns(engine)),
+        "pg_views" => Some(build_pg_views(engine)),
+        "pg_indexes" => Some(build_pg_indexes(engine)),
+        "pg_type" => Some(build_pg_type()),
+        _ => None,
+    }
+}
+
+fn build_pg_tables(engine: &Engine) -> Vec<ResultRow> {
+    let mut out: Vec<ResultRow> = Vec::new();
+    let mut names = engine.table_names();
+    names.sort();
+    for tname in names {
+        let mut r = ResultRow::new();
+        r.insert("table_catalog".into(), Value::Str(String::new()));
+        r.insert("table_schema".into(), Value::Str("public".into()));
+        r.insert("table_name".into(), Value::Str(tname.clone()));
+        r.insert("table_type".into(), Value::Str("BASE TABLE".into()));
+        // pg_tables shape additionally:
+        r.insert("schemaname".into(), Value::Str("public".into()));
+        r.insert("tablename".into(), Value::Str(tname));
+        out.push(r);
+    }
+    out
+}
+
+fn build_info_columns(engine: &Engine) -> Vec<ResultRow> {
+    let mut out: Vec<ResultRow> = Vec::new();
+    let mut tables = engine.table_names();
+    tables.sort();
+    for tname in tables {
+        let Some(cols) = engine.describe_table(&tname) else {
+            continue;
+        };
+        for (idx, col) in cols.iter().enumerate() {
+            let mut r = ResultRow::new();
+            r.insert("table_catalog".into(), Value::Str(String::new()));
+            r.insert("table_schema".into(), Value::Str("public".into()));
+            r.insert("table_name".into(), Value::Str(tname.clone()));
+            r.insert("column_name".into(), Value::Str(col.name.clone()));
+            r.insert("ordinal_position".into(), Value::Int((idx + 1) as i64));
+            r.insert(
+                "is_nullable".into(),
+                Value::Str(if col.not_null {
+                    "NO".into()
+                } else {
+                    "YES".into()
+                }),
+            );
+            r.insert(
+                "data_type".into(),
+                Value::Str(format!("{:?}", col.ty).to_lowercase()),
+            );
+            out.push(r);
+        }
+    }
+    out
+}
+
+fn build_pg_views(_engine: &Engine) -> Vec<ResultRow> {
+    Vec::new()
+}
+
+fn build_pg_indexes(_engine: &Engine) -> Vec<ResultRow> {
+    Vec::new()
+}
+
+fn build_pg_type() -> Vec<ResultRow> {
+    let mut out: Vec<ResultRow> = Vec::new();
+    for (oid, name) in [
+        (16_i64, "bool"),
+        (20_i64, "int8"),
+        (23_i64, "int4"),
+        (25_i64, "text"),
+        (700_i64, "float4"),
+        (701_i64, "float8"),
+        (1043_i64, "varchar"),
+        (1700_i64, "numeric"),
+    ] {
+        let mut r = ResultRow::new();
+        r.insert("oid".into(), Value::Int(oid));
+        r.insert("typname".into(), Value::Str(name.into()));
+        out.push(r);
+    }
+    out
+}
+
 fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
     let mut out = ResultRow::new();
     for (k, v) in doc {
@@ -1777,6 +1881,10 @@ fn build_join_rows_with_ctes(
             // same name (matches PostgreSQL semantics).
             if let Some(rows) = ctes.get(name) {
                 return Ok(rows.iter().map(|row| reprefix_row(&qual, row)).collect());
+            }
+            // information_schema / pg_catalog virtual views.
+            if let Some(rows) = build_info_schema_rows(engine, name) {
+                return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
             }
             Ok(load_table_rows(engine, name)
                 .iter()

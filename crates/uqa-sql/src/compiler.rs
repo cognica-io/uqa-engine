@@ -1038,7 +1038,11 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
     };
     match inner {
         NodeEnum::RangeVar(r) => Ok(FromClause::Table {
-            name: r.relname.clone(),
+            name: if r.schemaname.is_empty() {
+                r.relname.clone()
+            } else {
+                format!("{}.{}", r.schemaname, r.relname)
+            },
             alias: r.alias.as_ref().and_then(|a| {
                 if a.aliasname.is_empty() {
                     None
