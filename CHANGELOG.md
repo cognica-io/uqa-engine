@@ -28,7 +28,7 @@ The 0.1.0 release covers all eleven phases of [`docs/plans/0001-uqa-python-to-ru
 
 ### Round 2 (2026-05-06)
 
-Post-phase parity sweep against the Python reference, focused on SQL surface area, engine API parity, and CI hardening.
+Post-phase parity sweep against the Python reference, focused on SQL surface area, engine API parity, and CI hardening. The QueryOptimizer (10-pass algebraic / graph-aware / fusion-reordering optimiser) — previously ported 1:1 in `uqa_planner::query_optimizer` but never wired into the engine — now runs on every single-table `SELECT ... WHERE ...`. SQL WHERE clauses lower into an `OperatorTree`, the optimiser fires (`simplify_algebra`, `push_filters_down`, `push_filter_into_traverse`, `push_filter_below_graph_join`, `push_graph_pattern_filters`, `fuse_join_pattern`, `merge_vector_thresholds`, `reorder_intersect`, `reorder_fusion_signals`, `apply_index_scan`), and `PlanExecutor` runs the rewritten tree against an engine-backed `OperatorTreeDriver`. Shapes the operator IR can't represent (arithmetic across columns, sub-queries, window calls, ...) fall back to the legacy direct dispatch path.
 
 #### Added
 

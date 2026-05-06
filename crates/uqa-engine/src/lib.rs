@@ -57,6 +57,7 @@
 //! storage errors so callers only need to match one enum.
 
 pub mod deep;
+pub mod operator_tree_bridge;
 pub mod sql;
 
 use std::collections::BTreeMap;

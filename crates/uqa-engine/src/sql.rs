@@ -1625,16 +1625,29 @@ fn run_single_table_select(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let scored = match stmt.r#where.as_ref() {
-        None => engine
-            .table_doc_ids(table)
-            .into_iter()
-            .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
-            .collect::<Vec<_>>(),
-        Some(Expr::Func { name, args }) if uqa_sql::registry::is_registered(name) => {
-            execute_function(engine, table, name, args, params)?
+    // Try the operator-tree pipeline first: lower the WHERE clause to
+    // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
+    // aware / fusion-reordering passes — Python parity), then execute
+    // through `PlanExecutor` against an `EngineDriver`. The bridge
+    // returns `None` for shapes the operator IR can't represent
+    // (arithmetic across columns, sub-queries, window calls, ...) and
+    // we fall back to the legacy direct dispatch in that case.
+    let scored = if let Some(rows) =
+        crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
+    {
+        rows
+    } else {
+        match stmt.r#where.as_ref() {
+            None => engine
+                .table_doc_ids(table)
+                .into_iter()
+                .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
+                .collect::<Vec<_>>(),
+            Some(Expr::Func { name, args }) if uqa_sql::registry::is_registered(name) => {
+                execute_function(engine, table, name, args, params)?
+            }
+            Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
         }
-        Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
     };
 
     if has_aggregate(&stmt.projections)
@@ -4545,6 +4558,24 @@ fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SQLErro
             "{name} must be a non-negative integer, got {other:?}"
         ))),
     }
+}
+
+pub(crate) fn run_text_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_text_match(engine, table, args, params)
+}
+
+pub(crate) fn run_knn_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_knn_match(engine, table, args, params)
 }
 
 fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLError> {
