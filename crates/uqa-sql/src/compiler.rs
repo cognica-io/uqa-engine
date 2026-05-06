@@ -362,10 +362,15 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
         .as_ref()
         .map(|w| compile_expr(w))
         .transpose()?;
+    let from = match stmt.from_clause.first() {
+        Some(node) => Some(compile_from_node(node)?),
+        None => None,
+    };
     Ok(UpdateStmt {
         table,
         assignments,
         r#where,
+        from,
     })
 }
 
@@ -380,7 +385,15 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
         .as_ref()
         .map(|w| compile_expr(w))
         .transpose()?;
-    Ok(DeleteStmt { table, r#where })
+    let using = match stmt.using_clause.first() {
+        Some(node) => Some(compile_from_node(node)?),
+        None => None,
+    };
+    Ok(DeleteStmt {
+        table,
+        r#where,
+        using,
+    })
 }
 
 fn other_node_label(node: &NodeEnum) -> &'static str {

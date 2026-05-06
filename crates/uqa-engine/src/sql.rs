@@ -395,6 +395,13 @@ fn run_update(
     stmt: UpdateStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    // UPDATE ... FROM other [WHERE ...]: build the joined relation,
+    // evaluate the WHERE against each joined row, and apply
+    // assignments to the matching target rows. Mirrors Python's
+    // _compile_update_from.
+    if let Some(from_clause) = stmt.from.as_ref() {
+        return run_update_from(engine, &stmt, from_clause, params);
+    }
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     for doc_id in engine.table_doc_ids(&stmt.table) {
@@ -423,6 +430,67 @@ fn run_update(
     Ok(SQLResult::from_affected(affected))
 }
 
+fn run_update_from(
+    engine: &Engine,
+    stmt: &UpdateStmt,
+    from_clause: &uqa_sql::ast::FromClause,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+    let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &ctes)?;
+    let cancel = engine.cancellation_token();
+    let mut affected = 0u64;
+    let target = stmt.table.clone();
+    let target_doc_ids = engine.table_doc_ids(&target);
+    for doc_id in target_doc_ids {
+        cancel.check()?;
+        let mut doc = engine
+            .get_document(&target, doc_id)
+            .ok_or_else(|| SQLError::Internal("missing document during UPDATE FROM".into()))?;
+        let mut applied = false;
+        for from_row in &from_rows {
+            // Build a joined row: target columns are exposed both
+            // unqualified and prefixed (`<table>.<col>`) so the
+            // WHERE / RHS expressions can use either spelling.
+            // FROM-side rows already carry their alias prefix when
+            // one was supplied.
+            let mut joined = ResultRow::new();
+            for (k, v) in &doc {
+                joined.insert(k.clone(), v.clone());
+                joined.insert(format!("{target}.{k}"), v.clone());
+            }
+            for (k, v) in from_row {
+                joined.insert(k.clone(), v.clone());
+            }
+            if let Some(filter) = stmt.r#where.as_ref() {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+                if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+                    continue;
+                }
+            }
+            // Apply assignments evaluated against the joined row so
+            // RHS expressions can read FROM-side columns.
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+            let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+            for (col, expr) in &stmt.assignments {
+                let value = uqa_sql::expr::eval(expr, &ctx)?;
+                if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
+                    new_vectors.insert(col.clone(), vec);
+                }
+                doc.insert(col.clone(), value);
+            }
+            engine.add_document_with_vectors(&target, doc_id, doc.clone(), new_vectors);
+            applied = true;
+            break;
+        }
+        if applied {
+            affected += 1;
+        }
+    }
+    Ok(SQLResult::from_affected(affected))
+}
+
 fn run_delete(
     engine: &Engine,
     stmt: DeleteStmt,
@@ -431,19 +499,52 @@ fn run_delete(
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
+    // DELETE FROM t USING other WHERE ... -- materialise the join
+    // first, then collect target doc ids whose joined image
+    // satisfies WHERE. Mirrors Python's _compile_delete_using.
+    let using_rows: Option<Vec<ResultRow>> = match stmt.using.as_ref() {
+        Some(clause) => {
+            let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+            Some(build_join_rows_with_ctes(engine, clause, params, &ctes)?)
+        }
+        None => None,
+    };
     for doc_id in engine.table_doc_ids(&stmt.table) {
         cancel.check()?;
         let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
             continue;
         };
-        let keep = match stmt.r#where.as_ref() {
-            None => true,
-            Some(filter) => {
+        let keep = match (stmt.r#where.as_ref(), using_rows.as_ref()) {
+            (None, _) => true,
+            (Some(filter), None) => {
                 let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
                 matches!(
                     uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
                     Ok(true)
                 )
+            }
+            (Some(filter), Some(rows)) => {
+                let mut matched = false;
+                for using_row in rows {
+                    let mut joined = ResultRow::new();
+                    for (k, v) in &doc {
+                        joined.insert(k.clone(), v.clone());
+                        joined.insert(format!("{}.{k}", stmt.table), v.clone());
+                    }
+                    for (k, v) in using_row {
+                        joined.insert(k.clone(), v.clone());
+                    }
+                    let ctx =
+                        uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+                    if matches!(
+                        uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
+                        Ok(true)
+                    ) {
+                        matched = true;
+                        break;
+                    }
+                }
+                matched
             }
         };
         if keep {

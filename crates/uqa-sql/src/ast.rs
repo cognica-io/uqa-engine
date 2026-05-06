@@ -434,12 +434,19 @@ pub struct UpdateStmt {
     pub table: String,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
+    /// `UPDATE t SET ... FROM other [JOIN ...]` -- the engine joins
+    /// the target with this clause before applying the assignments.
+    pub from: Option<FromClause>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeleteStmt {
     pub table: String,
     pub r#where: Option<Expr>,
+    /// `DELETE FROM t USING other [JOIN ...]` -- the engine joins
+    /// the target with this clause and deletes target rows whose
+    /// joined image satisfies WHERE.
+    pub using: Option<FromClause>,
 }
 
 #[derive(Debug, Clone)]
