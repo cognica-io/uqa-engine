@@ -155,6 +155,19 @@ pub struct Engine {
     sequences: RwLock<BTreeMap<String, SequenceState>>,
     /// Prepared statements. Mirrors `_engine._prepared`.
     prepared: RwLock<BTreeMap<String, uqa_sql::ast::Statement>>,
+    /// Named analyzers from `CREATE ANALYZER`. Stores the config
+    /// JSON string for `list_analyzers` introspection. Mirrors
+    /// `_engine.create_analyzer` / `drop_analyzer`.
+    named_analyzers: RwLock<BTreeMap<String, String>>,
+    /// Per-(table, field) analyzer assignments from
+    /// `set_table_analyzer`. Stores `(analyzer_name, phase)` so the
+    /// FTS pipeline can pick up index-time vs query-time analyzers.
+    table_field_analyzers: RwLock<BTreeMap<(String, String), (String, String)>>,
+    /// `CREATE SERVER` registry. Keyed by server name; the value is
+    /// the FDW handler descriptor.
+    foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
+    /// `CREATE FOREIGN TABLE` registry. Keyed by table name.
+    foreign_tables: RwLock<BTreeMap<String, uqa_fdw::ForeignTable>>,
 }
 
 /// Mutable state of a single SQL sequence.
@@ -222,6 +235,10 @@ impl Engine {
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
             prepared: RwLock::new(BTreeMap::new()),
+            named_analyzers: RwLock::new(BTreeMap::new()),
+            table_field_analyzers: RwLock::new(BTreeMap::new()),
+            foreign_servers: RwLock::new(BTreeMap::new()),
+            foreign_tables: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -332,6 +349,202 @@ impl Engine {
         }
     }
 
+    // -----------------------------------------------------------------
+    // Named analyzers + per-(table, field) analyzer assignments. Mirror
+    // _engine.create_analyzer / drop_analyzer / list_analyzers /
+    // set_table_analyzer in the Python reference.
+    // -----------------------------------------------------------------
+
+    pub fn register_named_analyzer(
+        &self,
+        name: &str,
+        config_json: &str,
+    ) -> std::result::Result<(), String> {
+        // The config string is stored verbatim today; future commits
+        // can expand into a tokenizer / token-filter pipeline.
+        // Validate as JSON to surface obvious typos at registration.
+        if !config_json.is_empty() {
+            serde_json::from_str::<serde_json::Value>(config_json)
+                .map_err(|e| format!("create_analyzer: invalid config JSON: {e}"))?;
+        }
+        self.named_analyzers
+            .write()
+            .insert(name.to_string(), config_json.to_string());
+        Ok(())
+    }
+
+    pub fn drop_named_analyzer(&self, name: &str) -> bool {
+        self.named_analyzers.write().remove(name).is_some()
+    }
+
+    pub fn list_named_analyzers(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.named_analyzers.read().keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn set_table_field_analyzer(
+        &self,
+        table: &str,
+        field: &str,
+        analyzer_name: &str,
+        phase: &str,
+    ) -> std::result::Result<(), String> {
+        if self.table(table).is_none() {
+            return Err(format!(
+                "set_table_analyzer: table `{table}` does not exist"
+            ));
+        }
+        if !self.named_analyzers.read().contains_key(analyzer_name) {
+            return Err(format!(
+                "set_table_analyzer: analyzer `{analyzer_name}` is not registered"
+            ));
+        }
+        let phase = match phase {
+            "index" | "query" | "both" => phase.to_string(),
+            other => return Err(format!("set_table_analyzer: invalid phase `{other}`")),
+        };
+        self.table_field_analyzers.write().insert(
+            (table.to_string(), field.to_string()),
+            (analyzer_name.to_string(), phase),
+        );
+        Ok(())
+    }
+
+    pub fn table_field_analyzer(&self, table: &str, field: &str) -> Option<(String, String)> {
+        self.table_field_analyzers
+            .read()
+            .get(&(table.to_string(), field.to_string()))
+            .cloned()
+    }
+
+    // -----------------------------------------------------------------
+    // Foreign Data Wrapper registry. Mirrors `_engine._foreign_servers`
+    // / `_engine._foreign_tables` in the Python reference.
+    // -----------------------------------------------------------------
+
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn register_foreign_server(
+        &self,
+        name: String,
+        fdw_type: String,
+        options: Vec<(String, String)>,
+        if_not_exists: bool,
+    ) -> std::result::Result<(), String> {
+        let mut servers = self.foreign_servers.write();
+        if servers.contains_key(&name) {
+            if if_not_exists {
+                return Ok(());
+            }
+            return Err(format!("Foreign server `{name}` already exists"));
+        }
+        if !matches!(fdw_type.as_str(), "duckdb_fdw" | "arrow_fdw" | "memory_fdw") {
+            return Err(format!("Unsupported FDW type: `{fdw_type}`"));
+        }
+        let mut opt_map: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for (k, v) in options {
+            opt_map.insert(k, v);
+        }
+        servers.insert(
+            name.clone(),
+            uqa_fdw::ForeignServer {
+                name,
+                fdw_type,
+                options: opt_map,
+            },
+        );
+        Ok(())
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn register_foreign_table(
+        &self,
+        name: String,
+        server_name: String,
+        columns: Vec<uqa_sql::ast::ColumnDef>,
+        options: Vec<(String, String)>,
+        if_not_exists: bool,
+    ) -> std::result::Result<(), String> {
+        if self.has_table(&name) {
+            return Err(format!("Table `{name}` already exists"));
+        }
+        let mut tables = self.foreign_tables.write();
+        if tables.contains_key(&name) {
+            if if_not_exists {
+                return Ok(());
+            }
+            return Err(format!("Foreign table `{name}` already exists"));
+        }
+        if !self.foreign_servers.read().contains_key(&server_name) {
+            return Err(format!("Foreign server `{server_name}` does not exist"));
+        }
+        let fdw_columns: Vec<uqa_fdw::ColumnDef> = columns
+            .iter()
+            .map(|c| uqa_fdw::ColumnDef {
+                name: c.name.clone(),
+                ty: match &c.ty {
+                    uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
+                    uqa_sql::ast::ColumnType::Real => uqa_fdw::ColumnType::Real,
+                    uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
+                    uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
+                },
+            })
+            .collect();
+        let mut opt_map: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for (k, v) in options {
+            opt_map.insert(k, v);
+        }
+        tables.insert(
+            name.clone(),
+            uqa_fdw::ForeignTable {
+                name,
+                server_name,
+                columns: fdw_columns,
+                options: opt_map,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn drop_foreign_server(&self, name: &str) -> bool {
+        // Reject when any foreign table references this server.
+        let referenced = self
+            .foreign_tables
+            .read()
+            .values()
+            .any(|t| t.server_name == name);
+        if referenced {
+            return false;
+        }
+        self.foreign_servers.write().remove(name).is_some()
+    }
+
+    pub fn drop_foreign_table(&self, name: &str) -> bool {
+        self.foreign_tables.write().remove(name).is_some()
+    }
+
+    pub fn foreign_server(&self, name: &str) -> Option<uqa_fdw::ForeignServer> {
+        self.foreign_servers.read().get(name).cloned()
+    }
+
+    pub fn foreign_table(&self, name: &str) -> Option<uqa_fdw::ForeignTable> {
+        self.foreign_tables.read().get(name).cloned()
+    }
+
+    pub fn list_foreign_servers(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.foreign_servers.read().keys().cloned().collect();
+        out.sort();
+        out
+    }
+
+    pub fn list_foreign_tables(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.foreign_tables.read().keys().cloned().collect();
+        out.sort();
+        out
+    }
+
     /// Cancel every in-flight query that holds a clone of this
     /// engine's cancellation token. Mirrors `Engine.cancel()` in
     /// the Python reference; surfaces to operator hot loops as
@@ -374,6 +587,10 @@ impl Engine {
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
             prepared: RwLock::new(BTreeMap::new()),
+            named_analyzers: RwLock::new(BTreeMap::new()),
+            table_field_analyzers: RwLock::new(BTreeMap::new()),
+            foreign_servers: RwLock::new(BTreeMap::new()),
+            foreign_tables: RwLock::new(BTreeMap::new()),
         };
         engine.restore_from_catalog(&catalog, &conn)?;
         // Eagerly populate the model cache from the catalog so

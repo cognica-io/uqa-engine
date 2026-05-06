@@ -21,6 +21,7 @@ uqa-graph = { workspace = true }
 uqa-joins = { workspace = true }
 uqa-planner = { workspace = true }
 uqa-execution = { workspace = true }
+uqa-fdw = { workspace = true }
 parking_lot = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }

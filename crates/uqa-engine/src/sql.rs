@@ -120,6 +120,24 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
             Ok(SQLResult::empty())
         }
         Statement::Values { rows } => run_values(engine, rows, params),
+        Statement::CreateForeignServer(s) => {
+            engine
+                .register_foreign_server(s.name, s.fdw_type, s.options, s.if_not_exists)
+                .map_err(SQLError::Unsupported)?;
+            Ok(SQLResult::empty())
+        }
+        Statement::CreateForeignTable(s) => {
+            engine
+                .register_foreign_table(
+                    s.name,
+                    s.server_name,
+                    s.columns,
+                    s.options,
+                    s.if_not_exists,
+                )
+                .map_err(SQLError::Unsupported)?;
+            Ok(SQLResult::empty())
+        }
     }
 }
 
@@ -2208,6 +2226,132 @@ fn build_table_function_rows(
                 );
             }
             Ok(out)
+        }
+        // -------------------------------------------------------------
+        // Analyzer DDL exposed as table-functions. Mirror Python's
+        // _build_create_analyzer / _build_drop_analyzer /
+        // _build_list_analyzers / _build_set_table_analyzer.
+        // -------------------------------------------------------------
+        "create_analyzer" => {
+            if evaluated.len() < 2 {
+                return Err(SQLError::TypeMismatch(
+                    "create_analyzer requires (name, config_json)".into(),
+                ));
+            }
+            let analyzer_name = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("create_analyzer arg 1".into())),
+            };
+            let config_json = match &evaluated[1] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("create_analyzer arg 2".into())),
+            };
+            engine
+                .register_named_analyzer(&analyzer_name, &config_json)
+                .map_err(SQLError::Unsupported)?;
+            let mut r = ResultRow::new();
+            r.insert(
+                column_aliases
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "create_analyzer".into()),
+                Value::Str(format!("analyzer '{analyzer_name}' created")),
+            );
+            let r = match qual {
+                Some(a) => prefix_row(a, &r),
+                None => r,
+            };
+            Ok(vec![r])
+        }
+        "drop_analyzer" => {
+            if evaluated.is_empty() {
+                return Err(SQLError::TypeMismatch(
+                    "drop_analyzer requires a name argument".into(),
+                ));
+            }
+            let analyzer_name = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("drop_analyzer arg 1".into())),
+            };
+            engine.drop_named_analyzer(&analyzer_name);
+            let mut r = ResultRow::new();
+            r.insert(
+                column_aliases
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "drop_analyzer".into()),
+                Value::Str(format!("analyzer '{analyzer_name}' dropped")),
+            );
+            let r = match qual {
+                Some(a) => prefix_row(a, &r),
+                None => r,
+            };
+            Ok(vec![r])
+        }
+        "list_analyzers" => {
+            let names = engine.list_named_analyzers();
+            let key = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "analyzer_name".into());
+            for n in names {
+                let mut r = ResultRow::new();
+                r.insert(key.clone(), Value::Str(n));
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
+            }
+            Ok(out)
+        }
+        "set_table_analyzer" => {
+            if evaluated.len() < 3 {
+                return Err(SQLError::TypeMismatch(
+                    "set_table_analyzer requires (table, field, analyzer_name[, phase])".into(),
+                ));
+            }
+            let target_table = match &evaluated[0] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("set_table_analyzer arg 1".into())),
+            };
+            let field = match &evaluated[1] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("set_table_analyzer arg 2".into())),
+            };
+            let analyzer_name = match &evaluated[2] {
+                Value::Str(s) => s.clone(),
+                _ => return Err(SQLError::TypeMismatch("set_table_analyzer arg 3".into())),
+            };
+            let phase = if evaluated.len() > 3 {
+                match &evaluated[3] {
+                    Value::Str(s) => s.clone(),
+                    _ => "both".into(),
+                }
+            } else {
+                "both".into()
+            };
+            engine
+                .set_table_field_analyzer(&target_table, &field, &analyzer_name, &phase)
+                .map_err(SQLError::Unsupported)?;
+            let mut msg = format!("analyzer '{analyzer_name}' assigned to {target_table}.{field}");
+            if phase != "both" {
+                use std::fmt::Write as _;
+                let _ = write!(msg, " (phase={phase})");
+            }
+            let mut r = ResultRow::new();
+            r.insert(
+                column_aliases
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "set_table_analyzer".into()),
+                Value::Str(msg),
+            );
+            let r = match qual {
+                Some(a) => prefix_row(a, &r),
+                None => r,
+            };
+            Ok(vec![r])
         }
         other => Err(SQLError::Unsupported(format!(
             "table function `{other}` in FROM"

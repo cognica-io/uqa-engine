@@ -1297,6 +1297,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "uqa-execution",
+ "uqa-fdw",
  "uqa-fusion",
  "uqa-graph",
  "uqa-joins",

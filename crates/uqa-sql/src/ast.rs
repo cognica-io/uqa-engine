@@ -528,6 +528,27 @@ pub enum Statement {
     Values {
         rows: Vec<Vec<Expr>>,
     },
+    /// `CREATE SERVER name FOREIGN DATA WRAPPER type OPTIONS (...)`.
+    CreateForeignServer(CreateForeignServer),
+    /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
+    CreateForeignTable(CreateForeignTable),
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateForeignServer {
+    pub name: String,
+    pub fdw_type: String,
+    pub options: Vec<(String, String)>,
+    pub if_not_exists: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateForeignTable {
+    pub name: String,
+    pub server_name: String,
+    pub columns: Vec<ColumnDef>,
+    pub options: Vec<(String, String)>,
+    pub if_not_exists: bool,
 }
 
 #[derive(Debug, Clone)]

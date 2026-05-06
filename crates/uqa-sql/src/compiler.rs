@@ -86,6 +86,12 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::PrepareStmt(stmt) => compile_prepare(stmt),
         NodeEnum::ExecuteStmt(stmt) => compile_execute(stmt),
         NodeEnum::DeallocateStmt(stmt) => compile_deallocate(stmt),
+        NodeEnum::CreateForeignServerStmt(stmt) => {
+            compile_create_foreign_server(stmt).map(Statement::CreateForeignServer)
+        }
+        NodeEnum::CreateForeignTableStmt(stmt) => {
+            compile_create_foreign_table(stmt).map(Statement::CreateForeignTable)
+        }
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
@@ -223,6 +229,62 @@ fn compile_deallocate(stmt: &pg_query::protobuf::DeallocateStmt) -> Result<State
         Some(stmt.name.clone())
     };
     Ok(Statement::Deallocate { name })
+}
+
+fn compile_create_foreign_server(
+    stmt: &pg_query::protobuf::CreateForeignServerStmt,
+) -> Result<crate::ast::CreateForeignServer> {
+    use crate::ast::CreateForeignServer;
+    Ok(CreateForeignServer {
+        name: stmt.servername.clone(),
+        fdw_type: stmt.fdwname.clone(),
+        options: collect_def_elem_options(&stmt.options),
+        if_not_exists: stmt.if_not_exists,
+    })
+}
+
+fn compile_create_foreign_table(
+    stmt: &pg_query::protobuf::CreateForeignTableStmt,
+) -> Result<crate::ast::CreateForeignTable> {
+    use crate::ast::CreateForeignTable;
+    let base = stmt
+        .base_stmt
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without base".into()))?;
+    let name = base
+        .relation
+        .as_ref()
+        .map(|r| r.relname.clone())
+        .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without name".into()))?;
+    let mut columns: Vec<ColumnDef> = Vec::new();
+    for elt in &base.table_elts {
+        if let Some(NodeEnum::ColumnDef(col)) = elt.node.as_ref() {
+            columns.push(compile_column_def(col)?);
+        }
+    }
+    Ok(CreateForeignTable {
+        name,
+        server_name: stmt.servername.clone(),
+        columns,
+        options: collect_def_elem_options(&stmt.options),
+        if_not_exists: base.if_not_exists,
+    })
+}
+
+fn collect_def_elem_options(nodes: &[Node]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for opt in nodes {
+        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
+            let value = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                Some(NodeEnum::String(s)) => s.sval.clone(),
+                Some(NodeEnum::Integer(i)) => i.ival.to_string(),
+                Some(NodeEnum::Float(f)) => f.fval.clone(),
+                _ => String::new(),
+            };
+            out.push((elem.defname.clone(), value));
+        }
+    }
+    out
 }
 
 fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
