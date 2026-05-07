@@ -18,5 +18,8 @@ serde_json = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+tempfile = "3.13"
+
 [lints]
 workspace = true

@@ -16,6 +16,29 @@ use std::sync::Arc;
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
+/// Which side of the index/search pipeline a field analyzer applies to.
+/// Mirrors Python `set_field_analyzer(field, analyzer, phase=...)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalyzerPhase {
+    /// Run only when *adding* documents.
+    Index,
+    /// Run only when *querying* documents (e.g. through `TermOperator`).
+    Search,
+    /// Run on both phases (the Python default).
+    Both,
+}
+
+impl AnalyzerPhase {
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "index" => Ok(AnalyzerPhase::Index),
+            "search" | "query" => Ok(AnalyzerPhase::Search),
+            "both" => Ok(AnalyzerPhase::Both),
+            _ => Err(format!("phase must be 'index'|'search'|'both', got `{s}`")),
+        }
+    }
+}
+
 pub trait InvertedIndex: Send + Sync {
     fn analyzer(&self) -> &Analyzer;
 
@@ -115,6 +138,32 @@ pub trait InvertedIndex: Send + Sync {
         }
         total
     }
+
+    /// Bind an analyzer to a single field for the given phase.
+    /// `Both` writes to both the index-side and search-side maps; the
+    /// default impl errors so backends that don't support per-field
+    /// analyzers fail loud rather than silently dropping the request.
+    fn set_field_analyzer(
+        &mut self,
+        _field: &str,
+        _analyzer: Analyzer,
+        _phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        Err("set_field_analyzer not supported by this InvertedIndex backend".into())
+    }
+
+    /// Index-time analyzer for `field`; falls back to
+    /// [`InvertedIndex::analyzer`] when no override is set.
+    fn get_field_analyzer(&self, _field: &str) -> Analyzer {
+        self.analyzer().clone()
+    }
+
+    /// Search-time analyzer for `field`; falls back to the index-time
+    /// analyzer, then to the default. Mirrors Python
+    /// `get_search_analyzer`.
+    fn get_search_analyzer(&self, field: &str) -> Analyzer {
+        self.get_field_analyzer(field)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +179,12 @@ pub struct MemoryInvertedIndex {
     /// Sum of field lengths across all docs, per field.
     total_length: BTreeMap<FieldName, u64>,
     doc_count: u64,
+    /// Per-field analyzer override applied at index time. Falls back
+    /// to [`MemoryInvertedIndex::analyzer`] when no entry exists.
+    index_field_analyzers: BTreeMap<FieldName, Analyzer>,
+    /// Per-field analyzer override applied at search time (e.g. for
+    /// synonym expansion that must not be persisted into the postings).
+    search_field_analyzers: BTreeMap<FieldName, Analyzer>,
 }
 
 impl MemoryInvertedIndex {
@@ -141,6 +196,8 @@ impl MemoryInvertedIndex {
             doc_lengths: BTreeMap::new(),
             total_length: BTreeMap::new(),
             doc_count: 0,
+            index_field_analyzers: BTreeMap::new(),
+            search_field_analyzers: BTreeMap::new(),
         }
     }
 }
@@ -161,7 +218,11 @@ impl InvertedIndex for MemoryInvertedIndex {
         let mut term_set: BTreeSet<(FieldName, String)> = BTreeSet::new();
 
         for (field, text) in fields {
-            let tokens = self.analyzer.analyze(&text);
+            let analyzer = self
+                .index_field_analyzers
+                .get(&field)
+                .unwrap_or(&self.analyzer);
+            let tokens = analyzer.analyze(&text);
             let length = tokens.len() as u64;
             per_doc_lengths.insert(field.clone(), length);
             *self.total_length.entry(field.clone()).or_insert(0) += length;
@@ -284,6 +345,48 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn field_names(&self) -> Vec<FieldName> {
         self.total_length.keys().cloned().collect()
+    }
+
+    fn set_field_analyzer(
+        &mut self,
+        field: &str,
+        analyzer: Analyzer,
+        phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        match phase {
+            AnalyzerPhase::Index => {
+                self.index_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+            AnalyzerPhase::Search => {
+                self.search_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+            AnalyzerPhase::Both => {
+                self.index_field_analyzers
+                    .insert(field.to_string(), analyzer.clone());
+                self.search_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+        }
+        Ok(())
+    }
+
+    fn get_field_analyzer(&self, field: &str) -> Analyzer {
+        self.index_field_analyzers
+            .get(field)
+            .cloned()
+            .unwrap_or_else(|| self.analyzer.clone())
+    }
+
+    fn get_search_analyzer(&self, field: &str) -> Analyzer {
+        if let Some(a) = self.search_field_analyzers.get(field) {
+            return a.clone();
+        }
+        if let Some(a) = self.index_field_analyzers.get(field) {
+            return a.clone();
+        }
+        self.analyzer.clone()
     }
 }
 

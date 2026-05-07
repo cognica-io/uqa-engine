@@ -27,7 +27,7 @@ pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};
 pub use index_types::{IndexDef, IndexType};
-pub use inverted_index::{InvertedIndex, MemoryInvertedIndex};
+pub use inverted_index::{AnalyzerPhase, InvertedIndex, MemoryInvertedIndex};
 pub use ivf_index::{IVFIndex, IVFState};
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{

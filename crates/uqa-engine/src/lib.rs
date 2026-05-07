@@ -430,7 +430,7 @@ impl Engine {
             ));
         }
         let phase = match phase {
-            "index" | "query" | "both" => phase.to_string(),
+            "index" | "search" | "query" | "both" => phase.to_string(),
             other => return Err(format!("set_table_analyzer: invalid phase `{other}`")),
         };
         self.table_field_analyzers.write().insert(

@@ -3099,7 +3099,16 @@ fn build_table_function_rows(
             Ok(vec![r])
         }
         "list_analyzers" => {
-            let names = engine.list_named_analyzers();
+            // Mirror Python: include the four built-in analyzers
+            // (`whitespace`, `standard`, `standard_cjk`, `keyword`) on
+            // top of every user-registered named analyzer.
+            let mut names: std::collections::BTreeSet<String> = engine
+                .list_named_analyzers()
+                .into_iter()
+                .collect();
+            for builtin in ["whitespace", "standard", "standard_cjk", "keyword"] {
+                names.insert(builtin.to_string());
+            }
             let key = column_aliases
                 .first()
                 .cloned()

@@ -41,7 +41,15 @@ fn drop_analyzer_removes_entry() {
     eng.sql("SELECT * FROM drop_analyzer('strict')", &[])
         .unwrap();
     let r = eng.sql("SELECT * FROM list_analyzers()", &[]).unwrap();
-    assert!(r.rows.is_empty());
+    let names: Vec<String> = r
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("analyzer_name") {
+            Some(uqa_core::Value::Str(s)) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(!names.contains(&"strict".to_string()));
 }
 
 #[test]

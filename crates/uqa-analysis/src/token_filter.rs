@@ -7,6 +7,9 @@
 //! Token-level filters that run after tokenization.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
@@ -26,7 +29,16 @@ pub enum TokenFilter {
     PorterStem,
     ASCIIFolding,
     Synonym {
+        /// Inline `term -> [expansion, ...]` mapping. Empty when the
+        /// filter sources its mappings from `synonyms_path` instead.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         synonyms: BTreeMap<String, Vec<String>>,
+        /// Path to a Solr / Elasticsearch-style synonym file. The file
+        /// is parsed every time the filter runs so reload-on-edit is
+        /// free; for production use cache the parsed map upstream.
+        /// Mirrors Python `SynonymFilter(synonyms_path=...)`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        synonyms_path: Option<PathBuf>,
     },
     Ngram {
         min_gram: usize,
@@ -44,6 +56,102 @@ pub enum TokenFilter {
         #[serde(default)]
         max_length: usize,
     },
+}
+
+/// Errors raised when constructing a `Synonym` filter from a file.
+#[derive(Debug, thiserror::Error)]
+pub enum SynonymFileError {
+    #[error("synonym file not found: {0}")]
+    NotFound(PathBuf),
+    #[error("synonym file io: {0}")]
+    Io(#[from] io::Error),
+}
+
+impl TokenFilter {
+    /// Build a `Synonym` filter from a Solr / Elasticsearch synonym
+    /// file. The file format mirrors Python `SynonymFilter`:
+    /// blank lines and `#` comments are skipped, `a => b, c` defines a
+    /// one-way mapping, and `a, b, c` defines an equivalent group
+    /// where every term expands to the other group members. Mirrors
+    /// Python `SynonymFilter(synonyms_path=...)`.
+    pub fn synonym_from_path<P: AsRef<Path>>(path: P) -> Result<Self, SynonymFileError> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(SynonymFileError::NotFound(path.to_path_buf()));
+        }
+        // Touch the file once at construction so a missing path raises
+        // up front instead of at first filter() call.
+        let _ = fs::read_to_string(path)?;
+        Ok(TokenFilter::Synonym {
+            synonyms: BTreeMap::new(),
+            synonyms_path: Some(path.to_path_buf()),
+        })
+    }
+
+    /// Parse a synonym file into the same shape `Synonym::synonyms`
+    /// uses. Public so engines can pre-resolve a path to an inline map.
+    pub fn parse_synonym_file(
+        path: &Path,
+    ) -> Result<BTreeMap<String, Vec<String>>, SynonymFileError> {
+        let body = fs::read_to_string(path)?;
+        Ok(parse_synonym_body(&body))
+    }
+}
+
+fn parse_synonym_body(body: &str) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((lhs, rhs)) = line.split_once("=>") {
+            // One-way mapping: lhs members all expand to the rhs list.
+            let lhs_terms: Vec<String> = lhs
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            let rhs_terms: Vec<String> = rhs
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            for term in lhs_terms {
+                let entry = out.entry(term).or_default();
+                for r in &rhs_terms {
+                    if !entry.iter().any(|e| e == r) {
+                        entry.push(r.clone());
+                    }
+                }
+            }
+        } else {
+            // Equivalent group: each member expands to the others.
+            let members: Vec<String> = line
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            if members.len() < 2 {
+                continue;
+            }
+            for (i, term) in members.iter().enumerate() {
+                let entry = out.entry(term.clone()).or_default();
+                for (j, other) in members.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    if !entry.iter().any(|e| e == other) {
+                        entry.push(other.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 fn default_stop_language() -> String {
@@ -69,10 +177,18 @@ impl TokenFilter {
             }
             TokenFilter::PorterStem => tokens.into_iter().map(|t| porter::stem(&t)).collect(),
             TokenFilter::ASCIIFolding => tokens.into_iter().map(|t| ascii_fold(&t)).collect(),
-            TokenFilter::Synonym { synonyms } => {
+            TokenFilter::Synonym {
+                synonyms,
+                synonyms_path,
+            } => {
+                let resolved: BTreeMap<String, Vec<String>> = if let Some(path) = synonyms_path {
+                    TokenFilter::parse_synonym_file(path).unwrap_or_default()
+                } else {
+                    synonyms.clone()
+                };
                 let mut out = Vec::with_capacity(tokens.len());
                 for t in tokens {
-                    if let Some(extra) = synonyms.get(&t) {
+                    if let Some(extra) = resolved.get(&t) {
                         out.push(t);
                         out.extend(extra.iter().cloned());
                     } else {
@@ -236,7 +352,10 @@ mod tests {
             "car".to_string(),
             vec!["auto".to_string(), "vehicle".to_string()],
         );
-        let f = TokenFilter::Synonym { synonyms: m };
+        let f = TokenFilter::Synonym {
+            synonyms: m,
+            synonyms_path: None,
+        };
         assert_eq!(
             f.filter(v(&["fast", "car"])),
             v(&["fast", "car", "auto", "vehicle"])

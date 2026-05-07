@@ -41,7 +41,11 @@ impl Operator for TermOperator {
         let Some(idx) = ctx.inverted_index.as_ref() else {
             return PostingList::new();
         };
-        let tokens = idx.analyzer().analyze(&self.term);
+        // Search-time analyzer: synonym filters etc. expand `term` into
+        // a multi-token vector that gets unioned across the field's
+        // posting lists. Mirrors Python `TermOperator.execute`.
+        let analyzer = idx.get_search_analyzer(&self.field);
+        let tokens = analyzer.analyze(&self.term);
         if tokens.is_empty() {
             return PostingList::new();
         }

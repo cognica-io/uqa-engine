@@ -13,7 +13,7 @@ use rusqlite::{params, OptionalExtension};
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
-use crate::inverted_index::InvertedIndex;
+use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 
 #[derive(Clone)]
@@ -21,6 +21,12 @@ pub struct SQLiteInvertedIndex {
     conn: ManagedConnection,
     table: String,
     analyzer: Analyzer,
+    /// Per-field index-time analyzer overrides. Persisted at engine
+    /// catalog layer (not on the index itself); the index just looks
+    /// them up at tokenization time.
+    index_field_analyzers: BTreeMap<FieldName, Analyzer>,
+    /// Per-field search-time analyzer overrides.
+    search_field_analyzers: BTreeMap<FieldName, Analyzer>,
 }
 
 impl SQLiteInvertedIndex {
@@ -29,7 +35,19 @@ impl SQLiteInvertedIndex {
             conn,
             table: table.into(),
             analyzer,
+            index_field_analyzers: BTreeMap::new(),
+            search_field_analyzers: BTreeMap::new(),
         }
+    }
+
+    /// Tokenize `text` against the analyzer bound to `field`. Mirrors
+    /// Python's `SQLiteInvertedIndex._tokenize`.
+    pub fn tokenize(&self, text: &str, field: &str) -> Vec<String> {
+        let analyzer = self
+            .index_field_analyzers
+            .get(field)
+            .unwrap_or(&self.analyzer);
+        analyzer.analyze(text)
     }
 
     fn add_document_inner(
@@ -70,7 +88,11 @@ impl SQLiteInvertedIndex {
             )?;
 
             for (field, text) in fields {
-                let tokens = self.analyzer.analyze(&text);
+                let analyzer = self
+                    .index_field_analyzers
+                    .get(&field)
+                    .unwrap_or(&self.analyzer);
+                let tokens = analyzer.analyze(&text);
                 let length = tokens.len() as i64;
                 tx.execute(
                     "INSERT OR REPLACE INTO _doc_lengths
@@ -360,6 +382,48 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 Ok(rows)
             })
             .unwrap_or_default()
+    }
+
+    fn set_field_analyzer(
+        &mut self,
+        field: &str,
+        analyzer: Analyzer,
+        phase: AnalyzerPhase,
+    ) -> Result<(), String> {
+        match phase {
+            AnalyzerPhase::Index => {
+                self.index_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+            AnalyzerPhase::Search => {
+                self.search_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+            AnalyzerPhase::Both => {
+                self.index_field_analyzers
+                    .insert(field.to_string(), analyzer.clone());
+                self.search_field_analyzers
+                    .insert(field.to_string(), analyzer);
+            }
+        }
+        Ok(())
+    }
+
+    fn get_field_analyzer(&self, field: &str) -> Analyzer {
+        self.index_field_analyzers
+            .get(field)
+            .cloned()
+            .unwrap_or_else(|| self.analyzer.clone())
+    }
+
+    fn get_search_analyzer(&self, field: &str) -> Analyzer {
+        if let Some(a) = self.search_field_analyzers.get(field) {
+            return a.clone();
+        }
+        if let Some(a) = self.index_field_analyzers.get(field) {
+            return a.clone();
+        }
+        self.analyzer.clone()
     }
 }
 

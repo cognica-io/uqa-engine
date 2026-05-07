@@ -1249,6 +1249,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "unicode-normalization",
  "uqa-core",
@@ -1368,6 +1369,7 @@ name = "uqa-operators"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "uqa-analysis",
  "uqa-core",
  "uqa-fusion",
  "uqa-scoring",
