@@ -15,7 +15,9 @@ pub mod registry;
 pub mod token_filter;
 pub mod tokenizer;
 
-pub use analyzer::Analyzer;
+pub use analyzer::{
+    keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
+};
 pub use char_filter::CharFilter;
 pub use highlight::{highlight, HighlightOptions};
 pub use registry::{
