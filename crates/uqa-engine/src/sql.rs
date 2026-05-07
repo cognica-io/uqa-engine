@@ -490,11 +490,14 @@ fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
             }
         }
         DropKind::Index => {
-            // Indexes in this engine are catalog metadata only; dropping
-            // by name is informational. With IF EXISTS we always succeed;
-            // without it we still succeed because we never registered
-            // the index by name in the first place.
-            for _ in &stmt.names {}
+            // Persisted as `_catalog_indexes` rows. The in-memory
+            // physical structures (FTS / vector indexes attached to
+            // table fields) are not torn down here -- the catalog
+            // entry merely tracks the CREATE INDEX statement so it
+            // survives Engine::open.
+            for name in &stmt.names {
+                engine.drop_catalog_index(name);
+            }
         }
         DropKind::View => {
             for name in &stmt.names {
@@ -902,6 +905,20 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
                 return Err(SQLError::Internal(format!("add_fts_field: {e}")));
             }
         }
+    }
+    // Persist the CREATE INDEX statement itself so reopen sees the
+    // same set of registered indexes. The engine layer parses
+    // `parameters_json` back into `(key, value)` pairs and re-runs
+    // any access-method-specific side effects (e.g. add_fts_field
+    // for `gin`) on restore.
+    if let Some(name) = c.name.as_ref() {
+        engine.register_catalog_index(
+            name,
+            if am.is_empty() { "btree" } else { am.as_str() },
+            &c.table,
+            &c.columns,
+            &c.options,
+        );
     }
     Ok(SQLResult::empty())
 }

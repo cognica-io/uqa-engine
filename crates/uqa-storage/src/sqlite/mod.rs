@@ -13,7 +13,10 @@ pub mod document_store;
 pub mod inverted_index;
 pub mod vector_index;
 
-pub use catalog::{Catalog, TableSchema, VectorFieldSchema, CURRENT_SCHEMA_VERSION};
+pub use catalog::{
+    Catalog, CatalogIndexRow, EdgeRow, ForeignTableRow, TableSchema, VectorFieldSchema,
+    CURRENT_SCHEMA_VERSION,
+};
 pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;

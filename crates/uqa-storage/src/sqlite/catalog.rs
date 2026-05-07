@@ -6,7 +6,7 @@
 
 //! Catalog: schema versioning, migrations, and persisted table metadata.
 //!
-//! The catalog owns a single `_meta` table that records the schema version
+//! The catalog owns a single `_metadata` table that records the schema version
 //! plus a `_tables` table holding per-table analyzer config and the lists
 //! of FTS / vector fields registered on each table. Concrete data tables
 //! (`_documents`, `_postings`, `_vectors`, ...) are created by their
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
@@ -40,6 +40,37 @@ pub struct VectorFieldSchema {
     pub dimensions: u32,
 }
 
+/// One row from `_graph_edges`. Mirrors Python's
+/// `(edge_id, source_id, target_id, label, properties_json)` tuple
+/// but as a typed struct so the catalog API stays clippy-clean.
+#[derive(Debug, Clone)]
+pub struct EdgeRow {
+    pub edge_id: u64,
+    pub source_id: u64,
+    pub target_id: u64,
+    pub label: String,
+    pub properties_json: String,
+}
+
+/// One row from `_foreign_tables`.
+#[derive(Debug, Clone)]
+pub struct ForeignTableRow {
+    pub name: String,
+    pub server_name: String,
+    pub columns_json: String,
+    pub options_json: String,
+}
+
+/// One row from `_catalog_indexes`.
+#[derive(Debug, Clone)]
+pub struct CatalogIndexRow {
+    pub name: String,
+    pub index_type: String,
+    pub table_name: String,
+    pub columns_json: String,
+    pub parameters_json: String,
+}
+
 pub struct Catalog {
     conn: ManagedConnection,
 }
@@ -58,8 +89,26 @@ impl Catalog {
 
     fn run_migrations(&self) -> Result<()> {
         self.conn.with_mut(|conn| {
+            // Older catalogs (pre-v7) used the table name `_meta`. v7
+            // renames it to `_metadata` to match Python — promote the
+            // legacy table before any migration query touches it.
+            let legacy_meta_only: bool = conn
+                .query_row(
+                    "SELECT \
+                        (SELECT COUNT(*) FROM sqlite_master \
+                          WHERE type='table' AND name='_meta') > 0 \
+                     AND (SELECT COUNT(*) FROM sqlite_master \
+                            WHERE type='table' AND name='_metadata') = 0",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .optional()?
+                .is_some_and(|n| n != 0);
+            if legacy_meta_only {
+                conn.execute("ALTER TABLE _meta RENAME TO _metadata", [])?;
+            }
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS _meta (
+                "CREATE TABLE IF NOT EXISTS _metadata (
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 )",
@@ -67,7 +116,7 @@ impl Catalog {
             )?;
             let current: u32 = conn
                 .query_row(
-                    "SELECT value FROM _meta WHERE key = 'schema_version'",
+                    "SELECT value FROM _metadata WHERE key = 'schema_version'",
                     [],
                     |r| r.get::<_, String>(0),
                 )
@@ -79,7 +128,8 @@ impl Catalog {
                     let tx = conn.transaction()?;
                     tx.execute_batch(sql)?;
                     tx.execute(
-                        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?1)",
+                        "INSERT OR REPLACE INTO _metadata (key, value) \
+                         VALUES ('schema_version', ?1)",
                         params![version.to_string()],
                     )?;
                     tx.commit()?;
@@ -255,39 +305,40 @@ impl Catalog {
         })
     }
 
-    /// Register the existence of a named graph. Vertex / edge
-    /// payloads land in `_graph_vertices` / `_graph_edges` separately
-    /// — this row records the empty-graph case so the engine can
-    /// re-hydrate every previously-created graph at reopen, even if no
-    /// data has been added yet.
-    pub fn save_graph(&self, name: &str) -> Result<()> {
+    /// Register the existence of a named graph in the catalog.
+    /// Mirrors Python `Catalog.save_named_graph`.
+    pub fn save_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR IGNORE INTO _graphs (name) VALUES (?1)",
+                "INSERT OR IGNORE INTO _named_graphs (name) VALUES (?1)",
                 params![name],
             )?;
             Ok(())
         })
     }
 
-    /// Drop a named graph plus every vertex and edge that belongs to
-    /// it. Used by `DROP GRAPH` / `graph_drop()`.
-    pub fn drop_graph(&self, name: &str) -> Result<()> {
+    /// Drop the named-graph registry row plus every membership entry
+    /// that scopes a vertex or edge to this graph. Vertex / edge rows
+    /// stay in `_graph_vertices` / `_graph_edges` until they go
+    /// orphan; call [`Catalog::purge_orphan_graph_entities`] after to
+    /// GC them. Mirrors Python `Catalog.drop_named_graph` plus the
+    /// orphan sweep that the engine performs on its behalf.
+    pub fn drop_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
-            c.execute("DELETE FROM _graphs WHERE name = ?1", params![name])?;
+            c.execute("DELETE FROM _named_graphs WHERE name = ?1", params![name])?;
             c.execute(
-                "DELETE FROM _graph_vertices WHERE graph = ?1",
+                "DELETE FROM _graph_membership WHERE graph_name = ?1",
                 params![name],
             )?;
-            c.execute("DELETE FROM _graph_edges WHERE graph = ?1", params![name])?;
             Ok(())
         })
     }
 
-    /// Sorted list of every persisted graph name.
-    pub fn load_graphs(&self) -> Result<Vec<String>> {
+    /// Sorted list of every persisted named graph.
+    /// Mirrors Python `Catalog.load_named_graphs`.
+    pub fn load_named_graphs(&self) -> Result<Vec<String>> {
         self.conn.with(|c| {
-            let mut stmt = c.prepare("SELECT name FROM _graphs ORDER BY name")?;
+            let mut stmt = c.prepare("SELECT name FROM _named_graphs ORDER BY name")?;
             let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
             let mut out = Vec::new();
             for row in rows {
@@ -297,60 +348,248 @@ impl Catalog {
         })
     }
 
-    /// Persist a vertex (or update its label / properties payload) on
-    /// `graph`. The body is the serde-JSON encoding of [`uqa_core::Vertex`].
-    pub fn save_graph_vertex(&self, graph: &str, vertex_id: u64, body: &str) -> Result<()> {
+    /// Persist a vertex by global id. `properties_json` is the JSON
+    /// encoding of the property map. Mirrors Python
+    /// `Catalog.save_vertex` extended with the `label` column the
+    /// `SQLiteGraphStore` writes alongside it.
+    pub fn save_vertex(&self, vertex_id: u64, label: &str, properties_json: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO _graph_vertices (graph, vertex_id, body) \
+                "INSERT OR REPLACE INTO _graph_vertices (vertex_id, label, properties_json) \
                  VALUES (?1, ?2, ?3)",
-                params![graph, vertex_id as i64, body],
+                params![vertex_id as i64, label, properties_json],
             )?;
             Ok(())
         })
     }
 
-    /// Remove a single vertex from `graph`.
-    pub fn delete_graph_vertex(&self, graph: &str, vertex_id: u64) -> Result<()> {
+    /// Delete a vertex by global id.
+    pub fn delete_vertex(&self, vertex_id: u64) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
-                "DELETE FROM _graph_vertices WHERE graph = ?1 AND vertex_id = ?2",
-                params![graph, vertex_id as i64],
+                "DELETE FROM _graph_vertices WHERE vertex_id = ?1",
+                params![vertex_id as i64],
             )?;
             Ok(())
         })
     }
 
-    /// Persist an edge on `graph`. The body is the serde-JSON encoding
-    /// of [`uqa_core::Edge`].
-    pub fn save_graph_edge(&self, graph: &str, edge_id: u64, body: &str) -> Result<()> {
+    /// Every vertex row sorted by id, returned as
+    /// `(vertex_id, label, properties_json)` so the caller rebuilds
+    /// the `Vertex` from the typed columns plus the JSON-encoded
+    /// property map. Mirrors Python `Catalog.load_vertices`.
+    pub fn load_vertices(&self) -> Result<Vec<(u64, String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT vertex_id, label, properties_json FROM _graph_vertices ORDER BY vertex_id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id, label, props) = row?;
+                out.push((id as u64, label, props));
+            }
+            Ok(out)
+        })
+    }
+
+    /// Persist an edge by global id with its source / target vertices,
+    /// label, and JSON-encoded property map. Mirrors Python
+    /// `Catalog.save_edge`.
+    pub fn save_edge(
+        &self,
+        edge_id: u64,
+        source_id: u64,
+        target_id: u64,
+        label: &str,
+        properties_json: &str,
+    ) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO _graph_edges (graph, edge_id, body) \
+                "INSERT OR REPLACE INTO _graph_edges \
+                    (edge_id, source_id, target_id, label, properties_json) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    edge_id as i64,
+                    source_id as i64,
+                    target_id as i64,
+                    label,
+                    properties_json
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Delete an edge by global id.
+    pub fn delete_edge(&self, edge_id: u64) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _graph_edges WHERE edge_id = ?1",
+                params![edge_id as i64],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Every edge row sorted by id. Mirrors Python `Catalog.load_edges`.
+    pub fn load_edges(&self) -> Result<Vec<EdgeRow>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT edge_id, source_id, target_id, label, properties_json \
+                   FROM _graph_edges ORDER BY edge_id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id, src, tgt, label, props) = row?;
+                out.push(EdgeRow {
+                    edge_id: id as u64,
+                    source_id: src as u64,
+                    target_id: tgt as u64,
+                    label,
+                    properties_json: props,
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    /// Attach `entity_id` (a vertex when `entity_type == "vertex"`, an
+    /// edge when `"edge"`) to `graph_name`. The same entity can sit in
+    /// many graphs; the row is keyed by the full triple so duplicate
+    /// attaches no-op.
+    pub fn save_graph_membership(
+        &self,
+        entity_type: &str,
+        entity_id: u64,
+        graph_name: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO _graph_membership \
+                    (entity_type, entity_id, graph_name) \
                  VALUES (?1, ?2, ?3)",
-                params![graph, edge_id as i64, body],
+                params![entity_type, entity_id as i64, graph_name],
             )?;
             Ok(())
         })
     }
 
-    /// Remove a single edge from `graph`.
-    pub fn delete_graph_edge(&self, graph: &str, edge_id: u64) -> Result<()> {
+    /// Detach `entity_id` from `graph_name`.
+    pub fn delete_graph_membership(
+        &self,
+        entity_type: &str,
+        entity_id: u64,
+        graph_name: &str,
+    ) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
-                "DELETE FROM _graph_edges WHERE graph = ?1 AND edge_id = ?2",
-                params![graph, edge_id as i64],
+                "DELETE FROM _graph_membership \
+                  WHERE entity_type = ?1 AND entity_id = ?2 AND graph_name = ?3",
+                params![entity_type, entity_id as i64, graph_name],
             )?;
             Ok(())
         })
     }
 
-    /// Vertex bodies for `graph`, sorted by vertex id.
-    pub fn load_graph_vertices(&self, graph: &str) -> Result<Vec<String>> {
+    /// Detach every entity from `graph_name`. Used as the prelude to a
+    /// full graph drop / Cypher resync.
+    pub fn delete_graph_membership_for_graph(&self, graph_name: &str) -> Result<()> {
         self.conn.with(|c| {
-            let mut stmt =
-                c.prepare("SELECT body FROM _graph_vertices WHERE graph = ?1 ORDER BY vertex_id")?;
-            let rows = stmt.query_map(params![graph], |r| r.get::<_, String>(0))?;
+            c.execute(
+                "DELETE FROM _graph_membership WHERE graph_name = ?1",
+                params![graph_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Every membership row, returned as `(entity_type, entity_id, graph_name)`.
+    pub fn load_graph_memberships(&self) -> Result<Vec<(String, u64, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT entity_type, entity_id, graph_name FROM _graph_membership \
+                  ORDER BY graph_name, entity_type, entity_id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (ty, id, graph) = row?;
+                out.push((ty, id as u64, graph));
+            }
+            Ok(out)
+        })
+    }
+
+    /// Drop vertex / edge rows that no membership row still references.
+    /// Run after a detach / drop to garbage-collect orphaned entities.
+    pub fn purge_orphan_graph_entities(&self) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _graph_vertices \
+                  WHERE vertex_id NOT IN ( \
+                    SELECT entity_id FROM _graph_membership WHERE entity_type = 'vertex' \
+                  )",
+                [],
+            )?;
+            c.execute(
+                "DELETE FROM _graph_edges \
+                  WHERE edge_id NOT IN ( \
+                    SELECT entity_id FROM _graph_membership WHERE entity_type = 'edge' \
+                  )",
+                [],
+            )?;
+            Ok(())
+        })
+    }
+
+    // -- Named analyzers ---------------------------------------------------
+
+    /// Persist a named analyzer configuration. Mirrors Python
+    /// `Catalog.save_analyzer`.
+    pub fn save_analyzer(&self, name: &str, config_json: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _analyzers (name, config_json) VALUES (?1, ?2)",
+                params![name, config_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_analyzer(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute("DELETE FROM _analyzers WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
+
+    pub fn load_analyzers(&self) -> Result<Vec<(String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare("SELECT name, config_json FROM _analyzers ORDER BY name")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             let mut out = Vec::new();
             for row in rows {
                 out.push(row?);
@@ -359,12 +598,266 @@ impl Catalog {
         })
     }
 
-    /// Edge bodies for `graph`, sorted by edge id.
-    pub fn load_graph_edges(&self, graph: &str) -> Result<Vec<String>> {
+    // -- Per-field analyzer overrides --------------------------------------
+
+    /// Persist a `(table, field, phase) -> analyzer_name` row. Mirrors
+    /// Python `Catalog.save_table_field_analyzer`.
+    pub fn save_table_field_analyzer(
+        &self,
+        table_name: &str,
+        field: &str,
+        phase: &str,
+        analyzer_name: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _table_field_analyzers \
+                    (table_name, field, phase, analyzer_name) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![table_name, field, phase, analyzer_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_table_field_analyzers(&self, table_name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _table_field_analyzers WHERE table_name = ?1",
+                params![table_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Every `(table_name, field, phase, analyzer_name)` row sorted by
+    /// `(table_name, field, phase)`.
+    pub fn load_table_field_analyzers(&self) -> Result<Vec<(String, String, String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT table_name, field, phase, analyzer_name FROM _table_field_analyzers \
+                  ORDER BY table_name, field, phase",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    // -- Foreign servers ---------------------------------------------------
+
+    pub fn save_foreign_server(
+        &self,
+        name: &str,
+        fdw_type: &str,
+        options_json: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _foreign_servers (name, fdw_type, options) \
+                 VALUES (?1, ?2, ?3)",
+                params![name, fdw_type, options_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_foreign_server(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _foreign_servers WHERE name = ?1",
+                params![name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn load_foreign_servers(&self) -> Result<Vec<(String, String, String)>> {
         self.conn.with(|c| {
             let mut stmt =
-                c.prepare("SELECT body FROM _graph_edges WHERE graph = ?1 ORDER BY edge_id")?;
-            let rows = stmt.query_map(params![graph], |r| r.get::<_, String>(0))?;
+                c.prepare("SELECT name, fdw_type, options FROM _foreign_servers ORDER BY name")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    // -- Foreign tables ----------------------------------------------------
+
+    pub fn save_foreign_table(
+        &self,
+        name: &str,
+        server_name: &str,
+        columns_json: &str,
+        options_json: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _foreign_tables \
+                    (name, server_name, columns_json, options) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![name, server_name, columns_json, options_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_foreign_table(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute("DELETE FROM _foreign_tables WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
+
+    pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT name, server_name, columns_json, options FROM _foreign_tables \
+                  ORDER BY name",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (name, server, cols, opts) = row?;
+                out.push(ForeignTableRow {
+                    name,
+                    server_name: server,
+                    columns_json: cols,
+                    options_json: opts,
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    // -- Catalog indexes (CREATE INDEX state) ------------------------------
+
+    pub fn save_catalog_index(
+        &self,
+        name: &str,
+        index_type: &str,
+        table_name: &str,
+        columns_json: &str,
+        parameters_json: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _catalog_indexes \
+                    (name, index_type, table_name, columns, parameters) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![name, index_type, table_name, columns_json, parameters_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_catalog_index(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _catalog_indexes WHERE name = ?1",
+                params![name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_catalog_indexes_for_table(&self, table_name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _catalog_indexes WHERE table_name = ?1",
+                params![table_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn load_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT name, index_type, table_name, columns, parameters \
+                   FROM _catalog_indexes ORDER BY name",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (name, ty, table, cols, params_json) = row?;
+                out.push(CatalogIndexRow {
+                    name,
+                    index_type: ty,
+                    table_name: table,
+                    columns_json: cols,
+                    parameters_json: params_json,
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    // -- Path indexes ------------------------------------------------------
+
+    pub fn save_path_index(&self, graph_name: &str, label_sequences_json: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _path_indexes (graph_name, label_sequences) \
+                 VALUES (?1, ?2)",
+                params![graph_name, label_sequences_json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_path_index(&self, graph_name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _path_indexes WHERE graph_name = ?1",
+                params![graph_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// `(graph_name, label_sequences_json)` for every persisted path index.
+    pub fn load_path_indexes(&self) -> Result<Vec<(String, String)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT graph_name, label_sequences FROM _path_indexes ORDER BY graph_name",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             let mut out = Vec::new();
             for row in rows {
                 out.push(row?);
@@ -477,6 +970,103 @@ const MIGRATIONS: &[(u32, &str)] = &[
     );
     CREATE INDEX IF NOT EXISTS _graph_edges_by_graph
         ON _graph_edges (graph);
+    ",
+    ),
+    // Re-shape graph storage to mirror Python's `uqa/storage/catalog.py`:
+    // global vertex / edge tables keyed by id, a separate
+    // `_graph_membership` table mapping each entity to one or more
+    // named graphs, and the four supporting indexes the planner needs
+    // for label-based lookups. The legacy v5 tables (denormalized by
+    // graph name + JSON body) get dropped because no engine call site
+    // reads them anymore.
+    (
+        6,
+        r"
+    DROP TABLE IF EXISTS _graphs;
+    DROP TABLE IF EXISTS _graph_vertices;
+    DROP TABLE IF EXISTS _graph_edges;
+
+    CREATE TABLE IF NOT EXISTS _named_graphs (
+        name TEXT PRIMARY KEY
+    );
+
+    CREATE TABLE IF NOT EXISTS _graph_vertices (
+        vertex_id       INTEGER PRIMARY KEY,
+        label           TEXT NOT NULL DEFAULT '',
+        properties_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _graph_edges (
+        edge_id         INTEGER PRIMARY KEY,
+        source_id       INTEGER NOT NULL,
+        target_id       INTEGER NOT NULL,
+        label           TEXT NOT NULL,
+        properties_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _graph_membership (
+        entity_type TEXT NOT NULL,
+        entity_id   INTEGER NOT NULL,
+        graph_name  TEXT NOT NULL,
+        PRIMARY KEY (entity_type, entity_id, graph_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS _graph_vertices_label
+        ON _graph_vertices (label);
+    CREATE INDEX IF NOT EXISTS _graph_edges_out
+        ON _graph_edges (source_id, label);
+    CREATE INDEX IF NOT EXISTS _graph_edges_in
+        ON _graph_edges (target_id, label);
+    CREATE INDEX IF NOT EXISTS _graph_edges_label
+        ON _graph_edges (label);
+    ",
+    ),
+    // Persist the five engine-side registries that previously lived
+    // only in `Engine`'s in-memory maps (named analyzers, table-field
+    // analyzer overrides, foreign servers / tables, registered
+    // indexes, graph path indexes). Tables and column shapes mirror
+    // Python's `uqa/storage/catalog.py` exactly.
+    (
+        7,
+        r"
+    CREATE TABLE IF NOT EXISTS _analyzers (
+        name        TEXT PRIMARY KEY,
+        config_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _table_field_analyzers (
+        table_name    TEXT NOT NULL,
+        field         TEXT NOT NULL,
+        phase         TEXT NOT NULL,
+        analyzer_name TEXT NOT NULL,
+        PRIMARY KEY (table_name, field, phase)
+    );
+
+    CREATE TABLE IF NOT EXISTS _foreign_servers (
+        name     TEXT PRIMARY KEY,
+        fdw_type TEXT NOT NULL,
+        options  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _foreign_tables (
+        name         TEXT PRIMARY KEY,
+        server_name  TEXT NOT NULL,
+        columns_json TEXT NOT NULL,
+        options      TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _catalog_indexes (
+        name       TEXT PRIMARY KEY,
+        index_type TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        columns    TEXT NOT NULL,
+        parameters TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS _path_indexes (
+        graph_name      TEXT PRIMARY KEY,
+        label_sequences TEXT NOT NULL
+    );
     ",
     ),
 ];

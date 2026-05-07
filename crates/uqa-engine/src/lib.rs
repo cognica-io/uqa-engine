@@ -390,11 +390,20 @@ impl Engine {
         self.named_analyzers
             .write()
             .insert(name.to_string(), config_json.to_string());
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_analyzer(name, config_json);
+        }
         Ok(())
     }
 
     pub fn drop_named_analyzer(&self, name: &str) -> bool {
-        self.named_analyzers.write().remove(name).is_some()
+        let removed = self.named_analyzers.write().remove(name).is_some();
+        if removed {
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.drop_analyzer(name);
+            }
+        }
+        removed
     }
 
     pub fn list_named_analyzers(&self) -> Vec<String> {
@@ -426,8 +435,11 @@ impl Engine {
         };
         self.table_field_analyzers.write().insert(
             (table.to_string(), field.to_string()),
-            (analyzer_name.to_string(), phase),
+            (analyzer_name.to_string(), phase.clone()),
         );
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_table_field_analyzer(table, field, &phase, analyzer_name);
+        }
         Ok(())
     }
 
@@ -510,11 +522,16 @@ impl Engine {
         servers.insert(
             name.clone(),
             uqa_fdw::ForeignServer {
-                name,
-                fdw_type,
-                options: opt_map,
+                name: name.clone(),
+                fdw_type: fdw_type.clone(),
+                options: opt_map.clone(),
             },
         );
+        drop(servers);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let options_json = serde_json::to_string(&opt_map).unwrap_or_else(|_| "{}".into());
+            let _ = catalog.save_foreign_server(&name, &fdw_type, &options_json);
+        }
         Ok(())
     }
 
@@ -560,12 +577,18 @@ impl Engine {
         tables.insert(
             name.clone(),
             uqa_fdw::ForeignTable {
-                name,
-                server_name,
+                name: name.clone(),
+                server_name: server_name.clone(),
                 columns: fdw_columns,
-                options: opt_map,
+                options: opt_map.clone(),
             },
         );
+        drop(tables);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let columns_json = serde_json::to_string(&columns).unwrap_or_else(|_| "[]".into());
+            let options_json = serde_json::to_string(&opt_map).unwrap_or_else(|_| "{}".into());
+            let _ = catalog.save_foreign_table(&name, &server_name, &columns_json, &options_json);
+        }
         Ok(())
     }
 
@@ -579,11 +602,23 @@ impl Engine {
         if referenced {
             return false;
         }
-        self.foreign_servers.write().remove(name).is_some()
+        let removed = self.foreign_servers.write().remove(name).is_some();
+        if removed {
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.drop_foreign_server(name);
+            }
+        }
+        removed
     }
 
     pub fn drop_foreign_table(&self, name: &str) -> bool {
-        self.foreign_tables.write().remove(name).is_some()
+        let removed = self.foreign_tables.write().remove(name).is_some();
+        if removed {
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.drop_foreign_table(name);
+            }
+        }
+        removed
     }
 
     pub fn foreign_server(&self, name: &str) -> Option<uqa_fdw::ForeignServer> {
@@ -604,6 +639,38 @@ impl Engine {
         let mut out: Vec<String> = self.foreign_tables.read().keys().cloned().collect();
         out.sort();
         out
+    }
+
+    // -----------------------------------------------------------------
+    // Catalog index registry. Mirrors Python's `_catalog_indexes`
+    // table — records the CREATE INDEX statement (name + access
+    // method + columns + WITH options) so reopen can replay any
+    // metadata-bearing side effects.
+    // -----------------------------------------------------------------
+
+    pub fn register_catalog_index(
+        &self,
+        name: &str,
+        index_type: &str,
+        table: &str,
+        columns: &[String],
+        options: &[(String, String)],
+    ) {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        let columns_json = serde_json::to_string(columns).unwrap_or_else(|_| "[]".into());
+        let options_map: std::collections::BTreeMap<String, String> =
+            options.iter().cloned().collect();
+        let parameters_json = serde_json::to_string(&options_map).unwrap_or_else(|_| "{}".into());
+        let _ =
+            catalog.save_catalog_index(name, index_type, table, &columns_json, &parameters_json);
+    }
+
+    pub fn drop_catalog_index(&self, name: &str) {
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.drop_catalog_index(name);
+        }
     }
 
     /// Cancel every in-flight query that holds a clone of this
@@ -728,23 +795,182 @@ impl Engine {
             self.tables.write().insert(schema.name, Arc::new(table));
         }
         self.restore_graphs_from_catalog(catalog)?;
+        self.restore_engine_registries_from_catalog(catalog)?;
+        Ok(())
+    }
+
+    /// Re-hydrate the named-analyzer / table-field-analyzer / foreign
+    /// server / foreign table / catalog index / path index registries
+    /// from the catalog. Mirrors the side effects of every
+    /// `register_*` method but skips their catalog write-back so the
+    /// load is idempotent.
+    fn restore_engine_registries_from_catalog(&self, catalog: &Catalog) -> Result<(), SQLiteError> {
+        // Named analyzers.
+        for (name, config_json) in catalog.load_analyzers()? {
+            self.named_analyzers.write().insert(name, config_json);
+        }
+        // Per-(table, field) analyzer overrides.
+        for (table, field, phase, analyzer_name) in catalog.load_table_field_analyzers()? {
+            self.table_field_analyzers
+                .write()
+                .insert((table, field), (analyzer_name, phase));
+        }
+        // Foreign servers.
+        for (name, fdw_type, options_json) in catalog.load_foreign_servers()? {
+            let options: BTreeMap<String, String> =
+                serde_json::from_str(&options_json).unwrap_or_default();
+            self.foreign_servers.write().insert(
+                name.clone(),
+                uqa_fdw::ForeignServer {
+                    name,
+                    fdw_type,
+                    options,
+                },
+            );
+        }
+        // Foreign tables.
+        for row in catalog.load_foreign_tables()? {
+            let columns: Vec<uqa_sql::ast::ColumnDef> =
+                serde_json::from_str(&row.columns_json).unwrap_or_default();
+            let options: BTreeMap<String, String> =
+                serde_json::from_str(&row.options_json).unwrap_or_default();
+            let fdw_columns: Vec<uqa_fdw::ColumnDef> = columns
+                .iter()
+                .map(|c| uqa_fdw::ColumnDef {
+                    name: c.name.clone(),
+                    ty: match &c.ty {
+                        uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
+                        uqa_sql::ast::ColumnType::Real => uqa_fdw::ColumnType::Real,
+                        uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
+                        uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
+                    },
+                })
+                .collect();
+            self.foreign_tables.write().insert(
+                row.name.clone(),
+                uqa_fdw::ForeignTable {
+                    name: row.name,
+                    server_name: row.server_name,
+                    columns: fdw_columns,
+                    options,
+                },
+            );
+        }
+        // Catalog indexes: replay any side effects (e.g. `gin` re-
+        // registers the FTS field with its analyzer). Indexes that
+        // were declared on tables that no longer exist are skipped --
+        // drop_table already swept the catalog rows on the way out.
+        for row in catalog.load_catalog_indexes()? {
+            if !self.has_table(&row.table_name) {
+                continue;
+            }
+            let columns: Vec<String> = serde_json::from_str(&row.columns_json).unwrap_or_default();
+            let parameters: BTreeMap<String, String> =
+                serde_json::from_str(&row.parameters_json).unwrap_or_default();
+            if row.index_type.eq_ignore_ascii_case("gin")
+                || row.index_type.is_empty()
+                || row.index_type.eq_ignore_ascii_case("btree")
+            {
+                let analyzer = parameters
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
+                    .map(|(_, v)| v.as_str());
+                for col in &columns {
+                    let _ =
+                        self.add_fts_field_with_analyzer(&row.table_name, col.clone(), analyzer);
+                }
+            }
+        }
+        // Path indexes. The catalog stores label sequences keyed by
+        // the same `<graph>::<name>` engine key.
+        for (key, seq_json) in catalog.load_path_indexes()? {
+            let label_sequences: Vec<Vec<String>> =
+                serde_json::from_str(&seq_json).unwrap_or_default();
+            // Split the engine's compound key back into (graph, name)
+            // and rebuild the in-memory path index against the live
+            // graph store. The catalog layer accepts the compound key
+            // as opaque text -- only the engine knows the structure.
+            if let Some((graph, _name)) = key.split_once("::") {
+                let graphs = self.graphs.read();
+                let Some(store) = graphs.get(graph) else {
+                    continue;
+                };
+                let idx = uqa_graph::PathIndex::build(store, graph, &label_sequences);
+                drop(graphs);
+                self.path_indexes.write().insert(key.clone(), idx);
+            }
+        }
         Ok(())
     }
 
     fn restore_graphs_from_catalog(&self, catalog: &Catalog) -> Result<(), SQLiteError> {
+        use std::collections::BTreeMap;
         use uqa_graph::GraphStore as _;
-        for graph_name in catalog.load_graphs()? {
-            let mut store = uqa_graph::MemoryGraphStore::default();
-            store.create_graph(&graph_name);
-            for body in catalog.load_graph_vertices(&graph_name)? {
-                let vertex: uqa_core::Vertex = serde_json::from_str(&body)?;
-                store.add_vertex(vertex, &graph_name);
+        // Step 1: register every named graph (the registry table is
+        // authoritative for empty graphs).
+        let names = catalog.load_named_graphs()?;
+        let mut graphs = self.graphs.write();
+        for name in &names {
+            graphs.entry(name.clone()).or_default();
+            if let Some(store) = graphs.get_mut(name) {
+                if !store.has_graph(name) {
+                    store.create_graph(name);
+                }
             }
-            for body in catalog.load_graph_edges(&graph_name)? {
-                let edge: uqa_core::Edge = serde_json::from_str(&body)?;
-                store.add_edge(edge, &graph_name);
+        }
+        // Step 2: load every vertex / edge into a side-table keyed
+        // by global id. Memberships drive which graphs each entity
+        // ends up attached to.
+        let vertex_rows = catalog.load_vertices()?;
+        let mut vertex_by_id: BTreeMap<u64, uqa_core::Vertex> = BTreeMap::new();
+        for (id, label, props_json) in vertex_rows {
+            let properties: BTreeMap<String, uqa_core::Value> = serde_json::from_str(&props_json)?;
+            vertex_by_id.insert(
+                id,
+                uqa_core::Vertex {
+                    vertex_id: id,
+                    label,
+                    properties,
+                },
+            );
+        }
+        let edge_rows = catalog.load_edges()?;
+        let mut edge_by_id: BTreeMap<u64, uqa_core::Edge> = BTreeMap::new();
+        for row in edge_rows {
+            let properties: BTreeMap<String, uqa_core::Value> =
+                serde_json::from_str(&row.properties_json)?;
+            edge_by_id.insert(
+                row.edge_id,
+                uqa_core::Edge {
+                    edge_id: row.edge_id,
+                    source_id: row.source_id,
+                    target_id: row.target_id,
+                    label: row.label,
+                    properties,
+                },
+            );
+        }
+        // Step 3: replay each membership row through the per-graph
+        // store. add_vertex / add_edge populate the partition's
+        // adjacency indexes for free.
+        for (entity_type, entity_id, graph_name) in catalog.load_graph_memberships()? {
+            let store = graphs.entry(graph_name.clone()).or_default();
+            if !store.has_graph(&graph_name) {
+                store.create_graph(&graph_name);
             }
-            self.graphs.write().insert(graph_name, store);
+            match entity_type.as_str() {
+                "vertex" => {
+                    if let Some(v) = vertex_by_id.get(&entity_id) {
+                        store.add_vertex(v.clone(), &graph_name);
+                    }
+                }
+                "edge" => {
+                    if let Some(e) = edge_by_id.get(&entity_id) {
+                        store.add_edge(e.clone(), &graph_name);
+                    }
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
@@ -891,7 +1117,7 @@ impl Engine {
         graphs.entry(name.clone()).or_default();
         drop(graphs);
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_graph(&name);
+            let _ = catalog.save_named_graph(&name);
         }
     }
 
@@ -899,7 +1125,11 @@ impl Engine {
     pub fn drop_graph(&self, name: &str) {
         self.graphs.write().remove(name);
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_graph(name);
+            let _ = catalog.drop_named_graph(name);
+            // Vertex / edge rows survive in the global tables until
+            // every graph has detached them; sweep the orphans now so
+            // the catalog stays in sync with the in-memory view.
+            let _ = catalog.purge_orphan_graph_entities();
         }
     }
 
@@ -920,10 +1150,14 @@ impl Engine {
     pub fn add_graph_vertex(&self, vertex: uqa_core::Vertex, graph: &str) {
         use uqa_graph::GraphStore as _;
         let vertex_id = vertex.vertex_id;
-        let body = self
-            .catalog
-            .as_ref()
-            .and_then(|_| serde_json::to_string(&vertex).ok());
+        // Snapshot the persistable shape (label + properties JSON)
+        // before moving the value into the in-memory store so the
+        // catalog write below sees the exact same data.
+        let persist = self.catalog.as_ref().and_then(|_| {
+            serde_json::to_string(&vertex.properties)
+                .ok()
+                .map(|p| (vertex.label.clone(), p))
+        });
         {
             let mut graphs = self.graphs.write();
             let store = graphs.entry(graph.to_string()).or_default();
@@ -933,9 +1167,10 @@ impl Engine {
             store.add_vertex(vertex, graph);
         }
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_graph(graph);
-            if let Some(b) = body {
-                let _ = catalog.save_graph_vertex(graph, vertex_id, &b);
+            let _ = catalog.save_named_graph(graph);
+            if let Some((label, props_json)) = persist {
+                let _ = catalog.save_vertex(vertex_id, &label, &props_json);
+                let _ = catalog.save_graph_membership("vertex", vertex_id, graph);
             }
         }
     }
@@ -945,10 +1180,13 @@ impl Engine {
     pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) {
         use uqa_graph::GraphStore as _;
         let edge_id = edge.edge_id;
-        let body = self
-            .catalog
-            .as_ref()
-            .and_then(|_| serde_json::to_string(&edge).ok());
+        let edge_source = edge.source_id;
+        let edge_target = edge.target_id;
+        let persist = self.catalog.as_ref().and_then(|_| {
+            serde_json::to_string(&edge.properties)
+                .ok()
+                .map(|p| (edge.label.clone(), p))
+        });
         {
             let mut graphs = self.graphs.write();
             let store = graphs.entry(graph.to_string()).or_default();
@@ -958,9 +1196,10 @@ impl Engine {
             store.add_edge(edge, graph);
         }
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_graph(graph);
-            if let Some(b) = body {
-                let _ = catalog.save_graph_edge(graph, edge_id, &b);
+            let _ = catalog.save_named_graph(graph);
+            if let Some((label, props_json)) = persist {
+                let _ = catalog.save_edge(edge_id, edge_source, edge_target, &label, &props_json);
+                let _ = catalog.save_graph_membership("edge", edge_id, graph);
             }
         }
     }
@@ -986,26 +1225,42 @@ impl Engine {
         }
         drop(graphs);
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_graph(graph);
+            let _ = catalog.save_named_graph(graph);
+            let mut needs_purge = false;
             for op in delta.ops() {
                 match op {
                     DeltaOp::AddVertex(v) => {
-                        if let Ok(body) = serde_json::to_string(v) {
-                            let _ = catalog.save_graph_vertex(graph, v.vertex_id, &body);
+                        if let Ok(props_json) = serde_json::to_string(&v.properties) {
+                            let _ = catalog.save_vertex(v.vertex_id, &v.label, &props_json);
+                            let _ = catalog.save_graph_membership("vertex", v.vertex_id, graph);
                         }
                     }
                     DeltaOp::RemoveVertex(id) => {
-                        let _ = catalog.delete_graph_vertex(graph, *id);
+                        let _ = catalog.delete_graph_membership("vertex", *id, graph);
+                        needs_purge = true;
                     }
                     DeltaOp::AddEdge(e) => {
-                        if let Ok(body) = serde_json::to_string(e) {
-                            let _ = catalog.save_graph_edge(graph, e.edge_id, &body);
+                        if let Ok(props_json) = serde_json::to_string(&e.properties) {
+                            let _ = catalog.save_edge(
+                                e.edge_id,
+                                e.source_id,
+                                e.target_id,
+                                &e.label,
+                                &props_json,
+                            );
+                            let _ = catalog.save_graph_membership("edge", e.edge_id, graph);
                         }
                     }
                     DeltaOp::RemoveEdge(id) => {
-                        let _ = catalog.delete_graph_edge(graph, *id);
+                        let _ = catalog.delete_graph_membership("edge", *id, graph);
+                        needs_purge = true;
                     }
                 }
+            }
+            if needs_purge {
+                // Vertex / edge rows survive only while at least one
+                // graph still references them via `_graph_membership`.
+                let _ = catalog.purge_orphan_graph_entities();
             }
         }
         // Invalidate any cached path indexes for this graph: a path
@@ -1021,20 +1276,32 @@ impl Engine {
     /// — each sequence becomes a hash-friendly direct lookup for RPQ.
     /// Mirrors Python's `Engine.build_path_index`.
     pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
-        let graphs = self.graphs.read();
-        let Some(store) = graphs.get(graph) else {
-            return;
-        };
-        let idx = uqa_graph::PathIndex::build(store, graph, label_sequences);
         let key = format!("{graph}::{name}");
-        self.path_indexes.write().insert(key, idx);
+        let idx = {
+            let graphs = self.graphs.read();
+            let Some(store) = graphs.get(graph) else {
+                return;
+            };
+            uqa_graph::PathIndex::build(store, graph, label_sequences)
+        };
+        self.path_indexes.write().insert(key.clone(), idx);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let seq_json = serde_json::to_string(label_sequences).unwrap_or_else(|_| "[]".into());
+            let _ = catalog.save_path_index(&key, &seq_json);
+        }
     }
 
     /// Drop a path index by `(graph, name)`. Returns `true` when an
     /// index was removed. Mirrors Python's `Engine.drop_path_index`.
     pub fn drop_path_index(&self, name: &str, graph: &str) -> bool {
         let key = format!("{graph}::{name}");
-        self.path_indexes.write().remove(&key).is_some()
+        let removed = self.path_indexes.write().remove(&key).is_some();
+        if removed {
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.drop_path_index(&key);
+            }
+        }
+        removed
     }
 
     /// Look up a path index by `(graph, name)`. Returns a clone so the
@@ -1116,9 +1383,11 @@ impl Engine {
 
     /// Mirror the in-memory graph back to the catalog after a write.
     /// Cypher / `graph_with_mut` callers can edit the store directly,
-    /// so the simplest correct strategy is a full resync of the
-    /// graph's vertex / edge tables. The disk write is bounded by the
-    /// graph size, which is the same scale Cypher already touched.
+    /// so the simplest correct strategy is a full resync of `graph`'s
+    /// membership rows: drop every membership for the graph, re-insert
+    /// each vertex / edge currently in the partition, then garbage
+    /// collect any vertex / edge that fell out of every other graph's
+    /// membership too.
     fn resync_graph_to_catalog(&self, graph: &str) {
         use uqa_graph::GraphStore as _;
         let Some(catalog) = self.catalog.as_ref() else {
@@ -1128,19 +1397,27 @@ impl Engine {
         let Some(store) = graphs.get(graph) else {
             return;
         };
-        let _ = catalog.save_graph(graph);
-        let _ = catalog.drop_graph(graph);
-        let _ = catalog.save_graph(graph);
+        let _ = catalog.save_named_graph(graph);
+        let _ = catalog.delete_graph_membership_for_graph(graph);
         for vertex in store.vertices_in_graph(graph) {
-            if let Ok(body) = serde_json::to_string(&vertex) {
-                let _ = catalog.save_graph_vertex(graph, vertex.vertex_id, &body);
+            if let Ok(props_json) = serde_json::to_string(&vertex.properties) {
+                let _ = catalog.save_vertex(vertex.vertex_id, &vertex.label, &props_json);
+                let _ = catalog.save_graph_membership("vertex", vertex.vertex_id, graph);
             }
         }
         for edge in store.edges_in_graph(graph) {
-            if let Ok(body) = serde_json::to_string(&edge) {
-                let _ = catalog.save_graph_edge(graph, edge.edge_id, &body);
+            if let Ok(props_json) = serde_json::to_string(&edge.properties) {
+                let _ = catalog.save_edge(
+                    edge.edge_id,
+                    edge.source_id,
+                    edge.target_id,
+                    &edge.label,
+                    &props_json,
+                );
+                let _ = catalog.save_graph_membership("edge", edge.edge_id, graph);
             }
         }
+        let _ = catalog.purge_orphan_graph_entities();
     }
 
     /// Persist a deep-fusion model under `name`. Round-trips as JSON
@@ -1654,9 +1931,16 @@ impl Engine {
         if !removed {
             return false;
         }
+        // Sweep every related per-table registry so catalog state
+        // does not outlive the table.
+        self.table_field_analyzers
+            .write()
+            .retain(|(t, _), _| t != name);
         if let Some(catalog) = self.catalog.as_ref() {
             let _ = catalog.drop_table(name);
             let _ = catalog.purge_table_data(name);
+            let _ = catalog.drop_table_field_analyzers(name);
+            let _ = catalog.drop_catalog_indexes_for_table(name);
         }
         true
     }
