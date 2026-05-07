@@ -1299,11 +1299,11 @@ fn format_select_plan(stmt: &SelectStmt) -> String {
     if !stmt.order_by.is_empty() {
         let _ = writeln!(s, "  order_by={}", stmt.order_by.len());
     }
-    if let Some(n) = &stmt.limit {
-        let _ = writeln!(s, "  limit={n}");
+    if let Some(expr) = stmt.limit.as_ref() {
+        let _ = writeln!(s, "  limit={}", explain_int_expr(expr));
     }
-    if let Some(n) = &stmt.offset {
-        let _ = writeln!(s, "  offset={n}");
+    if let Some(expr) = stmt.offset.as_ref() {
+        let _ = writeln!(s, "  offset={}", explain_int_expr(expr));
     }
     if stmt.distinct {
         let _ = writeln!(s, "  distinct=true");
@@ -1381,6 +1381,12 @@ fn execute_select(
 ) -> Result<SQLResult, SQLError> {
     materialize_ctes(engine, &stmt.with, params, ctes)?;
 
+    // The parent `SelectStmt` carries the LHS branch's own clauses
+    // (projections / from / where / group-by / ORDER BY / LIMIT /
+    // OFFSET). The set-op-level combined clauses live on
+    // `set_op.combined_*`. The LHS branch executes with its own
+    // clauses applied; the merged result then takes the combined
+    // clauses below.
     let mut lhs = run_query_block(engine, stmt, params, ctes)?;
     if stmt.distinct {
         // SELECT DISTINCT: collapse duplicate output rows.
@@ -1398,7 +1404,7 @@ fn execute_select(
         return Ok(lhs);
     };
     let rhs = execute_select(engine, &set_op.right, params, ctes)?;
-    let combined = match (set_op.kind, set_op.all) {
+    let mut combined = match (set_op.kind, set_op.all) {
         (SetOpKind::Union, true) => {
             let mut rows = lhs.rows;
             rows.extend(rhs.rows);
@@ -1433,6 +1439,32 @@ fn execute_select(
             SQLResult::from_rows(lhs.columns, rows)
         }
     };
+
+    // Apply the union-level ORDER BY / LIMIT / OFFSET to the merged
+    // set-op result. The parent `stmt`'s own clauses already fired
+    // on the LHS branch above; here we use the combined clauses the
+    // compiler stashed on the SetOp.
+    if !set_op.combined_order_by.is_empty()
+        || set_op.combined_limit.is_some()
+        || set_op.combined_offset.is_some()
+    {
+        let synthetic = SelectStmt {
+            projections: Vec::new(),
+            from: None,
+            r#where: None,
+            group_by: Vec::new(),
+            grouping_sets: Vec::new(),
+            order_by: set_op.combined_order_by.clone(),
+            limit: set_op.combined_limit.clone(),
+            offset: set_op.combined_offset.clone(),
+            with: Vec::new(),
+            set_op: None,
+            distinct: false,
+        };
+        let columns = combined.columns.clone();
+        combined.rows = apply_row_order_limit(combined.rows, &synthetic, engine, params)?;
+        combined.columns = columns;
+    }
     Ok(combined)
 }
 
@@ -1475,7 +1507,7 @@ fn run_query_block(
     {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
-        let rows = apply_row_order_limit(rows, stmt, params)?;
+        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -1486,7 +1518,7 @@ fn run_query_block(
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, params)?;
+        rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -1522,14 +1554,33 @@ fn volcano_project_sort_limit(
         .projections
         .iter()
         .any(|p| matches!(p.expr, Expr::Star));
+    // Pre-projection ordering / limiting. PG semantics: ORDER BY can
+    // reference columns that the SELECT list drops, so the sort and
+    // the limit must happen against the source rows -- the Project
+    // step is the *last* node in the pipeline. Output column aliases
+    // from the projection list are not addressable here, but the
+    // common cases (`ORDER BY <source-column>`, `ORDER BY <const>`)
+    // both work because the source row carries every column the
+    // FROM relation produced.
+    let resolved_offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?;
+    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
+
     if has_engine_funcs || has_star {
-        let mut rows: Vec<ResultRow> = src_rows
+        let staged = stage_source_rows(
+            src_rows,
+            stmt,
+            engine,
+            params,
+            resolved_offset,
+            resolved_limit,
+        )?;
+        let rows: Vec<ResultRow> = staged
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, params)?;
         return Ok(rows);
     }
+
     use uqa_execution::physical::{run_to_rows, ExecError, PhysicalOperator};
     use uqa_execution::relational::{Limit, Project, Sort, SortKey};
     use uqa_execution::scan::TableScan;
@@ -1540,15 +1591,6 @@ fn volcano_project_sort_limit(
         .unwrap_or_default();
     let mut op: Box<dyn PhysicalOperator> =
         Box::new(TableScan::from_rows(columns, src_rows.to_vec()));
-
-    let labels = projection_columns(&stmt.projections);
-    let projections: Vec<(String, Expr)> = stmt
-        .projections
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (labels[i].clone(), p.expr.clone()))
-        .collect();
-    op = Box::new(Project::new(op, projections, params.to_vec()));
 
     if !stmt.order_by.is_empty() {
         let keys: Vec<SortKey> = stmt
@@ -1564,13 +1606,71 @@ fn volcano_project_sort_limit(
             .collect();
         op = Box::new(Sort::new(op, keys, params.to_vec()));
     }
-    if stmt.offset.is_some() || stmt.limit.is_some() {
-        op = Box::new(Limit::new(op, stmt.offset.unwrap_or(0), stmt.limit));
+    if resolved_offset.is_some() || resolved_limit.is_some() {
+        op = Box::new(Limit::new(op, resolved_offset.unwrap_or(0), resolved_limit));
     }
+
+    let labels = projection_columns(&stmt.projections);
+    let projections: Vec<(String, Expr)> = stmt
+        .projections
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (labels[i].clone(), p.expr.clone()))
+        .collect();
+    op = Box::new(Project::new(op, projections, params.to_vec()));
 
     let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
         ExecError::SQL(err) => err,
         ExecError::Other(msg) => SQLError::Internal(msg),
+    })?;
+    Ok(rows)
+}
+
+/// Sort + offset + limit a row set against the source-column namespace
+/// (pre-projection). Used by the engine-funcs / star projection path
+/// where projection happens row-by-row through the engine after the
+/// pipeline has already trimmed the input set.
+fn stage_source_rows(
+    src_rows: &[ResultRow],
+    stmt: &SelectStmt,
+    _engine: &Engine,
+    params: &[SQLParam],
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> Result<Vec<ResultRow>, SQLError> {
+    use uqa_execution::physical::{run_to_rows, PhysicalOperator};
+    use uqa_execution::relational::{Limit, Sort, SortKey};
+    use uqa_execution::scan::TableScan;
+
+    if stmt.order_by.is_empty() && offset.is_none() && limit.is_none() {
+        return Ok(src_rows.to_vec());
+    }
+    let columns: Vec<String> = src_rows
+        .first()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut op: Box<dyn PhysicalOperator> =
+        Box::new(TableScan::from_rows(columns, src_rows.to_vec()));
+    if !stmt.order_by.is_empty() {
+        let keys: Vec<SortKey> = stmt
+            .order_by
+            .iter()
+            .map(|o| SortKey {
+                expr: o.expr.clone(),
+                descending: o.descending,
+                nulls_first: o
+                    .nulls
+                    .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
+            })
+            .collect();
+        op = Box::new(Sort::new(op, keys, params.to_vec()));
+    }
+    if offset.is_some() || limit.is_some() {
+        op = Box::new(Limit::new(op, offset.unwrap_or(0), limit));
+    }
+    let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
+        uqa_execution::physical::ExecError::SQL(err) => err,
+        uqa_execution::physical::ExecError::Other(msg) => SQLError::Internal(msg),
     })?;
     Ok(rows)
 }
@@ -1767,7 +1867,7 @@ fn run_single_table_select(
     {
         let columns = projection_columns(&stmt.projections);
         let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
-        let rows = apply_row_order_limit(rows, stmt, params)?;
+        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -1788,7 +1888,7 @@ fn run_single_table_select(
                 }
             }
         }
-        let rows = apply_row_order_limit(all_rows, stmt, params)?;
+        let rows = apply_row_order_limit(all_rows, stmt, engine, params)?;
         // Strip the helper fields to keep the projection honest.
         let projected: Vec<_> = rows
             .into_iter()
@@ -1800,7 +1900,7 @@ fn run_single_table_select(
         return Ok(SQLResult::from_rows(columns, projected));
     }
 
-    let scored = apply_order_limit(scored, stmt);
+    let scored = apply_order_limit(scored, stmt, engine, params)?;
     let columns = projection_columns(&stmt.projections);
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SQLResult::from_rows(columns, rows))
@@ -1839,7 +1939,7 @@ fn run_joined_select(
     {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &joined, params)?;
-        let rows = apply_row_order_limit(rows, stmt, params)?;
+        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -1850,7 +1950,7 @@ fn run_joined_select(
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
             .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, params)?;
+        rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -1859,7 +1959,7 @@ fn run_joined_select(
         .iter()
         .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
         .collect::<Result<_, _>>()?;
-    rows = apply_row_order_limit(rows, stmt, params)?;
+    rows = apply_row_order_limit(rows, stmt, engine, params)?;
     Ok(SQLResult::from_rows(columns, rows))
 }
 
@@ -4046,6 +4146,7 @@ fn projection_label_at(proj: &Projection, position: usize) -> String {
 fn apply_row_order_limit(
     rows: Vec<ResultRow>,
     stmt: &SelectStmt,
+    engine: &Engine,
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     // Build a Volcano sub-pipeline:  Sort? -> Limit?  on top of an
@@ -4057,7 +4158,9 @@ fn apply_row_order_limit(
     if rows.is_empty() {
         return Ok(rows);
     }
-    if stmt.order_by.is_empty() && stmt.offset.is_none() && stmt.limit.is_none() {
+    let resolved_offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?;
+    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
+    if stmt.order_by.is_empty() && resolved_offset.is_none() && resolved_limit.is_none() {
         return Ok(rows);
     }
 
@@ -4083,8 +4186,8 @@ fn apply_row_order_limit(
         op = Box::new(Sort::new(op, keys, params.to_vec()));
     }
 
-    if stmt.offset.is_some() || stmt.limit.is_some() {
-        op = Box::new(Limit::new(op, stmt.offset.unwrap_or(0), stmt.limit));
+    if resolved_offset.is_some() || resolved_limit.is_some() {
+        op = Box::new(Limit::new(op, resolved_offset.unwrap_or(0), resolved_limit));
     }
 
     let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
@@ -4892,7 +4995,51 @@ fn expect_usize(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<usize
 // Output assembly
 // -------------------------------------------------------------------------
 
-fn apply_order_limit(mut entries: Vec<ScoredEntry>, stmt: &SelectStmt) -> Vec<ScoredEntry> {
+/// Render a `LIMIT` / `OFFSET` expression for the EXPLAIN output.
+/// Integer literals show their value verbatim; anything else collapses
+/// to `<expr>` because EXPLAIN runs without bound parameters.
+fn explain_int_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(Value::Int(n)) => n.to_string(),
+        _ => "<expr>".to_string(),
+    }
+}
+
+/// Evaluate a `LIMIT` / `OFFSET` expression to a non-negative `u64`.
+/// Mirrors Python's `_extract_int_value` — accepts integer constants,
+/// `$N` parameter references, and any expression that the row-evaluator
+/// can fold to an integer at execute time. Returns `None` when the
+/// clause was absent.
+fn resolve_limit_offset(
+    expr: Option<&Expr>,
+    engine: &Engine,
+    params: &[SQLParam],
+    label: &str,
+) -> Result<Option<u64>, SQLError> {
+    let Some(expr) = expr else {
+        return Ok(None);
+    };
+    let ctx = uqa_sql::expr::EvalContext::new(None, params).with_engine(engine);
+    let value = uqa_sql::expr::eval(expr, &ctx)?;
+    match value {
+        Value::Null => Ok(None),
+        Value::Int(n) if n >= 0 => Ok(Some(n as u64)),
+        Value::Int(_) => Err(SQLError::TypeMismatch(format!(
+            "{label} must be non-negative"
+        ))),
+        Value::Float(f) if f.is_finite() && f >= 0.0 && f.fract() == 0.0 => Ok(Some(f as u64)),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{label} must be a non-negative integer, got {other:?}"
+        ))),
+    }
+}
+
+fn apply_order_limit(
+    mut entries: Vec<ScoredEntry>,
+    stmt: &SelectStmt,
+    engine: &Engine,
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if !stmt.order_by.is_empty() {
         // Phase 5 only honours `ORDER BY <score-alias|_score>`. Any
         // expression resolves to the entry's score in our limited
@@ -4907,7 +5054,7 @@ fn apply_order_limit(mut entries: Vec<ScoredEntry>, stmt: &SelectStmt) -> Vec<Sc
             if descending { cmp.reverse() } else { cmp }.then_with(|| a.doc_id.cmp(&b.doc_id))
         });
     }
-    if let Some(offset) = stmt.offset {
+    if let Some(offset) = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")? {
         let off = offset as usize;
         if off >= entries.len() {
             entries.clear();
@@ -4915,10 +5062,10 @@ fn apply_order_limit(mut entries: Vec<ScoredEntry>, stmt: &SelectStmt) -> Vec<Sc
             entries.drain(0..off);
         }
     }
-    if let Some(limit) = stmt.limit {
+    if let Some(limit) = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")? {
         entries.truncate(limit as usize);
     }
-    entries
+    Ok(entries)
 }
 
 fn projection_columns(projections: &[Projection]) -> Vec<String> {

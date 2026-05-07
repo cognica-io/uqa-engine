@@ -205,8 +205,12 @@ pub struct SelectStmt {
     /// set (an empty inner Vec means the global grand-total bucket).
     pub grouping_sets: Vec<Vec<Expr>>,
     pub order_by: Vec<OrderBy>,
-    pub limit: Option<u64>,
-    pub offset: Option<u64>,
+    /// `LIMIT <expr>`. Stored as an expression so `LIMIT $1` and any
+    /// other constant-folding integer expression resolves at execute
+    /// time. `None` means no LIMIT clause was supplied.
+    pub limit: Option<Expr>,
+    /// `OFFSET <expr>`. Same shape as [`SelectStmt::limit`].
+    pub offset: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
     /// Optional set operation: `Some` for UNION / INTERSECT / EXCEPT,
@@ -229,6 +233,14 @@ pub struct SetOp {
     pub kind: SetOpKind,
     pub all: bool,
     pub right: SelectStmt,
+    /// `ORDER BY` applied to the combined `lhs <op> rhs` result.
+    /// Distinct from the LHS / RHS branches' own `ORDER BY`.
+    pub combined_order_by: Vec<OrderBy>,
+    /// `LIMIT` applied to the combined result. `None` means no
+    /// outer LIMIT clause was supplied.
+    pub combined_limit: Option<Expr>,
+    /// `OFFSET` applied to the combined result.
+    pub combined_offset: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

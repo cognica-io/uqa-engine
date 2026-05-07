@@ -1427,19 +1427,32 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         .map(|w| compile_expr(w))
         .transpose()?;
     let order_by = compile_order_by(&stmt.sort_clause)?;
-    let limit = compile_int_const(stmt.limit_count.as_deref())?;
-    let offset = compile_int_const(stmt.limit_offset.as_deref())?;
+    let limit = compile_limit_offset_expr(stmt.limit_count.as_deref())?;
+    let offset = compile_limit_offset_expr(stmt.limit_offset.as_deref())?;
     let (group_by, grouping_sets) = compile_group_clause(&stmt.group_clause)?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
     };
-    let set_op = compile_set_op(stmt)?;
+    let mut set_op = compile_set_op(stmt)?;
 
-    // For UNION shapes the LHS lives inside `larg`; pull projections /
-    // FROM from there since the top-level node carries only the set op.
+    // For UNION / INTERSECT / EXCEPT shapes the outer SelectStmt carries:
+    //   * its own `sortClause` / `limitCount` / `limitOffset` -> the
+    //     *combined* ORDER BY / LIMIT / OFFSET applied to `lhs <op> rhs`
+    //     (those land on `set_op.combined_*`).
+    //   * empty `targetList` / `fromClause`; the LHS branch (with its
+    //     own clauses, including its own optional `ORDER BY` / `LIMIT`)
+    //     lives in `stmt.larg`. We pull the LHS into the parent so the
+    //     executor sees `SelectStmt { ..lhs.., set_op: Some(..) }`.
     let (projections, from, r#where, group_by, order_by, limit, offset) =
         if set_op.is_some() && stmt.larg.is_some() {
+            // Promote the outer (combined) clauses onto the SetOp and
+            // replace the parent's clauses with the LHS branch's.
+            if let Some(so) = set_op.as_mut() {
+                so.combined_order_by = order_by;
+                so.combined_limit = limit;
+                so.combined_offset = offset;
+            }
             let lhs = compile_select(stmt.larg.as_deref().unwrap())?;
             (
                 lhs.projections,
@@ -1638,6 +1651,13 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
         kind,
         all: stmt.all,
         right,
+        // The outer SelectStmt's ORDER BY / LIMIT / OFFSET land here
+        // when `compile_select` finishes — the caller fills these in
+        // because at this point we don't have the parent's clauses
+        // resolved yet. Default to empty / None until then.
+        combined_order_by: Vec::new(),
+        combined_limit: None,
+        combined_offset: None,
     })))
 }
 
@@ -1672,25 +1692,30 @@ fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<CTE>> 
     Ok(out)
 }
 
-fn compile_int_const(node: Option<&Node>) -> Result<Option<u64>> {
+/// Compile a `LIMIT` / `OFFSET` operand into an [`Expr`]. The
+/// expression is resolved to an integer at execute time, so `LIMIT $1`
+/// and other parameter-bearing forms work end-to-end. `None` means the
+/// clause was absent entirely (`SELECT ... LIMIT NULL` is also `None`
+/// because PG treats `NULL` as "no limit").
+fn compile_limit_offset_expr(node: Option<&Node>) -> Result<Option<Expr>> {
     use pg_query::protobuf::a_const::Val;
     let Some(node) = node else { return Ok(None) };
     let Some(inner) = node.node.as_ref() else {
         return Ok(None);
     };
-    match inner {
-        NodeEnum::AConst(c) => match &c.val {
-            Some(Val::Ival(i)) if i.ival >= 0 => Ok(Some(u64::from(i.ival as u32))),
-            Some(Val::Ival(_)) => Err(SQLError::Internal("negative LIMIT/OFFSET".into())),
-            None => Ok(None),
-            other => Err(SQLError::Internal(format!(
-                "non-integer LIMIT/OFFSET: {other:?}"
-            ))),
-        },
-        _ => Err(SQLError::Internal(format!(
-            "LIMIT/OFFSET expr not supported: {inner:?}"
-        ))),
+    // `SELECT ... LIMIT NULL` parses as an `AConst` with no `val` --
+    // treat it like an absent clause.
+    if let NodeEnum::AConst(c) = inner {
+        if c.val.is_none() {
+            return Ok(None);
+        }
+        if let Some(Val::Ival(i)) = &c.val {
+            if i.ival < 0 {
+                return Err(SQLError::Internal("negative LIMIT/OFFSET".into()));
+            }
+        }
     }
+    Ok(Some(compile_expr(node)?))
 }
 
 // -------------------------------------------------------------------------
@@ -2425,6 +2450,9 @@ mod tests {
         assert!(matches!(s.r#where, Some(Expr::Func { .. })));
         assert_eq!(s.order_by.len(), 1);
         assert!(s.order_by[0].descending);
-        assert_eq!(s.limit, Some(5));
+        match &s.limit {
+            Some(Expr::Literal(uqa_core::Value::Int(5))) => {}
+            other => panic!("expected LIMIT 5, got {other:?}"),
+        }
     }
 }
