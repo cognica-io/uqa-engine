@@ -14,6 +14,8 @@
 
 use std::collections::BTreeMap;
 
+use rusqlite::params;
+
 use uqa_core::PostingList;
 
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
@@ -25,10 +27,16 @@ pub trait BlockMaxScorer {
     fn score(&self, term_freq: u64, doc_length: u64, doc_freq: u64) -> f64;
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockMaxIndex {
     block_size: usize,
     block_maxes: BTreeMap<(String, String, String), Vec<f64>>,
+}
+
+impl Default for BlockMaxIndex {
+    fn default() -> Self {
+        Self::new(DEFAULT_BLOCK_SIZE)
+    }
 }
 
 impl BlockMaxIndex {
@@ -42,6 +50,13 @@ impl BlockMaxIndex {
 
     pub fn block_size(&self) -> usize {
         self.block_size
+    }
+
+    pub fn set_block_maxes(&mut self, table: &str, field: &str, term: &str, scores: Vec<f64>) {
+        self.block_maxes.insert(
+            (table.to_string(), field.to_string(), term.to_string()),
+            scores,
+        );
     }
 
     /// Compute and store per-block maxima for `posting_list`. Each
@@ -104,6 +119,77 @@ impl BlockMaxIndex {
     pub fn clear(&mut self) {
         self.block_maxes.clear();
     }
+
+    pub fn save_to_sqlite(&self, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+        ensure_global_blockmax_shape(conn)?;
+        conn.execute("DELETE FROM _global_blockmax", [])?;
+        for ((table, field, term), scores) in &self.block_maxes {
+            for (block_idx, score) in scores.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO _global_blockmax
+                        (table_name, field, term, block_idx, max_score)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![table, field, term, block_idx as i64, *score],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn load_from_sqlite(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+        ensure_global_blockmax_shape(conn)?;
+        self.clear();
+        let mut stmt = conn.prepare(
+            "SELECT table_name, field, term, block_idx, max_score
+             FROM _global_blockmax
+             ORDER BY table_name, field, term, block_idx",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, f64>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (table, field, term, block_idx, score) = row?;
+            let entry = self.block_maxes.entry((table, field, term)).or_default();
+            let idx = block_idx.max(0) as usize;
+            if entry.len() <= idx {
+                entry.resize(idx + 1, 0.0);
+            }
+            entry[idx] = score;
+        }
+        Ok(())
+    }
+}
+
+fn ensure_global_blockmax_shape(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _global_blockmax (
+            table_name TEXT NOT NULL DEFAULT '',
+            field     TEXT NOT NULL,
+            term      TEXT NOT NULL,
+            block_idx INTEGER NOT NULL,
+            max_score REAL NOT NULL,
+            PRIMARY KEY (table_name, field, term, block_idx)
+        )",
+        [],
+    )?;
+    let mut stmt = conn.prepare("PRAGMA table_info(_global_blockmax)")?;
+    let cols = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    if !cols.iter().any(|c| c == "table_name") {
+        conn.execute(
+            "ALTER TABLE _global_blockmax ADD COLUMN table_name TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

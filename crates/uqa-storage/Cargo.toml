@@ -22,6 +22,7 @@ thiserror = { workspace = true }
 tempfile = "3.13"
 criterion = { workspace = true }
 proptest = { workspace = true }
+uqa-scoring = { workspace = true }
 
 [[bench]]
 name = "spatial"

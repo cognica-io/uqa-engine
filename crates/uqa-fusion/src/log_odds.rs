@@ -34,6 +34,10 @@ impl LogOddsFusion {
         Self { alpha }
     }
 
+    pub fn with_gating(alpha: f64, _gating: Option<&str>) -> Self {
+        Self { alpha }
+    }
+
     pub fn fuse(&self, probs: &[f64]) -> f64 {
         match probs.len() {
             0 => 0.5,
@@ -97,6 +101,10 @@ impl AdaptiveLogOddsFusion {
         alpha.clamp(0.01, 1.0)
     }
 
+    pub fn compute_signal_alpha(&self, q: SignalQuality) -> f64 {
+        self.signal_alpha(q)
+    }
+
     pub fn fuse(&self, probs: &[f64], qualities: &[SignalQuality]) -> Result<f64, &'static str> {
         match probs.len() {
             0 => Ok(0.5),
@@ -115,6 +123,14 @@ impl AdaptiveLogOddsFusion {
                 inner.fuse_weighted(probs, &normalized)
             }
         }
+    }
+
+    pub fn fuse_adaptive(
+        &self,
+        probs: &[f64],
+        qualities: &[SignalQuality],
+    ) -> Result<f64, &'static str> {
+        self.fuse(probs, qualities)
     }
 }
 

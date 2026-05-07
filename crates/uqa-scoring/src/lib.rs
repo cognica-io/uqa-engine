@@ -24,9 +24,11 @@ pub mod wand;
 pub use bayesian::BayesianProbabilityTransform;
 pub use bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
 pub use bm25::{BM25Params, BM25Scorer};
-pub use calibration::{CalibrationMetrics, VectorProbabilityTransform};
+pub use calibration::{
+    CalibrationMetrics, CalibrationReport, ReliabilityBin, VectorProbabilityTransform,
+};
 pub use external_prior::{authority_prior, recency_prior, ExternalPriorScorer, PriorFn};
-pub use fusion_wand::FusionWANDScorer;
+pub use fusion_wand::{FusionWANDScorer, TightenedFusionWANDScorer};
 pub use metrics::{average_precision_at_k, dcg_at_k, mean_average_precision_at_k, ndcg_at_k};
 pub use multi_field::{FieldConfig, MultiFieldBayesianScorer};
 pub use parameter_learner::ParameterLearner;
@@ -37,5 +39,6 @@ pub use prob::{
 pub use scorer::Scorer;
 pub use vector_score::VectorScorer;
 pub use wand::{
-    BlockMaxWANDScorer, BoundTightnessAnalyzer, WANDQuery, WANDResult, WANDScorer, WANDStats,
+    AdaptiveWANDScorer, BlockMaxWANDScorer, BoundTightnessAnalyzer, WANDQuery, WANDResult,
+    WANDScorer, WANDStats,
 };

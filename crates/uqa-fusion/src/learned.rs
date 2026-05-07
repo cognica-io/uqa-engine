@@ -21,6 +21,13 @@ pub struct LearnedFusion {
     pub alpha: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LearnedFusionState {
+    pub n_signals: usize,
+    pub alpha: f64,
+    pub weights: Vec<f64>,
+}
+
 impl LearnedFusion {
     pub fn new(n_signals: usize, alpha: f64) -> Self {
         Self {
@@ -44,6 +51,22 @@ impl LearnedFusion {
         }
         let weights = softmax(&self.weights);
         log_odds_conjunction_weighted(probs, &weights, self.alpha).unwrap_or(0.5)
+    }
+
+    pub fn state_dict(&self) -> LearnedFusionState {
+        LearnedFusionState {
+            n_signals: self.n_signals(),
+            alpha: self.alpha,
+            weights: self.weights.clone(),
+        }
+    }
+
+    pub fn load_state_dict(&mut self, state: &LearnedFusionState) {
+        self.weights = state.weights.clone();
+        if self.weights.len() != state.n_signals {
+            self.weights.resize(state.n_signals, 0.0);
+        }
+        self.alpha = state.alpha;
     }
 
     /// One SGD step on the logistic loss

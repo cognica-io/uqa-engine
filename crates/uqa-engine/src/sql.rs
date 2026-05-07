@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::Value;
+use uqa_core::{DocId, Value};
 use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
     CreateTable, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
@@ -39,9 +39,10 @@ use uqa_sql::registry::{lookup, FunctionKind};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, HybridSearchParams, ScoredEntry};
+use crate::{Engine, ScoredEntry};
 
 const SCORE_COLUMN: &str = "_score";
+const DOC_ID_COLUMN: &str = "_doc_id";
 
 pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
@@ -72,7 +73,21 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
         Statement::Delete(d) => run_delete(engine, d, params),
         Statement::Drop(d) => run_drop(engine, d),
         Statement::AlterTable(a) => run_alter_table(engine, a),
-        Statement::CreateView { name, body, .. } => {
+        Statement::CreateView {
+            name,
+            body,
+            or_replace,
+        } => {
+            if engine.has_table(&name) {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE VIEW: relation `{name}` already exists as a table"
+                )));
+            }
+            if !or_replace && engine.view(&name).is_some() {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE VIEW: relation `{name}` already exists"
+                )));
+            }
             engine.register_view(&name, *body);
             Ok(SQLResult::empty())
         }
@@ -108,6 +123,11 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
         }
         Statement::Truncate { tables, .. } => {
             for t in &tables {
+                if !engine.has_table(t) {
+                    return Err(SQLError::Unsupported(format!(
+                        "TRUNCATE TABLE: relation `{t}` does not exist"
+                    )));
+                }
                 engine.truncate_table(t);
             }
             Ok(SQLResult::empty())
@@ -124,11 +144,23 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
             body,
         } => run_create_table_as(engine, name, if_not_exists, *body, params),
         Statement::Prepare { name, body } => {
+            if engine.lookup_prepared(&name).is_some() {
+                return Err(SQLError::Unsupported(format!(
+                    "Prepared statement `{name}` already exists"
+                )));
+            }
             engine.register_prepared(name, *body);
             Ok(SQLResult::empty())
         }
         Statement::Execute { name, params: ps } => run_execute_prepared(engine, &name, &ps, params),
         Statement::Deallocate { name } => {
+            if let Some(ref n) = name {
+                if engine.lookup_prepared(n).is_none() {
+                    return Err(SQLError::Unsupported(format!(
+                        "Prepared statement `{n}` does not exist"
+                    )));
+                }
+            }
             engine.deallocate_prepared(name.as_deref());
             Ok(SQLResult::empty())
         }
@@ -593,9 +625,19 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
                     "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
                 )));
             }
+            if engine.table_has_column(&stmt.table, &to) {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE RENAME COLUMN: column `{to}` already exists"
+                )));
+            }
             engine.rename_column(&stmt.table, &from, &to);
         }
         AlterTableAction::RenameTable { to } => {
+            if engine.has_table(&to) {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE RENAME: relation `{to}` already exists"
+                )));
+            }
             if !engine.rename_table(&stmt.table, &to) {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME: rename of `{}` failed",
@@ -603,8 +645,82 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
                 )));
             }
         }
+        AlterTableAction::SetDefault { name, default } => {
+            if !engine.set_column_default(&stmt.table, &name, Some(default)) {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
+                )));
+            }
+        }
+        AlterTableAction::DropDefault { name } => {
+            if !engine.set_column_default(&stmt.table, &name, None) {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
+                )));
+            }
+        }
+        AlterTableAction::SetNotNull { name } => {
+            ensure_column_exists(engine, &stmt.table, &name)?;
+            ensure_existing_values_not_null(engine, &stmt.table, &name)?;
+            engine.set_column_not_null(&stmt.table, &name, true);
+        }
+        AlterTableAction::DropNotNull { name } => {
+            if !engine.set_column_not_null(&stmt.table, &name, false) {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
+                )));
+            }
+        }
+        AlterTableAction::AlterColumnType { name, ty } => {
+            ensure_column_exists(engine, &stmt.table, &name)?;
+            rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
+            engine.set_column_type(&stmt.table, &name, ty.clone());
+            match ty {
+                ColumnType::Text => {
+                    if let Err(e) = engine.add_fts_field(&stmt.table, name.clone()) {
+                        return Err(SQLError::Internal(format!("add_fts_field: {e}")));
+                    }
+                }
+                ColumnType::Vector(dim) => {
+                    engine.create_vector_field(&stmt.table, name, dim);
+                }
+                _ => {}
+            }
+        }
     }
     Ok(SQLResult::empty())
+}
+
+fn ensure_column_exists(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
+    if engine.table_has_column(table, column) {
+        Ok(())
+    } else {
+        Err(SQLError::Unsupported(format!(
+            "ALTER TABLE ALTER COLUMN: column `{column}` does not exist"
+        )))
+    }
+}
+
+fn ensure_existing_values_not_null(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
+    let mut null_rows = 0usize;
+    for doc_id in engine.table_doc_ids(table) {
+        let Some(doc) = engine.get_document(table, doc_id) else {
+            continue;
+        };
+        if matches!(doc.get(column), None | Some(Value::Null)) {
+            null_rows += 1;
+        }
+    }
+    if null_rows > 0 {
+        return Err(SQLError::TypeMismatch(format!(
+            "ALTER TABLE ALTER COLUMN: column `{column}` contains NULL values"
+        )));
+    }
+    Ok(())
 }
 
 /// Coerce an `INSERT` value to fit the column's declared type. Today
@@ -623,7 +739,182 @@ fn coerce_to_column_type(engine: &Engine, table: &str, column: &str, value: Valu
             return round_numeric(value, *s);
         }
     }
+    if matches!(&def.ty, ColumnType::Real) {
+        return match value {
+            Value::Float(_) => value,
+            Value::Int(i) => Value::Float(i as f64),
+            Value::Str(s) => s.parse::<f64>().map(Value::Float).unwrap_or(Value::Str(s)),
+            other => other,
+        };
+    }
+    if matches!(&def.ty, ColumnType::Json) {
+        return coerce_json_value(value);
+    }
+    if matches!(&def.ty, ColumnType::Bytea) {
+        return match value {
+            Value::Bytes(_) => value,
+            Value::Str(s) => Value::Bytes(s.into_bytes()),
+            other => other,
+        };
+    }
     value
+}
+
+fn coerce_json_value(value: Value) -> Value {
+    match value {
+        Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s)
+            .map(json_to_core_value)
+            .unwrap_or(Value::Str(s)),
+        other => other,
+    }
+}
+
+fn rewrite_column_values_to_type(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    ty: &ColumnType,
+) -> Result<(), SQLError> {
+    for doc_id in engine.table_doc_ids(table) {
+        let Some(doc) = engine.get_document(table, doc_id) else {
+            continue;
+        };
+        let Some(value) = doc.get(column).cloned() else {
+            continue;
+        };
+        let converted = convert_value_to_column_type(value, ty)?;
+        let mut updates: BTreeMap<String, Value> = BTreeMap::new();
+        updates.insert(column.to_string(), converted.clone());
+        let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+        if let Ok(vec) = value_to_vector(&converted) {
+            vectors.insert(column.to_string(), vec);
+        }
+        engine.update_document_fields(table, doc_id, updates, vectors);
+    }
+    Ok(())
+}
+
+fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
+    if matches!(value, Value::Null) {
+        return Ok(Value::Null);
+    }
+    match ty {
+        ColumnType::Integer => match value {
+            Value::Int(_) => Ok(value),
+            Value::Float(f) => Ok(Value::Int(f as i64)),
+            Value::Bool(b) => Ok(Value::Int(i64::from(b))),
+            Value::Str(s) => s
+                .parse::<i64>()
+                .map(Value::Int)
+                .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to integer: {e}"))),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to integer"
+            ))),
+        },
+        ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Real | ColumnType::Numeric { .. } => match value {
+            Value::Float(_) => Ok(value),
+            Value::Int(i) => Ok(Value::Float(i as f64)),
+            Value::Bool(b) => Ok(Value::Float(if b { 1.0 } else { 0.0 })),
+            Value::Str(s) => s
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to real: {e}"))),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to real"
+            ))),
+        },
+        ColumnType::Json => Ok(coerce_json_value(value)),
+        ColumnType::Bytea => Ok(match value {
+            Value::Bytes(_) => value,
+            Value::Str(s) => Value::Bytes(s.into_bytes()),
+            other => Value::Bytes(value_to_text(&other).into_bytes()),
+        }),
+        ColumnType::Vector(_) => {
+            value_to_vector(&value)?;
+            Ok(value)
+        }
+    }
+}
+
+fn value_to_text(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Str(s) => s.clone(),
+        Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
+            .unwrap_or_else(|_| format!("{value:?}")),
+    }
+}
+
+fn json_to_core_value(json: serde_json::Value) -> Value {
+    match json {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                Value::Null
+            }
+        }
+        serde_json::Value::String(s) => Value::Str(s),
+        serde_json::Value::Array(items) => {
+            Value::List(items.into_iter().map(json_to_core_value).collect())
+        }
+        serde_json::Value::Object(obj) => Value::Map(
+            obj.into_iter()
+                .map(|(k, v)| (k, json_to_core_value(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn core_value_to_json(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int(i) => serde_json::Value::Number((*i).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
+            .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
+        Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
+        Value::List(items) => {
+            serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
+        }
+        Value::Map(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), core_value_to_json(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn json_table_value_to_text(value: &serde_json::Value) -> Value {
+    match value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::String(s) => Value::Str(s.clone()),
+        serde_json::Value::Bool(b) => Value::Str(b.to_string()),
+        serde_json::Value::Number(n) => Value::Str(n.to_string()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            Value::Str(serde_json::to_string(value).unwrap_or_default())
+        }
+    }
+}
+
+fn json_table_arg(value: &Value, name: &str) -> Result<serde_json::Value, SQLError> {
+    match value {
+        Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
+            .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}"))),
+        other => Ok(core_value_to_json(other)),
+    }
 }
 
 fn round_numeric(value: Value, scale: u32) -> Value {
@@ -692,12 +983,14 @@ fn run_update(
         return run_update_from(engine, &stmt, from_clause, params);
     }
     let mut affected = 0u64;
+    let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
     for doc_id in engine.table_doc_ids(&stmt.table) {
         cancel.check()?;
         let mut doc = engine
             .get_document(&stmt.table, doc_id)
             .ok_or_else(|| SQLError::Internal("missing document during UPDATE".into()))?;
+        let original_doc = doc.clone();
         if let Some(filter) = stmt.r#where.as_ref() {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
             if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
@@ -707,16 +1000,160 @@ fn run_update(
         let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
         for (col, expr) in &stmt.assignments {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
-            let value = uqa_sql::expr::eval(expr, &ctx)?;
+            let value =
+                coerce_to_column_type(engine, &stmt.table, col, uqa_sql::expr::eval(expr, &ctx)?);
             if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
                 new_vectors.insert(col.clone(), vec);
             }
             doc.insert(col.clone(), value);
         }
-        engine.add_document_with_vectors(&stmt.table, doc_id, doc, new_vectors);
+        validate_updated_row(engine, &stmt.table, doc_id, &original_doc, &doc, params)?;
+        engine.add_document_with_vectors(&stmt.table, doc_id, doc.clone(), new_vectors);
+        if !stmt.returning.is_empty() {
+            returning_rows.push(build_returning_row(
+                engine,
+                &stmt.table,
+                doc_id,
+                &doc,
+                &stmt.returning,
+                params,
+            )?);
+        }
         affected += 1;
     }
+    if !stmt.returning.is_empty() {
+        return Ok(dml_returning_result(
+            engine,
+            &stmt.table,
+            &stmt.returning,
+            returning_rows,
+            affected,
+        ));
+    }
     Ok(SQLResult::from_affected(affected))
+}
+
+fn validate_updated_row(
+    engine: &Engine,
+    table: &str,
+    doc_id: DocId,
+    old_doc: &Document,
+    new_doc: &Document,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    validate_document_constraints(engine, table, doc_id, new_doc, params)?;
+    validate_referenced_key_update(engine, table, old_doc, new_doc)
+}
+
+fn validate_document_constraints(
+    engine: &Engine,
+    table: &str,
+    doc_id: DocId,
+    document: &Document,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    for col_def in engine.describe_table(table).unwrap_or_default() {
+        if !col_def.not_null || col_def.auto_increment {
+            continue;
+        }
+        match document.get(&col_def.name) {
+            Some(Value::Null) | None => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "NOT NULL constraint violated: column `{}` in table `{table}`",
+                    col_def.name
+                )));
+            }
+            _ => {}
+        }
+    }
+
+    for (cname, expr) in engine.check_constraints(table) {
+        let row_ctx = EvalContext::new(Some(document), params).with_engine(engine);
+        let result = eval(&expr, &row_ctx)?;
+        if !uqa_sql::expr::truthy(&result) {
+            let label = cname.unwrap_or_else(|| "<unnamed>".into());
+            return Err(SQLError::TypeMismatch(format!(
+                "CHECK constraint `{label}` violated in table `{table}`"
+            )));
+        }
+    }
+
+    for fk in engine.foreign_keys(table) {
+        let local_values: Vec<Value> = fk
+            .local_columns
+            .iter()
+            .map(|c| document.get(c).cloned().unwrap_or(Value::Null))
+            .collect();
+        if local_values.iter().any(|v| matches!(v, Value::Null)) {
+            continue;
+        }
+        if engine
+            .find_conflict(&fk.ref_table, &fk.ref_columns, &local_values)
+            .is_none()
+        {
+            let cols = fk.local_columns.join(", ");
+            return Err(SQLError::TypeMismatch(format!(
+                "FOREIGN KEY constraint violated: ({cols}) -> {}({}) has no matching row",
+                fk.ref_table,
+                fk.ref_columns.join(", ")
+            )));
+        }
+    }
+
+    for col in engine.unique_columns(table) {
+        let Some(value) = document.get(&col).cloned() else {
+            continue;
+        };
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        if let Some(conflict_id) = engine.find_conflict(
+            table,
+            std::slice::from_ref(&col),
+            std::slice::from_ref(&value),
+        ) {
+            if conflict_id != doc_id {
+                return Err(SQLError::TypeMismatch(format!(
+                    "UNIQUE constraint violated: duplicate value for column `{col}` in table `{table}`"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_referenced_key_update(
+    engine: &Engine,
+    table: &str,
+    old_doc: &Document,
+    new_doc: &Document,
+) -> Result<(), SQLError> {
+    for (ref_table, fk) in engine.referrers_to(table) {
+        let old_values: Vec<Value> = fk
+            .ref_columns
+            .iter()
+            .map(|c| old_doc.get(c).cloned().unwrap_or(Value::Null))
+            .collect();
+        let new_values: Vec<Value> = fk
+            .ref_columns
+            .iter()
+            .map(|c| new_doc.get(c).cloned().unwrap_or(Value::Null))
+            .collect();
+        if old_values == new_values || old_values.iter().any(|v| matches!(v, Value::Null)) {
+            continue;
+        }
+        if engine
+            .find_conflict(&ref_table, &fk.local_columns, &old_values)
+            .is_some()
+        {
+            return Err(SQLError::TypeMismatch(format!(
+                "FOREIGN KEY constraint violated: UPDATE on `{table}` is referenced by `{ref_table}` ({} -> {})",
+                fk.local_columns.join(", "),
+                fk.ref_columns.join(", "),
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn run_update_from(
@@ -729,6 +1166,7 @@ fn run_update_from(
     let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &ctes)?;
     let cancel = engine.cancellation_token();
     let mut affected = 0u64;
+    let mut returning_rows = Vec::new();
     let target = stmt.table.clone();
     let target_doc_ids = engine.table_doc_ids(&target);
     for doc_id in target_doc_ids {
@@ -763,19 +1201,39 @@ fn run_update_from(
             let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
             let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
             for (col, expr) in &stmt.assignments {
-                let value = uqa_sql::expr::eval(expr, &ctx)?;
+                let value =
+                    coerce_to_column_type(engine, &target, col, uqa_sql::expr::eval(expr, &ctx)?);
                 if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
                     new_vectors.insert(col.clone(), vec);
                 }
                 doc.insert(col.clone(), value);
             }
             engine.add_document_with_vectors(&target, doc_id, doc.clone(), new_vectors);
+            if !stmt.returning.is_empty() {
+                returning_rows.push(build_returning_row(
+                    engine,
+                    &target,
+                    doc_id,
+                    &doc,
+                    &stmt.returning,
+                    params,
+                )?);
+            }
             applied = true;
             break;
         }
         if applied {
             affected += 1;
         }
+    }
+    if !stmt.returning.is_empty() {
+        return Ok(dml_returning_result(
+            engine,
+            &target,
+            &stmt.returning,
+            returning_rows,
+            affected,
+        ));
     }
     Ok(SQLResult::from_affected(affected))
 }
@@ -788,6 +1246,7 @@ fn run_delete(
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
+    let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
     // DELETE FROM t USING other WHERE ... -- materialise the join
     // first, then collect target doc ids whose joined image
     // satisfies WHERE. Mirrors Python's _compile_delete_using.
@@ -837,6 +1296,9 @@ fn run_delete(
             }
         };
         if keep {
+            if !stmt.returning.is_empty() {
+                returning_docs.push((doc_id, doc.clone()));
+            }
             to_delete.push(doc_id);
         }
     }
@@ -863,7 +1325,7 @@ fn run_delete(
                     .is_some()
                 {
                     return Err(SQLError::TypeMismatch(format!(
-                        "DELETE on `{}` violates FOREIGN KEY constraint from `{}` ({} -> {})",
+                        "FOREIGN KEY constraint violated: DELETE on `{}` is referenced by `{}` ({} -> {})",
                         stmt.table,
                         ref_table,
                         fk.local_columns.join(", "),
@@ -877,7 +1339,89 @@ fn run_delete(
         engine.delete_document(&stmt.table, doc_id);
         affected += 1;
     }
+    if !stmt.returning.is_empty() {
+        let returning_rows = returning_docs
+            .into_iter()
+            .map(|(doc_id, doc)| {
+                build_returning_row(engine, &stmt.table, doc_id, &doc, &stmt.returning, params)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(dml_returning_result(
+            engine,
+            &stmt.table,
+            &stmt.returning,
+            returning_rows,
+            affected,
+        ));
+    }
     Ok(SQLResult::from_affected(affected))
+}
+
+fn find_insert_conflict(
+    engine: &Engine,
+    table: &str,
+    on_conflict: &uqa_sql::ast::OnConflict,
+    document: &Document,
+) -> Option<DocId> {
+    if !on_conflict.conflict_columns.is_empty() {
+        let conflict_values: Vec<Value> = on_conflict
+            .conflict_columns
+            .iter()
+            .map(|c| document.get(c).cloned().unwrap_or(Value::Null))
+            .collect();
+        return engine.find_conflict(table, &on_conflict.conflict_columns, &conflict_values);
+    }
+
+    for col in engine.unique_columns(table) {
+        let value = document.get(&col).cloned().unwrap_or(Value::Null);
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        if let Some(doc_id) = engine.find_conflict(
+            table,
+            std::slice::from_ref(&col),
+            std::slice::from_ref(&value),
+        ) {
+            return Some(doc_id);
+        }
+    }
+    None
+}
+
+fn build_returning_row(
+    engine: &Engine,
+    table: &str,
+    doc_id: DocId,
+    document: &Document,
+    returning: &[Projection],
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
+    let mut row_doc = document.clone();
+    row_doc.insert(DOC_ID_COLUMN.into(), Value::Int(doc_id as i64));
+    build_projection_row(Some(engine), &row_doc, returning, params).map_err(|err| {
+        SQLError::Internal(format!(
+            "RETURNING projection failed for table `{table}` doc {doc_id}: {err}"
+        ))
+    })
+}
+
+fn dml_returning_result(
+    engine: &Engine,
+    table: &str,
+    returning: &[Projection],
+    rows: Vec<ResultRow>,
+    affected_rows: u64,
+) -> SQLResult {
+    SQLResult {
+        columns: expand_star_columns(
+            projection_columns(returning),
+            returning,
+            engine,
+            Some(table),
+        ),
+        rows,
+        affected_rows,
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -975,6 +1519,7 @@ fn run_insert(
         };
         let auto_id_col = engine.auto_increment_column(&stmt.table);
         let mut affected = 0u64;
+        let mut returning_rows = Vec::new();
         let cancel = engine.cancellation_token();
         for source_row in result.rows {
             cancel.check()?;
@@ -999,10 +1544,29 @@ fn run_insert(
             engine.add_document_with_vectors(
                 &stmt.table,
                 doc_id,
-                document,
+                document.clone(),
                 vectors_to_field_map(vectors),
             );
+            if !stmt.returning.is_empty() {
+                returning_rows.push(build_returning_row(
+                    engine,
+                    &stmt.table,
+                    doc_id,
+                    &document,
+                    &stmt.returning,
+                    params,
+                )?);
+            }
             affected += 1;
+        }
+        if !stmt.returning.is_empty() {
+            return Ok(dml_returning_result(
+                engine,
+                &stmt.table,
+                &stmt.returning,
+                returning_rows,
+                affected,
+            ));
         }
         return Ok(SQLResult::from_affected(affected));
     }
@@ -1040,6 +1604,7 @@ fn run_insert(
     // schema declares no primary key.
 
     let mut affected = 0u64;
+    let mut returning_rows = Vec::new();
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
@@ -1193,54 +1758,66 @@ fn run_insert(
         // columns may include the primary key, so we collect their
         // current values from the row being inserted.
         if let Some(on_conflict) = stmt.on_conflict.as_ref() {
-            if !on_conflict.conflict_columns.is_empty() {
-                let conflict_values: Vec<Value> = on_conflict
-                    .conflict_columns
-                    .iter()
-                    .map(|c| document.get(c).cloned().unwrap_or(Value::Null))
-                    .collect();
-                if let Some(existing_id) = engine.find_conflict(
-                    &stmt.table,
-                    &on_conflict.conflict_columns,
-                    &conflict_values,
-                ) {
-                    match &on_conflict.action {
-                        uqa_sql::ast::OnConflictAction::Nothing => {
-                            continue;
+            if let Some(existing_id) =
+                find_insert_conflict(engine, &stmt.table, on_conflict, &document)
+            {
+                match &on_conflict.action {
+                    uqa_sql::ast::OnConflictAction::Nothing => {
+                        continue;
+                    }
+                    uqa_sql::ast::OnConflictAction::Update {
+                        assignments,
+                        r#where,
+                    } => {
+                        let existing_doc = engine
+                            .get_document(&stmt.table, existing_id)
+                            .unwrap_or_default();
+                        let mut conflict_ctx_doc = existing_doc.clone();
+                        for (col, value) in &document {
+                            conflict_ctx_doc.insert(format!("excluded.{col}"), value.clone());
                         }
-                        uqa_sql::ast::OnConflictAction::Update {
-                            assignments,
-                            r#where,
-                        } => {
-                            let existing_doc = engine
-                                .get_document(&stmt.table, existing_id)
-                                .unwrap_or_default();
-                            let row_ctx =
-                                EvalContext::new(Some(&existing_doc), params).with_engine(engine);
-                            if let Some(pred) = r#where {
-                                let keep = eval(pred, &row_ctx)?;
-                                if !uqa_sql::expr::truthy(&keep) {
-                                    continue;
-                                }
+                        let row_ctx =
+                            EvalContext::new(Some(&conflict_ctx_doc), params).with_engine(engine);
+                        if let Some(pred) = r#where {
+                            let keep = eval(pred, &row_ctx)?;
+                            if !uqa_sql::expr::truthy(&keep) {
+                                continue;
                             }
-                            let mut updates: BTreeMap<String, Value> = BTreeMap::new();
-                            let mut conflict_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
-                            for (col, expr) in assignments {
-                                let v = eval(expr, &row_ctx)?;
-                                if let Ok(vec) = value_to_vector(&v) {
-                                    conflict_vectors.insert(col.clone(), vec);
-                                }
-                                updates.insert(col.clone(), v);
+                        }
+                        let mut updated_doc = existing_doc.clone();
+                        let mut updates: BTreeMap<String, Value> = BTreeMap::new();
+                        let mut conflict_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+                        for (col, expr) in assignments {
+                            let v = coerce_to_column_type(
+                                engine,
+                                &stmt.table,
+                                col,
+                                eval(expr, &row_ctx)?,
+                            );
+                            if let Ok(vec) = value_to_vector(&v) {
+                                conflict_vectors.insert(col.clone(), vec);
                             }
-                            engine.update_document_fields(
+                            updated_doc.insert(col.clone(), v.clone());
+                            updates.insert(col.clone(), v);
+                        }
+                        engine.update_document_fields(
+                            &stmt.table,
+                            existing_id,
+                            updates,
+                            conflict_vectors,
+                        );
+                        if !stmt.returning.is_empty() {
+                            returning_rows.push(build_returning_row(
+                                engine,
                                 &stmt.table,
                                 existing_id,
-                                updates,
-                                conflict_vectors,
-                            );
-                            affected += 1;
-                            continue;
+                                &updated_doc,
+                                &stmt.returning,
+                                params,
+                            )?);
                         }
+                        affected += 1;
+                        continue;
                     }
                 }
             }
@@ -1264,10 +1841,29 @@ fn run_insert(
         engine.add_document_with_vectors(
             &stmt.table,
             doc_id,
-            document,
+            document.clone(),
             vectors_to_field_map(vectors),
         );
+        if !stmt.returning.is_empty() {
+            returning_rows.push(build_returning_row(
+                engine,
+                &stmt.table,
+                doc_id,
+                &document,
+                &stmt.returning,
+                params,
+            )?);
+        }
         affected += 1;
+    }
+    if !stmt.returning.is_empty() {
+        return Ok(dml_returning_result(
+            engine,
+            &stmt.table,
+            &stmt.returning,
+            returning_rows,
+            affected,
+        ));
     }
     Ok(SQLResult::from_affected(affected))
 }
@@ -1500,18 +2096,63 @@ fn execute_select(
     Ok(combined)
 }
 
+struct ScopedEngineHook<'a> {
+    engine: &'a Engine,
+    ctes: &'a BTreeMap<String, Vec<ResultRow>>,
+}
+
+impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn nextval(&self, name: &str) -> std::result::Result<i64, String> {
+        self.engine.nextval(name)
+    }
+
+    fn currval(&self, name: &str) -> std::result::Result<i64, String> {
+        self.engine.currval(name)
+    }
+
+    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
+        self.engine.setval(name, value)
+    }
+
+    fn run_subquery(
+        &self,
+        stmt: &uqa_sql::ast::SelectStmt,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> std::result::Result<(Vec<String>, Vec<ResultRow>), String> {
+        run_correlated_subquery(self.engine, stmt, outer_row, params, self.ctes)
+            .map(|result| (result.columns, result.rows))
+            .map_err(|e| format!("subquery failed: {e}"))
+    }
+}
+
+pub(crate) fn run_correlated_subquery(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    outer_row: Option<&ResultRow>,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<SQLResult, SQLError> {
+    if let Some(row) = outer_row {
+        execute_lateral_subquery(engine, stmt, row, params, ctes)
+    } else {
+        let mut scoped_ctes = ctes.clone();
+        execute_select(engine, stmt, params, &mut scoped_ctes)
+    }
+}
+
 fn run_query_block(
     engine: &Engine,
     stmt: &SelectStmt,
     params: &[SQLParam],
     ctes: &BTreeMap<String, Vec<ResultRow>>,
 ) -> Result<SQLResult, SQLError> {
-    let from = stmt
-        .from
-        .as_ref()
-        .ok_or_else(|| SQLError::Unsupported("SELECT without FROM".into()))?;
+    let Some(from) = stmt.from.as_ref() else {
+        return run_select_without_from(engine, stmt, params);
+    };
 
     let joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
+    let scoped_hook = ScopedEngineHook { engine, ctes };
 
     // Aggregates and window functions still go through their dedicated
     // routines because they need access to the SQL function registry
@@ -1523,7 +2164,7 @@ fn run_query_block(
     let filtered = if let Some(filter) = stmt.r#where.as_ref() {
         let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
         for row in joined {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(&scoped_hook);
             if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
                 out.push(row);
             }
@@ -1773,7 +2414,8 @@ fn materialize_ctes(
         let rows = if cte.recursive {
             materialize_recursive_cte(engine, cte, params, ctes)?
         } else {
-            execute_select(engine, &cte.query, params, ctes)?.rows
+            let result = execute_select(engine, &cte.query, params, ctes)?;
+            apply_cte_column_aliases(result.rows, &result.columns, &cte.columns)
         };
         ctes.insert(cte.name.clone(), rows);
     }
@@ -1796,9 +2438,9 @@ fn materialize_recursive_cte(
         .set_op
         .as_ref()
         .ok_or_else(|| SQLError::Unsupported("recursive CTE requires UNION ALL".into()))?;
-    if set_op.kind != SetOpKind::Union || !set_op.all {
+    if set_op.kind != SetOpKind::Union {
         return Err(SQLError::Unsupported(
-            "recursive CTE only supports UNION ALL".into(),
+            "recursive CTE only supports UNION".into(),
         ));
     }
 
@@ -1806,8 +2448,15 @@ fn materialize_recursive_cte(
     let mut anchor_stmt = cte.query.as_ref().clone();
     anchor_stmt.set_op = None;
     anchor_stmt.with.clear();
-    let anchor_columns = projection_columns(&anchor_stmt.projections);
+    let source_anchor_columns = projection_columns(&anchor_stmt.projections);
+    let anchor_columns = if cte.columns.is_empty() {
+        source_anchor_columns.clone()
+    } else {
+        cte.columns.clone()
+    };
     let anchor_rows = run_query_block(engine, &anchor_stmt, params, ctes)?.rows;
+    let anchor_rows =
+        apply_cte_column_aliases(anchor_rows, &source_anchor_columns, &anchor_columns);
 
     let mut all_rows = anchor_rows.clone();
     let mut working = anchor_rows;
@@ -1842,10 +2491,34 @@ fn materialize_recursive_cte(
             .into_iter()
             .map(|row| rename_columns(&row, &step_columns, &anchor_columns))
             .collect();
-        all_rows.extend(renamed.clone());
-        working = renamed;
+        let next = if set_op.all {
+            renamed
+        } else {
+            renamed
+                .into_iter()
+                .filter(|row| !all_rows.iter().any(|seen| seen == row))
+                .collect()
+        };
+        if next.is_empty() {
+            break;
+        }
+        all_rows.extend(next.clone());
+        working = next;
     }
     Ok(all_rows)
+}
+
+fn apply_cte_column_aliases(
+    rows: Vec<ResultRow>,
+    source_columns: &[String],
+    aliases: &[String],
+) -> Vec<ResultRow> {
+    if aliases.is_empty() {
+        return rows;
+    }
+    rows.into_iter()
+        .map(|row| rename_columns(&row, source_columns, aliases))
+        .collect()
 }
 
 fn rename_columns(row: &ResultRow, src: &[String], dst: &[String]) -> ResultRow {
@@ -1903,6 +2576,10 @@ fn run_single_table_select(
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
+    if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
+        return Ok(build_facet_rows(engine, table, &scored, &facet_fields));
+    }
+
     if order_by_references_field(stmt) {
         // ORDER BY references something other than `_score`; defer
         // ordering / skip / limit to the row-level evaluator that can
@@ -1941,6 +2618,71 @@ fn run_single_table_select(
     );
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SQLResult::from_rows(columns, rows))
+}
+
+fn facet_projection_fields(projections: &[Projection]) -> Result<Option<Vec<String>>, SQLError> {
+    if projections.len() != 1 {
+        return Ok(None);
+    }
+    let Expr::Func { name, args, .. } = &projections[0].expr else {
+        return Ok(None);
+    };
+    if !name.eq_ignore_ascii_case("uqa_facets") {
+        return Ok(None);
+    }
+    let mut fields = Vec::with_capacity(args.len());
+    for arg in args {
+        fields.push(expect_column_name(arg, "uqa_facets.field")?);
+    }
+    Ok(Some(fields))
+}
+
+fn build_facet_rows(
+    engine: &Engine,
+    table: &str,
+    scored: &[ScoredEntry],
+    fields: &[String],
+) -> SQLResult {
+    let include_field = fields.len() > 1;
+    let mut rows = Vec::new();
+    for field in fields {
+        let mut counts: BTreeMap<Value, i64> = BTreeMap::new();
+        for entry in scored {
+            let Some(doc) = engine.get_document(table, entry.doc_id) else {
+                continue;
+            };
+            let Some(value) = doc.get(field) else {
+                continue;
+            };
+            if matches!(value, Value::Null) {
+                continue;
+            }
+            *counts.entry(value.clone()).or_insert(0) += 1;
+        }
+        for (value, count) in counts {
+            let mut row = ResultRow::new();
+            if include_field {
+                row.insert("facet_field".into(), Value::Str(field.clone()));
+            }
+            row.insert("facet_value".into(), value);
+            row.insert("facet_count".into(), Value::Int(count));
+            rows.push(row);
+        }
+    }
+    let columns = if include_field {
+        vec![
+            "facet_field".into(),
+            "facet_value".into(),
+            "facet_count".into(),
+        ]
+    } else {
+        vec!["facet_value".into(), "facet_count".into()]
+    };
+    SQLResult {
+        columns,
+        rows,
+        affected_rows: 0,
+    }
 }
 
 /// When a projection list contains `Expr::Star`, replace the synthetic
@@ -2717,9 +3459,23 @@ fn build_join_rows_with_ctes(
             if let Some(rows) = ctes.get(name) {
                 return Ok(rows.iter().map(|row| reprefix_row(&qual, row)).collect());
             }
+            if let Some(body) = engine.view(name) {
+                let mut scoped_ctes = ctes.clone();
+                let result = execute_select(engine, &body, params, &mut scoped_ctes)?;
+                return Ok(result
+                    .rows
+                    .iter()
+                    .map(|row| reprefix_row(&qual, row))
+                    .collect());
+            }
             // information_schema / pg_catalog virtual views.
             if let Some(rows) = build_info_schema_rows(engine, name) {
                 return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
+            }
+            if engine.table(name).is_none() {
+                return Err(SQLError::Unsupported(format!(
+                    "relation `{name}` does not exist"
+                )));
             }
             Ok(load_table_rows(engine, name)
                 .iter()
@@ -2785,7 +3541,15 @@ fn build_join_rows_with_ctes(
                     params,
                     engine,
                 )?),
-                JoinKind::Full => Err(SQLError::Unsupported("FULL OUTER JOIN".into())),
+                JoinKind::Full => Ok(full_outer(
+                    &left_rows,
+                    &right_rows,
+                    left,
+                    right,
+                    on_expr,
+                    params,
+                    engine,
+                )?),
             }
         }
         FromClause::Values {
@@ -2818,37 +3582,44 @@ fn build_join_rows_with_ctes(
             column_aliases,
         } => {
             let result = run_select(engine, (**body).clone(), params)?;
-            let qual = alias.clone();
-            let cols = column_aliases.clone();
-            let rows: Vec<ResultRow> = result
-                .rows
-                .into_iter()
-                .map(|mut r| {
-                    if !cols.is_empty() {
-                        let pairs: Vec<(String, Value)> = result
-                            .columns
-                            .iter()
-                            .zip(cols.iter())
-                            .filter_map(|(orig, new)| r.remove(orig).map(|v| (new.clone(), v)))
-                            .collect();
-                        let mut renamed = ResultRow::new();
-                        for (k, v) in pairs {
-                            renamed.insert(k, v);
-                        }
-                        if let Some(q) = &qual {
-                            return prefix_row(q, &renamed);
-                        }
-                        renamed
-                    } else if let Some(q) = &qual {
-                        prefix_row(q, &r)
-                    } else {
-                        r
-                    }
-                })
-                .collect();
-            Ok(rows)
+            Ok(materialize_subquery_rows(result, alias, column_aliases))
         }
     }
+}
+
+fn materialize_subquery_rows(
+    result: SQLResult,
+    alias: &Option<String>,
+    column_aliases: &[String],
+) -> Vec<ResultRow> {
+    let qual = alias.clone();
+    let cols = column_aliases.to_vec();
+    result
+        .rows
+        .into_iter()
+        .map(|mut r| {
+            if !cols.is_empty() {
+                let pairs: Vec<(String, Value)> = result
+                    .columns
+                    .iter()
+                    .zip(cols.iter())
+                    .filter_map(|(orig, new)| r.remove(orig).map(|v| (new.clone(), v)))
+                    .collect();
+                let mut renamed = ResultRow::new();
+                for (k, v) in pairs {
+                    renamed.insert(k, v);
+                }
+                if let Some(q) = &qual {
+                    return prefix_row(q, &renamed);
+                }
+                renamed
+            } else if let Some(q) = &qual {
+                prefix_row(q, &r)
+            } else {
+                r
+            }
+        })
+        .collect()
 }
 
 fn build_values_rows(
@@ -2908,14 +3679,31 @@ fn build_lateral_join_rows(
     use uqa_sql::expr::{eval, truthy, EvalContext};
     let mut out: Vec<ResultRow> = Vec::new();
     for left_row in left_rows {
-        // Build a per-iteration ctes scope that includes a synthetic
-        // single-row CTE named after every alias seen in the left row,
-        // so the right body's column refs resolve. The simpler
-        // approach below substitutes the outer row by treating the
-        // right side as an ordinary FromClause and combining at the
-        // join layer; we still preserve the outer row for the ON
-        // predicate evaluation below.
-        let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
+        let right_rows = match right {
+            FromClause::Subquery {
+                body,
+                alias,
+                column_aliases,
+            } => {
+                let result = execute_lateral_subquery(engine, body, left_row, params, ctes)?;
+                materialize_subquery_rows(result, alias, column_aliases)
+            }
+            FromClause::Function {
+                name,
+                args,
+                alias,
+                column_aliases,
+            } => build_table_function_rows_with_row(
+                engine,
+                name,
+                args,
+                alias.as_deref(),
+                column_aliases,
+                params,
+                Some(left_row),
+            )?,
+            _ => build_join_rows_with_ctes(engine, right, params, ctes)?,
+        };
         for r_row in &right_rows {
             let mut joined = ResultRow::new();
             for (k, v) in left_row {
@@ -2939,6 +3727,71 @@ fn build_lateral_join_rows(
     Ok(out)
 }
 
+fn execute_lateral_subquery(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<SQLResult, SQLError> {
+    let mut scoped_ctes = ctes.clone();
+    materialize_ctes(engine, &stmt.with, params, &mut scoped_ctes)?;
+
+    let Some(from) = stmt.from.as_ref() else {
+        let projected =
+            project_join_row_with_engine(Some(engine), outer_row, &stmt.projections, params)?;
+        return Ok(SQLResult::from_rows(
+            projection_columns(&stmt.projections),
+            vec![projected],
+        ));
+    };
+
+    let inner_rows = build_join_rows_with_ctes(engine, from, params, &scoped_ctes)?;
+    let mut filtered: Vec<ResultRow> = Vec::with_capacity(inner_rows.len());
+    for inner in inner_rows {
+        let merged = merge_lateral_scope_rows(outer_row, &inner);
+        let keep = match stmt.r#where.as_ref() {
+            None => true,
+            Some(filter) => {
+                let ctx = EvalContext::new(Some(&merged), params).with_engine(engine);
+                uqa_sql::expr::truthy(&eval(filter, &ctx)?)
+            }
+        };
+        if keep {
+            filtered.push(merged);
+        }
+    }
+
+    if has_aggregate(&stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
+        let columns = projection_columns(&stmt.projections);
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
+        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        return Ok(SQLResult::from_rows(columns, rows));
+    }
+
+    let ordered = apply_row_order_limit(filtered, stmt, engine, params)?;
+    let columns = projection_columns(&stmt.projections);
+    let rows = ordered
+        .iter()
+        .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SQLResult::from_rows(columns, rows))
+}
+
+fn merge_lateral_scope_rows(outer_row: &ResultRow, inner_row: &ResultRow) -> ResultRow {
+    let mut merged = outer_row.clone();
+    for (key, value) in inner_row {
+        merged.insert(key.clone(), value.clone());
+        if let Some((_, column)) = key.rsplit_once('.') {
+            merged.insert(column.to_string(), value.clone());
+        }
+    }
+    merged
+}
+
 #[allow(clippy::similar_names)]
 fn build_table_function_rows(
     engine: &Engine,
@@ -2948,8 +3801,21 @@ fn build_table_function_rows(
     column_aliases: &[String],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
+    build_table_function_rows_with_row(engine, name, args, alias, column_aliases, params, None)
+}
+
+#[allow(clippy::similar_names)]
+fn build_table_function_rows_with_row(
+    engine: &Engine,
+    name: &str,
+    args: &[Expr],
+    alias: Option<&str>,
+    column_aliases: &[String],
+    params: &[SQLParam],
+    row: Option<&ResultRow>,
+) -> Result<Vec<ResultRow>, SQLError> {
     use uqa_sql::expr::{eval, EvalContext};
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = EvalContext::new(row, params).with_engine(engine);
     let lower = name.to_ascii_lowercase();
     let evaluated: Vec<Value> = args
         .iter()
@@ -3048,17 +3914,11 @@ fn build_table_function_rows(
             }
             Ok(out)
         }
-        "json_each" | "jsonb_each" => {
+        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
             if evaluated.len() != 1 {
                 return Err(SQLError::TypeMismatch(format!("{lower} takes 1 arg")));
             }
-            let s = match &evaluated[0] {
-                Value::Str(s) => s.clone(),
-                Value::Map(_) => format!("{:?}", evaluated[0]),
-                _ => return Err(SQLError::TypeMismatch(format!("{lower} arg type"))),
-            };
-            let parsed: serde_json::Value = serde_json::from_str(&s)
-                .map_err(|e| SQLError::TypeMismatch(format!("{lower}: invalid JSON: {e}")))?;
+            let parsed = json_table_arg(&evaluated[0], &lower)?;
             let serde_json::Value::Object(obj) = parsed else {
                 return Err(SQLError::TypeMismatch(format!(
                     "{lower}: argument is not an object"
@@ -3075,10 +3935,7 @@ fn build_table_function_rows(
             for (k, v) in obj {
                 let mut r = ResultRow::new();
                 r.insert(key_col.clone(), Value::Str(k));
-                r.insert(
-                    val_col.clone(),
-                    Value::Str(serde_json::to_string(&v).unwrap_or_default()),
-                );
+                r.insert(val_col.clone(), json_table_value_to_text(&v));
                 let r = match qual {
                     Some(a) => prefix_row(a, &r),
                     None => r,
@@ -3087,26 +3944,31 @@ fn build_table_function_rows(
             }
             Ok(out)
         }
-        "json_array_elements" | "jsonb_array_elements" => {
+        "json_array_elements"
+        | "jsonb_array_elements"
+        | "json_array_elements_text"
+        | "jsonb_array_elements_text" => {
             if evaluated.len() != 1 {
                 return Err(SQLError::TypeMismatch(format!("{lower} takes 1 arg")));
             }
-            let s = match &evaluated[0] {
-                Value::Str(s) => s.clone(),
-                _ => return Err(SQLError::TypeMismatch(format!("{lower} arg type"))),
-            };
-            let parsed: serde_json::Value = serde_json::from_str(&s)
-                .map_err(|e| SQLError::TypeMismatch(format!("{lower}: invalid JSON: {e}")))?;
+            let parsed = json_table_arg(&evaluated[0], &lower)?;
             let serde_json::Value::Array(arr) = parsed else {
                 return Err(SQLError::TypeMismatch(format!(
                     "{lower}: argument is not an array"
                 )));
             };
+            let col = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "value".into());
             for v in arr {
-                push_scalar(
-                    &mut out,
-                    Value::Str(serde_json::to_string(&v).unwrap_or_default()),
-                );
+                let mut r = ResultRow::new();
+                r.insert(col.clone(), json_table_value_to_text(&v));
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
             }
             Ok(out)
         }
@@ -3175,10 +4037,8 @@ fn build_table_function_rows(
             // Mirror Python: include the four built-in analyzers
             // (`whitespace`, `standard`, `standard_cjk`, `keyword`) on
             // top of every user-registered named analyzer.
-            let mut names: std::collections::BTreeSet<String> = engine
-                .list_named_analyzers()
-                .into_iter()
-                .collect();
+            let mut names: std::collections::BTreeSet<String> =
+                engine.list_named_analyzers().into_iter().collect();
             for builtin in ["whitespace", "standard", "standard_cjk", "keyword"] {
                 names.insert(builtin.to_string());
             }
@@ -3432,18 +4292,72 @@ fn left_outer(
             // Pad with NULLs for every column the inner side would
             // have contributed.
             let mut pad = l.clone();
-            let mut tables = Vec::new();
-            inner_from.collect_tables(&mut tables);
-            for (name, alias) in &tables {
-                let null_keys = null_row_for(name, alias.as_deref(), engine);
-                for (k, v) in null_keys {
-                    pad.entry(k).or_insert(v);
-                }
-            }
+            pad_nulls_for_from(&mut pad, inner_from, engine);
             out.push(pad);
         }
     }
     Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn full_outer(
+    left_rows: &[ResultRow],
+    right_rows: &[ResultRow],
+    left_from: &FromClause,
+    right_from: &FromClause,
+    on: Option<&Expr>,
+    params: &[SQLParam],
+    engine: &Engine,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut out = Vec::new();
+    let mut matched_right = vec![false; right_rows.len()];
+    for left in left_rows {
+        let mut matched_left = false;
+        for (idx, right) in right_rows.iter().enumerate() {
+            let merged = merge_rows(left, right);
+            let keep = match on {
+                None => true,
+                Some(expr) => {
+                    let ctx =
+                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
+                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                }
+            };
+            if keep {
+                out.push(merged);
+                matched_left = true;
+                matched_right[idx] = true;
+            }
+        }
+        if !matched_left {
+            let mut padded = left.clone();
+            pad_nulls_for_from(&mut padded, right_from, engine);
+            out.push(padded);
+        }
+    }
+    for (idx, right) in right_rows.iter().enumerate() {
+        if matched_right[idx] {
+            continue;
+        }
+        let mut padded = ResultRow::new();
+        pad_nulls_for_from(&mut padded, left_from, engine);
+        for (k, v) in right {
+            padded.insert(k.clone(), v.clone());
+        }
+        out.push(padded);
+    }
+    Ok(out)
+}
+
+fn pad_nulls_for_from(row: &mut ResultRow, from: &FromClause, engine: &Engine) {
+    let mut tables = Vec::new();
+    from.collect_tables(&mut tables);
+    for (name, alias) in &tables {
+        let null_keys = null_row_for(name, alias.as_deref(), engine);
+        for (k, v) in null_keys {
+            row.entry(k).or_insert(v);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -3515,6 +4429,12 @@ fn engine_func_intercept(
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "uqa_highlight" => Ok(Some(run_uqa_highlight(engine, row, args, params)?)),
+        "score_bm25" | "score_bayesian_bm25" => {
+            validate_score_projection_args(&lower, args, row, params)?;
+            Ok(Some(
+                row.get(SCORE_COLUMN).cloned().unwrap_or(Value::Float(0.0)),
+            ))
+        }
         "graph_create" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
@@ -3528,6 +4448,32 @@ fn engine_func_intercept(
             Ok(Some(Value::Bool(true)))
         }
         _ => Ok(None),
+    }
+}
+
+fn validate_score_projection_args(
+    name: &str,
+    args: &[Expr],
+    row: &ResultRow,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(SQLError::BadArity {
+            name: name.into(),
+            expected: "1..=2".into(),
+            actual: args.len(),
+        });
+    }
+    let query_idx = args.len() - 1;
+    if args.len() == 2 {
+        let _ = expect_column_name(&args[0], &format!("{name}.field"))?;
+    }
+    let ctx = EvalContext::new(Some(row), params);
+    match eval(&args[query_idx], &ctx)? {
+        Value::Str(_) => Ok(()),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{name}.query must be a string, got {other:?}"
+        ))),
     }
 }
 
@@ -3556,12 +4502,14 @@ fn run_uqa_highlight(
     let text = match &args[0] {
         Expr::Column(c) => match row.get(c) {
             Some(Value::Str(s)) => s.clone(),
+            Some(Value::Null) => return Ok(Value::Null),
             Some(other) => format!("{other:?}"),
             None => return Ok(Value::Null),
         },
         Expr::QualifiedColumn { qualifier, column } => {
             match row.get(&format!("{qualifier}.{column}")) {
                 Some(Value::Str(s)) => s.clone(),
+                Some(Value::Null) => return Ok(Value::Null),
                 Some(other) => format!("{other:?}"),
                 None => return Ok(Value::Null),
             }
@@ -3644,7 +4592,8 @@ fn run_uqa_highlight(
         .filter(|t| !matches!(t.to_ascii_lowercase().as_str(), "and" | "or" | "not"))
         .map(std::string::ToString::to_string)
         .collect();
-    let out = uqa_analysis::highlight(&text, &terms, None, &opts);
+    let analyzer = uqa_analysis::standard_analyzer("english");
+    let out = uqa_analysis::highlight(&text, &terms, Some(&analyzer), &opts);
     Ok(Value::Str(out))
 }
 
@@ -3726,25 +4675,7 @@ fn aggregate_join_rows(
                     continue;
                 }
             }
-            let lower_name = name.to_ascii_lowercase();
-            let value = match (lower_name.as_str(), args.as_slice()) {
-                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
-                // Ordered-set aggregates: the percentile / mode fraction
-                // is a direct positional argument; the value to fold
-                // comes from `WITHIN GROUP (ORDER BY ...)` which the
-                // compiler parks in `order_by[0]`.
-                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
-                    .first()
-                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
-                    .transpose()?
-                    .unwrap_or(Value::Null),
-                (_, args) => {
-                    let arg = args
-                        .first()
-                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-                    uqa_sql::expr::eval(arg, &ctx)?
-                }
-            };
+            let value = aggregate_input_value(name, args, order_by, &ctx)?;
             if *distinct && !matches!(value, Value::Null) {
                 let key = distinct_key(&value);
                 if !bucket.0[i].distinct.insert(key) {
@@ -3838,11 +4769,7 @@ fn resolve_having(
     _group_values: &[Value],
     _params: &[SQLParam],
 ) -> Result<Expr, SQLError> {
-    fn walk(
-        e: &Expr,
-        stmt: &SelectStmt,
-        accs: &[AggregateAccumulator],
-    ) -> Result<Expr, SQLError> {
+    fn walk(e: &Expr, stmt: &SelectStmt, accs: &[AggregateAccumulator]) -> Result<Expr, SQLError> {
         if is_aggregate(e) {
             // Find the matching projection so we can pluck the
             // already-computed accumulator value. Falls back to
@@ -3977,25 +4904,7 @@ fn aggregate_join_rows_relaxed(
                     continue;
                 }
             }
-            let lower_name = name.to_ascii_lowercase();
-            let value = match (lower_name.as_str(), args.as_slice()) {
-                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
-                // Ordered-set aggregates: the percentile / mode fraction
-                // is a direct positional argument; the value to fold
-                // comes from `WITHIN GROUP (ORDER BY ...)` which the
-                // compiler parks in `order_by[0]`.
-                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
-                    .first()
-                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
-                    .transpose()?
-                    .unwrap_or(Value::Null),
-                (_, args) => {
-                    let arg = args
-                        .first()
-                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-                    uqa_sql::expr::eval(arg, &ctx)?
-                }
-            };
+            let value = aggregate_input_value(name, args, order_by, &ctx)?;
             if *distinct && !matches!(value, Value::Null) {
                 let key = distinct_key(&value);
                 if !bucket.0[i].distinct.insert(key) {
@@ -4183,7 +5092,46 @@ fn is_aggregate(expr: &Expr) -> bool {
             | "percentile_cont"
             | "percentile_disc"
             | "mode"
+            | "json_object_agg"
+            | "jsonb_object_agg"
     ))
+}
+
+fn aggregate_input_value(
+    name: &str,
+    args: &[Expr],
+    order_by: &[OrderBy],
+    ctx: &EvalContext<'_>,
+) -> Result<Value, SQLError> {
+    match (name.to_ascii_lowercase().as_str(), args) {
+        ("count", [Expr::Star]) | ("count", []) => Ok(Value::Int(1)),
+        // Ordered-set aggregates: the percentile / mode fraction is a
+        // direct positional argument; the value to fold comes from
+        // `WITHIN GROUP (ORDER BY ...)` which the compiler parks in
+        // `order_by[0]`.
+        ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+            .first()
+            .map(|ob| uqa_sql::expr::eval(&ob.expr, ctx))
+            .transpose()
+            .map(|v| v.unwrap_or(Value::Null)),
+        ("json_object_agg" | "jsonb_object_agg", [key_expr, value_expr]) => {
+            let key = uqa_sql::expr::eval(key_expr, ctx)?;
+            if matches!(key, Value::Null) {
+                return Ok(Value::Null);
+            }
+            let value = uqa_sql::expr::eval(value_expr, ctx)?;
+            Ok(Value::List(vec![key, value]))
+        }
+        ("json_object_agg" | "jsonb_object_agg", _) => Err(SQLError::TypeMismatch(format!(
+            "{name} requires 2 arguments"
+        ))),
+        (_, args) => {
+            let arg = args
+                .first()
+                .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
+            uqa_sql::expr::eval(arg, ctx)
+        }
+    }
 }
 
 #[derive(Default)]
@@ -4377,25 +5325,7 @@ fn build_aggregate_rows(
                     continue;
                 }
             }
-            let lower_name = name.to_ascii_lowercase();
-            let value = match (lower_name.as_str(), args.as_slice()) {
-                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
-                // Ordered-set aggregates: the percentile / mode fraction
-                // is a direct positional argument; the value to fold
-                // comes from `WITHIN GROUP (ORDER BY ...)` which the
-                // compiler parks in `order_by[0]`.
-                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
-                    .first()
-                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
-                    .transpose()?
-                    .unwrap_or(Value::Null),
-                (_, args) => {
-                    let arg = args
-                        .first()
-                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-                    uqa_sql::expr::eval(arg, &ctx)?
-                }
-            };
+            let value = aggregate_input_value(name, args, order_by, &ctx)?;
             if *distinct && !matches!(value, Value::Null) {
                 let key = distinct_key(&value);
                 if !bucket.0[i].distinct.insert(key) {
@@ -4529,25 +5459,7 @@ fn build_aggregate_rows_relaxed(
                     continue;
                 }
             }
-            let lower_name = name.to_ascii_lowercase();
-            let value = match (lower_name.as_str(), args.as_slice()) {
-                ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
-                // Ordered-set aggregates: the percentile / mode fraction
-                // is a direct positional argument; the value to fold
-                // comes from `WITHIN GROUP (ORDER BY ...)` which the
-                // compiler parks in `order_by[0]`.
-                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
-                    .first()
-                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
-                    .transpose()?
-                    .unwrap_or(Value::Null),
-                (_, args) => {
-                    let arg = args
-                        .first()
-                        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-                    uqa_sql::expr::eval(arg, &ctx)?
-                }
-            };
+            let value = aggregate_input_value(name, args, order_by, &ctx)?;
             if *distinct && !matches!(value, Value::Null) {
                 let key = distinct_key(&value);
                 if !bucket.0[i].distinct.insert(key) {
@@ -4620,21 +5532,13 @@ fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
     aggregate_value_with_args(name, acc, &[])
 }
 
-fn aggregate_value_with_args(
-    name: &str,
-    acc: &AggregateAccumulator,
-    args: &[Expr],
-) -> Value {
+fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Expr]) -> Value {
     let lname = name.to_ascii_lowercase();
     // Order the collected `values` by the captured sort keys when the
     // aggregate was annotated with ORDER BY (string_agg / array_agg /
     // percentile_*). This is a stable sort so equal keys preserve
     // insertion order, matching PostgreSQL.
-    let ordered_values: Vec<Value> = if acc
-        .sort_keys
-        .iter()
-        .any(|k| !k.is_empty())
-    {
+    let ordered_values: Vec<Value> = if acc.sort_keys.iter().any(|k| !k.is_empty()) {
         let mut indexed: Vec<usize> = (0..acc.values.len()).collect();
         indexed.sort_by(|a, b| {
             let ak = &acc.sort_keys[*a];
@@ -4700,6 +5604,23 @@ fn aggregate_value_with_args(
             }
             Value::List(ordered_values)
         }
+        "json_object_agg" | "jsonb_object_agg" => {
+            let mut map = BTreeMap::new();
+            for value in ordered_values {
+                let Value::List(pair) = value else {
+                    continue;
+                };
+                if pair.len() != 2 || matches!(pair[0], Value::Null) {
+                    continue;
+                }
+                map.insert(aggregate_json_key(&pair[0]), pair[1].clone());
+            }
+            if map.is_empty() {
+                Value::Null
+            } else {
+                Value::Map(map)
+            }
+        }
         "bool_and" => match acc.bool_and {
             Some(b) => Value::Bool(b),
             None => Value::Null,
@@ -4759,11 +5680,21 @@ fn aggregate_value_with_args(
     }
 }
 
+fn aggregate_json_key(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Str(s) => s.clone(),
+        Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
+            .unwrap_or_else(|_| format!("{value:?}")),
+    }
+}
+
 fn mean(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values
-        .iter()
-        .filter_map(|v| value_as_f64(v).ok())
-        .collect();
+    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
     if nums.is_empty() {
         0.0
     } else {
@@ -4772,10 +5703,7 @@ fn mean(values: &[Value]) -> f64 {
 }
 
 fn variance_samp(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values
-        .iter()
-        .filter_map(|v| value_as_f64(v).ok())
-        .collect();
+    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
     if nums.len() < 2 {
         return 0.0;
     }
@@ -4785,10 +5713,7 @@ fn variance_samp(values: &[Value]) -> f64 {
 }
 
 fn variance_pop(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values
-        .iter()
-        .filter_map(|v| value_as_f64(v).ok())
-        .collect();
+    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
     if nums.is_empty() {
         return 0.0;
     }
@@ -4806,10 +5731,7 @@ fn stddev_pop(values: &[Value]) -> f64 {
 }
 
 fn percentile_cont(values: &[Value], frac: f64) -> f64 {
-    let mut nums: Vec<f64> = values
-        .iter()
-        .filter_map(|v| value_as_f64(v).ok())
-        .collect();
+    let mut nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
     if nums.is_empty() {
         return 0.0;
     }
@@ -4960,6 +5882,11 @@ fn execute_function(
         FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
             run_text_match(engine, table, args, params)
         }
+        FunctionKind::FTSMatch => run_fts_match(engine, table, args, params),
+        FunctionKind::BayesianMatchWithPrior => {
+            run_bayesian_match_with_prior(engine, table, args, params)
+        }
+        FunctionKind::SparseThreshold => run_sparse_threshold(engine, table, args, params),
         FunctionKind::KNNMatch => run_knn_match(engine, table, args, params),
         FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
         FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
@@ -4978,11 +5905,14 @@ fn execute_function(
         // shape or are construction-time helpers; they reach the
         // projection-side handler instead of this row-emitting
         // dispatcher.
+        FunctionKind::AttentionFusion | FunctionKind::LearnedFusion => {
+            run_attention_fusion(engine, table, args, params)
+        }
         FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
-        | FunctionKind::AttentionFusion
-        | FunctionKind::LearnedFusion
         | FunctionKind::CalibratedVectorMatch
+        | FunctionKind::ScoreBM25
+        | FunctionKind::ScoreBayesianBM25
         | FunctionKind::DeepLearn
         | FunctionKind::Convolve
         | FunctionKind::Pool
@@ -5032,6 +5962,37 @@ fn run_staged_retrieval(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    if matches!(args.first(), Some(Expr::Func { .. })) && !is_named_arg_expr(&args[0]) {
+        if args.is_empty() || args.len() % 2 != 0 {
+            return Err(SQLError::BadArity {
+                name: "staged_retrieval".into(),
+                expected: "pairs of (signal, top_k)".into(),
+                actual: args.len(),
+            });
+        }
+        let ctx = EvalContext::new(None, params).with_engine(engine);
+        let mut current: Option<Vec<ScoredEntry>> = None;
+        for pair in args.chunks(2) {
+            let rows = run_scored_signal(engine, table, &pair[0], params, "staged_retrieval")?;
+            let top_k = expect_usize(&pair[1], "staged_retrieval.top_k", &ctx)?;
+            let mut scored = rows;
+            if let Some(prior) = &current {
+                let prior_ids: std::collections::BTreeSet<u64> =
+                    prior.iter().map(|e| e.doc_id).collect();
+                scored.retain(|e| prior_ids.contains(&e.doc_id));
+            }
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scored.truncate(top_k);
+            scored.sort_by_key(|e| e.doc_id);
+            current = Some(scored);
+        }
+        return Ok(current.unwrap_or_default());
+    }
+
     if args.is_empty() || args.len() % 3 != 0 {
         return Err(SQLError::BadArity {
             name: "staged_retrieval".into(),
@@ -5078,31 +6039,20 @@ fn run_multi_field_match(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.len() < 3 {
         return Err(SQLError::BadArity {
             name: "multi_field_match".into(),
-            expected: "even, >= 2 (alternating field, query)".into(),
+            expected: ">= 3 (fields..., query[, weights...])".into(),
             actual: args.len(),
         });
     }
     let ctx = EvalContext::new(None, params).with_engine(engine);
-    // Run a text_match per (field, query) pair, accumulate per-doc
-    // probability vectors with 0.5 prior for missing fields, then fuse
-    // via log-odds conjunction with uniform weights.
-    let n_fields = args.len() / 2;
+    let (fields, queries, weights) = parse_multi_field_match_args(args, &ctx)?;
+    let n_fields = fields.len();
     let mut per_doc: std::collections::BTreeMap<u64, Vec<f64>> = std::collections::BTreeMap::new();
-    for i in 0..n_fields {
-        let field = expect_column_name(&args[2 * i], "multi_field_match.field")?;
-        let q = match eval(&args[2 * i + 1], &ctx)? {
-            Value::Str(s) => s,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "multi_field_match query must be string, got {other:?}"
-                )));
-            }
-        };
+    for (i, (field, q)) in fields.iter().zip(queries.iter()).enumerate() {
         let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
-        let scored = engine.search(table, &field, &q, &mode, usize::MAX);
+        let scored = engine.search(table, field, q, &mode, usize::MAX);
         for entry in scored {
             let slot = per_doc
                 .entry(entry.doc_id)
@@ -5116,7 +6066,6 @@ fn run_multi_field_match(
             slot.resize(n_fields, 0.5);
         }
     }
-    let weights = vec![1.0 / n_fields as f64; n_fields];
     let mut out: Vec<ScoredEntry> = per_doc
         .into_iter()
         .map(|(doc_id, probs)| {
@@ -5134,6 +6083,99 @@ fn run_multi_field_match(
         .collect();
     out.sort_by_key(|e| e.doc_id);
     Ok(out)
+}
+
+fn parse_multi_field_match_args(
+    args: &[Expr],
+    ctx: &EvalContext<'_>,
+) -> Result<(Vec<String>, Vec<String>, Vec<f64>), SQLError> {
+    let first_non_column = args.iter().position(|arg| !matches!(arg, Expr::Column(_)));
+    if let Some(query_idx) = first_non_column {
+        if query_idx >= 2 {
+            let fields = args[..query_idx]
+                .iter()
+                .map(|arg| expect_column_name(arg, "multi_field_match.field"))
+                .collect::<Result<Vec<_>, _>>()?;
+            let query = expect_string_value(&args[query_idx], "multi_field_match.query", ctx)?;
+            let weight_args = &args[query_idx + 1..];
+            let weights = if weight_args.is_empty() {
+                uniform_weights(fields.len())
+            } else {
+                if weight_args.len() != fields.len() {
+                    return Err(SQLError::BadArity {
+                        name: "multi_field_match".into(),
+                        expected: "one weight per field".into(),
+                        actual: weight_args.len(),
+                    });
+                }
+                normalize_weights(
+                    weight_args
+                        .iter()
+                        .map(|arg| expect_f64_value(arg, "multi_field_match.weight", ctx))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            };
+            let queries = vec![query; fields.len()];
+            return Ok((fields, queries, weights));
+        }
+    }
+
+    if args.len() < 4 || args.len() % 2 != 0 {
+        return Err(SQLError::BadArity {
+            name: "multi_field_match".into(),
+            expected: ">= 3 (fields..., query[, weights...]) or even >= 4 (field, query pairs)"
+                .into(),
+            actual: args.len(),
+        });
+    }
+    let n_fields = args.len() / 2;
+    let mut fields = Vec::with_capacity(n_fields);
+    let mut queries = Vec::with_capacity(n_fields);
+    for i in 0..n_fields {
+        fields.push(expect_column_name(&args[2 * i], "multi_field_match.field")?);
+        queries.push(expect_string_value(
+            &args[2 * i + 1],
+            "multi_field_match.query",
+            ctx,
+        )?);
+    }
+    Ok((fields, queries, uniform_weights(n_fields)))
+}
+
+fn expect_string_value(
+    expr: &Expr,
+    label: &str,
+    ctx: &EvalContext<'_>,
+) -> Result<String, SQLError> {
+    match eval(expr, ctx)? {
+        Value::Str(s) => Ok(s),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{label} must be string, got {other:?}"
+        ))),
+    }
+}
+
+fn expect_f64_value(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<f64, SQLError> {
+    match eval(expr, ctx)? {
+        Value::Float(f) => Ok(f),
+        Value::Int(i) => Ok(i as f64),
+        other => Err(SQLError::TypeMismatch(format!(
+            "{label} must be numeric, got {other:?}"
+        ))),
+    }
+}
+
+fn uniform_weights(n: usize) -> Vec<f64> {
+    vec![1.0 / n.max(1) as f64; n]
+}
+
+fn normalize_weights(weights: Vec<f64>) -> Vec<f64> {
+    let total: f64 = weights.iter().sum();
+    if total > 0.0 {
+        weights.into_iter().map(|w| w / total).collect()
+    } else {
+        uniform_weights(weights.len())
+    }
 }
 
 fn run_graph_pagerank(
@@ -5550,7 +6592,16 @@ fn run_text_match(
             actual: args.len(),
         });
     }
-    let field = expect_column_name(&args[0], "text_match.field")?;
+    let field = match &args[0] {
+        Expr::Column(name) => name.clone(),
+        Expr::QualifiedColumn { column, .. } => column.clone(),
+        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => "_all".to_string(),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "text_match.field must be a column reference, got {other:?}"
+            )));
+        }
+    };
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let query_value = eval(&args[1], &ctx)?;
     let query = match query_value {
@@ -5562,7 +6613,294 @@ fn run_text_match(
         }
     };
     let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
+    if field == "_all" || field.is_empty() {
+        let mut by_doc: BTreeMap<DocId, f64> = BTreeMap::new();
+        for field_name in engine.fts_fields_for_table(table) {
+            for entry in engine.search(table, &field_name, &query, &mode, usize::MAX) {
+                by_doc
+                    .entry(entry.doc_id)
+                    .and_modify(|score| *score = (*score).max(entry.score))
+                    .or_insert(entry.score);
+            }
+        }
+        return Ok(by_doc
+            .into_iter()
+            .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+            .collect());
+    }
     Ok(engine.search(table, &field, &query, &mode, usize::MAX))
+}
+
+fn run_fts_match(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 2 {
+        return Err(SQLError::BadArity {
+            name: "fts_match".into(),
+            expected: "2".into(),
+            actual: args.len(),
+        });
+    }
+    let default_field = match &args[0] {
+        Expr::Column(name) => Some(name.clone()),
+        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
+        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => None,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "fts_match.field must be a column reference, got {other:?}"
+            )));
+        }
+    };
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let query = expect_string(&args[1], "fts_match.query", &ctx)?;
+    let tokenizer = |_field: Option<&str>, phrase: &str| {
+        phrase
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+    };
+    uqa_sql::compile_fts_query_string(&query, default_field.as_deref(), &tokenizer)?;
+    let expr = Expr::Func {
+        name: "fts_match".into(),
+        args: args.to_vec(),
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    Ok(
+        crate::operator_tree_bridge::run_optimised(engine, table, Some(&expr), params)?
+            .unwrap_or_default(),
+    )
+}
+
+fn run_bayesian_match_with_prior(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 4 {
+        return Err(SQLError::BadArity {
+            name: "bayesian_match_with_prior".into(),
+            expected: "4".into(),
+            actual: args.len(),
+        });
+    }
+    let field = expect_column_name(&args[0], "bayesian_match_with_prior.field")?;
+    let prior_field = expect_column_name(&args[2], "bayesian_match_with_prior.prior_field")?;
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let query = expect_string(&args[1], "bayesian_match_with_prior.query", &ctx)?;
+    let mode = expect_string(&args[3], "bayesian_match_with_prior.mode", &ctx)?;
+
+    let base = run_text_match(
+        engine,
+        table,
+        &[
+            Expr::Column(field),
+            Expr::Literal(Value::Str(query.to_string())),
+        ],
+        params,
+    )?;
+    let prior_fn = prior_fn_for_mode(&mode, &prior_field)?;
+    Ok(base
+        .into_iter()
+        .map(|entry| {
+            let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
+            let prior = prior_fn(&document).clamp(1e-10, 1.0 - 1e-10);
+            ScoredEntry {
+                doc_id: entry.doc_id,
+                score: combine_probability_with_prior(entry.score, prior),
+            }
+        })
+        .collect())
+}
+
+fn prior_fn_for_mode(mode: &str, prior_field: &str) -> Result<uqa_scoring::PriorFn, SQLError> {
+    match mode.to_ascii_lowercase().as_str() {
+        "authority" => Ok(uqa_scoring::authority_prior(prior_field, None)),
+        "recency" => Ok(uqa_scoring::recency_prior(prior_field, 30.0)),
+        other => Err(SQLError::TypeMismatch(format!(
+            "Unknown prior mode: {other}"
+        ))),
+    }
+}
+
+fn combine_probability_with_prior(probability: f64, prior: f64) -> f64 {
+    let p = probability.clamp(1e-10, 1.0 - 1e-10);
+    uqa_scoring::sigmoid(uqa_scoring::logit(p) + uqa_scoring::logit(prior))
+}
+
+fn named_arg_expr(expr: &Expr) -> Option<(&str, &Expr)> {
+    let Expr::Func { name, args, .. } = expr else {
+        return None;
+    };
+    if name != "__named_arg" || args.len() != 2 {
+        return None;
+    }
+    let Expr::Literal(Value::Str(arg_name)) = &args[0] else {
+        return None;
+    };
+    Some((arg_name.as_str(), &args[1]))
+}
+
+fn is_named_arg_expr(expr: &Expr) -> bool {
+    named_arg_expr(expr).is_some()
+}
+
+fn run_scored_signal(
+    engine: &Engine,
+    table: &str,
+    expr: &Expr,
+    params: &[SQLParam],
+    parent: &str,
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let Expr::Func {
+        name, args: inner, ..
+    } = expr
+    else {
+        return Err(SQLError::Unsupported(format!(
+            "{parent} signal must be a function call"
+        )));
+    };
+    match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
+        FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
+            run_text_match(engine, table, inner, params)
+        }
+        FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params),
+        FunctionKind::BayesianMatchWithPrior => {
+            run_bayesian_match_with_prior(engine, table, inner, params)
+        }
+        FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params),
+        _ => Err(SQLError::Unsupported(format!(
+            "function {name} cannot be nested under {parent}"
+        ))),
+    }
+}
+
+fn run_attention_fusion(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() < 2 {
+        return Err(SQLError::BadArity {
+            name: "fuse_attention".into(),
+            expected: ">=2".into(),
+            actual: args.len(),
+        });
+    }
+
+    let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
+        Vec::with_capacity(args.len());
+    let mut all_doc_ids = std::collections::BTreeSet::new();
+    for arg in args {
+        if is_named_arg_expr(arg) {
+            continue;
+        }
+        let Expr::Func {
+            name, args: inner, ..
+        } = arg
+        else {
+            return Err(SQLError::Unsupported(
+                "fuse_attention arguments must be function calls".into(),
+            ));
+        };
+        let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
+            FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
+                run_text_match(engine, table, inner, params)?
+            }
+            FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
+            FunctionKind::BayesianMatchWithPrior => {
+                run_bayesian_match_with_prior(engine, table, inner, params)?
+            }
+            FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
+            _ => {
+                return Err(SQLError::Unsupported(format!(
+                    "function {name} cannot be nested under fuse_attention"
+                )));
+            }
+        };
+        let mut map = std::collections::BTreeMap::new();
+        for row in rows {
+            all_doc_ids.insert(row.doc_id);
+            map.insert(row.doc_id, row.score.clamp(1e-10, 1.0 - 1e-10));
+        }
+        score_maps.push(map);
+    }
+
+    if score_maps.is_empty() {
+        return Err(SQLError::BadArity {
+            name: "fuse_attention".into(),
+            expected: ">=1 signal".into(),
+            actual: 0,
+        });
+    }
+
+    let n = score_maps.len() as f64;
+    Ok(all_doc_ids
+        .into_iter()
+        .map(|doc_id| {
+            let score = score_maps
+                .iter()
+                .map(|map| map.get(&doc_id).copied().unwrap_or(0.5))
+                .sum::<f64>()
+                / n;
+            ScoredEntry { doc_id, score }
+        })
+        .collect())
+}
+
+fn run_sparse_threshold(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if args.len() != 2 {
+        return Err(SQLError::BadArity {
+            name: "sparse_threshold".into(),
+            expected: "2".into(),
+            actual: args.len(),
+        });
+    }
+    let Expr::Func {
+        name, args: inner, ..
+    } = &args[0]
+    else {
+        return Err(SQLError::Unsupported(
+            "sparse_threshold source must be a function call".into(),
+        ));
+    };
+    let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
+        FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
+            run_text_match(engine, table, inner, params)?
+        }
+        FunctionKind::BayesianMatchWithPrior => {
+            run_bayesian_match_with_prior(engine, table, inner, params)?
+        }
+        FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
+        _ => {
+            return Err(SQLError::Unsupported(format!(
+                "function {name} cannot be nested under sparse_threshold"
+            )));
+        }
+    };
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let threshold = expect_f64_value(&args[1], "sparse_threshold.threshold", &ctx)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|entry| {
+            let adjusted = entry.score - threshold;
+            (adjusted > 0.0).then_some(ScoredEntry {
+                doc_id: entry.doc_id,
+                score: adjusted,
+            })
+        })
+        .collect())
 }
 
 fn run_knn_match(
@@ -5599,19 +6937,24 @@ fn run_fuse_log_odds(
             actual: args.len(),
         });
     }
-    // Phase 5 supports the canonical hybrid call shape:
-    // `fuse_log_odds(text_match(field, q), knn_match(vec_field, $1, k))`.
-    let mut text_field: Option<String> = None;
-    let mut text_query: Option<String> = None;
-    let mut vector_field: Option<String> = None;
-    let mut query_vector: Option<Vec<f32>> = None;
-    let mut knn_pool: usize = 10;
+    let mut alpha = 0.5;
+    let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
+        Vec::with_capacity(args.len());
+    let mut all_doc_ids = std::collections::BTreeSet::new();
     let ctx = EvalContext::new(None, params).with_engine(engine);
     for arg in args {
+        if let Some((name, value_expr)) = named_arg_expr(arg) {
+            if name.eq_ignore_ascii_case("alpha") {
+                alpha = expect_f64_value(value_expr, "fuse_log_odds.alpha", &ctx)?;
+            }
+            continue;
+        }
         match arg {
-            Expr::Func { name, args: inner, .. } => {
+            Expr::Func {
+                name, args: inner, ..
+            } => {
                 let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))?;
-                match kind {
+                let rows = match kind {
                     FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
                         if inner.len() != 2 {
                             return Err(SQLError::BadArity {
@@ -5620,16 +6963,11 @@ fn run_fuse_log_odds(
                                 actual: inner.len(),
                             });
                         }
-                        text_field = Some(expect_column_name(&inner[0], "text_match.field")?);
-                        let q = eval(&inner[1], &ctx)?;
-                        text_query = match q {
-                            Value::Str(s) => Some(s),
-                            other => {
-                                return Err(SQLError::TypeMismatch(format!(
-                                    "text_match query must be string, got {other:?}"
-                                )));
-                            }
-                        };
+                        run_text_match(engine, table, inner, params)?
+                    }
+                    FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
+                    FunctionKind::BayesianMatchWithPrior => {
+                        run_bayesian_match_with_prior(engine, table, inner, params)?
                     }
                     FunctionKind::KNNMatch => {
                         if inner.len() != 3 {
@@ -5639,9 +6977,7 @@ fn run_fuse_log_odds(
                                 actual: inner.len(),
                             });
                         }
-                        vector_field = Some(expect_column_name(&inner[0], "knn_match.field")?);
-                        query_vector = Some(value_to_vector(&eval(&inner[1], &ctx)?)?);
-                        knn_pool = expect_usize(&inner[2], "knn_match.k", &ctx)?;
+                        run_knn_match(engine, table, inner, params)?
                     }
                     FunctionKind::FuseLogOdds => {
                         return Err(SQLError::Unsupported(
@@ -5665,6 +7001,9 @@ fn run_fuse_log_odds(
                     | FunctionKind::AttentionFusion
                     | FunctionKind::LearnedFusion
                     | FunctionKind::CalibratedVectorMatch
+                    | FunctionKind::ScoreBM25
+                    | FunctionKind::ScoreBayesianBM25
+                    | FunctionKind::SparseThreshold
                     | FunctionKind::DeepLearn
                     | FunctionKind::Convolve
                     | FunctionKind::Pool
@@ -5677,7 +7016,24 @@ fn run_fuse_log_odds(
                             "function {name} cannot be nested under fuse_log_odds"
                         )));
                     }
+                };
+                let mut map = std::collections::BTreeMap::new();
+                for row in rows {
+                    all_doc_ids.insert(row.doc_id);
+                    map.insert(row.doc_id, row.score.clamp(1e-10, 1.0 - 1e-10));
                 }
+                score_maps.push(map);
+            }
+            Expr::Literal(Value::Float(v)) => {
+                alpha = *v;
+            }
+            Expr::Literal(Value::Int(v)) => {
+                alpha = *v as f64;
+            }
+            Expr::Literal(Value::Str(_)) => {
+                // Compatibility with Python's optional gating string
+                // argument. Gating is a fusion-layer concern; the SQL
+                // engine keeps the same calibrated score semantics.
             }
             other => {
                 return Err(SQLError::Unsupported(format!(
@@ -5686,24 +7042,29 @@ fn run_fuse_log_odds(
             }
         }
     }
-    let text_field = text_field
-        .ok_or_else(|| SQLError::Unsupported("fuse_log_odds requires a text_match arm".into()))?;
-    let text_query = text_query.unwrap_or_default();
-    let vector_field = vector_field
-        .ok_or_else(|| SQLError::Unsupported("fuse_log_odds requires a knn_match arm".into()))?;
-    let query_vector =
-        query_vector.ok_or_else(|| SQLError::Internal("missing knn_match vector".into()))?;
-
-    Ok(engine.hybrid_search(&HybridSearchParams {
-        table,
-        text_field: &text_field,
-        text_query: &text_query,
-        vector_field: &vector_field,
-        query_vector,
-        knn_pool,
-        alpha: 0.5,
-        top_k: usize::MAX,
-    }))
+    if score_maps.len() < 2 {
+        return Err(SQLError::BadArity {
+            name: "fuse_log_odds".into(),
+            expected: ">=2 signal functions".into(),
+            actual: score_maps.len(),
+        });
+    }
+    let n = score_maps.len();
+    Ok(all_doc_ids
+        .into_iter()
+        .map(|doc_id| {
+            let probs: Vec<f64> = score_maps
+                .iter()
+                .map(|map| map.get(&doc_id).copied().unwrap_or(0.5))
+                .collect();
+            let score = if n == 1 {
+                probs[0]
+            } else {
+                uqa_scoring::log_odds_conjunction(&probs, alpha)
+            };
+            ScoredEntry { doc_id, score }
+        })
+        .collect())
 }
 
 fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SQLError> {
@@ -5828,6 +7189,7 @@ fn build_rows(
     let mut rows = Vec::with_capacity(scored.len());
     for entry in scored {
         let mut document = engine.get_document(table, entry.doc_id).unwrap_or_default();
+        document.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
         document.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
         let row = build_projection_row(Some(engine), &document, projections, params)?;
         rows.push(row);
@@ -5851,7 +7213,7 @@ fn build_projection_row(
         let label = labels[idx].clone();
         if let Expr::Star = proj.expr {
             for (k, v) in document {
-                if k.as_str() == SCORE_COLUMN {
+                if k.as_str() == SCORE_COLUMN || k.as_str() == DOC_ID_COLUMN {
                     continue;
                 }
                 row.insert(k.clone(), v.clone());

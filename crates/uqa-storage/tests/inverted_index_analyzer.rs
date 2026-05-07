@@ -16,9 +16,7 @@ use uqa_analysis::{
     keyword_analyzer, standard_analyzer, whitespace_analyzer, Analyzer, TokenFilter, Tokenizer,
 };
 use uqa_storage::sqlite::{Catalog, ManagedConnection};
-use uqa_storage::{
-    AnalyzerPhase, InvertedIndex, MemoryInvertedIndex, SQLiteInvertedIndex,
-};
+use uqa_storage::{AnalyzerPhase, InvertedIndex, MemoryInvertedIndex, SQLiteInvertedIndex};
 
 fn sqlite_with_catalog() -> ManagedConnection {
     let conn = ManagedConnection::open_in_memory().unwrap();
@@ -128,13 +126,18 @@ fn memory_separate_phases() {
         ],
         Vec::new(),
     );
-    idx.set_field_analyzer("body", idx_a, AnalyzerPhase::Index).unwrap();
+    idx.set_field_analyzer("body", idx_a, AnalyzerPhase::Index)
+        .unwrap();
     idx.set_field_analyzer("body", search_a, AnalyzerPhase::Search)
         .unwrap();
     let resolved_search = idx.get_search_analyzer("body");
-    assert!(resolved_search.analyze("car").contains(&"automobile".to_string()));
+    assert!(resolved_search
+        .analyze("car")
+        .contains(&"automobile".to_string()));
     let resolved_index = idx.get_field_analyzer("body");
-    assert!(!resolved_index.analyze("car").contains(&"automobile".to_string()));
+    assert!(!resolved_index
+        .analyze("car")
+        .contains(&"automobile".to_string()));
 }
 
 #[test]
@@ -145,10 +148,22 @@ fn memory_invalid_phase_string_rejected() {
 
 #[test]
 fn memory_phase_string_parses() {
-    assert_eq!(AnalyzerPhase::from_str("index").unwrap(), AnalyzerPhase::Index);
-    assert_eq!(AnalyzerPhase::from_str("search").unwrap(), AnalyzerPhase::Search);
-    assert_eq!(AnalyzerPhase::from_str("query").unwrap(), AnalyzerPhase::Search);
-    assert_eq!(AnalyzerPhase::from_str("both").unwrap(), AnalyzerPhase::Both);
+    assert_eq!(
+        AnalyzerPhase::from_str("index").unwrap(),
+        AnalyzerPhase::Index
+    );
+    assert_eq!(
+        AnalyzerPhase::from_str("search").unwrap(),
+        AnalyzerPhase::Search
+    );
+    assert_eq!(
+        AnalyzerPhase::from_str("query").unwrap(),
+        AnalyzerPhase::Search
+    );
+    assert_eq!(
+        AnalyzerPhase::from_str("both").unwrap(),
+        AnalyzerPhase::Both
+    );
 }
 
 #[test]
@@ -234,7 +249,8 @@ fn sqlite_dual_analyzer_separate_phases() {
         ],
         Vec::new(),
     );
-    idx.set_field_analyzer("body", idx_a, AnalyzerPhase::Index).unwrap();
+    idx.set_field_analyzer("body", idx_a, AnalyzerPhase::Index)
+        .unwrap();
     idx.set_field_analyzer("body", search_a, AnalyzerPhase::Search)
         .unwrap();
     let resolved_search = idx.get_search_analyzer("body");

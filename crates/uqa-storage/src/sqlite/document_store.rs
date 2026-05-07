@@ -28,8 +28,26 @@ impl SQLiteDocumentStore {
         }
     }
 
+    pub fn max_doc_id(&self) -> DocId {
+        self.conn
+            .with(|c| {
+                let id: Option<i64> = c.query_row(
+                    "SELECT MAX(doc_id) FROM _documents WHERE table_name = ?1",
+                    params![self.table],
+                    |r| r.get(0),
+                )?;
+                Ok(id.unwrap_or(0) as DocId)
+            })
+            .unwrap_or(0)
+    }
+
     fn put_inner(&self, doc_id: DocId, document: &Document) -> SQLiteResult<()> {
-        let body = serde_json::to_string(document)?;
+        let document: Document = document
+            .iter()
+            .filter(|(_, value)| !matches!(value, uqa_core::Value::Null))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let body = serde_json::to_string(&document)?;
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _documents (table_name, doc_id, body)

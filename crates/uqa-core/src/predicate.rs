@@ -49,9 +49,7 @@ impl Predicate {
             Predicate::Equals(target) => !is_null && value == Some(target),
             Predicate::NotEquals(target) => !is_null && value != Some(target),
             Predicate::GreaterThan(target) => !is_null && value.is_some_and(|v| v > target),
-            Predicate::GreaterThanOrEqual(target) => {
-                !is_null && value.is_some_and(|v| v >= target)
-            }
+            Predicate::GreaterThanOrEqual(target) => !is_null && value.is_some_and(|v| v >= target),
             Predicate::LessThan(target) => !is_null && value.is_some_and(|v| v < target),
             Predicate::LessThanOrEqual(target) => !is_null && value.is_some_and(|v| v <= target),
             Predicate::InSet(values) => !is_null && value.is_some_and(|v| values.contains(v)),

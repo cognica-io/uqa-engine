@@ -13,6 +13,8 @@
 //! logistic loss with respect to `alpha`, `beta`, and (optionally)
 //! `base_rate`. `fit` runs multiple epochs over a batch.
 
+use std::collections::BTreeMap;
+
 use crate::bayesian::BayesianProbabilityTransform;
 use crate::prob::PROB_EPSILON;
 
@@ -42,6 +44,14 @@ impl ParameterLearner {
 
     pub fn base_rate(&self) -> Option<f64> {
         self.transform.base_rate
+    }
+
+    pub fn params(&self) -> BTreeMap<String, f64> {
+        let mut out = BTreeMap::new();
+        out.insert("alpha".into(), self.transform.alpha);
+        out.insert("beta".into(), self.transform.beta);
+        out.insert("base_rate".into(), self.transform.base_rate.unwrap_or(0.5));
+        out
     }
 
     /// Single-observation gradient step on the logistic loss.
@@ -92,7 +102,7 @@ impl ParameterLearner {
         doc_len_ratios: Option<&[f64]>,
         learning_rate: f64,
         epochs: usize,
-    ) {
+    ) -> BTreeMap<String, f64> {
         for _ in 0..epochs {
             for i in 0..scores.len() {
                 let tf = tfs.and_then(|t| t.get(i).copied()).unwrap_or(1.0);
@@ -102,6 +112,23 @@ impl ParameterLearner {
                 self.update(scores[i], labels[i], tf, dlr, learning_rate);
             }
         }
+        self.params()
+    }
+
+    pub fn fit_with_options(
+        &mut self,
+        scores: &[f64],
+        labels: &[f64],
+        tfs: Option<&[f64]>,
+        doc_len_ratios: Option<&[f64]>,
+    ) -> BTreeMap<String, f64> {
+        self.fit(scores, labels, tfs, doc_len_ratios, 0.1, 50)
+    }
+}
+
+impl Default for ParameterLearner {
+    fn default() -> Self {
+        Self::new(1.0, 0.0, Some(0.5))
     }
 }
 

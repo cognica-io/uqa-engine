@@ -62,10 +62,7 @@ fn standard_tokenizer_unicode() {
 #[test]
 fn standard_tokenizer_punctuation() {
     let t = Tokenizer::Standard;
-    assert_eq!(
-        t.tokenize("it's a test."),
-        vec!["it", "s", "a", "test"]
-    );
+    assert_eq!(t.tokenize("it's a test."), vec!["it", "s", "a", "test"]);
 }
 
 #[test]
@@ -182,7 +179,12 @@ fn stopword_filter_english_defaults() {
         language: "english".into(),
         custom_words: Vec::new(),
     };
-    let result = f.filter(vec!["the".into(), "quick".into(), "brown".into(), "fox".into()]);
+    let result = f.filter(vec![
+        "the".into(),
+        "quick".into(),
+        "brown".into(),
+        "fox".into(),
+    ]);
     assert_eq!(result, vec!["quick", "brown", "fox"]);
 }
 
@@ -344,7 +346,10 @@ fn ngram_filter_roundtrip() {
     };
     let json = serde_json::to_string(&f).unwrap();
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.filter(vec!["abc".into()]), f.filter(vec!["abc".into()]));
+    assert_eq!(
+        back.filter(vec!["abc".into()]),
+        f.filter(vec!["abc".into()])
+    );
 }
 
 #[test]
@@ -621,17 +626,10 @@ fn analyzer_json_roundtrip() {
 #[test]
 fn registry_register_and_get() {
     use uqa_analysis::{drop_analyzer, get_analyzer, register_analyzer};
-    let custom = Analyzer::new(
-        Tokenizer::Letter,
-        vec![TokenFilter::Lowercase],
-        Vec::new(),
-    );
+    let custom = Analyzer::new(Tokenizer::Letter, vec![TokenFilter::Lowercase], Vec::new());
     register_analyzer("rs_test_custom_reg".to_string(), custom).unwrap();
     let retrieved = get_analyzer("rs_test_custom_reg").unwrap();
-    assert_eq!(
-        retrieved.analyze("hello123world"),
-        vec!["hello", "world"]
-    );
+    assert_eq!(retrieved.analyze("hello123world"), vec!["hello", "world"]);
     drop_analyzer("rs_test_custom_reg").unwrap();
 }
 
@@ -801,10 +799,7 @@ mod synonym_file {
         // omitted by the skip-if-empty serde attribute.
         assert!(!json.contains("\"synonyms\":{"));
         let back: TokenFilter = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            back.filter(vec!["car".into()]),
-            vec!["car", "automobile"]
-        );
+        assert_eq!(back.filter(vec!["car".into()]), vec!["car", "automobile"]);
     }
 
     #[test]
@@ -834,10 +829,7 @@ mod synonym_file {
         let path = write_synonyms(&dir, "lonely\ncar, automobile\n");
         let f = TokenFilter::synonym_from_path(&path).unwrap();
         assert_eq!(f.filter(vec!["lonely".into()]), vec!["lonely"]);
-        assert_eq!(
-            f.filter(vec!["car".into()]),
-            vec!["car", "automobile"]
-        );
+        assert_eq!(f.filter(vec!["car".into()]), vec!["car", "automobile"]);
     }
 
     #[test]

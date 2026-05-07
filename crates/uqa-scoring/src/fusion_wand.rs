@@ -22,6 +22,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use crate::prob::log_odds_conjunction;
+use crate::wand::BoundTightnessAnalyzer;
 
 /// Per-signal score map -- mirrors the dict-of-dicts shape used by the
 /// Python reference's `score_maps`.
@@ -151,6 +152,8 @@ pub struct TightenedFusionWANDScorer {
     pub inner: FusionWANDScorer,
     pub tightening_factor: f64,
     pub original_bounds: Vec<f64>,
+    pub signal_upper_bounds: Vec<f64>,
+    pub analyzer: BoundTightnessAnalyzer,
 }
 
 impl TightenedFusionWANDScorer {
@@ -167,15 +170,25 @@ impl TightenedFusionWANDScorer {
             .map(|ub| ub * tightening_factor)
             .collect();
         let original_bounds = upper_bounds.clone();
+        let signal_upper_bounds = tightened.clone();
         let inner = FusionWANDScorer::new(signals, tightened, alpha, k);
         Self {
             inner,
             tightening_factor,
             original_bounds,
+            signal_upper_bounds,
+            analyzer: BoundTightnessAnalyzer::default(),
         }
     }
 
-    pub fn score_top_k(&self) -> Vec<(u64, f64)> {
+    pub fn score_top_k(&mut self) -> Vec<(u64, f64)> {
+        self.analyzer.clear();
+        for (idx, sig) in self.inner.signals.iter().enumerate() {
+            let actual = sig.values().copied().fold(0.0_f64, f64::max);
+            if let Some(bound) = self.original_bounds.get(idx) {
+                self.analyzer.record(*bound, actual);
+            }
+        }
         self.inner.score_top_k()
     }
 }

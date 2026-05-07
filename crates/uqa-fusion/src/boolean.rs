@@ -15,12 +15,24 @@ impl ProbabilisticBoolean {
         prob_and(probs)
     }
 
+    pub fn prob_and(probs: &[f64]) -> f64 {
+        Self::and(probs)
+    }
+
     pub fn or(probs: &[f64]) -> f64 {
         prob_or(probs)
     }
 
+    pub fn prob_or(probs: &[f64]) -> f64 {
+        Self::or(probs)
+    }
+
     pub fn not(p: f64) -> f64 {
         prob_not(p)
+    }
+
+    pub fn prob_not(p: f64) -> f64 {
+        Self::not(p)
     }
 }
 

@@ -19,9 +19,15 @@ use std::sync::OnceLock;
 pub enum FunctionKind {
     /// `text_match(field, query_string)` — Bayesian BM25 retrieval.
     TextMatch,
+    /// `field @@ query` — full-text query-string parser over text and
+    /// vector signals.
+    FTSMatch,
     /// `bayesian_match(field, query_string)` — alias, same as
     /// `text_match` for now (Phase 5 ships only Bayesian BM25).
     BayesianMatch,
+    /// `bayesian_match_with_prior(field, query, prior_field, mode)` —
+    /// Bayesian BM25 adjusted by a document-level external prior.
+    BayesianMatchWithPrior,
     /// `knn_match(field, query_vector, k)` — top-k cosine KNN.
     KNNMatch,
     /// `fuse_log_odds(signal_1, signal_2, ...)` — log-odds fusion of
@@ -76,6 +82,15 @@ pub enum FunctionKind {
     /// `calibrated_vector_match(field, vector, k [, threshold])` —
     /// KNN with calibrated cosine probabilities (Paper 5).
     CalibratedVectorMatch,
+    /// `sparse_threshold(signal, threshold)` — drop scores at or below
+    /// the threshold and subtract it from survivors.
+    SparseThreshold,
+    /// `score_bm25([field,] query)` — projection helper exposing the
+    /// current match score.
+    ScoreBM25,
+    /// `score_bayesian_bm25([field,] query)` — projection helper
+    /// exposing the current Bayesian BM25 match score.
+    ScoreBayesianBM25,
     /// `deep_learn(model, training_set)` — kick off analytical
     /// training (Paper 4) for the named deep-fusion model.
     DeepLearn,
@@ -95,7 +110,12 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
     R.get_or_init(|| {
         let mut m = BTreeMap::new();
         m.insert("text_match", FunctionKind::TextMatch);
+        m.insert("fts_match", FunctionKind::FTSMatch);
         m.insert("bayesian_match", FunctionKind::BayesianMatch);
+        m.insert(
+            "bayesian_match_with_prior",
+            FunctionKind::BayesianMatchWithPrior,
+        );
         m.insert("knn_match", FunctionKind::KNNMatch);
         m.insert("fuse_log_odds", FunctionKind::FuseLogOdds);
         m.insert("graph_pagerank", FunctionKind::GraphPagerank);
@@ -113,11 +133,17 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("graph_drop", FunctionKind::GraphDrop);
         m.insert("graph_edges", FunctionKind::GraphEdges);
         m.insert("attention", FunctionKind::AttentionFusion);
+        m.insert("fuse_attention", FunctionKind::AttentionFusion);
+        m.insert("fuse_multihead", FunctionKind::AttentionFusion);
         m.insert("learned_fusion", FunctionKind::LearnedFusion);
+        m.insert("fuse_learned", FunctionKind::LearnedFusion);
         m.insert(
             "calibrated_vector_match",
             FunctionKind::CalibratedVectorMatch,
         );
+        m.insert("sparse_threshold", FunctionKind::SparseThreshold);
+        m.insert("score_bm25", FunctionKind::ScoreBM25);
+        m.insert("score_bayesian_bm25", FunctionKind::ScoreBayesianBM25);
         m.insert("deep_learn", FunctionKind::DeepLearn);
         m.insert("convolve", FunctionKind::Convolve);
         m.insert("pool", FunctionKind::Pool);

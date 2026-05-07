@@ -82,7 +82,10 @@ fn is_null_filters_null_category() {
 #[test]
 fn is_not_null_filters_non_null_categories() {
     let eng = engine();
-    let r = rows(&eng, "SELECT id, name FROM products WHERE category IS NOT NULL");
+    let r = rows(
+        &eng,
+        "SELECT id, name FROM products WHERE category IS NOT NULL",
+    );
     assert_eq!(r.len(), 2);
     let names: std::collections::BTreeSet<&str> =
         r.iter().filter_map(|row| str_col(row, "name")).collect();
@@ -144,7 +147,10 @@ fn arithmetic_subtract() {
 #[test]
 fn arithmetic_divide() {
     let eng = engine();
-    let r = rows(&eng, "SELECT name, price / quantity AS unit_cost FROM products");
+    let r = rows(
+        &eng,
+        "SELECT name, price / quantity AS unit_cost FROM products",
+    );
     let v = float_col(&r[0], "unit_cost").unwrap();
     assert!((v - 0.105).abs() < 0.001);
 }
@@ -173,7 +179,10 @@ fn arithmetic_with_null_propagates_null() {
         &[],
     )
     .unwrap();
-    let r = rows(&eng, "SELECT name, price * 2 AS dp FROM products WHERE id = 4");
+    let r = rows(
+        &eng,
+        "SELECT name, price * 2 AS dp FROM products WHERE id = 4",
+    );
     assert!(is_null(&r[0], "dp"));
 }
 
@@ -289,7 +298,10 @@ fn case_with_null_branch() {
 #[test]
 fn cast_int_to_text() {
     let eng = engine();
-    let r = rows(&eng, "SELECT CAST(quantity AS TEXT) AS qty_text FROM products");
+    let r = rows(
+        &eng,
+        "SELECT CAST(quantity AS TEXT) AS qty_text FROM products",
+    );
     assert_eq!(str_col(&r[0], "qty_text"), Some("100"));
 }
 
@@ -307,7 +319,10 @@ fn cast_text_to_int() {
 #[test]
 fn cast_float_to_int() {
     let eng = engine();
-    let r = rows(&eng, "SELECT CAST(price AS INTEGER) AS price_int FROM products");
+    let r = rows(
+        &eng,
+        "SELECT CAST(price AS INTEGER) AS price_int FROM products",
+    );
     assert_eq!(int_col(&r[0], "price_int"), Some(10));
 }
 
@@ -320,7 +335,10 @@ fn cast_null_stays_null() {
         &[],
     )
     .unwrap();
-    let r = rows(&eng, "SELECT CAST(price AS TEXT) AS p FROM products WHERE id = 4");
+    let r = rows(
+        &eng,
+        "SELECT CAST(price AS TEXT) AS p FROM products WHERE id = 4",
+    );
     assert!(is_null(&r[0], "p"));
 }
 
@@ -331,7 +349,10 @@ fn cast_null_stays_null() {
 #[test]
 fn coalesce_basic() {
     let eng = engine();
-    let r = rows(&eng, "SELECT id, COALESCE(category, 'none') AS cat FROM products");
+    let r = rows(
+        &eng,
+        "SELECT id, COALESCE(category, 'none') AS cat FROM products",
+    );
     assert_eq!(str_col(&r[0], "cat"), Some("tools"));
     assert_eq!(str_col(&r[2], "cat"), Some("none"));
 }
@@ -349,7 +370,10 @@ fn coalesce_first_non_null() {
 #[test]
 fn coalesce_all_non_null() {
     let eng = engine();
-    let r = rows(&eng, "SELECT COALESCE(name, 'default') AS val FROM products LIMIT 1");
+    let r = rows(
+        &eng,
+        "SELECT COALESCE(name, 'default') AS val FROM products LIMIT 1",
+    );
     assert_eq!(str_col(&r[0], "val"), Some("Widget"));
 }
 
@@ -442,7 +466,10 @@ fn string_function_on_null_propagates_null() {
         &[],
     )
     .unwrap();
-    let r = rows(&eng, "SELECT UPPER(category) AS up FROM products WHERE id = 4");
+    let r = rows(
+        &eng,
+        "SELECT UPPER(category) AS up FROM products WHERE id = 4",
+    );
     assert!(is_null(&r[0], "up"));
 }
 
@@ -547,7 +574,10 @@ fn where_combined_expression_and_column() {
 #[test]
 fn where_expression_no_match() {
     let eng = engine();
-    let r = rows(&eng, "SELECT name FROM products WHERE price * quantity > 99999");
+    let r = rows(
+        &eng,
+        "SELECT name FROM products WHERE price * quantity > 99999",
+    );
     assert!(r.is_empty());
 }
 
@@ -559,7 +589,10 @@ fn where_expression_no_match() {
 fn mixed_simple_and_computed() {
     let eng = engine();
     let r = eng
-        .sql("SELECT id, name, price * quantity AS total FROM products", &[])
+        .sql(
+            "SELECT id, name, price * quantity AS total FROM products",
+            &[],
+        )
         .unwrap();
     assert_eq!(r.columns, vec!["id", "name", "total"]);
     assert_eq!(int_col(&r.rows[0], "id"), Some(1));
@@ -623,7 +656,10 @@ fn null_with_group_by() {
     }
     assert_eq!(by_cat.get(&None).copied(), Some(1));
     assert_eq!(by_cat.get(&Some("tools".to_string())).copied(), Some(1));
-    assert_eq!(by_cat.get(&Some("electronics".to_string())).copied(), Some(1));
+    assert_eq!(
+        by_cat.get(&Some("electronics".to_string())).copied(),
+        Some(1)
+    );
 }
 
 #[test]

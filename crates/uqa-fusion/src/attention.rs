@@ -23,6 +23,14 @@ pub struct AttentionFusion {
     pub alpha: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttentionFusionState {
+    pub n_signals: usize,
+    pub n_query_features: usize,
+    pub alpha: f64,
+    pub weights_matrix: Vec<f64>,
+}
+
 impl AttentionFusion {
     pub fn new(n_signals: usize, n_query_features: usize, alpha: f64) -> Self {
         Self {
@@ -58,6 +66,22 @@ impl AttentionFusion {
         }
         let weights = self.attention_weights(query_features);
         log_odds_conjunction_weighted(probs, &weights, self.alpha).unwrap_or(0.5)
+    }
+
+    pub fn state_dict(&self) -> AttentionFusionState {
+        AttentionFusionState {
+            n_signals: self.n_signals,
+            n_query_features: self.n_query_features,
+            alpha: self.alpha,
+            weights_matrix: self.weights.clone(),
+        }
+    }
+
+    pub fn load_state_dict(&mut self, state: &AttentionFusionState) {
+        self.n_signals = state.n_signals;
+        self.n_query_features = state.n_query_features;
+        self.alpha = state.alpha;
+        self.weights = state.weights_matrix.clone();
     }
 
     /// One SGD step on the logistic loss. Approximate gradient:

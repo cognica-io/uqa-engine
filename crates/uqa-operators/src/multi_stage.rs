@@ -32,7 +32,10 @@ pub struct MultiStageOperator {
 
 impl MultiStageOperator {
     pub fn new(stages: Vec<(Arc<dyn Operator>, Cutoff)>) -> Self {
-        assert!(!stages.is_empty(), "MultiStageOperator requires >= 1 stage");
+        assert!(
+            !stages.is_empty(),
+            "MultiStageOperator requires at least one stage"
+        );
         Self { stages }
     }
 

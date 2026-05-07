@@ -584,11 +584,13 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
+    let returning = compile_projections(&stmt.returning_list)?;
     Ok(UpdateStmt {
         table,
         assignments,
         r#where,
         from,
+        returning,
     })
 }
 
@@ -607,10 +609,12 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
         Some(node) => Some(compile_from_node(node)?),
         None => None,
     };
+    let returning = compile_projections(&stmt.returning_list)?;
     Ok(DeleteStmt {
         table,
         r#where,
         using,
+        returning,
     })
 }
 
@@ -730,14 +734,43 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
             if_exists: cmd.missing_ok,
             cascade: matches!(cmd.behavior(), DropBehavior::DropCascade),
         },
-        AlterTableType::AtAlterColumnType
-        | AlterTableType::AtSetNotNull
-        | AlterTableType::AtDropNotNull
-        | AlterTableType::AtColumnDefault => {
-            return Err(SQLError::Unsupported(format!(
-                "ALTER COLUMN action {:?}",
-                cmd.subtype()
-            )));
+        AlterTableType::AtColumnDefault => {
+            if let Some(default) = cmd.def.as_deref() {
+                AlterTableAction::SetDefault {
+                    name: cmd.name.clone(),
+                    default: compile_expr(default)?,
+                }
+            } else {
+                AlterTableAction::DropDefault {
+                    name: cmd.name.clone(),
+                }
+            }
+        }
+        AlterTableType::AtSetNotNull => AlterTableAction::SetNotNull {
+            name: cmd.name.clone(),
+        },
+        AlterTableType::AtDropNotNull => AlterTableAction::DropNotNull {
+            name: cmd.name.clone(),
+        },
+        AlterTableType::AtAlterColumnType => {
+            let def_inner = cmd
+                .def
+                .as_ref()
+                .and_then(|d| d.node.as_ref())
+                .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
+            let ty = match def_inner {
+                NodeEnum::ColumnDef(c) => compile_column_def(c)?.ty,
+                NodeEnum::TypeName(t) => compile_pg_type_name(t, &cmd.name)?,
+                other => {
+                    return Err(SQLError::Internal(format!(
+                        "ALTER COLUMN TYPE expected ColumnDef/TypeName, got {other:?}"
+                    )));
+                }
+            };
+            AlterTableAction::AlterColumnType {
+                name: cmd.name.clone(),
+                ty,
+            }
         }
         other => {
             return Err(SQLError::Unsupported(format!(
@@ -986,6 +1019,13 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
             col.colname
         )));
     };
+    compile_pg_type_name(type_name, &col.colname)
+}
+
+fn compile_pg_type_name(
+    type_name: &pg_query::protobuf::TypeName,
+    column_name: &str,
+) -> Result<ColumnType> {
     let names: Vec<String> = type_name
         .names
         .iter()
@@ -999,9 +1039,7 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
             Ok(ColumnType::Text)
         }
         "bool" | "boolean" => Ok(ColumnType::Integer),
-        "real" | "float4" | "float8" | "double" | "double precision" => {
-            Ok(ColumnType::Real)
-        }
+        "real" | "float4" | "float8" | "double" | "double precision" => Ok(ColumnType::Real),
         "numeric" | "decimal" => {
             let mut typmods_iter = type_name.typmods.iter();
             let precision = typmods_iter
@@ -1026,7 +1064,8 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
         | "timestamp with time zone"
         | "time without time zone"
         | "time with time zone" => Ok(ColumnType::Text),
-        "json" | "jsonb" => Ok(ColumnType::Text),
+        "json" | "jsonb" => Ok(ColumnType::Json),
+        "bytea" => Ok(ColumnType::Bytea),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
             let Some(arg) = type_name.typmods.first() else {
@@ -1038,7 +1077,7 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
             Ok(ColumnType::Vector(dim))
         }
         other => Err(SQLError::Unsupported(format!(
-            "column type `{other}` is not supported"
+            "column `{column_name}` type `{other}` is not supported"
         ))),
     }
 }
@@ -1191,12 +1230,14 @@ fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<InsertStmt> {
         .as_ref()
         .map(|c| compile_on_conflict(c.as_ref()))
         .transpose()?;
+    let returning = compile_projections(&stmt.returning_list)?;
     Ok(InsertStmt {
         table,
         columns,
         rows,
         select_source,
         on_conflict,
+        returning,
     })
 }
 
@@ -1431,10 +1472,7 @@ fn compile_alias(alias: Option<&pg_query::protobuf::Alias>) -> (Option<String>, 
 }
 
 fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
-    let from = match stmt.from_clause.first() {
-        Some(node) => Some(compile_from_node(node)?),
-        None => None,
-    };
+    let from = compile_from_list(&stmt.from_clause)?;
     let projections = compile_projections(&stmt.target_list)?;
     let r#where = stmt
         .where_clause
@@ -1522,6 +1560,24 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         set_op,
         distinct,
     })
+}
+
+fn compile_from_list(nodes: &[Node]) -> Result<Option<FromClause>> {
+    let Some(first) = nodes.first() else {
+        return Ok(None);
+    };
+    let mut current = compile_from_node(first)?;
+    for node in nodes.iter().skip(1) {
+        let lateral = right_is_lateral(node);
+        current = FromClause::Join {
+            left: Box::new(current),
+            right: Box::new(compile_from_node(node)?),
+            kind: JoinKind::Cross,
+            on: None,
+            lateral,
+        };
+    }
+    Ok(Some(current))
 }
 
 fn resolve_group_by_aliases(group_by: Vec<Expr>, projections: &[Projection]) -> Vec<Expr> {
@@ -1747,8 +1803,14 @@ fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<CTE>> 
             NodeEnum::SelectStmt(s) => s,
             _ => return Err(SQLError::Unsupported("CTE body must be SELECT".into())),
         };
+        let columns = cte
+            .aliascolnames
+            .iter()
+            .filter_map(|n| extract_string(n).ok())
+            .collect();
         out.push(CTE {
             name: cte.ctename.clone(),
+            columns,
             recursive: wc.recursive,
             query: Box::new(compile_select(select)?),
         });
@@ -1795,6 +1857,21 @@ fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::ColumnRef(c) => compile_column_ref(c),
         NodeEnum::ParamRef(p) => Ok(Expr::Param(p.number as usize)),
         NodeEnum::FuncCall(f) => compile_func_call(f),
+        NodeEnum::NamedArgExpr(arg) => {
+            let Some(value_node) = arg.arg.as_ref() else {
+                return Err(SQLError::Internal("NamedArgExpr without value".into()));
+            };
+            Ok(Expr::Func {
+                name: "__named_arg".into(),
+                args: vec![
+                    Expr::Literal(Value::Str(arg.name.clone())),
+                    compile_expr(value_node)?,
+                ],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            })
+        }
         NodeEnum::AArrayExpr(a) => {
             let elements: Vec<Expr> = a
                 .elements
@@ -1805,6 +1882,7 @@ fn compile_expr(node: &Node) -> Result<Expr> {
         }
         NodeEnum::TypeCast(tc) => compile_type_cast(tc),
         NodeEnum::AExpr(a) => compile_a_expr(a),
+        NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
         NodeEnum::BoolExpr(b) => compile_bool_expr(b),
         NodeEnum::NullTest(n) => compile_null_test(n),
         NodeEnum::CaseExpr(c) => compile_case_expr(c),
@@ -1817,7 +1895,10 @@ fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Func {
                 name: "coalesce".into(),
                 args,
-            distinct: false, order_by: Vec::new(), filter: None })
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            })
         }
         NodeEnum::MinMaxExpr(me) => {
             use pg_query::protobuf::MinMaxOp;
@@ -1839,11 +1920,41 @@ fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Func {
                 name: name.into(),
                 args,
-            distinct: false, order_by: Vec::new(), filter: None })
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            })
         }
         NodeEnum::SubLink(sl) => compile_sublink(sl),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
     }
+}
+
+fn compile_sql_value_function(svf: &pg_query::protobuf::SqlValueFunction) -> Result<Expr> {
+    use pg_query::protobuf::SqlValueFunctionOp;
+    let name = match svf.op() {
+        SqlValueFunctionOp::SvfopCurrentDate => "current_date",
+        SqlValueFunctionOp::SvfopCurrentTimestamp
+        | SqlValueFunctionOp::SvfopCurrentTimestampN
+        | SqlValueFunctionOp::SvfopLocaltimestamp
+        | SqlValueFunctionOp::SvfopLocaltimestampN
+        | SqlValueFunctionOp::SvfopCurrentTime
+        | SqlValueFunctionOp::SvfopCurrentTimeN
+        | SqlValueFunctionOp::SvfopLocaltime
+        | SqlValueFunctionOp::SvfopLocaltimeN => "current_timestamp",
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "SQL value function {other:?}"
+            )));
+        }
+    };
+    Ok(Expr::Func {
+        name: name.into(),
+        args: Vec::new(),
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    })
 }
 
 fn compile_sublink(sl: &pg_query::protobuf::SubLink) -> Result<Expr> {
@@ -1974,61 +2085,145 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                     return Ok(Expr::Func {
                         name: "concat_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "@@" => {
+                    return Ok(Expr::Func {
+                        name: "fts_match".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "%" => {
                     return Ok(Expr::Func {
                         name: "mod".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "~~" => {
                     return Ok(Expr::Func {
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "~~*" => {
                     return Ok(Expr::Func {
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "!~~" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None })));
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    })));
                 }
                 "!~~*" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None })));
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    })));
                 }
                 "->" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "->>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path_text".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "#>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 "#>>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path_text".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                    distinct: false, order_by: Vec::new(), filter: None });
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "@>" => {
+                    return Ok(Expr::Func {
+                        name: "json_contains".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "<@" => {
+                    return Ok(Expr::Func {
+                        name: "json_contained_by".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "?" => {
+                    return Ok(Expr::Func {
+                        name: "json_has_key".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "?|" => {
+                    return Ok(Expr::Func {
+                        name: "json_has_any_key".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "?&" => {
+                    return Ok(Expr::Func {
+                        name: "json_has_all_keys".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
                 }
                 other => return Err(SQLError::Unsupported(format!("operator `{other}`"))),
             };
@@ -2074,7 +2269,10 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             return Ok(Expr::Func {
                 name: "nullif".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            distinct: false, order_by: Vec::new(), filter: None });
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            });
         }
         AExprKind::AexprLike => {
             // libpg_query encodes LIKE as `~~` and NOT LIKE as `!~~` in
@@ -2098,7 +2296,10 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let func = Expr::Func {
                 name: "like".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            distinct: false, order_by: Vec::new(), filter: None };
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
             return Ok(if op_name == "!~~" {
                 Expr::Not(Box::new(func))
             } else {
@@ -2124,7 +2325,10 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let func = Expr::Func {
                 name: "ilike".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            distinct: false, order_by: Vec::new(), filter: None };
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
             return Ok(if op_name == "!~~*" {
                 Expr::Not(Box::new(func))
             } else {
@@ -2464,8 +2668,8 @@ fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {
     // peel the schema off so the evaluator only ever sees the bare type
     // and treat aliases (`int4` -> `integer`, `float8` -> `double
     // precision`) up front.
-    let ty = raw_names.last().cloned().unwrap_or_default().to_lowercase();
-    let ty = match ty.as_str() {
+    let mut ty = raw_names.last().cloned().unwrap_or_default().to_lowercase();
+    ty = match ty.as_str() {
         "int2" => "smallint".to_string(),
         "int4" => "integer".to_string(),
         "int8" => "bigint".to_string(),
@@ -2473,6 +2677,14 @@ fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {
         "float8" => "double precision".to_string(),
         _ => ty,
     };
+    if tc
+        .type_name
+        .as_ref()
+        .is_some_and(|t| !t.array_bounds.is_empty())
+        && !ty.ends_with("[]")
+    {
+        ty.push_str("[]");
+    }
     if ty.is_empty() {
         return Ok(inner);
     }
@@ -2559,7 +2771,15 @@ mod tests {
             Some(FromClause::Table { name, .. }) => assert_eq!(name, "docs"),
             other => panic!("expected single-table FROM, got {other:?}"),
         }
-        assert!(matches!(s.r#where, Some(Expr::Func { .. , distinct: false, order_by: Vec::new(), filter: None })));
+        match &s.r#where {
+            Some(Expr::Func {
+                distinct: false,
+                order_by,
+                filter: None,
+                ..
+            }) if order_by.is_empty() => {}
+            other => panic!("expected scalar function call, got {other:?}"),
+        }
         assert_eq!(s.order_by.len(), 1);
         assert!(s.order_by[0].descending);
         match &s.limit {

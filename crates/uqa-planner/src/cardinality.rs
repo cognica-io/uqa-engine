@@ -978,7 +978,7 @@ impl CardinalityEstimator {
     // Filter selectivity (operator-tree surface)
     // -----------------------------------------------------------------
 
-    fn filter_selectivity(&self, field: &str, predicate: &Predicate, _n: f64) -> f64 {
+    pub fn filter_selectivity(&self, field: &str, predicate: &Predicate, _n: f64) -> f64 {
         let Some(cs) = self.column_stats.get(field) else {
             return 0.5;
         };

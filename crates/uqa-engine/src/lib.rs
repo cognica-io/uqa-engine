@@ -71,8 +71,12 @@ use uqa_operators::{
     CosineProbabilityOperator, ExecutionContext, KNNOperator, LogOddsFusionOperator, Operator,
     ScoreOperator, TermOperator, VectorSimilarityOperator,
 };
-use uqa_scoring::{BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, Scorer};
+use uqa_scoring::{
+    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
+    CalibrationReport, ParameterLearner, Scorer,
+};
 use uqa_sql::SQLError;
+use uqa_storage::sqlite::ColumnStatsRow;
 use uqa_storage::{
     document_store::Document, Catalog, DocumentStore, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore, SQLiteError,
@@ -566,8 +570,12 @@ impl Engine {
                     uqa_sql::ast::ColumnType::Real | uqa_sql::ast::ColumnType::Numeric { .. } => {
                         uqa_fdw::ColumnType::Real
                     }
-                    uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
-                    uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
+                    uqa_sql::ast::ColumnType::Text | uqa_sql::ast::ColumnType::Json => {
+                        uqa_fdw::ColumnType::Text
+                    }
+                    uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
+                        uqa_fdw::ColumnType::Bytes
+                    }
                 },
             })
             .collect();
@@ -782,6 +790,7 @@ impl Engine {
                 let store = docs.snapshot();
                 store.doc_ids().into_iter().max().unwrap_or(0)
             };
+            let column_stats = Self::load_column_stats_from_catalog(catalog, &schema.name)?;
             let table = TableState {
                 document_store: RwLock::new(docs),
                 inverted_index: RwLock::new(inv),
@@ -790,7 +799,7 @@ impl Engine {
                 columns: RwLock::new(columns),
                 next_id: parking_lot::Mutex::new(max_id + 1),
                 analyzer: RwLock::new(analyzer),
-                column_stats: RwLock::new(BTreeMap::new()),
+                column_stats: RwLock::new(column_stats),
                 table_checks: RwLock::new(Vec::new()),
                 foreign_keys: RwLock::new(Vec::new()),
             };
@@ -799,6 +808,39 @@ impl Engine {
         self.restore_graphs_from_catalog(catalog)?;
         self.restore_engine_registries_from_catalog(catalog)?;
         Ok(())
+    }
+
+    fn load_column_stats_from_catalog(
+        catalog: &Catalog,
+        table_name: &str,
+    ) -> Result<BTreeMap<String, uqa_planner::ColumnStats>, SQLiteError> {
+        let mut out = BTreeMap::new();
+        for row in catalog.load_column_stats(table_name)? {
+            out.insert(row.column_name.clone(), Self::column_stats_from_row(row)?);
+        }
+        Ok(out)
+    }
+
+    fn column_stats_from_row(row: ColumnStatsRow) -> Result<uqa_planner::ColumnStats, SQLiteError> {
+        Ok(uqa_planner::ColumnStats {
+            distinct_count: row.distinct_count.try_into().unwrap_or(0),
+            null_count: row.null_count.try_into().unwrap_or(0),
+            min_value: Self::decode_column_stat_value(row.min_value),
+            max_value: Self::decode_column_stat_value(row.max_value),
+            row_count: row.row_count.try_into().unwrap_or(0),
+            histogram: serde_json::from_str(&row.histogram_json).unwrap_or_default(),
+            mcv_values: serde_json::from_str(&row.mcv_values_json).unwrap_or_default(),
+            mcv_frequencies: serde_json::from_str(&row.mcv_frequencies_json).unwrap_or_default(),
+        })
+    }
+
+    fn decode_column_stat_value(raw: Option<String>) -> Option<Value> {
+        let raw = raw?;
+        match serde_json::from_str::<Value>(&raw) {
+            Ok(Value::Null) => None,
+            Ok(v) => Some(v),
+            Err(_) => Some(Value::Str(raw)),
+        }
     }
 
     /// Re-hydrate the named-analyzer / table-field-analyzer / foreign
@@ -844,8 +886,12 @@ impl Engine {
                         uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
                         uqa_sql::ast::ColumnType::Real
                         | uqa_sql::ast::ColumnType::Numeric { .. } => uqa_fdw::ColumnType::Real,
-                        uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
-                        uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
+                        uqa_sql::ast::ColumnType::Text | uqa_sql::ast::ColumnType::Json => {
+                            uqa_fdw::ColumnType::Text
+                        }
+                        uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
+                            uqa_fdw::ColumnType::Bytes
+                        }
                     },
                 })
                 .collect();
@@ -1537,6 +1583,11 @@ impl Engine {
         self.tables.read().get(name).cloned()
     }
 
+    pub(crate) fn fts_fields_for_table(&self, name: &str) -> Vec<FieldName> {
+        self.table(name)
+            .map_or_else(Vec::new, |table| table.fts_fields())
+    }
+
     pub fn add_document(&self, table: &str, doc_id: DocId, document: Document) {
         let Some(t) = self.table(table) else {
             return;
@@ -1705,12 +1756,12 @@ impl Engine {
         };
         for name in names {
             let Some(t) = self.table(&name) else { continue };
-            self.analyze_table(&t);
+            self.analyze_table(&name, &t);
         }
     }
 
     #[allow(clippy::unused_self)]
-    fn analyze_table(&self, t: &Arc<TableState>) {
+    fn analyze_table(&self, table_name: &str, t: &Arc<TableState>) {
         let snapshot = t.document_store.read().snapshot();
         let doc_ids: Vec<DocId> = {
             let mut v = snapshot.doc_ids();
@@ -1781,7 +1832,50 @@ impl Engine {
             );
         }
 
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = Self::persist_column_stats(catalog, table_name, &stats_out);
+        }
         *t.column_stats.write() = stats_out;
+    }
+
+    fn persist_column_stats(
+        catalog: &Catalog,
+        table_name: &str,
+        stats: &BTreeMap<String, uqa_planner::ColumnStats>,
+    ) -> Result<(), SQLiteError> {
+        catalog.delete_column_stats(table_name)?;
+        for (col_name, cs) in stats {
+            let min_json = cs
+                .min_value
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            let max_json = cs
+                .max_value
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
+            let histogram_json = serde_json::to_string(&cs.histogram)?;
+            let mcv_values_json = serde_json::to_string(&cs.mcv_values)?;
+            let mcv_frequencies_json = serde_json::to_string(&cs.mcv_frequencies)?;
+            catalog.save_column_stats_full(
+                table_name,
+                col_name,
+                Self::u64_to_i64(cs.distinct_count),
+                Self::u64_to_i64(cs.null_count),
+                min_json.as_deref(),
+                max_json.as_deref(),
+                Self::u64_to_i64(cs.row_count),
+                &histogram_json,
+                &mcv_values_json,
+                &mcv_frequencies_json,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn u64_to_i64(n: u64) -> i64 {
+        i64::try_from(n).unwrap_or(i64::MAX)
     }
 
     /// Snapshot of the cardinality estimator's per-column statistics
@@ -1997,6 +2091,74 @@ impl Engine {
             .and_then(|c| c.default.clone())
     }
 
+    pub fn set_column_default(
+        &self,
+        table: &str,
+        column: &str,
+        default: Option<uqa_sql::ast::Expr>,
+    ) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let mut found = false;
+        {
+            let mut cols = t.columns.write();
+            for col in cols.iter_mut() {
+                if col.name == column {
+                    col.default = default.clone();
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if found && self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+        found
+    }
+
+    pub fn set_column_not_null(&self, table: &str, column: &str, not_null: bool) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let mut found = false;
+        {
+            let mut cols = t.columns.write();
+            for col in cols.iter_mut() {
+                if col.name == column {
+                    col.not_null = not_null;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if found && self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+        found
+    }
+
+    pub fn set_column_type(&self, table: &str, column: &str, ty: uqa_sql::ast::ColumnType) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let mut found = false;
+        {
+            let mut cols = t.columns.write();
+            for col in cols.iter_mut() {
+                if col.name == column {
+                    col.ty = ty.clone();
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if found && self.is_persistent() {
+            self.save_table_schema(table, &t);
+        }
+        found
+    }
+
     /// Register table-level CHECK + FK constraints. Called by the
     /// SQL `CREATE TABLE` path after the columns are in place.
     pub fn register_table_constraints(
@@ -2144,6 +2306,15 @@ impl Engine {
             let mut vs = t.vector_indexes.write();
             vs.remove(column);
         }
+        let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
+        for doc_id in ids {
+            let Some(mut doc) = t.document_store.read().get(doc_id) else {
+                continue;
+            };
+            if doc.remove(column).is_some() {
+                self.rewrite_document(table, doc_id, doc);
+            }
+        }
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }
@@ -2176,6 +2347,16 @@ impl Engine {
             let mut vs = t.vector_indexes.write();
             if let Some(idx) = vs.remove(from) {
                 vs.insert(to.to_string(), idx);
+            }
+        }
+        let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
+        for doc_id in ids {
+            let Some(mut doc) = t.document_store.read().get(doc_id) else {
+                continue;
+            };
+            if let Some(value) = doc.remove(from) {
+                doc.insert(to.to_string(), value);
+                self.rewrite_document(table, doc_id, doc);
             }
         }
         if self.is_persistent() {
@@ -2309,6 +2490,28 @@ impl Engine {
         true
     }
 
+    fn rewrite_document(&self, table: &str, doc_id: DocId, document: Document) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        let vector_fields: Vec<FieldName> = t.vector_indexes.read().keys().cloned().collect();
+        let mut vectors: BTreeMap<FieldName, Vec<f32>> = BTreeMap::new();
+        for field in vector_fields {
+            let Some(value) = document.get(&field) else {
+                continue;
+            };
+            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
+                vectors.insert(field, vector);
+            }
+        }
+        t.document_store.write().delete(doc_id);
+        t.inverted_index.write().remove_document(doc_id);
+        for idx in t.vector_indexes.write().values_mut() {
+            idx.as_mut().delete(doc_id);
+        }
+        self.add_document_with_vectors(table, doc_id, document, vectors);
+    }
+
     pub fn delete_document(&self, table: &str, doc_id: DocId) {
         let Some(t) = self.table(table) else {
             return;
@@ -2399,6 +2602,104 @@ impl Engine {
         let score_op = ScoreOperator::new(scorer, term_op, analyzed_terms, field);
         let result = score_op.execute(&ctx);
         Self::rank_top_k(&result, top_k)
+    }
+
+    /// Compute calibration diagnostics for a Bayesian BM25 query
+    /// against every document in `table`, aligned to `labels` in
+    /// ascending document-id order.
+    pub fn calibration_report(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: &[u8],
+    ) -> Result<CalibrationReport, SQLError> {
+        if self.table(table).is_none() {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        }
+        let doc_ids = self.table_doc_ids(table);
+        if labels.len() != doc_ids.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "labels length ({}) must match document count ({})",
+                labels.len(),
+                doc_ids.len()
+            )));
+        }
+
+        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let score_map: std::collections::BTreeMap<DocId, f64> = self
+            .search(table, field, query, &mode, usize::MAX)
+            .into_iter()
+            .map(|entry| (entry.doc_id, entry.score))
+            .collect();
+        let probabilities: Vec<f64> = doc_ids
+            .iter()
+            .map(|doc_id| score_map.get(doc_id).copied().unwrap_or(0.0))
+            .collect();
+        Ok(CalibrationMetrics::report(&probabilities, labels, 10))
+    }
+
+    pub fn learn_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: &[u8],
+    ) -> Result<std::collections::BTreeMap<String, f64>, SQLError> {
+        if self.table(table).is_none() {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        }
+        let doc_ids = self.table_doc_ids(table);
+        if labels.len() != doc_ids.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "labels length ({}) must match document count ({})",
+                labels.len(),
+                doc_ids.len()
+            )));
+        }
+
+        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let score_map: std::collections::BTreeMap<DocId, f64> = self
+            .search(table, field, query, &mode, usize::MAX)
+            .into_iter()
+            .map(|entry| (entry.doc_id, entry.score))
+            .collect();
+        let scores: Vec<f64> = doc_ids
+            .iter()
+            .map(|doc_id| score_map.get(doc_id).copied().unwrap_or(0.0))
+            .collect();
+        let labels_f: Vec<f64> = labels.iter().map(|label| f64::from(*label)).collect();
+        let mut learner = ParameterLearner::default();
+        let params = learner.fit_with_options(&scores, &labels_f, None, None);
+        let json = serde_json::to_string(&params)
+            .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
+        self.save_scoring_params(&format!("{table}.{field}"), &json)?;
+        Ok(params)
+    }
+
+    pub fn update_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        score: f64,
+        label: u8,
+    ) -> Result<(), SQLError> {
+        let key = format!("{table}.{field}");
+        let mut learner = if let Some(json) = self.load_scoring_params(&key) {
+            let params: std::collections::BTreeMap<String, f64> =
+                serde_json::from_str(&json).unwrap_or_default();
+            ParameterLearner::new(
+                params.get("alpha").copied().unwrap_or(1.0),
+                params.get("beta").copied().unwrap_or(0.0),
+                Some(params.get("base_rate").copied().unwrap_or(0.5)),
+            )
+        } else {
+            ParameterLearner::default()
+        };
+        learner.update(score, f64::from(label), 1.0, 1.0, 0.1);
+        let json = serde_json::to_string(&learner.params())
+            .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
+        self.save_scoring_params(&key, &json)
     }
 
     /// Top-`k` nearest neighbors against the named vector field.
@@ -2516,10 +2817,8 @@ impl uqa_sql::expr::EngineHook for Engine {
         outer_row: Option<&uqa_sql::result::ResultRow>,
         params: &[uqa_sql::SQLParam],
     ) -> std::result::Result<(Vec<String>, Vec<uqa_sql::result::ResultRow>), String> {
-        let _ = outer_row; // correlated SELECT not yet wired -- the
-                           // outer row would feed Expr::Column
-                           // resolution for LATERAL.
-        match crate::sql::run_select(self, stmt.clone(), params) {
+        let ctes = BTreeMap::new();
+        match crate::sql::run_correlated_subquery(self, stmt, outer_row, params, &ctes) {
             Ok(r) => Ok((r.columns, r.rows)),
             Err(e) => Err(format!("subquery failed: {e}")),
         }

@@ -1,0 +1,669 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! 1:1 port of `uqa/tests/test_json.py`.
+
+use std::collections::BTreeMap;
+
+use uqa_core::Value;
+use uqa_engine::{Engine, SQLResult};
+
+fn exec(engine: &Engine, sql: &str) -> SQLResult {
+    engine.sql(sql, &[]).unwrap()
+}
+
+fn map<const N: usize>(pairs: [(&str, Value); N]) -> Value {
+    Value::Map(
+        pairs
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect::<BTreeMap<_, _>>(),
+    )
+}
+
+fn list(items: impl IntoIterator<Item = Value>) -> Value {
+    Value::List(items.into_iter().collect())
+}
+
+fn s(v: &str) -> Value {
+    Value::Str(v.to_string())
+}
+
+fn engine_with_json() -> Engine {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, data JSON, label TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO docs (id, data, label) VALUES
+         (1, '{\"name\": \"Alice\", \"age\": 30, \"tags\": [\"a\", \"b\"]}', 'first')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO docs (id, data, label) VALUES
+         (2, '{\"name\": \"Bob\", \"age\": 25, \"tags\": [\"c\"]}', 'second')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO docs (id, data, label) VALUES
+         (3, '{\"name\": \"Carol\", \"nested\": {\"x\": 10}}', 'third')",
+    );
+    engine
+}
+
+fn engine_with_table() -> Engine {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER, name TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO t (id, val, name) VALUES (1, 10, 'alpha')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO t (id, val, name) VALUES (2, 20, 'bravo')",
+    );
+    exec(
+        &engine,
+        "INSERT INTO t (id, val, name) VALUES (3, 30, 'charlie')",
+    );
+    engine
+}
+
+#[test]
+fn create_table_with_json() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, data JSON)",
+    );
+    assert!(result.rows.is_empty());
+    let selected = exec(&engine, "SELECT * FROM t");
+    assert!(selected.columns.contains(&"data".to_string()));
+}
+
+#[test]
+fn create_table_with_jsonb() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, data JSONB)",
+    );
+    let selected = exec(&engine, "SELECT * FROM t");
+    assert!(selected.columns.contains(&"data".to_string()));
+}
+
+#[test]
+fn insert_json_string_round_trips_as_map() {
+    let engine = engine_with_json();
+    let result = exec(&engine, "SELECT data FROM docs WHERE id = 1");
+    let Value::Map(data) = &result.rows[0]["data"] else {
+        panic!("expected map, got {:?}", result.rows[0]["data"]);
+    };
+    assert_eq!(data["name"], s("Alice"));
+    assert_eq!(data["age"], Value::Int(30));
+}
+
+#[test]
+fn insert_json_array_round_trips_as_list() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, items JSON)",
+    );
+    exec(&engine, "INSERT INTO t (id, items) VALUES (1, '[1, 2, 3]')");
+    let result = exec(&engine, "SELECT items FROM t WHERE id = 1");
+    assert_eq!(
+        result.rows[0]["items"],
+        list([Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+}
+
+#[test]
+fn arrow_text_key() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->'name' AS name FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["name"], s("Alice"));
+}
+
+#[test]
+fn double_arrow_text_key() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->>'name' AS name FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["name"], s("Alice"));
+}
+
+#[test]
+fn arrow_integer_key() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->'tags'->0 AS first_tag FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["first_tag"], s("a"));
+}
+
+#[test]
+fn arrow_nested_object() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->'nested'->'x' AS x FROM docs WHERE id = 3",
+    );
+    assert_eq!(result.rows[0]["x"], Value::Int(10));
+}
+
+#[test]
+fn double_arrow_returns_text_for_nested() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->>'tags' AS tags FROM docs WHERE id = 1",
+    );
+    let Value::Str(tags) = &result.rows[0]["tags"] else {
+        panic!("expected text");
+    };
+    assert!(tags.contains("\"a\""));
+}
+
+#[test]
+fn arrow_missing_key_returns_null() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT data->'nonexistent' AS v FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Null);
+}
+
+#[test]
+fn json_in_where() {
+    let engine = engine_with_json();
+    let result = exec(&engine, "SELECT id FROM docs WHERE data->>'name' = 'Bob'");
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(2));
+}
+
+#[test]
+fn json_build_object_returns_map() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO t (id) VALUES (1)");
+    let result = exec(
+        &engine,
+        "SELECT json_build_object('a', 1, 'b', 2) AS obj FROM t",
+    );
+    assert_eq!(
+        result.rows[0]["obj"],
+        map([("a", Value::Int(1)), ("b", Value::Int(2))])
+    );
+}
+
+#[test]
+fn json_build_array_returns_list() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO t (id) VALUES (1)");
+    let result = exec(&engine, "SELECT json_build_array(1, 2, 3) AS arr FROM t");
+    assert_eq!(
+        result.rows[0]["arr"],
+        list([Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+}
+
+#[test]
+fn json_build_array_mixed_types_stringifies() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT json_build_array(1, 2, 3, 'four') AS arr");
+    assert_eq!(
+        result.rows[0]["arr"],
+        list([s("1"), s("2"), s("3"), s("four")])
+    );
+}
+
+#[test]
+fn json_build_array_mixed_int_float_str_bool_stringifies() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT json_build_array(1, 2.5, 'hello', true) AS arr",
+    );
+    assert_eq!(
+        result.rows[0]["arr"],
+        list([s("1"), s("2.5"), s("hello"), s("true")])
+    );
+}
+
+#[test]
+fn json_build_array_empty() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT json_build_array() AS arr");
+    assert_eq!(result.rows[0]["arr"], list([]));
+}
+
+#[test]
+fn json_typeof_object() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_typeof(data) AS t FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["t"], s("object"));
+}
+
+#[test]
+fn json_typeof_array() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_typeof(data->'tags') AS t FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["t"], s("array"));
+}
+
+#[test]
+fn json_array_length() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_array_length(data->'tags') AS n FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["n"], Value::Int(2));
+}
+
+#[test]
+fn json_array_length_single() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_array_length(data->'tags') AS n FROM docs WHERE id = 2",
+    );
+    assert_eq!(result.rows[0]["n"], Value::Int(1));
+}
+
+#[test]
+fn json_extract_path() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_extract_path(data, 'nested', 'x') AS v FROM docs WHERE id = 3",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Int(10));
+}
+
+#[test]
+fn json_extract_path_text() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_extract_path_text(data, 'name') AS v FROM docs WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], s("Alice"));
+}
+
+#[test]
+fn cast_to_json() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE t (id INTEGER PRIMARY KEY, raw TEXT)");
+    exec(&engine, "INSERT INTO t (id, raw) VALUES (1, '{\"x\": 42}')");
+    let result = exec(
+        &engine,
+        "SELECT CAST(raw AS json)->'x' AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Int(42));
+}
+
+#[test]
+fn json_object_agg_basic() {
+    let engine = engine_with_table();
+    let result = exec(&engine, "SELECT json_object_agg(name, val) AS v FROM t");
+    let Value::Map(v) = &result.rows[0]["v"] else {
+        panic!("expected map");
+    };
+    assert_eq!(v["alpha"], Value::Int(10));
+    assert_eq!(v["bravo"], Value::Int(20));
+    assert_eq!(v["charlie"], Value::Int(30));
+}
+
+#[test]
+fn jsonb_object_agg_variant() {
+    let engine = engine_with_table();
+    let result = exec(&engine, "SELECT jsonb_object_agg(name, val) AS v FROM t");
+    let Value::Map(v) = &result.rows[0]["v"] else {
+        panic!("expected map");
+    };
+    assert_eq!(v["alpha"], Value::Int(10));
+}
+
+#[test]
+fn hash_gt_path_operator() {
+    let engine = engine_with_table();
+    exec(
+        &engine,
+        "CREATE TABLE jdoc (id SERIAL PRIMARY KEY, data JSONB)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO jdoc (data) VALUES ('{\"a\": {\"b\": 42}}'::jsonb)",
+    );
+    let result = exec(
+        &engine,
+        "SELECT data #> '{a,b}' AS v FROM jdoc WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Int(42));
+}
+
+#[test]
+fn hash_gt_gt_path_operator() {
+    let engine = engine_with_table();
+    exec(
+        &engine,
+        "CREATE TABLE jd2 (id SERIAL PRIMARY KEY, data JSONB)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO jd2 (data) VALUES ('{\"a\": {\"b\": 42}}'::jsonb)",
+    );
+    let result = exec(
+        &engine,
+        "SELECT data #>> '{a,b}' AS v FROM jd2 WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], s("42"));
+}
+
+#[test]
+fn json_contains_operator() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2}'::jsonb @> '{\"a\": 1}'::jsonb AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn json_not_contains_operator() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1}'::jsonb @> '{\"a\": 2}'::jsonb AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(false));
+}
+
+#[test]
+fn json_contained_by_operator() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1}'::jsonb <@ '{\"a\": 1, \"b\": 2}'::jsonb AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_set_basic() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_set('{\"a\": 1}'::jsonb, '{b}', '2'::jsonb) AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(
+        result.rows[0]["v"],
+        map([("a", Value::Int(1)), ("b", Value::Int(2))])
+    );
+}
+
+#[test]
+fn jsonb_set_replace() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_set('{\"a\": 1}'::jsonb, '{a}', '99'::jsonb) AS v FROM t WHERE id = 1",
+    );
+    let Value::Map(v) = &result.rows[0]["v"] else {
+        panic!("expected map");
+    };
+    assert_eq!(v["a"], Value::Int(99));
+}
+
+#[test]
+fn json_object_keys_basic() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT json_object_keys('{\"a\": 1, \"b\": 2}'::json) AS v FROM t WHERE id = 1",
+    );
+    let Value::List(keys) = &result.rows[0]["v"] else {
+        panic!("expected list");
+    };
+    let got: std::collections::BTreeSet<_> = keys.iter().cloned().collect();
+    assert_eq!(got, [s("a"), s("b")].into_iter().collect());
+}
+
+#[test]
+fn json_has_key_present() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2, \"c\": 3}'::jsonb ? 'a' AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn json_has_key_missing() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2}'::jsonb ? 'z' AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(false));
+}
+
+#[test]
+fn json_has_any_key_match() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2, \"c\": 3}'::jsonb ?| ARRAY['a', 'z'] AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn json_has_any_key_no_match() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1}'::jsonb ?| ARRAY['x', 'y'] AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(false));
+}
+
+#[test]
+fn json_has_all_keys_present() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2, \"c\": 3}'::jsonb ?& ARRAY['a', 'b'] AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn json_has_all_keys_missing_one() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\": 1, \"b\": 2}'::jsonb ?& ARRAY['a', 'z'] AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(false));
+}
+
+#[test]
+fn json_has_key_on_empty_object() {
+    let engine = engine_with_table();
+    let result = exec(&engine, "SELECT '{}'::jsonb ? 'a' AS v FROM t WHERE id = 1");
+    assert_eq!(result.rows[0]["v"], Value::Bool(false));
+}
+
+#[test]
+fn json_has_all_keys_on_single_key() {
+    let engine = engine_with_table();
+    let result = exec(
+        &engine,
+        "SELECT '{\"x\": 10}'::jsonb ?& ARRAY['x'] AS v FROM t WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["v"], Value::Bool(true));
+}
+
+#[test]
+fn json_each_returns_rows() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT * FROM json_each('{\"a\": 1, \"b\": 2}')");
+    assert_eq!(result.rows.len(), 2);
+    let keys: std::collections::BTreeSet<_> =
+        result.rows.iter().map(|r| r["key"].clone()).collect();
+    assert_eq!(keys, [s("a"), s("b")].into_iter().collect());
+}
+
+#[test]
+fn json_each_key_value_pairs() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT key, value FROM json_each('{\"x\": 10, \"y\": 20}')",
+    );
+    let kv: BTreeMap<_, _> = result
+        .rows
+        .iter()
+        .map(|r| (r["key"].clone(), r["value"].clone()))
+        .collect();
+    assert_eq!(kv[&s("x")], s("10"));
+    assert_eq!(kv[&s("y")], s("20"));
+}
+
+#[test]
+fn json_each_text_values_are_strings() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT * FROM json_each_text('{\"name\": \"Alice\", \"age\": \"30\"}')",
+    );
+    assert_eq!(result.rows.len(), 2);
+    assert!(result
+        .rows
+        .iter()
+        .all(|r| matches!(r["value"], Value::Str(_))));
+}
+
+#[test]
+fn json_each_text_key_value_pairs() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT key, value FROM json_each_text('{\"k1\": \"v1\", \"k2\": \"v2\"}')",
+    );
+    let kv: BTreeMap<_, _> = result
+        .rows
+        .iter()
+        .map(|r| (r["key"].clone(), r["value"].clone()))
+        .collect();
+    assert_eq!(kv[&s("k1")], s("v1"));
+    assert_eq!(kv[&s("k2")], s("v2"));
+}
+
+#[test]
+fn jsonb_each_returns_rows() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT * FROM jsonb_each('{\"p\": 100}')");
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["key"], s("p"));
+}
+
+#[test]
+fn json_array_elements_basic() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT * FROM json_array_elements('[1, 2, 3]')");
+    assert_eq!(result.rows.len(), 3);
+}
+
+#[test]
+fn json_array_elements_values() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT value FROM json_array_elements('[10, 20, 30]')",
+    );
+    let values: Vec<_> = result.rows.iter().map(|r| r["value"].clone()).collect();
+    assert!(values.contains(&s("10")));
+    assert!(values.contains(&s("20")));
+    assert!(values.contains(&s("30")));
+}
+
+#[test]
+fn json_array_elements_text_variant() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT * FROM json_array_elements_text('[\"a\", \"b\", \"c\"]')",
+    );
+    let values: Vec<_> = result.rows.iter().map(|r| r["value"].clone()).collect();
+    assert_eq!(result.rows.len(), 3);
+    assert!(values.contains(&s("a")));
+    assert!(values.contains(&s("b")));
+    assert!(values.contains(&s("c")));
+}
+
+#[test]
+fn jsonb_array_elements_basic() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT * FROM jsonb_array_elements('[4, 5]')");
+    assert_eq!(result.rows.len(), 2);
+}
+
+#[test]
+fn json_array_elements_single_element() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT * FROM json_array_elements('[42]')");
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["value"], s("42"));
+}
+
+#[test]
+fn json_array_elements_from_literal() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT value FROM json_array_elements('[\"python\", \"sql\", \"rust\"]')",
+    );
+    let values: Vec<_> = result.rows.iter().map(|r| r["value"].clone()).collect();
+    assert_eq!(result.rows.len(), 3);
+    assert!(values.contains(&s("python")));
+    assert!(values.contains(&s("sql")));
+    assert!(values.contains(&s("rust")));
+}
+
+#[test]
+fn json_array_elements_integers() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT value FROM json_array_elements('[1, 2, 3]')",
+    );
+    assert_eq!(result.rows.len(), 3);
+}

@@ -106,11 +106,21 @@ impl Operator for SemanticFilterOperator {
 pub struct LogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,
+    pub top_k: Option<usize>,
 }
 
 impl LogOddsFusionOperator {
     pub fn new(signals: Vec<Arc<dyn Operator>>, alpha: f64) -> Self {
-        Self { signals, alpha }
+        Self {
+            signals,
+            alpha,
+            top_k: None,
+        }
+    }
+
+    pub fn with_top_k(mut self, top_k: usize) -> Self {
+        self.top_k = Some(top_k);
+        self
     }
 }
 
@@ -158,7 +168,11 @@ impl Operator for LogOddsFusionOperator {
             };
             entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused)));
         }
-        PostingList::from_sorted_unchecked(entries)
+        let result = PostingList::from_sorted_unchecked(entries);
+        match self.top_k {
+            Some(k) => result.top_k(k),
+            None => result,
+        }
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

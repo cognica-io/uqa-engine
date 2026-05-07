@@ -461,8 +461,92 @@ impl BoundTightnessAnalyzer {
         1.0 - self.tightness_ratio()
     }
 
+    pub fn worst_bound_index(&self) -> usize {
+        self.pairs
+            .iter()
+            .enumerate()
+            .min_by(|(_, (ub_a, actual_a)), (_, (ub_b, actual_b))| {
+                let ratio_a = if *ub_a > 0.0 {
+                    (*actual_a / *ub_a).min(1.0)
+                } else {
+                    1.0
+                };
+                let ratio_b = if *ub_b > 0.0 {
+                    (*actual_b / *ub_b).min(1.0)
+                } else {
+                    1.0
+                };
+                ratio_a
+                    .partial_cmp(&ratio_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map_or(0, |(idx, _)| idx)
+    }
+
     pub fn clear(&mut self) {
         self.pairs.clear();
+    }
+}
+
+pub struct AdaptiveWANDScorer {
+    pub scorers: Vec<Arc<dyn Scorer>>,
+    pub k: usize,
+    pub posting_lists: Vec<PostingList>,
+    pub tightening_factor: f64,
+    pub analyzer: BoundTightnessAnalyzer,
+}
+
+impl AdaptiveWANDScorer {
+    pub fn new(
+        scorers: Vec<Arc<dyn Scorer>>,
+        k: usize,
+        posting_lists: Vec<PostingList>,
+        tightening_factor: f64,
+    ) -> Self {
+        Self {
+            scorers,
+            k,
+            posting_lists,
+            tightening_factor,
+            analyzer: BoundTightnessAnalyzer::default(),
+        }
+    }
+
+    pub fn compute_upper_bounds(&self) -> Vec<f64> {
+        self.scorers
+            .iter()
+            .zip(&self.posting_lists)
+            .map(|(scorer, pl)| scorer.upper_bound(pl.len() as u64) * self.tightening_factor)
+            .collect()
+    }
+
+    pub fn score_top_k(&mut self) -> PostingList {
+        self.analyzer.clear();
+        for (scorer, pl) in self.scorers.iter().zip(&self.posting_lists) {
+            let upper = scorer.upper_bound(pl.len() as u64);
+            let actual = pl.iter().map(|e| e.payload.score).fold(0.0_f64, f64::max);
+            self.analyzer.record(upper, actual);
+        }
+
+        let mut scores: std::collections::BTreeMap<DocId, f64> = std::collections::BTreeMap::new();
+        for pl in &self.posting_lists {
+            for entry in pl {
+                *scores.entry(entry.doc_id).or_insert(0.0) += entry.payload.score;
+            }
+        }
+        let mut entries: Vec<PostingEntry> = scores
+            .into_iter()
+            .map(|(doc_id, score)| PostingEntry::new(doc_id, Payload::with_score(score)))
+            .collect();
+        entries.sort_by(|a, b| {
+            b.payload
+                .score
+                .partial_cmp(&a.payload.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.doc_id.cmp(&b.doc_id))
+        });
+        entries.truncate(self.k);
+        PostingList::from_unsorted(entries)
     }
 }
 

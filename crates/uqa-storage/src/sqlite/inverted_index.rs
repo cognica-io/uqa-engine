@@ -13,6 +13,7 @@ use rusqlite::{params, OptionalExtension};
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
+use crate::block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 
@@ -30,6 +31,8 @@ pub struct SQLiteInvertedIndex {
 }
 
 impl SQLiteInvertedIndex {
+    pub const BLOCK_SIZE: usize = DEFAULT_BLOCK_SIZE;
+
     pub fn new(conn: ManagedConnection, table: impl Into<String>, analyzer: Analyzer) -> Self {
         Self {
             conn,
@@ -50,11 +53,279 @@ impl SQLiteInvertedIndex {
         analyzer.analyze(text)
     }
 
+    pub fn skip_table_name(&self, field: &str) -> String {
+        format!("_skip_{}_{}", self.table, field)
+    }
+
+    pub fn blockmax_table_name(&self, field: &str) -> String {
+        format!("_blockmax_{}_{}", self.table, field)
+    }
+
+    pub fn flush_skip_pointers(&self) {
+        let fields = self.field_names();
+        for field in fields {
+            let _ = self.rebuild_skip_pointers_for_field(&field);
+        }
+    }
+
+    pub fn skip_to(&self, field: &str, term: &str, target_doc_id: DocId) -> (DocId, usize) {
+        let _ = self.rebuild_skip_pointers_for_field(field);
+        let table = self.skip_table_name(field);
+        self.conn
+            .with(|conn| {
+                if !table_exists(conn, &table)? {
+                    return Ok((0, 0));
+                }
+                let sql = format!(
+                    "SELECT skip_doc_id, skip_offset FROM {}
+                     WHERE term = ?1 AND skip_doc_id <= ?2
+                     ORDER BY skip_doc_id DESC LIMIT 1",
+                    quote_ident(&table)
+                );
+                let row: Option<(i64, i64)> = conn
+                    .query_row(&sql, params![term, target_doc_id as i64], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .optional()?;
+                Ok(row
+                    .map(|(doc, off)| (doc.max(0) as DocId, off.max(0) as usize))
+                    .unwrap_or((0, 0)))
+            })
+            .unwrap_or((0, 0))
+    }
+
+    pub fn build_block_max_scores<S: BlockMaxScorer + ?Sized>(
+        &self,
+        field: &str,
+        term: &str,
+        scorer: &S,
+    ) {
+        let posting_list = self.get_posting_list(field, term);
+        if posting_list.is_empty() && !self.has_field(field) {
+            return;
+        }
+        let scored_entries = posting_list
+            .entries()
+            .iter()
+            .map(|entry| {
+                let tf = entry.payload.positions.len().max(1) as u64;
+                let doc_length = self.get_doc_length(entry.doc_id, field).max(tf);
+                (tf, doc_length)
+            })
+            .collect::<Vec<_>>();
+        let _ = self.ensure_aux_tables(field);
+        let table = self.blockmax_table_name(field);
+        let _ = self.conn.with_mut(|conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                &format!("DELETE FROM {} WHERE term = ?1", quote_ident(&table)),
+                [term],
+            )?;
+            let df = posting_list.len() as u64;
+            for (block_idx, chunk) in scored_entries.chunks(Self::BLOCK_SIZE).enumerate() {
+                let mut max_score = 0.0_f64;
+                for &(tf, doc_length) in chunk {
+                    max_score = max_score.max(scorer.score(tf, doc_length, df));
+                }
+                tx.execute(
+                    &format!(
+                        "INSERT OR REPLACE INTO {}
+                            (term, block_idx, max_score)
+                         VALUES (?1, ?2, ?3)",
+                        quote_ident(&table)
+                    ),
+                    params![term, block_idx as i64, max_score],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        });
+    }
+
+    pub fn build_all_block_max_scores<S: BlockMaxScorer + ?Sized>(&self, field: &str, scorer: &S) {
+        let terms = self.terms_for_field(field);
+        for term in terms {
+            self.build_block_max_scores(field, &term, scorer);
+        }
+    }
+
+    pub fn get_block_max_score(&self, field: &str, term: &str, block_idx: usize) -> f64 {
+        let table = self.blockmax_table_name(field);
+        self.conn
+            .with(|conn| {
+                if !table_exists(conn, &table)? {
+                    return Ok(0.0);
+                }
+                let sql = format!(
+                    "SELECT max_score FROM {}
+                     WHERE term = ?1 AND block_idx = ?2",
+                    quote_ident(&table)
+                );
+                let score: Option<f64> = conn
+                    .query_row(&sql, params![term, block_idx as i64], |row| row.get(0))
+                    .optional()?;
+                Ok(score.unwrap_or(0.0))
+            })
+            .unwrap_or(0.0)
+    }
+
+    pub fn get_all_block_max_scores(&self, field: &str, term: &str) -> Vec<f64> {
+        let table = self.blockmax_table_name(field);
+        self.conn
+            .with(|conn| {
+                if !table_exists(conn, &table)? {
+                    return Ok(Vec::new());
+                }
+                let sql = format!(
+                    "SELECT max_score FROM {}
+                     WHERE term = ?1 ORDER BY block_idx",
+                    quote_ident(&table)
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt
+                    .query_map([term], |row| row.get::<_, f64>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn load_block_max_into(&self, target: &mut BlockMaxIndex) {
+        for field in self.fields_with_blockmax_tables() {
+            for term in self.terms_for_field(&field) {
+                let scores = self.get_all_block_max_scores(&field, &term);
+                if !scores.is_empty() {
+                    target.set_block_maxes(&self.table, &field, &term, scores);
+                }
+            }
+        }
+    }
+
+    fn has_field(&self, field: &str) -> bool {
+        self.field_names().iter().any(|f| f == field)
+    }
+
+    fn terms_for_field(&self, field: &str) -> Vec<String> {
+        self.conn
+            .with(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT term FROM _postings
+                     WHERE table_name = ?1 AND field = ?2
+                     ORDER BY term",
+                )?;
+                let rows = stmt
+                    .query_map(params![self.table, field], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .unwrap_or_default()
+    }
+
+    fn fields_with_blockmax_tables(&self) -> Vec<String> {
+        let prefix = format!("_blockmax_{}_", self.table);
+        self.conn
+            .with(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT name FROM sqlite_master
+                     WHERE type = 'table' AND name LIKE ?1
+                     ORDER BY name",
+                )?;
+                let rows = stmt
+                    .query_map([format!("{prefix}%")], |row| row.get::<_, String>(0))?
+                    .filter_map(Result::ok)
+                    .filter_map(|name| name.strip_prefix(&prefix).map(str::to_string))
+                    .collect::<Vec<_>>();
+                Ok(rows)
+            })
+            .unwrap_or_default()
+    }
+
+    fn ensure_aux_tables(&self, field: &str) -> SQLiteResult<()> {
+        let skip_table = self.skip_table_name(field);
+        let block_table = self.blockmax_table_name(field);
+        self.conn.with(|conn| {
+            conn.execute(
+                &format!(
+                    "CREATE TABLE IF NOT EXISTS {} (
+                        term TEXT NOT NULL,
+                        skip_doc_id INTEGER NOT NULL,
+                        skip_offset INTEGER NOT NULL,
+                        PRIMARY KEY (term, skip_doc_id)
+                    )",
+                    quote_ident(&skip_table)
+                ),
+                [],
+            )?;
+            conn.execute(
+                &format!(
+                    "CREATE TABLE IF NOT EXISTS {} (
+                        term TEXT NOT NULL,
+                        block_idx INTEGER NOT NULL,
+                        max_score REAL NOT NULL,
+                        PRIMARY KEY (term, block_idx)
+                    )",
+                    quote_ident(&block_table)
+                ),
+                [],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn rebuild_skip_pointers_for_field(&self, field: &str) -> SQLiteResult<()> {
+        if !self.has_field(field) {
+            return Ok(());
+        }
+        self.ensure_aux_tables(field)?;
+        let table = self.skip_table_name(field);
+        let postings: Vec<(String, DocId)> = self.conn.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT term, doc_id FROM _postings
+                 WHERE table_name = ?1 AND field = ?2
+                 ORDER BY term, doc_id",
+            )?;
+            let rows = stmt
+                .query_map(params![self.table, field], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as DocId))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+        let mut by_term: BTreeMap<String, Vec<DocId>> = BTreeMap::new();
+        for (term, doc_id) in postings {
+            by_term.entry(term).or_default().push(doc_id);
+        }
+        self.conn.with_mut(|conn| {
+            let tx = conn.transaction()?;
+            tx.execute(&format!("DELETE FROM {}", quote_ident(&table)), [])?;
+            for (term, docs) in by_term {
+                for (block_idx, chunk) in docs.chunks(Self::BLOCK_SIZE).enumerate() {
+                    if let Some(doc_id) = chunk.first() {
+                        tx.execute(
+                            &format!(
+                                "INSERT OR REPLACE INTO {}
+                                    (term, skip_doc_id, skip_offset)
+                                 VALUES (?1, ?2, ?3)",
+                                quote_ident(&table)
+                            ),
+                            params![term, *doc_id as i64, (block_idx * Self::BLOCK_SIZE) as i64],
+                        )?;
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     fn add_document_inner(
         &self,
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
     ) -> SQLiteResult<()> {
+        for field in fields.keys() {
+            self.ensure_aux_tables(field)?;
+        }
         self.conn.with_mut(|conn| {
             let tx = conn.transaction()?;
             // Replacing an existing doc: drop its prior postings + lengths.
@@ -177,6 +448,21 @@ fn blob_to_positions(blob: &[u8]) -> Vec<u32> {
     blob.chunks_exact(4)
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
+}
+
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn table_exists(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<bool> {
+    let exists: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(exists.is_some())
 }
 
 impl InvertedIndex for SQLiteInvertedIndex {

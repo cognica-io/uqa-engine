@@ -395,6 +395,9 @@ mod tests {
                 Expr::Literal(Value::Str("query".into())),
                 Expr::Literal(Value::Float(t)),
             ],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
         };
         let e = Expr::And(vec![knn(0.5), knn(0.7)]);
         let merged = merge_vector_thresholds(e);
@@ -432,6 +435,7 @@ mod tests {
             r#where: Some(pred),
             group_by: vec![],
             grouping_sets: Vec::new(),
+            having: None,
             order_by: vec![],
             limit: None,
             offset: None,

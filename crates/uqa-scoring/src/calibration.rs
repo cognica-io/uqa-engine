@@ -172,6 +172,14 @@ impl CalibrationMetrics {
             bins,
         }
     }
+
+    pub fn reliability_diagram(
+        probabilities: &[f64],
+        labels: &[u8],
+        n_bins: usize,
+    ) -> Vec<ReliabilityBin> {
+        reliability_bins(probabilities, labels, n_bins)
+    }
 }
 
 fn reliability_bins(probabilities: &[f64], labels: &[u8], n_bins: usize) -> Vec<ReliabilityBin> {

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
@@ -135,7 +135,69 @@ impl Catalog {
                     tx.commit()?;
                 }
             }
+            Self::ensure_column_stats_shape(conn)?;
             Ok(())
+        })
+    }
+
+    fn ensure_column_stats_shape(conn: &rusqlite::Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS _column_stats (
+                table_name      TEXT NOT NULL,
+                column_name     TEXT NOT NULL,
+                distinct_count  INTEGER NOT NULL,
+                null_count      INTEGER NOT NULL,
+                min_value       TEXT,
+                max_value       TEXT,
+                row_count       INTEGER NOT NULL,
+                histogram       TEXT NOT NULL DEFAULT '[]',
+                mcv_values      TEXT NOT NULL DEFAULT '[]',
+                mcv_frequencies TEXT NOT NULL DEFAULT '[]',
+                PRIMARY KEY (table_name, column_name)
+            );",
+        )?;
+        let mut stmt = conn.prepare("PRAGMA table_info(_column_stats)")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+        let mut cols = std::collections::BTreeSet::new();
+        for row in rows {
+            cols.insert(row?);
+        }
+        for col in ["histogram", "mcv_values", "mcv_frequencies"] {
+            if !cols.contains(col) {
+                conn.execute(
+                    &format!(
+                        "ALTER TABLE _column_stats ADD COLUMN {col} TEXT NOT NULL DEFAULT '[]'"
+                    ),
+                    [],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Store an arbitrary key/value pair in the `_metadata` table.
+    /// Mirrors Python's `Catalog.set_metadata`.
+    pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Read a key/value pair from the `_metadata` table.
+    pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
+        self.conn.with(|c| {
+            let v: Option<String> = c
+                .query_row(
+                    "SELECT value FROM _metadata WHERE key = ?1",
+                    params![key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(v)
         })
     }
 
@@ -214,6 +276,10 @@ impl Catalog {
                 params![name],
             )?;
             c.execute("DELETE FROM _vectors WHERE table_name = ?1", params![name])?;
+            c.execute(
+                "DELETE FROM _column_stats WHERE table_name = ?1",
+                params![name],
+            )?;
             Ok(())
         })
     }
@@ -865,6 +931,132 @@ impl Catalog {
             Ok(out)
         })
     }
+
+    /// Persist a per-column ANALYZE summary so the planner still has
+    /// cardinality / range estimates after a restart. `min_value` and
+    /// `max_value` are stored as strings (JSON when the value isn't
+    /// natively textual) so the column type is irrelevant.
+    pub fn save_column_stats(
+        &self,
+        table_name: &str,
+        column_name: &str,
+        distinct_count: i64,
+        null_count: i64,
+        min_value: Option<&str>,
+        max_value: Option<&str>,
+        row_count: i64,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _column_stats
+                    (table_name, column_name, distinct_count, null_count,
+                     min_value, max_value, row_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    table_name,
+                    column_name,
+                    distinct_count,
+                    null_count,
+                    min_value,
+                    max_value,
+                    row_count,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn save_column_stats_full(
+        &self,
+        table_name: &str,
+        column_name: &str,
+        distinct_count: i64,
+        null_count: i64,
+        min_value: Option<&str>,
+        max_value: Option<&str>,
+        row_count: i64,
+        histogram_json: &str,
+        mcv_values_json: &str,
+        mcv_frequencies_json: &str,
+    ) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _column_stats
+                    (table_name, column_name, distinct_count, null_count,
+                     min_value, max_value, row_count,
+                     histogram, mcv_values, mcv_frequencies)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    table_name,
+                    column_name,
+                    distinct_count,
+                    null_count,
+                    min_value,
+                    max_value,
+                    row_count,
+                    histogram_json,
+                    mcv_values_json,
+                    mcv_frequencies_json,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn load_column_stats(&self, table_name: &str) -> Result<Vec<ColumnStatsRow>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT column_name, distinct_count, null_count,
+                        min_value, max_value, row_count,
+                        histogram, mcv_values, mcv_frequencies
+                   FROM _column_stats
+                  WHERE table_name = ?1
+                  ORDER BY column_name",
+            )?;
+            let rows = stmt.query_map(params![table_name], |r| {
+                Ok(ColumnStatsRow {
+                    column_name: r.get::<_, String>(0)?,
+                    distinct_count: r.get::<_, i64>(1)?,
+                    null_count: r.get::<_, i64>(2)?,
+                    min_value: r.get::<_, Option<String>>(3)?,
+                    max_value: r.get::<_, Option<String>>(4)?,
+                    row_count: r.get::<_, i64>(5)?,
+                    histogram_json: r.get::<_, String>(6)?,
+                    mcv_values_json: r.get::<_, String>(7)?,
+                    mcv_frequencies_json: r.get::<_, String>(8)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn delete_column_stats(&self, table_name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _column_stats WHERE table_name = ?1",
+                params![table_name],
+            )?;
+            Ok(())
+        })
+    }
+}
+
+/// One row from `_column_stats`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnStatsRow {
+    pub column_name: String,
+    pub distinct_count: i64,
+    pub null_count: i64,
+    pub min_value: Option<String>,
+    pub max_value: Option<String>,
+    pub row_count: i64,
+    pub histogram_json: String,
+    pub mcv_values_json: String,
+    pub mcv_frequencies_json: String,
 }
 
 /// Migrations applied in order. Each `(version, sql)` is run in a single
@@ -1066,6 +1258,27 @@ const MIGRATIONS: &[(u32, &str)] = &[
     CREATE TABLE IF NOT EXISTS _path_indexes (
         graph_name      TEXT PRIMARY KEY,
         label_sequences TEXT NOT NULL
+    );
+    ",
+    ),
+    // Persist per-column statistics produced by ANALYZE so that the
+    // optimiser still has cardinality / range estimates after a
+    // restart. Mirrors Python's `_column_stats` table.
+    (
+        8,
+        r"
+    CREATE TABLE IF NOT EXISTS _column_stats (
+        table_name      TEXT NOT NULL,
+        column_name     TEXT NOT NULL,
+        distinct_count  INTEGER NOT NULL,
+        null_count      INTEGER NOT NULL,
+        min_value       TEXT,
+        max_value       TEXT,
+        row_count       INTEGER NOT NULL,
+        histogram       TEXT NOT NULL DEFAULT '[]',
+        mcv_values      TEXT NOT NULL DEFAULT '[]',
+        mcv_frequencies TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY (table_name, column_name)
     );
     ",
     ),

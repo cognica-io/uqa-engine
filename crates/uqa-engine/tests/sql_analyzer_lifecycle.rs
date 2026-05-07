@@ -29,9 +29,7 @@ fn create_and_list_analyzers() {
         )
         .unwrap();
     assert_eq!(create.rows.len(), 1);
-    let names = eng
-        .sql("SELECT * FROM list_analyzers()", &[])
-        .unwrap();
+    let names = eng.sql("SELECT * FROM list_analyzers()", &[]).unwrap();
     let listed: Vec<String> = names
         .rows
         .iter()
@@ -54,10 +52,14 @@ fn drop_analyzer_via_sql() {
         &[],
     )
     .unwrap();
-    assert!(eng.list_named_analyzers().contains(&"rs_drop_me".to_string()));
+    assert!(eng
+        .list_named_analyzers()
+        .contains(&"rs_drop_me".to_string()));
     eng.sql("SELECT * FROM drop_analyzer('rs_drop_me')", &[])
         .unwrap();
-    assert!(!eng.list_named_analyzers().contains(&"rs_drop_me".to_string()));
+    assert!(!eng
+        .list_named_analyzers()
+        .contains(&"rs_drop_me".to_string()));
 }
 
 #[test]
@@ -145,13 +147,16 @@ fn analyzer_persists_across_engine_reopen() {
             &[],
         )
         .unwrap();
-        assert!(eng.list_named_analyzers().contains(&"rs_persistent".to_string()));
+        assert!(eng
+            .list_named_analyzers()
+            .contains(&"rs_persistent".to_string()));
     }
     {
         let eng = Engine::open(&path).unwrap();
         // analyzer registry came back from catalog
         assert!(
-            eng.list_named_analyzers().contains(&"rs_persistent".to_string()),
+            eng.list_named_analyzers()
+                .contains(&"rs_persistent".to_string()),
             "named analyzer lost across reopen"
         );
     }

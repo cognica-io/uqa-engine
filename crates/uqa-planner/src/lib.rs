@@ -62,6 +62,7 @@ pub mod parallel;
 pub mod query_optimizer;
 
 pub use cardinality::{
+    column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate,
     CardinalityEstimator, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler, RelationStats,
     Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
 };

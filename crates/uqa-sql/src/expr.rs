@@ -640,6 +640,35 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 }
             }
         }
+        "div" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("div takes 2 args".into()));
+            }
+            let divisor = to_i64(&args[1])?;
+            if divisor == 0 {
+                return Err(SQLError::TypeMismatch("division by zero".into()));
+            }
+            let dividend = to_i64(&args[0])?;
+            Ok(Value::Int((dividend as f64 / divisor as f64).floor() as i64))
+        }
+        "gcd" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("gcd takes 2 args".into()));
+            }
+            Ok(Value::Int(gcd_i64(to_i64(&args[0])?, to_i64(&args[1])?)))
+        }
+        "lcm" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("lcm takes 2 args".into()));
+            }
+            let a = to_i64(&args[0])?;
+            let b = to_i64(&args[1])?;
+            if a == 0 || b == 0 {
+                Ok(Value::Int(0))
+            } else {
+                Ok(Value::Int((a / gcd_i64(a, b)).abs() * b.abs()))
+            }
+        }
         "starts_with" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("starts_with takes 2 args".into()));
@@ -813,6 +842,39 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 .unwrap_or(0) as f64;
             Ok(Value::Float((t.sin().abs() * 1.0e9).fract()))
         }
+        "width_bucket" => {
+            if args.len() != 4 {
+                return Err(SQLError::TypeMismatch("width_bucket takes 4 args".into()));
+            }
+            let operand = to_f64(&args[0])?;
+            let low = to_f64(&args[1])?;
+            let high = to_f64(&args[2])?;
+            let count = to_i64(&args[3])?;
+            if count <= 0 || low == high {
+                return Err(SQLError::TypeMismatch(
+                    "width_bucket requires positive bucket count and non-empty range".into(),
+                ));
+            }
+            if low < high {
+                if operand < low {
+                    return Ok(Value::Int(0));
+                }
+                if operand >= high {
+                    return Ok(Value::Int(count + 1));
+                }
+                let width = (high - low) / count as f64;
+                Ok(Value::Int(((operand - low) / width).floor() as i64 + 1))
+            } else {
+                if operand > low {
+                    return Ok(Value::Int(0));
+                }
+                if operand <= high {
+                    return Ok(Value::Int(count + 1));
+                }
+                let width = (low - high) / count as f64;
+                Ok(Value::Int(((low - operand) / width).floor() as i64 + 1))
+            }
+        }
         // Padding / formatting
         "lpad" | "rpad" => {
             if args.len() < 2 || args.len() > 3 {
@@ -922,11 +984,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             Ok(Value::Str(out))
         }
-        "md5" => Err(SQLError::Unsupported(
-            "md5() is not yet wired -- pull in the `md-5` crate or call \
-             a stdlib hashing helper at the engine boundary"
-                .into(),
-        )),
+        "md5" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("md5 takes 1 arg".into()));
+            }
+            Ok(Value::Str(md5_hex(value_to_string(&args[0]).as_bytes())))
+        }
         "encode" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("encode takes 2 args".into()));
@@ -1077,9 +1140,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 })
         }
         "make_interval" => {
-            // make_interval(years, months, weeks, days, hours, mins, secs)
-            // Returns ISO 8601 duration P[n]Y[n]M[n]DT[n]H[n]M[n]S.
-            let mut iso = String::from("P");
+            // make_interval(years, months, weeks, days, hours, mins, secs).
+            // Mirrors the Python reference's compact HH:MM:SS interval
+            // representation, with years/months normalized to days.
             let years = args.first().map(to_i64).transpose()?.unwrap_or(0);
             let months = args.get(1).map(to_i64).transpose()?.unwrap_or(0);
             let weeks = args.get(2).map(to_i64).transpose()?.unwrap_or(0);
@@ -1087,33 +1150,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let hours = args.get(4).map(to_i64).transpose()?.unwrap_or(0);
             let mins = args.get(5).map(to_i64).transpose()?.unwrap_or(0);
             let secs = args.get(6).map(to_f64).transpose()?.unwrap_or(0.0);
-            use std::fmt::Write;
-            if years != 0 {
-                let _ = write!(iso, "{years}Y");
-            }
-            if months != 0 {
-                let _ = write!(iso, "{months}M");
-            }
-            let total_days = weeks * 7 + days;
-            if total_days != 0 {
-                let _ = write!(iso, "{total_days}D");
-            }
-            if hours != 0 || mins != 0 || secs != 0.0 {
-                iso.push('T');
-                if hours != 0 {
-                    let _ = write!(iso, "{hours}H");
-                }
-                if mins != 0 {
-                    let _ = write!(iso, "{mins}M");
-                }
-                if secs != 0.0 {
-                    let _ = write!(iso, "{secs}S");
-                }
-            }
-            if iso == "P" {
-                iso.push_str("0D");
-            }
-            Ok(Value::Str(iso))
+            let total_days = years * 365 + months * 30 + weeks * 7 + days;
+            let total_seconds =
+                total_days * 86_400 + hours * 3_600 + mins * 60 + secs.trunc() as i64;
+            let h_part = total_seconds / 3_600;
+            let m_part = (total_seconds % 3_600) / 60;
+            let s_part = total_seconds % 60;
+            Ok(Value::Str(format!("{h_part:02}:{m_part:02}:{s_part:02}")))
         }
         "to_char" => {
             if args.len() != 2 {
@@ -1188,10 +1231,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         // JSON functions
         // -------------------------------------------------------------
         "json_build_object" | "jsonb_build_object" => json_build_object(args),
-        "json_build_array" | "jsonb_build_array" => Ok(Value::Str(
-            serde_json::to_string(&args.iter().map(value_to_json).collect::<Vec<_>>())
-                .map_err(|e| SQLError::TypeMismatch(format!("json_build_array: {e}")))?,
-        )),
+        "json_build_array" | "jsonb_build_array" => Ok(json_build_array(args)),
         "json_typeof" | "jsonb_typeof" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("json_typeof takes 1 arg".into()));
@@ -1215,14 +1255,17 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "json_extract_path" | "jsonb_extract_path" => json_extract_path(args, false),
         "json_extract_path_text" | "jsonb_extract_path_text" => json_extract_path(args, true),
+        "json_contains" => json_contains(args),
+        "json_contained_by" => json_contained_by(args),
+        "json_has_key" => json_has_key(args),
+        "json_has_any_key" => json_has_keys(args, false),
+        "json_has_all_keys" => json_has_keys(args, true),
         "to_json" | "to_jsonb" | "row_to_json" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
             }
             let json = value_to_json(&args[0]);
-            Ok(Value::Str(serde_json::to_string(&json).map_err(|e| {
-                SQLError::TypeMismatch(format!("to_json: {e}"))
-            })?))
+            Ok(json_to_value(&json))
         }
         "jsonb_set" | "jsonb_insert" => jsonb_set(args),
         "json_strip_nulls" | "jsonb_strip_nulls" => {
@@ -1233,9 +1276,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             let mut parsed = parse_json(&value_to_string(&args[0]))?;
             strip_nulls(&mut parsed);
-            Ok(Value::Str(serde_json::to_string(&parsed).map_err(|e| {
-                SQLError::TypeMismatch(format!("json_strip_nulls: {e}"))
-            })?))
+            Ok(json_to_value(&parsed))
         }
         "json_object_keys" | "jsonb_object_keys" => {
             if args.len() != 1 {
@@ -1504,9 +1545,22 @@ fn json_build_object(args: &[Value]) -> Result<Value> {
         let val = value_to_json(&chunk[1]);
         obj.insert(key, val);
     }
-    serde_json::to_string(&serde_json::Value::Object(obj))
-        .map(Value::Str)
-        .map_err(|e| SQLError::TypeMismatch(format!("json_build_object: {e}")))
+    Ok(json_to_value(&serde_json::Value::Object(obj)))
+}
+
+fn json_build_array(args: &[Value]) -> Value {
+    let homogeneous_numeric = args
+        .iter()
+        .all(|v| matches!(v, Value::Int(_) | Value::Float(_)));
+    if homogeneous_numeric {
+        Value::List(args.to_vec())
+    } else {
+        Value::List(
+            args.iter()
+                .map(|v| Value::Str(value_to_string(v)))
+                .collect(),
+        )
+    }
 }
 
 fn json_extract_path(args: &[Value], as_text: bool) -> Result<Value> {
@@ -1538,10 +1592,76 @@ fn json_extract_path(args: &[Value], as_text: bool) -> Result<Value> {
     } else if matches!(current, serde_json::Value::Null) {
         Ok(Value::Null)
     } else {
-        Ok(Value::Str(
-            serde_json::to_string(&current).unwrap_or_default(),
-        ))
+        Ok(json_to_value(&current))
     }
+}
+
+fn json_contains(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch("json_contains takes 2 args".into()));
+    }
+    let lhs = parse_json(&value_to_string(&args[0]))?;
+    let rhs = parse_json(&value_to_string(&args[1]))?;
+    Ok(Value::Bool(json_contains_value(&lhs, &rhs)))
+}
+
+fn json_contained_by(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch(
+            "json_contained_by takes 2 args".into(),
+        ));
+    }
+    let lhs = parse_json(&value_to_string(&args[0]))?;
+    let rhs = parse_json(&value_to_string(&args[1]))?;
+    Ok(Value::Bool(json_contains_value(&rhs, &lhs)))
+}
+
+fn json_contains_value(lhs: &serde_json::Value, rhs: &serde_json::Value) -> bool {
+    match (lhs, rhs) {
+        (serde_json::Value::Object(l), serde_json::Value::Object(r)) => r
+            .iter()
+            .all(|(k, rv)| l.get(k).is_some_and(|lv| json_contains_value(lv, rv))),
+        (serde_json::Value::Array(l), serde_json::Value::Array(r)) => r
+            .iter()
+            .all(|rv| l.iter().any(|lv| json_contains_value(lv, rv))),
+        _ => lhs == rhs,
+    }
+}
+
+fn json_has_key(args: &[Value]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch("json_has_key takes 2 args".into()));
+    }
+    let obj = parse_json(&value_to_string(&args[0]))?;
+    let key = value_to_string(&args[1]);
+    Ok(Value::Bool(match obj {
+        serde_json::Value::Object(map) => map.contains_key(&key),
+        _ => false,
+    }))
+}
+
+fn json_has_keys(args: &[Value], require_all: bool) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(SQLError::TypeMismatch("json_has_keys takes 2 args".into()));
+    }
+    let obj = parse_json(&value_to_string(&args[0]))?;
+    let keys = match &args[1] {
+        Value::List(items) => items.iter().map(value_to_string).collect::<Vec<_>>(),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "json key list must be array, got {other:?}"
+            )));
+        }
+    };
+    let serde_json::Value::Object(map) = obj else {
+        return Ok(Value::Bool(false));
+    };
+    let found = |key: &String| map.contains_key(key);
+    Ok(Value::Bool(if require_all {
+        keys.iter().all(found)
+    } else {
+        keys.iter().any(found)
+    }))
 }
 
 fn jsonb_set(args: &[Value]) -> Result<Value> {
@@ -1567,9 +1687,7 @@ fn jsonb_set(args: &[Value]) -> Result<Value> {
     let new_val = parse_json(&value_to_string(&args[2]))
         .unwrap_or_else(|_| serde_json::Value::String(value_to_string(&args[2])));
     json_set_path(&mut current, &path, new_val);
-    Ok(Value::Str(serde_json::to_string(&current).map_err(
-        |e| SQLError::TypeMismatch(format!("jsonb_set: {e}")),
-    )?))
+    Ok(json_to_value(&current))
 }
 
 fn json_set_path(current: &mut serde_json::Value, path: &[String], new_val: serde_json::Value) {
@@ -1907,6 +2025,18 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
     if matches!(v, Value::Null) {
         return Ok(Value::Null);
     }
+    if let Some(elem_ty) = ty.strip_suffix("[]") {
+        let Value::List(items) = v else {
+            return Err(SQLError::TypeMismatch(format!(
+                "CAST AS {ty}: expected array, got {v:?}"
+            )));
+        };
+        return items
+            .iter()
+            .map(|item| cast_value(item, elem_ty))
+            .collect::<Result<Vec<_>>>()
+            .map(Value::List);
+    }
     match ty {
         "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial"
         | "bigserial" | "serial4" | "serial8" | "pg_catalog.int4" | "pg_catalog.int8"
@@ -1917,6 +2047,21 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
             Ok(Value::Str(value_to_string(v)))
         }
+        "date"
+        | "time"
+        | "timetz"
+        | "timestamp"
+        | "timestamptz"
+        | "timestamp without time zone"
+        | "timestamp with time zone"
+        | "time without time zone"
+        | "time with time zone" => Ok(Value::Str(value_to_string(v))),
+        "json" | "jsonb" => Ok(json_to_value(&parse_json(&value_to_string(v))?)),
+        "bytea" => match v {
+            Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
+            Value::Str(s) => Ok(Value::Bytes(s.as_bytes().to_vec())),
+            other => Ok(Value::Bytes(value_to_string(other).into_bytes())),
+        },
         "boolean" | "bool" => Ok(Value::Bool(truthy(v))),
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }
@@ -1929,7 +2074,10 @@ fn value_to_string(v: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Str(s) => s.clone(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
-        other => format!("{other:?}"),
+        Value::List(_) | Value::Map(_) => {
+            serde_json::to_string(&value_to_json(v)).unwrap_or_default()
+        }
+        Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
     }
 }
 
@@ -1996,6 +2144,17 @@ fn to_f64(v: &Value) -> Result<f64> {
             "expected number, got {other:?}"
         ))),
     }
+}
+
+fn gcd_i64(mut a: i64, mut b: i64) -> i64 {
+    a = a.abs();
+    b = b.abs();
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a
 }
 
 /// Best-effort `Value -> i64`. Returns `None` for shapes that do not

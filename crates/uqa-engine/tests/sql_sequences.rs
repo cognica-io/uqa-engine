@@ -11,6 +11,46 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 
 #[test]
+fn sequence_create_and_nextval_via_sql() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE myseq START 1", &[]).unwrap();
+    let first = eng.sql("SELECT nextval('myseq') AS v", &[]).unwrap();
+    assert_eq!(first.rows[0]["v"], Value::Int(1));
+    let second = eng.sql("SELECT nextval('myseq') AS v", &[]).unwrap();
+    assert_eq!(second.rows[0]["v"], Value::Int(2));
+}
+
+#[test]
+fn sequence_currval_via_sql() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE s2 START 10", &[]).unwrap();
+    eng.sql("SELECT nextval('s2') AS v", &[]).unwrap();
+    let result = eng.sql("SELECT currval('s2') AS v", &[]).unwrap();
+    assert_eq!(result.rows[0]["v"], Value::Int(10));
+}
+
+#[test]
+fn sequence_setval_via_sql_updates_currval() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE s3 START 1", &[]).unwrap();
+    eng.sql("SELECT nextval('s3') AS v", &[]).unwrap();
+    eng.sql("SELECT setval('s3', 100) AS v", &[]).unwrap();
+    let result = eng.sql("SELECT currval('s3') AS v", &[]).unwrap();
+    assert_eq!(result.rows[0]["v"], Value::Int(100));
+}
+
+#[test]
+fn sequence_increment_via_sql() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE s4 START 1 INCREMENT 5", &[])
+        .unwrap();
+    let first = eng.sql("SELECT nextval('s4') AS v", &[]).unwrap();
+    assert_eq!(first.rows[0]["v"], Value::Int(1));
+    let second = eng.sql("SELECT nextval('s4') AS v", &[]).unwrap();
+    assert_eq!(second.rows[0]["v"], Value::Int(6));
+}
+
+#[test]
 fn create_sequence_default_start_increment_one() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE s1", &[]).unwrap();

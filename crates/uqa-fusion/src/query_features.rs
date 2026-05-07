@@ -14,6 +14,35 @@ use uqa_core::IndexStats;
 
 pub const N_QUERY_FEATURES: usize = 6;
 
+#[derive(Debug, Clone)]
+pub struct QueryFeatureExtractor {
+    stats: IndexStats,
+    field: Option<String>,
+}
+
+impl QueryFeatureExtractor {
+    pub fn new(stats: IndexStats) -> Self {
+        Self { stats, field: None }
+    }
+
+    pub fn with_field(mut self, field: impl Into<String>) -> Self {
+        self.field = Some(field.into());
+        self
+    }
+
+    pub fn n_features(&self) -> usize {
+        N_QUERY_FEATURES
+    }
+
+    pub fn extract<S: AsRef<str>>(&self, query_terms: &[S]) -> [f64; N_QUERY_FEATURES] {
+        let terms: Vec<String> = query_terms
+            .iter()
+            .map(|term| term.as_ref().to_string())
+            .collect();
+        extract_query_features(&self.stats, &terms, self.field.as_deref())
+    }
+}
+
 /// Compute the query feature vector against the supplied
 /// [`IndexStats`]. `field` is the IDF field to consult; pass `None`
 /// for the catch-all `_default` slot.

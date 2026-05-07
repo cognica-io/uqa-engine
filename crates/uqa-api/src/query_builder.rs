@@ -13,6 +13,16 @@ use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
 use uqa_sql::SQLError;
 
+use std::fmt;
+use std::fs::File;
+use std::path::Path;
+use std::sync::Arc;
+
+use arrow_array::{ArrayRef, BooleanArray, Float64Array, Int64Array, RecordBatch, StringArray};
+use arrow_schema::{ArrowError, DataType, Field, Schema};
+use parquet::arrow::ArrowWriter;
+use parquet::errors::ParquetError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
     Asc,
@@ -235,6 +245,44 @@ impl<'a> QueryBuilder<'a> {
 
     pub fn execute(&self) -> Result<SQLResult, SQLError> {
         self.engine.sql(&self.to_sql(), &[])
+    }
+
+    /// Execute the query and convert the result to an Arrow
+    /// [`RecordBatch`]. The batch always includes Python-parity
+    /// metadata columns `_doc_id` and `_score` before the requested
+    /// projections.
+    pub fn execute_arrow(&self) -> Result<RecordBatch, QueryBuilderError> {
+        let result = self.execute_with_result_metadata()?;
+        sql_result_to_record_batch(&result).map_err(QueryBuilderError::Arrow)
+    }
+
+    /// Execute the query and write the Arrow result to a Parquet file.
+    pub fn execute_parquet<P: AsRef<Path>>(&self, path: P) -> Result<(), QueryBuilderError> {
+        let batch = self.execute_arrow()?;
+        let file = File::create(path).map_err(QueryBuilderError::Io)?;
+        let mut writer =
+            ArrowWriter::try_new(file, batch.schema(), None).map_err(QueryBuilderError::Parquet)?;
+        writer.write(&batch).map_err(QueryBuilderError::Parquet)?;
+        writer.close().map_err(QueryBuilderError::Parquet)?;
+        Ok(())
+    }
+
+    fn execute_with_result_metadata(&self) -> Result<SQLResult, SQLError> {
+        let mut builder = self.clone();
+        let original = if builder.projections.is_empty() {
+            vec!["*".to_string()]
+        } else {
+            builder.projections
+        };
+        builder.projections = Vec::with_capacity(original.len() + 2);
+        push_projection_once(&mut builder.projections, "_doc_id");
+        push_projection_once(&mut builder.projections, "_score");
+        for projection in original {
+            if projection != "_doc_id" && projection != "_score" {
+                builder.projections.push(projection);
+            }
+        }
+        builder.execute()
     }
 
     // -----------------------------------------------------------------
@@ -496,6 +544,52 @@ impl<'a> QueryBuilder<'a> {
         self.r#where(format!("bayesian_match({field}, {})", quote_str(query)))
     }
 
+    /// Bayesian BM25 with a document-level external prior. Rust's SQL
+    /// builder takes the serializable prior shape (`prior_field`,
+    /// `prior_mode`) rather than a closure, so the assembled query can
+    /// still flow through the SQL engine.
+    pub fn score_bayesian_with_prior(
+        self,
+        query: &str,
+        field: Option<&str>,
+        prior_field: Option<&str>,
+        prior_mode: Option<&str>,
+    ) -> Result<Self, SQLError> {
+        let Some(prior_field) = prior_field else {
+            return Err(SQLError::TypeMismatch("prior_fn is required".into()));
+        };
+        let Some(prior_mode) = prior_mode else {
+            return Err(SQLError::TypeMismatch("prior_fn is required".into()));
+        };
+        let field = field.unwrap_or("_default");
+        Ok(self.r#where(format!(
+            "bayesian_match_with_prior({field}, {}, {prior_field}, {})",
+            quote_str(query),
+            quote_str(prior_mode)
+        )))
+    }
+
+    pub fn learn_params(
+        &self,
+        query: &str,
+        labels: &[u8],
+        field: Option<&str>,
+    ) -> Result<std::collections::BTreeMap<String, f64>, SQLError> {
+        self.engine
+            .learn_scoring_params(&self.table, field.unwrap_or("_default"), query, labels)
+    }
+
+    pub fn sparse_threshold(mut self, threshold: f64) -> Result<Self, SQLError> {
+        if self.filters.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "sparse_threshold requires a source".into(),
+            ));
+        }
+        let source = self.filters.join(" AND ");
+        self.filters = vec![format!("sparse_threshold({source}, {threshold})")];
+        Ok(self)
+    }
+
     /// Run `EXPLAIN <assembled SELECT>` and return the planner's
     /// rendered plan as a single string. Mirrors Python
     /// `QueryBuilder.explain`.
@@ -521,6 +615,153 @@ fn render_vector(query: &[f32]) -> String {
         .map(f32::to_string)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[derive(Debug)]
+pub enum QueryBuilderError {
+    Sql(SQLError),
+    Arrow(ArrowError),
+    Parquet(ParquetError),
+    Io(std::io::Error),
+}
+
+impl fmt::Display for QueryBuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sql(err) => write!(f, "{err}"),
+            Self::Arrow(err) => write!(f, "{err}"),
+            Self::Parquet(err) => write!(f, "{err}"),
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for QueryBuilderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Sql(err) => Some(err),
+            Self::Arrow(err) => Some(err),
+            Self::Parquet(err) => Some(err),
+            Self::Io(err) => Some(err),
+        }
+    }
+}
+
+impl From<SQLError> for QueryBuilderError {
+    fn from(value: SQLError) -> Self {
+        Self::Sql(value)
+    }
+}
+
+fn push_projection_once(projections: &mut Vec<String>, projection: &str) {
+    if !projections.iter().any(|p| p == projection) {
+        projections.push(projection.to_string());
+    }
+}
+
+fn sql_result_to_record_batch(result: &SQLResult) -> Result<RecordBatch, ArrowError> {
+    let fields: Vec<Field> = result
+        .columns
+        .iter()
+        .map(|column| Field::new(column, infer_arrow_type(column, result), true))
+        .collect();
+    let arrays: Vec<ArrayRef> = result
+        .columns
+        .iter()
+        .zip(fields.iter())
+        .map(|(column, field)| build_arrow_array(column, field.data_type(), result))
+        .collect();
+    RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
+}
+
+fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
+    if column == "_doc_id" {
+        return DataType::Int64;
+    }
+    if column == "_score" {
+        return DataType::Float64;
+    }
+
+    let mut ty: Option<DataType> = None;
+    for row in &result.rows {
+        let Some(value) = row.get(column) else {
+            continue;
+        };
+        let next = match value {
+            Value::Null => continue,
+            Value::Bool(_) => DataType::Boolean,
+            Value::Int(_) => DataType::Int64,
+            Value::Float(_) => DataType::Float64,
+            Value::Str(_) | Value::Bytes(_) | Value::List(_) | Value::Map(_) => DataType::Utf8,
+        };
+        ty = Some(match (ty, next) {
+            (None, dt) => dt,
+            (Some(DataType::Int64), DataType::Float64)
+            | (Some(DataType::Float64), DataType::Int64 | DataType::Float64) => DataType::Float64,
+            (Some(current), dt) if current == dt => current,
+            _ => DataType::Utf8,
+        });
+        if ty == Some(DataType::Utf8) {
+            break;
+        }
+    }
+    ty.unwrap_or(DataType::Utf8)
+}
+
+fn build_arrow_array(column: &str, data_type: &DataType, result: &SQLResult) -> ArrayRef {
+    match data_type {
+        DataType::Boolean => Arc::new(BooleanArray::from(
+            result
+                .rows
+                .iter()
+                .map(|row| match row.get(column) {
+                    Some(Value::Bool(v)) => Some(*v),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        )),
+        DataType::Int64 => Arc::new(Int64Array::from(
+            result
+                .rows
+                .iter()
+                .map(|row| match row.get(column) {
+                    Some(Value::Int(v)) => Some(*v),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        )),
+        DataType::Float64 => Arc::new(Float64Array::from(
+            result
+                .rows
+                .iter()
+                .map(|row| match row.get(column) {
+                    Some(Value::Float(v)) => Some(*v),
+                    Some(Value::Int(v)) => Some(*v as f64),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        )),
+        _ => Arc::new(StringArray::from(
+            result
+                .rows
+                .iter()
+                .map(|row| row.get(column).and_then(value_to_arrow_string))
+                .collect::<Vec<_>>(),
+        )),
+    }
+}
+
+fn value_to_arrow_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::Bool(v) => Some(v.to_string()),
+        Value::Int(v) => Some(v.to_string()),
+        Value::Float(v) => Some(v.to_string()),
+        Value::Str(v) => Some(v.clone()),
+        Value::Bytes(v) => Some(format!("{v:?}")),
+        Value::List(v) => Some(format!("{v:?}")),
+        Value::Map(v) => Some(format!("{v:?}")),
+    }
 }
 
 fn render_value(value: &Value) -> String {

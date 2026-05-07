@@ -25,6 +25,10 @@ pub enum ColumnType {
         precision: Option<u32>,
         scale: Option<u32>,
     },
+    /// `JSON` / `JSONB` columns store typed JSON values.
+    Json,
+    /// `BYTEA` columns store opaque bytes.
+    Bytea,
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
 }
@@ -159,6 +163,23 @@ pub enum AlterTableAction {
     RenameTable {
         to: String,
     },
+    SetDefault {
+        name: String,
+        default: Expr,
+    },
+    DropDefault {
+        name: String,
+    },
+    SetNotNull {
+        name: String,
+    },
+    DropNotNull {
+        name: String,
+    },
+    AlterColumnType {
+        name: String,
+        ty: ColumnType,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +197,8 @@ pub struct InsertStmt {
     /// `ON CONFLICT (...) DO ...` clause. `None` for plain
     /// `INSERT INTO ... VALUES ...` without conflict handling.
     pub on_conflict: Option<OnConflict>,
+    /// `RETURNING ...` projection list. Empty when absent.
+    pub returning: Vec<Projection>,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +259,7 @@ pub struct SelectStmt {
 #[derive(Debug, Clone)]
 pub struct CTE {
     pub name: String,
+    pub columns: Vec<String>,
     pub recursive: bool,
     pub query: Box<SelectStmt>,
 }
@@ -520,6 +544,8 @@ pub struct UpdateStmt {
     /// `UPDATE t SET ... FROM other [JOIN ...]` -- the engine joins
     /// the target with this clause before applying the assignments.
     pub from: Option<FromClause>,
+    /// `RETURNING ...` projection list. Empty when absent.
+    pub returning: Vec<Projection>,
 }
 
 #[derive(Debug, Clone)]
@@ -530,6 +556,8 @@ pub struct DeleteStmt {
     /// the target with this clause and deletes target rows whose
     /// joined image satisfies WHERE.
     pub using: Option<FromClause>,
+    /// `RETURNING ...` projection list. Empty when absent.
+    pub returning: Vec<Projection>,
 }
 
 #[derive(Debug, Clone)]

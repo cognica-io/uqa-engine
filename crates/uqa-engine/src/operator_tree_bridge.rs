@@ -138,6 +138,11 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
                 field: Some(field),
             })
         }
+        "fts_match" => {
+            let default_field = fts_default_field(args.first()?)?;
+            let query = const_string(args.get(1)?, params)?;
+            compile_fts_query(&query, default_field.as_deref())
+        }
         "knn_match" => {
             // Standalone knn_match preserves raw cosine similarities;
             // calibration to (0, 1) only fires inside fusion contexts
@@ -156,6 +161,17 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
         "fuse_log_odds" => lower_fuse_log_odds(args, params),
         "attention" => lower_attention_fusion(args, params),
         "learned_fusion" => lower_learned_fusion(args, params),
+        "sparse_threshold" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let source = lower_signal_arg(args.first()?, params)?;
+            let threshold = const_f64(args.get(1)?, params)?;
+            Some(OperatorTree::SparseThreshold {
+                source: Box::new(source),
+                threshold,
+            })
+        }
         _ => None,
     }
 }
@@ -181,6 +197,11 @@ fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Op
                 query,
                 field: Some(field),
             })
+        }
+        "fts_match" => {
+            let default_field = fts_default_field(args.first()?)?;
+            let query = const_string(args.get(1)?, params)?;
+            compile_fts_query(&query, default_field.as_deref())
         }
         "knn_match" => {
             let field = column_name(args.first()?)?;
@@ -313,6 +334,25 @@ fn column_name(expr: &Expr) -> Option<String> {
         Expr::QualifiedColumn { column, .. } => Some(column.clone()),
         _ => None,
     }
+}
+
+fn fts_default_field(expr: &Expr) -> Option<Option<String>> {
+    match expr {
+        Expr::Column(name) => Some(Some(name.clone())),
+        Expr::QualifiedColumn { column, .. } => Some(Some(column.clone())),
+        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(None),
+        _ => None,
+    }
+}
+
+fn compile_fts_query(query: &str, default_field: Option<&str>) -> Option<OperatorTree> {
+    let tokenizer = |_field: Option<&str>, phrase: &str| {
+        phrase
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+    };
+    uqa_sql::compile_fts_query_string(query, default_field, &tokenizer).ok()
 }
 
 fn const_value(expr: &Expr, params: &[SQLParam]) -> Option<Value> {
@@ -550,6 +590,10 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             } => self.execute_attention_fusion(signals, attention, query_features),
             OperatorTree::LearnedFusion { signals, learned } => {
                 self.execute_learned_fusion(signals, learned)
+            }
+            OperatorTree::SparseThreshold { source, threshold } => {
+                let source = self.execute_node(source);
+                sparse_threshold_inline(&source, *threshold)
             }
             // The remaining graph-only IR variants (PatternMatch,
             // Traverse, RegularPathQuery, WeightedPathQuery,
@@ -875,6 +919,28 @@ fn posting_list_to_scored(pl: &PostingList) -> Vec<ScoredEntry> {
             score: e.payload.score,
         })
         .collect()
+}
+
+fn sparse_threshold_inline(source: &PostingList, threshold: f64) -> PostingList {
+    let entries = source
+        .iter()
+        .filter_map(|entry| {
+            let adjusted = entry.payload.score - threshold;
+            if adjusted > 0.0 {
+                Some(PostingEntry::new(
+                    entry.doc_id,
+                    Payload {
+                        positions: entry.payload.positions.clone(),
+                        score: adjusted,
+                        fields: entry.payload.fields.clone(),
+                    },
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    PostingList::from_unsorted(entries)
 }
 
 /// Lower a WHERE expression and run [`QueryOptimizer`] over the

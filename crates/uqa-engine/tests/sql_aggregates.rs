@@ -19,8 +19,11 @@ fn engine() -> Engine {
 
 fn engine_with_data() -> Engine {
     let eng = engine();
-    eng.sql("CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)", &[])
-        .unwrap();
+    eng.sql(
+        "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)",
+        &[],
+    )
+    .unwrap();
     eng.sql(
         "INSERT INTO users (id, name, age) VALUES \
          (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Carol', 35), (4, 'Dave', 25)",
@@ -142,7 +145,8 @@ fn count_distinct_with_group_by() {
 #[test]
 fn count_distinct_skips_nulls() {
     let eng = engine();
-    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
+    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[])
+        .unwrap();
     eng.sql(
         "INSERT INTO t (id, val) VALUES (1, 'a'), (2, 'a'); \
          INSERT INTO t (id) VALUES (3)",
@@ -200,17 +204,15 @@ fn string_agg_with_group_by() {
 #[test]
 fn string_agg_all_null_yields_null() {
     let eng = engine();
-    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
+    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[])
+        .unwrap();
     eng.sql("INSERT INTO t (id) VALUES (1), (2)", &[]).ok();
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).ok();
     eng.sql("INSERT INTO t (id) VALUES (2)", &[]).ok();
     let r = eng
         .sql("SELECT STRING_AGG(val, ',') AS vals FROM t", &[])
         .unwrap();
-    assert!(matches!(
-        r.rows[0].get("vals"),
-        Some(Value::Null) | None
-    ));
+    assert!(matches!(r.rows[0].get("vals"), Some(Value::Null) | None));
 }
 
 #[test]
@@ -226,7 +228,8 @@ fn string_agg_custom_delimiter() {
 #[test]
 fn string_agg_distinct() {
     let eng = engine();
-    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
+    eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[])
+        .unwrap();
     eng.sql(
         "INSERT INTO t (id, val) VALUES (1, 'a'), (2, 'b'), (3, 'a'), (4, 'c')",
         &[],
@@ -314,7 +317,10 @@ fn array_agg_with_order_by() {
             _ => None,
         })
         .collect();
-    assert_eq!(strs, vec!["Apple", "Banana", "Cherry", "Daikon", "Eggplant"]);
+    assert_eq!(
+        strs,
+        vec!["Apple", "Banana", "Cherry", "Daikon", "Eggplant"]
+    );
 }
 
 #[test]
@@ -334,7 +340,10 @@ fn array_agg_with_order_by_desc() {
             _ => None,
         })
         .collect();
-    assert_eq!(strs, vec!["Eggplant", "Daikon", "Cherry", "Banana", "Apple"]);
+    assert_eq!(
+        strs,
+        vec!["Eggplant", "Daikon", "Cherry", "Banana", "Apple"]
+    );
 }
 
 // =====================================================================
@@ -348,7 +357,9 @@ fn bool_and_all_true() {
         .unwrap();
     eng.sql("INSERT INTO t (id, flag) VALUES (1, true), (2, true)", &[])
         .unwrap();
-    let r = eng.sql("SELECT bool_and(flag) AS result FROM t", &[]).unwrap();
+    let r = eng
+        .sql("SELECT bool_and(flag) AS result FROM t", &[])
+        .unwrap();
     assert_eq!(bool_col(&r.rows[0], "result"), Some(true));
 }
 
@@ -390,9 +401,14 @@ fn bool_or_all_false() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, flag BOOLEAN)", &[])
         .unwrap();
-    eng.sql("INSERT INTO t (id, flag) VALUES (1, false), (2, false)", &[])
+    eng.sql(
+        "INSERT INTO t (id, flag) VALUES (1, false), (2, false)",
+        &[],
+    )
+    .unwrap();
+    let r = eng
+        .sql("SELECT bool_or(flag) AS result FROM t", &[])
         .unwrap();
-    let r = eng.sql("SELECT bool_or(flag) AS result FROM t", &[]).unwrap();
     assert_eq!(bool_col(&r.rows[0], "result"), Some(false));
 }
 
@@ -532,7 +548,8 @@ fn array_agg_ordered_with_group_by() {
             &[],
         )
         .unwrap();
-    let mut by_cat: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_cat: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for row in &r.rows {
         let cat = str_col(row, "category").unwrap_or_default().to_string();
         let names = list_col(row, "by_price").unwrap();
@@ -736,9 +753,7 @@ fn numeric_insert_rounds_to_scale() {
     .unwrap();
     eng.sql("INSERT INTO t (id, price) VALUES (1, 19.999)", &[])
         .unwrap();
-    let r = eng
-        .sql("SELECT price FROM t WHERE id = 1", &[])
-        .unwrap();
+    let r = eng.sql("SELECT price FROM t WHERE id = 1", &[]).unwrap();
     let v = float_col(&r.rows[0], "price").unwrap();
     assert!((v - 20.0).abs() < 0.001);
 }
@@ -753,9 +768,7 @@ fn numeric_insert_preserves_scale() {
     .unwrap();
     eng.sql("INSERT INTO t (id, amount) VALUES (1, 123.456)", &[])
         .unwrap();
-    let r = eng
-        .sql("SELECT amount FROM t WHERE id = 1", &[])
-        .unwrap();
+    let r = eng.sql("SELECT amount FROM t WHERE id = 1", &[]).unwrap();
     let v = float_col(&r.rows[0], "amount").unwrap();
     assert!((v - 123.456).abs() < 0.0001);
 }
@@ -780,8 +793,11 @@ fn numeric_arithmetic() {
 #[test]
 fn numeric_comparison() {
     let eng = engine();
-    eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC(10, 2))", &[])
-        .unwrap();
+    eng.sql(
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC(10, 2))",
+        &[],
+    )
+    .unwrap();
     eng.sql(
         "INSERT INTO t (id, val) VALUES (1, 10.50), (2, 20.75), (3, 5.25)",
         &[],
@@ -790,19 +806,18 @@ fn numeric_comparison() {
     let r = eng
         .sql("SELECT id FROM t WHERE val > 10.00 ORDER BY id", &[])
         .unwrap();
-    let ids: Vec<i64> = r
-        .rows
-        .iter()
-        .filter_map(|row| int_col(row, "id"))
-        .collect();
+    let ids: Vec<i64> = r.rows.iter().filter_map(|row| int_col(row, "id")).collect();
     assert_eq!(ids, vec![1, 2]);
 }
 
 #[test]
 fn numeric_no_scale_specified() {
     let eng = engine();
-    eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC(10))", &[])
-        .unwrap();
+    eng.sql(
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC(10))",
+        &[],
+    )
+    .unwrap();
     eng.sql("INSERT INTO t (id, val) VALUES (1, 42.9)", &[])
         .unwrap();
     let r = eng.sql("SELECT val FROM t WHERE id = 1", &[]).unwrap();
@@ -918,8 +933,11 @@ fn percentile_disc_median() {
 #[test]
 fn mode_basic() {
     let eng = engine();
-    eng.sql("CREATE TABLE m (id BIGSERIAL PRIMARY KEY, val INTEGER)", &[])
-        .unwrap();
+    eng.sql(
+        "CREATE TABLE m (id BIGSERIAL PRIMARY KEY, val INTEGER)",
+        &[],
+    )
+    .unwrap();
     eng.sql("INSERT INTO m (val) VALUES (1), (2), (2), (3)", &[])
         .unwrap();
     let r = eng

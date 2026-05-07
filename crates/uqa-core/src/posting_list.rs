@@ -304,7 +304,7 @@ fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
 /// (Definition 4.1.2, Paper 1).
 ///
 /// Invariant: `entries` sorted by the `doc_ids` tuple, no duplicates.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct GeneralizedPostingList {
     entries: Vec<GeneralizedPostingEntry>,
 }
@@ -391,6 +391,10 @@ impl GeneralizedPostingList {
         &self.entries
     }
 
+    pub fn doc_ids_set(&self) -> BTreeSet<Vec<DocId>> {
+        self.entries.iter().map(|e| e.doc_ids.clone()).collect()
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -399,6 +403,19 @@ impl GeneralizedPostingList {
         self.entries.is_empty()
     }
 }
+
+impl PartialEq for GeneralizedPostingList {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries.len() == other.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(other.entries.iter())
+                .all(|(a, b)| a.doc_ids == b.doc_ids)
+    }
+}
+
+impl Eq for GeneralizedPostingList {}
 
 impl FromIterator<GeneralizedPostingEntry> for GeneralizedPostingList {
     fn from_iter<I: IntoIterator<Item = GeneralizedPostingEntry>>(iter: I) -> Self {

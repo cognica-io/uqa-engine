@@ -26,7 +26,7 @@ pub enum SQLError {
         expected: String,
         actual: usize,
     },
-    #[error("missing parameter ${0}")]
+    #[error("No value supplied for parameter ${0}")]
     MissingParam(usize),
     #[error("vector dimension mismatch: expected {expected}, got {actual}")]
     VectorDimMismatch { expected: usize, actual: usize },

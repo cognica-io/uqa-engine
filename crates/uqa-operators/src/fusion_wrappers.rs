@@ -256,6 +256,10 @@ impl Operator for MultiFieldSearchOperator {
         }
         PostingList::from_sorted_unchecked(entries)
     }
+
+    fn cost_estimate(&self, stats: &uqa_core::IndexStats) -> f64 {
+        stats.total_docs as f64 * self.fields.len() as f64
+    }
 }
 
 // -------------------------------------------------------------------------

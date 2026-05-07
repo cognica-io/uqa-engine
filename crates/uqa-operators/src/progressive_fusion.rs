@@ -23,15 +23,28 @@ use crate::base::{ExecutionContext, Operator};
 pub struct ProgressiveFusionOperator {
     pub stages: Vec<(Vec<Arc<dyn Operator>>, usize)>,
     pub alpha: f64,
+    pub gating: Option<String>,
 }
 
 impl ProgressiveFusionOperator {
     pub fn new(stages: Vec<(Vec<Arc<dyn Operator>>, usize)>, alpha: f64) -> Self {
+        Self::with_gating(stages, alpha, None)
+    }
+
+    pub fn with_gating(
+        stages: Vec<(Vec<Arc<dyn Operator>>, usize)>,
+        alpha: f64,
+        gating: Option<String>,
+    ) -> Self {
         assert!(
             !stages.is_empty(),
-            "ProgressiveFusionOperator requires >= 1 stage"
+            "ProgressiveFusionOperator requires at least one stage"
         );
-        Self { stages, alpha }
+        Self {
+            stages,
+            alpha,
+            gating,
+        }
     }
 }
 

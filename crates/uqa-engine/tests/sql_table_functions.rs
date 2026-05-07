@@ -13,20 +13,108 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+fn values(result: &uqa_engine::SQLResult, column: &str) -> Vec<Value> {
+    result.rows.iter().map(|row| row[column].clone()).collect()
+}
+
 #[test]
-fn generate_series_emits_inclusive_range() {
+fn generate_series_basic() {
     let eng = Engine::new();
-    let r = eng.sql("SELECT * FROM generate_series(1, 5)", &[]).unwrap();
-    assert_eq!(r.rows.len(), 5);
+    let r = eng
+        .sql("SELECT n FROM generate_series(1, 5) AS t(n)", &[])
+        .unwrap();
+    assert_eq!(
+        values(&r, "n"),
+        vec![
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+            Value::Int(4),
+            Value::Int(5)
+        ]
+    );
 }
 
 #[test]
 fn generate_series_with_step() {
     let eng = Engine::new();
     let r = eng
-        .sql("SELECT * FROM generate_series(0, 10, 2)", &[])
+        .sql("SELECT n FROM generate_series(0, 10, 3) AS t(n)", &[])
         .unwrap();
-    assert_eq!(r.rows.len(), 6);
+    assert_eq!(
+        values(&r, "n"),
+        vec![Value::Int(0), Value::Int(3), Value::Int(6), Value::Int(9)]
+    );
+}
+
+#[test]
+fn generate_series_descending() {
+    let eng = Engine::new();
+    let r = eng
+        .sql("SELECT n FROM generate_series(5, 1, -1) AS t(n)", &[])
+        .unwrap();
+    assert_eq!(
+        values(&r, "n"),
+        vec![
+            Value::Int(5),
+            Value::Int(4),
+            Value::Int(3),
+            Value::Int(2),
+            Value::Int(1)
+        ]
+    );
+}
+
+#[test]
+fn generate_series_single_value() {
+    let eng = Engine::new();
+    let r = eng
+        .sql("SELECT n FROM generate_series(1, 1) AS t(n)", &[])
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0]["n"], Value::Int(1));
+}
+
+#[test]
+fn generate_series_empty_range() {
+    let eng = Engine::new();
+    let r = eng
+        .sql("SELECT n FROM generate_series(5, 1) AS t(n)", &[])
+        .unwrap();
+    assert!(r.rows.is_empty());
+}
+
+#[test]
+fn unnest_basic() {
+    let eng = Engine::new();
+    let r = eng
+        .sql("SELECT val FROM unnest(ARRAY[10, 20, 30]) AS t(val)", &[])
+        .unwrap();
+    assert_eq!(r.rows.len(), 3);
+    assert_eq!(
+        values(&r, "val"),
+        vec![Value::Int(10), Value::Int(20), Value::Int(30)]
+    );
+}
+
+#[test]
+fn unnest_text_array() {
+    let eng = Engine::new();
+    let r = eng
+        .sql(
+            "SELECT val FROM unnest(ARRAY['a', 'b', 'c']) AS t(val)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 3);
+    assert_eq!(
+        values(&r, "val"),
+        vec![
+            Value::Str("a".into()),
+            Value::Str("b".into()),
+            Value::Str("c".into())
+        ]
+    );
 }
 
 #[test]

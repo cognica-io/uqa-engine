@@ -31,6 +31,40 @@ fn engine_with_corpus() -> Engine {
     engine
 }
 
+fn engine_with_docs() -> Engine {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE docs (
+                id SERIAL PRIMARY KEY,
+                title TEXT,
+                body TEXT,
+                year INTEGER,
+                score REAL
+            )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX idx_docs_gin ON docs USING gin (title, body)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO docs (title, body, year, score) VALUES
+             ('attention is all you need', 'transformer model uses self attention', 2017, 9.5),
+             ('bert pre-training', 'bidirectional encoder representations', 2019, 8.0),
+             ('graph attention networks', 'attention on graph structured data', 2018, 7.5),
+             ('vision transformer', 'image recognition with patches', 2021, 6.0),
+             ('scaling language models', 'scaling laws for neural language models', 2020, 8.5)",
+            &[],
+        )
+        .unwrap();
+    engine
+}
+
 #[test]
 fn select_with_text_match_and_order_runs() {
     let engine = engine_with_corpus();
@@ -165,4 +199,225 @@ fn explain_returns_plan_lines() {
         .unwrap();
     assert!(plan.contains("Select"));
     assert!(plan.contains("limit=2"));
+}
+
+#[test]
+fn execute_arrow_basic() {
+    let engine = engine_with_docs();
+    let batch = QueryBuilder::new(&engine, "docs")
+        .term("graph", Some("title"))
+        .execute_arrow()
+        .unwrap();
+    let schema = batch.schema();
+    assert!(schema.field_with_name("_doc_id").is_ok());
+    assert!(schema.field_with_name("_score").is_ok());
+    assert!(batch.num_rows() >= 1);
+}
+
+#[test]
+fn execute_arrow_empty_result_keeps_metadata_columns() {
+    let engine = engine_with_docs();
+    let batch = QueryBuilder::new(&engine, "docs")
+        .term("xyznonexistent", Some("title"))
+        .execute_arrow()
+        .unwrap();
+    let schema = batch.schema();
+    assert_eq!(batch.num_rows(), 0);
+    assert!(schema.field_with_name("_doc_id").is_ok());
+    assert!(schema.field_with_name("_score").is_ok());
+}
+
+#[test]
+fn execute_arrow_with_scoring_keeps_positive_match_scores() {
+    let engine = engine_with_docs();
+    let batch = QueryBuilder::new(&engine, "docs")
+        .term("graph", Some("title"))
+        .score_bm25("graph", None)
+        .execute_arrow()
+        .unwrap();
+    let scores = batch
+        .column_by_name("_score")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow_array::Float64Array>()
+        .unwrap();
+    assert!((0..scores.len()).all(|idx| scores.value(idx) > 0.0));
+}
+
+#[test]
+fn execute_arrow_metadata_column_types() {
+    let engine = engine_with_docs();
+    let batch = QueryBuilder::new(&engine, "docs")
+        .term("graph", Some("title"))
+        .execute_arrow()
+        .unwrap();
+    let schema = batch.schema();
+    assert_eq!(
+        schema.field_with_name("_doc_id").unwrap().data_type(),
+        &arrow_schema::DataType::Int64
+    );
+    assert_eq!(
+        schema.field_with_name("_score").unwrap().data_type(),
+        &arrow_schema::DataType::Float64
+    );
+}
+
+#[test]
+fn execute_parquet_basic() {
+    let engine = engine_with_docs();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fluent.parquet");
+    QueryBuilder::new(&engine, "docs")
+        .term("graph", Some("title"))
+        .execute_parquet(&path)
+        .unwrap();
+    let file = std::fs::File::open(path).unwrap();
+    let builder =
+        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+    let schema = builder.schema().clone();
+    let batches: Vec<_> = builder.build().unwrap().collect::<Result<_, _>>().unwrap();
+    let rows: usize = batches.iter().map(arrow_array::RecordBatch::num_rows).sum();
+    assert!(rows >= 1);
+    assert!(schema.field_with_name("_doc_id").is_ok());
+    assert!(schema.field_with_name("_score").is_ok());
+}
+
+#[test]
+fn execute_parquet_roundtrip_matches_arrow_doc_ids() {
+    let engine = engine_with_docs();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("roundtrip.parquet");
+    let query = QueryBuilder::new(&engine, "docs").term("graph", Some("title"));
+    query.execute_parquet(&path).unwrap();
+
+    let arrow_batch = query.execute_arrow().unwrap();
+    let arrow_ids = arrow_batch
+        .column_by_name("_doc_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow_array::Int64Array>()
+        .unwrap();
+
+    let file = std::fs::File::open(path).unwrap();
+    let mut reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+    let parquet_batch = reader.next().unwrap().unwrap();
+    let parquet_ids = parquet_batch
+        .column_by_name("_doc_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow_array::Int64Array>()
+        .unwrap();
+
+    assert_eq!(arrow_batch.num_rows(), parquet_batch.num_rows());
+    assert_eq!(arrow_ids.values(), parquet_ids.values());
+}
+
+#[test]
+fn execute_parquet_empty() {
+    let engine = engine_with_docs();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("empty.parquet");
+    QueryBuilder::new(&engine, "docs")
+        .term("xyznonexistent", Some("title"))
+        .execute_parquet(&path)
+        .unwrap();
+    let file = std::fs::File::open(path).unwrap();
+    let batches: Vec<_> =
+        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+    let rows: usize = batches.iter().map(arrow_array::RecordBatch::num_rows).sum();
+    assert_eq!(rows, 0);
+}
+
+#[test]
+fn fluent_api_with_authority_prior() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE articles (id SERIAL PRIMARY KEY, body TEXT, source TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX idx_articles_gin ON articles USING gin (body)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO articles (body, source) VALUES
+             ('information retrieval systems', 'high'),
+             ('retrieval augmented generation', 'low')",
+            &[],
+        )
+        .unwrap();
+
+    let result = QueryBuilder::new(&engine, "articles")
+        .score_bayesian_with_prior("retrieval", Some("body"), Some("source"), Some("authority"))
+        .unwrap()
+        .execute()
+        .unwrap();
+    assert!(!result.rows.is_empty());
+}
+
+#[test]
+fn fluent_api_requires_prior_fn() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE t (id SERIAL PRIMARY KEY, text TEXT)", &[])
+        .unwrap();
+    let err = match QueryBuilder::new(&engine, "t").score_bayesian_with_prior(
+        "test",
+        Some("text"),
+        None,
+        None,
+    ) {
+        Ok(_) => panic!("expected missing prior error"),
+        Err(err) => err.to_string(),
+    };
+    assert!(err.contains("prior_fn is required"));
+}
+
+#[test]
+fn query_builder_learn_params() {
+    let engine = engine_with_docs();
+    let result = QueryBuilder::new(&engine, "docs")
+        .learn_params("learning", &[1, 1, 0, 0, 0], Some("body"))
+        .unwrap();
+    assert!(result.contains_key("alpha"));
+}
+
+#[test]
+fn query_builder_sparse_threshold() {
+    let engine = engine_with_docs();
+    let result = QueryBuilder::new(&engine, "docs")
+        .term("learning", Some("body"))
+        .score_bayesian_bm25("learning", Some("body"))
+        .sparse_threshold(0.3)
+        .unwrap()
+        .execute()
+        .unwrap();
+    for row in result.rows {
+        if let Some(Value::Float(score)) = row.get("_score") {
+            assert!(*score > 0.0);
+        }
+    }
+}
+
+#[test]
+fn query_builder_sparse_threshold_requires_source() {
+    let engine = engine_with_docs();
+    let err = match QueryBuilder::new(&engine, "docs").sparse_threshold(0.3) {
+        Ok(_) => panic!("expected source error"),
+        Err(err) => err.to_string(),
+    };
+    assert!(err.contains("requires a source"));
 }
