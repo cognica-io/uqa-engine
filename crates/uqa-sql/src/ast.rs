@@ -17,6 +17,14 @@ pub enum ColumnType {
     Integer,
     Text,
     Real,
+    /// `NUMERIC(precision, scale)` -- exact decimal storage. When
+    /// `scale` is `Some(s)` the engine rounds `INSERT` values to `s`
+    /// fractional digits. `precision` is captured for round-tripping
+    /// the catalog text but is not currently enforced.
+    Numeric {
+        precision: Option<u32>,
+        scale: Option<u32>,
+    },
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
 }
@@ -204,6 +212,10 @@ pub struct SelectStmt {
     /// Each inner Vec lists the grouping-key expressions for that
     /// set (an empty inner Vec means the global grand-total bucket).
     pub grouping_sets: Vec<Vec<Expr>>,
+    /// `HAVING <expr>`. Evaluated against each aggregated row and
+    /// filters out groups whose predicate is falsy. Mirrors PG's
+    /// `havingClause`.
+    pub having: Option<Expr>,
     pub order_by: Vec<OrderBy>,
     /// `LIMIT <expr>`. Stored as an expression so `LIMIT $1` and any
     /// other constant-folding integer expression resolves at execute
@@ -402,6 +414,14 @@ pub enum Expr {
     Func {
         name: String,
         args: Vec<Expr>,
+        /// `func(DISTINCT expr)` — only meaningful for aggregate
+        /// functions. Mirrors PostgreSQL's `agg_distinct`.
+        distinct: bool,
+        /// `func(expr ORDER BY ...)` — only meaningful for ordered
+        /// aggregates (`STRING_AGG`, `ARRAY_AGG`, `PERCENTILE_*`).
+        order_by: Vec<OrderBy>,
+        /// `func(...) FILTER (WHERE expr)` — aggregate-level row filter.
+        filter: Option<Box<Expr>>,
     },
     /// `ARRAY[1.0, 2.0, ...]` literal — currently restricted to numeric
     /// elements (vectors).

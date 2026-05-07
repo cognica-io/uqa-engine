@@ -999,8 +999,23 @@ fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> 
             Ok(ColumnType::Text)
         }
         "bool" | "boolean" => Ok(ColumnType::Integer),
-        "real" | "float4" | "float8" | "double" | "double precision" | "numeric" | "decimal" => {
+        "real" | "float4" | "float8" | "double" | "double precision" => {
             Ok(ColumnType::Real)
+        }
+        "numeric" | "decimal" => {
+            let mut typmods_iter = type_name.typmods.iter();
+            let precision = typmods_iter
+                .next()
+                .map(|n| expect_integer_const(n).map(|v| v as u32))
+                .transpose()?;
+            let scale = typmods_iter
+                .next()
+                .map(|n| expect_integer_const(n).map(|v| v as u32))
+                .transpose()?;
+            // PostgreSQL semantics: NUMERIC(precision) without an
+            // explicit scale defaults to scale=0, rounding to integers.
+            let scale = scale.or(precision.map(|_| 0));
+            Ok(ColumnType::Numeric { precision, scale })
         }
         "date"
         | "time"
@@ -1371,7 +1386,7 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
             };
             let expr = compile_expr(call)?;
             let (name, args) = match expr {
-                Expr::Func { name, args } => (name, args),
+                Expr::Func { name, args, .. } => (name, args),
                 other => {
                     return Err(SQLError::Unsupported(format!(
                         "RangeFunction body must be a function call, got {other:?}"
@@ -1430,6 +1445,22 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
     let limit = compile_limit_offset_expr(stmt.limit_count.as_deref())?;
     let offset = compile_limit_offset_expr(stmt.limit_offset.as_deref())?;
     let (group_by, grouping_sets) = compile_group_clause(&stmt.group_clause)?;
+    // Resolve GROUP BY 1 / GROUP BY <alias> against the SELECT list.
+    // Postgres prefers a real column when one matches, falling back to
+    // the alias; we don't have schema info here, so we only rewrite
+    // when the alias clearly cannot be a column on the source row
+    // (i.e., the projection's expression is something other than a
+    // bare reference to that same name).
+    let group_by = resolve_group_by_aliases(group_by, &projections);
+    let grouping_sets: Vec<Vec<Expr>> = grouping_sets
+        .into_iter()
+        .map(|s| resolve_group_by_aliases(s, &projections))
+        .collect();
+    let having = stmt
+        .having_clause
+        .as_ref()
+        .map(|h| compile_expr(h))
+        .transpose()?;
     let with = match stmt.with_clause.as_ref() {
         Some(wc) => compile_with_clause(wc)?,
         None => Vec::new(),
@@ -1483,6 +1514,7 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         r#where,
         group_by,
         grouping_sets,
+        having,
         order_by,
         limit,
         offset,
@@ -1490,6 +1522,38 @@ fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {
         set_op,
         distinct,
     })
+}
+
+fn resolve_group_by_aliases(group_by: Vec<Expr>, projections: &[Projection]) -> Vec<Expr> {
+    group_by
+        .into_iter()
+        .map(|g| match &g {
+            // GROUP BY <ordinal>: refers to the Nth projection.
+            Expr::Literal(Value::Int(n)) if *n >= 1 && (*n as usize) <= projections.len() => {
+                projections[(*n as usize) - 1].expr.clone()
+            }
+            // GROUP BY <alias>: only rewrite when the alias points at
+            // a non-trivial expression. If the projection is just a
+            // column reference with the same name the original AST is
+            // already correct.
+            Expr::Column(name) => {
+                for p in projections {
+                    if let Some(alias) = &p.alias {
+                        if alias == name {
+                            if let Expr::Column(col_name) = &p.expr {
+                                if col_name == name {
+                                    return g;
+                                }
+                            }
+                            return p.expr.clone();
+                        }
+                    }
+                }
+                g
+            }
+            _ => g,
+        })
+        .collect()
 }
 
 fn compile_group_clause(nodes: &[pg_query::protobuf::Node]) -> Result<(Vec<Expr>, Vec<Vec<Expr>>)> {
@@ -1753,7 +1817,7 @@ fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Func {
                 name: "coalesce".into(),
                 args,
-            })
+            distinct: false, order_by: Vec::new(), filter: None })
         }
         NodeEnum::MinMaxExpr(me) => {
             use pg_query::protobuf::MinMaxOp;
@@ -1775,7 +1839,7 @@ fn compile_expr(node: &Node) -> Result<Expr> {
             Ok(Expr::Func {
                 name: name.into(),
                 args,
-            })
+            distinct: false, order_by: Vec::new(), filter: None })
         }
         NodeEnum::SubLink(sl) => compile_sublink(sl),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
@@ -1910,61 +1974,61 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                     return Ok(Expr::Func {
                         name: "concat_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "%" => {
                     return Ok(Expr::Func {
                         name: "mod".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "~~" => {
                     return Ok(Expr::Func {
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "~~*" => {
                     return Ok(Expr::Func {
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "!~~" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
                         name: "like".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    })));
+                    distinct: false, order_by: Vec::new(), filter: None })));
                 }
                 "!~~*" => {
                     return Ok(Expr::Not(Box::new(Expr::Func {
                         name: "ilike".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    })));
+                    distinct: false, order_by: Vec::new(), filter: None })));
                 }
                 "->" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "->>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path_text".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "#>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 "#>>" => {
                     return Ok(Expr::Func {
                         name: "json_extract_path_text".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                    });
+                    distinct: false, order_by: Vec::new(), filter: None });
                 }
                 other => return Err(SQLError::Unsupported(format!("operator `{other}`"))),
             };
@@ -2010,7 +2074,7 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             return Ok(Expr::Func {
                 name: "nullif".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            });
+            distinct: false, order_by: Vec::new(), filter: None });
         }
         AExprKind::AexprLike => {
             // libpg_query encodes LIKE as `~~` and NOT LIKE as `!~~` in
@@ -2034,7 +2098,7 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let func = Expr::Func {
                 name: "like".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            };
+            distinct: false, order_by: Vec::new(), filter: None };
             return Ok(if op_name == "!~~" {
                 Expr::Not(Box::new(func))
             } else {
@@ -2060,7 +2124,7 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
             let func = Expr::Func {
                 name: "ilike".into(),
                 args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-            };
+            distinct: false, order_by: Vec::new(), filter: None };
             return Ok(if op_name == "!~~*" {
                 Expr::Not(Box::new(func))
             } else {
@@ -2185,7 +2249,7 @@ fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
 }
 
 fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {
-    let name = f
+    let raw_name = f
         .funcname
         .iter()
         .filter_map(|n| {
@@ -2198,16 +2262,62 @@ fn compile_func_call(f: &pg_query::protobuf::FuncCall) -> Result<Expr> {
         .last()
         .cloned()
         .unwrap_or_default();
-    let args = f
+    let mut args = f
         .args
         .iter()
         .map(compile_expr)
         .collect::<Result<Vec<_>>>()?;
     if let Some(over) = f.over.as_ref() {
         let spec = compile_window_spec(over)?;
-        return Ok(Expr::WindowCall { name, args, spec });
+        return Ok(Expr::WindowCall {
+            name: raw_name,
+            args,
+            spec,
+        });
     }
-    Ok(Expr::Func { name, args })
+    // COUNT(*): the parser leaves `args` empty; mark explicitly so
+    // the dispatcher distinguishes it from COUNT(column).
+    if f.agg_star && args.is_empty() {
+        args.push(Expr::Star);
+    }
+    // Translate the aggregate's ORDER BY clauses (e.g.
+    // `string_agg(name, ',' ORDER BY name)`) into typed `OrderBy`
+    // entries on `Expr::Func.order_by`.
+    let mut agg_order: Vec<OrderBy> = Vec::new();
+    for sort_node in &f.agg_order {
+        let Some(inner) = sort_node.node.as_ref() else {
+            continue;
+        };
+        if let NodeEnum::SortBy(sb) = inner {
+            let expr_node = sb
+                .node
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("agg_order SortBy without expr".into()))?;
+            let key_expr = compile_expr(expr_node)?;
+            let descending = sb.sortby_dir == pg_query::protobuf::SortByDir::SortbyDesc as i32;
+            let nulls = match sb.sortby_nulls {
+                2 => Some(crate::ast::NullsOrder::First),
+                3 => Some(crate::ast::NullsOrder::Last),
+                _ => None,
+            };
+            agg_order.push(OrderBy {
+                expr: key_expr,
+                descending,
+                nulls,
+            });
+        }
+    }
+    let agg_filter = match f.agg_filter.as_ref() {
+        Some(inner) => Some(Box::new(compile_expr(inner)?)),
+        None => None,
+    };
+    Ok(Expr::Func {
+        name: raw_name,
+        args,
+        distinct: f.agg_distinct,
+        order_by: agg_order,
+        filter: agg_filter,
+    })
 }
 
 fn compile_window_spec(w: &pg_query::protobuf::WindowDef) -> Result<WindowSpec> {
@@ -2449,7 +2559,7 @@ mod tests {
             Some(FromClause::Table { name, .. }) => assert_eq!(name, "docs"),
             other => panic!("expected single-table FROM, got {other:?}"),
         }
-        assert!(matches!(s.r#where, Some(Expr::Func { .. })));
+        assert!(matches!(s.r#where, Some(Expr::Func { .. , distinct: false, order_by: Vec::new(), filter: None })));
         assert_eq!(s.order_by.len(), 1);
         assert!(s.order_by[0].descending);
         match &s.limit {

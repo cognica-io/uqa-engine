@@ -9,15 +9,6 @@
 //! BOOL_OR, FILTER (WHERE ...), GROUP BY by ordinal / alias,
 //! complex HAVING, NUMERIC precision/scale, STDDEV / VARIANCE,
 //! PERCENTILE_CONT / PERCENTILE_DISC, and MODE.
-//!
-//! Tests marked `#[ignore]` document features still missing on the
-//! Rust engine: COUNT(DISTINCT) / SUM(DISTINCT) (compile-time DISTINCT
-//! drop), STRING_AGG / ARRAY_AGG (engine support), BOOL_AND / BOOL_OR,
-//! FILTER (WHERE ...), HAVING clause (parser surface), STDDEV /
-//! VARIANCE / PERCENTILE_CONT / PERCENTILE_DISC / MODE (statistical
-//! aggregates), and the NUMERIC(precision, scale) round-trip quirks.
-//! Each ignore line keeps the test file as a forward-reference for the
-//! engine work that lights them up.
 
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -119,7 +110,6 @@ fn bool_col(row: &uqa_sql::ResultRow, col: &str) -> Option<bool> {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn count_distinct_basic() {
     let eng = engine_with_data();
     let r = eng
@@ -129,7 +119,6 @@ fn count_distinct_basic() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn count_distinct_with_group_by() {
     let eng = engine();
     eng.sql("CREATE TABLE sales (dept TEXT, product TEXT)", &[])
@@ -151,7 +140,6 @@ fn count_distinct_with_group_by() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn count_distinct_skips_nulls() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
@@ -175,7 +163,6 @@ fn count_distinct_skips_nulls() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_basic() {
     let eng = engine_with_data();
     let r = eng
@@ -188,7 +175,6 @@ fn string_agg_basic() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_with_group_by() {
     let eng = engine();
     eng.sql("CREATE TABLE items (category TEXT, name TEXT)", &[])
@@ -212,7 +198,6 @@ fn string_agg_with_group_by() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_all_null_yields_null() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
@@ -229,7 +214,6 @@ fn string_agg_all_null_yields_null() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_custom_delimiter() {
     let eng = engine_with_data();
     let r = eng
@@ -240,7 +224,6 @@ fn string_agg_custom_delimiter() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_distinct() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER, val TEXT)", &[]).unwrap();
@@ -264,7 +247,6 @@ fn string_agg_distinct() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn array_agg_basic() {
     let eng = engine_with_products();
     let r = eng
@@ -284,7 +266,6 @@ fn array_agg_basic() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn array_agg_with_group_by() {
     let eng = engine_with_products();
     let r = eng
@@ -317,7 +298,6 @@ fn array_agg_with_group_by() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn array_agg_with_order_by() {
     let eng = engine_with_products();
     let r = eng
@@ -338,7 +318,6 @@ fn array_agg_with_order_by() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn array_agg_with_order_by_desc() {
     let eng = engine_with_products();
     let r = eng
@@ -363,7 +342,6 @@ fn array_agg_with_order_by_desc() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_and_all_true() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, flag BOOLEAN)", &[])
@@ -375,7 +353,6 @@ fn bool_and_all_true() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_and_mixed_returns_false() {
     let eng = engine_with_products();
     let r = eng
@@ -385,7 +362,6 @@ fn bool_and_mixed_returns_false() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_and_with_group_by() {
     let eng = engine_with_products();
     let r = eng
@@ -410,7 +386,6 @@ fn bool_and_with_group_by() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_or_all_false() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, flag BOOLEAN)", &[])
@@ -422,7 +397,6 @@ fn bool_or_all_false() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_or_mixed_returns_true() {
     let eng = engine_with_products();
     let r = eng
@@ -432,7 +406,6 @@ fn bool_or_mixed_returns_true() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn bool_or_with_group_by() {
     let eng = engine_with_products();
     let r = eng
@@ -457,7 +430,6 @@ fn bool_or_with_group_by() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn count_filter_active() {
     let eng = engine_with_products();
     let r = eng
@@ -470,7 +442,6 @@ fn count_filter_active() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn sum_filter_active() {
     let eng = engine_with_products();
     let r = eng
@@ -483,7 +454,6 @@ fn sum_filter_active() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn filter_with_group_by() {
     let eng = engine_with_products();
     let r = eng
@@ -507,7 +477,6 @@ fn filter_with_group_by() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn filter_with_comparison() {
     let eng = engine_with_products();
     let r = eng
@@ -524,7 +493,6 @@ fn filter_with_comparison() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_ordered_asc() {
     let eng = engine_with_products();
     let r = eng
@@ -540,7 +508,6 @@ fn string_agg_ordered_asc() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn string_agg_ordered_desc() {
     let eng = engine_with_products();
     let r = eng
@@ -556,7 +523,6 @@ fn string_agg_ordered_desc() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn array_agg_ordered_with_group_by() {
     let eng = engine_with_products();
     let r = eng
@@ -594,7 +560,6 @@ fn array_agg_ordered_with_group_by() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn group_by_ordinal() {
     let eng = engine();
     eng.sql(
@@ -626,7 +591,6 @@ fn group_by_ordinal() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn group_by_alias() {
     let eng = engine();
     eng.sql(
@@ -661,7 +625,6 @@ fn group_by_alias() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn having_with_and() {
     let eng = engine();
     eng.sql(
@@ -700,7 +663,6 @@ fn having_with_and() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn having_aggregate_comparison() {
     let eng = engine();
     eng.sql(
@@ -726,7 +688,6 @@ fn having_aggregate_comparison() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn having_simple() {
     let eng = engine();
     eng.sql(
@@ -754,7 +715,6 @@ fn having_simple() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn numeric_create_table() {
     let eng = engine();
     eng.sql(
@@ -767,7 +727,6 @@ fn numeric_create_table() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn numeric_insert_rounds_to_scale() {
     let eng = engine();
     eng.sql(
@@ -840,7 +799,6 @@ fn numeric_comparison() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn numeric_no_scale_specified() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC(10))", &[])
@@ -869,7 +827,6 @@ fn plain_numeric_no_precision() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn stddev_samp() {
     let eng = engine_with_table();
     let r = eng.sql("SELECT stddev(val) AS v FROM t", &[]).unwrap();
@@ -878,7 +835,6 @@ fn stddev_samp() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn stddev_pop() {
     let eng = engine_with_table();
     let r = eng.sql("SELECT stddev_pop(val) AS v FROM t", &[]).unwrap();
@@ -888,7 +844,6 @@ fn stddev_pop() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn stddev_single_row_is_null() {
     let eng = engine_with_table();
     let r = eng
@@ -898,7 +853,6 @@ fn stddev_single_row_is_null() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn variance_samp() {
     let eng = engine_with_table();
     let r = eng.sql("SELECT variance(val) AS v FROM t", &[]).unwrap();
@@ -907,7 +861,6 @@ fn variance_samp() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn variance_pop() {
     let eng = engine_with_table();
     let r = eng.sql("SELECT var_pop(val) AS v FROM t", &[]).unwrap();
@@ -921,7 +874,6 @@ fn variance_pop() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn percentile_cont_median() {
     let eng = engine_with_table();
     let r = eng
@@ -935,7 +887,6 @@ fn percentile_cont_median() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn percentile_cont_quartile() {
     let eng = engine_with_table();
     let r = eng
@@ -949,7 +900,6 @@ fn percentile_cont_quartile() {
 }
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn percentile_disc_median() {
     let eng = engine_with_table();
     let r = eng
@@ -966,7 +916,6 @@ fn percentile_disc_median() {
 // =====================================================================
 
 #[test]
-#[ignore = "engine feature gap; see TODO at file head"]
 fn mode_basic() {
     let eng = engine();
     eng.sql("CREATE TABLE m (id BIGSERIAL PRIMARY KEY, val INTEGER)", &[])

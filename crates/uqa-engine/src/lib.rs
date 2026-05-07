@@ -563,7 +563,9 @@ impl Engine {
                 name: c.name.clone(),
                 ty: match &c.ty {
                     uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
-                    uqa_sql::ast::ColumnType::Real => uqa_fdw::ColumnType::Real,
+                    uqa_sql::ast::ColumnType::Real | uqa_sql::ast::ColumnType::Numeric { .. } => {
+                        uqa_fdw::ColumnType::Real
+                    }
                     uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
                     uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
                 },
@@ -840,7 +842,8 @@ impl Engine {
                     name: c.name.clone(),
                     ty: match &c.ty {
                         uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
-                        uqa_sql::ast::ColumnType::Real => uqa_fdw::ColumnType::Real,
+                        uqa_sql::ast::ColumnType::Real
+                        | uqa_sql::ast::ColumnType::Numeric { .. } => uqa_fdw::ColumnType::Real,
                         uqa_sql::ast::ColumnType::Text => uqa_fdw::ColumnType::Text,
                         uqa_sql::ast::ColumnType::Vector(_) => uqa_fdw::ColumnType::Bytes,
                     },

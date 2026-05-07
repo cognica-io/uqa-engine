@@ -149,9 +149,18 @@ fn simplify_bool(expr: Expr) -> Expr {
             list: list.into_iter().map(simplify_bool).collect(),
             negated,
         },
-        Expr::Func { name, args } => Expr::Func {
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => Expr::Func {
             name,
             args: args.into_iter().map(simplify_bool).collect(),
+            distinct,
+            order_by,
+            filter,
         },
         Expr::WindowCall { name, args, spec } => Expr::WindowCall {
             name,
@@ -185,7 +194,7 @@ fn merge_vector_thresholds(expr: Expr) -> Expr {
                 std::collections::BTreeMap::new();
             let mut others: Vec<Expr> = Vec::new();
             for p in parts {
-                if let Expr::Func { name, args } = &p {
+                if let Expr::Func { name, args, .. } = &p {
                     if name == "knn_match" && args.len() >= 3 {
                         if let (Expr::Literal(Value::Str(field)), Expr::Literal(Value::Float(t))) =
                             (&args[0], &args[2])
@@ -196,7 +205,7 @@ fn merge_vector_thresholds(expr: Expr) -> Expr {
                                 .or_insert_with(|| (p.clone(), threshold));
                             if threshold > entry.1 {
                                 entry.1 = threshold;
-                                if let Expr::Func { name: _, args: a } = &mut entry.0 {
+                                if let Expr::Func { args: a, .. } = &mut entry.0 {
                                     if a.len() >= 3 {
                                         a[2] = Expr::Literal(Value::Float(threshold));
                                     }

@@ -73,7 +73,7 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
         Expr::Not(inner) => Some(OperatorTree::Complement(Box::new(lower_where(
             inner, params,
         )?))),
-        Expr::Func { name, args } => lower_function(name, args, params),
+        Expr::Func { name, args, .. } => lower_function(name, args, params),
         Expr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, params),
         Expr::IsNull { expr, negated } => {
             let field = column_name(expr)?;
@@ -204,7 +204,7 @@ fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Op
 /// `learned_fusion`) so the rewrite stays consistent across fusers.
 fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
     match arg {
-        Expr::Func { name, args } => {
+        Expr::Func { name, args, .. } => {
             let lower = name.to_ascii_lowercase();
             lower_calibrated_signal(&lower, args, params)
         }

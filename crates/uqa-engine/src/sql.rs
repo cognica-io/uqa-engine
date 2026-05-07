@@ -607,6 +607,37 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
     Ok(SQLResult::empty())
 }
 
+/// Coerce an `INSERT` value to fit the column's declared type. Today
+/// this only rounds NUMERIC(precision, scale) values to `scale` digits;
+/// other types pass the value through unchanged.
+fn coerce_to_column_type(engine: &Engine, table: &str, column: &str, value: Value) -> Value {
+    let cols = match engine.describe_table(table) {
+        Some(c) => c,
+        None => return value,
+    };
+    let Some(def) = cols.iter().find(|c| c.name == column) else {
+        return value;
+    };
+    if let ColumnType::Numeric { scale, .. } = &def.ty {
+        if let Some(s) = scale {
+            return round_numeric(value, *s);
+        }
+    }
+    value
+}
+
+fn round_numeric(value: Value, scale: u32) -> Value {
+    let factor = 10f64.powi(scale as i32);
+    match value {
+        Value::Float(f) => {
+            let rounded = (f * factor).round() / factor;
+            Value::Float(rounded)
+        }
+        Value::Int(i) => Value::Float(i as f64),
+        other => other,
+    }
+}
+
 /// Apply the new column's DEFAULT (or NULL) value to every row that
 /// existed before the ADD COLUMN. `PostgreSQL` evaluates the default
 /// once per existing row at ALTER TABLE time so NOT NULL columns stay
@@ -1003,11 +1034,10 @@ fn run_insert(
     };
 
     let id_index = columns.iter().position(|c| c == &id_column);
-    if id_index.is_none() && auto_id_col.is_none() {
-        return Err(SQLError::Unsupported(
-            "INSERT requires an `id` column or a SERIAL/BIGSERIAL primary key".into(),
-        ));
-    }
+    // No explicit id and no auto-increment column: allocate a synthetic
+    // u64 doc_id at insert time. Mirrors the Python reference, which
+    // treats every table as having an implicit doc_id even when the
+    // schema declares no primary key.
 
     let mut affected = 0u64;
     let ctx = EvalContext::new(None, params).with_engine(engine);
@@ -1025,7 +1055,8 @@ fn run_insert(
         let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
         let mut doc_id: Option<u64> = None;
         for (i, col) in columns.iter().enumerate() {
-            let v = eval(&row[i], &ctx)?;
+            let mut v = eval(&row[i], &ctx)?;
+            v = coerce_to_column_type(engine, &stmt.table, col, v);
             if Some(i) == id_index {
                 // Auto-increment primary keys must be integers. A
                 // non-auto-increment primary key (TEXT, UUID, ...) keeps
@@ -1454,6 +1485,7 @@ fn execute_select(
             r#where: None,
             group_by: Vec::new(),
             grouping_sets: Vec::new(),
+            having: None,
             order_by: set_op.combined_order_by.clone(),
             limit: set_op.combined_limit.clone(),
             offset: set_op.combined_offset.clone(),
@@ -1854,7 +1886,7 @@ fn run_single_table_select(
                 .into_iter()
                 .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
                 .collect::<Vec<_>>(),
-            Some(Expr::Func { name, args }) if uqa_sql::registry::is_registered(name) => {
+            Some(Expr::Func { name, args, .. }) if uqa_sql::registry::is_registered(name) => {
                 execute_function(engine, table, name, args, params)?
             }
             Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
@@ -1901,9 +1933,50 @@ fn run_single_table_select(
     }
 
     let scored = apply_order_limit(scored, stmt, engine, params)?;
-    let columns = projection_columns(&stmt.projections);
+    let columns = expand_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        engine,
+        Some(table),
+    );
     let rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
     Ok(SQLResult::from_rows(columns, rows))
+}
+
+/// When a projection list contains `Expr::Star`, replace the synthetic
+/// `*` placeholder in the result column list with the source schema.
+/// Empty result sets still report the correct column shape, matching
+/// `PostgreSQL`'s behaviour of `SELECT * FROM empty_table`.
+fn expand_star_columns(
+    columns: Vec<String>,
+    projections: &[Projection],
+    engine: &Engine,
+    table: Option<&str>,
+) -> Vec<String> {
+    let has_star = projections.iter().any(|p| matches!(p.expr, Expr::Star));
+    if !has_star {
+        return columns;
+    }
+    let schema_cols: Vec<String> = match table {
+        Some(t) => engine.table_columns(t),
+        None => Vec::new(),
+    };
+    if schema_cols.is_empty() {
+        return columns;
+    }
+    let mut out: Vec<String> = Vec::with_capacity(columns.len() + schema_cols.len());
+    for c in columns {
+        if c == "*" {
+            for sc in &schema_cols {
+                if !out.iter().any(|x| x == sc) {
+                    out.push(sc.clone());
+                }
+            }
+        } else if !out.iter().any(|x| x == &c) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn order_by_references_field(stmt: &SelectStmt) -> bool {
@@ -3416,7 +3489,7 @@ fn project_join_row_with_engine(
         // to. Intercept the call here, resolve the string column +
         // query, and emit the wrapped text through
         // `uqa_analysis::highlight`.
-        if let Expr::Func { name, args } = &proj.expr {
+        if let Expr::Func { name, args, .. } = &proj.expr {
             if let Some(value) = engine_func_intercept(engine, name, args, src, params)? {
                 out.insert(label, value);
                 continue;
@@ -3635,11 +3708,36 @@ fn aggregate_join_rows(
             )
         });
         for (i, proj) in agg_targets.iter().enumerate() {
-            let Expr::Func { name, args } = &proj.expr else {
+            let Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } = &proj.expr
+            else {
                 continue;
             };
-            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+            if let Some(filter_expr) = filter.as_deref() {
+                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
+                    .map(|v| uqa_sql::expr::truthy(&v))
+                    .unwrap_or(false);
+                if !keep {
+                    continue;
+                }
+            }
+            let lower_name = name.to_ascii_lowercase();
+            let value = match (lower_name.as_str(), args.as_slice()) {
                 ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                // Ordered-set aggregates: the percentile / mode fraction
+                // is a direct positional argument; the value to fold
+                // comes from `WITHIN GROUP (ORDER BY ...)` which the
+                // compiler parks in `order_by[0]`.
+                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+                    .first()
+                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
+                    .transpose()?
+                    .unwrap_or(Value::Null),
                 (_, args) => {
                     let arg = args
                         .first()
@@ -3647,7 +3745,22 @@ fn aggregate_join_rows(
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
-            bucket.0[i].observe(&value);
+            if *distinct && !matches!(value, Value::Null) {
+                let key = distinct_key(&value);
+                if !bucket.0[i].distinct.insert(key) {
+                    continue;
+                }
+            }
+            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+            for ob in order_by.iter() {
+                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
+                sort_keys.push((v, ob.descending));
+            }
+            if order_by.is_empty() {
+                bucket.0[i].observe(&value);
+            } else {
+                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
+            }
         }
     }
 
@@ -3671,12 +3784,12 @@ fn aggregate_join_rows(
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
-                let Expr::Func { name, .. } = &proj.expr else {
+                let Expr::Func { name, args, .. } = &proj.expr else {
                     return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
-                row.insert(label, aggregate_value(name, acc));
+                row.insert(label, aggregate_value_with_args(name, acc, args));
             } else {
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
@@ -3693,9 +3806,125 @@ fn aggregate_join_rows(
                 }
             }
         }
+        // HAVING filter: evaluated against a synthetic row that
+        // contains the group-by column values plus every projection
+        // alias. Aggregate references inside the HAVING expression
+        // resolve through `eval_aggregate_in_having` which walks the
+        // group rows to recompute the aggregate without re-projecting.
+        if let Some(having_expr) = stmt.having.as_ref() {
+            let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            let kept = uqa_sql::expr::eval(&resolved, &ctx)
+                .map(|v| uqa_sql::expr::truthy(&v))
+                .unwrap_or(false);
+            if !kept {
+                continue;
+            }
+        }
         out.push(row);
     }
     Ok(out)
+}
+
+/// Walk a HAVING expression and replace each aggregate-function
+/// reference with its computed value from the group's accumulators.
+/// Non-aggregate sub-expressions (column refs, comparisons, AND / OR)
+/// pass through untouched so the caller can `eval` the result.
+fn resolve_having(
+    expr: &Expr,
+    _projected_row: &ResultRow,
+    stmt: &SelectStmt,
+    accs: &[AggregateAccumulator],
+    _group_values: &[Value],
+    _params: &[SQLParam],
+) -> Result<Expr, SQLError> {
+    fn walk(
+        e: &Expr,
+        stmt: &SelectStmt,
+        accs: &[AggregateAccumulator],
+    ) -> Result<Expr, SQLError> {
+        if is_aggregate(e) {
+            // Find the matching projection so we can pluck the
+            // already-computed accumulator value. Falls back to
+            // matching by aggregate-function shape (name + args).
+            for (idx, proj) in stmt
+                .projections
+                .iter()
+                .filter(|p| is_aggregate(&p.expr))
+                .enumerate()
+            {
+                if exprs_match(&proj.expr, e) {
+                    if let Expr::Func { name, args, .. } = &proj.expr {
+                        let v = aggregate_value_with_args(name, &accs[idx], args);
+                        return Ok(Expr::Literal(v));
+                    }
+                }
+            }
+            // Aggregate appears in HAVING but not in SELECT; reject.
+            return Err(SQLError::Unsupported(
+                "HAVING references an aggregate that is not in the SELECT list".into(),
+            ));
+        }
+        match e {
+            Expr::And(parts) => Ok(Expr::And(
+                parts
+                    .iter()
+                    .map(|p| walk(p, stmt, accs))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Expr::Or(parts) => Ok(Expr::Or(
+                parts
+                    .iter()
+                    .map(|p| walk(p, stmt, accs))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Expr::Not(inner) => Ok(Expr::Not(Box::new(walk(inner, stmt, accs)?))),
+            Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
+                op: *op,
+                lhs: Box::new(walk(lhs, stmt, accs)?),
+                rhs: Box::new(walk(rhs, stmt, accs)?),
+            }),
+            Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
+                expr: Box::new(walk(expr, stmt, accs)?),
+                negated: *negated,
+            }),
+            Expr::Between { expr, low, high } => Ok(Expr::Between {
+                expr: Box::new(walk(expr, stmt, accs)?),
+                low: Box::new(walk(low, stmt, accs)?),
+                high: Box::new(walk(high, stmt, accs)?),
+            }),
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => Ok(Expr::InList {
+                expr: Box::new(walk(expr, stmt, accs)?),
+                list: list
+                    .iter()
+                    .map(|x| walk(x, stmt, accs))
+                    .collect::<Result<Vec<_>, _>>()?,
+                negated: *negated,
+            }),
+            Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } => Ok(Expr::Func {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| walk(a, stmt, accs))
+                    .collect::<Result<Vec<_>, _>>()?,
+                distinct: *distinct,
+                order_by: order_by.clone(),
+                filter: filter.clone(),
+            }),
+            other => Ok(other.clone()),
+        }
+    }
+    walk(expr, stmt, accs)
 }
 
 /// Variant of [`aggregate_join_rows`] used by the GROUPING SETS
@@ -3730,11 +3959,36 @@ fn aggregate_join_rows_relaxed(
             )
         });
         for (i, proj) in agg_targets.iter().enumerate() {
-            let Expr::Func { name, args } = &proj.expr else {
+            let Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } = &proj.expr
+            else {
                 continue;
             };
-            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+            if let Some(filter_expr) = filter.as_deref() {
+                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
+                    .map(|v| uqa_sql::expr::truthy(&v))
+                    .unwrap_or(false);
+                if !keep {
+                    continue;
+                }
+            }
+            let lower_name = name.to_ascii_lowercase();
+            let value = match (lower_name.as_str(), args.as_slice()) {
                 ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                // Ordered-set aggregates: the percentile / mode fraction
+                // is a direct positional argument; the value to fold
+                // comes from `WITHIN GROUP (ORDER BY ...)` which the
+                // compiler parks in `order_by[0]`.
+                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+                    .first()
+                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
+                    .transpose()?
+                    .unwrap_or(Value::Null),
                 (_, args) => {
                     let arg = args
                         .first()
@@ -3742,7 +3996,22 @@ fn aggregate_join_rows_relaxed(
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
-            bucket.0[i].observe(&value);
+            if *distinct && !matches!(value, Value::Null) {
+                let key = distinct_key(&value);
+                if !bucket.0[i].distinct.insert(key) {
+                    continue;
+                }
+            }
+            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+            for ob in order_by.iter() {
+                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
+                sort_keys.push((v, ob.descending));
+            }
+            if order_by.is_empty() {
+                bucket.0[i].observe(&value);
+            } else {
+                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
+            }
         }
     }
     if groups.is_empty() && stmt.group_by.is_empty() {
@@ -3764,12 +4033,12 @@ fn aggregate_join_rows_relaxed(
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
-                let Expr::Func { name, .. } = &proj.expr else {
+                let Expr::Func { name, args, .. } = &proj.expr else {
                     return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
-                row.insert(label, aggregate_value(name, acc));
+                row.insert(label, aggregate_value_with_args(name, acc, args));
             } else {
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
@@ -3791,6 +4060,7 @@ fn aggregate_join_rows_relaxed(
 
 fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
     match (lhs, rhs) {
+        (Expr::Star, Expr::Star) => true,
         (Expr::Column(a), Expr::Column(b)) => a == b,
         (
             Expr::QualifiedColumn {
@@ -3804,6 +4074,68 @@ fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
         ) => aq == bq && ac == bc,
         (Expr::Column(c), Expr::QualifiedColumn { column, .. })
         | (Expr::QualifiedColumn { column, .. }, Expr::Column(c)) => c == column,
+        (Expr::Literal(a), Expr::Literal(b)) => literals_equal(a, b),
+        (Expr::Param(a), Expr::Param(b)) => a == b,
+        (
+            Expr::Func {
+                name: an,
+                args: aa,
+                distinct: ad,
+                order_by: ao,
+                filter: af,
+            },
+            Expr::Func {
+                name: bn,
+                args: ba,
+                distinct: bd,
+                order_by: bo,
+                filter: bf,
+            },
+        ) => {
+            an.eq_ignore_ascii_case(bn)
+                && ad == bd
+                && aa.len() == ba.len()
+                && aa.iter().zip(ba.iter()).all(|(x, y)| exprs_match(x, y))
+                && ao.len() == bo.len()
+                && ao.iter().zip(bo.iter()).all(|(x, y)| {
+                    x.descending == y.descending
+                        && x.nulls == y.nulls
+                        && exprs_match(&x.expr, &y.expr)
+                })
+                && match (af.as_deref(), bf.as_deref()) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => exprs_match(x, y),
+                    _ => false,
+                }
+        }
+        (
+            Expr::Binary {
+                op: ao,
+                lhs: al,
+                rhs: ar,
+            },
+            Expr::Binary {
+                op: bo,
+                lhs: bl,
+                rhs: br,
+            },
+        ) => ao == bo && exprs_match(al, bl) && exprs_match(ar, br),
+        (Expr::And(a), Expr::And(b)) | (Expr::Or(a), Expr::Or(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
+        }
+        (Expr::Not(a), Expr::Not(b)) => exprs_match(a, b),
+        _ => false,
+    }
+}
+
+fn literals_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
+        (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::Bytes(x), Value::Bytes(y)) => x == y,
         _ => false,
     }
 }
@@ -3833,7 +4165,24 @@ fn has_aggregate(projections: &[Projection]) -> bool {
 fn is_aggregate(expr: &Expr) -> bool {
     matches!(expr, Expr::Func { name, .. } if matches!(
         name.to_ascii_lowercase().as_str(),
-        "count" | "sum" | "avg" | "min" | "max"
+        "count"
+            | "sum"
+            | "avg"
+            | "min"
+            | "max"
+            | "string_agg"
+            | "array_agg"
+            | "bool_and"
+            | "bool_or"
+            | "stddev"
+            | "stddev_samp"
+            | "stddev_pop"
+            | "variance"
+            | "var_samp"
+            | "var_pop"
+            | "percentile_cont"
+            | "percentile_disc"
+            | "mode"
     ))
 }
 
@@ -3843,6 +4192,23 @@ struct AggregateAccumulator {
     sum: f64,
     min: Option<Value>,
     max: Option<Value>,
+    /// Distinct-bookkeeping. Filled by the dispatcher when the
+    /// aggregate was annotated with `DISTINCT`. Holds canonical-form
+    /// keys so `Int(1)` and `Float(1.0)` collapse to the same bucket.
+    distinct: std::collections::BTreeSet<String>,
+    /// Every observed (non-null) value for collection-style
+    /// aggregates (`STRING_AGG`, `ARRAY_AGG`, statistical aggregates,
+    /// percentile / mode). Sort keys for ordered aggregates land in
+    /// `sort_keys` parallel to this vector.
+    values: Vec<Value>,
+    /// Optional sort key per `values` entry, packed as a `Vec<(key,
+    /// descending)>` so multi-key ORDER BY composes lexicographically.
+    sort_keys: Vec<Vec<(Value, bool)>>,
+    /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
+    /// first observation so an empty input set returns `NULL` (matches
+    /// PostgreSQL).
+    bool_and: Option<bool>,
+    bool_or: Option<bool>,
 }
 
 impl AggregateAccumulator {
@@ -3862,6 +4228,50 @@ impl AggregateAccumulator {
             Some(cur) if !value_gt(value, cur) => {}
             _ => self.max = Some(value.clone()),
         }
+        self.values.push(value.clone());
+        self.sort_keys.push(Vec::new());
+        if let Value::Bool(b) = value {
+            self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
+            self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
+        }
+    }
+
+    fn observe_with_sort_keys(&mut self, value: &Value, keys: Vec<(Value, bool)>) {
+        if matches!(value, Value::Null) {
+            return;
+        }
+        self.count += 1;
+        if let Ok(f) = value_as_f64(value) {
+            self.sum += f;
+        }
+        match &self.min {
+            Some(cur) if !value_lt(value, cur) => {}
+            _ => self.min = Some(value.clone()),
+        }
+        match &self.max {
+            Some(cur) if !value_gt(value, cur) => {}
+            _ => self.max = Some(value.clone()),
+        }
+        self.values.push(value.clone());
+        self.sort_keys.push(keys);
+        if let Value::Bool(b) = value {
+            self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
+            self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
+        }
+    }
+}
+
+/// Canonical-form key for `DISTINCT` deduplication. Mirrors the
+/// approach in `uqa_execution::relational::distinct_key`.
+fn distinct_key(v: &Value) -> String {
+    match v {
+        Value::Null => "\x00".into(),
+        Value::Bool(b) => format!("b:{b}"),
+        Value::Int(n) => format!("i:{n}"),
+        Value::Float(f) => format!("f:{f}"),
+        Value::Str(s) => format!("s:{s}"),
+        Value::Bytes(b) => format!("y:{}", b.len()),
+        other => format!("o:{other:?}"),
     }
 }
 
@@ -3949,11 +4359,36 @@ fn build_aggregate_rows(
             )
         });
         for (i, proj) in agg_targets.iter().enumerate() {
-            let Expr::Func { name, args } = &proj.expr else {
+            let Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } = &proj.expr
+            else {
                 continue;
             };
-            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+            if let Some(filter_expr) = filter.as_deref() {
+                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
+                    .map(|v| uqa_sql::expr::truthy(&v))
+                    .unwrap_or(false);
+                if !keep {
+                    continue;
+                }
+            }
+            let lower_name = name.to_ascii_lowercase();
+            let value = match (lower_name.as_str(), args.as_slice()) {
                 ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                // Ordered-set aggregates: the percentile / mode fraction
+                // is a direct positional argument; the value to fold
+                // comes from `WITHIN GROUP (ORDER BY ...)` which the
+                // compiler parks in `order_by[0]`.
+                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+                    .first()
+                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
+                    .transpose()?
+                    .unwrap_or(Value::Null),
                 (_, args) => {
                     let arg = args
                         .first()
@@ -3961,7 +4396,22 @@ fn build_aggregate_rows(
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
-            bucket.0[i].observe(&value);
+            if *distinct && !matches!(value, Value::Null) {
+                let key = distinct_key(&value);
+                if !bucket.0[i].distinct.insert(key) {
+                    continue;
+                }
+            }
+            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+            for ob in order_by.iter() {
+                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
+                sort_keys.push((v, ob.descending));
+            }
+            if order_by.is_empty() {
+                bucket.0[i].observe(&value);
+            } else {
+                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
+            }
         }
     }
 
@@ -3987,32 +4437,39 @@ fn build_aggregate_rows(
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
-                let Expr::Func { name, .. } = &proj.expr else {
+                let Expr::Func { name, args, .. } = &proj.expr else {
                     return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
-                row.insert(label, aggregate_value(name, acc));
-            } else if let Expr::Column(col) = &proj.expr {
+                row.insert(label, aggregate_value_with_args(name, acc, args));
+            } else {
+                // Match a non-aggregate projection against the GROUP BY
+                // key list using `exprs_match`, which understands both
+                // bare column refs and complex expressions.
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if let Expr::Column(g_col) = g_expr {
-                        if g_col == col {
-                            row.insert(label.clone(), g_value.clone());
-                            placed = true;
-                            break;
-                        }
+                    if exprs_match(&proj.expr, g_expr) {
+                        row.insert(label.clone(), g_value.clone());
+                        placed = true;
+                        break;
                     }
                 }
                 if !placed {
                     return Err(SQLError::Unsupported(format!(
-                        "non-aggregated projection `{col}` must appear in GROUP BY"
+                        "non-aggregated projection `{label}` must appear in GROUP BY"
                     )));
                 }
-            } else {
-                return Err(SQLError::Unsupported(
-                    "complex non-aggregate projections in GROUP BY are not supported".into(),
-                ));
+            }
+        }
+        if let Some(having_expr) = stmt.having.as_ref() {
+            let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            let kept = uqa_sql::expr::eval(&resolved, &ctx)
+                .map(|v| uqa_sql::expr::truthy(&v))
+                .unwrap_or(false);
+            if !kept {
+                continue;
             }
         }
         rows.push(row);
@@ -4054,11 +4511,36 @@ fn build_aggregate_rows_relaxed(
             )
         });
         for (i, proj) in agg_targets.iter().enumerate() {
-            let Expr::Func { name, args } = &proj.expr else {
+            let Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } = &proj.expr
+            else {
                 continue;
             };
-            let value = match (name.to_ascii_lowercase().as_str(), args.as_slice()) {
+            if let Some(filter_expr) = filter.as_deref() {
+                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
+                    .map(|v| uqa_sql::expr::truthy(&v))
+                    .unwrap_or(false);
+                if !keep {
+                    continue;
+                }
+            }
+            let lower_name = name.to_ascii_lowercase();
+            let value = match (lower_name.as_str(), args.as_slice()) {
                 ("count", [Expr::Star]) | ("count", []) => Value::Int(1),
+                // Ordered-set aggregates: the percentile / mode fraction
+                // is a direct positional argument; the value to fold
+                // comes from `WITHIN GROUP (ORDER BY ...)` which the
+                // compiler parks in `order_by[0]`.
+                ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+                    .first()
+                    .map(|ob| uqa_sql::expr::eval(&ob.expr, &ctx))
+                    .transpose()?
+                    .unwrap_or(Value::Null),
                 (_, args) => {
                     let arg = args
                         .first()
@@ -4066,7 +4548,22 @@ fn build_aggregate_rows_relaxed(
                     uqa_sql::expr::eval(arg, &ctx)?
                 }
             };
-            bucket.0[i].observe(&value);
+            if *distinct && !matches!(value, Value::Null) {
+                let key = distinct_key(&value);
+                if !bucket.0[i].distinct.insert(key) {
+                    continue;
+                }
+            }
+            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+            for ob in order_by.iter() {
+                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
+                sort_keys.push((v, ob.descending));
+            }
+            if order_by.is_empty() {
+                bucket.0[i].observe(&value);
+            } else {
+                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
+            }
         }
     }
     if groups.is_empty() && stmt.group_by.is_empty() {
@@ -4088,12 +4585,12 @@ fn build_aggregate_rows_relaxed(
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
             if is_aggregate(&proj.expr) {
-                let Expr::Func { name, .. } = &proj.expr else {
+                let Expr::Func { name, args, .. } = &proj.expr else {
                     return Err(SQLError::Internal("aggregate expr lost".into()));
                 };
                 let acc = &accs[agg_idx];
                 agg_idx += 1;
-                row.insert(label, aggregate_value(name, acc));
+                row.insert(label, aggregate_value_with_args(name, acc, args));
             } else if let Expr::Column(col) = &proj.expr {
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
@@ -4120,9 +4617,53 @@ fn build_aggregate_rows_relaxed(
 }
 
 fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
-    match name.to_ascii_lowercase().as_str() {
+    aggregate_value_with_args(name, acc, &[])
+}
+
+fn aggregate_value_with_args(
+    name: &str,
+    acc: &AggregateAccumulator,
+    args: &[Expr],
+) -> Value {
+    let lname = name.to_ascii_lowercase();
+    // Order the collected `values` by the captured sort keys when the
+    // aggregate was annotated with ORDER BY (string_agg / array_agg /
+    // percentile_*). This is a stable sort so equal keys preserve
+    // insertion order, matching PostgreSQL.
+    let ordered_values: Vec<Value> = if acc
+        .sort_keys
+        .iter()
+        .any(|k| !k.is_empty())
+    {
+        let mut indexed: Vec<usize> = (0..acc.values.len()).collect();
+        indexed.sort_by(|a, b| {
+            let ak = &acc.sort_keys[*a];
+            let bk = &acc.sort_keys[*b];
+            for ((av, ad), (bv, _bd)) in ak.iter().zip(bk.iter()) {
+                let cmp = av.cmp(bv);
+                let cmp = if *ad { cmp.reverse() } else { cmp };
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+        indexed.into_iter().map(|i| acc.values[i].clone()).collect()
+    } else {
+        acc.values.clone()
+    };
+
+    match lname.as_str() {
         "count" => Value::Int(acc.count as i64),
-        "sum" => Value::Float(acc.sum),
+        "sum" => {
+            if acc.count == 0 {
+                Value::Null
+            } else if acc.values.iter().all(|v| matches!(v, Value::Int(_))) {
+                Value::Int(acc.sum as i64)
+            } else {
+                Value::Float(acc.sum)
+            }
+        }
         "avg" => {
             if acc.count == 0 {
                 Value::Null
@@ -4132,8 +4673,193 @@ fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
         }
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
+        "string_agg" => {
+            if ordered_values.is_empty() {
+                return Value::Null;
+            }
+            // Separator: literal second positional arg, or empty.
+            let sep = match args.get(1) {
+                Some(Expr::Literal(Value::Str(s))) => s.clone(),
+                _ => String::new(),
+            };
+            let parts: Vec<String> = ordered_values
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Str(s) => Some(s.clone()),
+                    Value::Int(n) => Some(n.to_string()),
+                    Value::Float(f) => Some(f.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                })
+                .collect();
+            Value::Str(parts.join(&sep))
+        }
+        "array_agg" => {
+            if ordered_values.is_empty() {
+                return Value::Null;
+            }
+            Value::List(ordered_values)
+        }
+        "bool_and" => match acc.bool_and {
+            Some(b) => Value::Bool(b),
+            None => Value::Null,
+        },
+        "bool_or" => match acc.bool_or {
+            Some(b) => Value::Bool(b),
+            None => Value::Null,
+        },
+        "stddev" | "stddev_samp" => {
+            if acc.count < 2 {
+                return Value::Null;
+            }
+            Value::Float(stddev_samp(&acc.values))
+        }
+        "stddev_pop" => {
+            if acc.count == 0 {
+                return Value::Null;
+            }
+            Value::Float(stddev_pop(&acc.values))
+        }
+        "variance" | "var_samp" => {
+            if acc.count < 2 {
+                return Value::Null;
+            }
+            Value::Float(variance_samp(&acc.values))
+        }
+        "var_pop" => {
+            if acc.count == 0 {
+                return Value::Null;
+            }
+            Value::Float(variance_pop(&acc.values))
+        }
+        "percentile_cont" => {
+            if ordered_values.is_empty() {
+                return Value::Null;
+            }
+            let frac = match args.first() {
+                Some(Expr::Literal(Value::Float(f))) => *f,
+                Some(Expr::Literal(Value::Int(n))) => *n as f64,
+                _ => 0.5,
+            };
+            Value::Float(percentile_cont(&ordered_values, frac))
+        }
+        "percentile_disc" => {
+            if ordered_values.is_empty() {
+                return Value::Null;
+            }
+            let frac = match args.first() {
+                Some(Expr::Literal(Value::Float(f))) => *f,
+                Some(Expr::Literal(Value::Int(n))) => *n as f64,
+                _ => 0.5,
+            };
+            percentile_disc(&ordered_values, frac)
+        }
+        "mode" => mode_value(&ordered_values),
         _ => Value::Null,
     }
+}
+
+fn mean(values: &[Value]) -> f64 {
+    let nums: Vec<f64> = values
+        .iter()
+        .filter_map(|v| value_as_f64(v).ok())
+        .collect();
+    if nums.is_empty() {
+        0.0
+    } else {
+        nums.iter().sum::<f64>() / nums.len() as f64
+    }
+}
+
+fn variance_samp(values: &[Value]) -> f64 {
+    let nums: Vec<f64> = values
+        .iter()
+        .filter_map(|v| value_as_f64(v).ok())
+        .collect();
+    if nums.len() < 2 {
+        return 0.0;
+    }
+    let m = mean(values);
+    let total: f64 = nums.iter().map(|x| (x - m).powi(2)).sum();
+    total / (nums.len() as f64 - 1.0)
+}
+
+fn variance_pop(values: &[Value]) -> f64 {
+    let nums: Vec<f64> = values
+        .iter()
+        .filter_map(|v| value_as_f64(v).ok())
+        .collect();
+    if nums.is_empty() {
+        return 0.0;
+    }
+    let m = mean(values);
+    let total: f64 = nums.iter().map(|x| (x - m).powi(2)).sum();
+    total / nums.len() as f64
+}
+
+fn stddev_samp(values: &[Value]) -> f64 {
+    variance_samp(values).sqrt()
+}
+
+fn stddev_pop(values: &[Value]) -> f64 {
+    variance_pop(values).sqrt()
+}
+
+fn percentile_cont(values: &[Value], frac: f64) -> f64 {
+    let mut nums: Vec<f64> = values
+        .iter()
+        .filter_map(|v| value_as_f64(v).ok())
+        .collect();
+    if nums.is_empty() {
+        return 0.0;
+    }
+    nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let frac = frac.clamp(0.0, 1.0);
+    let pos = frac * (nums.len() as f64 - 1.0);
+    let lo = pos.floor() as usize;
+    let hi = pos.ceil() as usize;
+    if lo == hi {
+        return nums[lo];
+    }
+    let weight = pos - lo as f64;
+    nums[lo] * (1.0 - weight) + nums[hi] * weight
+}
+
+fn percentile_disc(values: &[Value], frac: f64) -> Value {
+    let mut sorted: Vec<&Value> = values.iter().collect();
+    sorted.sort_by(|a, b| a.cmp(b));
+    if sorted.is_empty() {
+        return Value::Null;
+    }
+    let frac = frac.clamp(0.0, 1.0);
+    // PostgreSQL: smallest rank where cumulative cum_dist >= frac.
+    let n = sorted.len();
+    let mut idx = (frac * n as f64).ceil() as usize;
+    if idx == 0 {
+        idx = 1;
+    }
+    if idx > n {
+        idx = n;
+    }
+    sorted[idx - 1].clone()
+}
+
+fn mode_value(values: &[Value]) -> Value {
+    use std::collections::BTreeMap;
+    if values.is_empty() {
+        return Value::Null;
+    }
+    let mut counts: BTreeMap<String, (Value, u64)> = BTreeMap::new();
+    for v in values {
+        let key = distinct_key(v);
+        let entry = counts.entry(key).or_insert((v.clone(), 0));
+        entry.1 += 1;
+    }
+    counts
+        .into_values()
+        .max_by_key(|(_, n)| *n)
+        .map(|(v, _)| v)
+        .unwrap_or(Value::Null)
 }
 
 /// Compute a projection's output column name. The position is folded
@@ -4883,7 +5609,7 @@ fn run_fuse_log_odds(
     let ctx = EvalContext::new(None, params).with_engine(engine);
     for arg in args {
         match arg {
-            Expr::Func { name, args: inner } => {
+            Expr::Func { name, args: inner, .. } => {
                 let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))?;
                 match kind {
                     FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
@@ -5135,7 +5861,7 @@ fn build_projection_row(
         // Engine-side registry hooks (uqa_highlight / graph_create /
         // graph_drop) need access to the engine; intercept them
         // before falling through to the scalar evaluator.
-        if let Expr::Func { name, args } = &proj.expr {
+        if let Expr::Func { name, args, .. } = &proj.expr {
             if let Some(value) = engine_func_intercept(engine, name, args, document, params)? {
                 row.insert(label, value);
                 continue;

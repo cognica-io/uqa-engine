@@ -107,7 +107,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             Ok(Value::List(out))
         }
         Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
-        Expr::Func { name, args } => {
+        Expr::Func { name, args, .. } => {
             // Functions registered in the operator registry (text_match,
             // knn_match, ...) are dispatched by the engine; only pure
             // scalar built-ins are evaluated inline here.
