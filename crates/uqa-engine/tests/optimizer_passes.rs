@@ -282,7 +282,10 @@ fn attention_fusion_lowers_with_calibrated_signals() {
         panic!("expected AttentionFusion");
     };
     assert_eq!(signals.len(), 2);
-    assert!(query_features.is_empty(), "features fill in at execute time");
+    assert!(
+        query_features.is_empty(),
+        "features fill in at execute time"
+    );
     assert!(matches!(signals[0], OperatorTree::Term { .. }));
     assert!(matches!(signals[1], OperatorTree::CosineProbability(_)));
 }

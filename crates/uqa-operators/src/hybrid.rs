@@ -9,7 +9,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, FieldName, IndexStats, Predicate, Payload, PostingEntry, PostingList, Value};
+use uqa_core::{
+    DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Predicate, Value,
+};
 use uqa_fusion::{
     AdaptiveLogOddsFusion as AdaptiveLogOddsFuser, ProbabilisticBoolean, SignalQuality,
 };
@@ -419,7 +421,7 @@ fn value_to_facet_string(v: &Value) -> String {
 /// Adaptive log-odds fusion. Mirrors Python
 /// `AdaptiveLogOddsFusionOperator` — runs each signal, computes a
 /// per-signal `SignalQuality` (coverage / variance / calibration
-/// error), and combines through [`AdaptiveLogOddsFuser::fuse_adaptive`].
+/// error), and combines through [`AdaptiveLogOddsFuser::fuse`].
 pub struct AdaptiveLogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub base_alpha: f64,

@@ -172,11 +172,7 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
 /// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
 ///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
 ///   rescaled to `(0, 1)` via `(1 + s) / 2`.
-fn lower_calibrated_signal(
-    name: &str,
-    args: &[Expr],
-    params: &[SQLParam],
-) -> Option<OperatorTree> {
+fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
     match name {
         "text_match" | "bayesian_match" => {
             let field = column_name(args.first()?)?;
@@ -669,9 +665,7 @@ impl EngineDriver<'_> {
         }
         let posting_lists: Vec<PostingList> = self.execute_branches(signals);
         let features = self.attention_query_features(signals, query_features);
-        fuse_signals_with(&posting_lists, |probs| {
-            attention.fuse(probs, &features)
-        })
+        fuse_signals_with(&posting_lists, |probs| attention.fuse(probs, &features))
     }
 
     fn execute_learned_fusion(
@@ -692,11 +686,7 @@ impl EngineDriver<'_> {
     /// `[mean_idf, max_idf, min_idf, coverage, query_length,
     /// vocab_overlap]` vector from the table's inverted-index stats
     /// against the first text-bearing signal it can find.
-    fn attention_query_features(
-        &self,
-        signals: &[OperatorTree],
-        explicit: &[f64],
-    ) -> Vec<f64> {
+    fn attention_query_features(&self, signals: &[OperatorTree], explicit: &[f64]) -> Vec<f64> {
         if !explicit.is_empty() {
             return explicit.to_vec();
         }
@@ -708,8 +698,7 @@ impl EngineDriver<'_> {
         let analyzer = idx_guard.analyzer().clone();
         if let Some((field, query)) = first_text_signal(signals) {
             let terms = analyzer.analyze(&query);
-            return uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field))
-                .to_vec();
+            return uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field)).to_vec();
         }
         vec![0.0; uqa_fusion::N_QUERY_FEATURES]
     }
@@ -722,11 +711,7 @@ impl EngineDriver<'_> {
         ctx
     }
 
-    fn facet_vector_inline(
-        &self,
-        vec_pl: &PostingList,
-        facet_field: &str,
-    ) -> PostingList {
+    fn facet_vector_inline(&self, vec_pl: &PostingList, facet_field: &str) -> PostingList {
         use std::collections::BTreeMap;
         let Some(state) = self.engine.table(self.table) else {
             return PostingList::new();
@@ -750,7 +735,10 @@ impl EngineDriver<'_> {
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(counts.len());
         for (i, (value, count)) in counts.into_iter().enumerate() {
             let mut fields = std::collections::BTreeMap::new();
-            fields.insert("_facet_field".to_string(), Value::Str(facet_field.to_string()));
+            fields.insert(
+                "_facet_field".to_string(),
+                Value::Str(facet_field.to_string()),
+            );
             fields.insert("_facet_value".to_string(), Value::Str(value));
             fields.insert("_facet_count".to_string(), Value::Int(count as i64));
             entries.push(PostingEntry::new(
@@ -796,9 +784,7 @@ fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
 
 fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
-        OperatorTree::Term { query, field } => {
-            field.clone().map(|f| (f, query.clone()))
-        }
+        OperatorTree::Term { query, field } => field.clone().map(|f| (f, query.clone())),
         OperatorTree::Score {
             source,
             query_terms,
@@ -812,12 +798,15 @@ fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
             }
             Some((field.clone(), query_terms.join(" ")))
         }
-        OperatorTree::Filter { source: Some(s), .. } => find_text_in_tree(s),
+        OperatorTree::Filter {
+            source: Some(s), ..
+        } => find_text_in_tree(s),
         OperatorTree::Composed(parts)
         | OperatorTree::Intersect(parts)
         | OperatorTree::Union(parts) => parts.iter().find_map(find_text_in_tree),
-        OperatorTree::Complement(inner)
-        | OperatorTree::CosineProbability(inner) => find_text_in_tree(inner),
+        OperatorTree::Complement(inner) | OperatorTree::CosineProbability(inner) => {
+            find_text_in_tree(inner)
+        }
         _ => None,
     }
 }

@@ -144,8 +144,8 @@ impl Operator for CypherQueryOperator {
         // engine passes `Arc<RwLock<...>>` so concurrent readers can
         // share the store while writers serialize through the lock.
         let mut guard = self.graph_store.write();
-        let mut writer =
-            CypherWriter::new(&mut *guard, self.graph_name.clone()).with_params(self.params.clone());
+        let mut writer = CypherWriter::new(&mut *guard, self.graph_name.clone())
+            .with_params(self.params.clone());
         let Ok((_cols, rows)) = writer.execute(&self.query) else {
             return PostingList::new();
         };
