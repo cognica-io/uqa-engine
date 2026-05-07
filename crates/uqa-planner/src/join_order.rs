@@ -180,7 +180,7 @@ impl JoinOrderOptimizer {
             predicate_lookup.insert((l.min(r), l.max(r)), pred);
         }
 
-        let plan = enumerate_dpccp(&graph, &self.cost_estimator);
+        let plan = enumerate_dpccp(&graph);
         let tree = match plan {
             Some(p) => self.materialize_plan(&p, &graph, &relations, &predicate_lookup),
             None => {
@@ -234,13 +234,18 @@ impl JoinOrderOptimizer {
         relations: &[JoinRelation],
         predicates: &BTreeMap<(usize, usize), JoinPredicate>,
     ) -> JoinOrderTree {
-        match plan {
-            JoinPlan::Leaf { relation, .. } => JoinOrderTree::Scan(relations[*relation].clone()),
-            JoinPlan::Join { left, right, .. } => {
+        match (&plan.left, &plan.right) {
+            (None, None) => {
+                // Leaf: `relations` is a singleton bitmask of the
+                // source relation index.
+                let idx = plan.relations.trailing_zeros() as usize;
+                JoinOrderTree::Scan(relations[idx].clone())
+            }
+            (Some(left), Some(right)) => {
                 let l_tree = self.materialize_plan(left, graph, relations, predicates);
                 let r_tree = self.materialize_plan(right, graph, relations, predicates);
-                let l_set = relations_in_plan(left);
-                let r_set = relations_in_plan(right);
+                let l_set = left.relations;
+                let r_set = right.relations;
                 let Some(edge) = graph.edges.iter().find(|e| edge_connects(e, l_set, r_set)) else {
                     return JoinOrderTree::Cross {
                         left: Box::new(l_tree),
@@ -292,14 +297,11 @@ impl JoinOrderOptimizer {
                     right: Box::new(r_tree),
                 }
             }
+            // A plan with exactly one child shouldn't appear; treat as
+            // its own materialised child.
+            (Some(left), None) => self.materialize_plan(left, graph, relations, predicates),
+            (None, Some(right)) => self.materialize_plan(right, graph, relations, predicates),
         }
-    }
-}
-
-fn relations_in_plan(plan: &JoinPlan) -> u64 {
-    match plan {
-        JoinPlan::Leaf { relation, .. } => 1u64 << *relation,
-        JoinPlan::Join { left, right, .. } => relations_in_plan(left) | relations_in_plan(right),
     }
 }
 

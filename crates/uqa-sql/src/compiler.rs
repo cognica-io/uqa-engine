@@ -94,10 +94,28 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
         NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
+        NodeEnum::VariableShowStmt(stmt) => Ok(Statement::ShowVariable {
+            name: stmt.name.clone(),
+        }),
+        NodeEnum::DiscardStmt(stmt) => Ok(Statement::Discard {
+            target: discard_target(stmt.target),
+        }),
         other => Err(SQLError::Unsupported(format!(
             "{}",
             other_node_label(other)
         ))),
+    }
+}
+
+/// Map `pg_query`'s `DiscardMode` enum (1=ALL, 2=PLANS, 3=SEQUENCES,
+/// 4=TEMP) to the AST's [`DiscardTarget`].
+fn discard_target(mode: i32) -> crate::ast::DiscardTarget {
+    use crate::ast::DiscardTarget;
+    match mode {
+        2 => DiscardTarget::Plans,
+        3 => DiscardTarget::Sequences,
+        4 => DiscardTarget::Temp,
+        _ => DiscardTarget::All,
     }
 }
 

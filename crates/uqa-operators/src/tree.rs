@@ -54,6 +54,24 @@ pub trait LearnedFuserDyn: Send + Sync {
     fn fuse(&self, probs: &[f64]) -> f64;
 }
 
+impl AttentionFuserDyn for uqa_fusion::AttentionFusion {
+    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> f64 {
+        uqa_fusion::AttentionFusion::fuse(self, probs, query_features)
+    }
+}
+
+impl AttentionFuserDyn for uqa_fusion::MultiHeadAttentionFusion {
+    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> f64 {
+        uqa_fusion::MultiHeadAttentionFusion::fuse(self, probs, query_features)
+    }
+}
+
+impl LearnedFuserDyn for uqa_fusion::LearnedFusion {
+    fn fuse(&self, probs: &[f64]) -> f64 {
+        uqa_fusion::LearnedFusion::fuse(self, probs)
+    }
+}
+
 /// Single vertex pattern (variable name + accumulated constraints).
 #[derive(Clone)]
 pub struct VertexPatternIR {

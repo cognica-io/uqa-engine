@@ -732,7 +732,11 @@ impl CardinalityEstimator {
             (n * 0.1).min(10.0)
         };
 
-        let hops_f = hops.max(1) as f64;
+        // Mirror Python's `branching ** max_hops` directly: hops=0
+        // collapses to a single hop's worth of branching factor (i.e.
+        // 1), keeping `result = min(n, branching ** hops)` identical
+        // to the reference.
+        let hops_f = hops as f64;
         let mut result = n.min(branching.powf(hops_f));
 
         if let (Some(tf), Some(gs)) = (temporal_filter, self.graph_stats.as_ref()) {
@@ -1301,26 +1305,30 @@ impl XorShiftRng {
 }
 
 /// Count label-bearing tokens in an RPQ expression source. Mirrors
-/// `uqa.planner.cost_model._expr_label_count`: every alphanumeric
-/// identifier counts as one label, every Kleene operator (`*`, `+`,
-/// `?`) doubles the contribution to approximate NFA expansion.
+/// Count label nodes in an RPQ expression. Mirrors Python's
+/// `uqa.planner.cost_model._expr_label_count`: parses the source,
+/// then walks the AST. Label = 1, Concat/Alt = sum, KleeneStar =
+/// inner * 2, Bounded = inner * max_hops. Falls back to 1 when the
+/// source can't be parsed.
 fn rpq_label_count(source: &str) -> usize {
-    let mut labels = 0_usize;
-    let mut in_ident = false;
-    for ch in source.chars() {
-        if ch.is_alphanumeric() || ch == '_' {
-            if !in_ident {
-                labels += 1;
-                in_ident = true;
-            }
-        } else {
-            in_ident = false;
-            if ch == '*' || ch == '+' || ch == '?' {
-                labels = labels.saturating_add(labels);
-            }
+    match uqa_graph::parse_rpq(source) {
+        Ok(expr) => count_rpq_labels(&expr).max(1),
+        Err(_) => 1,
+    }
+}
+
+fn count_rpq_labels(expr: &uqa_graph::RegularPathExpr) -> usize {
+    use uqa_graph::RegularPathExpr;
+    match expr {
+        RegularPathExpr::Label(_) => 1,
+        RegularPathExpr::Concat(l, r) | RegularPathExpr::Alternation(l, r) => {
+            count_rpq_labels(l) + count_rpq_labels(r)
+        }
+        RegularPathExpr::KleeneStar(inner) => count_rpq_labels(inner).saturating_mul(2),
+        RegularPathExpr::Bounded { inner, max, .. } => {
+            count_rpq_labels(inner).saturating_mul(*max as usize)
         }
     }
-    labels.max(1)
 }
 
 #[cfg(test)]

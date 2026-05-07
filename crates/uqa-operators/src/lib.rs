@@ -46,7 +46,12 @@ pub use hierarchical::{
     eval_path, parse_path, project_paths, unnest_array, AggregationKind as PathAggKind,
     PathAggregateOperator, PathFilterOperator, PathProjectOperator, UnifiedFilterOperator,
 };
-pub use hybrid::{HybridTextVectorOperator, LogOddsFusionOperator, SemanticFilterOperator};
+pub use hybrid::{
+    AdaptiveLogOddsFusionOperator, FacetVectorOperator, HybridTextVectorOperator,
+    IndexScanOperator, LogOddsFusionOperator, ProbBoolFusionOperator,
+    ProbBoolMode as HybridProbBoolMode, ProbNotOperator, SemanticFilterOperator,
+    VectorExclusionOperator,
+};
 pub use multi_stage::{Cutoff, MultiStageOperator};
 pub use primitive::{
     FacetOperator, FilterOperator, ScoreOperator, SpatialWithinOperator, TermOperator,

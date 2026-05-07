@@ -74,5 +74,7 @@ pub use join_order::{
     JoinPredicate, JoinRelation, INDEX_JOIN_THRESHOLD,
 };
 pub use optimizer::{optimize, OptimizerConfig};
-pub use parallel::run_parallel;
+pub use parallel::{
+    run_parallel, ParallelExecutor, DEFAULT_PARALLEL_WORKERS, MIN_PARALLEL_BRANCHES,
+};
 pub use query_optimizer::{OptimizerConfig as TreeOptimizerConfig, QueryOptimizer};

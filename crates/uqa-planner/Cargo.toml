@@ -15,6 +15,7 @@ uqa-sql = { workspace = true }
 uqa-operators = { workspace = true }
 uqa-storage = { workspace = true }
 uqa-execution = { workspace = true }
+uqa-graph = { workspace = true }
 uqa-joins = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }

@@ -41,6 +41,7 @@ use std::collections::BTreeSet;
 use uqa_core::{DocId, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_operators::{GatingSpec, OperatorTree};
 use uqa_planner::executor::{OperatorTreeDriver, PlanExecutor};
+use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::QueryOptimizer;
 use uqa_sql::ast::{BinaryOp, Expr};
 use uqa_sql::expr::{eval, EvalContext};
@@ -127,6 +128,57 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "text_match" | "bayesian_match" => {
+            // Standalone text_match / bayesian_match -- the Term node
+            // already runs through the Bayesian BM25 scorer, so the
+            // standalone path produces calibrated probabilities.
+            let field = column_name(args.first()?)?;
+            let query = const_string(args.get(1)?, params)?;
+            Some(OperatorTree::Term {
+                query,
+                field: Some(field),
+            })
+        }
+        "knn_match" => {
+            // Standalone knn_match preserves raw cosine similarities;
+            // calibration to (0, 1) only fires inside fusion contexts
+            // (mirrors `_compile_calibrated_signal` semantics from the
+            // Python reference: only fusion arms see calibrated KNN).
+            let field = column_name(args.first()?)?;
+            let vec_expr = args.get(1)?;
+            let query_vector = const_vector(vec_expr, params)?;
+            let k = const_usize(args.get(2)?, params)?;
+            Some(OperatorTree::KNN {
+                query_vector,
+                k,
+                field,
+            })
+        }
+        "fuse_log_odds" => lower_fuse_log_odds(args, params),
+        "attention" => lower_attention_fusion(args, params),
+        "learned_fusion" => lower_learned_fusion(args, params),
+        _ => None,
+    }
+}
+
+/// Compile a signal-function call into a node that produces calibrated
+/// probabilities in (0, 1). Mirrors Python's
+/// `_compile_calibrated_signal`: in fusion contexts every signal must
+/// land on the (0, 1) probability scale before log-odds / attention /
+/// learned fusion can combine them.
+///
+/// - `text_match` / `bayesian_match` --> [`OperatorTree::Term`] (the
+///   engine evaluates `Term` through the Bayesian BM25 scorer, so the
+///   result is already calibrated).
+/// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
+///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
+///   rescaled to `(0, 1)` via `(1 + s) / 2`.
+fn lower_calibrated_signal(
+    name: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
+    match name {
+        "text_match" | "bayesian_match" => {
             let field = column_name(args.first()?)?;
             let query = const_string(args.get(1)?, params)?;
             Some(OperatorTree::Term {
@@ -139,33 +191,90 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
             let vec_expr = args.get(1)?;
             let query_vector = const_vector(vec_expr, params)?;
             let k = const_usize(args.get(2)?, params)?;
-            Some(OperatorTree::KNN {
-                query_vector,
-                k,
-                field,
-            })
-        }
-        "fuse_log_odds" => {
-            // `fuse_log_odds(signal_1, signal_2, ..., alpha)`. The last
-            // arg must be a numeric literal alpha; the rest must lower
-            // into `OperatorTree` signals.
-            if args.len() < 2 {
-                return None;
-            }
-            let alpha_expr = args.last()?;
-            let alpha = const_f64(alpha_expr, params)?;
-            let mut signals: Vec<OperatorTree> = Vec::with_capacity(args.len() - 1);
-            for a in &args[..args.len() - 1] {
-                signals.push(lower_where(a, params)?);
-            }
-            Some(OperatorTree::LogOddsFusion {
-                signals,
-                alpha,
-                gating: GatingSpec::Pass,
-            })
+            Some(OperatorTree::CosineProbability(Box::new(
+                OperatorTree::KNN {
+                    query_vector,
+                    k,
+                    field,
+                },
+            )))
         }
         _ => None,
     }
+}
+
+/// Lower a function-call argument into a calibrated signal node. Used
+/// by every fusion lowering arm (`fuse_log_odds`, `attention`,
+/// `learned_fusion`) so the rewrite stays consistent across fusers.
+fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
+    match arg {
+        Expr::Func { name, args } => {
+            let lower = name.to_ascii_lowercase();
+            lower_calibrated_signal(&lower, args, params)
+        }
+        _ => None,
+    }
+}
+
+fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    // `fuse_log_odds(signal_1, signal_2, ..., alpha)`. The last
+    // argument must be a numeric literal alpha; the rest must lower
+    // into calibrated signal trees.
+    if args.len() < 2 {
+        return None;
+    }
+    let alpha_expr = args.last()?;
+    let alpha = const_f64(alpha_expr, params)?;
+    let mut signals: Vec<OperatorTree> = Vec::with_capacity(args.len() - 1);
+    for a in &args[..args.len() - 1] {
+        signals.push(lower_signal_arg(a, params)?);
+    }
+    Some(OperatorTree::LogOddsFusion {
+        signals,
+        alpha,
+        gating: GatingSpec::Pass,
+    })
+}
+
+fn lower_attention_fusion(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    use std::sync::Arc;
+    use uqa_fusion::{AttentionFusion, N_QUERY_FEATURES};
+    use uqa_operators::tree::AttentionRef;
+
+    let mut signals: Vec<OperatorTree> = Vec::new();
+    for a in args {
+        signals.push(lower_signal_arg(a, params)?);
+    }
+    if signals.len() < 2 {
+        return None;
+    }
+    // `attention(signal_1, signal_2, ...)` defaults: alpha=0.5,
+    // n_query_features=6 (matches Python `_make_attention_fusion_op`).
+    // Query features are filled in lazily at execute time from the
+    // engine snapshot, so the IR carries a zero-vector placeholder.
+    let attention: AttentionRef =
+        Arc::new(AttentionFusion::new(signals.len(), N_QUERY_FEATURES, 0.5));
+    Some(OperatorTree::AttentionFusion {
+        signals,
+        attention,
+        query_features: Vec::new(),
+    })
+}
+
+fn lower_learned_fusion(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    use std::sync::Arc;
+    use uqa_fusion::LearnedFusion;
+    use uqa_operators::tree::LearnedFusionRef;
+
+    let mut signals: Vec<OperatorTree> = Vec::new();
+    for a in args {
+        signals.push(lower_signal_arg(a, params)?);
+    }
+    if signals.len() < 2 {
+        return None;
+    }
+    let learned: LearnedFusionRef = Arc::new(LearnedFusion::new(signals.len(), 0.5));
+    Some(OperatorTree::LearnedFusion { signals, learned })
 }
 
 fn lower_comparison(
@@ -271,6 +380,7 @@ pub struct EngineDriver<'a> {
     pub engine: &'a Engine,
     pub table: &'a str,
     pub params: &'a [SQLParam],
+    pub parallel: ParallelExecutor,
 }
 
 impl<'a> EngineDriver<'a> {
@@ -280,7 +390,22 @@ impl<'a> EngineDriver<'a> {
             engine,
             table,
             params,
+            parallel: ParallelExecutor::default(),
         }
+    }
+
+    /// Override the branch-level parallel executor. The default uses
+    /// rayon's pool with `DEFAULT_PARALLEL_WORKERS`; pass `0` for
+    /// fully-serial execution in tests / deterministic benchmarks.
+    #[must_use]
+    pub fn with_parallel(mut self, par: ParallelExecutor) -> Self {
+        self.parallel = par;
+        self
+    }
+
+    fn execute_branches(&self, branches: &[OperatorTree]) -> Vec<PostingList> {
+        let workers: Vec<_> = branches.iter().map(|b| || self.execute_node(b)).collect();
+        self.parallel.execute_branches(&workers)
     }
 
     fn execute_term(&self, query: &str, field: Option<&str>) -> PostingList {
@@ -360,14 +485,14 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 source,
             } => self.execute_filter(field, predicate, source.as_deref()),
             OperatorTree::Intersect(parts) => {
-                let mut iter = parts.iter().map(|p| self.execute_node(p));
+                let mut iter = self.execute_branches(parts).into_iter();
                 let Some(first) = iter.next() else {
                     return PostingList::new();
                 };
                 iter.fold(first, |acc, next| acc.intersect(&next))
             }
             OperatorTree::Union(parts) => {
-                let mut iter = parts.iter().map(|p| self.execute_node(p));
+                let mut iter = self.execute_branches(parts).into_iter();
                 let Some(first) = iter.next() else {
                     return PostingList::new();
                 };
@@ -397,28 +522,351 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 iter.fold(first, |acc, next| acc.intersect(&next))
             }
             OperatorTree::LogOddsFusion { signals, alpha, .. } => {
-                // Reuse the existing fuse_log_odds dispatcher by lowering
-                // each child back to a SQL expression. Today's fast path:
-                // execute every signal independently and combine through
-                // posting-list union, then re-score via the same alpha
-                // weighting. This keeps semantics aligned with the
-                // un-optimised baseline while letting `reorder_fusion_signals`
-                // and `simplify_algebra` reshape the tree first.
-                let scored: Vec<PostingList> =
-                    signals.iter().map(|s| self.execute_node(s)).collect();
-                let _ = alpha;
-                let mut iter = scored.into_iter();
-                let Some(first) = iter.next() else {
-                    return PostingList::new();
-                };
-                iter.fold(first, |acc, next| acc.union(&next))
+                self.execute_log_odds_fusion(signals, *alpha)
             }
-            // Anything else is currently outside the SELECT-WHERE
-            // surface this bridge handles. The lower step rejects them
-            // up-front, so this path is a safety net.
+            OperatorTree::ProbBoolFusion { signals, mode } => {
+                self.execute_prob_bool_fusion(signals, *mode)
+            }
+            OperatorTree::ProbNot {
+                signal,
+                default_prob,
+            } => self.execute_prob_not(signal, *default_prob),
+            OperatorTree::IndexScan {
+                index_name,
+                field,
+                predicate,
+            } => self.execute_index_scan(index_name, field, predicate),
+            OperatorTree::VectorExclusion { positive, negative } => {
+                self.execute_vector_exclusion(positive, negative)
+            }
+            OperatorTree::FacetVector {
+                vector_op,
+                facet_field,
+            } => {
+                let vec_pl = self.execute_node(vector_op);
+                self.facet_vector_inline(&vec_pl, facet_field)
+            }
+            OperatorTree::CosineProbability(source) => self.execute_cosine_probability(source),
+            OperatorTree::AttentionFusion {
+                signals,
+                attention,
+                query_features,
+            } => self.execute_attention_fusion(signals, attention, query_features),
+            OperatorTree::LearnedFusion { signals, learned } => {
+                self.execute_learned_fusion(signals, learned)
+            }
+            // The remaining graph-only IR variants (PatternMatch,
+            // Traverse, RegularPathQuery, WeightedPathQuery,
+            // CypherQuery, ...) need a shared graph store handle to
+            // execute. The engine routes those through dedicated
+            // table-function entry points; if one shows up here we
+            // signal an empty result rather than misreporting matches.
             _ => PostingList::new(),
         }
     }
+}
+
+impl EngineDriver<'_> {
+    fn execute_prob_bool_fusion(
+        &self,
+        signals: &[OperatorTree],
+        mode: uqa_operators::ProbBoolMode,
+    ) -> PostingList {
+        use uqa_operators::base::Operator;
+        use uqa_operators::{HybridProbBoolMode, ProbBoolFusionOperator};
+        if signals.is_empty() {
+            return PostingList::new();
+        }
+        // Pre-execute every child through the driver, then wrap the
+        // results in static signal stubs so the fusion operator can
+        // consume them without taking a back-reference into the
+        // driver.
+        let signal_ops: Vec<std::sync::Arc<dyn Operator>> = self
+            .execute_branches(signals)
+            .into_iter()
+            .map(|pl| -> std::sync::Arc<dyn Operator> {
+                std::sync::Arc::new(StaticPostingList { pl })
+            })
+            .collect();
+        let mode = match mode {
+            uqa_operators::ProbBoolMode::And => HybridProbBoolMode::And,
+            uqa_operators::ProbBoolMode::Or => HybridProbBoolMode::Or,
+        };
+        let op = ProbBoolFusionOperator::new(signal_ops, mode);
+        op.execute(&self.bridge_context())
+    }
+
+    fn execute_prob_not(&self, signal: &OperatorTree, default_prob: f64) -> PostingList {
+        use uqa_operators::base::Operator;
+        use uqa_operators::ProbNotOperator;
+        let signal_pl = self.execute_node(signal);
+        let stub: std::sync::Arc<dyn Operator> =
+            std::sync::Arc::new(StaticPostingList { pl: signal_pl });
+        let op = ProbNotOperator::new(stub, default_prob);
+        op.execute(&self.bridge_context())
+    }
+
+    fn execute_index_scan(
+        &self,
+        index_name: &str,
+        field: &str,
+        predicate: &uqa_core::Predicate,
+    ) -> PostingList {
+        let _ = index_name;
+        // The Rust port stores `index_name` as a String; resolving it
+        // to an `Arc<dyn Index>` requires the engine's IndexManager.
+        // Until that hookup lands the driver evaluates the predicate
+        // against the table directly (matches a `Filter { source: None }`
+        // arm).
+        self.execute_filter(field, predicate, None)
+    }
+
+    fn execute_vector_exclusion(
+        &self,
+        positive: &OperatorTree,
+        negative: &OperatorTree,
+    ) -> PostingList {
+        let pos = self.execute_node(positive);
+        let neg = self.execute_node(negative);
+        let neg_ids: BTreeSet<DocId> = neg.entries().iter().map(|e| e.doc_id).collect();
+        let mut entries: Vec<PostingEntry> = Vec::new();
+        for entry in pos.entries() {
+            if !neg_ids.contains(&entry.doc_id) {
+                entries.push(entry.clone());
+            }
+        }
+        PostingList::from_sorted_unchecked(entries)
+    }
+
+    fn execute_log_odds_fusion(&self, signals: &[OperatorTree], alpha: f64) -> PostingList {
+        if signals.is_empty() {
+            return PostingList::new();
+        }
+        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
+        let fuser = uqa_fusion::LogOddsFusion::new(alpha);
+        fuse_signals_with(&posting_lists, |probs| fuser.fuse(probs))
+    }
+
+    fn execute_cosine_probability(&self, source: &OperatorTree) -> PostingList {
+        // Lift cosine similarities in `[-1, 1]` onto the (0, 1)
+        // probability scale via `(1 + s) / 2`. Mirrors
+        // [`uqa_operators::CosineProbabilityOperator`] but skips the
+        // trait wrapper because the source has already been driven
+        // through the engine.
+        use uqa_scoring::cosine_to_probability;
+        let pl = self.execute_node(source);
+        pl.with_scores(|e| cosine_to_probability(e.payload.score))
+    }
+
+    fn execute_attention_fusion(
+        &self,
+        signals: &[OperatorTree],
+        attention: &uqa_operators::tree::AttentionRef,
+        query_features: &[f64],
+    ) -> PostingList {
+        if signals.is_empty() {
+            return PostingList::new();
+        }
+        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
+        let features = self.attention_query_features(signals, query_features);
+        fuse_signals_with(&posting_lists, |probs| {
+            attention.fuse(probs, &features)
+        })
+    }
+
+    fn execute_learned_fusion(
+        &self,
+        signals: &[OperatorTree],
+        learned: &uqa_operators::tree::LearnedFusionRef,
+    ) -> PostingList {
+        if signals.is_empty() {
+            return PostingList::new();
+        }
+        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
+        fuse_signals_with(&posting_lists, |probs| learned.fuse(probs))
+    }
+
+    /// Build the `n_query_features=6` vector that attention fusers
+    /// expect. When the IR carries a non-empty placeholder it wins
+    /// (test fixtures); otherwise the driver extracts the canonical
+    /// `[mean_idf, max_idf, min_idf, coverage, query_length,
+    /// vocab_overlap]` vector from the table's inverted-index stats
+    /// against the first text-bearing signal it can find.
+    fn attention_query_features(
+        &self,
+        signals: &[OperatorTree],
+        explicit: &[f64],
+    ) -> Vec<f64> {
+        if !explicit.is_empty() {
+            return explicit.to_vec();
+        }
+        let Some(table_state) = self.engine.table(self.table) else {
+            return vec![0.0; uqa_fusion::N_QUERY_FEATURES];
+        };
+        let idx_guard = table_state.inverted_index.read();
+        let index_stats = idx_guard.stats();
+        let analyzer = idx_guard.analyzer().clone();
+        if let Some((field, query)) = first_text_signal(signals) {
+            let terms = analyzer.analyze(&query);
+            return uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field))
+                .to_vec();
+        }
+        vec![0.0; uqa_fusion::N_QUERY_FEATURES]
+    }
+
+    fn bridge_context(&self) -> uqa_operators::base::ExecutionContext {
+        let mut ctx = uqa_operators::base::ExecutionContext::new();
+        if let Some(state) = self.engine.table(self.table) {
+            ctx.document_store = Some(state.document_store.read().snapshot());
+        }
+        ctx
+    }
+
+    fn facet_vector_inline(
+        &self,
+        vec_pl: &PostingList,
+        facet_field: &str,
+    ) -> PostingList {
+        use std::collections::BTreeMap;
+        let Some(state) = self.engine.table(self.table) else {
+            return PostingList::new();
+        };
+        let snapshot = state.document_store.read().snapshot();
+        let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+        for entry in vec_pl.entries() {
+            if let Some(value) = snapshot.get_field(entry.doc_id, facet_field) {
+                if !matches!(value, Value::Null) {
+                    let key = match value {
+                        Value::Str(s) => s,
+                        Value::Int(n) => n.to_string(),
+                        Value::Float(f) => format!("{f}"),
+                        Value::Bool(b) => b.to_string(),
+                        other => format!("{other:?}"),
+                    };
+                    *counts.entry(key).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut entries: Vec<PostingEntry> = Vec::with_capacity(counts.len());
+        for (i, (value, count)) in counts.into_iter().enumerate() {
+            let mut fields = std::collections::BTreeMap::new();
+            fields.insert("_facet_field".to_string(), Value::Str(facet_field.to_string()));
+            fields.insert("_facet_value".to_string(), Value::Str(value));
+            fields.insert("_facet_count".to_string(), Value::Int(count as i64));
+            entries.push(PostingEntry::new(
+                i as DocId,
+                Payload {
+                    positions: Vec::new(),
+                    score: count as f64,
+                    fields,
+                },
+            ));
+        }
+        PostingList::from_sorted_unchecked(entries)
+    }
+}
+
+/// Replay a posting list that the [`EngineDriver`] has already
+/// computed. Used by fusion / boolean wrappers that take
+/// `Arc<dyn Operator>` signals: the driver pre-executes each child
+/// node and hands the result over as a [`StaticPostingList`].
+struct StaticPostingList {
+    pl: PostingList,
+}
+
+impl uqa_operators::base::Operator for StaticPostingList {
+    fn execute(&self, _ctx: &uqa_operators::base::ExecutionContext) -> PostingList {
+        self.pl.clone()
+    }
+}
+
+/// Walk a slice of fusion signals and find the first text-bearing
+/// node so attention's query-feature extractor has a query to score
+/// against. Returns `(field, query)` of the first matching `Term` (or
+/// `Score`-wrapped `Term`); falls back to `None` when no text signal
+/// is present in the fusion args.
+fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
+    for sig in signals {
+        if let Some(pair) = find_text_in_tree(sig) {
+            return Some(pair);
+        }
+    }
+    None
+}
+
+fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
+    match tree {
+        OperatorTree::Term { query, field } => {
+            field.clone().map(|f| (f, query.clone()))
+        }
+        OperatorTree::Score {
+            source,
+            query_terms,
+            field,
+            ..
+        } => {
+            // Score wraps a Term; flatten the underlying query string
+            // back out by joining the analyzed terms with spaces.
+            if let Some(inner) = find_text_in_tree(source) {
+                return Some(inner);
+            }
+            Some((field.clone(), query_terms.join(" ")))
+        }
+        OperatorTree::Filter { source: Some(s), .. } => find_text_in_tree(s),
+        OperatorTree::Composed(parts)
+        | OperatorTree::Intersect(parts)
+        | OperatorTree::Union(parts) => parts.iter().find_map(find_text_in_tree),
+        OperatorTree::Complement(inner)
+        | OperatorTree::CosineProbability(inner) => find_text_in_tree(inner),
+        _ => None,
+    }
+}
+
+/// Combine a vector of per-signal posting lists into a single fused
+/// posting list. `fuse` receives the per-signal probability vector
+/// for one document and returns the fused score. Mirrors the
+/// `collect_score_maps` + per-doc loop in
+/// `uqa_operators::fusion_wrappers`.
+fn fuse_signals_with<F>(posting_lists: &[PostingList], fuse: F) -> PostingList
+where
+    F: Fn(&[f64]) -> f64,
+{
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut maps: Vec<BTreeMap<DocId, f64>> = Vec::with_capacity(posting_lists.len());
+    let mut all_ids: BTreeSet<DocId> = BTreeSet::new();
+    for pl in posting_lists {
+        let mut m: BTreeMap<DocId, f64> = BTreeMap::new();
+        for entry in pl {
+            m.insert(entry.doc_id, entry.payload.score);
+            all_ids.insert(entry.doc_id);
+        }
+        maps.push(m);
+    }
+    let total = all_ids.len();
+    if total == 0 {
+        return PostingList::new();
+    }
+    let defaults: Vec<f64> = maps
+        .iter()
+        .map(|m| uqa_operators::hybrid::coverage_based_default(m.len(), total, 0.01))
+        .collect();
+    let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
+    for doc_id in all_ids {
+        let probs: Vec<f64> = maps
+            .iter()
+            .enumerate()
+            .map(|(j, m)| *m.get(&doc_id).unwrap_or(&defaults[j]))
+            .collect();
+        let fused = fuse(&probs);
+        entries.push(PostingEntry::new(
+            doc_id,
+            Payload {
+                score: fused,
+                ..Default::default()
+            },
+        ));
+    }
+    PostingList::from_sorted_unchecked(entries)
 }
 
 fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {
@@ -440,6 +888,26 @@ fn posting_list_to_scored(pl: &PostingList) -> Vec<ScoredEntry> {
         .collect()
 }
 
+/// Lower a WHERE expression and run [`QueryOptimizer`] over the
+/// resulting tree without executing it. Useful for tests and
+/// `EXPLAIN`-style diagnostics that want to inspect the rewritten
+/// shape before any posting list is materialised.
+#[must_use]
+pub fn optimised_tree_for(
+    engine: &Engine,
+    table: &str,
+    where_expr: &Expr,
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
+    let tree = lower_where(where_expr, params)?;
+    let row_count = engine.table_doc_ids(table).len() as u64;
+    Some(
+        QueryOptimizer::new()
+            .with_row_count(row_count)
+            .optimize(tree),
+    )
+}
+
 /// The "lower → optimise → execute" pipeline. `Some(rows)` when the
 /// WHERE expression maps cleanly onto the operator tree; `None`
 /// signals the caller to fall back to its direct-dispatch path. Any
@@ -454,12 +922,9 @@ pub fn run_optimised(
     let Some(expr) = where_expr else {
         return Ok(None);
     };
-    let Some(tree) = lower_where(expr, params) else {
+    let Some(optimised) = optimised_tree_for(engine, table, expr, params) else {
         return Ok(None);
     };
-    let optimised = QueryOptimizer::new()
-        .with_row_count(engine.table_doc_ids(table).len() as u64)
-        .optimize(tree);
     let driver = EngineDriver::new(engine, table, params);
     let mut executor = PlanExecutor::new(&driver);
     let pl = executor.execute(&optimised);

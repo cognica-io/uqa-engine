@@ -149,6 +149,10 @@ pub struct Engine {
     /// Resolution order for unqualified table names. Mirrors Python's
     /// `Engine._tables._search_path`. Defaults to `["public"]`.
     search_path: RwLock<Vec<String>>,
+    /// Session-scoped runtime parameters. Anything assigned via SET
+    /// lands here so SHOW can echo it back; `DISCARD ALL` clears the
+    /// map. Mirrors Python's `Engine._session_vars`.
+    session_vars: RwLock<BTreeMap<String, String>>,
     /// Pre-built RPQ path indexes keyed by `<graph>::<name>`. Each
     /// entry materialises a fixed set of label sequences so RPQ can
     /// short-circuit NFA simulation when the expression matches.
@@ -245,6 +249,7 @@ impl Engine {
             views: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
+            session_vars: RwLock::new(BTreeMap::new()),
             path_indexes: RwLock::new(BTreeMap::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
@@ -646,6 +651,7 @@ impl Engine {
             views: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
+            session_vars: RwLock::new(BTreeMap::new()),
             path_indexes: RwLock::new(BTreeMap::new()),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
@@ -1226,9 +1232,10 @@ impl Engine {
         *self.search_path.write() = value;
     }
 
-    /// Apply `SET <name> [TO|=] <value>`. Today only `search_path` has
-    /// engine-level semantics; everything else is recorded as a no-op
-    /// for forward compatibility.
+    /// Apply `SET <name> [TO|=] <value>`. Honours `search_path`
+    /// directly; every other parameter is stored in the session-vars
+    /// map so a subsequent `SHOW <name>` can echo it back. Mirrors
+    /// Python's session-variable behaviour.
     pub fn set_variable(&self, name: &str, value: &str) {
         if name.eq_ignore_ascii_case("search_path") {
             let parts: Vec<String> = value
@@ -1237,6 +1244,54 @@ impl Engine {
                 .filter(|s| !s.is_empty())
                 .collect();
             self.set_search_path(parts);
+            self.session_vars
+                .write()
+                .insert(name.to_string(), value.to_string());
+            return;
+        }
+        self.session_vars
+            .write()
+            .insert(name.to_string(), value.to_string());
+    }
+
+    /// Read back a session variable. `search_path` always resolves to
+    /// the current resolution order; every other key looks up the
+    /// session-vars map and falls back to an empty string. Mirrors
+    /// Python's `_compile_show`.
+    pub fn show_variable(&self, name: &str) -> String {
+        if name.eq_ignore_ascii_case("search_path") {
+            return self.search_path().join(",");
+        }
+        self.session_vars
+            .read()
+            .get(name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Apply `DISCARD <target>`. Mirrors Python's `_compile_discard`:
+    /// `ALL` resets every kind of session state; the narrower
+    /// variants are scoped accordingly.
+    pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) {
+        use uqa_sql::ast::DiscardTarget;
+        match target {
+            DiscardTarget::All => {
+                self.session_vars.write().clear();
+                self.prepared.write().clear();
+                // Temp tables aren't tracked separately yet; clearing
+                // the prepared map matches Python's effect on the bits
+                // we own today.
+            }
+            DiscardTarget::Plans => {
+                self.prepared.write().clear();
+            }
+            DiscardTarget::Sequences => {
+                self.sequences.write().clear();
+            }
+            DiscardTarget::Temp => {
+                // No temp-table registry yet; preserve the no-op
+                // semantics until we add one.
+            }
         }
     }
 

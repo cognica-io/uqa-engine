@@ -330,6 +330,15 @@ pub enum NullsOrder {
     Last,
 }
 
+/// `DISCARD` target. Mirrors `PostgreSQL`'s `DiscardMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscardTarget {
+    All,
+    Plans,
+    Sequences,
+    Temp,
+}
+
 #[derive(Debug, Clone)]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
@@ -525,6 +534,17 @@ pub enum Statement {
     SetVariable {
         name: String,
         value: String,
+    },
+    /// `SHOW <variable>` — return the runtime parameter as a single
+    /// `(name -> value)` row. Mirrors Python `_compile_show`.
+    ShowVariable {
+        name: String,
+    },
+    /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` — clear session
+    /// state. Mirrors Python `_compile_discard`. The engine resets
+    /// session vars, prepared statements and temp tables.
+    Discard {
+        target: DiscardTarget,
     },
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
     /// emit the planner output. No-op when the engine does not have

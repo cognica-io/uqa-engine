@@ -231,6 +231,260 @@ impl CostEstimator {
     }
 }
 
+// ---------------------------------------------------------------
+// Algebraic-tree cost model (port of Python's `CostModel` class).
+// ---------------------------------------------------------------
+
+use uqa_core::IndexStats;
+use uqa_operators::{DeepFusionLayer, OperatorTree, ProbBoolMode};
+
+use crate::cardinality::GraphStats;
+
+/// Mirrors Python's `SCORE_OVERHEAD_FACTOR`.
+pub const SCORE_OVERHEAD_FACTOR: f64 = 1.1;
+/// Mirrors Python's `FILTER_SCAN_FRACTION`.
+pub const FILTER_SCAN_FRACTION: f64 = 0.1;
+/// Mirrors Python's `GROUP_BY_OVERHEAD_FACTOR`.
+pub const GROUP_BY_OVERHEAD_FACTOR: f64 = 1.5;
+/// Mirrors Python's `VERTEX_AGG_FRACTION`.
+pub const VERTEX_AGG_FRACTION: f64 = 0.2;
+/// Mirrors Python's `TRAVERSE_FRACTION`.
+pub const TRAVERSE_FRACTION: f64 = 0.1;
+
+/// Algebraic operator-tree cost model. 1:1 port of Python's
+/// `uqa.planner.cost_model.CostModel` — produces a unitless cost for
+/// each [`OperatorTree`] node so the query optimiser's
+/// `reorder_intersect` pass can pick a join order that matches the
+/// Python reference.
+#[derive(Debug, Clone, Default)]
+pub struct CostModel {
+    pub graph_stats: Option<GraphStats>,
+}
+
+impl CostModel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_graph_stats(mut self, stats: GraphStats) -> Self {
+        self.graph_stats = Some(stats);
+        self
+    }
+
+    /// Estimate the cost of a sub-plan against `stats`. Mirrors
+    /// Python's `CostModel.estimate` (line 30 of `cost_model.py`).
+    pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+        let n = stats.total_docs as f64;
+        match op {
+            OperatorTree::Empty => 0.0,
+            OperatorTree::Term { query, field } => {
+                if stats.total_docs == 0 {
+                    1.0
+                } else {
+                    let f = field.as_deref().unwrap_or("_default");
+                    stats.doc_freq(f, query) as f64
+                }
+            }
+            OperatorTree::VectorSimilarity { .. } | OperatorTree::KNN { .. } => {
+                let dims = f64::from(stats.dimensions);
+                dims * ((stats.total_docs as f64) + 1.0).log2()
+            }
+            OperatorTree::IndexScan { .. } => {
+                // The Rust port lacks an `IndexScanOperator.cost_estimate`
+                // hook; mirror Python's behaviour by treating the index
+                // scan as proportional to the number of documents the
+                // index covers.
+                n * 0.1
+            }
+            OperatorTree::Score { source, .. } => {
+                self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
+            }
+            OperatorTree::Filter { source, .. } => {
+                let mut base = n;
+                if let Some(src) = source.as_deref() {
+                    base = self.estimate(src, stats) + base * FILTER_SCAN_FRACTION;
+                }
+                base
+            }
+            OperatorTree::Intersect(ops) => {
+                let total: f64 = ops.iter().map(|o| self.estimate(o, stats)).sum();
+                total
+            }
+            OperatorTree::Union(ops) => ops.iter().map(|o| self.estimate(o, stats)).sum(),
+            OperatorTree::Aggregate { .. } => n,
+            OperatorTree::GroupBy { .. } => n * GROUP_BY_OVERHEAD_FACTOR,
+            OperatorTree::LogOddsFusion { signals, .. }
+            | OperatorTree::ProbBoolFusion { signals, .. }
+            | OperatorTree::AttentionFusion { signals, .. }
+            | OperatorTree::LearnedFusion { signals, .. } => {
+                signals.iter().map(|s| self.estimate(s, stats)).sum()
+            }
+            OperatorTree::ProbNot { signal, .. } => self.estimate(signal, stats) + n,
+            OperatorTree::HybridTextVector {
+                term_op, vector_op, ..
+            } => self.estimate(term_op, stats) + self.estimate(vector_op, stats),
+            OperatorTree::SemanticFilter { source, vector_op } => {
+                self.estimate(source, stats) + self.estimate(vector_op, stats)
+            }
+            OperatorTree::VectorExclusion { positive, negative } => {
+                self.estimate(positive, stats) + self.estimate(negative, stats)
+            }
+            OperatorTree::FacetVector { vector_op, .. } => self.estimate(vector_op, stats),
+            OperatorTree::VertexAggregation { .. } => n * VERTEX_AGG_FRACTION,
+            OperatorTree::Traverse {
+                label, max_hops, ..
+            }
+            | OperatorTree::TemporalTraverse {
+                label, max_hops, ..
+            } => {
+                if let Some(gs) = self.graph_stats.as_ref() {
+                    let sel = gs.label_selectivity(label.as_deref());
+                    let d = gs.avg_out_degree * sel;
+                    let mut cost = 0.0_f64;
+                    let hops = (*max_hops).max(1);
+                    for i in 1..=hops {
+                        cost += d.powi(i as i32);
+                    }
+                    cost.max(1.0)
+                } else {
+                    n * TRAVERSE_FRACTION
+                }
+            }
+            OperatorTree::PatternMatch { pattern, .. } => {
+                let k = pattern.vertex_patterns.len() as i32;
+                // Negated edge patterns aren't represented in the Rust
+                // IR yet (`EdgePatternIR` carries no `negated` flag).
+                // The base cost matches Python's path; the +20% per
+                // negated edge will land once the IR adds the flag.
+                if let Some(gs) = self.graph_stats.as_ref() {
+                    let nv = if gs.num_vertices > 0 {
+                        gs.num_vertices as f64
+                    } else {
+                        n
+                    };
+                    (nv.powi(k) * 0.01).max(1.0)
+                } else {
+                    n * n
+                }
+            }
+            OperatorTree::TemporalPatternMatch { .. } => n * n,
+            OperatorTree::RegularPathQuery { rpq_source, .. }
+            | OperatorTree::WeightedPathQuery { rpq_source, .. } => {
+                // Path-indexable expressions (Concat-of-Labels) are
+                // cheap. Falling back to the full RPQ cost otherwise.
+                if is_label_chain(rpq_source) {
+                    return n * 0.1;
+                }
+                if let Some(gs) = self.graph_stats.as_ref() {
+                    let nv = gs.num_vertices as f64;
+                    let r_size = rpq_source_label_count(rpq_source).max(1) as f64;
+                    return (nv.powi(2) * r_size * 0.001).max(1.0);
+                }
+                n * n
+            }
+            OperatorTree::SparseThreshold { source, .. } => self.estimate(source, stats) * 0.5,
+            OperatorTree::MultiFieldSearch { fields, .. } => n * fields.len() as f64,
+            OperatorTree::MessagePassing { source } | OperatorTree::GraphEmbedding { source } => {
+                self.estimate(source, stats)
+            }
+            OperatorTree::MultiStage { stages } => stages
+                .iter()
+                .map(|s| self.estimate(&s.child, stats))
+                .sum::<f64>()
+                .max(n * 0.1),
+            // Python's `CostModel` reads `op.max_iterations` directly.
+            // The Rust IR doesn't carry this field today, so we use
+            // Python's default (20). Tracking the iteration count
+            // accurately requires extending `OperatorTree::PageRank` /
+            // `HITS`.
+            OperatorTree::PageRank { .. } => n * 20.0 * 0.1,
+            OperatorTree::HITS { .. } => n * 20.0 * 0.2,
+            OperatorTree::BetweennessCentrality { .. } => n * n * 0.5,
+            OperatorTree::TextSimilarityJoin { .. } => {
+                2.0 * n * f64::from(stats.dimensions.max(10))
+            }
+            OperatorTree::VectorSimilarityJoin { .. } => n * n * f64::from(stats.dimensions.max(1)),
+            OperatorTree::GraphJoin { .. } | OperatorTree::CrossParadigmJoin { .. } => n * 10.0,
+            OperatorTree::HybridJoin { .. } => n + n * f64::from(stats.dimensions.max(1)),
+            OperatorTree::ProgressiveFusion { stages } => {
+                stages.last().map(|s| s.k as f64).unwrap_or(n)
+            }
+            OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
+            OperatorTree::Composed(ops) | OperatorTree::Opaque { children: ops, .. } => {
+                ops.iter().map(|o| self.estimate(o, stats)).sum()
+            }
+            OperatorTree::Complement(inner) => self.estimate(inner, stats) + n,
+            OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
+            OperatorTree::Facet { source, .. } => match source.as_deref() {
+                Some(s) => self.estimate(s, stats),
+                None => n,
+            },
+        }
+    }
+
+    fn estimate_deep_fusion(&self, layers: &[DeepFusionLayer], stats: &IndexStats, n: f64) -> f64 {
+        let mut cost = 0.0_f64;
+        for layer in layers {
+            match layer {
+                DeepFusionLayer::Signal { signals } => {
+                    cost += signals.iter().map(|s| self.estimate(s, stats)).sum::<f64>();
+                }
+                DeepFusionLayer::Propagate { .. } | DeepFusionLayer::Conv => {
+                    cost += n;
+                }
+                DeepFusionLayer::Pool { .. }
+                | DeepFusionLayer::Flatten
+                | DeepFusionLayer::Dense
+                | DeepFusionLayer::Softmax
+                | DeepFusionLayer::BatchNorm
+                | DeepFusionLayer::Dropout => {}
+            }
+        }
+        cost.max(n * 0.1)
+    }
+}
+
+/// Quick check for `Concat(Label, Concat(Label, ...))` shape — Python
+/// recognises path-indexable RPQs and short-circuits the cost. Since
+/// the Rust port only stores the source string, we approximate by
+/// disallowing any quantifier (`*`, `+`, `?`) or alternation (`|`).
+fn is_label_chain(source: &str) -> bool {
+    !source.contains('*')
+        && !source.contains('+')
+        && !source.contains('?')
+        && !source.contains('|')
+        && !source.contains('{')
+}
+
+/// Mirror of Python's `_expr_label_count`, but operates on the raw
+/// source string. Falls back to alphanumeric token counting + `* / +
+/// / ?` doubling so empty / unparseable inputs degrade to 1.
+fn rpq_source_label_count(source: &str) -> usize {
+    let mut labels = 0_usize;
+    let mut in_ident = false;
+    for ch in source.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            if !in_ident {
+                labels += 1;
+                in_ident = true;
+            }
+        } else {
+            in_ident = false;
+            if ch == '*' || ch == '+' || ch == '?' {
+                labels = labels.saturating_add(labels);
+            }
+        }
+    }
+    labels.max(1)
+}
+
+// Required for the `ProbBoolMode` variant match above to work even
+// when the OR/AND distinction is irrelevant at the cost-model layer.
+const _: () = {
+    let _ = ProbBoolMode::And;
+    let _ = ProbBoolMode::Or;
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

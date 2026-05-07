@@ -1341,6 +1341,7 @@ name = "uqa-graph"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "parking_lot",
  "proptest",
  "rusqlite",
  "serde",
@@ -1348,6 +1349,7 @@ dependencies = [
  "thiserror 2.0.18",
  "uqa-analysis",
  "uqa-core",
+ "uqa-operators",
  "uqa-storage",
 ]
 
@@ -1381,6 +1383,7 @@ dependencies = [
  "thiserror 2.0.18",
  "uqa-core",
  "uqa-execution",
+ "uqa-graph",
  "uqa-joins",
  "uqa-operators",
  "uqa-sql",

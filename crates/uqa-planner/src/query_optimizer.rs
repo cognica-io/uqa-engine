@@ -43,7 +43,7 @@ use uqa_operators::{
 use uqa_storage::IndexManager;
 
 use crate::cardinality::{CardinalityEstimator, GraphStats};
-use crate::cost_model::CostEstimator;
+use crate::cost_model::{CostEstimator, CostModel};
 
 /// Fluent configuration for the optimizer pipeline. Lets callers
 /// disable individual stages for testing without poking at private
@@ -83,6 +83,7 @@ impl Default for OptimizerConfig {
 pub struct QueryOptimizer {
     pub estimator: CardinalityEstimator,
     pub cost_estimator: CostEstimator,
+    pub cost_model: CostModel,
     pub graph_stats: Option<GraphStats>,
     pub index_manager: Option<Arc<IndexManager>>,
     pub table_name: Option<String>,
@@ -95,6 +96,7 @@ impl QueryOptimizer {
         Self {
             estimator: CardinalityEstimator::new(),
             cost_estimator: CostEstimator::default(),
+            cost_model: CostModel::new(),
             graph_stats: None,
             index_manager: None,
             table_name: None,
@@ -110,6 +112,8 @@ impl QueryOptimizer {
     }
 
     pub fn with_graph_stats(mut self, gs: GraphStats) -> Self {
+        self.cost_model = CostModel::new().with_graph_stats(gs.clone());
+        self.estimator = std::mem::take(&mut self.estimator).with_graph_stats(gs.clone());
         self.graph_stats = Some(gs);
         self
     }
@@ -377,28 +381,45 @@ impl QueryOptimizer {
                             graph: graph.clone(),
                         };
                     }
-                    // Try edge variable: "src_tgt.prop".
+                    // Try edge variable: "src_tgt.prop". Mirror Python's
+                    // two-stage match: first build the
+                    // `source_target -> ep` lookup (last-write-wins so
+                    // multi-label edges between the same vertices fall
+                    // through to the most recently declared label),
+                    // then push the new constraint onto *every* edge
+                    // sharing the chosen triple `(source, target, label)`.
+                    let mut edge_lookup: std::collections::BTreeMap<String, EdgePatternIR> =
+                        std::collections::BTreeMap::new();
+                    for ep in &pattern.edge_patterns {
+                        let key = format!("{}_{}", ep.source_var, ep.target_var);
+                        edge_lookup.insert(key, ep.clone());
+                    }
+                    let chosen = edge_lookup.get(target_var).cloned();
                     let mut new_eps = Vec::with_capacity(pattern.edge_patterns.len());
-                    for orig_ep in &pattern.edge_patterns {
-                        let edge_key = format!("{}_{}", orig_ep.source_var, orig_ep.target_var);
-                        if !pushed && edge_key == target_var {
-                            let mut constraints = orig_ep.constraints.clone();
-                            let pred = predicate.clone();
-                            let prop_clone = prop.clone();
-                            constraints.push(Arc::new(move |e: &uqa_core::Edge| {
-                                e.properties
-                                    .get(&prop_clone)
-                                    .is_some_and(|val| pred.evaluate(Some(val)))
-                            }));
-                            new_eps.push(EdgePatternIR {
-                                source_var: orig_ep.source_var.clone(),
-                                target_var: orig_ep.target_var.clone(),
-                                label: orig_ep.label.clone(),
-                                constraints,
-                            });
-                            pushed = true;
-                        } else {
-                            new_eps.push(orig_ep.clone());
+                    if let Some(ref chosen_ep) = chosen {
+                        for orig_ep in &pattern.edge_patterns {
+                            if orig_ep.source_var == chosen_ep.source_var
+                                && orig_ep.target_var == chosen_ep.target_var
+                                && orig_ep.label == chosen_ep.label
+                            {
+                                let mut constraints = orig_ep.constraints.clone();
+                                let pred = predicate.clone();
+                                let prop_clone = prop.clone();
+                                constraints.push(Arc::new(move |e: &uqa_core::Edge| {
+                                    e.properties
+                                        .get(&prop_clone)
+                                        .is_some_and(|val| pred.evaluate(Some(val)))
+                                }));
+                                new_eps.push(EdgePatternIR {
+                                    source_var: orig_ep.source_var.clone(),
+                                    target_var: orig_ep.target_var.clone(),
+                                    label: orig_ep.label.clone(),
+                                    constraints,
+                                });
+                                pushed = true;
+                            } else {
+                                new_eps.push(orig_ep.clone());
+                            }
                         }
                     }
                     if pushed {
@@ -688,27 +709,39 @@ impl QueryOptimizer {
         if vars_a.intersection(&vars_b).next().is_none() {
             return None;
         }
-        let mut merged: std::collections::BTreeMap<String, VertexPatternIR> =
+        // Python uses a regular dict for the merge buffer, which keeps
+        // insertion order. Mirror that with a parallel `Vec` (positions)
+        // + `BTreeMap` (lookup) so structurally-equivalent inputs give
+        // structurally-equivalent merged patterns regardless of name
+        // collation.
+        let mut order: Vec<String> = Vec::new();
+        let mut by_var: std::collections::BTreeMap<String, VertexPatternIR> =
             std::collections::BTreeMap::new();
         for vp in &pa.vertex_patterns {
-            merged.insert(vp.variable.clone(), vp.clone());
+            order.push(vp.variable.clone());
+            by_var.insert(vp.variable.clone(), vp.clone());
         }
         for vp in &pb.vertex_patterns {
-            match merged.get_mut(&vp.variable) {
+            match by_var.get_mut(&vp.variable) {
                 Some(existing) => {
                     let mut combined = existing.constraints.clone();
                     combined.extend(vp.constraints.iter().cloned());
                     existing.constraints = combined;
                 }
                 None => {
-                    merged.insert(vp.variable.clone(), vp.clone());
+                    order.push(vp.variable.clone());
+                    by_var.insert(vp.variable.clone(), vp.clone());
                 }
             }
         }
+        let merged_vps: Vec<VertexPatternIR> = order
+            .into_iter()
+            .filter_map(|var| by_var.remove(&var))
+            .collect();
         let mut edge_patterns = pa.edge_patterns.clone();
         edge_patterns.extend(pb.edge_patterns.iter().cloned());
         let new_pattern = GraphPatternIR {
-            vertex_patterns: merged.into_values().collect(),
+            vertex_patterns: merged_vps,
             edge_patterns,
         };
         Some(OperatorTree::PatternMatch {
@@ -784,9 +817,16 @@ impl QueryOptimizer {
                 .into_iter()
                 .map(|c| self.recurse_children(c))
                 .collect();
+            // Mirror Python: the optimizer ranks intersect arms by the
+            // algebraic operator cost (`CostModel.estimate`), not the
+            // cardinality estimator. The two diverge for `Filter`,
+            // `Score`, `Traverse`, `RegularPathQuery`, fusion / hybrid
+            // / cross-paradigm join nodes, and any operator with a
+            // dedicated formula in `cost_model.py`.
+            let cost_stats = uqa_core::IndexStats::new(self.row_count.unwrap_or(1_000));
             children.sort_by(|a, b| {
-                let ca = self.estimator.estimate_operator(a, self.row_count);
-                let cb = self.estimator.estimate_operator(b, self.row_count);
+                let ca = self.cost_model.estimate(a, &cost_stats);
+                let cb = self.cost_model.estimate(b, &cost_stats);
                 ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
             });
             return OperatorTree::Intersect(children);
@@ -902,11 +942,15 @@ impl QueryOptimizer {
             source: None,
         } = &op
         {
-            if let Some(name) = im.find_covering_index_name(table, field, predicate) {
-                let total = self.row_count.unwrap_or(0) as f64;
-                // Cost lookup is opaque; if the manager finds an
-                // index, prefer it over a full scan whenever total > 0.
-                if total > 0.0 {
+            if let Some((name, scan_cost)) =
+                im.find_covering_index_with_cost(table, field, predicate)
+            {
+                // Python's `_apply_index_scan` only rewrites when the
+                // index's `scan_cost(predicate)` beats a full scan.
+                // Mirror that gate exactly: prefer the index only when
+                // its cost is strictly cheaper.
+                let full_scan_cost = self.row_count.unwrap_or(0) as f64;
+                if scan_cost < full_scan_cost {
                     return OperatorTree::IndexScan {
                         index_name: name,
                         field: field.clone(),

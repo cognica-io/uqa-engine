@@ -22,6 +22,7 @@ mod incremental_match;
 mod index;
 mod memory_store;
 mod message_passing;
+mod operator_impls;
 mod operators;
 mod pattern;
 mod posting_list;
@@ -43,6 +44,7 @@ pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex};
 pub use memory_store::MemoryGraphStore;
 pub use message_passing::{AggregationKind, MessagePassing};
+pub use operator_impls::{CypherQueryOperator, WeightedPathQueryOperator};
 pub use operators::{
     AggFn, GMatch, RegularPathQuery, Traverse, VertexAggregation, VertexMatch, DEFAULT_GRAPH_SCORE,
 };

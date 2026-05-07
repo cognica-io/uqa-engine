@@ -88,6 +88,20 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
             engine.set_variable(&name, &value);
             Ok(SQLResult::empty())
         }
+        Statement::ShowVariable { name } => {
+            let value = engine.show_variable(&name);
+            let mut row = ResultRow::new();
+            row.insert(name.clone(), Value::Str(value));
+            Ok(SQLResult {
+                columns: vec![name],
+                rows: vec![row],
+                affected_rows: 0,
+            })
+        }
+        Statement::Discard { target } => {
+            engine.discard(target);
+            Ok(SQLResult::empty())
+        }
         Statement::Analyze { table } => {
             engine.run_analyze(table.as_deref());
             Ok(SQLResult::empty())

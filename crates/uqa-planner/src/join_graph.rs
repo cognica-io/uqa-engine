@@ -89,6 +89,36 @@ impl JoinGraph {
             (1u64 << self.relations.len()) - 1
         }
     }
+
+    /// Indices of every relation directly connected to `node` by any
+    /// edge. Mirrors Python's `JoinGraph.neighbors`. Each call walks
+    /// the edge list once; O(|edges|).
+    pub fn neighbors(&self, node: usize) -> Vec<usize> {
+        let mark = 1u64 << node;
+        let mut out: Vec<usize> = Vec::new();
+        let mut seen: u64 = 0;
+        for edge in &self.edges {
+            let other = if edge.left == mark {
+                edge.right
+            } else if edge.right == mark {
+                edge.left
+            } else {
+                continue;
+            };
+            if other == 0 {
+                continue;
+            }
+            // `other` is a singleton bitmask of the other side.
+            let idx = other.trailing_zeros() as usize;
+            if seen & (1u64 << idx) != 0 {
+                continue;
+            }
+            seen |= 1u64 << idx;
+            out.push(idx);
+        }
+        out.sort_unstable();
+        out
+    }
 }
 
 #[cfg(test)]
