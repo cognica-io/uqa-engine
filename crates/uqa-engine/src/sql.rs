@@ -553,7 +553,21 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
                 }
                 _ => {}
             }
+            // Capture the default expression and NOT NULL flag before
+            // moving the column into the engine so we can backfill any
+            // existing rows. PostgreSQL evaluates the default once per
+            // existing row at ALTER TABLE time, which keeps NOT NULL
+            // constraints satisfiable for non-empty tables.
+            let default_expr = column.default.clone();
+            let column_not_null = column.not_null;
             engine.register_column(&stmt.table, column);
+            backfill_added_column(
+                engine,
+                &stmt.table,
+                &col_name,
+                default_expr.as_ref(),
+                column_not_null,
+            )?;
         }
         AlterTableAction::DropColumn {
             name,
@@ -588,6 +602,47 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
         }
     }
     Ok(SQLResult::empty())
+}
+
+/// Apply the new column's DEFAULT (or NULL) value to every row that
+/// existed before the ADD COLUMN. `PostgreSQL` evaluates the default
+/// once per existing row at ALTER TABLE time so NOT NULL columns stay
+/// consistent on non-empty tables; the Rust port mirrors that
+/// semantics by sweeping the document store.
+fn backfill_added_column(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    default_expr: Option<&uqa_sql::ast::Expr>,
+    not_null: bool,
+) -> Result<(), SQLError> {
+    let doc_ids = engine.table_doc_ids(table);
+    if doc_ids.is_empty() {
+        return Ok(());
+    }
+    let default_value = if let Some(expr) = default_expr {
+        let ctx = EvalContext::new(None, &[]).with_engine(engine);
+        eval(expr, &ctx)?
+    } else if not_null {
+        return Err(SQLError::TypeMismatch(format!(
+            "ALTER TABLE ADD COLUMN `{column}` is NOT NULL but no DEFAULT supplied; \
+             {} existing row(s) would violate the constraint",
+            doc_ids.len()
+        )));
+    } else {
+        Value::Null
+    };
+    let vector_value: Option<Vec<f32>> = value_to_vector(&default_value).ok();
+    for doc_id in doc_ids {
+        let mut updates: BTreeMap<String, Value> = BTreeMap::new();
+        updates.insert(column.to_string(), default_value.clone());
+        let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+        if let Some(v) = vector_value.as_ref() {
+            vectors.insert(column.to_string(), v.clone());
+        }
+        engine.update_document_fields(table, doc_id, updates, vectors);
+    }
+    Ok(())
 }
 
 fn run_update(
@@ -905,7 +960,17 @@ fn run_insert(
     }
 
     let auto_id_col = engine.auto_increment_column(&stmt.table);
-    let id_column = auto_id_col.clone().unwrap_or_else(|| "id".into());
+    // Resolve the table's primary-key column name. Auto-increment
+    // (SERIAL / BIGSERIAL) wins; otherwise the first PRIMARY KEY
+    // column wins; otherwise we fall back to the conventional "id"
+    // slot so legacy tests keep passing.
+    let id_column = auto_id_col.clone().or_else(|| {
+        engine
+            .describe_table(&stmt.table)
+            .and_then(|cols| cols.into_iter().find(|c| c.primary_key))
+            .map(|c| c.name)
+    });
+    let id_column = id_column.unwrap_or_else(|| "id".into());
 
     let columns: Vec<String> = if stmt.columns.is_empty() {
         // INSERT without explicit column list: project the table schema.
@@ -945,14 +1010,22 @@ fn run_insert(
         for (i, col) in columns.iter().enumerate() {
             let v = eval(&row[i], &ctx)?;
             if Some(i) == id_index {
+                // Auto-increment primary keys must be integers. A
+                // non-auto-increment primary key (TEXT, UUID, ...) keeps
+                // the user value in the document and the engine still
+                // allocates a synthetic u64 doc_id for posting-list
+                // bookkeeping. UNIQUE / PRIMARY KEY enforcement runs
+                // through `engine.unique_columns` regardless.
+                let is_auto = auto_id_col.as_deref() == Some(id_column.as_str());
                 doc_id = match &v {
                     Value::Int(n) if *n >= 0 => Some(*n as u64),
                     Value::Null => None,
-                    other => {
+                    other if is_auto => {
                         return Err(SQLError::TypeMismatch(format!(
-                            "id must be a non-negative integer, got {other:?}"
+                            "auto-increment id must be an integer, got {other:?}"
                         )));
                     }
+                    _ => None,
                 };
             }
             if let Ok(vec) = value_to_vector(&v) {
@@ -1129,7 +1202,14 @@ fn run_insert(
             id
         } else {
             let id = engine.allocate_next_id(&stmt.table)?;
-            document.insert(id_column.clone(), Value::Int(id as i64));
+            // Only stamp the allocated id back onto the document when
+            // the primary-key column is auto-increment. For non-auto
+            // primary keys (TEXT, UUID, ...) the user-supplied value
+            // already lives in `document[id_column]` and must be
+            // preserved -- the synthetic u64 stays internal.
+            if auto_id_col.as_deref() == Some(id_column.as_str()) {
+                document.insert(id_column.clone(), Value::Int(id as i64));
+            }
             id
         };
         engine.advance_next_id(&stmt.table, doc_id);
