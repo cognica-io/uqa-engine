@@ -80,7 +80,11 @@ fn offset_larger_than_row_count_empty() {
 #[test]
 fn limit_with_offset_combines() {
     let eng = engine();
-    let r = ids(&eng, "SELECT id FROM notes ORDER BY id LIMIT 2 OFFSET 1", &[]);
+    let r = ids(
+        &eng,
+        "SELECT id FROM notes ORDER BY id LIMIT 2 OFFSET 1",
+        &[],
+    );
     assert_eq!(r, vec![2, 3]);
 }
 
@@ -121,11 +125,8 @@ fn parameterised_limit_offset_binds() {
 #[test]
 fn limit_with_text_match_score_order() {
     let eng = engine();
-    eng.sql(
-        "CREATE INDEX notes_body_idx ON notes USING gin (body)",
-        &[],
-    )
-    .unwrap();
+    eng.sql("CREATE INDEX notes_body_idx ON notes USING gin (body)", &[])
+        .unwrap();
     let r = eng
         .sql(
             "SELECT id, _score FROM notes WHERE text_match(body, 'alpha') \
