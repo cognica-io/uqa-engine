@@ -1902,11 +1902,13 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 "*" => BinaryOp::Multiply,
                 "/" => BinaryOp::Divide,
                 // String concatenation: rewrite `a || b` into a
-                // concat() call so the scalar dispatcher handles
-                // null-safety and stringification uniformly.
+                // concat_op() call. concat_op propagates NULL the way
+                // the SQL `||` operator must (`'x' || NULL == NULL`),
+                // which is distinct from PostgreSQL's `CONCAT()` that
+                // skips NULL arguments.
                 "||" => {
                     return Ok(Expr::Func {
-                        name: "concat".into(),
+                        name: "concat_op".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                     });
                 }

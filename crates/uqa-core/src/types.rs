@@ -222,6 +222,24 @@ impl Ord for Value {
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             (Value::Int(a), Value::Int(b)) => a.cmp(b),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+            // Numeric cross-type compare: Int / Float / Bool all coerce
+            // to f64 so SQL `WHERE price > 15` (Float vs Int literal)
+            // and `WHERE flag > 0` line up with PostgreSQL semantics
+            // instead of falling through to the discriminant order.
+            (Value::Int(a), Value::Float(b)) => {
+                (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
+            }
+            (Value::Float(a), Value::Int(b)) => {
+                a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
+            }
+            (Value::Bool(a), Value::Int(b)) => i64::from(*a).cmp(b),
+            (Value::Int(a), Value::Bool(b)) => a.cmp(&i64::from(*b)),
+            (Value::Bool(a), Value::Float(b)) => f64::from(i64::from(*a) as i32)
+                .partial_cmp(b)
+                .unwrap_or(Ordering::Equal),
+            (Value::Float(a), Value::Bool(b)) => a
+                .partial_cmp(&f64::from(i64::from(*b) as i32))
+                .unwrap_or(Ordering::Equal),
             (Value::Str(a), Value::Str(b)) => a.cmp(b),
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::List(a), Value::List(b)) => a.cmp(b),
@@ -300,6 +318,10 @@ mod tests {
     #[test]
     fn value_ordering_across_variants_is_stable() {
         assert!(Value::Null < Value::Bool(false));
-        assert!(Value::Bool(true) < Value::Int(0));
+        // Numeric coercion: Bool(true) == 1 > Int(0).
+        assert!(Value::Bool(true) > Value::Int(0));
+        // Float vs Int compares numerically (not by discriminant).
+        assert!(Value::Float(10.0) < Value::Int(15));
+        assert!(Value::Float(20.0) > Value::Int(15));
     }
 }

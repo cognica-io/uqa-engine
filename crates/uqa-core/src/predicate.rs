@@ -39,19 +39,25 @@ impl Predicate {
     }
 
     /// Evaluate against an optional field value. The two null-aware
-    /// variants see the `None` directly; the rest reject `None`.
+    /// variants treat both an absent field (`None`) and an explicit
+    /// `Value::Null` as null; the rest reject either form.
     pub fn evaluate(&self, value: Option<&Value>) -> bool {
+        let is_null = matches!(value, None | Some(Value::Null));
         match self {
-            Predicate::IsNull => value.is_none(),
-            Predicate::IsNotNull => value.is_some(),
-            Predicate::Equals(target) => value == Some(target),
-            Predicate::NotEquals(target) => value.is_some() && value != Some(target),
-            Predicate::GreaterThan(target) => value.is_some_and(|v| v > target),
-            Predicate::GreaterThanOrEqual(target) => value.is_some_and(|v| v >= target),
-            Predicate::LessThan(target) => value.is_some_and(|v| v < target),
-            Predicate::LessThanOrEqual(target) => value.is_some_and(|v| v <= target),
-            Predicate::InSet(values) => value.is_some_and(|v| values.contains(v)),
-            Predicate::Between { low, high } => value.is_some_and(|v| v >= low && v <= high),
+            Predicate::IsNull => is_null,
+            Predicate::IsNotNull => !is_null,
+            Predicate::Equals(target) => !is_null && value == Some(target),
+            Predicate::NotEquals(target) => !is_null && value != Some(target),
+            Predicate::GreaterThan(target) => !is_null && value.is_some_and(|v| v > target),
+            Predicate::GreaterThanOrEqual(target) => {
+                !is_null && value.is_some_and(|v| v >= target)
+            }
+            Predicate::LessThan(target) => !is_null && value.is_some_and(|v| v < target),
+            Predicate::LessThanOrEqual(target) => !is_null && value.is_some_and(|v| v <= target),
+            Predicate::InSet(values) => !is_null && value.is_some_and(|v| values.contains(v)),
+            Predicate::Between { low, high } => {
+                !is_null && value.is_some_and(|v| v >= low && v <= high)
+            }
         }
     }
 }

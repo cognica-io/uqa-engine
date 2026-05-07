@@ -330,6 +330,10 @@ fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
 }
 
 fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
+    // SQL three-valued logic: NULL `op` anything == NULL.
+    if matches!(a, Value::Null) || matches!(b, Value::Null) {
+        return Ok(Value::Null);
+    }
     let lf = to_f64(a)?;
     let rf = to_f64(b)?;
     let result = match op {
@@ -337,8 +341,23 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
         BinaryOp::Subtract => lf - rf,
         BinaryOp::Multiply => lf * rf,
         BinaryOp::Divide => {
+            // PostgreSQL raises division_by_zero, but the Python
+            // reference here surfaces it as NULL so SQL row evaluation
+            // does not fail mid-projection. Match that.
             if rf == 0.0 {
-                return Err(SQLError::TypeMismatch("division by zero".into()));
+                return Ok(Value::Null);
+            }
+            // Integer / Integer in SQL truncates toward zero.
+            if matches!((a, b), (Value::Int(_), Value::Int(_))) {
+                let li = match a {
+                    Value::Int(n) => *n,
+                    _ => unreachable!(),
+                };
+                let ri = match b {
+                    Value::Int(n) => *n,
+                    _ => unreachable!(),
+                };
+                return Ok(Value::Int(li / ri));
             }
             lf / rf
         }
@@ -465,17 +484,33 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let s = expect_str(args, 0)?;
             Ok(Value::Int(s.len() as i64))
         }
-        "trim" => string1(args, |s| s.trim().to_string()),
+        "trim" | "btrim" => string1(args, |s| s.trim().to_string()),
         "ltrim" => string1(args, |s| s.trim_start().to_string()),
         "rtrim" => string1(args, |s| s.trim_end().to_string()),
         "initcap" => string1(args, initcap_str),
         "reverse" => string1(args, |s| s.chars().rev().collect()),
         "concat" => {
+            // PostgreSQL `CONCAT()` skips NULLs.
             let mut buf = String::new();
             for a in args {
                 if matches!(a, Value::Null) {
                     continue;
                 }
+                buf.push_str(&value_to_string(a));
+            }
+            Ok(Value::Str(buf))
+        }
+        "concat_op" => {
+            // SQL `||` operator: NULL propagates. Argument count is
+            // always two because the parser only emits this when
+            // rewriting a binary expression.
+            for a in args {
+                if matches!(a, Value::Null) {
+                    return Ok(Value::Null);
+                }
+            }
+            let mut buf = String::new();
+            for a in args {
                 buf.push_str(&value_to_string(a));
             }
             Ok(Value::Str(buf))
