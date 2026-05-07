@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
@@ -254,6 +254,124 @@ impl Catalog {
             Ok(())
         })
     }
+
+    /// Register the existence of a named graph. Vertex / edge
+    /// payloads land in `_graph_vertices` / `_graph_edges` separately
+    /// — this row records the empty-graph case so the engine can
+    /// re-hydrate every previously-created graph at reopen, even if no
+    /// data has been added yet.
+    pub fn save_graph(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO _graphs (name) VALUES (?1)",
+                params![name],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Drop a named graph plus every vertex and edge that belongs to
+    /// it. Used by `DROP GRAPH` / `graph_drop()`.
+    pub fn drop_graph(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute("DELETE FROM _graphs WHERE name = ?1", params![name])?;
+            c.execute(
+                "DELETE FROM _graph_vertices WHERE graph = ?1",
+                params![name],
+            )?;
+            c.execute("DELETE FROM _graph_edges WHERE graph = ?1", params![name])?;
+            Ok(())
+        })
+    }
+
+    /// Sorted list of every persisted graph name.
+    pub fn load_graphs(&self) -> Result<Vec<String>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare("SELECT name FROM _graphs ORDER BY name")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Persist a vertex (or update its label / properties payload) on
+    /// `graph`. The body is the serde-JSON encoding of [`uqa_core::Vertex`].
+    pub fn save_graph_vertex(&self, graph: &str, vertex_id: u64, body: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _graph_vertices (graph, vertex_id, body) \
+                 VALUES (?1, ?2, ?3)",
+                params![graph, vertex_id as i64, body],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Remove a single vertex from `graph`.
+    pub fn delete_graph_vertex(&self, graph: &str, vertex_id: u64) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _graph_vertices WHERE graph = ?1 AND vertex_id = ?2",
+                params![graph, vertex_id as i64],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Persist an edge on `graph`. The body is the serde-JSON encoding
+    /// of [`uqa_core::Edge`].
+    pub fn save_graph_edge(&self, graph: &str, edge_id: u64, body: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO _graph_edges (graph, edge_id, body) \
+                 VALUES (?1, ?2, ?3)",
+                params![graph, edge_id as i64, body],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Remove a single edge from `graph`.
+    pub fn delete_graph_edge(&self, graph: &str, edge_id: u64) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _graph_edges WHERE graph = ?1 AND edge_id = ?2",
+                params![graph, edge_id as i64],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Vertex bodies for `graph`, sorted by vertex id.
+    pub fn load_graph_vertices(&self, graph: &str) -> Result<Vec<String>> {
+        self.conn.with(|c| {
+            let mut stmt =
+                c.prepare("SELECT body FROM _graph_vertices WHERE graph = ?1 ORDER BY vertex_id")?;
+            let rows = stmt.query_map(params![graph], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
+    /// Edge bodies for `graph`, sorted by edge id.
+    pub fn load_graph_edges(&self, graph: &str) -> Result<Vec<String>> {
+        self.conn.with(|c| {
+            let mut stmt =
+                c.prepare("SELECT body FROM _graph_edges WHERE graph = ?1 ORDER BY edge_id")?;
+            let rows = stmt.query_map(params![graph], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
 }
 
 /// Migrations applied in order. Each `(version, sql)` is run in a single
@@ -335,6 +453,30 @@ const MIGRATIONS: &[(u32, &str)] = &[
         name TEXT PRIMARY KEY,
         params TEXT NOT NULL
     );
+    ",
+    ),
+    (
+        5,
+        r"
+    CREATE TABLE IF NOT EXISTS _graphs (
+        name TEXT PRIMARY KEY
+    );
+
+    CREATE TABLE IF NOT EXISTS _graph_vertices (
+        graph     TEXT NOT NULL,
+        vertex_id INTEGER NOT NULL,
+        body      TEXT NOT NULL,
+        PRIMARY KEY (graph, vertex_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS _graph_edges (
+        graph   TEXT NOT NULL,
+        edge_id INTEGER NOT NULL,
+        body    TEXT NOT NULL,
+        PRIMARY KEY (graph, edge_id)
+    );
+    CREATE INDEX IF NOT EXISTS _graph_edges_by_graph
+        ON _graph_edges (graph);
     ",
     ),
 ];

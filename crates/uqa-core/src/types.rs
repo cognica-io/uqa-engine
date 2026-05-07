@@ -114,7 +114,7 @@ pub type EdgeId = u64;
 
 /// Property graph vertex: `(id, label, properties)`. Properties are typed
 /// by [`Value`] so vertex props share the same encoding as document fields.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Vertex {
     pub vertex_id: VertexId,
     pub label: String,
@@ -132,7 +132,7 @@ impl Vertex {
 }
 
 /// Directed property graph edge: `(id, source, target, label, properties)`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Edge {
     pub edge_id: EdgeId,
     pub source_id: VertexId,

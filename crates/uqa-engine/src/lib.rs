@@ -727,6 +727,25 @@ impl Engine {
             };
             self.tables.write().insert(schema.name, Arc::new(table));
         }
+        self.restore_graphs_from_catalog(catalog)?;
+        Ok(())
+    }
+
+    fn restore_graphs_from_catalog(&self, catalog: &Catalog) -> Result<(), SQLiteError> {
+        use uqa_graph::GraphStore as _;
+        for graph_name in catalog.load_graphs()? {
+            let mut store = uqa_graph::MemoryGraphStore::default();
+            store.create_graph(&graph_name);
+            for body in catalog.load_graph_vertices(&graph_name)? {
+                let vertex: uqa_core::Vertex = serde_json::from_str(&body)?;
+                store.add_vertex(vertex, &graph_name);
+            }
+            for body in catalog.load_graph_edges(&graph_name)? {
+                let edge: uqa_core::Edge = serde_json::from_str(&body)?;
+                store.add_edge(edge, &graph_name);
+            }
+            self.graphs.write().insert(graph_name, store);
+        }
         Ok(())
     }
 
@@ -869,12 +888,19 @@ impl Engine {
     pub fn create_graph(&self, name: impl Into<String>) {
         let name = name.into();
         let mut graphs = self.graphs.write();
-        graphs.entry(name).or_default();
+        graphs.entry(name.clone()).or_default();
+        drop(graphs);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_graph(&name);
+        }
     }
 
     /// Drop a named graph. No-op when the graph is missing.
     pub fn drop_graph(&self, name: &str) {
         self.graphs.write().remove(name);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.drop_graph(name);
+        }
     }
 
     /// Sorted list of every named graph registered on this engine.
@@ -893,24 +919,50 @@ impl Engine {
     /// missing. Mirrors Python's `Engine.add_graph_vertex`.
     pub fn add_graph_vertex(&self, vertex: uqa_core::Vertex, graph: &str) {
         use uqa_graph::GraphStore as _;
-        let mut graphs = self.graphs.write();
-        let store = graphs.entry(graph.to_string()).or_default();
-        if !store.has_graph(graph) {
-            store.create_graph(graph);
+        let vertex_id = vertex.vertex_id;
+        let body = self
+            .catalog
+            .as_ref()
+            .and_then(|_| serde_json::to_string(&vertex).ok());
+        {
+            let mut graphs = self.graphs.write();
+            let store = graphs.entry(graph.to_string()).or_default();
+            if !store.has_graph(graph) {
+                store.create_graph(graph);
+            }
+            store.add_vertex(vertex, graph);
         }
-        store.add_vertex(vertex, graph);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_graph(graph);
+            if let Some(b) = body {
+                let _ = catalog.save_graph_vertex(graph, vertex_id, &b);
+            }
+        }
     }
 
     /// Insert an edge into a named graph. Auto-creates the graph if
     /// missing. Mirrors Python's `Engine.add_graph_edge`.
     pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) {
         use uqa_graph::GraphStore as _;
-        let mut graphs = self.graphs.write();
-        let store = graphs.entry(graph.to_string()).or_default();
-        if !store.has_graph(graph) {
-            store.create_graph(graph);
+        let edge_id = edge.edge_id;
+        let body = self
+            .catalog
+            .as_ref()
+            .and_then(|_| serde_json::to_string(&edge).ok());
+        {
+            let mut graphs = self.graphs.write();
+            let store = graphs.entry(graph.to_string()).or_default();
+            if !store.has_graph(graph) {
+                store.create_graph(graph);
+            }
+            store.add_edge(edge, graph);
         }
-        store.add_edge(edge, graph);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_graph(graph);
+            if let Some(b) = body {
+                let _ = catalog.save_graph_edge(graph, edge_id, &b);
+            }
+        }
     }
 
     /// Apply a [`uqa_graph::GraphDelta`] to a named graph as a single
@@ -930,6 +982,30 @@ impl Engine {
                 DeltaOp::RemoveVertex(id) => store.remove_vertex(*id, graph),
                 DeltaOp::AddEdge(e) => store.add_edge(e.clone(), graph),
                 DeltaOp::RemoveEdge(id) => store.remove_edge(*id, graph),
+            }
+        }
+        drop(graphs);
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_graph(graph);
+            for op in delta.ops() {
+                match op {
+                    DeltaOp::AddVertex(v) => {
+                        if let Ok(body) = serde_json::to_string(v) {
+                            let _ = catalog.save_graph_vertex(graph, v.vertex_id, &body);
+                        }
+                    }
+                    DeltaOp::RemoveVertex(id) => {
+                        let _ = catalog.delete_graph_vertex(graph, *id);
+                    }
+                    DeltaOp::AddEdge(e) => {
+                        if let Ok(body) = serde_json::to_string(e) {
+                            let _ = catalog.save_graph_edge(graph, e.edge_id, &body);
+                        }
+                    }
+                    DeltaOp::RemoveEdge(id) => {
+                        let _ = catalog.delete_graph_edge(graph, *id);
+                    }
+                }
             }
         }
         // Invalidate any cached path indexes for this graph: a path
@@ -993,8 +1069,14 @@ impl Engine {
         name: &str,
         f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> R,
     ) -> Option<R> {
-        let mut graphs = self.graphs.write();
-        graphs.get_mut(name).map(f)
+        let result = {
+            let mut graphs = self.graphs.write();
+            graphs.get_mut(name).map(f)
+        };
+        if result.is_some() {
+            self.resync_graph_to_catalog(name);
+        }
+        result
     }
 
     /// Run a Cypher query against a named graph and return the
@@ -1015,16 +1097,50 @@ impl Engine {
         use uqa_graph::cypher::{parse_cypher, CypherWriter};
         use uqa_graph::GraphStore as _;
         let q = parse_cypher(query)?;
-        let mut graphs = self.graphs.write();
-        let store = graphs.entry(graph.to_string()).or_default();
-        // Ensure the named partition exists inside the store as well.
-        // The outer map only owns the store; create_graph populates the
-        // store's own partition registry that mutations key off of.
-        if !store.has_graph(graph) {
-            store.create_graph(graph);
+        let result = {
+            let mut graphs = self.graphs.write();
+            let store = graphs.entry(graph.to_string()).or_default();
+            // Ensure the named partition exists inside the store as
+            // well. The outer map only owns the store; create_graph
+            // populates the store's own partition registry that
+            // mutations key off of.
+            if !store.has_graph(graph) {
+                store.create_graph(graph);
+            }
+            let mut writer = CypherWriter::new(store, graph).with_params(params);
+            writer.execute(&q)?
+        };
+        self.resync_graph_to_catalog(graph);
+        Ok(result)
+    }
+
+    /// Mirror the in-memory graph back to the catalog after a write.
+    /// Cypher / `graph_with_mut` callers can edit the store directly,
+    /// so the simplest correct strategy is a full resync of the
+    /// graph's vertex / edge tables. The disk write is bounded by the
+    /// graph size, which is the same scale Cypher already touched.
+    fn resync_graph_to_catalog(&self, graph: &str) {
+        use uqa_graph::GraphStore as _;
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        let graphs = self.graphs.read();
+        let Some(store) = graphs.get(graph) else {
+            return;
+        };
+        let _ = catalog.save_graph(graph);
+        let _ = catalog.drop_graph(graph);
+        let _ = catalog.save_graph(graph);
+        for vertex in store.vertices_in_graph(graph) {
+            if let Ok(body) = serde_json::to_string(&vertex) {
+                let _ = catalog.save_graph_vertex(graph, vertex.vertex_id, &body);
+            }
         }
-        let mut writer = CypherWriter::new(store, graph).with_params(params);
-        writer.execute(&q)
+        for edge in store.edges_in_graph(graph) {
+            if let Ok(body) = serde_json::to_string(&edge) {
+                let _ = catalog.save_graph_edge(graph, edge.edge_id, &body);
+            }
+        }
     }
 
     /// Persist a deep-fusion model under `name`. Round-trips as JSON
