@@ -234,22 +234,51 @@ fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
 }
 
 fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
-    // `fuse_log_odds(signal_1, signal_2, ..., alpha)`. The last
-    // argument must be a numeric literal alpha; the rest must lower
-    // into calibrated signal trees.
+    // `fuse_log_odds(signal_1, signal_2, ...[, alpha[, gating]])`.
+    // Python defaults alpha to 0.5 when no numeric option is supplied;
+    // don't treat the last signal as an alpha argument.
     if args.len() < 2 {
         return None;
     }
-    let alpha_expr = args.last()?;
-    let alpha = const_f64(alpha_expr, params)?;
-    let mut signals: Vec<OperatorTree> = Vec::with_capacity(args.len() - 1);
-    for a in &args[..args.len() - 1] {
+
+    let mut alpha = 0.5;
+    let mut gating = GatingSpec::Pass;
+    let mut signal_end = args.len();
+    while signal_end > 0 {
+        let option = &args[signal_end - 1];
+        if let Some((name, value_expr)) = named_arg_expr(option) {
+            if name.eq_ignore_ascii_case("alpha") {
+                alpha = const_f64(value_expr, params)?;
+            } else if name.eq_ignore_ascii_case("gating") {
+                gating = const_gating(value_expr, params)?;
+            }
+            signal_end -= 1;
+            continue;
+        }
+        if let Some(g) = const_gating(option, params) {
+            gating = g;
+            signal_end -= 1;
+            continue;
+        }
+        if let Some(v) = const_f64(option, params) {
+            alpha = v;
+            signal_end -= 1;
+            continue;
+        }
+        break;
+    }
+    if signal_end < 2 {
+        return None;
+    }
+
+    let mut signals: Vec<OperatorTree> = Vec::with_capacity(signal_end);
+    for a in &args[..signal_end] {
         signals.push(lower_signal_arg(a, params)?);
     }
     Some(OperatorTree::LogOddsFusion {
         signals,
         alpha,
-        gating: GatingSpec::Pass,
+        gating,
     })
 }
 
@@ -406,6 +435,27 @@ fn const_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f32>> {
             _ => None,
         },
     }
+}
+
+fn const_gating(expr: &Expr, params: &[SQLParam]) -> Option<GatingSpec> {
+    match const_value(expr, params)? {
+        Value::Str(s) if s.eq_ignore_ascii_case("relu") => Some(GatingSpec::ReLU),
+        Value::Str(_) => Some(GatingSpec::Pass),
+        _ => None,
+    }
+}
+
+fn named_arg_expr(expr: &Expr) -> Option<(&str, &Expr)> {
+    let Expr::Func { name, args, .. } = expr else {
+        return None;
+    };
+    if name != "__named_arg" || args.len() != 2 {
+        return None;
+    }
+    let Expr::Literal(Value::Str(arg_name)) = &args[0] else {
+        return None;
+    };
+    Some((arg_name.as_str(), &args[1]))
 }
 
 /// `OperatorTreeDriver` backed by the engine's existing per-function

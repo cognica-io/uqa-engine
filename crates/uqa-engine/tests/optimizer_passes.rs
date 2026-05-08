@@ -171,6 +171,42 @@ fn fuse_log_odds_lowers_to_logoddsfusion_and_reorder_keeps_signals() {
 }
 
 #[test]
+fn fuse_log_odds_lowers_with_default_alpha() {
+    let eng = engine_with_corpus();
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_log_odds(text_match(title, 'rust'), text_match(body, 'tokio'))",
+    );
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
+        panic!("expected LogOddsFusion");
+    };
+    assert_eq!(signals.len(), 2);
+    assert!((alpha - 0.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
+    let eng = engine_with_corpus();
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_log_odds(text_match(title, 'rust'), text_match(body, 'tokio')) \
+           AND year >= 2024",
+    );
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let OperatorTree::Intersect(parts) = optimised else {
+        panic!("expected Intersect");
+    };
+    assert_eq!(parts.len(), 2);
+    assert!(parts
+        .iter()
+        .any(|p| matches!(p, OperatorTree::LogOddsFusion { .. })));
+    assert!(parts
+        .iter()
+        .any(|p| matches!(p, OperatorTree::Filter { .. })));
+}
+
+#[test]
 fn between_lowers_to_filter_with_between_predicate() {
     let expr = where_of("SELECT id FROM notes WHERE year BETWEEN 2024 AND 2025");
     let lowered = lower_where(&expr, &[]).expect("lowers");
