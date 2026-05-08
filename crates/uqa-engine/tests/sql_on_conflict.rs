@@ -60,6 +60,100 @@ fn on_conflict_do_update_applies_assignments() {
 }
 
 #[test]
+fn on_conflict_do_update_reads_excluded_qualified_columns() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO engine_meta (key, value) VALUES ('schema_version', '14')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO engine_meta (key, value) VALUES ('schema_version', '15') \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        &[],
+    )
+    .unwrap();
+
+    let row = eng.get_document("engine_meta", 1).unwrap();
+    assert_eq!(row.get("value"), Some(&Value::Str("15".into())));
+}
+
+#[test]
+fn on_conflict_do_update_reads_excluded_bound_params() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO engine_meta (key, value) VALUES ('schema_version', '14')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO engine_meta (key, value) VALUES ('schema_version', $1) \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        &[uqa_sql::SQLParam::scalar(Value::Str("15".into()))],
+    )
+    .unwrap();
+
+    let row = eng.get_document("engine_meta", 1).unwrap();
+    assert_eq!(row.get("value"), Some(&Value::Str("15".into())));
+}
+
+#[test]
+fn on_conflict_do_update_reads_excluded_bound_params_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("engine_meta.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO engine_meta (key, value) VALUES ('schema_version', $1) \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            &[uqa_sql::SQLParam::scalar(Value::Str("14".into()))],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO engine_meta (key, value) VALUES ('schema_version', $1) \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            &[uqa_sql::SQLParam::scalar(Value::Str("15".into()))],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO engine_meta (key, value) VALUES ('local_seq', $1) \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            &[uqa_sql::SQLParam::scalar(Value::Str("42".into()))],
+        )
+        .unwrap();
+    }
+
+    let eng = Engine::open(&db).unwrap();
+    let version = eng
+        .sql(
+            "SELECT value FROM engine_meta WHERE key = 'schema_version'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(version.rows[0]["value"], Value::Str("15".into()));
+
+    let seq = eng
+        .sql("SELECT value FROM engine_meta WHERE key = 'local_seq'", &[])
+        .unwrap();
+    assert_eq!(seq.rows[0]["value"], Value::Str("42".into()));
+}
+
+#[test]
 fn on_conflict_falls_through_to_insert_when_no_match() {
     let eng = setup();
     let result = eng

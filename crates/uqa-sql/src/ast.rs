@@ -49,14 +49,13 @@ pub struct ColumnDef {
     #[serde(default)]
     pub unique: bool,
     /// `DEFAULT <expr>`. Evaluated at INSERT time when the column is
-    /// not present in the row tuple. Skipped from serde because
-    /// `Expr` is not serializable; catalog reload re-parses the
-    /// `CREATE TABLE` text from the catalog body.
-    #[serde(skip)]
+    /// not present in the row tuple. Persisted in catalog metadata so
+    /// reopened engines keep the same INSERT semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
     /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
     /// (and UPDATE-replace) time against the row being written.
-    #[serde(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<Expr>,
     /// `REFERENCES parent(col)` column-level FOREIGN KEY. The engine
     /// rejects INSERT / UPDATE whose value is not present in the
@@ -72,7 +71,7 @@ pub struct ForeignKeyRef {
     pub column: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTable {
     pub name: String,
     pub columns: Vec<ColumnDef>,
@@ -89,7 +88,7 @@ pub struct CreateTable {
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
 /// CHECK (...)`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableCheck {
     pub name: Option<String>,
     pub expr: Expr,
@@ -98,7 +97,7 @@ pub struct TableCheck {
 /// Table-level foreign key. `local_columns.len()` matches
 /// `ref_columns.len()`; the engine joins on the position-aligned
 /// pairs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignKey {
     pub name: Option<String>,
     pub local_columns: Vec<String>,
@@ -106,7 +105,7 @@ pub struct ForeignKey {
     pub ref_columns: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
@@ -121,7 +120,7 @@ pub struct CreateIndex {
     pub options: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DropStmt {
     pub kind: DropKind,
     pub names: Vec<String>,
@@ -129,7 +128,7 @@ pub struct DropStmt {
     pub cascade: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DropKind {
     Table,
     Index,
@@ -137,14 +136,14 @@ pub enum DropKind {
     Schema,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTableStmt {
     pub table: String,
     pub if_exists: bool,
     pub action: AlterTableAction,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum AlterTableAction {
     AddColumn {
@@ -182,7 +181,7 @@ pub enum AlterTableAction {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
     pub columns: Vec<String>,
@@ -201,7 +200,7 @@ pub struct InsertStmt {
     pub returning: Vec<Projection>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnConflict {
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
@@ -210,7 +209,7 @@ pub struct OnConflict {
     pub action: OnConflictAction,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OnConflictAction {
     /// `DO NOTHING` -- skip conflicting rows silently.
     Nothing,
@@ -223,7 +222,7 @@ pub enum OnConflictAction {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectStmt {
     pub projections: Vec<Projection>,
     pub from: Option<FromClause>,
@@ -256,7 +255,7 @@ pub struct SelectStmt {
     pub distinct: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CTE {
     pub name: String,
     pub columns: Vec<String>,
@@ -264,7 +263,7 @@ pub struct CTE {
     pub query: Box<SelectStmt>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetOp {
     pub kind: SetOpKind,
     pub all: bool,
@@ -279,14 +278,14 @@ pub struct SetOp {
     pub combined_offset: Option<Expr>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetOpKind {
     Union,
     Intersect,
     Except,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FromClause {
     /// `FROM <table> [AS <alias>]`.
     Table { name: String, alias: Option<String> },
@@ -347,7 +346,7 @@ impl FromClause {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JoinKind {
     Inner,
     Left,
@@ -356,13 +355,13 @@ pub enum JoinKind {
     Cross,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Projection {
     pub expr: Expr,
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderBy {
     pub expr: Expr,
     pub descending: bool,
@@ -372,14 +371,14 @@ pub struct OrderBy {
     pub nulls: Option<NullsOrder>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NullsOrder {
     First,
     Last,
 }
 
 /// `DISCARD` target. Mirrors `PostgreSQL`'s `DiscardMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiscardTarget {
     All,
     Plans,
@@ -387,7 +386,7 @@ pub enum DiscardTarget {
     Temp,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderBy>,
@@ -396,21 +395,21 @@ pub struct WindowSpec {
     pub frame: Option<WindowFrame>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowFrame {
     pub mode: FrameMode,
     pub start: FrameBound,
     pub end: FrameBound,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FrameMode {
     Rows,
     Range,
     Groups,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FrameBound {
     UnboundedPreceding,
     UnboundedFollowing,
@@ -420,7 +419,7 @@ pub enum FrameBound {
 }
 
 /// Scalar expression nodes the compiler handles.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Expr {
     Star,
     /// Unqualified column reference (`col`).
@@ -519,7 +518,7 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryOp {
     Equal,
     NotEqual,
@@ -536,7 +535,7 @@ pub enum BinaryOp {
 /// `Expr` restricted to value-producing forms used by `INSERT` rows.
 pub type ValueExpr = Expr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
     pub assignments: Vec<(String, Expr)>,
@@ -548,7 +547,7 @@ pub struct UpdateStmt {
     pub returning: Vec<Projection>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
     pub r#where: Option<Expr>,
@@ -560,7 +559,7 @@ pub struct DeleteStmt {
     pub returning: Vec<Projection>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateTable(CreateTable),
     CreateIndex(CreateIndex),
@@ -666,7 +665,7 @@ pub enum Statement {
     Merge(MergeStmt),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeStmt {
     pub target: String,
     pub target_alias: Option<String>,
@@ -675,7 +674,7 @@ pub struct MergeStmt {
     pub when_clauses: Vec<MergeWhen>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MergeWhen {
     /// `WHEN MATCHED [AND <cond>] THEN UPDATE SET ...`.
     UpdateMatched {
@@ -696,7 +695,7 @@ pub enum MergeWhen {
     NothingNotMatched { condition: Option<Expr> },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateForeignServer {
     pub name: String,
     pub fdw_type: String,
@@ -704,7 +703,7 @@ pub struct CreateForeignServer {
     pub if_not_exists: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateForeignTable {
     pub name: String,
     pub server_name: String,
@@ -713,7 +712,7 @@ pub struct CreateForeignTable {
     pub if_not_exists: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSequence {
     pub name: String,
     pub if_not_exists: bool,
@@ -721,7 +720,7 @@ pub struct CreateSequence {
     pub increment: i64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AlterSequence {
     pub name: String,
     /// `RESTART [WITH n]`. `Some(None)` for `RESTART` (uses `start`),
@@ -731,7 +730,7 @@ pub struct AlterSequence {
     pub start: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransactionStmt {
     Begin,
     Commit,

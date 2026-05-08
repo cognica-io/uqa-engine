@@ -104,6 +104,117 @@ fn alter_table_add_column_with_default() {
 }
 
 #[test]
+fn alter_table_add_not_null_column_with_default_backfills_existing_rows() {
+    let engine = engine_with_users();
+    exec(
+        &engine,
+        "ALTER TABLE users ADD COLUMN retrieval_top_k INTEGER NOT NULL DEFAULT 0",
+    );
+    exec(&engine, "UPDATE users SET age = age + 1 WHERE id = 1");
+
+    let result = query(&engine, "SELECT retrieval_top_k FROM users WHERE id = 1");
+    assert_eq!(result.rows[0]["retrieval_top_k"], Value::Int(0));
+}
+
+#[test]
+fn not_null_default_survives_engine_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("default.db");
+    {
+        let engine = Engine::open(&db).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                retrieval_top_k INTEGER NOT NULL DEFAULT 0
+            )",
+        );
+    }
+    let engine = Engine::open(&db).unwrap();
+    let columns = engine.describe_table("conversations").unwrap();
+    let retrieval_col = columns
+        .iter()
+        .find(|col| col.name == "retrieval_top_k")
+        .unwrap();
+    assert!(retrieval_col.default.is_some());
+
+    exec(
+        &engine,
+        "INSERT INTO conversations (id, title) VALUES ('c1', 'hello')",
+    );
+    let result = query(
+        &engine,
+        "SELECT retrieval_top_k FROM conversations WHERE id = 'c1'",
+    );
+    assert_eq!(result.rows[0]["retrieval_top_k"], Value::Int(0));
+}
+
+#[test]
+fn alter_table_add_not_null_defaults_backfill_persistent_rows_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("conversations.db");
+    {
+        let engine = Engine::open(&db).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                enabled_tools TEXT NOT NULL DEFAULT '[]'
+            )",
+        );
+        exec(
+            &engine,
+            "INSERT INTO conversations (id, title) VALUES ('c1', 'hello')",
+        );
+    }
+
+    {
+        let engine = Engine::open(&db).unwrap();
+        exec(
+            &engine,
+            "ALTER TABLE conversations ADD COLUMN retrieval_top_k INTEGER NOT NULL DEFAULT 0",
+        );
+        exec(
+            &engine,
+            "ALTER TABLE conversations ADD COLUMN retrieval_max_context_tokens INTEGER NOT NULL DEFAULT 0",
+        );
+        exec(
+            &engine,
+            "UPDATE conversations SET enabled_tools = '[\"web_search\"]' WHERE id = 'c1'",
+        );
+
+        let result = query(
+            &engine,
+            "SELECT retrieval_top_k, retrieval_max_context_tokens
+             FROM conversations WHERE id = 'c1'",
+        );
+        assert_eq!(result.rows[0]["retrieval_top_k"], Value::Int(0));
+        assert_eq!(
+            result.rows[0]["retrieval_max_context_tokens"],
+            Value::Int(0)
+        );
+    }
+
+    let engine = Engine::open(&db).unwrap();
+    exec(
+        &engine,
+        "UPDATE conversations SET title = 'still ok' WHERE id = 'c1'",
+    );
+    let result = query(
+        &engine,
+        "SELECT retrieval_top_k, retrieval_max_context_tokens
+         FROM conversations WHERE id = 'c1'",
+    );
+    assert_eq!(result.rows[0]["retrieval_top_k"], Value::Int(0));
+    assert_eq!(
+        result.rows[0]["retrieval_max_context_tokens"],
+        Value::Int(0)
+    );
+}
+
+#[test]
 fn alter_table_drop_column() {
     let engine = engine_with_users();
     exec(&engine, "ALTER TABLE users DROP COLUMN age");
