@@ -1193,7 +1193,13 @@ impl Engine {
         dimensions: u32,
         params: IvfIndexParams,
     ) -> bool {
-        self.install_vector_field(table, field.into(), dimensions, params, true, false)
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let field = field.into();
+        let idx = self.build_vector_index(table, &field, dimensions, params);
+        t.vector_indexes.write().insert(field, idx);
+        true
     }
 
     fn install_vector_field(
@@ -3081,6 +3087,92 @@ mod tests {
             .into()
     }
 
+    fn blob_to_vector(blob: &[u8]) -> Vec<f32> {
+        blob.chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()
+    }
+
+    fn normalise(v: &mut [f32]) {
+        let mag: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if mag > 1e-12 {
+            for x in v {
+                *x /= mag;
+            }
+        }
+    }
+
+    fn dot(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    }
+
+    fn nearest_and_other_ivf_centroid(conn: &ManagedConnection, query: &[f32]) -> (i64, i64) {
+        let mut query = query.to_vec();
+        normalise(&mut query);
+        conn.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT centroid_id, vector FROM _ivf_centroids
+                  WHERE table_name = 'articles' AND field = 'embedding'
+                  ORDER BY centroid_id",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+            let mut centroids = Vec::new();
+            for row in rows {
+                let (id, blob) = row?;
+                let mut centroid = blob_to_vector(&blob);
+                normalise(&mut centroid);
+                centroids.push((id, centroid));
+            }
+            assert!(centroids.len() >= 2);
+            let nearest = centroids
+                .iter()
+                .max_by(|(_, a), (_, b)| {
+                    dot(&query, a)
+                        .partial_cmp(&dot(&query, b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(id, _)| *id)
+                .unwrap();
+            let other = centroids
+                .iter()
+                .map(|(id, _)| *id)
+                .find(|id| *id != nearest)
+                .unwrap();
+            Ok((nearest, other))
+        })
+        .unwrap()
+    }
+
+    fn make_doc_two_the_only_nearest_ivf_candidate(conn: &ManagedConnection, query: &[f32]) {
+        let (nearest, other) = nearest_and_other_ivf_centroid(conn, query);
+        conn.with(|conn| {
+            conn.execute(
+                "DELETE FROM _ivf_assignments
+                  WHERE table_name = 'articles' AND field = 'embedding'",
+                [],
+            )?;
+            conn.execute(
+                &format!(
+                    "INSERT INTO _ivf_assignments
+                        (table_name, field, doc_id, centroid_id)
+                     VALUES ('articles', 'embedding', 1, {other})"
+                ),
+                [],
+            )?;
+            conn.execute(
+                &format!(
+                    "INSERT INTO _ivf_assignments
+                        (table_name, field, doc_id, centroid_id)
+                     VALUES ('articles', 'embedding', 2, {nearest})"
+                ),
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn run_analyze_populates_column_stats() {
         let eng = Engine::new();
@@ -3236,6 +3328,44 @@ mod tests {
             vector_index_kind(&eng, "articles", "embedding"),
             "sqlite-ivf"
         );
+    }
+
+    #[test]
+    fn sqlite_ivf_restore_reuses_persisted_assignments() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vectors.db");
+        {
+            let eng = Engine::open(&db).unwrap();
+            eng.sql(
+                "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+                &[],
+            )
+            .unwrap();
+            eng.sql(
+                "INSERT INTO articles (id, embedding) VALUES \
+                 (1, ARRAY[1.0, 0.0]), \
+                 (2, ARRAY[0.0, 1.0])",
+                &[],
+            )
+            .unwrap();
+            eng.sql(
+                "CREATE INDEX articles_embedding_ivf ON articles USING hnsw (embedding) \
+                 WITH (lists = 2, probes = 1, train_threshold = 2)",
+                &[],
+            )
+            .unwrap();
+
+            let conn = eng.conn.as_ref().expect("sqlite connection").clone();
+            make_doc_two_the_only_nearest_ivf_candidate(&conn, &[1.0, 0.0]);
+        }
+
+        let reopened = Engine::open(&db).unwrap();
+        assert_eq!(
+            vector_index_kind(&reopened, "articles", "embedding"),
+            "sqlite-ivf"
+        );
+        let hits = reopened.knn_search("articles", "embedding", vec![1.0, 0.0], 1);
+        assert_eq!(hits.first().map(|h| h.doc_id), Some(2));
     }
 
     #[test]

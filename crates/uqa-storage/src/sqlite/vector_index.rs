@@ -545,6 +545,7 @@ impl SQLiteIVFIndex {
             return;
         }
         let centroid = nearest_centroid_for_raw(vector, &centroids);
+        let vector_count = self.persistent.count() as i64;
         let _ = self.persistent.conn.with(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO _ivf_assignments
@@ -561,11 +562,7 @@ impl SQLiteIVFIndex {
                 "UPDATE _ivf_indexes
                     SET vector_count = ?3
                   WHERE table_name = ?1 AND field = ?2",
-                params![
-                    self.persistent.table,
-                    self.persistent.field,
-                    self.persistent.count() as i64,
-                ],
+                params![self.persistent.table, self.persistent.field, vector_count],
             )?;
             Ok(())
         });
