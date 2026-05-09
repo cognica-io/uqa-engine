@@ -134,7 +134,7 @@ fn view_preserves_column_types() {
         "CREATE VIEW v AS SELECT name, salary FROM employees",
     );
     let r = exec(&engine, "SELECT salary FROM v WHERE name = 'Alice'");
-    assert_eq!(r.rows[0]["salary"], Value::Float(90000.0));
+    assert_eq!(r.rows[0]["salary"], Value::Float(90_000.0));
 }
 
 #[test]

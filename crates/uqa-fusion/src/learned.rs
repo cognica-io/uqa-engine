@@ -62,7 +62,7 @@ impl LearnedFusion {
     }
 
     pub fn load_state_dict(&mut self, state: &LearnedFusionState) {
-        self.weights = state.weights.clone();
+        self.weights.clone_from(&state.weights);
         if self.weights.len() != state.n_signals {
             self.weights.resize(state.n_signals, 0.0);
         }

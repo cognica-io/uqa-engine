@@ -29,13 +29,21 @@ pub enum AnalyzerPhase {
 }
 
 impl AnalyzerPhase {
-    pub fn from_str(s: &str) -> Result<Self, String> {
+    pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "index" => Ok(AnalyzerPhase::Index),
             "search" | "query" => Ok(AnalyzerPhase::Search),
             "both" => Ok(AnalyzerPhase::Both),
             _ => Err(format!("phase must be 'index'|'search'|'both', got `{s}`")),
         }
+    }
+}
+
+impl std::str::FromStr for AnalyzerPhase {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 

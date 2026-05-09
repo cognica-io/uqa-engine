@@ -336,7 +336,7 @@ impl SQLiteIVFIndex {
                 params![
                     self.persistent.table,
                     self.persistent.field,
-                    self.persistent.dimensions as i64,
+                    i64::from(self.persistent.dimensions),
                     self.params.nlist as i64,
                     self.params.nprobe as i64,
                     self.params.train_threshold as i64,
@@ -405,7 +405,7 @@ impl SQLiteIVFIndex {
                 params![
                     self.persistent.table,
                     self.persistent.field,
-                    self.persistent.dimensions as i64,
+                    i64::from(self.persistent.dimensions),
                     self.params.nlist as i64,
                     self.params.nprobe as i64,
                     self.params.train_threshold as i64,
@@ -679,7 +679,7 @@ impl VectorIndex for SQLiteIVFIndex {
         if candidates.is_empty() {
             return PostingList::new();
         }
-        scored_posting_list(query, candidates, k)
+        scored_posting_list(query, &candidates, k)
     }
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList {
@@ -763,7 +763,7 @@ fn nearest_centroids_for_raw(vector: &[f32], centroids: &[Vec<f32>], nprobe: usi
         .collect()
 }
 
-fn scored_posting_list(query: &[f32], entries: Vec<(DocId, Vec<f32>)>, k: usize) -> PostingList {
+fn scored_posting_list(query: &[f32], entries: &[(DocId, Vec<f32>)], k: usize) -> PostingList {
     let mut scored: Vec<(DocId, f32)> = entries
         .iter()
         .map(|(doc_id, vector)| (*doc_id, cosine_similarity(query, vector)))

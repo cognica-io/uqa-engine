@@ -76,7 +76,7 @@ use uqa_scoring::{
     CalibrationReport, ParameterLearner, Scorer,
 };
 use uqa_sql::SQLError;
-use uqa_storage::sqlite::ColumnStatsRow;
+use uqa_storage::sqlite::{ColumnStatsInput, ColumnStatsRow};
 use uqa_storage::{
     document_store::Document, Catalog, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
@@ -861,13 +861,13 @@ impl Engine {
     ) -> Result<BTreeMap<String, uqa_planner::ColumnStats>, SQLiteError> {
         let mut out = BTreeMap::new();
         for row in catalog.load_column_stats(table_name)? {
-            out.insert(row.column_name.clone(), Self::column_stats_from_row(row)?);
+            out.insert(row.column_name.clone(), Self::column_stats_from_row(row));
         }
         Ok(out)
     }
 
-    fn column_stats_from_row(row: ColumnStatsRow) -> Result<uqa_planner::ColumnStats, SQLiteError> {
-        Ok(uqa_planner::ColumnStats {
+    fn column_stats_from_row(row: ColumnStatsRow) -> uqa_planner::ColumnStats {
+        uqa_planner::ColumnStats {
             distinct_count: row.distinct_count.try_into().unwrap_or(0),
             null_count: row.null_count.try_into().unwrap_or(0),
             min_value: Self::decode_column_stat_value(row.min_value),
@@ -876,7 +876,7 @@ impl Engine {
             histogram: serde_json::from_str(&row.histogram_json).unwrap_or_default(),
             mcv_values: serde_json::from_str(&row.mcv_values_json).unwrap_or_default(),
             mcv_frequencies: serde_json::from_str(&row.mcv_frequencies_json).unwrap_or_default(),
-        })
+        }
     }
 
     fn decode_column_stat_value(raw: Option<String>) -> Option<Value> {
@@ -1989,18 +1989,18 @@ impl Engine {
             let histogram_json = serde_json::to_string(&cs.histogram)?;
             let mcv_values_json = serde_json::to_string(&cs.mcv_values)?;
             let mcv_frequencies_json = serde_json::to_string(&cs.mcv_frequencies)?;
-            catalog.save_column_stats_full(
+            catalog.save_column_stats(ColumnStatsInput {
                 table_name,
-                col_name,
-                Self::u64_to_i64(cs.distinct_count),
-                Self::u64_to_i64(cs.null_count),
-                min_json.as_deref(),
-                max_json.as_deref(),
-                Self::u64_to_i64(cs.row_count),
-                &histogram_json,
-                &mcv_values_json,
-                &mcv_frequencies_json,
-            )?;
+                column_name: col_name,
+                distinct_count: Self::u64_to_i64(cs.distinct_count),
+                null_count: Self::u64_to_i64(cs.null_count),
+                min_value: min_json.as_deref(),
+                max_value: max_json.as_deref(),
+                row_count: Self::u64_to_i64(cs.row_count),
+                histogram_json: &histogram_json,
+                mcv_values_json: &mcv_values_json,
+                mcv_frequencies_json: &mcv_frequencies_json,
+            })?;
         }
         Ok(())
     }
@@ -2244,12 +2244,9 @@ impl Engine {
         let mut found = false;
         {
             let mut cols = t.columns.write();
-            for col in cols.iter_mut() {
-                if col.name == column {
-                    col.default = default.clone();
-                    found = true;
-                    break;
-                }
+            if let Some(col) = cols.iter_mut().find(|col| col.name == column) {
+                col.default = default;
+                found = true;
             }
         }
         if found && self.is_persistent() {
@@ -2279,19 +2276,21 @@ impl Engine {
         found
     }
 
-    pub fn set_column_type(&self, table: &str, column: &str, ty: uqa_sql::ast::ColumnType) -> bool {
+    pub fn set_column_type(
+        &self,
+        table: &str,
+        column: &str,
+        ty: &uqa_sql::ast::ColumnType,
+    ) -> bool {
         let Some(t) = self.table(table) else {
             return false;
         };
         let mut found = false;
         {
             let mut cols = t.columns.write();
-            for col in cols.iter_mut() {
-                if col.name == column {
-                    col.ty = ty.clone();
-                    found = true;
-                    break;
-                }
+            if let Some(col) = cols.iter_mut().find(|col| col.name == column) {
+                col.ty.clone_from(ty);
+                found = true;
             }
         }
         if found && self.is_persistent() {

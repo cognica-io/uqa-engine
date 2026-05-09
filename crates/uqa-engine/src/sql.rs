@@ -675,7 +675,7 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
         AlterTableAction::AlterColumnType { name, ty } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
             rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
-            engine.set_column_type(&stmt.table, &name, ty.clone());
+            engine.set_column_type(&stmt.table, &name, &ty);
             match ty {
                 ColumnType::Text => {
                     if let Err(e) = engine.add_fts_field(&stmt.table, name.clone()) {
@@ -735,10 +735,8 @@ fn coerce_to_column_type(engine: &Engine, table: &str, column: &str, value: Valu
     let Some(def) = cols.iter().find(|c| c.name == column) else {
         return value;
     };
-    if let ColumnType::Numeric { scale, .. } = &def.ty {
-        if let Some(s) = scale {
-            return round_numeric(value, *s);
-        }
+    if let ColumnType::Numeric { scale: Some(s), .. } = &def.ty {
+        return round_numeric(value, *s);
     }
     if matches!(&def.ty, ColumnType::Real) {
         return match value {
@@ -882,8 +880,7 @@ fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
@@ -3647,17 +3644,20 @@ fn build_join_rows_with_ctes(
             column_aliases,
         } => {
             let result = run_select(engine, (**body).clone(), params)?;
-            Ok(materialize_subquery_rows(result, alias, column_aliases))
+            Ok(materialize_subquery_rows(
+                result,
+                alias.as_deref(),
+                column_aliases,
+            ))
         }
     }
 }
 
 fn materialize_subquery_rows(
     result: SQLResult,
-    alias: &Option<String>,
+    alias: Option<&str>,
     column_aliases: &[String],
 ) -> Vec<ResultRow> {
-    let qual = alias.clone();
     let cols = column_aliases.to_vec();
     result
         .rows
@@ -3674,11 +3674,11 @@ fn materialize_subquery_rows(
                 for (k, v) in pairs {
                     renamed.insert(k, v);
                 }
-                if let Some(q) = &qual {
+                if let Some(q) = alias {
                     return prefix_row(q, &renamed);
                 }
                 renamed
-            } else if let Some(q) = &qual {
+            } else if let Some(q) = alias {
                 prefix_row(q, &r)
             } else {
                 r
@@ -3751,7 +3751,7 @@ fn build_lateral_join_rows(
                 column_aliases,
             } => {
                 let result = execute_lateral_subquery(engine, body, left_row, params, ctes)?;
-                materialize_subquery_rows(result, alias, column_aliases)
+                materialize_subquery_rows(result, alias.as_deref(), column_aliases)
             }
             FromClause::Function {
                 name,
@@ -4733,9 +4733,8 @@ fn aggregate_join_rows(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
-                    .map(|v| uqa_sql::expr::truthy(&v))
-                    .unwrap_or(false);
+                let keep =
+                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
                 if !keep {
                     continue;
                 }
@@ -4748,7 +4747,7 @@ fn aggregate_join_rows(
                 }
             }
             let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by.iter() {
+            for ob in order_by {
                 let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
                 sort_keys.push((v, ob.descending));
             }
@@ -4810,9 +4809,8 @@ fn aggregate_join_rows(
         if let Some(having_expr) = stmt.having.as_ref() {
             let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
             let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
-            let kept = uqa_sql::expr::eval(&resolved, &ctx)
-                .map(|v| uqa_sql::expr::truthy(&v))
-                .unwrap_or(false);
+            let kept =
+                uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
             if !kept {
                 continue;
             }
@@ -4962,9 +4960,8 @@ fn aggregate_join_rows_relaxed(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
-                    .map(|v| uqa_sql::expr::truthy(&v))
-                    .unwrap_or(false);
+                let keep =
+                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
                 if !keep {
                     continue;
                 }
@@ -4977,7 +4974,7 @@ fn aggregate_join_rows_relaxed(
                 }
             }
             let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by.iter() {
+            for ob in order_by {
                 let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
                 sort_keys.push((v, ob.descending));
             }
@@ -5219,7 +5216,7 @@ struct AggregateAccumulator {
     sort_keys: Vec<Vec<(Value, bool)>>,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
     /// first observation so an empty input set returns `NULL` (matches
-    /// PostgreSQL).
+    /// `PostgreSQL`).
     bool_and: Option<bool>,
     bool_or: Option<bool>,
 }
@@ -5383,9 +5380,8 @@ fn build_aggregate_rows(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
-                    .map(|v| uqa_sql::expr::truthy(&v))
-                    .unwrap_or(false);
+                let keep =
+                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
                 if !keep {
                     continue;
                 }
@@ -5398,7 +5394,7 @@ fn build_aggregate_rows(
                 }
             }
             let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by.iter() {
+            for ob in order_by {
                 let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
                 sort_keys.push((v, ob.descending));
             }
@@ -5460,9 +5456,8 @@ fn build_aggregate_rows(
         if let Some(having_expr) = stmt.having.as_ref() {
             let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
             let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
-            let kept = uqa_sql::expr::eval(&resolved, &ctx)
-                .map(|v| uqa_sql::expr::truthy(&v))
-                .unwrap_or(false);
+            let kept =
+                uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
             if !kept {
                 continue;
             }
@@ -5517,9 +5512,8 @@ fn build_aggregate_rows_relaxed(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::eval(filter_expr, &ctx)
-                    .map(|v| uqa_sql::expr::truthy(&v))
-                    .unwrap_or(false);
+                let keep =
+                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
                 if !keep {
                     continue;
                 }
@@ -5532,7 +5526,7 @@ fn build_aggregate_rows_relaxed(
                 }
             }
             let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by.iter() {
+            for ob in order_by {
                 let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
                 sort_keys.push((v, ob.descending));
             }
@@ -5814,7 +5808,7 @@ fn percentile_cont(values: &[Value], frac: f64) -> f64 {
 
 fn percentile_disc(values: &[Value], frac: f64) -> Value {
     let mut sorted: Vec<&Value> = values.iter().collect();
-    sorted.sort_by(|a, b| a.cmp(b));
+    sorted.sort();
     if sorted.is_empty() {
         return Value::Null;
     }
@@ -5845,8 +5839,7 @@ fn mode_value(values: &[Value]) -> Value {
     counts
         .into_values()
         .max_by_key(|(_, n)| *n)
-        .map(|(v, _)| v)
-        .unwrap_or(Value::Null)
+        .map_or(Value::Null, |(v, _)| v)
 }
 
 /// Compute a projection's output column name. The position is folded
@@ -6150,10 +6143,12 @@ fn run_multi_field_match(
     Ok(out)
 }
 
+type MultiFieldMatchArgs = (Vec<String>, Vec<String>, Vec<f64>);
+
 fn parse_multi_field_match_args(
     args: &[Expr],
     ctx: &EvalContext<'_>,
-) -> Result<(Vec<String>, Vec<String>, Vec<f64>), SQLError> {
+) -> Result<MultiFieldMatchArgs, SQLError> {
     let first_non_column = args.iter().position(|arg| !matches!(arg, Expr::Column(_)));
     if let Some(query_idx) = first_non_column {
         if query_idx >= 2 {
@@ -6763,10 +6758,7 @@ fn run_bayesian_match_with_prior(
     let base = run_text_match(
         engine,
         table,
-        &[
-            Expr::Column(field),
-            Expr::Literal(Value::Str(query.to_string())),
-        ],
+        &[Expr::Column(field), Expr::Literal(Value::Str(query))],
         params,
     )?;
     let prior_fn = prior_fn_for_mode(&mode, &prior_field)?;

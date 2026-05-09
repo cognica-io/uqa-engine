@@ -69,11 +69,11 @@ fn const_string() {
 
 #[test]
 fn const_float() {
-    let expr = projection_expr("SELECT 3.14 FROM t");
+    let expr = projection_expr("SELECT 3.125 FROM t");
     let ctx = EvalContext::new(None, &[]);
     assert!(matches!(
         eval(&expr, &ctx).unwrap(),
-        Value::Float(f) if (f - 3.14).abs() < 1e-9
+        Value::Float(f) if (f - 3.125).abs() < 1e-9
     ));
 }
 
@@ -154,7 +154,7 @@ fn typeof_function() {
     let expr = projection_expr("SELECT typeof(x) FROM t");
     for (val, expected) in [
         (Value::Int(42), "integer"),
-        (Value::Float(3.14), "double precision"),
+        (Value::Float(3.125), "double precision"),
         (Value::Str("hello".into()), "text"),
         (Value::Null, "null"),
     ] {

@@ -365,11 +365,25 @@ fn column_name(expr: &Expr) -> Option<String> {
     }
 }
 
-fn fts_default_field(expr: &Expr) -> Option<Option<String>> {
+enum FtsDefaultField {
+    Field(String),
+    All,
+}
+
+impl FtsDefaultField {
+    fn as_deref(&self) -> Option<&str> {
+        match self {
+            FtsDefaultField::Field(field) => Some(field),
+            FtsDefaultField::All => None,
+        }
+    }
+}
+
+fn fts_default_field(expr: &Expr) -> Option<FtsDefaultField> {
     match expr {
-        Expr::Column(name) => Some(Some(name.clone())),
-        Expr::QualifiedColumn { column, .. } => Some(Some(column.clone())),
-        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(None),
+        Expr::Column(name) => Some(FtsDefaultField::Field(name.clone())),
+        Expr::QualifiedColumn { column, .. } => Some(FtsDefaultField::Field(column.clone())),
+        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(FtsDefaultField::All),
         _ => None,
     }
 }

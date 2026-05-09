@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_aggregates.py`. Covers COUNT DISTINCT,
-//! STRING_AGG / ARRAY_AGG with DISTINCT and ORDER BY, BOOL_AND /
-//! BOOL_OR, FILTER (WHERE ...), GROUP BY by ordinal / alias,
-//! complex HAVING, NUMERIC precision/scale, STDDEV / VARIANCE,
-//! PERCENTILE_CONT / PERCENTILE_DISC, and MODE.
+//! Port of `uqa/tests/test_aggregates.py`. Covers `COUNT DISTINCT`,
+//! `STRING_AGG` / `ARRAY_AGG` with `DISTINCT` and `ORDER BY`, `BOOL_AND` /
+//! `BOOL_OR`, `FILTER (WHERE ...)`, `GROUP BY` by ordinal / alias,
+//! complex `HAVING`, `NUMERIC` precision/scale, `STDDEV` / `VARIANCE`,
+//! `PERCENTILE_CONT` / `PERCENTILE_DISC`, and `MODE`.
 
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -830,11 +830,11 @@ fn plain_numeric_no_precision() {
     let eng = engine();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, val NUMERIC)", &[])
         .unwrap();
-    eng.sql("INSERT INTO t (id, val) VALUES (1, 3.14159)", &[])
+    eng.sql("INSERT INTO t (id, val) VALUES (1, 3.125)", &[])
         .unwrap();
     let r = eng.sql("SELECT val FROM t WHERE id = 1", &[]).unwrap();
     let v = float_col(&r.rows[0], "val").unwrap();
-    assert!((v - 3.14159).abs() < 0.001);
+    assert!((v - 3.125).abs() < 0.001);
 }
 
 // =====================================================================

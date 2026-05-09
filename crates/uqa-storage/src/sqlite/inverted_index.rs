@@ -87,9 +87,9 @@ impl SQLiteInvertedIndex {
                         Ok((row.get(0)?, row.get(1)?))
                     })
                     .optional()?;
-                Ok(row
-                    .map(|(doc, off)| (doc.max(0) as DocId, off.max(0) as usize))
-                    .unwrap_or((0, 0)))
+                Ok(row.map_or((0, 0), |(doc, off)| {
+                    (doc.max(0) as DocId, off.max(0) as usize)
+                }))
             })
             .unwrap_or((0, 0))
     }

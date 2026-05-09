@@ -59,7 +59,7 @@ fn test_attention_fuses_two_signals() {
     let result = op.execute(&ExecutionContext::new());
     let ids: Vec<u64> = result.iter().map(|entry| entry.doc_id).collect();
     assert_eq!(ids, vec![1, 2, 3]);
-    for entry in result.iter() {
+    for entry in &result {
         assert!(entry.payload.score > 0.0 && entry.payload.score < 1.0);
     }
 }
@@ -89,7 +89,7 @@ fn test_learned_fuses_two_signals() {
     let result = op.execute(&ExecutionContext::new());
     let ids: Vec<u64> = result.iter().map(|entry| entry.doc_id).collect();
     assert_eq!(ids, vec![1, 2, 3]);
-    for entry in result.iter() {
+    for entry in &result {
         assert!(entry.payload.score > 0.0 && entry.payload.score < 1.0);
     }
 }

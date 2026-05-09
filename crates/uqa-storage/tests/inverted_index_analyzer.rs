@@ -142,28 +142,22 @@ fn memory_separate_phases() {
 
 #[test]
 fn memory_invalid_phase_string_rejected() {
-    let r = AnalyzerPhase::from_str("bad");
+    let r = AnalyzerPhase::parse("bad");
     assert!(r.is_err());
 }
 
 #[test]
 fn memory_phase_string_parses() {
+    assert_eq!(AnalyzerPhase::parse("index").unwrap(), AnalyzerPhase::Index);
     assert_eq!(
-        AnalyzerPhase::from_str("index").unwrap(),
-        AnalyzerPhase::Index
-    );
-    assert_eq!(
-        AnalyzerPhase::from_str("search").unwrap(),
+        AnalyzerPhase::parse("search").unwrap(),
         AnalyzerPhase::Search
     );
     assert_eq!(
-        AnalyzerPhase::from_str("query").unwrap(),
+        AnalyzerPhase::parse("query").unwrap(),
         AnalyzerPhase::Search
     );
-    assert_eq!(
-        AnalyzerPhase::from_str("both").unwrap(),
-        AnalyzerPhase::Both
-    );
+    assert_eq!(AnalyzerPhase::parse("both").unwrap(), AnalyzerPhase::Both);
 }
 
 #[test]

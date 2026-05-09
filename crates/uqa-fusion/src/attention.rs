@@ -81,7 +81,7 @@ impl AttentionFusion {
         self.n_signals = state.n_signals;
         self.n_query_features = state.n_query_features;
         self.alpha = state.alpha;
-        self.weights = state.weights_matrix.clone();
+        self.weights.clone_from(&state.weights_matrix);
     }
 
     /// One SGD step on the logistic loss. Approximate gradient:

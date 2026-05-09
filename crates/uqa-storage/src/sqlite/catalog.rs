@@ -71,6 +71,46 @@ pub struct CatalogIndexRow {
     pub parameters_json: String,
 }
 
+/// Values persisted into one `_column_stats` row.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnStatsInput<'a> {
+    pub table_name: &'a str,
+    pub column_name: &'a str,
+    pub distinct_count: i64,
+    pub null_count: i64,
+    pub min_value: Option<&'a str>,
+    pub max_value: Option<&'a str>,
+    pub row_count: i64,
+    pub histogram_json: &'a str,
+    pub mcv_values_json: &'a str,
+    pub mcv_frequencies_json: &'a str,
+}
+
+impl<'a> ColumnStatsInput<'a> {
+    pub fn basic(
+        table_name: &'a str,
+        column_name: &'a str,
+        distinct_count: i64,
+        null_count: i64,
+        min_value: Option<&'a str>,
+        max_value: Option<&'a str>,
+        row_count: i64,
+    ) -> Self {
+        Self {
+            table_name,
+            column_name,
+            distinct_count,
+            null_count,
+            min_value,
+            max_value,
+            row_count,
+            histogram_json: "[]",
+            mcv_values_json: "[]",
+            mcv_frequencies_json: "[]",
+        }
+    }
+}
+
 pub struct Catalog {
     conn: ManagedConnection,
 }
@@ -949,49 +989,7 @@ impl Catalog {
     /// cardinality / range estimates after a restart. `min_value` and
     /// `max_value` are stored as strings (JSON when the value isn't
     /// natively textual) so the column type is irrelevant.
-    pub fn save_column_stats(
-        &self,
-        table_name: &str,
-        column_name: &str,
-        distinct_count: i64,
-        null_count: i64,
-        min_value: Option<&str>,
-        max_value: Option<&str>,
-        row_count: i64,
-    ) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
-                "INSERT OR REPLACE INTO _column_stats
-                    (table_name, column_name, distinct_count, null_count,
-                     min_value, max_value, row_count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    table_name,
-                    column_name,
-                    distinct_count,
-                    null_count,
-                    min_value,
-                    max_value,
-                    row_count,
-                ],
-            )?;
-            Ok(())
-        })
-    }
-
-    pub fn save_column_stats_full(
-        &self,
-        table_name: &str,
-        column_name: &str,
-        distinct_count: i64,
-        null_count: i64,
-        min_value: Option<&str>,
-        max_value: Option<&str>,
-        row_count: i64,
-        histogram_json: &str,
-        mcv_values_json: &str,
-        mcv_frequencies_json: &str,
-    ) -> Result<()> {
+    pub fn save_column_stats(&self, stats: ColumnStatsInput<'_>) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _column_stats
@@ -1000,16 +998,16 @@ impl Catalog {
                      histogram, mcv_values, mcv_frequencies)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
-                    table_name,
-                    column_name,
-                    distinct_count,
-                    null_count,
-                    min_value,
-                    max_value,
-                    row_count,
-                    histogram_json,
-                    mcv_values_json,
-                    mcv_frequencies_json,
+                    stats.table_name,
+                    stats.column_name,
+                    stats.distinct_count,
+                    stats.null_count,
+                    stats.min_value,
+                    stats.max_value,
+                    stats.row_count,
+                    stats.histogram_json,
+                    stats.mcv_values_json,
+                    stats.mcv_frequencies_json,
                 ],
             )?;
             Ok(())

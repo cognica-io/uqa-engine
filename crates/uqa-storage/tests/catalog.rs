@@ -20,8 +20,8 @@ use uqa_core::{DocId, Value};
 use uqa_storage::document_store::DocumentStore;
 use uqa_storage::inverted_index::InvertedIndex;
 use uqa_storage::sqlite::{
-    Catalog, ColumnStatsRow, ManagedConnection, SQLiteDocumentStore, SQLiteInvertedIndex,
-    SQLiteVectorIndex, TableSchema, VectorFieldSchema,
+    Catalog, ColumnStatsInput, ColumnStatsRow, ManagedConnection, SQLiteDocumentStore,
+    SQLiteInvertedIndex, SQLiteVectorIndex, TableSchema, VectorFieldSchema,
 };
 use uqa_storage::vector_index::VectorIndex;
 
@@ -39,6 +39,26 @@ fn open_in_memory_catalog() -> (ManagedConnection, Catalog) {
     let conn = ManagedConnection::open_in_memory().unwrap();
     let cat = Catalog::open(conn.clone()).unwrap();
     (conn, cat)
+}
+
+fn column_stats<'a>(
+    table_name: &'a str,
+    column_name: &'a str,
+    distinct_count: i64,
+    null_count: i64,
+    min_value: Option<&'a str>,
+    max_value: Option<&'a str>,
+    row_count: i64,
+) -> ColumnStatsInput<'a> {
+    ColumnStatsInput::basic(
+        table_name,
+        column_name,
+        distinct_count,
+        null_count,
+        min_value,
+        max_value,
+        row_count,
+    )
 }
 
 fn document_store(conn: ManagedConnection, table: &str) -> SQLiteDocumentStore {
@@ -147,7 +167,7 @@ fn drop_table_cascades_postings_and_stats() {
     cat.save_table(&schema("t1", &["x"])).unwrap();
     let mut idx = inverted_index(conn.clone(), "t1");
     idx.add_document(1, fields(&[("x", "hello")]));
-    cat.save_column_stats("t1", "x", 5, 0, Some("a"), Some("z"), 10)
+    cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("a"), Some("z"), 10))
         .unwrap();
     cat.drop_table("t1").unwrap();
     cat.purge_table_data("t1").unwrap();
@@ -220,7 +240,7 @@ fn document_delete_removes_row() {
     store.put(2, doc([("x", Value::Int(2))]));
     store.delete(1);
     let mut ids = store.doc_ids();
-    ids.sort();
+    ids.sort_unstable();
     assert_eq!(ids, vec![2u64 as DocId]);
 }
 
@@ -335,8 +355,8 @@ fn graph_vertices_round_trip() {
         .into_iter()
         .map(|(id, _, props)| (id, props))
         .collect();
-    assert_eq!(by_id.get(&1).map(|s| s.as_str()), Some(r#"{"name":"A"}"#));
-    assert_eq!(by_id.get(&2).map(|s| s.as_str()), Some(r#"{"name":"B"}"#));
+    assert_eq!(by_id.get(&1).map(String::as_str), Some(r#"{"name":"A"}"#));
+    assert_eq!(by_id.get(&2).map(String::as_str), Some(r#"{"name":"B"}"#));
 }
 
 #[test]
@@ -410,10 +430,26 @@ fn vector_delete_removes_only_target() {
 #[test]
 fn column_stats_save_and_load() {
     let (_conn, cat) = open_in_memory_catalog();
-    cat.save_column_stats("t1", "age", 10, 2, Some("18"), Some("65"), 100)
-        .unwrap();
-    cat.save_column_stats("t1", "name", 50, 0, Some("alice"), Some("zoe"), 100)
-        .unwrap();
+    cat.save_column_stats(column_stats(
+        "t1",
+        "age",
+        10,
+        2,
+        Some("18"),
+        Some("65"),
+        100,
+    ))
+    .unwrap();
+    cat.save_column_stats(column_stats(
+        "t1",
+        "name",
+        50,
+        0,
+        Some("alice"),
+        Some("zoe"),
+        100,
+    ))
+    .unwrap();
     let stats = cat.load_column_stats("t1").unwrap();
     assert_eq!(stats.len(), 2);
     let by_col: std::collections::BTreeMap<String, ColumnStatsRow> = stats
@@ -434,18 +470,18 @@ fn column_stats_save_and_load() {
 #[test]
 fn column_stats_full_round_trip_preserves_histogram_and_mcv() {
     let (_conn, cat) = open_in_memory_catalog();
-    cat.save_column_stats_full(
-        "t1",
-        "cat",
-        2,
-        0,
-        Some(r#""A""#),
-        Some(r#""B""#),
-        100,
-        r#"["A","B"]"#,
-        r#"["A"]"#,
-        r#"[0.6]"#,
-    )
+    cat.save_column_stats(ColumnStatsInput {
+        table_name: "t1",
+        column_name: "cat",
+        distinct_count: 2,
+        null_count: 0,
+        min_value: Some(r#""A""#),
+        max_value: Some(r#""B""#),
+        row_count: 100,
+        histogram_json: r#"["A","B"]"#,
+        mcv_values_json: r#"["A"]"#,
+        mcv_frequencies_json: r"[0.6]",
+    })
     .unwrap();
     let stats = cat.load_column_stats("t1").unwrap();
     assert_eq!(stats.len(), 1);
@@ -453,15 +489,15 @@ fn column_stats_full_round_trip_preserves_histogram_and_mcv() {
     assert_eq!(stats[0].max_value.as_deref(), Some(r#""B""#));
     assert_eq!(stats[0].histogram_json, r#"["A","B"]"#);
     assert_eq!(stats[0].mcv_values_json, r#"["A"]"#);
-    assert_eq!(stats[0].mcv_frequencies_json, r#"[0.6]"#);
+    assert_eq!(stats[0].mcv_frequencies_json, r"[0.6]");
 }
 
 #[test]
 fn column_stats_overwrite() {
     let (_conn, cat) = open_in_memory_catalog();
-    cat.save_column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20)
+    cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20))
         .unwrap();
-    cat.save_column_stats("t1", "x", 8, 1, Some("2"), Some("15"), 30)
+    cat.save_column_stats(column_stats("t1", "x", 8, 1, Some("2"), Some("15"), 30))
         .unwrap();
     let stats = cat.load_column_stats("t1").unwrap();
     assert_eq!(stats.len(), 1);
@@ -473,7 +509,7 @@ fn column_stats_overwrite() {
 #[test]
 fn column_stats_delete() {
     let (_conn, cat) = open_in_memory_catalog();
-    cat.save_column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20)
+    cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20))
         .unwrap();
     cat.delete_column_stats("t1").unwrap();
     assert!(cat.load_column_stats("t1").unwrap().is_empty());
@@ -482,9 +518,9 @@ fn column_stats_delete() {
 #[test]
 fn column_stats_tables_isolated() {
     let (_conn, cat) = open_in_memory_catalog();
-    cat.save_column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20)
+    cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("1"), Some("10"), 20))
         .unwrap();
-    cat.save_column_stats("t2", "x", 8, 0, Some("1"), Some("20"), 40)
+    cat.save_column_stats(column_stats("t2", "x", 8, 0, Some("1"), Some("20"), 40))
         .unwrap();
     let s1 = cat.load_column_stats("t1").unwrap();
     let s2 = cat.load_column_stats("t2").unwrap();
@@ -572,7 +608,7 @@ fn transaction_rollback_drops_uncommitted_writes() {
     store.put(2, doc([("x", Value::Int(2))]));
     conn.rollback_transaction().unwrap();
     let mut ids = store.doc_ids();
-    ids.sort();
+    ids.sort_unstable();
     assert_eq!(ids, vec![1u64 as DocId]);
 }
 
@@ -613,7 +649,7 @@ fn close_and_reopen_restores_every_store() {
         cat.save_vertex(1, "", r#"{"label":"A"}"#).unwrap();
         cat.save_edge(1, 1, 2, "link", "{}").unwrap();
         vec_idx.add(1, vec![1.0, 2.0]);
-        cat.save_column_stats("t", "x", 5, 0, Some("1"), Some("10"), 20)
+        cat.save_column_stats(column_stats("t", "x", 5, 0, Some("1"), Some("10"), 20))
             .unwrap();
         cat.save_scoring_params("bm25", r#"{"alpha":1.5}"#).unwrap();
 

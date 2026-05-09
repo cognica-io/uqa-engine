@@ -13,10 +13,15 @@ all-features = true
 
 [advisories]
 version = 2
-# Refuse to ship code with a known security advisory. `unmaintained`
-# is informational only, since stable upstream crates often go quiet.
+# In v2, cargo-deny errors on vulnerability, unmaintained, unsound, and notice
+# advisories. Keep any intentional transitive unmaintained exceptions explicit.
 yanked = "deny"
-ignore = []
+ignore = [
+    # `paste` is pulled transitively through Arrow/Parquet. RUSTSEC marks it
+    # unmaintained and offers no safe upgrade; keep this explicit so real
+    # vulnerability advisories still fail the gate.
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
 version = 2

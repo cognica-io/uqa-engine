@@ -38,6 +38,10 @@ jobs:
   test:
     name: cargo test
     runs-on: ${{ matrix.os }}
+    env:
+      # The Ubuntu runner hit an lld bus-error while linking a test binary, so
+      # use the system linker there while keeping warnings-as-errors.
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
     strategy:
       fail-fast: false
       matrix:

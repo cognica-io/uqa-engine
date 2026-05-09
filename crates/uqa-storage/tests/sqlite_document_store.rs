@@ -7,13 +7,15 @@
 //! 1:1 port of `uqa/tests/test_sqlite_document_store.py`.
 //!
 //! The Rust store persists documents in the catalog `_documents` table
-//! as typed JSON rather than creating one SQLite column per logical
+//! as typed JSON rather than creating one `SQLite` column per logical
 //! field. These tests assert the same public `DocumentStore`
 //! behaviour through the Rust storage surface.
 
 use uqa_core::{PathSegment, Value};
 use uqa_storage::document_store::{Document, DocumentStore};
 use uqa_storage::sqlite::{Catalog, ManagedConnection, SQLiteDocumentStore};
+
+const TEST_FLOAT: f64 = 3.125;
 
 fn make_store(table: &str) -> (tempfile::TempDir, ManagedConnection, SQLiteDocumentStore) {
     let dir = tempfile::tempdir().unwrap();
@@ -125,8 +127,8 @@ fn text_column() {
 #[test]
 fn real_column() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(1, doc([("val", Value::Float(3.14))]));
-    assert_eq!(store.get_field(1, "val"), Some(Value::Float(3.14)));
+    store.put(1, doc([("val", Value::Float(TEST_FLOAT))]));
+    assert_eq!(store.get_field(1, "val"), Some(Value::Float(TEST_FLOAT)));
 }
 
 #[test]
@@ -370,13 +372,16 @@ fn two_tables_independent() {
     );
     store_b.put(
         1,
-        doc([("p", Value::Float(3.14)), ("q", Value::Str("pi".into()))]),
+        doc([
+            ("p", Value::Float(TEST_FLOAT)),
+            ("q", Value::Str("pi".into())),
+        ]),
     );
 
     assert_eq!(store_a.len(), 1);
     assert_eq!(store_b.len(), 1);
     assert_eq!(store_a.get(1).unwrap()["x"], Value::Int(10));
-    assert_eq!(store_b.get(1).unwrap()["p"], Value::Float(3.14));
+    assert_eq!(store_b.get(1).unwrap()["p"], Value::Float(TEST_FLOAT));
     store_a.delete(1);
     assert_eq!(store_a.len(), 0);
     assert_eq!(store_b.len(), 1);

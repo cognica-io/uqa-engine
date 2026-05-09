@@ -95,7 +95,7 @@ fn test_top_k_results_match_full_results() {
     )
     .with_top_k(2)
     .execute(&ExecutionContext::new());
-    for entry in top.iter() {
+    for entry in &top {
         let full_entry = full.get_entry(entry.doc_id).unwrap();
         assert!((entry.payload.score - full_entry.payload.score).abs() < 1e-6);
     }

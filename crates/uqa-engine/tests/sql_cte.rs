@@ -241,7 +241,7 @@ fn recursive_union_dedup() {
          ) SELECT n FROM seq",
     );
     let mut values = ints(&result, "n");
-    values.sort();
+    values.sort_unstable();
     assert_eq!(values, vec![1, 2, 3]);
 }
 

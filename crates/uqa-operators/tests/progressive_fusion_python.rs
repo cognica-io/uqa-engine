@@ -118,7 +118,7 @@ fn scores_are_probabilities() {
 
     let op = ProgressiveFusionOperator::new(vec![(vec![sig1, sig2], 3)], 0.5);
     let result = op.execute(&ExecutionContext::new());
-    for entry in result.iter() {
+    for entry in &result {
         assert!(entry.payload.score > 0.0);
         assert!(entry.payload.score < 1.0);
     }

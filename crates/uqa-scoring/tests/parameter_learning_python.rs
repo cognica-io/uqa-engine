@@ -42,12 +42,12 @@ fn fit_returns_params() {
 fn fit_changes_params() {
     let mut learner = ParameterLearner::default();
     let initial = learner.params();
-    let learned =
+    let fitted_params =
         learner.fit_with_options(&[0.1, 0.2, 0.8, 0.9], &[0.0, 0.0, 1.0, 1.0], None, None);
     assert!(
-        (learned["alpha"] - initial["alpha"]).abs() > 1e-6
-            || (learned["beta"] - initial["beta"]).abs() > 1e-6
-            || (learned["base_rate"] - initial["base_rate"]).abs() > 1e-6
+        (fitted_params["alpha"] - initial["alpha"]).abs() > 1e-6
+            || (fitted_params["beta"] - initial["beta"]).abs() > 1e-6
+            || (fitted_params["base_rate"] - initial["base_rate"]).abs() > 1e-6
     );
 }
 

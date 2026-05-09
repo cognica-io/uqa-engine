@@ -195,7 +195,7 @@ fn scalar_subquery_aggregate() {
         "SELECT name, (SELECT MAX(salary) FROM employees) AS max_salary \
          FROM employees WHERE id = 1",
     );
-    assert_eq!(result.rows[0]["max_salary"], Value::Float(95000.0));
+    assert_eq!(result.rows[0]["max_salary"], Value::Float(95_000.0));
 }
 
 #[test]

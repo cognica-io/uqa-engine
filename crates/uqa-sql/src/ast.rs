@@ -438,7 +438,7 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
         /// `func(DISTINCT expr)` — only meaningful for aggregate
-        /// functions. Mirrors PostgreSQL's `agg_distinct`.
+        /// functions. Mirrors `PostgreSQL`'s `agg_distinct`.
         distinct: bool,
         /// `func(expr ORDER BY ...)` — only meaningful for ordered
         /// aggregates (`STRING_AGG`, `ARRAY_AGG`, `PERCENTILE_*`).

@@ -159,7 +159,7 @@ fn execute_update() {
     );
     exec(&engine, "EXECUTE upd (100000, 1)");
     let result = exec(&engine, "SELECT salary FROM employees WHERE id = 1");
-    assert_eq!(result.rows[0]["salary"], Value::Float(100000.0));
+    assert_eq!(result.rows[0]["salary"], Value::Float(100_000.0));
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn reprepare_after_deallocate() {
         "PREPARE q AS SELECT salary FROM employees WHERE id = $1",
     );
     let result = exec(&engine, "EXECUTE q (1)");
-    assert_eq!(result.rows[0]["salary"], Value::Float(90000.0));
+    assert_eq!(result.rows[0]["salary"], Value::Float(90_000.0));
 }
 
 #[test]

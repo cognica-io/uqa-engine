@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of the FusionWAND scoring portion of Python `test_fusion_wand.py`.
+//! Port of the `FusionWAND` scoring portion of Python `test_fusion_wand.py`.
 
 use std::collections::BTreeMap;
 

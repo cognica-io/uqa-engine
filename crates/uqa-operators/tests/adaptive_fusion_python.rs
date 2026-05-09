@@ -48,7 +48,7 @@ fn adaptive_operator_basic() {
 
     assert_eq!(result.len(), 3);
     assert_eq!(result.doc_ids().collect::<Vec<_>>(), vec![1, 2, 3]);
-    for entry in result.iter() {
+    for entry in &result {
         assert!(entry.payload.score > 0.0);
         assert!(entry.payload.score < 1.0);
     }
