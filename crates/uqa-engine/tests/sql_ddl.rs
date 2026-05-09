@@ -104,6 +104,34 @@ fn alter_table_add_column_with_default() {
 }
 
 #[test]
+fn create_index_using_ivf_accepts_vector_columns() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+    );
+    exec(
+        &engine,
+        "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding) \
+         WITH (lists = 4, probes = 2, train_threshold = 4)",
+    );
+}
+
+#[test]
+fn create_index_using_hnsw_aliases_ivf() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+    );
+    exec(
+        &engine,
+        "CREATE INDEX docs_embedding_hnsw ON docs USING hnsw (embedding) \
+         WITH (lists = 4, probes = 2, train_threshold = 4)",
+    );
+}
+
+#[test]
 fn alter_table_add_not_null_column_with_default_backfills_existing_rows() {
     let engine = engine_with_users();
     exec(

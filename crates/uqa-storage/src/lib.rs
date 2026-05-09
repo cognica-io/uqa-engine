@@ -31,8 +31,8 @@ pub use inverted_index::{AnalyzerPhase, InvertedIndex, MemoryInvertedIndex};
 pub use ivf_index::{IVFIndex, IVFState};
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
-    Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteInvertedIndex,
-    SQLiteVectorIndex, TableSchema, VectorFieldSchema,
+    Catalog, ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
+    SQLiteInvertedIndex, SQLiteVectorIndex, TableSchema, VectorFieldSchema,
 };
 pub use transaction::{
     InMemoryTransaction, SQLiteTransaction, Snapshotable, TransactionError, TxResult,

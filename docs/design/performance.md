@@ -34,7 +34,7 @@ when locking in a baseline you intend to compare against later.
 | SQL filter (10k rows) | `cargo bench -p uqa-engine --bench sql_e2e` | ~3.78 ms | end-to-end SELECT WHERE |
 | SQL text match (10k docs) | same bench | ~17.26 ms | analyzer + posting list + score |
 | SQL inner join (10k x 1k) | `cargo bench -p uqa-engine --bench join` | ~10.08 ms | hash-join optimizer hit |
-| k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~2.0 ms | brute-force vector path |
+| k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~2.0 ms | IVF vector path |
 | SQL text match (1M docs, top 10) | `cargo bench -p uqa-engine --bench sql_1m` | ~1.48 s | scaling check |
 | Relevance bench (3 queries, BM25) | `cargo bench -p uqa-engine --bench relevance` | ~84 us | retrieval loop only |
 | Relevance bench (3 queries, BayesianBM25) | same bench | ~85 us | retrieval loop only |

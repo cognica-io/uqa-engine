@@ -109,13 +109,13 @@ pub struct ForeignKey {
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
-    /// `gin`, `btree`, `ivf`, `rtree`, `hnsw`, ...
+    /// `gin`, `btree`, `ivf`, `hnsw` (alias for `ivf`), `rtree`, ...
     pub access_method: String,
     pub columns: Vec<String>,
     /// `CREATE INDEX IF NOT EXISTS`.
     pub if_not_exists: bool,
     /// Storage parameters from `WITH (k = v, ...)`. Stored verbatim;
-    /// known keys (`analyzer`, `lists`, `m`, `ef_construction`, ...)
+    /// known keys (`analyzer`, `lists`, `probes`, ...)
     /// are interpreted by the engine.
     pub options: Vec<(String, String)>,
 }

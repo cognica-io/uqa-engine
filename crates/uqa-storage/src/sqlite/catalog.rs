@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
@@ -258,8 +258,9 @@ impl Catalog {
 
     /// Wipe the rows owned by `table` from the per-table data tables
     /// (`_documents`, `_postings`, `_doc_lengths`, `_field_stats`,
-    /// `_vectors`). Run after [`Catalog::drop_table`] when the engine
-    /// drops the table from its in-memory registry as well.
+    /// `_vectors`, IVF metadata). Run after [`Catalog::drop_table`]
+    /// when the engine drops the table from its in-memory registry as
+    /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -276,6 +277,18 @@ impl Catalog {
                 params![name],
             )?;
             c.execute("DELETE FROM _vectors WHERE table_name = ?1", params![name])?;
+            c.execute(
+                "DELETE FROM _ivf_indexes WHERE table_name = ?1",
+                params![name],
+            )?;
+            c.execute(
+                "DELETE FROM _ivf_centroids WHERE table_name = ?1",
+                params![name],
+            )?;
+            c.execute(
+                "DELETE FROM _ivf_assignments WHERE table_name = ?1",
+                params![name],
+            )?;
             c.execute(
                 "DELETE FROM _column_stats WHERE table_name = ?1",
                 params![name],
@@ -1280,6 +1293,42 @@ const MIGRATIONS: &[(u32, &str)] = &[
         mcv_frequencies TEXT NOT NULL DEFAULT '[]',
         PRIMARY KEY (table_name, column_name)
     );
+    ",
+    ),
+    (
+        9,
+        r"
+    CREATE TABLE IF NOT EXISTS _ivf_indexes (
+        table_name          TEXT NOT NULL,
+        field               TEXT NOT NULL,
+        dimensions          INTEGER NOT NULL,
+        nlist               INTEGER NOT NULL,
+        nprobe              INTEGER NOT NULL,
+        train_threshold     INTEGER NOT NULL,
+        state               TEXT NOT NULL,
+        trained_size        INTEGER NOT NULL,
+        deletes_since_train INTEGER NOT NULL,
+        vector_count        INTEGER NOT NULL,
+        PRIMARY KEY (table_name, field)
+    );
+
+    CREATE TABLE IF NOT EXISTS _ivf_centroids (
+        table_name  TEXT NOT NULL,
+        field       TEXT NOT NULL,
+        centroid_id INTEGER NOT NULL,
+        vector      BLOB NOT NULL,
+        PRIMARY KEY (table_name, field, centroid_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS _ivf_assignments (
+        table_name  TEXT NOT NULL,
+        field       TEXT NOT NULL,
+        doc_id      INTEGER NOT NULL,
+        centroid_id INTEGER NOT NULL,
+        PRIMARY KEY (table_name, field, doc_id)
+    );
+    CREATE INDEX IF NOT EXISTS _ivf_assignments_centroid_idx
+        ON _ivf_assignments (table_name, field, centroid_id, doc_id);
     ",
     ),
 ];

@@ -33,7 +33,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
-use crate::vector_index::VectorIndex;
+use crate::vector_index::{cosine_similarity, VectorIndex};
 
 const DEFAULT_NLIST: usize = 100;
 const DEFAULT_NPROBE: usize = 10;
@@ -51,8 +51,19 @@ pub enum IVFState {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct IVFMetadataSnapshot {
+    pub state: IVFState,
+    pub centroids: Vec<Vec<f32>>,
+    pub assignments: Vec<(DocId, usize)>,
+    pub trained_size: usize,
+    pub deletes_since_train: usize,
+    pub vector_count: usize,
+}
+
+#[derive(Debug, Clone)]
 struct StoredVector {
     doc_id: DocId,
+    raw_vector: Vec<f32>,
     vector: Vec<f32>,
     centroid: Option<usize>,
 }
@@ -72,6 +83,7 @@ pub struct IVFIndex {
     /// the index is trained or a row is added post-training.
     vectors: Mutex<BTreeMap<DocId, StoredVector>>,
     centroids: Mutex<Vec<Vec<f32>>>,
+    inverted_lists: Mutex<Vec<Vec<DocId>>>,
     /// Trained corpus size at the last training pass; the stale
     /// detector compares this to the current `vectors.len()` plus the
     /// running deletion counter.
@@ -103,6 +115,7 @@ impl IVFIndex {
             state: Mutex::new(IVFState::Untrained),
             vectors: Mutex::new(BTreeMap::new()),
             centroids: Mutex::new(Vec::new()),
+            inverted_lists: Mutex::new(Vec::new()),
             trained_size: Mutex::new(0),
             deletes_since_train: Mutex::new(0),
         }
@@ -152,9 +165,13 @@ impl IVFIndex {
         let centroids = centroids_guard.clone();
         drop(centroids_guard);
         let mut vectors = self.vectors.lock();
+        let mut inverted_lists = vec![Vec::new(); centroids.len()];
         for v in vectors.values_mut() {
-            v.centroid = Some(nearest_centroid(&v.vector, &centroids));
+            let centroid = nearest_centroid(&v.vector, &centroids);
+            v.centroid = Some(centroid);
+            inverted_lists[centroid].push(v.doc_id);
         }
+        *self.inverted_lists.lock() = inverted_lists;
         *self.trained_size.lock() = vectors.len();
         *self.deletes_since_train.lock() = 0;
         *self.state.lock() = IVFState::Trained;
@@ -168,6 +185,40 @@ impl IVFIndex {
         let deletes = *self.deletes_since_train.lock();
         if (deletes as f64) / (trained as f64) > STALE_FRACTION {
             *self.state.lock() = IVFState::Stale;
+        }
+    }
+
+    fn remove_from_inverted_list(&self, centroid: usize, doc_id: DocId) {
+        let mut lists = self.inverted_lists.lock();
+        if let Some(list) = lists.get_mut(centroid) {
+            list.retain(|id| *id != doc_id);
+        }
+    }
+
+    fn add_to_inverted_list(&self, centroid: usize, doc_id: DocId) {
+        let mut lists = self.inverted_lists.lock();
+        if let Some(list) = lists.get_mut(centroid) {
+            match list.binary_search(&doc_id) {
+                Ok(_) => {}
+                Err(pos) => list.insert(pos, doc_id),
+            }
+        }
+    }
+
+    pub(crate) fn metadata_snapshot(&self) -> IVFMetadataSnapshot {
+        let vectors = self.vectors.lock();
+        let mut assignments: Vec<(DocId, usize)> = vectors
+            .values()
+            .filter_map(|v| v.centroid.map(|centroid| (v.doc_id, centroid)))
+            .collect();
+        assignments.sort_by_key(|(doc_id, _)| *doc_id);
+        IVFMetadataSnapshot {
+            state: *self.state.lock(),
+            centroids: self.centroids.lock().clone(),
+            assignments,
+            trained_size: *self.trained_size.lock(),
+            deletes_since_train: *self.deletes_since_train.lock(),
+            vector_count: vectors.len(),
         }
     }
 }
@@ -240,10 +291,15 @@ impl VectorIndex for IVFIndex {
         self.dimensions
     }
 
+    fn index_kind(&self) -> &'static str {
+        "ivf"
+    }
+
     fn add(&mut self, doc_id: DocId, mut vector: Vec<f32>) {
         if vector.len() as u32 != self.dimensions {
             return;
         }
+        let raw_vector = vector.clone();
         l2_normalise(&mut vector);
         let centroids = self.centroids.lock();
         let centroid = if centroids.is_empty() {
@@ -253,10 +309,11 @@ impl VectorIndex for IVFIndex {
         };
         drop(centroids);
         let mut vectors = self.vectors.lock();
-        vectors.insert(
+        let old = vectors.insert(
             doc_id,
             StoredVector {
                 doc_id,
+                raw_vector,
                 vector,
                 centroid,
             },
@@ -265,6 +322,12 @@ impl VectorIndex for IVFIndex {
         let count = vectors.len();
         let untrained = matches!(*self.state.lock(), IVFState::Untrained);
         drop(vectors);
+        if let Some(old_centroid) = old.and_then(|v| v.centroid) {
+            self.remove_from_inverted_list(old_centroid, doc_id);
+        }
+        if let Some(centroid) = centroid {
+            self.add_to_inverted_list(centroid, doc_id);
+        }
         if untrained && count >= self.train_threshold {
             self.train();
         }
@@ -272,7 +335,10 @@ impl VectorIndex for IVFIndex {
 
     fn delete(&mut self, doc_id: DocId) {
         let mut vectors = self.vectors.lock();
-        if vectors.remove(&doc_id).is_some() {
+        if let Some(old) = vectors.remove(&doc_id) {
+            if let Some(centroid) = old.centroid {
+                self.remove_from_inverted_list(centroid, doc_id);
+            }
             *self.deletes_since_train.lock() += 1;
         }
         drop(vectors);
@@ -282,6 +348,7 @@ impl VectorIndex for IVFIndex {
     fn clear(&mut self) {
         self.vectors.lock().clear();
         self.centroids.lock().clear();
+        self.inverted_lists.lock().clear();
         *self.state.lock() = IVFState::Untrained;
         *self.trained_size.lock() = 0;
         *self.deletes_since_train.lock() = 0;
@@ -291,6 +358,7 @@ impl VectorIndex for IVFIndex {
         if query.len() as u32 != self.dimensions || k == 0 {
             return PostingList::default();
         }
+        let raw_query = query;
         let mut q = query.to_vec();
         l2_normalise(&mut q);
 
@@ -305,7 +373,7 @@ impl VectorIndex for IVFIndex {
 
         let mut scored: Vec<(DocId, f32)> = Vec::new();
         let scan_one = |sv: &StoredVector, scored: &mut Vec<(DocId, f32)>| {
-            let sim = dot(&q, &sv.vector);
+            let sim = cosine_similarity(raw_query, &sv.raw_vector);
             scored.push((sv.doc_id, sim));
         };
 
@@ -336,11 +404,13 @@ impl VectorIndex for IVFIndex {
                         .take(*self.nprobe.lock())
                         .map(|(i, _)| i)
                         .collect();
-                    drop(centroids);
-                    for sv in vectors.values() {
-                        if let Some(c) = sv.centroid {
-                            if probe.contains(&c) {
-                                scan_one(sv, &mut scored);
+                    let lists = self.inverted_lists.lock();
+                    for centroid in probe {
+                        if let Some(doc_ids) = lists.get(centroid) {
+                            for doc_id in doc_ids {
+                                if let Some(sv) = vectors.get(doc_id) {
+                                    scan_one(sv, &mut scored);
+                                }
                             }
                         }
                     }
@@ -373,12 +443,10 @@ impl VectorIndex for IVFIndex {
         if query.len() as u32 != self.dimensions {
             return PostingList::default();
         }
-        let mut q = query.to_vec();
-        l2_normalise(&mut q);
         let vectors = self.vectors.lock();
         let mut entries: Vec<PostingEntry> = Vec::new();
         for sv in vectors.values() {
-            let sim = dot(&q, &sv.vector);
+            let sim = cosine_similarity(query, &sv.raw_vector);
             if sim >= threshold {
                 entries.push(PostingEntry::new(
                     sv.doc_id,
@@ -409,6 +477,7 @@ impl VectorIndex for IVFIndex {
             state: Mutex::new(*self.state.lock()),
             vectors: Mutex::new(self.vectors.lock().clone()),
             centroids: Mutex::new(self.centroids.lock().clone()),
+            inverted_lists: Mutex::new(self.inverted_lists.lock().clone()),
             trained_size: Mutex::new(*self.trained_size.lock()),
             deletes_since_train: Mutex::new(*self.deletes_since_train.lock()),
         };

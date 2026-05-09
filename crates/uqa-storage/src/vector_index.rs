@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Vector index abstraction and an in-memory brute-force implementation.
+//! Vector index abstraction and an in-memory brute-force fallback.
 //!
 //! Operators (`KNNOperator`, `VectorSimilarityOperator`,
-//! `CalibratedVectorOperator`) depend only on this trait. IVF and HNSW
-//! backends slot in by implementing the same surface.
+//! `CalibratedVectorOperator`) depend only on this trait. IVF backends
+//! slot in by implementing the same surface.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -41,6 +41,9 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 pub trait VectorIndex: Send + Sync {
     fn dimensions(&self) -> u32;
+    fn index_kind(&self) -> &'static str {
+        "vector"
+    }
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>);
     fn delete(&mut self, doc_id: DocId);
     fn clear(&mut self);
@@ -74,6 +77,10 @@ impl MemoryVectorIndex {
 impl VectorIndex for MemoryVectorIndex {
     fn dimensions(&self) -> u32 {
         self.dimensions
+    }
+
+    fn index_kind(&self) -> &'static str {
+        "memory-bruteforce"
     }
 
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) {

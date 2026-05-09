@@ -113,7 +113,7 @@ crates/
 
 ## Release notes
 
-See [CHANGELOG.md](CHANGELOG.md) for what is in each release and what is still open.
+See [HISTORY.md](HISTORY.md) for what is in each release and what is still open.
 
 ## Contributing
 

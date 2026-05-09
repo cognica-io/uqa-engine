@@ -1,12 +1,12 @@
-# Changelog
+# History
 
 All notable changes to `uqa-rs` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-05-09
 
-The 0.1.0 release covers all eleven phases of [`docs/plans/0001-uqa-python-to-rust-port.md`](docs/plans/0001-uqa-python-to-rust-port.md). The remaining exit-criterion items are the 2x-vs-Python performance ratio (Rust baseline measured in `docs/design/performance.md`; the Python comparison harness is the next deliverable) and the release tag itself.
+The 0.1.0 release covers all eleven phases of [`docs/plans/0001-uqa-python-to-rust-port.md`](docs/plans/0001-uqa-python-to-rust-port.md). The remaining post-release exit-criterion item is the 2x-vs-Python performance ratio; the Rust baseline is measured in `docs/design/performance.md`, and the Python comparison harness is the next deliverable.
 
 ### Added
 
@@ -79,7 +79,21 @@ Post-phase parity sweep against the Python reference, focused on SQL surface are
 - `cargo test --workspace --all-targets --locked` — 105 test groups passing.
 - `cargo build --workspace --release --locked` clean.
 
+### Round 3 (2026-05-09)
+
+#### Changed
+
+- **Vector indexing:** vector fields and `CREATE INDEX ... USING ivf` now use IVF as the primary backend instead of a brute-force SQLite vector scan.
+- **SQL compatibility:** `USING hnsw` is accepted as an alias for IVF and is stored in the catalog as `ivf`.
+- **Release notes:** renamed `CHANGELOG.md` to `HISTORY.md`.
+
+#### Fixed
+
+- **SQLite IVF durability:** persisted IVF centroids and assignments are restored on `Engine::open`, so indexes are not rebuilt from all raw vectors on every database open.
+- **Vector semantics:** IVF keeps each original vector alongside its normalized copy and scores candidates against the original vector values, preserving existing cosine-threshold behavior.
+- **DDL lifecycle:** vector-index metadata is cleared or rebuilt when vector columns are dropped or renamed.
+
 ### Notes
 
 - The 2x-vs-Python performance gate from the master plan is split into the Rust baseline (`docs/design/performance.md`) and the Python comparison harness, which is the next deliverable.
-- DPccp join enumeration, `deep_learn` training, HNSW vector index, and PyO3 Python bindings remain explicitly deferred per the master plan's non-goals.
+- DPccp join enumeration, `deep_learn` training, and PyO3 Python bindings remain explicitly deferred per the master plan's non-goals.

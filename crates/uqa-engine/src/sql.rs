@@ -10,9 +10,10 @@
 //!
 //! Phase 5 covers the quickstart slice: `CREATE TABLE` (with `VECTOR(N)`
 //! columns), `CREATE INDEX ... USING gin (...)` (recorded as an FTS
-//! field), `INSERT ... VALUES`, and `SELECT` with `text_match`,
-//! `knn_match`, and `fuse_log_odds` calls in `WHERE`. Statements outside
-//! this surface return [`uqa_sql::SQLError::Unsupported`] cleanly.
+//! field), `CREATE INDEX ... USING ivf (...)` (`hnsw` is accepted as an
+//! IVF alias), `INSERT ... VALUES`, and `SELECT` with `text_match`,
+//! `knn_match`, and `fuse_log_odds` calls in `WHERE`. Statements outside this surface return
+//! [`uqa_sql::SQLError::Unsupported`] cleanly.
 
 #![allow(
     clippy::useless_format,
@@ -39,7 +40,7 @@ use uqa_sql::registry::{lookup, FunctionKind};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, ScoredEntry};
+use crate::{Engine, IvfIndexParams, ScoredEntry};
 
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
@@ -1466,20 +1467,50 @@ fn column_names(cols: &[SQLColumnDef]) -> Vec<String> {
 fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLError> {
     // CREATE INDEX is metadata-bearing now: `gin` registers the column
     // as an FTS field with the analyzer specified in `WITH (analyzer = ...)`,
-    // `ivf` / `hnsw` register vector fields if not already declared,
-    // others are informational.
+    // `ivf` rebuilds the vector field with an IVF backend, `hnsw` is a
+    // compatibility alias for the same backend, and others are informational.
     let am = c.access_method.to_ascii_lowercase();
-    if am.is_empty() || am == "gin" {
-        for col in &c.columns {
-            let analyzer = c
-                .options
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
-                .map(|(_, v)| v.as_str());
-            if let Err(e) = engine.add_fts_field_with_analyzer(&c.table, col.clone(), analyzer) {
-                return Err(SQLError::Internal(format!("add_fts_field: {e}")));
+    match am.as_str() {
+        "" | "gin" => {
+            for col in &c.columns {
+                let analyzer = c
+                    .options
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
+                    .map(|(_, v)| v.as_str());
+                if let Err(e) = engine.add_fts_field_with_analyzer(&c.table, col.clone(), analyzer)
+                {
+                    return Err(SQLError::Internal(format!("add_fts_field: {e}")));
+                }
             }
         }
+        "ivf" | "hnsw" => {
+            let params = parse_ivf_index_params(&c.options)?;
+            for col in &c.columns {
+                match engine.column_type(&c.table, col) {
+                    Some(ColumnType::Vector(dim)) => {
+                        if !engine.rebuild_ivf_vector_field(&c.table, col.clone(), dim, params) {
+                            return Err(SQLError::Unsupported(format!(
+                                "CREATE INDEX USING ivf: relation `{}` does not exist",
+                                c.table
+                            )));
+                        }
+                    }
+                    Some(other) => {
+                        return Err(SQLError::Unsupported(format!(
+                            "CREATE INDEX USING ivf requires VECTOR column `{col}`, got {other:?}"
+                        )));
+                    }
+                    None => {
+                        return Err(SQLError::Unsupported(format!(
+                            "CREATE INDEX USING ivf: column `{}`.`{col}` does not exist",
+                            c.table
+                        )));
+                    }
+                }
+            }
+        }
+        _ => {}
     }
     // Persist the CREATE INDEX statement itself so reopen sees the
     // same set of registered indexes. The engine layer parses
@@ -1487,15 +1518,49 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
     // any access-method-specific side effects (e.g. add_fts_field
     // for `gin`) on restore.
     if let Some(name) = c.name.as_ref() {
-        engine.register_catalog_index(
-            name,
-            if am.is_empty() { "btree" } else { am.as_str() },
-            &c.table,
-            &c.columns,
-            &c.options,
-        );
+        let catalog_index_type = match am.as_str() {
+            "" => "btree",
+            "hnsw" => "ivf",
+            other => other,
+        };
+        engine.register_catalog_index(name, catalog_index_type, &c.table, &c.columns, &c.options);
     }
     Ok(SQLResult::empty())
+}
+
+fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IvfIndexParams, SQLError> {
+    let mut params = IvfIndexParams::default();
+    for (key, value) in options {
+        if key.eq_ignore_ascii_case("lists") || key.eq_ignore_ascii_case("nlist") {
+            params.nlist = parse_positive_usize_option(key, value)?;
+        } else if key.eq_ignore_ascii_case("probes") || key.eq_ignore_ascii_case("nprobe") {
+            params.nprobe = parse_positive_usize_option(key, value)?;
+        } else if key.eq_ignore_ascii_case("train_threshold")
+            || key.eq_ignore_ascii_case("train-threshold")
+            || key.eq_ignore_ascii_case("min_train")
+        {
+            params.train_threshold = parse_positive_usize_option(key, value)?;
+        } else {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX USING ivf option `{key}` is not supported"
+            )));
+        }
+    }
+    Ok(params)
+}
+
+fn parse_positive_usize_option(key: &str, value: &str) -> Result<usize, SQLError> {
+    let parsed = value.parse::<usize>().map_err(|_| {
+        SQLError::TypeMismatch(format!(
+            "CREATE INDEX USING ivf option `{key}` must be a positive integer"
+        ))
+    })?;
+    if parsed == 0 {
+        return Err(SQLError::TypeMismatch(format!(
+            "CREATE INDEX USING ivf option `{key}` must be a positive integer"
+        )));
+    }
+    Ok(parsed)
 }
 
 // -------------------------------------------------------------------------

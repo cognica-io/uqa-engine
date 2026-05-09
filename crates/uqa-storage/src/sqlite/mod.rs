@@ -20,4 +20,4 @@ pub use catalog::{
 pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
-pub use vector_index::SQLiteVectorIndex;
+pub use vector_index::{SQLiteIVFIndex, SQLiteVectorIndex};

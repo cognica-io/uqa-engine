@@ -78,9 +78,9 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::sqlite::ColumnStatsRow;
 use uqa_storage::{
-    document_store::Document, Catalog, DocumentStore, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, SQLiteDocumentStore, SQLiteError,
-    SQLiteInvertedIndex, SQLiteVectorIndex, TableSchema, VectorFieldSchema, VectorIndex,
+    document_store::Document, Catalog, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
+    MemoryDocumentStore, MemoryInvertedIndex, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
+    SQLiteInvertedIndex, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -226,6 +226,51 @@ struct TableState {
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
     foreign_keys: RwLock<Vec<uqa_sql::ast::ForeignKey>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IvfIndexParams {
+    pub nlist: usize,
+    pub nprobe: usize,
+    pub train_threshold: usize,
+}
+
+impl Default for IvfIndexParams {
+    fn default() -> Self {
+        Self {
+            nlist: 100,
+            nprobe: 10,
+            train_threshold: 256,
+        }
+    }
+}
+
+impl IvfIndexParams {
+    fn from_map_lossy(parameters: &BTreeMap<String, String>) -> Self {
+        fn read_positive(
+            parameters: &BTreeMap<String, String>,
+            keys: &[&str],
+            default: usize,
+        ) -> usize {
+            parameters
+                .iter()
+                .find(|(key, _)| keys.iter().any(|k| key.eq_ignore_ascii_case(k)))
+                .and_then(|(_, value)| value.parse::<usize>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(default)
+        }
+
+        let default = Self::default();
+        Self {
+            nlist: read_positive(parameters, &["lists", "nlist"], default.nlist),
+            nprobe: read_positive(parameters, &["probes", "nprobe"], default.nprobe),
+            train_threshold: read_positive(
+                parameters,
+                &["train_threshold", "train-threshold", "min_train"],
+                default.train_threshold,
+            ),
+        }
+    }
 }
 
 impl TableState {
@@ -770,7 +815,7 @@ impl Engine {
             for vf in &schema.vector_fields {
                 vectors.insert(
                     vf.field.clone(),
-                    Box::new(SQLiteVectorIndex::new(
+                    Box::new(SQLiteIVFIndex::new(
                         conn.clone(),
                         &schema.name,
                         &vf.field,
@@ -927,6 +972,17 @@ impl Engine {
                 for col in &columns {
                     let _ =
                         self.add_fts_field_with_analyzer(&row.table_name, col.clone(), analyzer);
+                }
+            } else if row.index_type.eq_ignore_ascii_case("ivf")
+                || row.index_type.eq_ignore_ascii_case("hnsw")
+            {
+                let params = IvfIndexParams::from_map_lossy(&parameters);
+                for col in &columns {
+                    if let Some(uqa_sql::ast::ColumnType::Vector(dim)) =
+                        self.column_type(&row.table_name, col)
+                    {
+                        let _ = self.restore_ivf_vector_field(&row.table_name, col, dim, params);
+                    }
                 }
             }
         }
@@ -1100,34 +1156,109 @@ impl Engine {
         }
     }
 
-    /// Register a vector field on a table. The vector index starts empty;
-    /// call [`Engine::add_vector`] (or pass embeddings to
-    /// [`Engine::add_document_with_vectors`]) to populate it.
+    /// Register an IVF vector field on a table. Existing document values
+    /// in the same field are indexed immediately; later calls to
+    /// [`Engine::add_vector`] or [`Engine::add_document_with_vectors`] keep
+    /// it current.
     pub fn create_vector_field(
         &self,
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
     ) -> bool {
+        self.install_vector_field(
+            table,
+            field.into(),
+            dimensions,
+            IvfIndexParams::default(),
+            false,
+            true,
+        )
+    }
+
+    pub(crate) fn rebuild_ivf_vector_field(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+        params: IvfIndexParams,
+    ) -> bool {
+        self.install_vector_field(table, field.into(), dimensions, params, true, true)
+    }
+
+    fn restore_ivf_vector_field(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+        params: IvfIndexParams,
+    ) -> bool {
+        self.install_vector_field(table, field.into(), dimensions, params, true, false)
+    }
+
+    fn install_vector_field(
+        &self,
+        table: &str,
+        field: FieldName,
+        dimensions: u32,
+        params: IvfIndexParams,
+        replace_existing: bool,
+        persist_schema: bool,
+    ) -> bool {
         let Some(t) = self.table(table) else {
             return false;
         };
-        let field = field.into();
-        let idx: Box<dyn VectorIndex> = if let Some(conn) = self.conn.as_ref() {
-            Box::new(SQLiteVectorIndex::new(
-                conn.clone(),
-                table,
-                &field,
-                dimensions,
-            ))
-        } else {
-            Box::new(MemoryVectorIndex::new(dimensions))
-        };
+        if !replace_existing {
+            if let Some(existing) = t.vector_indexes.read().get(&field) {
+                return existing.dimensions() == dimensions;
+            }
+        }
+        let mut idx = self.build_vector_index(table, &field, dimensions, params);
+        Self::backfill_vector_index(&t, &field, idx.as_mut());
         t.vector_indexes.write().insert(field, idx);
-        if self.is_persistent() {
+        if persist_schema && self.is_persistent() {
             self.save_table_schema(table, &t);
         }
         true
+    }
+
+    fn build_vector_index(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        params: IvfIndexParams,
+    ) -> Box<dyn VectorIndex> {
+        if let Some(conn) = self.conn.as_ref() {
+            Box::new(SQLiteIVFIndex::with_params(
+                conn.clone(),
+                table,
+                field,
+                dimensions,
+                params.nlist,
+                params.nprobe,
+                params.train_threshold,
+            ))
+        } else {
+            Box::new(IVFIndex::with_params(
+                dimensions,
+                params.nlist,
+                params.nprobe,
+                params.train_threshold,
+            ))
+        }
+    }
+
+    fn backfill_vector_index(table: &TableState, field: &str, idx: &mut dyn VectorIndex) {
+        let docs = table.document_store.read().snapshot();
+        for (doc_id, document) in docs.iter_all() {
+            let Some(value) = document.get(field) else {
+                continue;
+            };
+            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
+                idx.add(doc_id, vector);
+            }
+        }
     }
 
     pub fn add_vector(&self, table: &str, doc_id: DocId, field: &str, vector: Vec<f32>) -> bool {
@@ -2061,6 +2192,16 @@ impl Engine {
         cols.iter().any(|c| c.name == column)
     }
 
+    pub(crate) fn column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Option<uqa_sql::ast::ColumnType> {
+        let t = self.table(table)?;
+        let cols = t.columns.read();
+        cols.iter().find(|c| c.name == column).map(|c| c.ty.clone())
+    }
+
     /// Return the SERIAL/BIGSERIAL column name for `table`, if any.
     pub(crate) fn auto_increment_column(&self, table: &str) -> Option<String> {
         let t = self.table(table)?;
@@ -2304,7 +2445,9 @@ impl Engine {
         // Drop the vector index for this field if it exists.
         {
             let mut vs = t.vector_indexes.write();
-            vs.remove(column);
+            if let Some(mut idx) = vs.remove(column) {
+                idx.clear();
+            }
         }
         let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
         for doc_id in ids {
@@ -2340,15 +2483,14 @@ impl Engine {
                 }
             }
         }
-        // Vector index keys are immutable; rename means remove + re-add
-        // an entry pointing at the same backing data. We swap the entry
-        // by reinserting under the new key.
-        {
+        let vector_dimensions = {
             let mut vs = t.vector_indexes.write();
-            if let Some(idx) = vs.remove(from) {
-                vs.insert(to.to_string(), idx);
-            }
-        }
+            vs.remove(from).map(|mut idx| {
+                let dimensions = idx.dimensions();
+                idx.clear();
+                dimensions
+            })
+        };
         let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
         for doc_id in ids {
             let Some(mut doc) = t.document_store.read().get(doc_id) else {
@@ -2358,6 +2500,9 @@ impl Engine {
                 doc.insert(to.to_string(), value);
                 self.rewrite_document(table, doc_id, doc);
             }
+        }
+        if let Some(dimensions) = vector_dimensions {
+            self.create_vector_field(table, to, dimensions);
         }
         if self.is_persistent() {
             self.save_table_schema(table, &t);
@@ -2923,6 +3068,20 @@ mod tests {
         Value::Str(v.to_string())
     }
 
+    fn vector(values: &[f64]) -> Value {
+        Value::List(values.iter().copied().map(Value::Float).collect())
+    }
+
+    fn vector_index_kind(engine: &Engine, table: &str, field: &str) -> String {
+        let table = engine.table(table).expect("table");
+        let indexes = table.vector_indexes.read();
+        indexes
+            .get(field)
+            .expect("vector index")
+            .index_kind()
+            .into()
+    }
+
     #[test]
     fn run_analyze_populates_column_stats() {
         let eng = Engine::new();
@@ -3049,6 +3208,51 @@ mod tests {
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
         // doc 3 (cos ~0.707) beats doc 2 (cos 0.0).
         assert_eq!(hits.get(1).map(|h| h.doc_id), Some(3));
+    }
+
+    #[test]
+    fn vector_fields_use_ivf_backends() {
+        let eng = Engine::new();
+        eng.create_default_table("articles", vec![]);
+        eng.create_vector_field("articles", "embedding", 3);
+        assert_eq!(vector_index_kind(&eng, "articles", "embedding"), "ivf");
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vectors.db");
+        {
+            let eng = Engine::open(&db).unwrap();
+            eng.sql(
+                "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                vector_index_kind(&eng, "articles", "embedding"),
+                "sqlite-ivf"
+            );
+        }
+
+        let eng = Engine::open(&db).unwrap();
+        assert_eq!(
+            vector_index_kind(&eng, "articles", "embedding"),
+            "sqlite-ivf"
+        );
+    }
+
+    #[test]
+    fn create_vector_field_backfills_existing_documents() {
+        let eng = Engine::new();
+        eng.create_default_table("docs", vec![]);
+        eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))]));
+        eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))]));
+        eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))]));
+
+        assert!(eng.create_vector_field("docs", "embedding", 2));
+        let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 2);
+        assert_eq!(
+            hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
     }
 
     #[test]
