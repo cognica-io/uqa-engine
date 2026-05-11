@@ -21,6 +21,8 @@ use rusqlite::Connection;
 pub enum SQLiteError {
     #[error("sqlite error: {0}")]
     SQLite(#[from] rusqlite::Error),
+    #[error("encryption key must not be empty")]
+    EmptyEncryptionKey,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog migration {version} failed: {source}")]
@@ -44,7 +46,18 @@ pub struct ManagedConnection {
 
 impl ManagedConnection {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_optional_key(path, None)
+    }
+
+    pub fn open_encrypted(path: &Path, key: &str) -> Result<Self> {
+        Self::open_with_optional_key(path, Some(key))
+    }
+
+    fn open_with_optional_key(path: &Path, key: Option<&str>) -> Result<Self> {
         let conn = Connection::open(path)?;
+        if let Some(key) = key {
+            Self::apply_encryption_key(&conn, key)?;
+        }
         Self::configure(&conn)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
@@ -57,6 +70,14 @@ impl ManagedConnection {
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    fn apply_encryption_key(conn: &Connection, key: &str) -> Result<()> {
+        if key.is_empty() {
+            return Err(SQLiteError::EmptyEncryptionKey);
+        }
+        conn.pragma_update(None, "key", key)?;
+        Ok(())
     }
 
     fn configure(conn: &Connection) -> Result<()> {
@@ -168,6 +189,47 @@ mod tests {
         assert!(matches!(
             mode.to_lowercase().as_str(),
             "memory" | "wal" | "delete" | "truncate" | "persist" | "off"
+        ));
+    }
+
+    #[test]
+    fn sqlcipher_build_reports_cipher_version() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let version: String = mc
+            .with(|c| Ok(c.query_row("PRAGMA cipher_version", [], |r| r.get(0))?))
+            .unwrap();
+        assert!(!version.is_empty());
+    }
+
+    #[test]
+    fn encrypted_file_requires_matching_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("encrypted.sqlite3");
+        let key = "correct horse battery staple";
+
+        {
+            let mc = ManagedConnection::open_encrypted(&path, key).unwrap();
+            mc.with(|c| {
+                c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", [])?;
+                c.execute("INSERT INTO t (id, v) VALUES (1, 'secret')", [])?;
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        {
+            let mc = ManagedConnection::open_encrypted(&path, key).unwrap();
+            let got: String = mc
+                .with(|c| Ok(c.query_row("SELECT v FROM t WHERE id = 1", [], |r| r.get(0))?))
+                .unwrap();
+            assert_eq!(got, "secret");
+        }
+
+        assert!(ManagedConnection::open_encrypted(&path, "wrong key").is_err());
+        assert!(ManagedConnection::open(&path).is_err());
+        assert!(matches!(
+            ManagedConnection::open_encrypted(&path, ""),
+            Err(SQLiteError::EmptyEncryptionKey)
         ));
     }
 }

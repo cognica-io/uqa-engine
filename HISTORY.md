@@ -4,6 +4,12 @@ All notable changes to `uqa-rs` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **SQLCipher storage:** the bundled SQLite backend now builds against SQLCipher with vendored OpenSSL. `Engine::open` keeps the plaintext initialization path, while `Engine::open_encrypted(path, key)` applies the SQLCipher key before catalog access and reuses the same restore pipeline. The `sqlcipher_encrypted_catalog` example shows create, reopen, and wrong-key failure behavior.
+
 ## [0.1.0] - 2026-05-09
 
 The 0.1.0 release covers all eleven phases of [`docs/plans/0001-uqa-python-to-rust-port.md`](docs/plans/0001-uqa-python-to-rust-port.md). The remaining post-release exit-criterion item is the 2x-vs-Python performance ratio; the Rust baseline is measured in `docs/design/performance.md`, and the Python comparison harness is the next deliverable.

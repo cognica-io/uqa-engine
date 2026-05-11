@@ -7,8 +7,9 @@
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores
-//! ([`Engine::new`]) or by `SQLite` ([`Engine::open`]); the operator
-//! pipeline is identical across backends.
+//! ([`Engine::new`]) or by `SQLite` / `SQLCipher` ([`Engine::open`],
+//! [`Engine::open_encrypted`]); the operator pipeline is identical
+//! across backends.
 //!
 //! # Public API surface
 //!
@@ -16,6 +17,8 @@
 //! - [`Engine::new`] — purely in-memory; great for tests and the REPL.
 //! - [`Engine::open`] — `SQLite`-backed catalog at the given path; reopens
 //!   restore tables, models, and graphs from disk.
+//! - [`Engine::open_encrypted`] — same catalog restore path, with a
+//!   `SQLCipher` key applied before any schema access.
 //!
 //! Schema and table lifecycle:
 //! - [`Engine::create_table`] — register a table with declared columns.
@@ -762,6 +765,18 @@ impl Engine {
     /// registry from the persisted catalog.
     pub fn open(path: &Path) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open(path)?;
+        Self::open_with_connection(&conn)
+    }
+
+    /// SQLCipher-backed engine. Applies `key` before any catalog
+    /// access, runs migrations, and rebuilds the in-memory table
+    /// registry from the encrypted catalog.
+    pub fn open_encrypted(path: &Path, key: &str) -> Result<Self, SQLiteError> {
+        let conn = ManagedConnection::open_encrypted(path, key)?;
+        Self::open_with_connection(&conn)
+    }
+
+    fn open_with_connection(conn: &ManagedConnection) -> Result<Self, SQLiteError> {
         let catalog = Arc::new(Catalog::open(conn.clone())?);
         let mut engine = Self {
             tables: RwLock::new(BTreeMap::new()),
@@ -784,7 +799,7 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
         };
-        engine.restore_from_catalog(&catalog, &conn)?;
+        engine.restore_from_catalog(&catalog, conn)?;
         // Eagerly populate the model cache from the catalog so
         // `load_model` is one read deep.
         if let Ok(rows) = catalog.load_models() {
