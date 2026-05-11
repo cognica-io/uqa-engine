@@ -7,9 +7,10 @@
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores
-//! ([`Engine::new`]) or by `SQLite` / `SQLCipher` ([`Engine::open`],
-//! [`Engine::open_encrypted`]); the operator pipeline is identical
-//! across backends.
+//! ([`Engine::new`]) or by `SQLite`, `SQLCipher`, and compressed `SQLite`
+//! containers ([`Engine::open`], [`Engine::open_encrypted`],
+//! [`Engine::open_compressed`], [`Engine::open_compressed_encrypted`]);
+//! the operator pipeline is identical across backends.
 //!
 //! # Public API surface
 //!
@@ -19,6 +20,9 @@
 //!   restore tables, models, and graphs from disk.
 //! - [`Engine::open_encrypted`] — same catalog restore path, with a
 //!   `SQLCipher` key applied before any schema access.
+//! - [`Engine::open_compressed`] — schema-neutral compressed `SQLite` VFS.
+//! - [`Engine::open_compressed_encrypted`] — compressed chunks encrypted
+//!   after compression.
 //!
 //! Schema and table lifecycle:
 //! - [`Engine::create_table`] — register a table with declared columns.
@@ -82,8 +86,8 @@ use uqa_sql::SQLError;
 use uqa_storage::sqlite::{ColumnStatsInput, ColumnStatsRow};
 use uqa_storage::{
     document_store::Document, Catalog, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
-    SQLiteInvertedIndex, TableSchema, VectorFieldSchema, VectorIndex,
+    MemoryDocumentStore, MemoryInvertedIndex, SQLiteCompressionOptions, SQLiteDocumentStore,
+    SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -773,6 +777,28 @@ impl Engine {
     /// registry from the encrypted catalog.
     pub fn open_encrypted(path: &Path, key: &str) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open_encrypted(path, key)?;
+        Self::open_with_connection(&conn)
+    }
+
+    /// Compressed SQLite-backed engine. The compression VFS is
+    /// schema-neutral: it compresses `SQLite` byte ranges in chunks
+    /// without knowledge of UQA catalog tables or columns.
+    pub fn open_compressed(
+        path: &Path,
+        compression: SQLiteCompressionOptions,
+    ) -> Result<Self, SQLiteError> {
+        let conn = ManagedConnection::open_compressed(path, compression)?;
+        Self::open_with_connection(&conn)
+    }
+
+    /// Compressed and encrypted SQLite-backed engine. Chunk payloads
+    /// are compressed first, then encrypted by the compressed VFS.
+    pub fn open_compressed_encrypted(
+        path: &Path,
+        key: &str,
+        compression: SQLiteCompressionOptions,
+    ) -> Result<Self, SQLiteError> {
+        let conn = ManagedConnection::open_compressed_encrypted(path, key, compression)?;
         Self::open_with_connection(&conn)
     }
 

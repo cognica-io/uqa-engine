@@ -8,6 +8,7 @@
 //! inverted index, vector index.
 
 pub mod catalog;
+pub mod compressed_vfs;
 pub mod connection;
 pub mod document_store;
 pub mod inverted_index;
@@ -17,6 +18,7 @@ pub use catalog::{
     Catalog, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     TableSchema, VectorFieldSchema, CURRENT_SCHEMA_VERSION,
 };
+pub use compressed_vfs::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;

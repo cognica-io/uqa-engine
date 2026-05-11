@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - **SQLCipher storage:** the bundled SQLite backend now builds against SQLCipher with vendored OpenSSL. `Engine::open` keeps the plaintext initialization path, while `Engine::open_encrypted(path, key)` applies the SQLCipher key before catalog access and reuses the same restore pipeline. The `sqlcipher_encrypted_catalog` example shows create, reopen, and wrong-key failure behavior.
+- **Compressed SQLite containers:** `uqa-storage` now registers a schema-neutral `uqa_compressed` SQLite VFS that stores byte-addressed SQLite files as zstd- or LZ4-compressed chunks. `ManagedConnection::open_compressed` / `Engine::open_compressed` use the compressed container path, and `open_compressed_encrypted` compresses chunks before encrypting them with per-container keys. The `compressed_encrypted_catalog` example shows create, reopen, wrong-key, and plaintext-open failure behavior.
 
 ## [0.1.0] - 2026-05-09
 

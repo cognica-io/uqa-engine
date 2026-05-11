@@ -17,6 +17,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+argon2 = { workspace = true }
+chacha20poly1305 = { workspace = true }
+crc32fast = { workspace = true }
+fs2 = { workspace = true }
+lz4_flex = { workspace = true }
+rand_core = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"

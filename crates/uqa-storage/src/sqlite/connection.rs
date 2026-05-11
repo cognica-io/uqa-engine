@@ -15,7 +15,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
+
+use crate::sqlite::compressed_vfs::{self, SQLiteCompressionOptions};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -23,6 +25,8 @@ pub enum SQLiteError {
     SQLite(#[from] rusqlite::Error),
     #[error("encryption key must not be empty")]
     EmptyEncryptionKey,
+    #[error("compressed sqlite container error: {0}")]
+    CompressedContainer(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("catalog migration {version} failed: {source}")]
@@ -53,12 +57,49 @@ impl ManagedConnection {
         Self::open_with_optional_key(path, Some(key))
     }
 
+    pub fn open_compressed(path: &Path, compression: SQLiteCompressionOptions) -> Result<Self> {
+        Self::open_compressed_with_optional_key(path, compression, None)
+    }
+
+    pub fn open_compressed_encrypted(
+        path: &Path,
+        key: &str,
+        compression: SQLiteCompressionOptions,
+    ) -> Result<Self> {
+        if key.is_empty() {
+            return Err(SQLiteError::EmptyEncryptionKey);
+        }
+        Self::open_compressed_with_optional_key(path, compression, Some(key))
+    }
+
     fn open_with_optional_key(path: &Path, key: Option<&str>) -> Result<Self> {
         let conn = Connection::open(path)?;
         if let Some(key) = key {
             Self::apply_encryption_key(&conn, key)?;
         }
-        Self::configure(&conn)?;
+        Self::configure_wal(&conn)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    fn open_compressed_with_optional_key(
+        path: &Path,
+        compression: SQLiteCompressionOptions,
+        key: Option<&str>,
+    ) -> Result<Self> {
+        let compression = compression
+            .validate()
+            .map_err(SQLiteError::CompressedContainer)?;
+        compressed_vfs::register_database(path, compression, key)
+            .map_err(SQLiteError::CompressedContainer)?;
+        let conn = Connection::open_with_flags_and_vfs(
+            path,
+            OpenFlags::default(),
+            compressed_vfs::VFS_NAME,
+        )?;
+        conn.pragma_update(None, "page_size", compression.page_size)?;
+        Self::configure_compressed(&conn)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -66,7 +107,7 @@ impl ManagedConnection {
 
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        Self::configure(&conn)?;
+        Self::configure_wal(&conn)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(conn)),
         })
@@ -80,7 +121,7 @@ impl ManagedConnection {
         Ok(())
     }
 
-    fn configure(conn: &Connection) -> Result<()> {
+    fn configure_wal(conn: &Connection) -> Result<()> {
         // WAL: many readers + 1 writer concurrently, durable on commit.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // 5s busy timeout absorbs short contention without surfacing
@@ -91,6 +132,19 @@ impl ManagedConnection {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         // Foreign keys are off by default; turn on so per-table cleanup
         // can use ON DELETE CASCADE later.
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(())
+    }
+
+    fn configure_compressed(conn: &Connection) -> Result<()> {
+        // The compressed VFS implements the byte-addressed database file
+        // and every rollback-journal file as compressed containers. WAL
+        // requires shared-memory VFS methods, so compressed databases use
+        // SQLite's rollback journal and keep temp storage in memory.
+        conn.pragma_update(None, "journal_mode", "DELETE")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.pragma_update(None, "synchronous", "FULL")?;
+        conn.pragma_update(None, "temp_store", "MEMORY")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())
     }
@@ -229,6 +283,127 @@ mod tests {
         assert!(ManagedConnection::open(&path).is_err());
         assert!(matches!(
             ManagedConnection::open_encrypted(&path, ""),
+            Err(SQLiteError::EmptyEncryptionKey)
+        ));
+    }
+
+    #[test]
+    fn compressed_file_reopens_through_vfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("compressed.uqac.sqlite3");
+        let plain_path = dir.path().join("plain.sqlite3");
+        let options = SQLiteCompressionOptions::default();
+        let repeated = "compressible payload ".repeat(256);
+
+        {
+            let mc = ManagedConnection::open_compressed(&path, options).unwrap();
+            mc.with(|c| {
+                c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)", [])?;
+                let mut stmt = c.prepare("INSERT INTO t (id, body) VALUES (?1, ?2)")?;
+                for id in 0..128_i64 {
+                    stmt.execute(rusqlite::params![id, &repeated])?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        {
+            let mc = ManagedConnection::open_compressed(&path, options).unwrap();
+            let count: i64 = mc
+                .with(|c| Ok(c.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))?))
+                .unwrap();
+            assert_eq!(count, 128);
+        }
+
+        {
+            let plain = Connection::open(&plain_path).unwrap();
+            plain
+                .execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)", [])
+                .unwrap();
+            let mut stmt = plain
+                .prepare("INSERT INTO t (id, body) VALUES (?1, ?2)")
+                .unwrap();
+            for id in 0..128_i64 {
+                stmt.execute(rusqlite::params![id, &repeated]).unwrap();
+            }
+        }
+
+        let compressed = std::fs::read(&path).unwrap();
+        let plain_len = std::fs::metadata(&plain_path).unwrap().len();
+        assert_eq!(&compressed[..8], b"UQACDB1\0");
+        assert!(compressed.len() < plain_len as usize);
+        assert!(ManagedConnection::open(&path).is_err());
+    }
+
+    #[test]
+    fn lz4_compressed_file_reopens_through_vfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("compressed-lz4.uqac.sqlite3");
+        let options = SQLiteCompressionOptions::lz4();
+        let repeated = "lz4 compressible payload ".repeat(256);
+
+        {
+            let mc = ManagedConnection::open_compressed(&path, options).unwrap();
+            mc.with(|c| {
+                c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)", [])?;
+                let mut stmt = c.prepare("INSERT INTO t (id, body) VALUES (?1, ?2)")?;
+                for id in 0..128_i64 {
+                    stmt.execute(rusqlite::params![id, &repeated])?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..8], b"UQACDB1\0");
+
+        let mc = ManagedConnection::open_compressed(&path, options).unwrap();
+        let count: i64 = mc
+            .with(|c| Ok(c.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(count, 128);
+    }
+
+    #[test]
+    fn compressed_encrypted_file_requires_matching_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("compressed-encrypted.uqac.sqlite3");
+        let options = SQLiteCompressionOptions::default();
+        let key = "correct horse battery staple";
+        let secret = "very secret compressed payload".repeat(64);
+
+        {
+            let mc = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
+            mc.with(|c| {
+                c.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)", [])?;
+                c.execute(
+                    "INSERT INTO t (id, body) VALUES (1, ?1)",
+                    rusqlite::params![&secret],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        {
+            let mc = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
+            let got: String = mc
+                .with(|c| Ok(c.query_row("SELECT body FROM t WHERE id = 1", [], |r| r.get(0))?))
+                .unwrap();
+            assert_eq!(got, secret);
+        }
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!bytes
+            .windows(b"very secret compressed payload".len())
+            .any(|window| window == b"very secret compressed payload"));
+        assert!(ManagedConnection::open_compressed_encrypted(&path, "wrong key", options).is_err());
+        assert!(ManagedConnection::open_compressed(&path, options).is_err());
+        assert!(ManagedConnection::open(&path).is_err());
+        assert!(matches!(
+            ManagedConnection::open_compressed_encrypted(&path, "", options),
             Err(SQLiteError::EmptyEncryptionKey)
         ));
     }
