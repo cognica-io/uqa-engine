@@ -8,6 +8,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Full debuginfo for every workspace test binary exhausts the Ubuntu runner's
+  # disk during `cargo test --workspace --all-targets`. CI only needs build and
+  # test output, not local debugging sections.
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_PROFILE_BENCH_DEBUG: "0"
 
 jobs:
   fmt:
