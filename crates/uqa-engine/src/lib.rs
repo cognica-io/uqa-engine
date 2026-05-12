@@ -72,7 +72,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use uqa_analysis::{analyzer::standard_analyzer, Analyzer};
+use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, PostingEntry, PostingList, Value};
 use uqa_operators::{
     CosineProbabilityOperator, ExecutionContext, KNNOperator, LogOddsFusionOperator, Operator,
@@ -85,9 +85,10 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::sqlite::{ColumnStatsInput, ColumnStatsRow};
 use uqa_storage::{
-    document_store::Document, Catalog, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, SQLiteCompressionOptions, SQLiteDocumentStore,
-    SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, TableSchema, VectorFieldSchema, VectorIndex,
+    document_store::Document, AnalyzerPhase, Catalog, DocumentStore, IVFIndex, InvertedIndex,
+    ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, SQLiteCompressionOptions,
+    SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, TableSchema,
+    VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -106,6 +107,18 @@ pub type EngineResult<T> = std::result::Result<T, EngineError>;
 pub struct ScoredEntry {
     pub doc_id: DocId,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FtsIndexStat {
+    pub table_name: String,
+    pub field: String,
+    pub analyzer: String,
+    pub posting_count: u64,
+    pub doc_length_count: u64,
+    pub indexed_doc_count: u64,
+    pub term_count: u64,
+    pub total_field_length: u64,
 }
 
 impl ScoredEntry {
@@ -286,6 +299,46 @@ impl TableState {
     }
 }
 
+fn normalize_analyzer_config_value(value: &mut serde_json::Value) {
+    if let Some(tokenizer) = value.get_mut("tokenizer") {
+        if let Some(name) = tokenizer.as_str() {
+            *tokenizer = serde_json::json!({
+                "type": name.to_ascii_lowercase().replace('-', "_")
+            });
+        }
+    }
+    if let Some(filters) = value
+        .get_mut("token_filters")
+        .and_then(|v| v.as_array_mut())
+    {
+        for filter in filters {
+            if let Some(name) = filter.as_str() {
+                *filter = serde_json::json!({
+                    "type": name.to_ascii_lowercase().replace('-', "_")
+                });
+            }
+        }
+    }
+}
+
+fn parse_analyzer_config(name: &str, config_json: &str) -> std::result::Result<Analyzer, String> {
+    let mut value: serde_json::Value = serde_json::from_str(config_json)
+        .map_err(|e| format!("analyzer `{name}` config is not valid JSON: {e}"))?;
+    normalize_analyzer_config_value(&mut value);
+    serde_json::from_value(value)
+        .map_err(|e| format!("analyzer `{name}` config is not a valid analyzer: {e}"))
+}
+
+fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, AnalyzerPhase), String> {
+    let phase = AnalyzerPhase::parse(&phase.to_ascii_lowercase())?;
+    let normalized = match phase {
+        AnalyzerPhase::Index => "index",
+        AnalyzerPhase::Search => "search",
+        AnalyzerPhase::Both => "both",
+    };
+    Ok((normalized.to_string(), phase))
+}
+
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
@@ -431,18 +484,26 @@ impl Engine {
     // set_table_analyzer in the Python reference.
     // -----------------------------------------------------------------
 
+    fn resolve_analyzer(&self, name: &str) -> std::result::Result<Analyzer, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("analyzer name cannot be empty".into());
+        }
+        if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
+            return Ok(analyzer);
+        }
+        let Some(config_json) = self.named_analyzers.read().get(name).cloned() else {
+            return Err(format!("analyzer `{name}` is not registered"));
+        };
+        parse_analyzer_config(name, &config_json)
+    }
+
     pub fn register_named_analyzer(
         &self,
         name: &str,
         config_json: &str,
     ) -> std::result::Result<(), String> {
-        // The config string is stored verbatim today; future commits
-        // can expand into a tokenizer / token-filter pipeline.
-        // Validate as JSON to surface obvious typos at registration.
-        if !config_json.is_empty() {
-            serde_json::from_str::<serde_json::Value>(config_json)
-                .map_err(|e| format!("create_analyzer: invalid config JSON: {e}"))?;
-        }
+        let _ = parse_analyzer_config(name, config_json)?;
         self.named_analyzers
             .write()
             .insert(name.to_string(), config_json.to_string());
@@ -475,26 +536,28 @@ impl Engine {
         analyzer_name: &str,
         phase: &str,
     ) -> std::result::Result<(), String> {
-        if self.table(table).is_none() {
+        let Some(t) = self.table(table) else {
             return Err(format!(
                 "set_table_analyzer: table `{table}` does not exist"
             ));
-        }
-        if !self.named_analyzers.read().contains_key(analyzer_name) {
-            return Err(format!(
-                "set_table_analyzer: analyzer `{analyzer_name}` is not registered"
-            ));
-        }
-        let phase = match phase {
-            "index" | "search" | "query" | "both" => phase.to_string(),
-            other => return Err(format!("set_table_analyzer: invalid phase `{other}`")),
         };
+        let analyzer = self.resolve_analyzer(analyzer_name)?;
+        let (phase_name, phase) = normalize_analyzer_phase(phase)?;
+        t.inverted_index
+            .write()
+            .set_field_analyzer(field, analyzer, phase)
+            .map_err(|e| format!("set_table_analyzer: {e}"))?;
         self.table_field_analyzers.write().insert(
             (table.to_string(), field.to_string()),
-            (analyzer_name.to_string(), phase.clone()),
+            (analyzer_name.to_string(), phase_name.clone()),
         );
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_table_field_analyzer(table, field, &phase, analyzer_name);
+            let _ = catalog.save_table_field_analyzer(table, field, &phase_name, analyzer_name);
+        }
+        if matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
+            && t.fts_fields().iter().any(|f| f == field)
+        {
+            self.rebuild_fts_index(table, &t);
         }
         Ok(())
     }
@@ -544,7 +607,9 @@ impl Engine {
             ("both", _) | ("index", "index") | ("query" | "search", "search") => name,
             _ => return None,
         };
-        self.named_analyzers.read().get(&resolved).cloned()
+        self.resolve_analyzer(&resolved)
+            .ok()
+            .and_then(|analyzer| serde_json::to_string(&analyzer).ok())
     }
 
     // -----------------------------------------------------------------
@@ -941,6 +1006,20 @@ impl Engine {
         }
         // Per-(table, field) analyzer overrides.
         for (table, field, phase, analyzer_name) in catalog.load_table_field_analyzers()? {
+            if let (Some(t), Ok(analyzer), Ok((phase_name, phase))) = (
+                self.table(&table),
+                self.resolve_analyzer(&analyzer_name),
+                normalize_analyzer_phase(&phase),
+            ) {
+                let _ = t
+                    .inverted_index
+                    .write()
+                    .set_field_analyzer(&field, analyzer, phase);
+                self.table_field_analyzers
+                    .write()
+                    .insert((table, field), (analyzer_name, phase_name));
+                continue;
+            }
             self.table_field_analyzers
                 .write()
                 .insert((table, field), (analyzer_name, phase));
@@ -1002,10 +1081,7 @@ impl Engine {
             let columns: Vec<String> = serde_json::from_str(&row.columns_json).unwrap_or_default();
             let parameters: BTreeMap<String, String> =
                 serde_json::from_str(&row.parameters_json).unwrap_or_default();
-            if row.index_type.eq_ignore_ascii_case("gin")
-                || row.index_type.is_empty()
-                || row.index_type.eq_ignore_ascii_case("btree")
-            {
+            if row.index_type.eq_ignore_ascii_case("gin") {
                 let analyzer = parameters
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
@@ -1764,6 +1840,63 @@ impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Vec<FieldName> {
         self.table(name)
             .map_or_else(Vec::new, |table| table.fts_fields())
+    }
+
+    pub fn fts_index_stats(&self, table_filter: Option<&str>) -> Vec<FtsIndexStat> {
+        let mut tables: Vec<(String, Arc<TableState>)> = self
+            .tables
+            .read()
+            .iter()
+            .filter(|(name, _)| table_filter.map_or(true, |target| name.as_str() == target))
+            .map(|(name, table)| (name.clone(), table.clone()))
+            .collect();
+        tables.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut out = Vec::new();
+        for (table_name, table) in tables {
+            let mut fields = table.fts_fields();
+            fields.sort();
+            let index = table.inverted_index.read();
+            for field in fields {
+                let analyzer = self
+                    .table_field_analyzer(&table_name, &field)
+                    .map(|(name, _)| name)
+                    .unwrap_or_else(|| analyzer_registry::DEFAULT_ANALYZER_NAME.to_string());
+                let doc_length_count = index.doc_length_count(Some(&field));
+                out.push(FtsIndexStat {
+                    table_name: table_name.clone(),
+                    field: field.clone(),
+                    analyzer,
+                    posting_count: index.posting_count(Some(&field)),
+                    doc_length_count,
+                    indexed_doc_count: doc_length_count,
+                    term_count: index.term_count(Some(&field)),
+                    total_field_length: index.total_field_length(&field),
+                });
+            }
+        }
+        out
+    }
+
+    fn rebuild_fts_index(&self, _table: &str, t: &Arc<TableState>) {
+        let fts_fields = t.fts_fields();
+        let docs: Vec<(DocId, Document)> = {
+            let store = t.document_store.read();
+            store.iter_all().collect()
+        };
+        let mut index = t.inverted_index.write();
+        index.clear();
+        for (doc_id, document) in docs {
+            let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
+            for field in &fts_fields {
+                if let Some(Value::Str(s)) = document.get(field) {
+                    text_fields.insert(field.clone(), s.clone());
+                }
+            }
+            if !text_fields.is_empty() {
+                index.add_document(doc_id, text_fields);
+            }
+        }
     }
 
     pub fn add_document(&self, table: &str, doc_id: DocId, document: Document) {
@@ -2574,10 +2707,9 @@ impl Engine {
         true
     }
 
-    /// Append `field` to the table's FTS field list. The analyzer is
-    /// the table-level default. Re-indexing of existing rows happens
-    /// lazily on the next mutation; documents already in the store stay
-    /// queryable through the original analyzer until then.
+    /// Append `field` to the table's FTS field list. Existing rows are
+    /// indexed immediately so SQL `CREATE INDEX USING gin` behaves like a
+    /// real secondary-index build rather than a metadata-only toggle.
     pub fn add_fts_field(&self, table: &str, field: FieldName) -> Result<(), String> {
         self.add_fts_field_with_analyzer(table, field, None)
     }
@@ -2589,17 +2721,32 @@ impl Engine {
         &self,
         table: &str,
         field: FieldName,
-        _analyzer: Option<&str>,
+        analyzer: Option<&str>,
     ) -> Result<(), String> {
         let t = self
             .table(table)
             .ok_or_else(|| format!("unknown table `{table}`"))?;
+        if let Some(analyzer_name) = analyzer {
+            let analyzer = self.resolve_analyzer(analyzer_name)?;
+            t.inverted_index
+                .write()
+                .set_field_analyzer(&field, analyzer, AnalyzerPhase::Both)
+                .map_err(|e| format!("add_fts_field: {e}"))?;
+            self.table_field_analyzers.write().insert(
+                (table.to_string(), field.clone()),
+                (analyzer_name.to_string(), "both".to_string()),
+            );
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.save_table_field_analyzer(table, &field, "both", analyzer_name);
+            }
+        }
         {
             let mut fts = t.fts_fields.write();
             if !fts.contains(&field) {
-                fts.push(field);
+                fts.push(field.clone());
             }
         }
+        self.rebuild_fts_index(table, &t);
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }
@@ -2782,8 +2929,7 @@ impl Engine {
             .inverted_index
             .as_ref()
             .expect("snapshot_context populates the inverted index")
-            .analyzer()
-            .clone();
+            .get_search_analyzer(field);
         let analyzed_terms = analyzer.analyze(query);
         if analyzed_terms.is_empty() {
             return Vec::new();
@@ -2947,8 +3093,7 @@ impl Engine {
             .inverted_index
             .as_ref()
             .expect("snapshot_context populates the inverted index")
-            .analyzer()
-            .clone();
+            .get_search_analyzer(params.text_field);
         let analyzed_terms = analyzer.analyze(params.text_query);
         if analyzed_terms.is_empty() && !ctx.vector_indexes.contains_key(params.vector_field) {
             return Vec::new();

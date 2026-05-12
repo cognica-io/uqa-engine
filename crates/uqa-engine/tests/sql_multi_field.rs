@@ -19,6 +19,12 @@ fn engine_with_corpus() -> Engine {
         .unwrap();
     engine
         .sql(
+            "CREATE INDEX docs_fts_idx ON docs USING gin (title, body)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
             "INSERT INTO docs (id, title, body) VALUES \
              (1, 'rust language guide', 'a deep dive into rust generics'), \
              (2, 'python web frameworks', 'flask django and python tooling'), \

@@ -72,6 +72,24 @@ pub trait InvertedIndex: Send + Sync {
     /// scoring layer. Implementations may cache this between mutations.
     fn stats(&self) -> IndexStats;
 
+    /// Number of posting rows. With `field = Some(..)`, limits the count
+    /// to one indexed field.
+    fn posting_count(&self, _field: Option<&str>) -> u64 {
+        0
+    }
+
+    /// Number of `(doc_id, field)` length rows. With `field = Some(..)`,
+    /// this is the number of documents indexed for that field.
+    fn doc_length_count(&self, _field: Option<&str>) -> u64 {
+        0
+    }
+
+    /// Number of distinct indexed terms. With `field = Some(..)`, limits
+    /// the count to one indexed field.
+    fn term_count(&self, _field: Option<&str>) -> u64 {
+        0
+    }
+
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> Arc<dyn InvertedIndex>;
 
@@ -345,6 +363,38 @@ impl InvertedIndex for MemoryInvertedIndex {
             s.set_doc_freq(field.clone(), term.clone(), inner.len() as u64);
         }
         s
+    }
+
+    fn posting_count(&self, field: Option<&str>) -> u64 {
+        self.index
+            .iter()
+            .filter(|((f, _), _)| field.map_or(true, |target| f == target))
+            .map(|(_, postings)| postings.len() as u64)
+            .sum()
+    }
+
+    fn doc_length_count(&self, field: Option<&str>) -> u64 {
+        match field {
+            Some(target) => self
+                .doc_lengths
+                .values()
+                .filter(|lengths| lengths.contains_key(target))
+                .count() as u64,
+            None => self
+                .doc_lengths
+                .values()
+                .map(|lengths| lengths.len() as u64)
+                .sum(),
+        }
+    }
+
+    fn term_count(&self, field: Option<&str>) -> u64 {
+        self.index
+            .keys()
+            .filter(|(f, _)| field.map_or(true, |target| f == target))
+            .map(|(_, term)| term)
+            .collect::<BTreeSet<_>>()
+            .len() as u64
     }
 
     fn snapshot(&self) -> Arc<dyn InvertedIndex> {

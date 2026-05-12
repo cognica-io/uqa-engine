@@ -23,6 +23,9 @@ fn build_engine() -> Arc<Engine> {
     engine
         .sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
         .unwrap();
+    engine
+        .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
+        .unwrap();
     let mut sql = String::from("INSERT INTO docs (id, body) VALUES ");
     for i in 0..200 {
         if i > 0 {

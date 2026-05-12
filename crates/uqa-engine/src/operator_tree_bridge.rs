@@ -803,8 +803,8 @@ impl EngineDriver<'_> {
         };
         let idx_guard = table_state.inverted_index.read();
         let index_stats = idx_guard.stats();
-        let analyzer = idx_guard.analyzer().clone();
         if let Some((field, query)) = first_text_signal(signals) {
+            let analyzer = idx_guard.get_search_analyzer(&field);
             let terms = analyzer.analyze(&query);
             return uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field)).to_vec();
         }

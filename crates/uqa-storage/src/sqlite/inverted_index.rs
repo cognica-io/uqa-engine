@@ -652,6 +652,72 @@ impl InvertedIndex for SQLiteInvertedIndex {
         s
     }
 
+    fn posting_count(&self, field: Option<&str>) -> u64 {
+        self.conn
+            .with(|c| {
+                let n: i64 = if let Some(field) = field {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM _postings
+                         WHERE table_name = ?1 AND field = ?2",
+                        params![self.table, field],
+                        |r| r.get(0),
+                    )?
+                } else {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM _postings WHERE table_name = ?1",
+                        params![self.table],
+                        |r| r.get(0),
+                    )?
+                };
+                Ok(n as u64)
+            })
+            .unwrap_or(0)
+    }
+
+    fn doc_length_count(&self, field: Option<&str>) -> u64 {
+        self.conn
+            .with(|c| {
+                let n: i64 = if let Some(field) = field {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM _doc_lengths
+                         WHERE table_name = ?1 AND field = ?2",
+                        params![self.table, field],
+                        |r| r.get(0),
+                    )?
+                } else {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM _doc_lengths WHERE table_name = ?1",
+                        params![self.table],
+                        |r| r.get(0),
+                    )?
+                };
+                Ok(n as u64)
+            })
+            .unwrap_or(0)
+    }
+
+    fn term_count(&self, field: Option<&str>) -> u64 {
+        self.conn
+            .with(|c| {
+                let n: i64 = if let Some(field) = field {
+                    c.query_row(
+                        "SELECT COUNT(DISTINCT term) FROM _postings
+                         WHERE table_name = ?1 AND field = ?2",
+                        params![self.table, field],
+                        |r| r.get(0),
+                    )?
+                } else {
+                    c.query_row(
+                        "SELECT COUNT(DISTINCT term) FROM _postings WHERE table_name = ?1",
+                        params![self.table],
+                        |r| r.get(0),
+                    )?
+                };
+                Ok(n as u64)
+            })
+            .unwrap_or(0)
+    }
+
     fn snapshot(&self) -> Arc<dyn InvertedIndex> {
         Arc::new(self.clone())
     }

@@ -1436,16 +1436,13 @@ fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLErr
             c.name
         )));
     }
-    let mut fts_fields = Vec::new();
     let mut vector_fields: Vec<(String, u32)> = Vec::new();
     for col in &c.columns {
-        match &col.ty {
-            ColumnType::Text => fts_fields.push(col.name.clone()),
-            ColumnType::Vector(dim) => vector_fields.push((col.name.clone(), *dim)),
-            _ => {}
+        if let ColumnType::Vector(dim) = &col.ty {
+            vector_fields.push((col.name.clone(), *dim));
         }
     }
-    engine.create_default_table(c.name.clone(), fts_fields);
+    engine.create_default_table(c.name.clone(), Vec::new());
     for (field, dim) in vector_fields {
         engine.create_vector_field(&c.name, field, dim);
     }
@@ -1468,7 +1465,7 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
     // compatibility alias for the same backend, and others are informational.
     let am = c.access_method.to_ascii_lowercase();
     match am.as_str() {
-        "" | "gin" => {
+        "gin" => {
             for col in &c.columns {
                 let analyzer = c
                     .options
@@ -1481,6 +1478,7 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
                 }
             }
         }
+        "" => {}
         "ivf" | "hnsw" => {
             let params = parse_ivf_index_params(&c.options)?;
             for col in &c.columns {
@@ -4114,6 +4112,47 @@ fn build_table_function_rows_with_row(
             for n in names {
                 let mut r = ResultRow::new();
                 r.insert(key.clone(), Value::Str(n));
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
+            }
+            Ok(out)
+        }
+        "fts_index_stats" => {
+            if evaluated.len() > 1 {
+                return Err(SQLError::TypeMismatch(
+                    "fts_index_stats accepts optional table name".into(),
+                ));
+            }
+            let table_filter = match evaluated.first() {
+                Some(Value::Str(s)) => Some(s.as_str()),
+                Some(_) => return Err(SQLError::TypeMismatch("fts_index_stats arg 1".into())),
+                None => None,
+            };
+            for stat in engine.fts_index_stats(table_filter) {
+                let mut r = ResultRow::new();
+                r.insert("table_name".into(), Value::Str(stat.table_name));
+                r.insert("field".into(), Value::Str(stat.field));
+                r.insert("analyzer".into(), Value::Str(stat.analyzer));
+                r.insert(
+                    "posting_count".into(),
+                    Value::Int(stat.posting_count as i64),
+                );
+                r.insert(
+                    "doc_length_count".into(),
+                    Value::Int(stat.doc_length_count as i64),
+                );
+                r.insert(
+                    "indexed_doc_count".into(),
+                    Value::Int(stat.indexed_doc_count as i64),
+                );
+                r.insert("term_count".into(), Value::Int(stat.term_count as i64));
+                r.insert(
+                    "total_field_length".into(),
+                    Value::Int(stat.total_field_length as i64),
+                );
                 let r = match qual {
                     Some(a) => prefix_row(a, &r),
                     None => r,

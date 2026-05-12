@@ -22,6 +22,11 @@ fn engine_with_corpus() -> Engine {
     )
     .unwrap();
     eng.sql(
+        "CREATE INDEX notes_fts_idx ON notes USING gin (title, body)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
         "INSERT INTO notes (id, title, body, year) VALUES \
          (1, 'rust async', 'futures and tokio', 2024), \
          (2, 'rust embedded', 'no_std and cortex_m', 2025), \
