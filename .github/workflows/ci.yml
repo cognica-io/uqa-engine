@@ -38,6 +38,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -55,6 +57,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - run: cargo test --workspace --all-targets --locked
 
   build-release:
@@ -68,6 +72,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - run: cargo build --workspace --release --locked
 
   doc:
@@ -79,6 +85,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - run: cargo doc --workspace --no-deps --locked
 
   deny:
@@ -98,4 +106,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
       - run: cargo bench --workspace --no-run --locked

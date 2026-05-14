@@ -20,6 +20,12 @@ fn engine_with_corpus() -> Engine {
         .unwrap();
     engine
         .sql(
+            "CREATE INDEX idx_notes_title ON notes USING gin (title)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
             "INSERT INTO notes (id, title, qty) VALUES \
              (1, 'rust async', 7), \
              (2, 'python web', 3), \

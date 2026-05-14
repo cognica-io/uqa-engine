@@ -560,7 +560,7 @@ impl Engine {
         if matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field)
         {
-            self.rebuild_fts_index(table, &t);
+            Self::rebuild_fts_index(&t);
         }
         Ok(())
     }
@@ -888,8 +888,8 @@ impl Engine {
     ) -> StorageBackendResult<Self> {
         let mut engine = Self {
             tables: RwLock::new(BTreeMap::new()),
-            catalog: Some(catalog.clone()),
-            backend: Some(backend.clone()),
+            catalog: Some(catalog),
+            backend: Some(backend),
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
@@ -907,6 +907,8 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
         };
+        let catalog = engine.catalog.as_ref().expect("persistent catalog").clone();
+        let backend = engine.backend.as_ref().expect("persistent backend").clone();
         engine.restore_from_catalog(catalog.as_ref(), backend.as_ref())?;
         // Eagerly populate the model cache from the catalog so
         // `load_model` is one read deep.
@@ -1018,11 +1020,20 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        // Named analyzers.
+        self.restore_analyzers_from_catalog(catalog)?;
+        self.restore_foreign_registries_from_catalog(catalog)?;
+        self.restore_catalog_indexes_from_catalog(catalog)?;
+        self.restore_path_indexes_from_catalog(catalog)?;
+        Ok(())
+    }
+
+    fn restore_analyzers_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         for (name, config_json) in catalog.load_analyzers()? {
             self.named_analyzers.write().insert(name, config_json);
         }
-        // Per-(table, field) analyzer overrides.
         for (table, field, phase, analyzer_name) in catalog.load_table_field_analyzers()? {
             if let (Some(t), Ok(analyzer), Ok((phase_name, phase))) = (
                 self.table(&table),
@@ -1042,7 +1053,13 @@ impl Engine {
                 .write()
                 .insert((table, field), (analyzer_name, phase));
         }
-        // Foreign servers.
+        Ok(())
+    }
+
+    fn restore_foreign_registries_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         for (name, fdw_type, options_json) in catalog.load_foreign_servers()? {
             let options: BTreeMap<String, String> =
                 serde_json::from_str(&options_json).unwrap_or_default();
@@ -1055,7 +1072,6 @@ impl Engine {
                 },
             );
         }
-        // Foreign tables.
         for row in catalog.load_foreign_tables()? {
             let columns: Vec<uqa_sql::ast::ColumnDef> =
                 serde_json::from_str(&row.columns_json).unwrap_or_default();
@@ -1088,10 +1104,13 @@ impl Engine {
                 },
             );
         }
-        // Catalog indexes: replay any side effects (e.g. `gin` re-
-        // registers the FTS field with its analyzer). Indexes that
-        // were declared on tables that no longer exist are skipped --
-        // drop_table already swept the catalog rows on the way out.
+        Ok(())
+    }
+
+    fn restore_catalog_indexes_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         for row in catalog.load_catalog_indexes()? {
             if !self.has_table(&row.table_name) {
                 continue;
@@ -1121,15 +1140,16 @@ impl Engine {
                 }
             }
         }
-        // Path indexes. The catalog stores label sequences keyed by
-        // the same `<graph>::<name>` engine key.
+        Ok(())
+    }
+
+    fn restore_path_indexes_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         for (key, seq_json) in catalog.load_path_indexes()? {
             let label_sequences: Vec<Vec<String>> =
                 serde_json::from_str(&seq_json).unwrap_or_default();
-            // Split the engine's compound key back into (graph, name)
-            // and rebuild the in-memory path index against the live
-            // graph store. The catalog layer accepts the compound key
-            // as opaque text -- only the engine knows the structure.
             if let Some((graph, _name)) = key.split_once("::") {
                 let graphs = self.graphs.read();
                 let Some(store) = graphs.get(graph) else {
@@ -1862,7 +1882,7 @@ impl Engine {
             .tables
             .read()
             .iter()
-            .filter(|(name, _)| table_filter.map_or(true, |target| name.as_str() == target))
+            .filter(|(name, _)| table_filter.is_none_or(|target| name.as_str() == target))
             .map(|(name, table)| (name.clone(), table.clone()))
             .collect();
         tables.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1873,10 +1893,10 @@ impl Engine {
             fields.sort();
             let index = table.inverted_index.read();
             for field in fields {
-                let analyzer = self
-                    .table_field_analyzer(&table_name, &field)
-                    .map(|(name, _)| name)
-                    .unwrap_or_else(|| analyzer_registry::DEFAULT_ANALYZER_NAME.to_string());
+                let analyzer = self.table_field_analyzer(&table_name, &field).map_or_else(
+                    || analyzer_registry::DEFAULT_ANALYZER_NAME.to_string(),
+                    |(name, _)| name,
+                );
                 let doc_length_count = index.doc_length_count(Some(&field));
                 out.push(FtsIndexStat {
                     table_name: table_name.clone(),
@@ -1893,7 +1913,7 @@ impl Engine {
         out
     }
 
-    fn rebuild_fts_index(&self, _table: &str, t: &Arc<TableState>) {
+    fn rebuild_fts_index(t: &Arc<TableState>) {
         let fts_fields = t.fts_fields();
         let docs: Vec<(DocId, Document)> = {
             let store = t.document_store.read();
@@ -2364,7 +2384,7 @@ impl Engine {
                 self.save_transaction_savepoint(&mut guard, name)?;
             }
             TransactionStmt::ReleaseSavepoint(name) => {
-                self.release_transaction_savepoint(&mut guard, name)?;
+                self.release_transaction_savepoint(&mut guard, &name)?;
             }
             TransactionStmt::RollbackToSavepoint(name) => {
                 self.rollback_to_transaction_savepoint(&mut guard, &name)?;
@@ -2378,7 +2398,7 @@ impl Engine {
             if let Some(backend) = self.backend.as_ref() {
                 backend
                     .begin_transaction()
-                    .map_err(|err| Self::storage_tx_error("BEGIN", err))?;
+                    .map_err(|err| Self::storage_tx_error("BEGIN", &err))?;
             }
             None
         } else {
@@ -2386,7 +2406,7 @@ impl Engine {
             if let Some(backend) = self.backend.as_ref() {
                 backend
                     .savepoint(&savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", err))?;
+                    .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
             }
             Some(savepoint)
         };
@@ -2407,11 +2427,11 @@ impl Engine {
             if let Some(savepoint) = storage_savepoint.as_ref() {
                 backend
                     .release_savepoint(savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", err))?;
+                    .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", &err))?;
             } else {
                 backend
                     .commit_transaction()
-                    .map_err(|err| Self::storage_tx_error("COMMIT", err))?;
+                    .map_err(|err| Self::storage_tx_error("COMMIT", &err))?;
             }
         }
         stack.pop();
@@ -2431,14 +2451,14 @@ impl Engine {
             if let Some(savepoint) = storage_savepoint.as_ref() {
                 backend
                     .rollback_to_savepoint(savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", err))?;
+                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", &err))?;
                 backend
                     .release_savepoint(savepoint)
-                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK release", err))?;
+                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK release", &err))?;
             } else {
                 backend
                     .rollback_transaction()
-                    .map_err(|err| Self::storage_tx_error("ROLLBACK", err))?;
+                    .map_err(|err| Self::storage_tx_error("ROLLBACK", &err))?;
             }
         }
         stack.pop();
@@ -2456,7 +2476,7 @@ impl Engine {
         if let Some(backend) = self.backend.as_ref() {
             backend
                 .savepoint(&name)
-                .map_err(|err| Self::storage_tx_error("SAVEPOINT", err))?;
+                .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
         }
         frame.savepoints.insert(name);
         Ok(())
@@ -2465,17 +2485,17 @@ impl Engine {
     fn release_transaction_savepoint(
         &self,
         stack: &mut [TransactionFrame],
-        name: String,
+        name: &str,
     ) -> Result<(), SQLError> {
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
         if let Some(backend) = self.backend.as_ref() {
             backend
-                .release_savepoint(&name)
-                .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", err))?;
+                .release_savepoint(name)
+                .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
-        frame.savepoints.remove(&name);
+        frame.savepoints.remove(name);
         Ok(())
     }
 
@@ -2493,12 +2513,12 @@ impl Engine {
         if let Some(backend) = self.backend.as_ref() {
             backend
                 .rollback_to_savepoint(name)
-                .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", err))?;
+                .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
         }
         Ok(())
     }
 
-    fn storage_tx_error(action: &str, err: StorageBackendError) -> SQLError {
+    fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
         SQLError::Internal(format!("{action} failed in storage backend: {err}"))
     }
 
@@ -2913,10 +2933,10 @@ impl Engine {
         {
             let mut fts = t.fts_fields.write();
             if !fts.contains(&field) {
-                fts.push(field.clone());
+                fts.push(field);
             }
         }
-        self.rebuild_fts_index(table, &t);
+        Self::rebuild_fts_index(&t);
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }

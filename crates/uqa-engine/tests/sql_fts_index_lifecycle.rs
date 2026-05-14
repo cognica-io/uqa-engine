@@ -13,12 +13,12 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
-fn ids(result: uqa_sql::SQLResult) -> Vec<i64> {
+fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
         .rows
         .iter()
-        .filter_map(|row| match row.get("id") {
-            Some(Value::Int(id)) => Some(*id),
+        .map(|row| match row.get("id") {
+            Some(Value::Int(id)) => *id,
             other => panic!("expected integer id, got {other:?}"),
         })
         .collect()
@@ -72,15 +72,15 @@ fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns(
             &[],
         )
         .unwrap();
-    assert_eq!(ids(content_hits), vec![1]);
+    assert_eq!(ids(&content_hits), vec![1]);
 
-    let context_hits = eng
+    let metadata_hits = eng
         .sql(
             "SELECT id FROM messages WHERE text_match(context_json, '대구호텔') ORDER BY id",
             &[],
         )
         .unwrap();
-    assert!(context_hits.rows.is_empty());
+    assert!(metadata_hits.rows.is_empty());
 
     let stats = eng
         .sql(
@@ -134,7 +134,7 @@ fn gin_analyzer_assignment_persists_and_indexes_new_rows_after_reopen() {
                 &[],
             )
             .unwrap();
-        assert_eq!(ids(hits), vec![1, 2]);
+        assert_eq!(ids(&hits), vec![1, 2]);
 
         let stats = eng
             .sql(
