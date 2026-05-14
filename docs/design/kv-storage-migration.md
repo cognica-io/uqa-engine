@@ -19,6 +19,8 @@ This is a design doc only. No code lands until the plan in [Phasing](#phasing) i
 
 ## Storage trait
 
+The first code-level preparation is already separated from RocksDB itself: `uqa-storage::PersistentStorageBackend` is the engine-facing factory for persistent document stores, inverted indexes, vector indexes, and transaction control. `SQLiteStorageBackend` is the only implementation today. This keeps `uqa-engine` from constructing `SQLiteDocumentStore`, `SQLiteInvertedIndex`, or `SQLiteIVFIndex` directly while leaving the existing SQLite `Catalog` facade in place. A future RocksDB port still needs the `KvStore`/catalog work below; it does not need to reopen the table/index construction path in `uqa-engine`.
+
 ```rust
 pub trait KvStore: Send + Sync {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;

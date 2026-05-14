@@ -8,6 +8,7 @@
 //! index, vector indexes (IVF), B-tree, `R*Tree`, block-max, and the
 //! `SQLite` catalog.
 
+pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
 pub mod document_store;
@@ -21,6 +22,10 @@ pub mod sqlite;
 pub mod transaction;
 pub mod vector_index;
 
+pub use backend::{
+    PersistentStorageBackend, PersistentVectorIndexParams, SQLiteStorageBackend,
+    StorageBackendError, StorageBackendResult,
+};
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use document_store::{DocumentStore, MemoryDocumentStore};

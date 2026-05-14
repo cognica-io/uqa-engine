@@ -88,9 +88,9 @@ use uqa_sql::SQLError;
 use uqa_storage::sqlite::{ColumnStatsInput, ColumnStatsRow};
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, Catalog, DocumentStore, IVFIndex, InvertedIndex,
-    ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, SQLiteCompressionOptions,
-    SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, TableSchema,
-    VectorFieldSchema, VectorIndex,
+    ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, PersistentStorageBackend,
+    PersistentVectorIndexParams, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
+    StorageBackendError, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -151,7 +151,7 @@ impl Default for ScoringMode {
 pub struct Engine {
     tables: RwLock<BTreeMap<String, Arc<TableState>>>,
     catalog: Option<Arc<Catalog>>,
-    conn: Option<ManagedConnection>,
+    backend: Option<Arc<dyn PersistentStorageBackend>>,
     /// Named in-memory graphs reachable from SQL via the
     /// `graph_*` function family. Persistence to the catalog is left
     /// to a follow-up slice.
@@ -354,7 +354,7 @@ impl Engine {
         Self {
             tables: RwLock::new(BTreeMap::new()),
             catalog: None,
-            conn: None,
+            backend: None,
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
@@ -872,10 +872,12 @@ impl Engine {
 
     fn open_with_connection(conn: &ManagedConnection) -> Result<Self, SQLiteError> {
         let catalog = Arc::new(Catalog::open(conn.clone())?);
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(SQLiteStorageBackend::new(conn.clone()));
         let mut engine = Self {
             tables: RwLock::new(BTreeMap::new()),
             catalog: Some(catalog.clone()),
-            conn: Some(conn.clone()),
+            backend: Some(backend.clone()),
             graphs: RwLock::new(BTreeMap::new()),
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
@@ -893,7 +895,7 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
         };
-        engine.restore_from_catalog(&catalog, conn)?;
+        engine.restore_from_catalog(&catalog, backend.as_ref())?;
         // Eagerly populate the model cache from the catalog so
         // `load_model` is one read deep.
         if let Ok(rows) = catalog.load_models() {
@@ -909,27 +911,17 @@ impl Engine {
     fn restore_from_catalog(
         &mut self,
         catalog: &Catalog,
-        conn: &ManagedConnection,
+        backend: &dyn PersistentStorageBackend,
     ) -> Result<(), SQLiteError> {
         for schema in catalog.load_tables()? {
             let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
-            let docs: Box<dyn DocumentStore> =
-                Box::new(SQLiteDocumentStore::new(conn.clone(), &schema.name));
-            let inv: Box<dyn InvertedIndex> = Box::new(SQLiteInvertedIndex::new(
-                conn.clone(),
-                &schema.name,
-                analyzer.clone(),
-            ));
+            let docs = backend.document_store(&schema.name);
+            let inv = backend.inverted_index(&schema.name, analyzer.clone());
             let mut vectors: BTreeMap<FieldName, Box<dyn VectorIndex>> = BTreeMap::new();
             for vf in &schema.vector_fields {
                 vectors.insert(
                     vf.field.clone(),
-                    Box::new(SQLiteIVFIndex::new(
-                        conn.clone(),
-                        &schema.name,
-                        &vf.field,
-                        vf.dimensions,
-                    )),
+                    backend.vector_index(&schema.name, &vf.field, vf.dimensions, None),
                 );
             }
             let columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
@@ -1242,14 +1234,10 @@ impl Engine {
     ) {
         let name = name.into();
         let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
-            if let Some(conn) = self.conn.as_ref() {
+            if let Some(backend) = self.backend.as_ref() {
                 (
-                    Box::new(SQLiteDocumentStore::new(conn.clone(), &name)),
-                    Box::new(SQLiteInvertedIndex::new(
-                        conn.clone(),
-                        &name,
-                        analyzer.clone(),
-                    )),
+                    backend.document_store(&name),
+                    backend.inverted_index(&name, analyzer.clone()),
                 )
             } else {
                 (
@@ -1355,16 +1343,17 @@ impl Engine {
         dimensions: u32,
         params: IvfIndexParams,
     ) -> Box<dyn VectorIndex> {
-        if let Some(conn) = self.conn.as_ref() {
-            Box::new(SQLiteIVFIndex::with_params(
-                conn.clone(),
+        if let Some(backend) = self.backend.as_ref() {
+            backend.vector_index(
                 table,
                 field,
                 dimensions,
-                params.nlist,
-                params.nprobe,
-                params.train_threshold,
-            ))
+                Some(PersistentVectorIndexParams {
+                    nlist: params.nlist,
+                    nprobe: params.nprobe,
+                    train_threshold: params.train_threshold,
+                }),
+            )
         } else {
             Box::new(IVFIndex::with_params(
                 dimensions,
@@ -2327,8 +2316,8 @@ impl Engine {
             had_open_transaction
         };
         if had_open_transaction {
-            if let Some(conn) = self.conn.as_ref() {
-                let _ = conn.rollback_transaction();
+            if let Some(backend) = self.backend.as_ref() {
+                let _ = backend.rollback_transaction();
             }
         }
         // Clear FDW registries — closing connections is up to the
@@ -2363,15 +2352,17 @@ impl Engine {
 
     fn begin_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
         let storage_savepoint = if stack.is_empty() {
-            if let Some(conn) = self.conn.as_ref() {
-                conn.begin_transaction()
+            if let Some(backend) = self.backend.as_ref() {
+                backend
+                    .begin_transaction()
                     .map_err(|err| Self::storage_tx_error("BEGIN", err))?;
             }
             None
         } else {
             let savepoint = format!("__uqa_nested_tx_{}", stack.len());
-            if let Some(conn) = self.conn.as_ref() {
-                conn.savepoint(&savepoint)
+            if let Some(backend) = self.backend.as_ref() {
+                backend
+                    .savepoint(&savepoint)
                     .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", err))?;
             }
             Some(savepoint)
@@ -2389,12 +2380,14 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
             .storage_savepoint
             .clone();
-        if let Some(conn) = self.conn.as_ref() {
+        if let Some(backend) = self.backend.as_ref() {
             if let Some(savepoint) = storage_savepoint.as_ref() {
-                conn.release_savepoint(savepoint)
+                backend
+                    .release_savepoint(savepoint)
                     .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", err))?;
             } else {
-                conn.commit_transaction()
+                backend
+                    .commit_transaction()
                     .map_err(|err| Self::storage_tx_error("COMMIT", err))?;
             }
         }
@@ -2411,14 +2404,17 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
             .storage_savepoint
             .clone();
-        if let Some(conn) = self.conn.as_ref() {
+        if let Some(backend) = self.backend.as_ref() {
             if let Some(savepoint) = storage_savepoint.as_ref() {
-                conn.rollback_to_savepoint(savepoint)
+                backend
+                    .rollback_to_savepoint(savepoint)
                     .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", err))?;
-                conn.release_savepoint(savepoint)
+                backend
+                    .release_savepoint(savepoint)
                     .map_err(|err| Self::storage_tx_error("nested ROLLBACK release", err))?;
             } else {
-                conn.rollback_transaction()
+                backend
+                    .rollback_transaction()
                     .map_err(|err| Self::storage_tx_error("ROLLBACK", err))?;
             }
         }
@@ -2434,8 +2430,9 @@ impl Engine {
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("SAVEPOINT outside a transaction".into()))?;
-        if let Some(conn) = self.conn.as_ref() {
-            conn.savepoint(&name)
+        if let Some(backend) = self.backend.as_ref() {
+            backend
+                .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", err))?;
         }
         frame.savepoints.insert(name);
@@ -2450,8 +2447,9 @@ impl Engine {
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
-        if let Some(conn) = self.conn.as_ref() {
-            conn.release_savepoint(&name)
+        if let Some(backend) = self.backend.as_ref() {
+            backend
+                .release_savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", err))?;
         }
         frame.savepoints.remove(&name);
@@ -2469,14 +2467,15 @@ impl Engine {
         if !frame.savepoints.contains(name) {
             return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
         }
-        if let Some(conn) = self.conn.as_ref() {
-            conn.rollback_to_savepoint(name)
+        if let Some(backend) = self.backend.as_ref() {
+            backend
+                .rollback_to_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", err))?;
         }
         Ok(())
     }
 
-    fn storage_tx_error(action: &str, err: SQLiteError) -> SQLError {
+    fn storage_tx_error(action: &str, err: StorageBackendError) -> SQLError {
         SQLError::Internal(format!("{action} failed in storage backend: {err}"))
     }
 
@@ -3689,7 +3688,7 @@ mod tests {
             )
             .unwrap();
 
-            let conn = eng.conn.as_ref().expect("sqlite connection").clone();
+            let conn = eng.catalog.as_ref().expect("sqlite catalog").connection();
             make_doc_two_the_only_nearest_ivf_candidate(&conn, &[1.0, 0.0]);
         }
 
