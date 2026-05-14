@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `QueryBuilder` — assembles a SELECT statement and runs it via
+//! `QueryBuilder` - assembles a SELECT statement and runs it via
 //! [`uqa_engine::Engine::sql`]. Each method returns the builder by
 //! value so calls compose linearly. The builder is transport-only;
 //! all real work happens in the engine's SQL pipeline.
@@ -537,7 +537,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `bayesian_match(field, '<query>')` filter — Bayesian BM25
+    /// `bayesian_match(field, '<query>')` filter - Bayesian BM25
     /// scoring with calibrated probabilities. Mirrors Python's
     /// `QueryBuilder.score_bayesian_bm25` style search.
     pub fn bayesian_match(self, field: &str, query: &str) -> Self {
@@ -692,7 +692,11 @@ fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             Value::Bool(_) => DataType::Boolean,
             Value::Int(_) => DataType::Int64,
             Value::Float(_) => DataType::Float64,
-            Value::Str(_) | Value::Bytes(_) | Value::List(_) | Value::Map(_) => DataType::Utf8,
+            Value::Str(_)
+            | Value::Bytes(_)
+            | Value::Temporal(_)
+            | Value::List(_)
+            | Value::Map(_) => DataType::Utf8,
         };
         ty = Some(match (ty, next) {
             (None, dt) => dt,
@@ -759,6 +763,7 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Float(v) => Some(v.to_string()),
         Value::Str(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
+        Value::Temporal(v) => Some(v.to_sql_string()),
         Value::List(v) => Some(format!("{v:?}")),
         Value::Map(v) => Some(format!("{v:?}")),
     }
@@ -772,6 +777,7 @@ fn render_value(value: &Value) -> String {
         Value::Float(f) => format!("{f}"),
         Value::Str(s) => quote_str(s),
         Value::Bytes(b) => quote_str(&format!("<{} bytes>", b.len())),
+        Value::Temporal(t) => quote_str(&t.to_sql_string()),
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(render_value).collect();
             format!("ARRAY[{}]", inner.join(", "))
@@ -793,7 +799,7 @@ mod tests {
         // We can't make an Engine in unit tests without bringing in
         // its full surface, but to_sql doesn't touch the engine when
         // `execute()` isn't called. Use a transmute-free dummy via
-        // `unsafe { std::mem::zeroed() }`? Avoid that — instead test
+        // `unsafe { std::mem::zeroed() }`? Avoid that; instead test
         // through a dedicated integration test that holds a real
         // Engine. The unit tests below verify the SQL builders that
         // don't need a runtime: render_value and quote_str.

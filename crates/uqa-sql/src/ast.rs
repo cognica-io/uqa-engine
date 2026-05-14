@@ -29,6 +29,18 @@ pub enum ColumnType {
     Json,
     /// `BYTEA` columns store opaque bytes.
     Bytea,
+    /// `DATE` columns store days since 1970-01-01.
+    Date,
+    /// `TIME` columns store microseconds since midnight.
+    Time,
+    /// `TIME WITH TIME ZONE` columns store local time plus offset.
+    TimeTz,
+    /// `TIMESTAMP WITHOUT TIME ZONE` columns store naive microseconds
+    /// since 1970-01-01 00:00:00.
+    Timestamp,
+    /// `TIMESTAMP WITH TIME ZONE` columns store UTC microseconds since
+    /// 1970-01-01 00:00:00Z.
+    TimestampTz,
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
 }
@@ -75,7 +87,7 @@ pub struct ForeignKeyRef {
 pub struct CreateTable {
     pub name: String,
     pub columns: Vec<ColumnDef>,
-    /// `CREATE TABLE IF NOT EXISTS` — silently ignore the statement
+    /// `CREATE TABLE IF NOT EXISTS` - silently ignore the statement
     /// when a table with this name already exists.
     pub if_not_exists: bool,
     /// Table-level `CHECK (...)` constraints. Each entry is an
@@ -366,7 +378,7 @@ pub struct OrderBy {
     pub expr: Expr,
     pub descending: bool,
     /// `NULLS FIRST` / `NULLS LAST` placement. `None` means the
-    /// SQL-standard default — `NULLS LAST` for ASC and `NULLS FIRST`
+    /// SQL-standard default - `NULLS LAST` for ASC and `NULLS FIRST`
     /// for DESC. Mirrors `PostgreSQL` semantics.
     pub nulls: Option<NullsOrder>,
 }
@@ -432,24 +444,24 @@ pub enum Expr {
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),
-    /// `text_match(...)`, `knn_match(...)`, etc. — dispatched through
+    /// `text_match(...)`, `knn_match(...)`, etc. - dispatched through
     /// the function registry.
     Func {
         name: String,
         args: Vec<Expr>,
-        /// `func(DISTINCT expr)` — only meaningful for aggregate
+        /// `func(DISTINCT expr)` - only meaningful for aggregate
         /// functions. Mirrors `PostgreSQL`'s `agg_distinct`.
         distinct: bool,
-        /// `func(expr ORDER BY ...)` — only meaningful for ordered
+        /// `func(expr ORDER BY ...)` - only meaningful for ordered
         /// aggregates (`STRING_AGG`, `ARRAY_AGG`, `PERCENTILE_*`).
         order_by: Vec<OrderBy>,
-        /// `func(...) FILTER (WHERE expr)` — aggregate-level row filter.
+        /// `func(...) FILTER (WHERE expr)` - aggregate-level row filter.
         filter: Option<Box<Expr>>,
     },
-    /// `ARRAY[1.0, 2.0, ...]` literal — currently restricted to numeric
+    /// `ARRAY[1.0, 2.0, ...]` literal - currently restricted to numeric
     /// elements (vectors).
     Array(Vec<Expr>),
-    /// `lhs op rhs` — comparison or arithmetic.
+    /// `lhs op rhs` - comparison or arithmetic.
     Binary {
         op: BinaryOp,
         lhs: Box<Expr>,
@@ -587,19 +599,19 @@ pub enum Statement {
         name: String,
         if_not_exists: bool,
     },
-    /// `SET <name> [TO|=] <value>` — runtime parameter assignment.
+    /// `SET <name> [TO|=] <value>` - runtime parameter assignment.
     /// Currently the engine recognises `search_path`; everything else
     /// is recorded as a no-op for forward compatibility.
     SetVariable {
         name: String,
         value: String,
     },
-    /// `SHOW <variable>` — return the runtime parameter as a single
+    /// `SHOW <variable>` - return the runtime parameter as a single
     /// `(name -> value)` row. Mirrors Python `_compile_show`.
     ShowVariable {
         name: String,
     },
-    /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` — clear session
+    /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session
     /// state. Mirrors Python `_compile_discard`. The engine resets
     /// session vars, prepared statements and temp tables.
     Discard {

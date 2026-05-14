@@ -46,17 +46,56 @@ impl Predicate {
         match self {
             Predicate::IsNull => is_null,
             Predicate::IsNotNull => !is_null,
-            Predicate::Equals(target) => !is_null && value == Some(target),
-            Predicate::NotEquals(target) => !is_null && value != Some(target),
-            Predicate::GreaterThan(target) => !is_null && value.is_some_and(|v| v > target),
-            Predicate::GreaterThanOrEqual(target) => !is_null && value.is_some_and(|v| v >= target),
-            Predicate::LessThan(target) => !is_null && value.is_some_and(|v| v < target),
-            Predicate::LessThanOrEqual(target) => !is_null && value.is_some_and(|v| v <= target),
-            Predicate::InSet(values) => !is_null && value.is_some_and(|v| values.contains(v)),
+            Predicate::Equals(target) => !is_null && value.is_some_and(|v| values_equal(v, target)),
+            Predicate::NotEquals(target) => {
+                !is_null && value.is_some_and(|v| !values_equal(v, target))
+            }
+            Predicate::GreaterThan(target) => {
+                !is_null && value.is_some_and(|v| compare_values(v, target).is_gt())
+            }
+            Predicate::GreaterThanOrEqual(target) => {
+                !is_null && value.is_some_and(|v| compare_values(v, target).is_ge())
+            }
+            Predicate::LessThan(target) => {
+                !is_null && value.is_some_and(|v| compare_values(v, target).is_lt())
+            }
+            Predicate::LessThanOrEqual(target) => {
+                !is_null && value.is_some_and(|v| compare_values(v, target).is_le())
+            }
+            Predicate::InSet(values) => {
+                !is_null
+                    && value.is_some_and(|v| values.iter().any(|target| values_equal(v, target)))
+            }
             Predicate::Between { low, high } => {
-                !is_null && value.is_some_and(|v| v >= low && v <= high)
+                !is_null
+                    && value.is_some_and(|v| {
+                        compare_values(v, low).is_ge() && compare_values(v, high).is_le()
+                    })
             }
         }
+    }
+}
+
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Temporal(x), Value::Temporal(y)) => x == y,
+        (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => {
+            x.parse_same_kind(y).is_some_and(|parsed| parsed == *x)
+        }
+        _ => a == b,
+    }
+}
+
+fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match (a, b) {
+        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Str(y)) => x
+            .parse_same_kind(y)
+            .map_or_else(|| a.cmp(b), |parsed| x.cmp(&parsed)),
+        (Value::Str(x), Value::Temporal(y)) => y
+            .parse_same_kind(x)
+            .map_or_else(|| a.cmp(b), |parsed| parsed.cmp(y)),
+        _ => a.cmp(b),
     }
 }
 

@@ -15,7 +15,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Deserialize;
 use uqa_analysis::analyzer::standard_analyzer;
-use uqa_core::{DocId, Edge, Value, Vertex};
+use uqa_core::{DocId, Edge, TemporalValue, Value, Vertex};
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 use uqa_storage::sqlite::ColumnStatsInput;
 
@@ -497,6 +497,9 @@ fn rust_column_type(col: &PythonColumnDef) -> Result<ColumnType, PythonMigration
     if raw.ends_with("[]") || raw == "point" {
         return Ok(ColumnType::Json);
     }
+    if let Some(ty) = python_temporal_type(&raw) {
+        return Ok(ty);
+    }
     if is_python_text_type(&raw) {
         return Ok(ColumnType::Text);
     }
@@ -517,23 +520,19 @@ fn rust_column_type(col: &PythonColumnDef) -> Result<ColumnType, PythonMigration
 fn is_python_text_type(raw: &str) -> bool {
     matches!(
         raw,
-        "text"
-            | "varchar"
-            | "character varying"
-            | "char"
-            | "character"
-            | "name"
-            | "uuid"
-            | "date"
-            | "time"
-            | "timetz"
-            | "timestamp"
-            | "timestamptz"
-            | "timestamp without time zone"
-            | "timestamp with time zone"
-            | "time without time zone"
-            | "time with time zone"
+        "text" | "varchar" | "character varying" | "char" | "character" | "name" | "uuid"
     )
+}
+
+fn python_temporal_type(raw: &str) -> Option<ColumnType> {
+    match raw {
+        "date" => Some(ColumnType::Date),
+        "time" | "time without time zone" => Some(ColumnType::Time),
+        "timetz" | "time with time zone" => Some(ColumnType::TimeTz),
+        "datetime" | "timestamp" | "timestamp without time zone" => Some(ColumnType::Timestamp),
+        "timestamptz" | "timestamp with time zone" => Some(ColumnType::TimestampTz),
+        _ => None,
+    }
 }
 
 fn create_tables(
@@ -770,11 +769,17 @@ fn sqlite_value_to_uqa(
         ValueRef::Integer(n) if matches!(lower.as_str(), "bool" | "boolean") => {
             Ok(Value::Bool(n != 0))
         }
+        ValueRef::Integer(n) if python_temporal_type(&lower).is_some() => {
+            integer_to_temporal_value(n, &lower)
+        }
         ValueRef::Integer(n) => Ok(Value::Int(n)),
         ValueRef::Real(n) => Ok(Value::Float(n)),
         ValueRef::Text(bytes) => {
             let text = std::str::from_utf8(bytes)
                 .map_err(|e| PythonMigrationError::Invalid(format!("invalid text: {e}")))?;
+            if let Some(value) = text_to_temporal_value(text, &lower)? {
+                return Ok(value);
+            }
             if lower == "json"
                 || lower == "jsonb"
                 || lower == "vector"
@@ -799,6 +804,48 @@ fn sqlite_value_to_uqa(
     }
 }
 
+fn integer_to_temporal_value(value: i64, raw_type: &str) -> Result<Value, PythonMigrationError> {
+    let ty = python_temporal_type(raw_type)
+        .ok_or_else(|| PythonMigrationError::Invalid(format!("not a temporal type: {raw_type}")))?;
+    let temporal = match ty {
+        ColumnType::Date => TemporalValue::Date {
+            days: i32::try_from(value).map_err(|e| {
+                PythonMigrationError::Invalid(format!("date day offset {value} out of range: {e}"))
+            })?,
+        },
+        ColumnType::Time => TemporalValue::Time { micros: value },
+        ColumnType::TimeTz => TemporalValue::TimeTz {
+            micros: value,
+            offset_minutes: 0,
+        },
+        ColumnType::Timestamp => TemporalValue::Timestamp { micros: value },
+        ColumnType::TimestampTz => TemporalValue::TimestampTz { micros: value },
+        _ => unreachable!(),
+    };
+    Ok(Value::Temporal(temporal))
+}
+
+fn text_to_temporal_value(
+    text: &str,
+    raw_type: &str,
+) -> Result<Option<Value>, PythonMigrationError> {
+    let Some(ty) = python_temporal_type(raw_type) else {
+        return Ok(None);
+    };
+    let parsed = match ty {
+        ColumnType::Date => TemporalValue::parse_date(text),
+        ColumnType::Time => TemporalValue::parse_time(text),
+        ColumnType::TimeTz => TemporalValue::parse_time_tz(text),
+        ColumnType::Timestamp => TemporalValue::parse_timestamp(text),
+        ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        PythonMigrationError::Invalid(format!("invalid {raw_type} temporal value: {text}"))
+    })?;
+    Ok(Some(Value::Temporal(parsed)))
+}
+
 fn json_to_value(json: &serde_json::Value) -> Result<Value, PythonMigrationError> {
     match json {
         serde_json::Value::Null => Ok(Value::Null),
@@ -820,11 +867,16 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, PythonMigrationError
             .map(json_to_value)
             .collect::<Result<Vec<_>, _>>()
             .map(Value::List),
-        serde_json::Value::Object(items) => items
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), json_to_value(value)?)))
-            .collect::<Result<BTreeMap<_, _>, _>>()
-            .map(Value::Map),
+        serde_json::Value::Object(items) => {
+            if let Ok(temporal) = serde_json::from_value::<TemporalValue>(json.clone()) {
+                return Ok(Value::Temporal(temporal));
+            }
+            items
+                .iter()
+                .map(|(key, value)| Ok((key.clone(), json_to_value(value)?)))
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Value::Map)
+        }
     }
 }
 

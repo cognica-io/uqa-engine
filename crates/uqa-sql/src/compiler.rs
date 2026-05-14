@@ -1055,15 +1055,11 @@ fn compile_pg_type_name(
             let scale = scale.or(precision.map(|_| 0));
             Ok(ColumnType::Numeric { precision, scale })
         }
-        "date"
-        | "time"
-        | "timetz"
-        | "timestamp"
-        | "timestamptz"
-        | "timestamp without time zone"
-        | "timestamp with time zone"
-        | "time without time zone"
-        | "time with time zone" => Ok(ColumnType::Text),
+        "date" => Ok(ColumnType::Date),
+        "time" | "time without time zone" => Ok(ColumnType::Time),
+        "timetz" | "time with time zone" => Ok(ColumnType::TimeTz),
+        "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
+        "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
         "json" | "jsonb" => Ok(ColumnType::Json),
         "bytea" => Ok(ColumnType::Bytea),
         "vector" => {
@@ -1772,7 +1768,7 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
         all: stmt.all,
         right,
         // The outer SelectStmt's ORDER BY / LIMIT / OFFSET land here
-        // when `compile_select` finishes — the caller fills these in
+        // when `compile_select` finishes - the caller fills these in
         // because at this point we don't have the parent's clauses
         // resolved yet. Default to empty / None until then.
         combined_order_by: Vec::new(),
@@ -2589,7 +2585,7 @@ fn compile_window_frame(
     let _ = FRAMEOPTION_BETWEEN;
     // PostgreSQL always encodes a default frame in `frame_options`
     // (RANGE UNBOUNDED PRECEDING TO CURRENT ROW). Only honor the
-    // frame when the user explicitly wrote one — that's exactly what
+    // frame when the user explicitly wrote one - that's exactly what
     // the `FRAMEOPTION_NONDEFAULT` bit indicates.
     if f & FRAMEOPTION_NONDEFAULT == 0 {
         return Ok(None);

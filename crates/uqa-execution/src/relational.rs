@@ -178,7 +178,7 @@ pub struct SortKey {
     pub expr: Expr,
     pub descending: bool,
     /// `Some(true)` forces NULLS FIRST, `Some(false)` forces NULLS
-    /// LAST. `None` falls back to the SQL-standard default — NULLS
+    /// LAST. `None` falls back to the SQL-standard default - NULLS
     /// LAST for ASC and NULLS FIRST for DESC.
     pub nulls_first: Option<bool>,
 }
@@ -222,6 +222,13 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
         (Value::Str(x), Value::Str(y)) => x.cmp(y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Str(y)) => {
+            x.parse_same_kind(y).map_or(Equal, |parsed| x.cmp(&parsed))
+        }
+        (Value::Str(x), Value::Temporal(y)) => {
+            y.parse_same_kind(x).map_or(Equal, |parsed| parsed.cmp(y))
+        }
         _ => Equal,
     }
 }
@@ -475,6 +482,7 @@ fn distinct_key(v: &Value) -> String {
         Value::Float(f) => format!("f:{f:.17}"),
         Value::Str(s) => format!("s:{s}"),
         Value::Bool(b) => format!("b:{b}"),
+        Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
         other => format!("o:{other:?}"),
     }
 }

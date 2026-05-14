@@ -7,7 +7,7 @@
 //! Scalar expression evaluator: turns an [`Expr`] into a [`Value`] under
 //! a row context (column -> value) and a parameter binding.
 
-use uqa_core::Value;
+use uqa_core::{TemporalValue, Value};
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -305,6 +305,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Null, _) | (_, Value::Null) => false,
         (Value::Int(x), Value::Float(y)) => (*x as f64) == *y,
         (Value::Float(x), Value::Int(y)) => *x == (*y as f64),
+        (Value::Temporal(x), Value::Temporal(y)) => x == y,
+        (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => {
+            x.parse_same_kind(y).is_some_and(|parsed| parsed == *x)
+        }
         _ => a == b,
     }
 }
@@ -322,6 +326,15 @@ fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
             Ok(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal))
         }
         (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
+        (Value::Temporal(x), Value::Temporal(y)) => Ok(x.cmp(y)),
+        (Value::Temporal(x), Value::Str(y)) => x
+            .parse_same_kind(y)
+            .map(|parsed| x.cmp(&parsed))
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
+        (Value::Str(x), Value::Temporal(y)) => y
+            .parse_same_kind(x)
+            .map(|parsed| parsed.cmp(y))
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
         (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
@@ -1485,6 +1498,7 @@ fn value_to_json(v: &Value) -> serde_json::Value {
             serde_json::Value::String(s.clone())
         }
         Value::Bytes(b) => serde_json::Value::String(format!("0x{}", hex_encode(b))),
+        Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
         Value::Map(map) => {
             let mut obj = serde_json::Map::new();
@@ -1513,6 +1527,11 @@ fn json_to_value(json: &serde_json::Value) -> Value {
         serde_json::Value::String(s) => Value::Str(s.clone()),
         serde_json::Value::Array(arr) => Value::List(arr.iter().map(json_to_value).collect()),
         serde_json::Value::Object(obj) => {
+            if let Ok(temporal) =
+                serde_json::from_value::<TemporalValue>(serde_json::Value::Object(obj.clone()))
+            {
+                return Value::Temporal(temporal);
+            }
             let mut map = std::collections::BTreeMap::new();
             for (k, v) in obj {
                 map.insert(k.clone(), json_to_value(v));
@@ -1745,6 +1764,13 @@ fn typeof_value(v: &Value) -> String {
         Value::Float(_) => "double precision".into(),
         Value::Str(_) => "text".into(),
         Value::Bytes(_) => "bytea".into(),
+        Value::Temporal(value) => match value {
+            TemporalValue::Date { .. } => "date".into(),
+            TemporalValue::Time { .. } => "time without time zone".into(),
+            TemporalValue::TimeTz { .. } => "time with time zone".into(),
+            TemporalValue::Timestamp { .. } => "timestamp without time zone".into(),
+            TemporalValue::TimestampTz { .. } => "timestamp with time zone".into(),
+        },
         Value::List(_) => "array".into(),
         Value::Map(_) => "jsonb".into(),
     }
@@ -2047,15 +2073,19 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
             Ok(Value::Str(value_to_string(v)))
         }
-        "date"
-        | "time"
-        | "timetz"
-        | "timestamp"
-        | "timestamptz"
-        | "timestamp without time zone"
-        | "timestamp with time zone"
-        | "time without time zone"
-        | "time with time zone" => Ok(Value::Str(value_to_string(v))),
+        "date" => cast_temporal(v, TemporalValue::parse_date, "date"),
+        "time" | "time without time zone" => cast_temporal(v, TemporalValue::parse_time, "time"),
+        "timetz" | "time with time zone" => {
+            cast_temporal(v, TemporalValue::parse_time_tz, "time with time zone")
+        }
+        "timestamp" | "datetime" | "timestamp without time zone" => {
+            cast_temporal(v, TemporalValue::parse_timestamp, "timestamp")
+        }
+        "timestamptz" | "timestamp with time zone" => cast_temporal(
+            v,
+            TemporalValue::parse_timestamp_tz,
+            "timestamp with time zone",
+        ),
         "json" | "jsonb" => Ok(json_to_value(&parse_json(&value_to_string(v))?)),
         "bytea" => match v {
             Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
@@ -2067,6 +2097,15 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
     }
 }
 
+fn cast_temporal(v: &Value, parse: fn(&str) -> Option<TemporalValue>, ty: &str) -> Result<Value> {
+    match v {
+        Value::Temporal(value) => Ok(Value::Temporal(value.clone())),
+        other => parse(&value_to_string(other))
+            .map(Value::Temporal)
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
+    }
+}
+
 fn value_to_string(v: &Value) -> String {
     match v {
         Value::Null => "".into(),
@@ -2074,6 +2113,7 @@ fn value_to_string(v: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Str(s) => s.clone(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
+        Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => {
             serde_json::to_string(&value_to_json(v)).unwrap_or_default()
         }

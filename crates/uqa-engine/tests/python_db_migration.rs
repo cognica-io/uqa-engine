@@ -7,7 +7,7 @@
 use rusqlite::{params, Connection};
 use serde_json::json;
 use tempfile::tempdir;
-use uqa_core::Value;
+use uqa_core::{TemporalValue, Value};
 use uqa_engine::migration::migrate_python_database;
 use uqa_engine::{Engine, ScoringMode};
 use uqa_graph::GraphStore;
@@ -60,6 +60,18 @@ fn migrates_python_uqa_catalog_from_directory() {
     let doc = engine.get_document("docs", 1).unwrap();
     assert_eq!(doc.get("title"), Some(&Value::Str("Rust migration".into())));
     assert!(matches!(doc.get("payload"), Some(Value::Map(_))));
+    assert!(matches!(
+        doc.get("published_at"),
+        Some(Value::Temporal(TemporalValue::Timestamp { .. }))
+    ));
+    assert!(matches!(
+        doc.get("event_date"),
+        Some(Value::Temporal(TemporalValue::Date { .. }))
+    ));
+    assert!(matches!(
+        doc.get("wake_time"),
+        Some(Value::Temporal(TemporalValue::TimeTz { .. }))
+    ));
 
     let text_hits = engine.search("docs", "body", "database", &ScoringMode::default(), 10);
     assert_eq!(text_hits.first().map(|hit| hit.doc_id), Some(1));
@@ -109,6 +121,9 @@ fn create_python_schema(conn: &Connection) {
             title TEXT,
             body TEXT,
             embedding TEXT,
+            published_at TEXT,
+            event_date TEXT,
+            wake_time TEXT,
             payload TEXT
         );
         CREATE TABLE _catalog_indexes (
@@ -179,7 +194,51 @@ fn create_python_schema(conn: &Connection) {
 }
 
 fn insert_python_table_rows(conn: &Connection) {
-    let columns = json!([
+    let columns = python_doc_columns();
+    conn.execute(
+        "INSERT INTO _catalog_tables (name, columns_json) VALUES (?1, ?2)",
+        params!["docs", columns.to_string()],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO _data_docs
+            (_rowid, id, title, body, embedding, published_at, event_date, wake_time, payload)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            1_i64,
+            1_i64,
+            "Rust migration",
+            "Rust database migration",
+            "[1.0, 0.0, 0.0]",
+            "2026-05-14 09:30:00",
+            "2026-05-14",
+            "09:30:00+09:00",
+            "{\"kind\":\"guide\"}"
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO _data_docs
+            (_rowid, id, title, body, embedding, published_at, event_date, wake_time, payload)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            2_i64,
+            2_i64,
+            "Python reference",
+            "Python catalog reference",
+            "[0.0, 1.0, 0.0]",
+            "2026-05-13 10:00:00",
+            "2026-05-13",
+            "10:00:00+09:00",
+            "{\"kind\":\"source\"}"
+        ],
+    )
+    .unwrap();
+}
+
+fn python_doc_columns() -> serde_json::Value {
+    json!([
         {
             "name": "id",
             "type_name": "integer",
@@ -225,40 +284,35 @@ fn insert_python_table_rows(conn: &Connection) {
             "auto_increment": false,
             "default": null,
             "unique": false
+        },
+        {
+            "name": "published_at",
+            "type_name": "timestamp without time zone",
+            "primary_key": false,
+            "not_null": false,
+            "auto_increment": false,
+            "default": null,
+            "unique": false
+        },
+        {
+            "name": "event_date",
+            "type_name": "date",
+            "primary_key": false,
+            "not_null": false,
+            "auto_increment": false,
+            "default": null,
+            "unique": false
+        },
+        {
+            "name": "wake_time",
+            "type_name": "timetz",
+            "primary_key": false,
+            "not_null": false,
+            "auto_increment": false,
+            "default": null,
+            "unique": false
         }
-    ]);
-    conn.execute(
-        "INSERT INTO _catalog_tables (name, columns_json) VALUES (?1, ?2)",
-        params!["docs", columns.to_string()],
-    )
-    .unwrap();
-
-    conn.execute(
-        "INSERT INTO _data_docs (_rowid, id, title, body, embedding, payload)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            1_i64,
-            1_i64,
-            "Rust migration",
-            "Rust database migration",
-            "[1.0, 0.0, 0.0]",
-            "{\"kind\":\"guide\"}"
-        ],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO _data_docs (_rowid, id, title, body, embedding, payload)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            2_i64,
-            2_i64,
-            "Python reference",
-            "Python catalog reference",
-            "[0.0, 1.0, 0.0]",
-            "{\"kind\":\"source\"}"
-        ],
-    )
-    .unwrap();
+    ])
 }
 
 fn insert_python_index_rows(conn: &Connection) {

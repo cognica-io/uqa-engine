@@ -19,5 +19,5 @@ pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::Predicate;
 pub use types::{
     DocId, Edge, EdgeId, FieldName, GeneralizedPayload, GeneralizedPostingEntry, IndexStats,
-    PathExpr, PathSegment, Payload, PostingEntry, Value, Vertex, VertexId,
+    PathExpr, PathSegment, Payload, PostingEntry, TemporalValue, Value, Vertex, VertexId,
 };

@@ -298,7 +298,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 let mut new_row = row.clone();
                 if let Some(var) = &np.variable {
                     if let Some(prior) = new_row.get(var) {
-                        // Variable already bound — must refer to the same vertex.
+                        // Variable already bound - must refer to the same vertex.
                         if let Binding::Vertex(prev) = prior {
                             if prev.vertex_id != vertex.vertex_id {
                                 continue;
@@ -1029,6 +1029,7 @@ fn value_truthy(v: &Value) -> bool {
         Value::List(l) => !l.is_empty(),
         Value::Map(m) => !m.is_empty(),
         Value::Bytes(b) => !b.is_empty(),
+        Value::Temporal(_) => true,
     }
 }
 

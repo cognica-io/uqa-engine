@@ -691,9 +691,13 @@ impl Engine {
                     uqa_sql::ast::ColumnType::Real | uqa_sql::ast::ColumnType::Numeric { .. } => {
                         uqa_fdw::ColumnType::Real
                     }
-                    uqa_sql::ast::ColumnType::Text | uqa_sql::ast::ColumnType::Json => {
-                        uqa_fdw::ColumnType::Text
-                    }
+                    uqa_sql::ast::ColumnType::Text
+                    | uqa_sql::ast::ColumnType::Json
+                    | uqa_sql::ast::ColumnType::Date
+                    | uqa_sql::ast::ColumnType::Time
+                    | uqa_sql::ast::ColumnType::TimeTz
+                    | uqa_sql::ast::ColumnType::Timestamp
+                    | uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::Text,
                     uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
                         uqa_fdw::ColumnType::Bytes
                     }
@@ -1086,9 +1090,13 @@ impl Engine {
                         uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
                         uqa_sql::ast::ColumnType::Real
                         | uqa_sql::ast::ColumnType::Numeric { .. } => uqa_fdw::ColumnType::Real,
-                        uqa_sql::ast::ColumnType::Text | uqa_sql::ast::ColumnType::Json => {
-                            uqa_fdw::ColumnType::Text
-                        }
+                        uqa_sql::ast::ColumnType::Text
+                        | uqa_sql::ast::ColumnType::Json
+                        | uqa_sql::ast::ColumnType::Date
+                        | uqa_sql::ast::ColumnType::Time
+                        | uqa_sql::ast::ColumnType::TimeTz
+                        | uqa_sql::ast::ColumnType::Timestamp
+                        | uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::Text,
                         uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
                             uqa_fdw::ColumnType::Bytes
                         }
@@ -1611,8 +1619,8 @@ impl Engine {
     }
 
     /// Build (or replace) a path index for `graph` keyed by `name`.
-    /// `label_sequences` is the set of label sequences to materialise
-    /// - each sequence becomes a hash-friendly direct lookup for RPQ.
+    /// `label_sequences` is the set of label sequences to materialise;
+    /// each sequence becomes a hash-friendly direct lookup for RPQ.
     /// Mirrors Python's `Engine.build_path_index`.
     pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
         let key = format!("{graph}::{name}");

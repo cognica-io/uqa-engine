@@ -7,7 +7,10 @@
 //! Core value types for UQA: doc ids, payloads, posting entries, and the
 //! dynamic [`Value`] used inside payload fields.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
+
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 /// Document identifier.
 ///
@@ -26,9 +29,268 @@ pub enum PathSegment {
     Index(usize),
 }
 
-/// A path expression — a sequence of [`PathSegment`]s navigating a
+/// A path expression - a sequence of [`PathSegment`]s navigating a
 /// hierarchical document.
 pub type PathExpr = Vec<PathSegment>;
+
+const MICROS_PER_SECOND: i64 = 1_000_000;
+const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
+
+/// Compact temporal values used by SQL `DATE`, `TIME`, and `TIMESTAMP`
+/// columns. The payload is numeric so comparison and sorting do not
+/// depend on string collation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "$uqa_type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TemporalValue {
+    Date { days: i32 },
+    Time { micros: i64 },
+    TimeTz { micros: i64, offset_minutes: i32 },
+    Timestamp { micros: i64 },
+    TimestampTz { micros: i64 },
+}
+
+impl TemporalValue {
+    pub fn parse_date(input: &str) -> Option<Self> {
+        let date = NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d").ok()?;
+        let days = date.signed_duration_since(epoch_date()).num_days();
+        Some(Self::Date {
+            days: i32::try_from(days).ok()?,
+        })
+    }
+
+    pub fn parse_time(input: &str) -> Option<Self> {
+        parse_naive_time(input.trim()).map(|time| Self::Time {
+            micros: time_to_micros(time),
+        })
+    }
+
+    pub fn parse_time_tz(input: &str) -> Option<Self> {
+        let (time, offset_minutes) = split_offset_suffix(input.trim())?;
+        parse_naive_time(time.trim()).map(|time| Self::TimeTz {
+            micros: time_to_micros(time),
+            offset_minutes,
+        })
+    }
+
+    pub fn parse_timestamp(input: &str) -> Option<Self> {
+        let input = input.trim();
+        if let Some(Self::Date { days }) = Self::parse_date(input) {
+            return Some(Self::Timestamp {
+                micros: i64::from(days) * MICROS_PER_DAY,
+            });
+        }
+        parse_naive_datetime(input).map(|dt| Self::Timestamp {
+            micros: dt.and_utc().timestamp_micros(),
+        })
+    }
+
+    pub fn parse_timestamp_tz(input: &str) -> Option<Self> {
+        let input = input.trim();
+        if let Ok(dt) = DateTime::parse_from_rfc3339(input) {
+            return Some(Self::TimestampTz {
+                micros: dt.timestamp_micros(),
+            });
+        }
+        for fmt in [
+            "%Y-%m-%d %H:%M:%S%.f%:z",
+            "%Y-%m-%d %H:%M:%S%.f %:z",
+            "%Y-%m-%dT%H:%M:%S%.f%:z",
+            "%Y-%m-%d %H:%M%:z",
+            "%Y-%m-%d %H:%M %:z",
+            "%Y-%m-%dT%H:%M%:z",
+            "%Y-%m-%d %H:%M:%S%.f%z",
+            "%Y-%m-%d %H:%M:%S%.f %z",
+            "%Y-%m-%dT%H:%M:%S%.f%z",
+        ] {
+            if let Ok(dt) = DateTime::parse_from_str(input, fmt) {
+                return Some(Self::TimestampTz {
+                    micros: dt.timestamp_micros(),
+                });
+            }
+        }
+        Self::parse_timestamp(input).and_then(|value| match value {
+            Self::Timestamp { micros } => Some(Self::TimestampTz { micros }),
+            _ => None,
+        })
+    }
+
+    pub fn parse_same_kind(&self, input: &str) -> Option<Self> {
+        match self {
+            Self::Date { .. } => Self::parse_date(input),
+            Self::Time { .. } => Self::parse_time(input),
+            Self::TimeTz { .. } => Self::parse_time_tz(input),
+            Self::Timestamp { .. } => Self::parse_timestamp(input),
+            Self::TimestampTz { .. } => Self::parse_timestamp_tz(input),
+        }
+    }
+
+    pub fn to_sql_string(&self) -> String {
+        match self {
+            Self::Date { days } => epoch_date()
+                .checked_add_signed(Duration::days(i64::from(*days)))
+                .map_or_else(|| days.to_string(), |date| date.to_string()),
+            Self::Time { micros } => format_time_micros(*micros),
+            Self::TimeTz {
+                micros,
+                offset_minutes,
+            } => format!(
+                "{}{}",
+                format_time_micros(*micros),
+                format_offset(*offset_minutes)
+            ),
+            Self::Timestamp { micros } => format_timestamp_micros(*micros, false),
+            Self::TimestampTz { micros } => format_timestamp_micros(*micros, true),
+        }
+    }
+
+    fn sort_key(&self) -> (u8, i64) {
+        match self {
+            Self::Date { days } => (0, i64::from(*days)),
+            Self::Time { micros } => (1, micros.rem_euclid(MICROS_PER_DAY)),
+            Self::TimeTz {
+                micros,
+                offset_minutes,
+            } => (
+                2,
+                (micros - i64::from(*offset_minutes) * 60 * MICROS_PER_SECOND)
+                    .rem_euclid(MICROS_PER_DAY),
+            ),
+            Self::Timestamp { micros } => (3, *micros),
+            Self::TimestampTz { micros } => (4, *micros),
+        }
+    }
+}
+
+impl PartialOrd for TemporalValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TemporalValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.sort_key().cmp(&other.sort_key())
+    }
+}
+
+fn epoch_date() -> NaiveDate {
+    NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid epoch date")
+}
+
+fn parse_naive_time(input: &str) -> Option<NaiveTime> {
+    for fmt in ["%H:%M:%S%.f", "%H:%M"] {
+        if let Ok(time) = NaiveTime::parse_from_str(input, fmt) {
+            return Some(time);
+        }
+    }
+    None
+}
+
+fn parse_naive_datetime(input: &str) -> Option<NaiveDateTime> {
+    for fmt in [
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M",
+    ] {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(input, fmt) {
+            return Some(dt);
+        }
+    }
+    None
+}
+
+fn time_to_micros(time: NaiveTime) -> i64 {
+    i64::from(time.num_seconds_from_midnight()) * MICROS_PER_SECOND
+        + i64::from(time.nanosecond() / 1_000)
+}
+
+fn split_offset_suffix(input: &str) -> Option<(&str, i32)> {
+    if let Some(body) = input.strip_suffix('Z') {
+        return Some((body, 0));
+    }
+    let plus = input.rfind('+');
+    let minus = input.rfind('-');
+    let pos = match (plus, minus) {
+        (Some(p), Some(m)) => Some(p.max(m)),
+        (Some(p), None) => Some(p),
+        (None, Some(m)) => Some(m),
+        (None, None) => None,
+    }?;
+    let (body, offset) = input.split_at(pos);
+    Some((body, parse_offset_minutes(offset)?))
+}
+
+fn parse_offset_minutes(offset: &str) -> Option<i32> {
+    let sign = match offset.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let body = &offset[1..];
+    let (hours, minutes) = if let Some((h, m)) = body.split_once(':') {
+        (h.parse::<i32>().ok()?, m.parse::<i32>().ok()?)
+    } else if body.len() == 4 {
+        (
+            body[..2].parse::<i32>().ok()?,
+            body[2..].parse::<i32>().ok()?,
+        )
+    } else {
+        return None;
+    };
+    if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
+        return None;
+    }
+    Some(sign * (hours * 60 + minutes))
+}
+
+fn format_time_micros(micros: i64) -> String {
+    let normalized = micros.rem_euclid(MICROS_PER_DAY);
+    let seconds = normalized / MICROS_PER_SECOND;
+    let micros = normalized % MICROS_PER_SECOND;
+    let Some(time) =
+        NaiveTime::from_num_seconds_from_midnight_opt(seconds as u32, (micros * 1_000) as u32)
+    else {
+        return normalized.to_string();
+    };
+    let mut out = time.format("%H:%M:%S").to_string();
+    if micros != 0 {
+        let mut frac = format!("{micros:06}");
+        while frac.ends_with('0') {
+            frac.pop();
+        }
+        out.push('.');
+        out.push_str(&frac);
+    }
+    out
+}
+
+fn format_offset(offset_minutes: i32) -> String {
+    let sign = if offset_minutes < 0 { '-' } else { '+' };
+    let abs = offset_minutes.abs();
+    format!("{sign}{:02}:{:02}", abs / 60, abs % 60)
+}
+
+fn format_timestamp_micros(micros: i64, utc: bool) -> String {
+    let Some(dt) = DateTime::from_timestamp_micros(micros) else {
+        return micros.to_string();
+    };
+    let mut out = dt.naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+    let frac = micros.rem_euclid(MICROS_PER_SECOND);
+    if frac != 0 {
+        let mut text = format!("{frac:06}");
+        while text.ends_with('0') {
+            text.pop();
+        }
+        out.push('.');
+        out.push_str(&text);
+    }
+    if utc {
+        out = out.replace(' ', "T");
+        out.push('Z');
+    }
+    out
+}
 
 /// Dynamic value type for document fields and posting payload extras.
 ///
@@ -44,6 +306,7 @@ pub enum Value {
     Float(f64),
     Str(String),
     Bytes(Vec<u8>),
+    Temporal(TemporalValue),
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
 }
@@ -53,7 +316,7 @@ pub enum Value {
 ///
 /// `positions` is sorted ascending with no duplicates. `fields` uses
 /// `BTreeMap` (not `HashMap`) so equality and iteration are deterministic
-/// — this matters for the Boolean-algebra property tests.
+/// - this matters for the Boolean-algebra property tests.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Payload {
     pub positions: Vec<u32>,
@@ -242,6 +505,7 @@ impl Ord for Value {
                 .unwrap_or(Ordering::Equal),
             (Value::Str(a), Value::Str(b)) => a.cmp(b),
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+            (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
             (Value::List(a), Value::List(b)) => a.cmp(b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
@@ -257,8 +521,9 @@ fn discriminant(v: &Value) -> u8 {
         Value::Float(_) => 3,
         Value::Str(_) => 4,
         Value::Bytes(_) => 5,
-        Value::List(_) => 6,
-        Value::Map(_) => 7,
+        Value::Temporal(_) => 6,
+        Value::List(_) => 7,
+        Value::Map(_) => 8,
     }
 }
 

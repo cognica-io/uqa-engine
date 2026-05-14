@@ -29,7 +29,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::{DocId, Value};
+use uqa_core::{DocId, TemporalValue, Value};
 use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
     CreateTable, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
@@ -724,39 +724,45 @@ fn ensure_existing_values_not_null(
     Ok(())
 }
 
-/// Coerce an `INSERT` value to fit the column's declared type. Today
-/// this only rounds NUMERIC(precision, scale) values to `scale` digits;
-/// other types pass the value through unchanged.
-fn coerce_to_column_type(engine: &Engine, table: &str, column: &str, value: Value) -> Value {
+/// Coerce a write value to fit the column's declared type.
+fn coerce_to_column_type(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    value: Value,
+) -> Result<Value, SQLError> {
     let cols = match engine.describe_table(table) {
         Some(c) => c,
-        None => return value,
+        None => return Ok(value),
     };
     let Some(def) = cols.iter().find(|c| c.name == column) else {
-        return value;
+        return Ok(value);
     };
     if let ColumnType::Numeric { scale: Some(s), .. } = &def.ty {
-        return round_numeric(value, *s);
+        return Ok(round_numeric(value, *s));
     }
     if matches!(&def.ty, ColumnType::Real) {
         return match value {
-            Value::Float(_) => value,
-            Value::Int(i) => Value::Float(i as f64),
-            Value::Str(s) => s.parse::<f64>().map(Value::Float).unwrap_or(Value::Str(s)),
-            other => other,
+            Value::Float(_) => Ok(value),
+            Value::Int(i) => Ok(Value::Float(i as f64)),
+            Value::Str(s) => Ok(s.parse::<f64>().map(Value::Float).unwrap_or(Value::Str(s))),
+            other => Ok(other),
         };
     }
     if matches!(&def.ty, ColumnType::Json) {
-        return coerce_json_value(value);
+        return Ok(coerce_json_value(value));
     }
     if matches!(&def.ty, ColumnType::Bytea) {
         return match value {
-            Value::Bytes(_) => value,
-            Value::Str(s) => Value::Bytes(s.into_bytes()),
-            other => other,
+            Value::Bytes(_) => Ok(value),
+            Value::Str(s) => Ok(Value::Bytes(s.into_bytes())),
+            other => Ok(other),
         };
     }
-    value
+    if is_temporal_column_type(&def.ty) {
+        return convert_value_to_column_type(value, &def.ty);
+    }
+    Ok(value)
 }
 
 fn coerce_json_value(value: Value) -> Value {
@@ -829,9 +835,62 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
             Value::Str(s) => Value::Bytes(s.into_bytes()),
             other => Value::Bytes(value_to_text(&other).into_bytes()),
         }),
+        ColumnType::Date
+        | ColumnType::Time
+        | ColumnType::TimeTz
+        | ColumnType::Timestamp
+        | ColumnType::TimestampTz => convert_temporal_value(value, ty),
         ColumnType::Vector(_) => {
             value_to_vector(&value)?;
             Ok(value)
+        }
+    }
+}
+
+fn is_temporal_column_type(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::Date
+            | ColumnType::Time
+            | ColumnType::TimeTz
+            | ColumnType::Timestamp
+            | ColumnType::TimestampTz
+    )
+}
+
+fn column_type_name(ty: &ColumnType) -> &'static str {
+    match ty {
+        ColumnType::Integer => "integer",
+        ColumnType::Text => "text",
+        ColumnType::Real => "real",
+        ColumnType::Numeric { .. } => "numeric",
+        ColumnType::Json => "json",
+        ColumnType::Bytea => "bytea",
+        ColumnType::Date => "date",
+        ColumnType::Time => "time",
+        ColumnType::TimeTz => "time with time zone",
+        ColumnType::Timestamp => "timestamp",
+        ColumnType::TimestampTz => "timestamp with time zone",
+        ColumnType::Vector(_) => "vector",
+    }
+}
+
+fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
+    match value {
+        Value::Temporal(temporal) => Ok(Value::Temporal(temporal)),
+        other => {
+            let text = value_to_text(&other);
+            let parsed = match ty {
+                ColumnType::Date => TemporalValue::parse_date(&text),
+                ColumnType::Time => TemporalValue::parse_time(&text),
+                ColumnType::TimeTz => TemporalValue::parse_time_tz(&text),
+                ColumnType::Timestamp => TemporalValue::parse_timestamp(&text),
+                ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(&text),
+                _ => None,
+            };
+            parsed.map(Value::Temporal).ok_or_else(|| {
+                SQLError::TypeMismatch(format!("cannot cast `{text}` to {}", column_type_name(ty)))
+            })
         }
     }
 }
@@ -844,6 +903,7 @@ fn value_to_text(value: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Str(s) => s.clone(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
     }
@@ -866,11 +926,18 @@ fn json_to_core_value(json: serde_json::Value) -> Value {
         serde_json::Value::Array(items) => {
             Value::List(items.into_iter().map(json_to_core_value).collect())
         }
-        serde_json::Value::Object(obj) => Value::Map(
-            obj.into_iter()
-                .map(|(k, v)| (k, json_to_core_value(v)))
-                .collect(),
-        ),
+        serde_json::Value::Object(obj) => {
+            if let Ok(temporal) =
+                serde_json::from_value::<TemporalValue>(serde_json::Value::Object(obj.clone()))
+            {
+                return Value::Temporal(temporal);
+            }
+            Value::Map(
+                obj.into_iter()
+                    .map(|(k, v)| (k, json_to_core_value(v)))
+                    .collect(),
+            )
+        }
     }
 }
 
@@ -884,6 +951,7 @@ fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
+        Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::List(items) => {
             serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
         }
@@ -955,6 +1023,7 @@ fn backfill_added_column(
     } else {
         Value::Null
     };
+    let default_value = coerce_to_column_type(engine, table, column, default_value)?;
     let vector_value: Option<Vec<f32>> = value_to_vector(&default_value).ok();
     for doc_id in doc_ids {
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
@@ -999,7 +1068,7 @@ fn run_update(
         for (col, expr) in &stmt.assignments {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
             let value =
-                coerce_to_column_type(engine, &stmt.table, col, uqa_sql::expr::eval(expr, &ctx)?);
+                coerce_to_column_type(engine, &stmt.table, col, uqa_sql::expr::eval(expr, &ctx)?)?;
             if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
                 new_vectors.insert(col.clone(), vec);
             }
@@ -1200,7 +1269,7 @@ fn run_update_from(
             let mut new_vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
             for (col, expr) in &stmt.assignments {
                 let value =
-                    coerce_to_column_type(engine, &target, col, uqa_sql::expr::eval(expr, &ctx)?);
+                    coerce_to_column_type(engine, &target, col, uqa_sql::expr::eval(expr, &ctx)?)?;
                 if let Ok(vec) = uqa_sql::expr::value_to_vector(&value) {
                     new_vectors.insert(col.clone(), vec);
                 }
@@ -1681,7 +1750,7 @@ fn run_insert(
         let mut doc_id: Option<u64> = None;
         for (i, col) in columns.iter().enumerate() {
             let mut v = eval(&row[i], &ctx)?;
-            v = coerce_to_column_type(engine, &stmt.table, col, v);
+            v = coerce_to_column_type(engine, &stmt.table, col, v)?;
             if Some(i) == id_index {
                 // Auto-increment primary keys must be integers. A
                 // non-auto-increment primary key (TEXT, UUID, ...) keeps
@@ -1853,7 +1922,7 @@ fn run_insert(
                                 &stmt.table,
                                 col,
                                 eval(expr, &row_ctx)?,
-                            );
+                            )?;
                             if let Ok(vec) = value_to_vector(&v) {
                                 conflict_vectors.insert(col.clone(), vec);
                             }
@@ -3400,7 +3469,7 @@ fn build_info_columns(engine: &Engine) -> Vec<ResultRow> {
             );
             r.insert(
                 "data_type".into(),
-                Value::Str(format!("{:?}", col.ty).to_lowercase()),
+                Value::Str(column_type_name(&col.ty).to_string()),
             );
             out.push(r);
         }
@@ -5146,6 +5215,7 @@ fn literals_equal(a: &Value, b: &Value) -> bool {
         (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Bytes(x), Value::Bytes(y)) => x == y,
+        (Value::Temporal(x), Value::Temporal(y)) => x == y,
         _ => false,
     }
 }
@@ -5320,6 +5390,7 @@ fn distinct_key(v: &Value) -> String {
         Value::Float(f) => format!("f:{f}"),
         Value::Str(s) => format!("s:{s}"),
         Value::Bytes(b) => format!("y:{}", b.len()),
+        Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
         other => format!("o:{other:?}"),
     }
 }
@@ -5341,6 +5412,7 @@ fn value_lt(a: &Value, b: &Value) -> bool {
         (Value::Int(x), Value::Float(y)) => (*x as f64) < *y,
         (Value::Float(x), Value::Int(y)) => *x < (*y as f64),
         (Value::Str(x), Value::Str(y)) => x < y,
+        (Value::Temporal(x), Value::Temporal(y)) => x < y,
         _ => false,
     }
 }
@@ -5691,6 +5763,7 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
                     Value::Int(n) => Some(n.to_string()),
                     Value::Float(f) => Some(f.to_string()),
                     Value::Bool(b) => Some(b.to_string()),
+                    Value::Temporal(t) => Some(t.to_sql_string()),
                     _ => None,
                 })
                 .collect();
@@ -5786,6 +5859,7 @@ fn aggregate_json_key(value: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Str(s) => s.clone(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
             .unwrap_or_else(|_| format!("{value:?}")),
     }
@@ -5963,6 +6037,13 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
         (Value::Str(x), Value::Str(y)) => x.cmp(y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Str(y)) => x
+            .parse_same_kind(y)
+            .map_or(Ordering::Equal, |parsed| x.cmp(&parsed)),
+        (Value::Str(x), Value::Temporal(y)) => y
+            .parse_same_kind(x)
+            .map_or(Ordering::Equal, |parsed| parsed.cmp(y)),
         _ => Ordering::Equal,
     }
 }

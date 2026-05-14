@@ -58,6 +58,10 @@ pub fn quote_literal(value: &Value) -> String {
             let escaped = format!("<{} bytes>", b.len()).replace('\'', "''");
             format!("'{escaped}'")
         }
+        Value::Temporal(t) => {
+            let escaped = t.to_sql_string().replace('\'', "''");
+            format!("'{escaped}'")
+        }
         Value::List(items) => {
             // Used inside an IN list; emit a comma-separated literal
             // tuple. Outer caller decides whether to wrap in `(...)`.

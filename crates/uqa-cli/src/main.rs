@@ -562,6 +562,7 @@ fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Float(f)) => format!("{f}"),
         Some(Value::Str(s)) => s.clone(),
         Some(Value::Bytes(b)) => format!("<{} bytes>", b.len()),
+        Some(Value::Temporal(t)) => t.to_sql_string(),
         Some(Value::List(items)) => {
             let inner: Vec<String> = items.iter().map(|v| value_to_display(Some(v))).collect();
             format!("[{}]", inner.join(", "))
