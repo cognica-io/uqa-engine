@@ -35,6 +35,8 @@
 //! - [`Engine::add_vector`] — set or replace a vector for an existing doc.
 //! - [`Engine::get_document`], [`Engine::delete_document`]
 //! - [`Engine::document_count`]
+//! - [`Engine::transaction`], [`Engine::sql_batch`] — group writes under one
+//!   engine transaction.
 //!
 //! Querying:
 //! - `Engine::sql` (defined in [`sql`]) — full SQL surface (select /
@@ -220,6 +222,7 @@ pub struct SequenceState {
 
 #[derive(Debug, Default)]
 struct TransactionFrame {
+    storage_savepoint: Option<String>,
     savepoints: std::collections::BTreeSet<String>,
 }
 
@@ -2259,6 +2262,49 @@ impl Engine {
         ))
     }
 
+    /// Run `f` inside one engine transaction. On success the transaction is
+    /// committed; on error or panic it is rolled back before the error/panic is
+    /// returned to the caller.
+    pub fn transaction<R>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        self.begin()?;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+        match result {
+            Ok(Ok(value)) => {
+                self.commit()?;
+                Ok(value)
+            }
+            Ok(Err(err)) => {
+                if let Err(rollback_err) = self.rollback() {
+                    return Err(SQLError::Internal(format!(
+                        "transaction rollback after error failed: {rollback_err}; original error: {err}"
+                    )));
+                }
+                Err(err)
+            }
+            Err(payload) => {
+                let _ = self.rollback();
+                std::panic::resume_unwind(payload);
+            }
+        }
+    }
+
+    /// Execute multiple SQL statements inside one engine transaction.
+    pub fn sql_batch(
+        &self,
+        statements: &[(&str, &[SQLParam])],
+    ) -> Result<Vec<SQLResult>, SQLError> {
+        self.transaction(|engine| {
+            let mut results = Vec::with_capacity(statements.len());
+            for (sql, params) in statements {
+                results.push(engine.sql(sql, params)?);
+            }
+            Ok(results)
+        })
+    }
+
     /// Number of currently-open transaction frames (`BEGIN` count
     /// minus `COMMIT/ROLLBACK` count). Useful for assertions in tests
     /// and for status displays in the CLI.
@@ -2274,9 +2320,17 @@ impl Engine {
     /// reference and for explicit shutdown ordering.
     pub fn close(&self) {
         // Roll back every open transaction.
-        let mut guard = self.tx_stack.lock();
-        guard.clear();
-        drop(guard);
+        let had_open_transaction = {
+            let mut guard = self.tx_stack.lock();
+            let had_open_transaction = !guard.is_empty();
+            guard.clear();
+            had_open_transaction
+        };
+        if had_open_transaction {
+            if let Some(conn) = self.conn.as_ref() {
+                let _ = conn.rollback_transaction();
+            }
+        }
         // Clear FDW registries — closing connections is up to the
         // handler, but dropping the catalog entries is enough to free
         // the registered handles.
@@ -2291,45 +2345,139 @@ impl Engine {
         use uqa_sql::ast::TransactionStmt;
         let mut guard = self.tx_stack.lock();
         match tx {
-            TransactionStmt::Begin => {
-                guard.push(TransactionFrame::default());
-            }
-            TransactionStmt::Commit => {
-                if guard.pop().is_none() {
-                    return Err(SQLError::Internal(
-                        "COMMIT without an open transaction".into(),
-                    ));
-                }
-            }
-            TransactionStmt::Rollback => {
-                if guard.pop().is_none() {
-                    return Err(SQLError::Internal(
-                        "ROLLBACK without an open transaction".into(),
-                    ));
-                }
-            }
+            TransactionStmt::Begin => self.begin_transaction_frame(&mut guard)?,
+            TransactionStmt::Commit => self.commit_transaction_frame(&mut guard)?,
+            TransactionStmt::Rollback => self.rollback_transaction_frame(&mut guard)?,
             TransactionStmt::Savepoint(name) => {
-                let frame = guard
-                    .last_mut()
-                    .ok_or_else(|| SQLError::Internal("SAVEPOINT outside a transaction".into()))?;
-                frame.savepoints.insert(name);
+                self.save_transaction_savepoint(&mut guard, name)?;
             }
             TransactionStmt::ReleaseSavepoint(name) => {
-                let frame = guard.last_mut().ok_or_else(|| {
-                    SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into())
-                })?;
-                frame.savepoints.remove(&name);
+                self.release_transaction_savepoint(&mut guard, name)?;
             }
             TransactionStmt::RollbackToSavepoint(name) => {
-                let frame = guard.last_mut().ok_or_else(|| {
-                    SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
-                })?;
-                if !frame.savepoints.contains(&name) {
-                    return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
-                }
+                self.rollback_to_transaction_savepoint(&mut guard, &name)?;
             }
         }
         Ok(())
+    }
+
+    fn begin_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
+        let storage_savepoint = if stack.is_empty() {
+            if let Some(conn) = self.conn.as_ref() {
+                conn.begin_transaction()
+                    .map_err(|err| Self::storage_tx_error("BEGIN", err))?;
+            }
+            None
+        } else {
+            let savepoint = format!("__uqa_nested_tx_{}", stack.len());
+            if let Some(conn) = self.conn.as_ref() {
+                conn.savepoint(&savepoint)
+                    .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", err))?;
+            }
+            Some(savepoint)
+        };
+        stack.push(TransactionFrame {
+            storage_savepoint,
+            savepoints: std::collections::BTreeSet::new(),
+        });
+        Ok(())
+    }
+
+    fn commit_transaction_frame(&self, stack: &mut Vec<TransactionFrame>) -> Result<(), SQLError> {
+        let storage_savepoint = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
+            .storage_savepoint
+            .clone();
+        if let Some(conn) = self.conn.as_ref() {
+            if let Some(savepoint) = storage_savepoint.as_ref() {
+                conn.release_savepoint(savepoint)
+                    .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", err))?;
+            } else {
+                conn.commit_transaction()
+                    .map_err(|err| Self::storage_tx_error("COMMIT", err))?;
+            }
+        }
+        stack.pop();
+        Ok(())
+    }
+
+    fn rollback_transaction_frame(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+    ) -> Result<(), SQLError> {
+        let storage_savepoint = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
+            .storage_savepoint
+            .clone();
+        if let Some(conn) = self.conn.as_ref() {
+            if let Some(savepoint) = storage_savepoint.as_ref() {
+                conn.rollback_to_savepoint(savepoint)
+                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK savepoint", err))?;
+                conn.release_savepoint(savepoint)
+                    .map_err(|err| Self::storage_tx_error("nested ROLLBACK release", err))?;
+            } else {
+                conn.rollback_transaction()
+                    .map_err(|err| Self::storage_tx_error("ROLLBACK", err))?;
+            }
+        }
+        stack.pop();
+        Ok(())
+    }
+
+    fn save_transaction_savepoint(
+        &self,
+        stack: &mut [TransactionFrame],
+        name: String,
+    ) -> Result<(), SQLError> {
+        let frame = stack
+            .last_mut()
+            .ok_or_else(|| SQLError::Internal("SAVEPOINT outside a transaction".into()))?;
+        if let Some(conn) = self.conn.as_ref() {
+            conn.savepoint(&name)
+                .map_err(|err| Self::storage_tx_error("SAVEPOINT", err))?;
+        }
+        frame.savepoints.insert(name);
+        Ok(())
+    }
+
+    fn release_transaction_savepoint(
+        &self,
+        stack: &mut [TransactionFrame],
+        name: String,
+    ) -> Result<(), SQLError> {
+        let frame = stack
+            .last_mut()
+            .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
+        if let Some(conn) = self.conn.as_ref() {
+            conn.release_savepoint(&name)
+                .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", err))?;
+        }
+        frame.savepoints.remove(&name);
+        Ok(())
+    }
+
+    fn rollback_to_transaction_savepoint(
+        &self,
+        stack: &mut [TransactionFrame],
+        name: &str,
+    ) -> Result<(), SQLError> {
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
+        })?;
+        if !frame.savepoints.contains(name) {
+            return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
+        }
+        if let Some(conn) = self.conn.as_ref() {
+            conn.rollback_to_savepoint(name)
+                .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", err))?;
+        }
+        Ok(())
+    }
+
+    fn storage_tx_error(action: &str, err: SQLiteError) -> SQLError {
+        SQLError::Internal(format!("{action} failed in storage backend: {err}"))
     }
 
     /// Drop a table from the catalog and release its in-memory state.

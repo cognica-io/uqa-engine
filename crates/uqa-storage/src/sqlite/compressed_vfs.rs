@@ -34,8 +34,8 @@ use rusqlite::ffi;
 pub const VFS_NAME: &str = "uqa_compressed";
 
 const VFS_NAME_C: &[u8] = b"uqa_compressed\0";
-const MAGIC: &[u8; 8] = b"UQACDB3\0";
-const VERSION: u32 = 3;
+const MAGIC: &[u8; 8] = b"UQACDB1\0";
+const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 128;
 const ENTRY_SIZE: usize = 80;
 const FLAG_ENCRYPTED: u32 = 1;

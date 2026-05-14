@@ -368,7 +368,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     fn posting_count(&self, field: Option<&str>) -> u64 {
         self.index
             .iter()
-            .filter(|((f, _), _)| field.map_or(true, |target| f == target))
+            .filter(|((f, _), _)| field.is_none_or(|target| f == target))
             .map(|(_, postings)| postings.len() as u64)
             .sum()
     }
@@ -391,7 +391,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     fn term_count(&self, field: Option<&str>) -> u64 {
         self.index
             .keys()
-            .filter(|(f, _)| field.map_or(true, |target| f == target))
+            .filter(|(f, _)| field.is_none_or(|target| f == target))
             .map(|(_, term)| term)
             .collect::<BTreeSet<_>>()
             .len() as u64

@@ -332,7 +332,7 @@ mod tests {
 
         let compressed = std::fs::read(&path).unwrap();
         let plain_len = std::fs::metadata(&plain_path).unwrap().len();
-        assert_eq!(&compressed[..8], b"UQACDB3\0");
+        assert_eq!(&compressed[..8], b"UQACDB1\0");
         assert!(compressed.len() < plain_len as usize);
         assert!(ManagedConnection::open(&path).is_err());
     }
@@ -358,7 +358,7 @@ mod tests {
         }
 
         let bytes = std::fs::read(&path).unwrap();
-        assert_eq!(&bytes[..8], b"UQACDB3\0");
+        assert_eq!(&bytes[..8], b"UQACDB1\0");
 
         let mc = ManagedConnection::open_compressed(&path, options).unwrap();
         let count: i64 = mc

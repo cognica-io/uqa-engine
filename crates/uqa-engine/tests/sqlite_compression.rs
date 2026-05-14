@@ -6,11 +6,20 @@
 
 //! Compressed `SQLite` catalog open paths.
 
+use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_storage::SQLiteCompressionOptions;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine.sql(sql, &[]).unwrap()
+}
+
+fn count_notes(engine: &Engine) -> i64 {
+    let rows = exec(engine, "SELECT COUNT(*) AS cnt FROM notes");
+    match rows.rows[0].get("cnt") {
+        Some(Value::Int(count)) => *count,
+        value => panic!("unexpected COUNT(*) result: {value:?}"),
+    }
 }
 
 #[test]
@@ -38,6 +47,63 @@ fn compressed_engine_reopens_catalog() {
         Some(&uqa_core::Value::Str("compressed catalog".to_string()))
     );
     assert!(Engine::open(&path).is_err());
+}
+
+#[test]
+fn compressed_engine_transaction_rolls_back_storage_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-compressed-rollback.uqac.sqlite3");
+    let options = SQLiteCompressionOptions::default();
+
+    {
+        let engine = Engine::open_compressed(&path, options).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT)",
+        );
+        exec(&engine, "BEGIN");
+        exec(
+            &engine,
+            "INSERT INTO notes (id, title) VALUES (1, 'rolled back')",
+        );
+        exec(&engine, "ROLLBACK");
+        assert_eq!(count_notes(&engine), 0);
+    }
+
+    let engine = Engine::open_compressed(&path, options).unwrap();
+    assert_eq!(count_notes(&engine), 0);
+}
+
+#[test]
+fn compressed_engine_sql_batch_commits_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("engine-compressed-batch.uqac.sqlite3");
+    let options = SQLiteCompressionOptions::default();
+    let empty_params: &[uqa_engine::SQLParam] = &[];
+
+    {
+        let engine = Engine::open_compressed(&path, options).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT)",
+        );
+        engine
+            .sql_batch(&[
+                (
+                    "INSERT INTO notes (id, title) VALUES (1, 'batched one')",
+                    empty_params,
+                ),
+                (
+                    "INSERT INTO notes (id, title) VALUES (2, 'batched two')",
+                    empty_params,
+                ),
+            ])
+            .unwrap();
+        assert_eq!(count_notes(&engine), 2);
+    }
+
+    let engine = Engine::open_compressed(&path, options).unwrap();
+    assert_eq!(count_notes(&engine), 2);
 }
 
 #[test]
