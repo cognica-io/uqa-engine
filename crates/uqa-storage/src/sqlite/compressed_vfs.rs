@@ -9,13 +9,15 @@
 //! Schema-neutral compressed `SQLite` VFS.
 //!
 //! The VFS exposes a normal byte-addressed `SQLite` database file to the
-//! pager. The on-disk file is a UQA container made of compressed chunks;
-//! encrypted containers encrypt each chunk payload after compression.
+//! pager. The on-disk file is a UQA container made of independently compressed
+//! chunk records. Dirty chunks are appended on sync; active records are tracked
+//! by the container header generation, so small commits do not rewrite the
+//! logical database image.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CStr;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::{Component, Path, PathBuf};
 use std::ptr;
@@ -32,10 +34,10 @@ use rusqlite::ffi;
 pub const VFS_NAME: &str = "uqa_compressed";
 
 const VFS_NAME_C: &[u8] = b"uqa_compressed\0";
-const MAGIC: &[u8; 8] = b"UQACDB1\0";
-const VERSION: u32 = 1;
+const MAGIC: &[u8; 8] = b"UQACDB2\0";
+const VERSION: u32 = 2;
 const HEADER_SIZE: usize = 128;
-const ENTRY_SIZE: usize = 64;
+const ENTRY_SIZE: usize = 80;
 const FLAG_ENCRYPTED: u32 = 1;
 const CHUNK_COMPRESSED: u32 = 1;
 const CHUNK_ENCRYPTED: u32 = 2;
@@ -148,7 +150,7 @@ struct Header {
     salt: [u8; SALT_LEN],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ChunkEntry {
     chunk_id: u64,
     offset: u64,
@@ -157,17 +159,22 @@ struct ChunkEntry {
     flags: u32,
     crc32: u32,
     nonce: [u8; NONCE_LEN],
+    generation: u64,
 }
 
 #[derive(Debug)]
 struct ContainerFile {
     path: PathBuf,
-    logical: Vec<u8>,
+    logical_len: usize,
+    append_offset: u64,
+    chunks: BTreeMap<u64, ChunkEntry>,
+    cache: BTreeMap<u64, Vec<u8>>,
+    dirty_chunks: BTreeSet<u64>,
     compression: SQLiteCompressionOptions,
     key: Option<String>,
     salt: [u8; SALT_LEN],
     generation: u64,
-    dirty: bool,
+    dirty_header: bool,
 }
 
 #[repr(C)]
@@ -299,95 +306,75 @@ impl ContainerFile {
         }
         Ok(Self {
             path,
-            logical: Vec::new(),
+            logical_len: 0,
+            append_offset: HEADER_SIZE as u64,
+            chunks: BTreeMap::new(),
+            cache: BTreeMap::new(),
+            dirty_chunks: BTreeSet::new(),
             compression: options.compression,
             key: options.key,
             salt,
             generation: 0,
-            dirty: false,
+            dirty_header: false,
         })
     }
 
     fn load(path: PathBuf, key: Option<String>) -> std::io::Result<Self> {
-        let mut bytes = Vec::new();
-        File::open(&path)?.read_to_end(&mut bytes)?;
-        let header = parse_header(&bytes)?;
+        let mut file = File::open(&path)?;
+        let mut header_bytes = [0_u8; HEADER_SIZE];
+        file.read_exact(&mut header_bytes)?;
+        let header = parse_header(&header_bytes)?;
         let encrypted = header.flags & FLAG_ENCRYPTED != 0;
         if encrypted && key.is_none() {
             return Err(invalid_data(
                 "compressed container requires an encryption key",
             ));
         }
-        let cipher = if encrypted {
-            Some(cipher_from_key(
-                key.as_deref().unwrap_or_default(),
-                &header.salt,
-            )?)
-        } else {
-            None
-        };
-        let mut logical = vec![0_u8; header.logical_len];
-        for idx in 0..header.chunk_count {
-            let entry_offset = HEADER_SIZE + idx * ENTRY_SIZE;
-            let entry = parse_entry(&bytes[entry_offset..entry_offset + ENTRY_SIZE])?;
-            let start = usize::try_from(entry.offset).map_err(|_| invalid_data("chunk offset"))?;
-            let end = start
-                .checked_add(entry.stored_len)
-                .ok_or_else(|| invalid_data("chunk offset overflow"))?;
-            if end > bytes.len() {
-                return Err(invalid_data("chunk extends past end of file"));
+        let file_len = file.metadata()?.len();
+        let mut record_offset = HEADER_SIZE as u64;
+        let mut chunks = BTreeMap::new();
+        while record_offset + ENTRY_SIZE as u64 <= file_len {
+            file.seek(SeekFrom::Start(record_offset))?;
+            let mut entry_bytes = [0_u8; ENTRY_SIZE];
+            file.read_exact(&mut entry_bytes)?;
+            let entry = parse_entry(&entry_bytes)?;
+            let payload_offset = record_offset + ENTRY_SIZE as u64;
+            let payload_end = payload_offset
+                .checked_add(entry.stored_len as u64)
+                .ok_or_else(|| invalid_data("chunk payload offset overflow"))?;
+            if payload_end > file_len {
+                break;
             }
-            let mut payload = bytes[start..end].to_vec();
-            if entry.flags & CHUNK_ENCRYPTED != 0 {
-                let cipher = cipher
-                    .as_ref()
-                    .ok_or_else(|| invalid_data("encrypted chunk without key"))?;
-                payload = cipher
-                    .decrypt(
-                        XNonce::from_slice(&entry.nonce),
-                        Payload {
-                            msg: &payload,
-                            aad: &entry.chunk_id.to_le_bytes(),
-                        },
-                    )
-                    .map_err(|_| invalid_data("invalid compressed container encryption key"))?;
+            if entry.offset != payload_offset {
+                return Err(invalid_data("chunk payload offset mismatch"));
             }
-            let raw = if entry.flags & CHUNK_COMPRESSED != 0 {
-                decompress_chunk(header.compression.codec, &payload)?
-            } else {
-                payload
-            };
-            if raw.len() != entry.raw_len {
-                return Err(invalid_data("chunk raw length mismatch"));
+            if entry.raw_len > header.compression.chunk_size() {
+                return Err(invalid_data(
+                    "chunk raw length exceeds configured chunk size",
+                ));
             }
-            if crc32fast::hash(&raw) != entry.crc32 {
-                return Err(invalid_data("chunk checksum mismatch"));
+            if entry.generation <= header.generation && entry.chunk_id < header.chunk_count as u64 {
+                chunks.insert(entry.chunk_id, entry);
             }
-            let logical_start = usize::try_from(entry.chunk_id)
-                .map_err(|_| invalid_data("chunk id"))?
-                .checked_mul(header.compression.chunk_size())
-                .ok_or_else(|| invalid_data("logical chunk offset overflow"))?;
-            let logical_end = logical_start
-                .checked_add(raw.len())
-                .ok_or_else(|| invalid_data("logical chunk length overflow"))?;
-            if logical_end > logical.len() {
-                return Err(invalid_data("chunk extends past logical length"));
-            }
-            logical[logical_start..logical_end].copy_from_slice(&raw);
+            record_offset = payload_end;
         }
         Ok(Self {
             path,
-            logical,
+            logical_len: header.logical_len,
+            append_offset: record_offset,
+            chunks,
+            cache: BTreeMap::new(),
+            dirty_chunks: BTreeSet::new(),
             compression: header.compression,
             key,
             salt: header.salt,
             generation: header.generation,
-            dirty: false,
+            dirty_header: false,
         })
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        if !self.dirty {
+        if self.dirty_chunks.is_empty() && !self.dirty_header {
             return Ok(());
         }
         if let Some(parent) = self.path.parent() {
@@ -396,7 +383,7 @@ impl ContainerFile {
         if self.key.is_some() && self.salt == [0_u8; SALT_LEN] {
             OsRng.fill_bytes(&mut self.salt);
         }
-        self.generation = self.generation.saturating_add(1);
+        let next_generation = self.generation.saturating_add(1);
         let encrypted = self.key.is_some();
         let cipher = if encrypted {
             Some(cipher_from_key(
@@ -406,18 +393,31 @@ impl ContainerFile {
         } else {
             None
         };
-        let chunk_size = self.compression.chunk_size();
-        let chunk_count = self.logical.len().div_ceil(chunk_size);
-        let mut encoded_chunks = Vec::with_capacity(chunk_count);
-        let mut entries = Vec::with_capacity(chunk_count);
-        for (idx, raw) in self.logical.chunks(chunk_size).enumerate() {
-            let compressed = compress_chunk(self.compression, raw)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)?;
+        file.set_len(self.append_offset)?;
+        file.seek(SeekFrom::Start(self.append_offset))?;
+        let active_chunk_count = self.chunk_count() as u64;
+        let dirty_chunks: Vec<u64> = self
+            .dirty_chunks
+            .iter()
+            .copied()
+            .filter(|chunk_id| *chunk_id < active_chunk_count)
+            .collect();
+        let mut append_offset = self.append_offset;
+        for chunk_id in dirty_chunks {
+            let raw = self.load_chunk(chunk_id)?.clone();
+            let compressed = compress_chunk(self.compression, &raw)?;
             let mut flags = 0_u32;
             let mut stored = if compressed.len() < raw.len() {
                 flags |= CHUNK_COMPRESSED;
                 compressed
             } else {
-                raw.to_vec()
+                raw.clone()
             };
             let mut nonce = [0_u8; NONCE_LEN];
             if let Some(cipher) = cipher.as_ref() {
@@ -428,55 +428,287 @@ impl ContainerFile {
                         XNonce::from_slice(&nonce),
                         Payload {
                             msg: &stored,
-                            aad: &(idx as u64).to_le_bytes(),
+                            aad: &chunk_id.to_le_bytes(),
                         },
                     )
                     .map_err(|_| invalid_data("chunk encryption failed"))?;
             }
-            entries.push(ChunkEntry {
-                chunk_id: idx as u64,
-                offset: 0,
+            let entry = ChunkEntry {
+                chunk_id,
+                offset: append_offset + ENTRY_SIZE as u64,
                 stored_len: stored.len(),
                 raw_len: raw.len(),
                 flags,
-                crc32: crc32fast::hash(raw),
+                crc32: crc32fast::hash(&raw),
                 nonce,
-            });
-            encoded_chunks.push(stored);
+                generation: next_generation,
+            };
+            file.write_all(&build_entry(&entry))?;
+            file.write_all(&stored)?;
+            append_offset += ENTRY_SIZE as u64 + stored.len() as u64;
+            self.chunks.insert(chunk_id, entry);
         }
-        let mut offset = HEADER_SIZE + entries.len() * ENTRY_SIZE;
-        for entry in &mut entries {
-            entry.offset = offset as u64;
-            offset += entry.stored_len;
+        self.chunks
+            .retain(|chunk_id, _| *chunk_id < active_chunk_count);
+        file.flush()?;
+        file.sync_data()?;
+        self.generation = next_generation;
+        self.append_offset = append_offset;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&build_header(
+            if encrypted { FLAG_ENCRYPTED } else { 0 },
+            self.compression,
+            self.chunk_count(),
+            self.logical_len,
+            self.generation,
+            self.salt,
+        ))?;
+        file.sync_all()?;
+        drop(file);
+        self.dirty_chunks.clear();
+        self.dirty_header = false;
+        self.compact_if_needed()?;
+        Ok(())
+    }
+
+    fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
+        if offset >= self.logical_len {
+            dest.fill(0);
+            return Ok(0);
+        }
+        let available = (self.logical_len - offset).min(dest.len());
+        let chunk_size = self.compression.chunk_size();
+        let mut copied = 0;
+        while copied < available {
+            let logical_offset = offset + copied;
+            let chunk_id = (logical_offset / chunk_size) as u64;
+            let chunk_offset = logical_offset % chunk_size;
+            let copy_len = (available - copied).min(chunk_size - chunk_offset);
+            let chunk = self.load_chunk(chunk_id)?;
+            dest[copied..copied + copy_len]
+                .copy_from_slice(&chunk[chunk_offset..chunk_offset + copy_len]);
+            copied += copy_len;
+        }
+        dest[available..].fill(0);
+        Ok(available)
+    }
+
+    fn write_at(&mut self, offset: usize, source: &[u8]) -> std::io::Result<()> {
+        if source.is_empty() {
+            return Ok(());
+        }
+        let end = offset
+            .checked_add(source.len())
+            .ok_or_else(|| invalid_data("write offset overflow"))?;
+        if end > self.logical_len {
+            self.logical_len = end;
+            self.dirty_header = true;
+        }
+        let chunk_size = self.compression.chunk_size();
+        let mut copied = 0;
+        while copied < source.len() {
+            let logical_offset = offset + copied;
+            let chunk_id = (logical_offset / chunk_size) as u64;
+            let chunk_offset = logical_offset % chunk_size;
+            let copy_len = (source.len() - copied).min(chunk_size - chunk_offset);
+            let chunk = self.load_chunk(chunk_id)?;
+            chunk[chunk_offset..chunk_offset + copy_len]
+                .copy_from_slice(&source[copied..copied + copy_len]);
+            self.dirty_chunks.insert(chunk_id);
+            copied += copy_len;
+        }
+        Ok(())
+    }
+
+    fn truncate_to(&mut self, size: usize) -> std::io::Result<()> {
+        if size == self.logical_len {
+            return Ok(());
+        }
+        let old_len = self.logical_len;
+        let old_chunk_count = self.chunk_count();
+        self.logical_len = size;
+        self.dirty_header = true;
+        let new_chunk_count = self.chunk_count();
+        let active_chunk_count = new_chunk_count as u64;
+        self.chunks
+            .retain(|chunk_id, _| *chunk_id < active_chunk_count);
+        self.cache
+            .retain(|chunk_id, _| *chunk_id < active_chunk_count);
+        self.dirty_chunks
+            .retain(|chunk_id| *chunk_id < active_chunk_count);
+        if size > 0 {
+            let chunk_size = self.compression.chunk_size();
+            let changed_chunk = if size < old_len {
+                (size % chunk_size != 0).then_some((new_chunk_count - 1) as u64)
+            } else if old_len > 0 && old_len % chunk_size != 0 {
+                Some((old_chunk_count - 1) as u64)
+            } else if old_chunk_count == new_chunk_count {
+                Some((new_chunk_count - 1) as u64)
+            } else {
+                None
+            };
+            if let Some(chunk_id) = changed_chunk {
+                let expected_len = self.expected_chunk_len(chunk_id);
+                let chunk = self.load_chunk(chunk_id)?;
+                chunk.resize(expected_len, 0);
+                self.dirty_chunks.insert(chunk_id);
+            }
+        }
+        Ok(())
+    }
+
+    fn load_chunk(&mut self, chunk_id: u64) -> std::io::Result<&mut Vec<u8>> {
+        if !self.cache.contains_key(&chunk_id) {
+            let raw = self.read_chunk_from_disk(chunk_id)?;
+            self.cache.insert(chunk_id, raw);
+        }
+        let expected_len = self.expected_chunk_len(chunk_id);
+        let chunk = self
+            .cache
+            .get_mut(&chunk_id)
+            .expect("chunk cache populated above");
+        chunk.resize(expected_len, 0);
+        Ok(chunk)
+    }
+
+    fn read_chunk_from_disk(&self, chunk_id: u64) -> std::io::Result<Vec<u8>> {
+        let expected_len = self.expected_chunk_len(chunk_id);
+        if expected_len == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(entry) = self.chunks.get(&chunk_id) else {
+            return Ok(vec![0_u8; expected_len]);
+        };
+        let mut file = File::open(&self.path)?;
+        file.seek(SeekFrom::Start(entry.offset))?;
+        let mut payload = vec![0_u8; entry.stored_len];
+        file.read_exact(&mut payload)?;
+        if entry.flags & CHUNK_ENCRYPTED != 0 {
+            let cipher = cipher_from_key(
+                self.key
+                    .as_deref()
+                    .ok_or_else(|| invalid_data("encrypted chunk without key"))?,
+                &self.salt,
+            )?;
+            payload = cipher
+                .decrypt(
+                    XNonce::from_slice(&entry.nonce),
+                    Payload {
+                        msg: &payload,
+                        aad: &entry.chunk_id.to_le_bytes(),
+                    },
+                )
+                .map_err(|_| invalid_data("invalid compressed container encryption key"))?;
+        }
+        let mut raw = if entry.flags & CHUNK_COMPRESSED != 0 {
+            decompress_chunk(self.compression.codec, &payload)?
+        } else {
+            payload
+        };
+        if raw.len() != entry.raw_len {
+            return Err(invalid_data("chunk raw length mismatch"));
+        }
+        if crc32fast::hash(&raw) != entry.crc32 {
+            return Err(invalid_data("chunk checksum mismatch"));
+        }
+        if raw.len() > expected_len {
+            raw.truncate(expected_len);
+        } else {
+            raw.resize(expected_len, 0);
+        }
+        Ok(raw)
+    }
+
+    fn chunk_count(&self) -> usize {
+        chunk_count_for(self.logical_len, self.compression.chunk_size())
+    }
+
+    fn expected_chunk_len(&self, chunk_id: u64) -> usize {
+        expected_chunk_len_for(
+            self.logical_len,
+            self.compression.chunk_size(),
+            chunk_id as usize,
+        )
+    }
+
+    fn active_record_bytes(&self) -> u64 {
+        let chunk_count = self.chunk_count() as u64;
+        self.chunks
+            .iter()
+            .filter(|(chunk_id, _)| **chunk_id < chunk_count)
+            .map(|(_, entry)| ENTRY_SIZE as u64 + entry.stored_len as u64)
+            .sum()
+    }
+
+    fn compact_if_needed(&mut self) -> std::io::Result<()> {
+        let compact_len = HEADER_SIZE as u64 + self.active_record_bytes();
+        let stale_bytes = self.append_offset.saturating_sub(compact_len);
+        let compact_threshold = compact_len.max(8 * 1024 * 1024);
+        if stale_bytes <= compact_threshold {
+            return Ok(());
         }
         let tmp_path = self.path.with_extension(format!(
-            "{}.tmp",
+            "{}.compact.tmp",
             self.path
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("uqac")
         ));
-        let mut file = File::create(&tmp_path)?;
-        file.write_all(&build_header(
-            if encrypted { FLAG_ENCRYPTED } else { 0 },
+        let mut source = File::open(&self.path)?;
+        let mut tmp = File::create(&tmp_path)?;
+        tmp.write_all(&build_header(
+            if self.key.is_some() {
+                FLAG_ENCRYPTED
+            } else {
+                0
+            },
             self.compression,
-            entries.len(),
-            self.logical.len(),
+            self.chunk_count(),
+            self.logical_len,
             self.generation,
             self.salt,
         ))?;
-        for entry in &entries {
-            file.write_all(&build_entry(entry))?;
+        let chunk_count = self.chunk_count() as u64;
+        let mut append_offset = HEADER_SIZE as u64;
+        let mut compacted = BTreeMap::new();
+        for (&chunk_id, entry) in self.chunks.iter().filter(|(id, _)| **id < chunk_count) {
+            let mut payload = vec![0_u8; entry.stored_len];
+            source.seek(SeekFrom::Start(entry.offset))?;
+            source.read_exact(&mut payload)?;
+            let mut compacted_entry = entry.clone();
+            compacted_entry.offset = append_offset + ENTRY_SIZE as u64;
+            tmp.write_all(&build_entry(&compacted_entry))?;
+            tmp.write_all(&payload)?;
+            append_offset += ENTRY_SIZE as u64 + payload.len() as u64;
+            compacted.insert(chunk_id, compacted_entry);
         }
-        for chunk in &encoded_chunks {
-            file.write_all(chunk)?;
-        }
-        file.sync_all()?;
-        drop(file);
+        tmp.set_len(append_offset)?;
+        tmp.sync_all()?;
+        drop(tmp);
         fs::rename(&tmp_path, &self.path)?;
-        self.dirty = false;
+        self.append_offset = append_offset;
+        self.chunks = compacted;
         Ok(())
     }
+}
+
+fn chunk_count_for(logical_len: usize, chunk_size: usize) -> usize {
+    if logical_len == 0 {
+        0
+    } else {
+        logical_len.div_ceil(chunk_size)
+    }
+}
+
+fn expected_chunk_len_for(logical_len: usize, chunk_size: usize, chunk_id: usize) -> usize {
+    let chunk_count = chunk_count_for(logical_len, chunk_size);
+    if chunk_id >= chunk_count {
+        return 0;
+    }
+    if chunk_id + 1 < chunk_count {
+        return chunk_size;
+    }
+    logical_len - chunk_id * chunk_size
 }
 
 fn cipher_from_key(key: &str, salt: &[u8; SALT_LEN]) -> std::io::Result<XChaCha20Poly1305> {
@@ -539,15 +771,9 @@ fn parse_header(bytes: &[u8]) -> std::io::Result<Header> {
     }
     .validate()
     .map_err(invalid_data)?;
-    let directory_end = HEADER_SIZE
-        .checked_add(
-            chunk_count
-                .checked_mul(ENTRY_SIZE)
-                .ok_or_else(|| invalid_data("chunk directory overflow"))?,
-        )
-        .ok_or_else(|| invalid_data("chunk directory overflow"))?;
-    if directory_end > bytes.len() {
-        return Err(invalid_data("chunk directory is truncated"));
+    let expected_chunk_count = chunk_count_for(logical_len, compression.chunk_size());
+    if chunk_count != expected_chunk_count {
+        return Err(invalid_data("compressed container chunk count mismatch"));
     }
     Ok(Header {
         flags,
@@ -595,6 +821,7 @@ fn parse_entry(bytes: &[u8]) -> std::io::Result<ChunkEntry> {
     let crc32 = read_u32(bytes, 36)?;
     let mut nonce = [0_u8; NONCE_LEN];
     nonce.copy_from_slice(&bytes[40..40 + NONCE_LEN]);
+    let generation = read_u64(bytes, 64)?;
     Ok(ChunkEntry {
         chunk_id,
         offset,
@@ -603,6 +830,7 @@ fn parse_entry(bytes: &[u8]) -> std::io::Result<ChunkEntry> {
         flags,
         crc32,
         nonce,
+        generation,
     })
 }
 
@@ -615,6 +843,7 @@ fn build_entry(entry: &ChunkEntry) -> [u8; ENTRY_SIZE] {
     write_u32(&mut out, 32, entry.flags);
     write_u32(&mut out, 36, entry.crc32);
     out[40..40 + NONCE_LEN].copy_from_slice(&entry.nonce);
+    write_u64(&mut out, 64, entry.generation);
     out
 }
 
@@ -733,18 +962,10 @@ unsafe extern "C" fn file_read(
     let amount = amount as usize;
     let offset = offset as usize;
     let dest = unsafe { std::slice::from_raw_parts_mut(out.cast::<u8>(), amount) };
-    if offset >= handle.file.logical.len() {
-        dest.fill(0);
-        return ffi::SQLITE_IOERR_SHORT_READ;
-    }
-    let available = handle.file.logical.len() - offset;
-    let copy_len = available.min(amount);
-    dest[..copy_len].copy_from_slice(&handle.file.logical[offset..offset + copy_len]);
-    if copy_len < amount {
-        dest[copy_len..].fill(0);
-        ffi::SQLITE_IOERR_SHORT_READ
-    } else {
-        ffi::SQLITE_OK
+    match handle.file.read_at(offset, dest) {
+        Ok(copy_len) if copy_len == amount => ffi::SQLITE_OK,
+        Ok(_) => ffi::SQLITE_IOERR_SHORT_READ,
+        Err(_) => ffi::SQLITE_IOERR_READ,
     }
 }
 
@@ -765,16 +986,11 @@ unsafe extern "C" fn file_write(
     }
     let amount = amount as usize;
     let offset = offset as usize;
-    let Some(end) = offset.checked_add(amount) else {
-        return ffi::SQLITE_IOERR_WRITE;
-    };
-    if end > handle.file.logical.len() {
-        handle.file.logical.resize(end, 0);
-    }
     let source = unsafe { std::slice::from_raw_parts(input.cast::<u8>(), amount) };
-    handle.file.logical[offset..end].copy_from_slice(source);
-    handle.file.dirty = true;
-    ffi::SQLITE_OK
+    match handle.file.write_at(offset, source) {
+        Ok(()) => ffi::SQLITE_OK,
+        Err(_) => ffi::SQLITE_IOERR_WRITE,
+    }
 }
 
 unsafe extern "C" fn file_truncate(
@@ -787,9 +1003,10 @@ unsafe extern "C" fn file_truncate(
     if handle.read_only || size < 0 {
         return ffi::SQLITE_IOERR_TRUNCATE;
     }
-    handle.file.logical.resize(size as usize, 0);
-    handle.file.dirty = true;
-    ffi::SQLITE_OK
+    match handle.file.truncate_to(size as usize) {
+        Ok(()) => ffi::SQLITE_OK,
+        Err(_) => ffi::SQLITE_IOERR_TRUNCATE,
+    }
 }
 
 unsafe extern "C" fn file_sync(file: *mut ffi::sqlite3_file, _flags: c_int) -> c_int {
@@ -810,7 +1027,7 @@ unsafe extern "C" fn file_size(
         return ffi::SQLITE_IOERR_FSTAT;
     };
     unsafe {
-        *size_out = handle.file.logical.len() as ffi::sqlite3_int64;
+        *size_out = handle.file.logical_len as ffi::sqlite3_int64;
     }
     ffi::SQLITE_OK
 }
@@ -1105,5 +1322,74 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn flush_appends_only_dirty_chunk_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("incremental.uqac.sqlite3");
+        let compression = SQLiteCompressionOptions {
+            codec: SQLiteCompressionCodec::Zstd,
+            page_size: 512,
+            chunk_pages: 1,
+            level: 1,
+        };
+        let options = OpenOptionsEntry {
+            compression,
+            key: None,
+        };
+        let chunk_size = compression.chunk_size();
+
+        let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
+        container.write_at(0, &vec![b'a'; chunk_size * 16]).unwrap();
+        container.flush().unwrap();
+        let first_len = std::fs::metadata(&path).unwrap().len();
+        let first_records = scan_record_generations(&path);
+        assert_eq!(first_records.len(), 16);
+        assert!(first_records.iter().all(|generation| *generation == 1));
+
+        let update_offset = chunk_size * 3 + 7;
+        container.write_at(update_offset, b"xyz").unwrap();
+        container.flush().unwrap();
+        let second_len = std::fs::metadata(&path).unwrap().len();
+        let second_records = scan_record_generations(&path);
+        assert_eq!(second_records.len(), 17);
+        assert_eq!(
+            second_records
+                .iter()
+                .filter(|generation| **generation == 2)
+                .count(),
+            1
+        );
+        assert!(second_len - first_len < first_len / 4);
+
+        let mut reopened = ContainerFile::open(path, options).unwrap();
+        let mut out = [0_u8; 3];
+        assert_eq!(reopened.read_at(update_offset, &mut out).unwrap(), 3);
+        assert_eq!(&out, b"xyz");
+    }
+
+    fn scan_record_generations(path: &Path) -> Vec<u64> {
+        let mut file = File::open(path).unwrap();
+        let mut header_bytes = [0_u8; HEADER_SIZE];
+        file.read_exact(&mut header_bytes).unwrap();
+        parse_header(&header_bytes).unwrap();
+        let file_len = file.metadata().unwrap().len();
+        let mut offset = HEADER_SIZE as u64;
+        let mut generations = Vec::new();
+        while offset + ENTRY_SIZE as u64 <= file_len {
+            file.seek(SeekFrom::Start(offset)).unwrap();
+            let mut entry_bytes = [0_u8; ENTRY_SIZE];
+            file.read_exact(&mut entry_bytes).unwrap();
+            let entry = parse_entry(&entry_bytes).unwrap();
+            let payload_offset = offset + ENTRY_SIZE as u64;
+            let payload_end = payload_offset + entry.stored_len as u64;
+            if payload_end > file_len {
+                break;
+            }
+            generations.push(entry.generation);
+            offset = payload_end;
+        }
+        generations
     }
 }
