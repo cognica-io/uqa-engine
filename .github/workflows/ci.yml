@@ -97,7 +97,7 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
-          arg: --workspace
+          arguments: --workspace
 
   bench-build:
     name: cargo bench --no-run
