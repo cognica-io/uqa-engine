@@ -182,7 +182,7 @@ impl JoinOrderOptimizer {
 
         let plan = enumerate_dpccp(&graph);
         let tree = match plan {
-            Some(p) => self.materialize_plan(&p, &graph, &relations, &predicate_lookup),
+            Some(p) => Self::materialize_plan(&p, &graph, &relations, &predicate_lookup),
             None => {
                 // No connecting edges -- fall back to a left-deep
                 // cartesian product. DPccp returns None when the
@@ -228,7 +228,6 @@ impl JoinOrderOptimizer {
     }
 
     fn materialize_plan(
-        &self,
         plan: &JoinPlan,
         graph: &JoinGraph,
         relations: &[JoinRelation],
@@ -242,8 +241,8 @@ impl JoinOrderOptimizer {
                 JoinOrderTree::Scan(relations[idx].clone())
             }
             (Some(left), Some(right)) => {
-                let l_tree = self.materialize_plan(left, graph, relations, predicates);
-                let r_tree = self.materialize_plan(right, graph, relations, predicates);
+                let l_tree = Self::materialize_plan(left, graph, relations, predicates);
+                let r_tree = Self::materialize_plan(right, graph, relations, predicates);
                 let l_set = left.relations;
                 let r_set = right.relations;
                 let Some(edge) = graph.edges.iter().find(|e| edge_connects(e, l_set, r_set)) else {
@@ -299,8 +298,8 @@ impl JoinOrderOptimizer {
             }
             // A plan with exactly one child shouldn't appear; treat as
             // its own materialised child.
-            (Some(left), None) => self.materialize_plan(left, graph, relations, predicates),
-            (None, Some(right)) => self.materialize_plan(right, graph, relations, predicates),
+            (Some(left), None) => Self::materialize_plan(left, graph, relations, predicates),
+            (None, Some(right)) => Self::materialize_plan(right, graph, relations, predicates),
         }
     }
 }

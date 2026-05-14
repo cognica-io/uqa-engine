@@ -142,7 +142,7 @@ impl QueryOptimizer {
             op = self.push_filter_below_graph_join(op);
         }
         if self.config.enable_fuse_join_pattern {
-            op = self.fuse_join_pattern(op);
+            op = Self::fuse_join_pattern(op);
         }
         if self.config.enable_merge_vector_thresholds {
             op = self.merge_vector_thresholds(op);
@@ -631,10 +631,10 @@ impl QueryOptimizer {
     // 6. Fuse PatternMatch operators inside an Intersect
     // ---------------------------------------------------------------
 
-    fn fuse_join_pattern(&self, op: OperatorTree) -> OperatorTree {
+    fn fuse_join_pattern(op: OperatorTree) -> OperatorTree {
         if let OperatorTree::Intersect(ops) = op {
             let children: Vec<OperatorTree> =
-                ops.into_iter().map(|o| self.fuse_join_pattern(o)).collect();
+                ops.into_iter().map(Self::fuse_join_pattern).collect();
             let mut pattern_ops: Vec<OperatorTree> = Vec::new();
             let mut other_ops: Vec<OperatorTree> = Vec::new();
             for child in children {
@@ -667,10 +667,10 @@ impl QueryOptimizer {
         }
         match op {
             OperatorTree::Union(ops) => {
-                OperatorTree::Union(ops.into_iter().map(|o| self.fuse_join_pattern(o)).collect())
+                OperatorTree::Union(ops.into_iter().map(Self::fuse_join_pattern).collect())
             }
             OperatorTree::Complement(inner) => {
-                OperatorTree::Complement(Box::new(self.fuse_join_pattern(*inner)))
+                OperatorTree::Complement(Box::new(Self::fuse_join_pattern(*inner)))
             }
             OperatorTree::Filter {
                 field,
@@ -679,10 +679,10 @@ impl QueryOptimizer {
             } => OperatorTree::Filter {
                 field,
                 predicate,
-                source: Some(Box::new(self.fuse_join_pattern(*s))),
+                source: Some(Box::new(Self::fuse_join_pattern(*s))),
             },
             OperatorTree::Composed(ops) => {
-                OperatorTree::Composed(ops.into_iter().map(|o| self.fuse_join_pattern(o)).collect())
+                OperatorTree::Composed(ops.into_iter().map(Self::fuse_join_pattern).collect())
             }
             other => other,
         }
