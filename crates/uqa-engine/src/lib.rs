@@ -15,57 +15,58 @@
 //! # Public API surface
 //!
 //! Construction:
-//! - [`Engine::new`] — purely in-memory; great for tests and the REPL.
-//! - [`Engine::open`] — `SQLite`-backed catalog at the given path; reopens
+//! - [`Engine::new`] - purely in-memory; great for tests and the REPL.
+//! - [`Engine::open`] - `SQLite`-backed catalog at the given path; reopens
 //!   restore tables, models, and graphs from disk.
-//! - [`Engine::open_encrypted`] — same catalog restore path, with a
+//! - [`Engine::open_encrypted`] - same catalog restore path, with a
 //!   `SQLCipher` key applied before any schema access.
-//! - [`Engine::open_compressed`] — schema-neutral compressed `SQLite` VFS.
-//! - [`Engine::open_compressed_encrypted`] — compressed chunks encrypted
+//! - [`Engine::open_compressed`] - schema-neutral compressed `SQLite` VFS.
+//! - [`Engine::open_compressed_encrypted`] - compressed chunks encrypted
 //!   after compression.
 //!
 //! Schema and table lifecycle:
-//! - [`Engine::create_table`] — register a table with declared columns.
-//! - [`Engine::create_default_table`] — convenience for FTS-only tables.
-//! - [`Engine::create_vector_field`] — attach a vector field to an
+//! - [`Engine::create_table`] - register a table with declared columns.
+//! - [`Engine::create_default_table`] - convenience for FTS-only tables.
+//! - [`Engine::create_vector_field`] - attach a vector field to an
 //!   existing table.
 //!
 //! Document mutation:
 //! - [`Engine::add_document`], [`Engine::add_document_with_vectors`]
-//! - [`Engine::add_vector`] — set or replace a vector for an existing doc.
+//! - [`Engine::add_vector`] - set or replace a vector for an existing doc.
 //! - [`Engine::get_document`], [`Engine::delete_document`]
 //! - [`Engine::document_count`]
-//! - [`Engine::transaction`], [`Engine::sql_batch`] — group writes under one
+//! - [`Engine::transaction`], [`Engine::sql_batch`] - group writes under one
 //!   engine transaction.
 //!
 //! Querying:
-//! - `Engine::sql` (defined in [`sql`]) — full SQL surface (select /
+//! - `Engine::sql` (defined in [`sql`]) - full SQL surface (select /
 //!   insert / update / delete / create-table, plus the registered
 //!   functions: `text_match`, `knn_match`, `fuse_log_odds`,
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
-//! - [`Engine::search`] — direct text-only retrieval returning a posting
+//! - [`Engine::search`] - direct text-only retrieval returning a posting
 //!   list.
-//! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] — k-NN
+//! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN
 //!   over a vector field.
-//! - [`Engine::hybrid_search`] — log-odds fusion of text and vector
+//! - [`Engine::hybrid_search`] - log-odds fusion of text and vector
 //!   posting lists (no SQL parsing in the hot path).
 //!
 //! Deep-model persistence:
 //! - [`Engine::save_model`], [`Engine::load_model`], [`Engine::drop_model`]
-//! - [`Engine::deep_predict`] — runs a stored model against the cached
+//! - [`Engine::deep_predict`] - runs a stored model against the cached
 //!   feature row and returns ranked `(doc_id, score)` pairs.
 //!
 //! Graph workspaces (used by the Cypher front-end and the `graph_*`
 //! SQL functions):
 //! - [`Engine::create_graph`], [`Engine::drop_graph`]
-//! - [`Engine::graph_with`] — read-only access by name.
-//! - [`Engine::graph_with_mut`] — exclusive mutable access.
+//! - [`Engine::graph_with`] - read-only access by name.
+//! - [`Engine::graph_with_mut`] - exclusive mutable access.
 //!
 //! Result types ([`SQLResult`], [`SQLParam`]) are re-exported from
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
 pub mod deep;
+pub mod migration;
 pub mod operator_tree_bridge;
 pub mod sql;
 
@@ -252,13 +253,13 @@ struct TableState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct IvfIndexParams {
+pub(crate) struct IVFIndexParams {
     pub nlist: usize,
     pub nprobe: usize,
     pub train_threshold: usize,
 }
 
-impl Default for IvfIndexParams {
+impl Default for IVFIndexParams {
     fn default() -> Self {
         Self {
             nlist: 100,
@@ -268,8 +269,8 @@ impl Default for IvfIndexParams {
     }
 }
 
-impl IvfIndexParams {
-    fn from_map_lossy(parameters: &BTreeMap<String, String>) -> Self {
+impl IVFIndexParams {
+    pub(crate) fn from_map_lossy(parameters: &BTreeMap<String, String>) -> Self {
         fn read_positive(
             parameters: &BTreeMap<String, String>,
             keys: &[&str],
@@ -773,7 +774,7 @@ impl Engine {
 
     // -----------------------------------------------------------------
     // Catalog index registry. Mirrors Python's `_catalog_indexes`
-    // table — records the CREATE INDEX statement (name + access
+    // table - records the CREATE INDEX statement (name + access
     // method + columns + WITH options) so reopen can replay any
     // metadata-bearing side effects.
     // -----------------------------------------------------------------
@@ -1130,7 +1131,7 @@ impl Engine {
             } else if row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw")
             {
-                let params = IvfIndexParams::from_map_lossy(&parameters);
+                let params = IVFIndexParams::from_map_lossy(&parameters);
                 for col in &columns {
                     if let Some(uqa_sql::ast::ColumnType::Vector(dim)) =
                         self.column_type(&row.table_name, col)
@@ -1321,7 +1322,7 @@ impl Engine {
             table,
             field.into(),
             dimensions,
-            IvfIndexParams::default(),
+            IVFIndexParams::default(),
             false,
             true,
         )
@@ -1332,7 +1333,7 @@ impl Engine {
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
-        params: IvfIndexParams,
+        params: IVFIndexParams,
     ) -> bool {
         self.install_vector_field(table, field.into(), dimensions, params, true, true)
     }
@@ -1342,7 +1343,7 @@ impl Engine {
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
-        params: IvfIndexParams,
+        params: IVFIndexParams,
     ) -> bool {
         let Some(t) = self.table(table) else {
             return false;
@@ -1358,7 +1359,7 @@ impl Engine {
         table: &str,
         field: FieldName,
         dimensions: u32,
-        params: IvfIndexParams,
+        params: IVFIndexParams,
         replace_existing: bool,
         persist_schema: bool,
     ) -> bool {
@@ -1384,7 +1385,7 @@ impl Engine {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: IvfIndexParams,
+        params: IVFIndexParams,
     ) -> Box<dyn VectorIndex> {
         if let Some(backend) = self.backend.as_ref() {
             backend.vector_index(
@@ -1611,7 +1612,7 @@ impl Engine {
 
     /// Build (or replace) a path index for `graph` keyed by `name`.
     /// `label_sequences` is the set of label sequences to materialise
-    /// — each sequence becomes a hash-friendly direct lookup for RPQ.
+    /// - each sequence becomes a hash-friendly direct lookup for RPQ.
     /// Mirrors Python's `Engine.build_path_index`.
     pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
         let key = format!("{graph}::{name}");
@@ -2363,7 +2364,7 @@ impl Engine {
                 let _ = backend.rollback_transaction();
             }
         }
-        // Clear FDW registries — closing connections is up to the
+        // Clear FDW registries - closing connections is up to the
         // handler, but dropping the catalog entries is enough to free
         // the registered handles.
         self.foreign_servers.write().clear();

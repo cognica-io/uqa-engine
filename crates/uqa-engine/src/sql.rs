@@ -40,7 +40,7 @@ use uqa_sql::registry::{lookup, FunctionKind};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, IvfIndexParams, ScoredEntry};
+use crate::{Engine, IVFIndexParams, ScoredEntry};
 
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
@@ -1523,8 +1523,8 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
     Ok(SQLResult::empty())
 }
 
-fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IvfIndexParams, SQLError> {
-    let mut params = IvfIndexParams::default();
+fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IVFIndexParams, SQLError> {
+    let mut params = IVFIndexParams::default();
     for (key, value) in options {
         if key.eq_ignore_ascii_case("lists") || key.eq_ignore_ascii_case("nlist") {
             params.nlist = parse_positive_usize_option(key, value)?;
@@ -2504,7 +2504,7 @@ fn materialize_recursive_cte(
         ));
     }
 
-    // Anchor: the LHS — the same SelectStmt with set_op stripped.
+    // Anchor: the LHS - the same SelectStmt with set_op stripped.
     let mut anchor_stmt = cte.query.as_ref().clone();
     anchor_stmt.set_op = None;
     anchor_stmt.with.clear();
@@ -2603,7 +2603,7 @@ fn run_single_table_select(
 ) -> Result<SQLResult, SQLError> {
     // Try the operator-tree pipeline first: lower the WHERE clause to
     // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
-    // aware / fusion-reordering passes — Python parity), then execute
+    // aware / fusion-reordering passes - Python parity), then execute
     // through `PlanExecutor` against an `EngineDriver`. The bridge
     // returns `None` for shapes the operator IR can't represent
     // (arithmetic across columns, sub-queries, window calls, ...) and
@@ -3281,8 +3281,8 @@ fn sort_keys(a: &[Value], b: &[Value], order: &[OrderBy]) -> std::cmp::Ordering 
     use uqa_sql::ast::NullsOrder;
     for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {
         let descending = order.get(i).is_some_and(|o| o.descending);
-        // Resolve NULLS FIRST/LAST. Default mirrors PostgreSQL: ASC →
-        // NULLS LAST, DESC → NULLS FIRST.
+        // Resolve NULLS FIRST/LAST. Default mirrors PostgreSQL: ASC maps
+        // to NULLS LAST, DESC maps to NULLS FIRST.
         let nulls_first = match order.get(i).and_then(|o| o.nulls) {
             Some(NullsOrder::First) => true,
             Some(NullsOrder::Last) => false,
@@ -3478,7 +3478,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
     let mut out = ResultRow::new();
     // Emit NULLs for any column that ever appeared in the table; for an
     // empty table we still know the keys via document_count, but the
-    // safe default is just an empty row — a missing key resolves to
+    // safe default is just an empty row - a missing key resolves to
     // NULL through Expr::Column / QualifiedColumn lookup anyway.
     let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for id in engine.table_doc_ids(table) {
@@ -6578,7 +6578,7 @@ fn run_temporal_traverse(
     Ok(out)
 }
 
-/// `rpq(expr, start, graph)` — evaluate a Regular Path Query
+/// `rpq(expr, start, graph)` - evaluate a Regular Path Query
 /// (Definition 5.1.2). Mirrors Python's
 /// `Engine.sql("SELECT * FROM rpq(expr, start, graph)")`.
 fn run_rpq(
@@ -7198,7 +7198,7 @@ fn explain_int_expr(expr: &Expr) -> String {
 }
 
 /// Evaluate a `LIMIT` / `OFFSET` expression to a non-negative `u64`.
-/// Mirrors Python's `_extract_int_value` — accepts integer constants,
+/// Mirrors Python's `_extract_int_value` - accepts integer constants,
 /// `$N` parameter references, and any expression that the row-evaluator
 /// can fold to an integer at execute time. Returns `None` when the
 /// clause was absent.

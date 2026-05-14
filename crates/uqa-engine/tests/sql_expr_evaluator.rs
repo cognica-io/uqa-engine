@@ -644,20 +644,23 @@ fn null_with_group_by() {
         &eng,
         "SELECT category, COUNT(*) AS cnt FROM products GROUP BY category",
     );
-    let mut by_cat: std::collections::BTreeMap<Option<String>, i64> =
+    let mut by_category: std::collections::BTreeMap<Option<String>, i64> =
         std::collections::BTreeMap::new();
     for row in &r {
-        let cat = match row.get("category") {
+        let category = match row.get("category") {
             Some(Value::Str(s)) => Some(s.clone()),
             _ => None,
         };
-        let cnt = int_col(row, "cnt").unwrap_or(0);
-        by_cat.insert(cat, cnt);
+        let count = int_col(row, "cnt").unwrap_or(0);
+        by_category.insert(category, count);
     }
-    assert_eq!(by_cat.get(&None).copied(), Some(1));
-    assert_eq!(by_cat.get(&Some("tools".to_string())).copied(), Some(1));
+    assert_eq!(by_category.get(&None).copied(), Some(1));
     assert_eq!(
-        by_cat.get(&Some("electronics".to_string())).copied(),
+        by_category.get(&Some("tools".to_string())).copied(),
+        Some(1)
+    );
+    assert_eq!(
+        by_category.get(&Some("electronics".to_string())).copied(),
         Some(1)
     );
 }

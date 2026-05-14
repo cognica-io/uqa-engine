@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use uqa_core::Value;
+use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{Engine, SQLResult};
 
 const PROMPT_PRIMARY: &str = "usql> ";
@@ -27,6 +28,11 @@ const PROMPT_CONTINUATION: &str = "    > ";
 const HISTORY_FILE: &str = ".uqa_history";
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        return handle_args(&args);
+    }
+
     let mut session = Session::new();
     Session::print_banner();
     let stdin = io::stdin();
@@ -82,6 +88,29 @@ fn main() -> ExitCode {
     }
 }
 
+fn handle_args(args: &[String]) -> ExitCode {
+    match args {
+        [cmd, source, destination]
+            if cmd == "migrate-python-db" || cmd == "--migrate-python-db" =>
+        {
+            match migrate_python_database(Path::new(source), Path::new(destination)) {
+                Ok(report) => {
+                    print_migration_report_stdout(&report);
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("migration failed: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: usql [migrate-python-db <source> <destination>]");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 struct Session {
     engine: Engine,
     location: String,
@@ -131,7 +160,7 @@ impl Session {
     }
 
     fn print_banner() {
-        println!("UQA usql — type \\help for commands, \\q to quit");
+        println!("UQA usql - type \\help for commands, \\q to quit");
     }
 
     fn run_statement(&mut self, sql: &str, out: &mut impl Write) {
@@ -171,7 +200,7 @@ impl Session {
             "help" | "h" => {
                 let _ = writeln!(
                     out,
-                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file\n  \\timing                  toggle per-statement execution timing\n  \\expanded                toggle column-per-line output\n  \\dt                      list registered tables\n  \\describe <table>        show the schema of a table\n  \\stats <table>           show ANALYZE column statistics\n  \\dg | \\graphs            list registered graphs\n  \\dfs                     list registered foreign servers\n  \\dft                     list registered foreign tables\n  \\da | \\analyzers         list registered named analyzers\n  \\run <file>              execute SQL from a file"
+                    "  \\q | \\quit | \\exit       quit\n  \\open <path>             switch to SQLite-backed engine at <path>\n  \\new                     drop back to an empty in-memory engine\n  \\where                   show the current engine location\n  \\history                 print the persisted statement history\n  \\history clear           delete the on-disk history file\n  \\timing                  toggle per-statement execution timing\n  \\expanded                toggle column-per-line output\n  \\dt                      list registered tables\n  \\describe <table>        show the schema of a table\n  \\stats <table>           show ANALYZE column statistics\n  \\dg | \\graphs            list registered graphs\n  \\dfs                     list registered foreign servers\n  \\dft                     list registered foreign tables\n  \\da | \\analyzers         list registered named analyzers\n  \\migrate-python-db <source> <destination>  migrate a Python UQA SQLite DB\n  \\run <file>              execute SQL from a file"
                 );
             }
             "history" => match arg {
@@ -252,7 +281,7 @@ impl Session {
                 } else {
                     let stats = self.engine.column_stats(arg);
                     if stats.is_empty() {
-                        let _ = writeln!(out, "no stats — run ANALYZE {arg}");
+                        let _ = writeln!(out, "no stats - run ANALYZE {arg}");
                     } else {
                         for (col, s) in stats {
                             let _ = writeln!(
@@ -320,12 +349,74 @@ impl Session {
                     }
                 }
             }
+            "migrate-python-db" => {
+                self.handle_migrate_python_db(arg, out);
+            }
             other => {
                 let _ = writeln!(out, "unknown command: \\{other}. \\help for the list.");
             }
         }
         true
     }
+
+    fn handle_migrate_python_db(&mut self, arg: &str, out: &mut impl Write) {
+        let parts = arg.split_whitespace().collect::<Vec<_>>();
+        if parts.len() != 2 {
+            let _ = writeln!(out, "usage: \\migrate-python-db <source> <destination>");
+            return;
+        }
+        let source = Path::new(parts[0]);
+        let destination = Path::new(parts[1]);
+        match migrate_python_database(source, destination) {
+            Ok(report) => {
+                print_migration_report(&report, out);
+                match Engine::open(destination) {
+                    Ok(engine) => {
+                        self.engine = engine;
+                        self.location = destination.display().to_string();
+                        let _ = writeln!(out, "opened {}", self.location);
+                    }
+                    Err(err) => {
+                        let _ = writeln!(out, "open migrated database failed: {err}");
+                    }
+                }
+            }
+            Err(err) => {
+                let _ = writeln!(out, "migration failed: {err}");
+            }
+        }
+    }
+}
+
+fn print_migration_report_stdout(report: &PythonMigrationReport) {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    print_migration_report(report, &mut out);
+}
+
+fn print_migration_report(report: &PythonMigrationReport, out: &mut impl Write) {
+    let _ = writeln!(out, "migrated {}", report.source_path.display());
+    let _ = writeln!(out, "destination {}", report.destination_path.display());
+    let _ = writeln!(
+        out,
+        "tables={} documents={} fts_fields={} vector_fields={} indexes={}",
+        report.tables, report.documents, report.fts_fields, report.vector_fields, report.indexes
+    );
+    let _ = writeln!(
+        out,
+        "graphs={} vertices={} edges={} path_indexes={}",
+        report.graphs, report.graph_vertices, report.graph_edges, report.path_indexes
+    );
+    let _ = writeln!(
+        out,
+        "analyzers={} table_field_analyzers={} scoring_params={} models={}",
+        report.analyzers, report.table_field_analyzers, report.scoring_params, report.models
+    );
+    let _ = writeln!(
+        out,
+        "foreign_servers={} foreign_tables={} column_stats={}",
+        report.foreign_servers, report.foreign_tables, report.column_stats
+    );
 }
 
 fn split_statements(text: &str) -> Vec<String> {

@@ -2013,6 +2013,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
