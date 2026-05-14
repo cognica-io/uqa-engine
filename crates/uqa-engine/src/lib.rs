@@ -85,12 +85,12 @@ use uqa_scoring::{
     CalibrationReport, ParameterLearner, Scorer,
 };
 use uqa_sql::SQLError;
-use uqa_storage::sqlite::{ColumnStatsInput, ColumnStatsRow};
 use uqa_storage::{
-    document_store::Document, AnalyzerPhase, Catalog, DocumentStore, IVFIndex, InvertedIndex,
-    ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, PersistentStorageBackend,
-    PersistentVectorIndexParams, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
-    StorageBackendError, TableSchema, VectorFieldSchema, VectorIndex,
+    document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, ColumnStatsInput,
+    ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection, MemoryDocumentStore,
+    MemoryInvertedIndex, PersistentStorageBackend, PersistentVectorIndexParams,
+    SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend, StorageBackendError,
+    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -150,7 +150,7 @@ impl Default for ScoringMode {
 /// backends drop in interchangeably.
 pub struct Engine {
     tables: RwLock<BTreeMap<String, Arc<TableState>>>,
-    catalog: Option<Arc<Catalog>>,
+    catalog: Option<Arc<dyn CatalogFacade>>,
     backend: Option<Arc<dyn PersistentStorageBackend>>,
     /// Named in-memory graphs reachable from SQL via the
     /// `graph_*` function family. Persistence to the catalog is left
@@ -871,9 +871,21 @@ impl Engine {
     }
 
     fn open_with_connection(conn: &ManagedConnection) -> Result<Self, SQLiteError> {
-        let catalog = Arc::new(Catalog::open(conn.clone())?);
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(conn.clone())?);
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(SQLiteStorageBackend::new(conn.clone()));
+        Self::from_persistent_backends(catalog, backend).map_err(Self::sqlite_open_error)
+    }
+
+    /// Build an engine from already-open persistent metadata and data
+    /// backends. This is the storage-neutral entry point used by
+    /// `Engine::open` after it creates the `SQLite` implementations,
+    /// and by future `RocksDB` / `redb` constructors once they provide
+    /// the same facade objects.
+    pub fn from_persistent_backends(
+        catalog: Arc<dyn CatalogFacade>,
+        backend: Arc<dyn PersistentStorageBackend>,
+    ) -> StorageBackendResult<Self> {
         let mut engine = Self {
             tables: RwLock::new(BTreeMap::new()),
             catalog: Some(catalog.clone()),
@@ -895,7 +907,7 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
         };
-        engine.restore_from_catalog(&catalog, backend.as_ref())?;
+        engine.restore_from_catalog(catalog.as_ref(), backend.as_ref())?;
         // Eagerly populate the model cache from the catalog so
         // `load_model` is one read deep.
         if let Ok(rows) = catalog.load_models() {
@@ -908,11 +920,19 @@ impl Engine {
         Ok(engine)
     }
 
+    fn sqlite_open_error(err: StorageBackendError) -> SQLiteError {
+        match err {
+            StorageBackendError::SQLite(err) => err,
+            StorageBackendError::Serde(err) => SQLiteError::Serde(err),
+            StorageBackendError::Other(msg) => SQLiteError::StorageBackend(msg),
+        }
+    }
+
     fn restore_from_catalog(
         &mut self,
-        catalog: &Catalog,
+        catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
-    ) -> Result<(), SQLiteError> {
+    ) -> StorageBackendResult<()> {
         for schema in catalog.load_tables()? {
             let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
             let docs = backend.document_store(&schema.name);
@@ -957,9 +977,9 @@ impl Engine {
     }
 
     fn load_column_stats_from_catalog(
-        catalog: &Catalog,
+        catalog: &dyn CatalogFacade,
         table_name: &str,
-    ) -> Result<BTreeMap<String, uqa_planner::ColumnStats>, SQLiteError> {
+    ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         let mut out = BTreeMap::new();
         for row in catalog.load_column_stats(table_name)? {
             out.insert(row.column_name.clone(), Self::column_stats_from_row(row));
@@ -994,7 +1014,10 @@ impl Engine {
     /// from the catalog. Mirrors the side effects of every
     /// `register_*` method but skips their catalog write-back so the
     /// load is idempotent.
-    fn restore_engine_registries_from_catalog(&self, catalog: &Catalog) -> Result<(), SQLiteError> {
+    fn restore_engine_registries_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         // Named analyzers.
         for (name, config_json) in catalog.load_analyzers()? {
             self.named_analyzers.write().insert(name, config_json);
@@ -1120,7 +1143,7 @@ impl Engine {
         Ok(())
     }
 
-    fn restore_graphs_from_catalog(&self, catalog: &Catalog) -> Result<(), SQLiteError> {
+    fn restore_graphs_from_catalog(&self, catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
         use std::collections::BTreeMap;
         use uqa_graph::GraphStore as _;
         // Step 1: register every named graph (the registry table is
@@ -2136,16 +2159,16 @@ impl Engine {
         }
 
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = Self::persist_column_stats(catalog, table_name, &stats_out);
+            let _ = Self::persist_column_stats(catalog.as_ref(), table_name, &stats_out);
         }
         *t.column_stats.write() = stats_out;
     }
 
     fn persist_column_stats(
-        catalog: &Catalog,
+        catalog: &dyn CatalogFacade,
         table_name: &str,
         stats: &BTreeMap<String, uqa_planner::ColumnStats>,
-    ) -> Result<(), SQLiteError> {
+    ) -> StorageBackendResult<()> {
         catalog.delete_column_stats(table_name)?;
         for (col_name, cs) in stats {
             let min_json = cs
@@ -3420,6 +3443,27 @@ mod tests {
             .into()
     }
 
+    #[test]
+    fn persistent_engine_restores_through_facade_traits() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("facade.db");
+        let conn = ManagedConnection::open(&db).unwrap();
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(conn.clone()).unwrap());
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(SQLiteStorageBackend::new(conn.clone()));
+
+        {
+            let eng = Engine::from_persistent_backends(catalog.clone(), backend.clone()).unwrap();
+            eng.create_default_table("docs", vec!["title".into()]);
+            eng.add_document("docs", 1, doc([("title", s("hello facade"))]));
+        }
+
+        let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
+        assert_eq!(reopened.document_count("docs"), 1);
+        let hits = reopened.search("docs", "title", "facade", &ScoringMode::default(), 10);
+        assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
+    }
+
     fn blob_to_vector(blob: &[u8]) -> Vec<f32> {
         blob.chunks_exact(4)
             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
@@ -3688,7 +3732,7 @@ mod tests {
             )
             .unwrap();
 
-            let conn = eng.catalog.as_ref().expect("sqlite catalog").connection();
+            let conn = ManagedConnection::open(&db).unwrap();
             make_doc_two_the_only_nearest_ivf_candidate(&conn, &[1.0, 0.0]);
         }
 

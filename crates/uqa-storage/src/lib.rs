@@ -11,6 +11,7 @@
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
+pub mod catalog;
 pub mod document_store;
 pub mod index_abc;
 pub mod index_manager;
@@ -28,6 +29,10 @@ pub use backend::{
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
+pub use catalog::{
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
+    TableSchema, VectorFieldSchema,
+};
 pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};
@@ -38,7 +43,6 @@ pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionCodec, SQLiteCompressionOptions,
     SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
-    TableSchema, VectorFieldSchema,
 };
 pub use transaction::{
     InMemoryTransaction, SQLiteTransaction, Snapshotable, TransactionError, TxResult,

@@ -14,10 +14,11 @@ pub mod document_store;
 pub mod inverted_index;
 pub mod vector_index;
 
-pub use catalog::{
-    Catalog, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    TableSchema, VectorFieldSchema, CURRENT_SCHEMA_VERSION,
+pub use crate::catalog::{
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
+    TableSchema, VectorFieldSchema,
 };
+pub use catalog::{Catalog, CURRENT_SCHEMA_VERSION};
 pub use compressed_vfs::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use document_store::SQLiteDocumentStore;

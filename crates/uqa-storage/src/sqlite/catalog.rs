@@ -13,103 +13,16 @@
 //! respective stores.
 
 use rusqlite::{params, OptionalExtension};
-use serde::{Deserialize, Serialize};
 
+use crate::backend::{StorageBackendError, StorageBackendResult};
+use crate::catalog::{
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
+    TableSchema, VectorFieldSchema,
+};
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
 pub const CURRENT_SCHEMA_VERSION: u32 = 9;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableSchema {
-    pub name: String,
-    pub analyzer_json: String,
-    pub fts_fields: Vec<String>,
-    pub vector_fields: Vec<VectorFieldSchema>,
-    /// Serialized `Vec<uqa_sql::ast::ColumnDef>` capturing the schema
-    /// columns (name, type, `auto_increment`, flags). Empty for
-    /// tables created by the legacy code path before column tracking
-    /// existed.
-    #[serde(default)]
-    pub columns_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorFieldSchema {
-    pub field: String,
-    pub dimensions: u32,
-}
-
-/// One row from `_graph_edges`. Mirrors Python's
-/// `(edge_id, source_id, target_id, label, properties_json)` tuple
-/// but as a typed struct so the catalog API stays clippy-clean.
-#[derive(Debug, Clone)]
-pub struct EdgeRow {
-    pub edge_id: u64,
-    pub source_id: u64,
-    pub target_id: u64,
-    pub label: String,
-    pub properties_json: String,
-}
-
-/// One row from `_foreign_tables`.
-#[derive(Debug, Clone)]
-pub struct ForeignTableRow {
-    pub name: String,
-    pub server_name: String,
-    pub columns_json: String,
-    pub options_json: String,
-}
-
-/// One row from `_catalog_indexes`.
-#[derive(Debug, Clone)]
-pub struct CatalogIndexRow {
-    pub name: String,
-    pub index_type: String,
-    pub table_name: String,
-    pub columns_json: String,
-    pub parameters_json: String,
-}
-
-/// Values persisted into one `_column_stats` row.
-#[derive(Debug, Clone, Copy)]
-pub struct ColumnStatsInput<'a> {
-    pub table_name: &'a str,
-    pub column_name: &'a str,
-    pub distinct_count: i64,
-    pub null_count: i64,
-    pub min_value: Option<&'a str>,
-    pub max_value: Option<&'a str>,
-    pub row_count: i64,
-    pub histogram_json: &'a str,
-    pub mcv_values_json: &'a str,
-    pub mcv_frequencies_json: &'a str,
-}
-
-impl<'a> ColumnStatsInput<'a> {
-    pub fn basic(
-        table_name: &'a str,
-        column_name: &'a str,
-        distinct_count: i64,
-        null_count: i64,
-        min_value: Option<&'a str>,
-        max_value: Option<&'a str>,
-        row_count: i64,
-    ) -> Self {
-        Self {
-            table_name,
-            column_name,
-            distinct_count,
-            null_count,
-            min_value,
-            max_value,
-            row_count,
-            histogram_json: "[]",
-            mcv_values_json: "[]",
-            mcv_frequencies_json: "[]",
-        }
-    }
-}
 
 pub struct Catalog {
     conn: ManagedConnection,
@@ -1056,18 +969,312 @@ impl Catalog {
     }
 }
 
-/// One row from `_column_stats`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ColumnStatsRow {
-    pub column_name: String,
-    pub distinct_count: i64,
-    pub null_count: i64,
-    pub min_value: Option<String>,
-    pub max_value: Option<String>,
-    pub row_count: i64,
-    pub histogram_json: String,
-    pub mcv_values_json: String,
-    pub mcv_frequencies_json: String,
+fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
+    result.map_err(StorageBackendError::from)
+}
+
+impl CatalogFacade for Catalog {
+    fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::set_metadata(self, key, value))
+    }
+
+    fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
+        into_storage_result(Catalog::get_metadata(self, key))
+    }
+
+    fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_table(self, schema))
+    }
+
+    fn load_tables(&self) -> StorageBackendResult<Vec<TableSchema>> {
+        into_storage_result(Catalog::load_tables(self))
+    }
+
+    fn drop_table(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_table(self, name))
+    }
+
+    fn purge_table_data(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::purge_table_data(self, name))
+    }
+
+    fn save_model(&self, name: &str, json: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_model(self, name, json))
+    }
+
+    fn load_models(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_models(self))
+    }
+
+    fn load_model(&self, name: &str) -> StorageBackendResult<Option<String>> {
+        into_storage_result(Catalog::load_model(self, name))
+    }
+
+    fn drop_model(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_model(self, name))
+    }
+
+    fn save_scoring_params(&self, name: &str, params_json: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_scoring_params(self, name, params_json))
+    }
+
+    fn load_scoring_params(&self, name: &str) -> StorageBackendResult<Option<String>> {
+        into_storage_result(Catalog::load_scoring_params(self, name))
+    }
+
+    fn load_all_scoring_params(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_all_scoring_params(self))
+    }
+
+    fn drop_scoring_params(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_scoring_params(self, name))
+    }
+
+    fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_named_graph(self, name))
+    }
+
+    fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_named_graph(self, name))
+    }
+
+    fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
+        into_storage_result(Catalog::load_named_graphs(self))
+    }
+
+    fn save_vertex(
+        &self,
+        vertex_id: u64,
+        label: &str,
+        properties_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_vertex(
+            self,
+            vertex_id,
+            label,
+            properties_json,
+        ))
+    }
+
+    fn delete_vertex(&self, vertex_id: u64) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_vertex(self, vertex_id))
+    }
+
+    fn load_vertices(&self) -> StorageBackendResult<Vec<(u64, String, String)>> {
+        into_storage_result(Catalog::load_vertices(self))
+    }
+
+    fn save_edge(
+        &self,
+        edge_id: u64,
+        source_id: u64,
+        target_id: u64,
+        label: &str,
+        properties_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_edge(
+            self,
+            edge_id,
+            source_id,
+            target_id,
+            label,
+            properties_json,
+        ))
+    }
+
+    fn delete_edge(&self, edge_id: u64) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_edge(self, edge_id))
+    }
+
+    fn load_edges(&self) -> StorageBackendResult<Vec<EdgeRow>> {
+        into_storage_result(Catalog::load_edges(self))
+    }
+
+    fn save_graph_membership(
+        &self,
+        entity_type: &str,
+        entity_id: u64,
+        graph_name: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_graph_membership(
+            self,
+            entity_type,
+            entity_id,
+            graph_name,
+        ))
+    }
+
+    fn delete_graph_membership(
+        &self,
+        entity_type: &str,
+        entity_id: u64,
+        graph_name: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_graph_membership(
+            self,
+            entity_type,
+            entity_id,
+            graph_name,
+        ))
+    }
+
+    fn delete_graph_membership_for_graph(&self, graph_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_graph_membership_for_graph(self, graph_name))
+    }
+
+    fn load_graph_memberships(&self) -> StorageBackendResult<Vec<(String, u64, String)>> {
+        into_storage_result(Catalog::load_graph_memberships(self))
+    }
+
+    fn purge_orphan_graph_entities(&self) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::purge_orphan_graph_entities(self))
+    }
+
+    fn save_analyzer(&self, name: &str, config_json: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_analyzer(self, name, config_json))
+    }
+
+    fn drop_analyzer(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_analyzer(self, name))
+    }
+
+    fn load_analyzers(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_analyzers(self))
+    }
+
+    fn save_table_field_analyzer(
+        &self,
+        table_name: &str,
+        field: &str,
+        phase: &str,
+        analyzer_name: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_table_field_analyzer(
+            self,
+            table_name,
+            field,
+            phase,
+            analyzer_name,
+        ))
+    }
+
+    fn drop_table_field_analyzers(&self, table_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_table_field_analyzers(self, table_name))
+    }
+
+    fn load_table_field_analyzers(
+        &self,
+    ) -> StorageBackendResult<Vec<(String, String, String, String)>> {
+        into_storage_result(Catalog::load_table_field_analyzers(self))
+    }
+
+    fn save_foreign_server(
+        &self,
+        name: &str,
+        fdw_type: &str,
+        options_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_foreign_server(
+            self,
+            name,
+            fdw_type,
+            options_json,
+        ))
+    }
+
+    fn drop_foreign_server(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_foreign_server(self, name))
+    }
+
+    fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>> {
+        into_storage_result(Catalog::load_foreign_servers(self))
+    }
+
+    fn save_foreign_table(
+        &self,
+        name: &str,
+        server_name: &str,
+        columns_json: &str,
+        options_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_foreign_table(
+            self,
+            name,
+            server_name,
+            columns_json,
+            options_json,
+        ))
+    }
+
+    fn drop_foreign_table(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_foreign_table(self, name))
+    }
+
+    fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>> {
+        into_storage_result(Catalog::load_foreign_tables(self))
+    }
+
+    fn save_catalog_index(
+        &self,
+        name: &str,
+        index_type: &str,
+        table_name: &str,
+        columns_json: &str,
+        parameters_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_catalog_index(
+            self,
+            name,
+            index_type,
+            table_name,
+            columns_json,
+            parameters_json,
+        ))
+    }
+
+    fn drop_catalog_index(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_catalog_index(self, name))
+    }
+
+    fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_catalog_indexes_for_table(self, table_name))
+    }
+
+    fn load_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
+        into_storage_result(Catalog::load_catalog_indexes(self))
+    }
+
+    fn save_path_index(
+        &self,
+        graph_name: &str,
+        label_sequences_json: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_path_index(
+            self,
+            graph_name,
+            label_sequences_json,
+        ))
+    }
+
+    fn drop_path_index(&self, graph_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_path_index(self, graph_name))
+    }
+
+    fn load_path_indexes(&self) -> StorageBackendResult<Vec<(String, String)>> {
+        into_storage_result(Catalog::load_path_indexes(self))
+    }
+
+    fn save_column_stats(&self, stats: ColumnStatsInput<'_>) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_column_stats(self, stats))
+    }
+
+    fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {
+        into_storage_result(Catalog::load_column_stats(self, table_name))
+    }
+
+    fn delete_column_stats(&self, table_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::delete_column_stats(self, table_name))
+    }
 }
 
 /// Migrations applied in order. Each `(version, sql)` is run in a single
@@ -1380,6 +1587,28 @@ mod tests {
         assert_eq!(loaded[0].vector_fields[0].field, "embedding");
         assert_eq!(loaded[0].vector_fields[0].dimensions, 768);
         assert!(loaded[0].columns_json.is_empty());
+    }
+
+    #[test]
+    fn catalog_facade_trait_object_round_trips_table() {
+        let cat = fresh();
+        let facade: &dyn CatalogFacade = &cat;
+        let schema = TableSchema {
+            name: "facade_articles".into(),
+            analyzer_json:
+                "{\"tokenizer\":{\"type\":\"standard\"},\"token_filters\":[],\"char_filters\":[]}"
+                    .into(),
+            fts_fields: vec!["title".into()],
+            vector_fields: vec![VectorFieldSchema {
+                field: "embedding".into(),
+                dimensions: 128,
+            }],
+            columns_json: String::new(),
+        };
+        facade.save_table(&schema).unwrap();
+        let loaded = facade.load_tables().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "facade_articles");
     }
 
     #[test]

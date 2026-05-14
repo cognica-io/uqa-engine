@@ -23,6 +23,8 @@ use crate::vector_index::VectorIndex;
 pub enum StorageBackendError {
     #[error(transparent)]
     SQLite(#[from] SQLiteError),
+    #[error("payload serialization failed: {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("{0}")]
     Other(String),
 }

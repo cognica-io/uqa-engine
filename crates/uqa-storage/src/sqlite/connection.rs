@@ -37,6 +37,8 @@ pub enum SQLiteError {
     },
     #[error("payload serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("storage backend error: {0}")]
+    StorageBackend(String),
 }
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
