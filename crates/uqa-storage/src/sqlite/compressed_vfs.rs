@@ -10,9 +10,9 @@
 //!
 //! The VFS exposes a normal byte-addressed `SQLite` database file to the
 //! pager. The on-disk file is a UQA container made of independently compressed
-//! chunk records. Dirty chunks are appended on sync; active records are tracked
-//! by the container header generation, so small commits do not rewrite the
-//! logical database image.
+//! chunk records. Dirty chunks are appended with commit records on sync; active
+//! records are compacted before stale autocommit history can dominate reopen
+//! time or file size.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CStr;
@@ -34,13 +34,17 @@ use rusqlite::ffi;
 pub const VFS_NAME: &str = "uqa_compressed";
 
 const VFS_NAME_C: &[u8] = b"uqa_compressed\0";
-const MAGIC: &[u8; 8] = b"UQACDB2\0";
-const VERSION: u32 = 2;
+const MAGIC: &[u8; 8] = b"UQACDB3\0";
+const VERSION: u32 = 3;
 const HEADER_SIZE: usize = 128;
 const ENTRY_SIZE: usize = 80;
 const FLAG_ENCRYPTED: u32 = 1;
 const CHUNK_COMPRESSED: u32 = 1;
 const CHUNK_ENCRYPTED: u32 = 2;
+const CHUNK_COMMIT: u32 = 4;
+const COMMIT_CHUNK_ID: u64 = u64::MAX;
+const MIN_COMPACT_STALE_BYTES: u64 = 4 * 1024;
+const MAX_COMPACT_STALE_BYTES: u64 = 8 * 1024 * 1024;
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const DEFAULT_PAGE_SIZE: u32 = 4096;
@@ -160,6 +164,7 @@ struct ChunkEntry {
     crc32: u32,
     nonce: [u8; NONCE_LEN],
     generation: u64,
+    allocated_len: usize,
 }
 
 #[derive(Debug)]
@@ -184,11 +189,23 @@ struct CompressedSQLiteFile {
 }
 
 struct FileHandle {
-    file: ContainerFile,
+    file: VfsFile,
     lock_file: File,
     read_only: bool,
     delete_on_close: bool,
     lock_state: c_int,
+}
+
+#[derive(Debug)]
+enum VfsFile {
+    Compressed(ContainerFile),
+    Plain(PlainFile),
+}
+
+#[derive(Debug)]
+struct PlainFile {
+    path: PathBuf,
+    file: File,
 }
 
 static REGISTRY: OnceLock<Mutex<BTreeMap<String, OpenOptionsEntry>>> = OnceLock::new();
@@ -295,6 +312,114 @@ fn options_for_path(path: &Path) -> OpenOptionsEntry {
     }
 }
 
+impl VfsFile {
+    fn open(
+        path: PathBuf,
+        options: OpenOptionsEntry,
+        flags: c_int,
+        read_only: bool,
+    ) -> std::io::Result<Self> {
+        if options.key.is_none() && should_store_plain(flags, &path) {
+            PlainFile::open(path, read_only, flags & ffi::SQLITE_OPEN_CREATE != 0).map(Self::Plain)
+        } else {
+            ContainerFile::open(path, options).map(Self::Compressed)
+        }
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            Self::Compressed(file) => &file.path,
+            Self::Plain(file) => &file.path,
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Compressed(file) => file.flush(),
+            Self::Plain(file) => file.flush(),
+        }
+    }
+
+    fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Compressed(file) => file.read_at(offset, dest),
+            Self::Plain(file) => file.read_at(offset, dest),
+        }
+    }
+
+    fn write_at(&mut self, offset: usize, source: &[u8]) -> std::io::Result<()> {
+        match self {
+            Self::Compressed(file) => file.write_at(offset, source),
+            Self::Plain(file) => file.write_at(offset, source),
+        }
+    }
+
+    fn truncate_to(&mut self, size: usize) -> std::io::Result<()> {
+        match self {
+            Self::Compressed(file) => file.truncate_to(size),
+            Self::Plain(file) => file.truncate_to(size),
+        }
+    }
+
+    fn size(&self) -> std::io::Result<usize> {
+        match self {
+            Self::Compressed(file) => Ok(file.logical_len),
+            Self::Plain(file) => file.size(),
+        }
+    }
+}
+
+impl PlainFile {
+    fn open(path: PathBuf, read_only: bool, create: bool) -> std::io::Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut options = OpenOptions::new();
+        options.read(true);
+        if !read_only {
+            options.write(true);
+            if create {
+                options.create(true);
+            }
+        }
+        let file = options.open(&path)?;
+        Ok(Self { path, file })
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()?;
+        self.file.sync_all()
+    }
+
+    fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
+        self.file.seek(SeekFrom::Start(offset as u64))?;
+        let mut read = 0;
+        while read < dest.len() {
+            let n = self.file.read(&mut dest[read..])?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        dest[read..].fill(0);
+        Ok(read)
+    }
+
+    fn write_at(&mut self, offset: usize, source: &[u8]) -> std::io::Result<()> {
+        self.file.seek(SeekFrom::Start(offset as u64))?;
+        self.file.write_all(source)
+    }
+
+    fn truncate_to(&mut self, size: usize) -> std::io::Result<()> {
+        self.file.set_len(size as u64)
+    }
+
+    fn size(&self) -> std::io::Result<usize> {
+        usize::try_from(self.file.metadata()?.len())
+            .map_err(|_| invalid_data("plain file too large"))
+    }
+}
+
 impl ContainerFile {
     fn open(path: PathBuf, options: OpenOptionsEntry) -> std::io::Result<Self> {
         if path.exists() && path.metadata()?.len() > 0 {
@@ -331,16 +456,35 @@ impl ContainerFile {
             ));
         }
         let file_len = file.metadata()?.len();
+        let mut committed_generation = header.generation;
+        let mut committed_logical_len = header.logical_len;
+        let mut committed_chunk_count = header.chunk_count;
         let mut record_offset = HEADER_SIZE as u64;
-        let mut chunks = BTreeMap::new();
+        let mut entries = Vec::new();
         while record_offset + ENTRY_SIZE as u64 <= file_len {
             file.seek(SeekFrom::Start(record_offset))?;
             let mut entry_bytes = [0_u8; ENTRY_SIZE];
             file.read_exact(&mut entry_bytes)?;
             let entry = parse_entry(&entry_bytes)?;
+            if entry.flags & CHUNK_COMMIT != 0 {
+                if entry.chunk_id != COMMIT_CHUNK_ID
+                    || entry.stored_len != 0
+                    || entry.allocated_len != 0
+                {
+                    return Err(invalid_data("invalid compressed container commit record"));
+                }
+                if entry.generation > committed_generation {
+                    committed_generation = entry.generation;
+                    committed_logical_len = usize::try_from(entry.offset)
+                        .map_err(|_| invalid_data("commit logical length"))?;
+                    committed_chunk_count = entry.raw_len;
+                }
+                record_offset += ENTRY_SIZE as u64;
+                continue;
+            }
             let payload_offset = record_offset + ENTRY_SIZE as u64;
             let payload_end = payload_offset
-                .checked_add(entry.stored_len as u64)
+                .checked_add(entry.allocated_len as u64)
                 .ok_or_else(|| invalid_data("chunk payload offset overflow"))?;
             if payload_end > file_len {
                 break;
@@ -348,19 +492,37 @@ impl ContainerFile {
             if entry.offset != payload_offset {
                 return Err(invalid_data("chunk payload offset mismatch"));
             }
+            if entry.allocated_len < entry.stored_len {
+                return Err(invalid_data(
+                    "chunk allocation is smaller than stored payload",
+                ));
+            }
             if entry.raw_len > header.compression.chunk_size() {
                 return Err(invalid_data(
                     "chunk raw length exceeds configured chunk size",
                 ));
             }
-            if entry.generation <= header.generation && entry.chunk_id < header.chunk_count as u64 {
+            entries.push(entry);
+            record_offset = payload_end;
+        }
+        let expected_chunk_count =
+            chunk_count_for(committed_logical_len, header.compression.chunk_size());
+        if committed_chunk_count != expected_chunk_count {
+            return Err(invalid_data(
+                "compressed container commit chunk count mismatch",
+            ));
+        }
+        let mut chunks = BTreeMap::new();
+        for entry in entries {
+            if entry.generation <= committed_generation
+                && entry.chunk_id < committed_chunk_count as u64
+            {
                 chunks.insert(entry.chunk_id, entry);
             }
-            record_offset = payload_end;
         }
         Ok(Self {
             path,
-            logical_len: header.logical_len,
+            logical_len: committed_logical_len,
             append_offset: record_offset,
             chunks,
             cache: BTreeMap::new(),
@@ -368,7 +530,7 @@ impl ContainerFile {
             compression: header.compression,
             key,
             salt: header.salt,
-            generation: header.generation,
+            generation: committed_generation,
             dirty_header: false,
         })
     }
@@ -399,6 +561,7 @@ impl ContainerFile {
             .create(true)
             .truncate(false)
             .open(&self.path)?;
+        self.ensure_header(&mut file, encrypted)?;
         file.set_len(self.append_offset)?;
         file.seek(SeekFrom::Start(self.append_offset))?;
         let active_chunk_count = self.chunk_count() as u64;
@@ -409,66 +572,105 @@ impl ContainerFile {
             .filter(|chunk_id| *chunk_id < active_chunk_count)
             .collect();
         let mut append_offset = self.append_offset;
+        let mut pending_entries = Vec::with_capacity(dirty_chunks.len());
         for chunk_id in dirty_chunks {
-            let raw = self.load_chunk(chunk_id)?.clone();
-            let compressed = compress_chunk(self.compression, &raw)?;
-            let mut flags = 0_u32;
-            let mut stored = if compressed.len() < raw.len() {
-                flags |= CHUNK_COMPRESSED;
-                compressed
-            } else {
-                raw.clone()
-            };
-            let mut nonce = [0_u8; NONCE_LEN];
-            if let Some(cipher) = cipher.as_ref() {
-                flags |= CHUNK_ENCRYPTED;
-                OsRng.fill_bytes(&mut nonce);
-                stored = cipher
-                    .encrypt(
-                        XNonce::from_slice(&nonce),
-                        Payload {
-                            msg: &stored,
-                            aad: &chunk_id.to_le_bytes(),
-                        },
-                    )
-                    .map_err(|_| invalid_data("chunk encryption failed"))?;
-            }
-            let entry = ChunkEntry {
-                chunk_id,
-                offset: append_offset + ENTRY_SIZE as u64,
-                stored_len: stored.len(),
-                raw_len: raw.len(),
-                flags,
-                crc32: crc32fast::hash(&raw),
-                nonce,
-                generation: next_generation,
-            };
+            let (entry, stored) =
+                self.encode_dirty_chunk(chunk_id, append_offset, next_generation, cipher.as_ref())?;
             file.write_all(&build_entry(&entry))?;
             file.write_all(&stored)?;
-            append_offset += ENTRY_SIZE as u64 + stored.len() as u64;
-            self.chunks.insert(chunk_id, entry);
+            append_offset += ENTRY_SIZE as u64 + entry.allocated_len as u64;
+            pending_entries.push(entry);
+        }
+        let commit = build_commit_entry(next_generation, self.logical_len, self.chunk_count());
+        file.write_all(&build_entry(&commit))?;
+        append_offset += ENTRY_SIZE as u64;
+        file.flush()?;
+        file.sync_all()?;
+        self.generation = next_generation;
+        self.append_offset = append_offset;
+        drop(file);
+        for entry in pending_entries {
+            self.chunks.insert(entry.chunk_id, entry);
         }
         self.chunks
             .retain(|chunk_id, _| *chunk_id < active_chunk_count);
-        file.flush()?;
-        file.sync_data()?;
-        self.generation = next_generation;
-        self.append_offset = append_offset;
-        file.seek(SeekFrom::Start(0))?;
-        file.write_all(&build_header(
-            if encrypted { FLAG_ENCRYPTED } else { 0 },
-            self.compression,
-            self.chunk_count(),
-            self.logical_len,
-            self.generation,
-            self.salt,
-        ))?;
-        file.sync_all()?;
-        drop(file);
         self.dirty_chunks.clear();
         self.dirty_header = false;
         self.compact_if_needed()?;
         Ok(())
+    }
+
+    fn ensure_header(&self, file: &mut File, encrypted: bool) -> std::io::Result<()> {
+        if file.metadata()?.len() >= HEADER_SIZE as u64 {
+            return Ok(());
+        }
+        file.set_len(HEADER_SIZE as u64)?;
+        file.seek(SeekFrom::Start(0))?;
+        let header_chunk_count = if self.generation == 0 {
+            0
+        } else {
+            self.chunk_count()
+        };
+        let header_logical_len = if self.generation == 0 {
+            0
+        } else {
+            self.logical_len
+        };
+        file.write_all(&build_header(
+            if encrypted { FLAG_ENCRYPTED } else { 0 },
+            self.compression,
+            header_chunk_count,
+            header_logical_len,
+            self.generation,
+            self.salt,
+        ))
+    }
+
+    fn encode_dirty_chunk(
+        &mut self,
+        chunk_id: u64,
+        append_offset: u64,
+        generation: u64,
+        cipher: Option<&XChaCha20Poly1305>,
+    ) -> std::io::Result<(ChunkEntry, Vec<u8>)> {
+        let raw = self.load_chunk(chunk_id)?.clone();
+        let compressed = compress_chunk(self.compression, &raw)?;
+        let mut flags = 0_u32;
+        let mut stored = if compressed.len() < raw.len() {
+            flags |= CHUNK_COMPRESSED;
+            compressed
+        } else {
+            raw.clone()
+        };
+        let mut nonce = [0_u8; NONCE_LEN];
+        if let Some(cipher) = cipher {
+            flags |= CHUNK_ENCRYPTED;
+            OsRng.fill_bytes(&mut nonce);
+            stored = cipher
+                .encrypt(
+                    XNonce::from_slice(&nonce),
+                    Payload {
+                        msg: &stored,
+                        aad: &chunk_id.to_le_bytes(),
+                    },
+                )
+                .map_err(|_| invalid_data("chunk encryption failed"))?;
+        }
+        let stored_len = stored.len();
+        Ok((
+            ChunkEntry {
+                chunk_id,
+                offset: append_offset + ENTRY_SIZE as u64,
+                stored_len,
+                raw_len: raw.len(),
+                flags,
+                crc32: crc32fast::hash(&raw),
+                nonce,
+                generation,
+                allocated_len: stored_len,
+            },
+            stored,
+        ))
     }
 
     fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
@@ -636,14 +838,15 @@ impl ContainerFile {
         self.chunks
             .iter()
             .filter(|(chunk_id, _)| **chunk_id < chunk_count)
-            .map(|(_, entry)| ENTRY_SIZE as u64 + entry.stored_len as u64)
+            .map(|(_, entry)| ENTRY_SIZE as u64 + entry.allocated_len as u64)
             .sum()
     }
 
     fn compact_if_needed(&mut self) -> std::io::Result<()> {
         let compact_len = HEADER_SIZE as u64 + self.active_record_bytes();
         let stale_bytes = self.append_offset.saturating_sub(compact_len);
-        let compact_threshold = compact_len.max(8 * 1024 * 1024);
+        let compact_threshold = (self.active_record_bytes().saturating_mul(2))
+            .clamp(MIN_COMPACT_STALE_BYTES, MAX_COMPACT_STALE_BYTES);
         if stale_bytes <= compact_threshold {
             return Ok(());
         }
@@ -677,9 +880,10 @@ impl ContainerFile {
             source.read_exact(&mut payload)?;
             let mut compacted_entry = entry.clone();
             compacted_entry.offset = append_offset + ENTRY_SIZE as u64;
+            compacted_entry.allocated_len = compacted_entry.stored_len;
             tmp.write_all(&build_entry(&compacted_entry))?;
             tmp.write_all(&payload)?;
-            append_offset += ENTRY_SIZE as u64 + payload.len() as u64;
+            append_offset += ENTRY_SIZE as u64 + compacted_entry.allocated_len as u64;
             compacted.insert(chunk_id, compacted_entry);
         }
         tmp.set_len(append_offset)?;
@@ -709,6 +913,33 @@ fn expected_chunk_len_for(logical_len: usize, chunk_size: usize, chunk_id: usize
         return chunk_size;
     }
     logical_len - chunk_id * chunk_size
+}
+
+fn build_commit_entry(generation: u64, logical_len: usize, chunk_count: usize) -> ChunkEntry {
+    ChunkEntry {
+        chunk_id: COMMIT_CHUNK_ID,
+        offset: logical_len as u64,
+        stored_len: 0,
+        raw_len: chunk_count,
+        flags: CHUNK_COMMIT,
+        crc32: 0,
+        nonce: [0_u8; NONCE_LEN],
+        generation,
+        allocated_len: 0,
+    }
+}
+
+fn should_store_plain(flags: c_int, path: &Path) -> bool {
+    let auxiliary_flags = ffi::SQLITE_OPEN_MAIN_JOURNAL
+        | ffi::SQLITE_OPEN_TEMP_JOURNAL
+        | ffi::SQLITE_OPEN_SUBJOURNAL
+        | ffi::SQLITE_OPEN_SUPER_JOURNAL
+        | ffi::SQLITE_OPEN_WAL;
+    if flags & auxiliary_flags != 0 {
+        return true;
+    }
+    let normalized = path.to_string_lossy();
+    normalized.ends_with("-journal") || normalized.ends_with("-wal") || normalized.ends_with("-shm")
 }
 
 fn cipher_from_key(key: &str, salt: &[u8; SALT_LEN]) -> std::io::Result<XChaCha20Poly1305> {
@@ -822,6 +1053,8 @@ fn parse_entry(bytes: &[u8]) -> std::io::Result<ChunkEntry> {
     let mut nonce = [0_u8; NONCE_LEN];
     nonce.copy_from_slice(&bytes[40..40 + NONCE_LEN]);
     let generation = read_u64(bytes, 64)?;
+    let allocated_len = usize::try_from(read_u64(bytes, 72)?)
+        .map_err(|_| invalid_data("chunk allocated length"))?;
     Ok(ChunkEntry {
         chunk_id,
         offset,
@@ -831,6 +1064,7 @@ fn parse_entry(bytes: &[u8]) -> std::io::Result<ChunkEntry> {
         crc32,
         nonce,
         generation,
+        allocated_len,
     })
 }
 
@@ -844,6 +1078,7 @@ fn build_entry(entry: &ChunkEntry) -> [u8; ENTRY_SIZE] {
     write_u32(&mut out, 36, entry.crc32);
     out[40..40 + NONCE_LEN].copy_from_slice(&entry.nonce);
     write_u64(&mut out, 64, entry.generation);
+    write_u64(&mut out, 72, entry.allocated_len as u64);
     out
 }
 
@@ -935,7 +1170,7 @@ unsafe extern "C" fn file_close(file: *mut ffi::sqlite3_file) -> c_int {
     let flush = handle.file.flush();
     let _ = FileExt::unlock(&handle.lock_file);
     if handle.delete_on_close {
-        let _ = fs::remove_file(&handle.file.path);
+        let _ = fs::remove_file(handle.file.path());
     }
     unsafe {
         (*compressed).base.pMethods = ptr::null();
@@ -1026,8 +1261,11 @@ unsafe extern "C" fn file_size(
     let Some(handle) = (unsafe { file_from_sqlite(file) }) else {
         return ffi::SQLITE_IOERR_FSTAT;
     };
+    let Ok(size) = handle.file.size() else {
+        return ffi::SQLITE_IOERR_FSTAT;
+    };
     unsafe {
-        *size_out = handle.file.logical_len as ffi::sqlite3_int64;
+        *size_out = size as ffi::sqlite3_int64;
     }
     ffi::SQLITE_OK
 }
@@ -1128,7 +1366,7 @@ unsafe extern "C" fn vfs_open(
         return ffi::SQLITE_CANTOPEN;
     }
     let lock_path = lock_path(&normalized);
-    let open_result = ContainerFile::open(normalized, options)
+    let open_result = VfsFile::open(normalized, options, flags, read_only)
         .and_then(|container| open_lock_file(&lock_path).map(|lock_file| (container, lock_file)));
     let compressed = file.cast::<CompressedSQLiteFile>();
     unsafe {
@@ -1344,7 +1582,7 @@ mod tests {
         container.write_at(0, &vec![b'a'; chunk_size * 16]).unwrap();
         container.flush().unwrap();
         let first_len = std::fs::metadata(&path).unwrap().len();
-        let first_records = scan_record_generations(&path);
+        let first_records = scan_chunk_record_generations(&path);
         assert_eq!(first_records.len(), 16);
         assert!(first_records.iter().all(|generation| *generation == 1));
 
@@ -1352,7 +1590,7 @@ mod tests {
         container.write_at(update_offset, b"xyz").unwrap();
         container.flush().unwrap();
         let second_len = std::fs::metadata(&path).unwrap().len();
-        let second_records = scan_record_generations(&path);
+        let second_records = scan_chunk_record_generations(&path);
         assert_eq!(second_records.len(), 17);
         assert_eq!(
             second_records
@@ -1369,7 +1607,70 @@ mod tests {
         assert_eq!(&out, b"xyz");
     }
 
-    fn scan_record_generations(path: &Path) -> Vec<u64> {
+    #[test]
+    fn repeated_autocommit_updates_trigger_stale_record_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("autocommit.uqac.sqlite3");
+        let compression = SQLiteCompressionOptions {
+            codec: SQLiteCompressionCodec::Zstd,
+            page_size: 512,
+            chunk_pages: 1,
+            level: 1,
+        };
+        let options = OpenOptionsEntry {
+            compression,
+            key: None,
+        };
+
+        let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
+        container
+            .write_at(0, &vec![b'a'; compression.chunk_size()])
+            .unwrap();
+        container.flush().unwrap();
+        for i in 0..300_u16 {
+            container.write_at(17, &i.to_le_bytes()).unwrap();
+            container.flush().unwrap();
+        }
+
+        let file_len = std::fs::metadata(&path).unwrap().len();
+        assert!(file_len < 16 * 1024);
+        assert!(scan_chunk_record_generations(&path).len() < 80);
+
+        let mut reopened = ContainerFile::open(path, options).unwrap();
+        let mut out = [0_u8; 2];
+        assert_eq!(reopened.read_at(17, &mut out).unwrap(), 2);
+        assert_eq!(out, 299_u16.to_le_bytes());
+    }
+
+    #[test]
+    fn sqlite_journal_files_are_not_compressed_containers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.uqac.sqlite3-journal");
+        let options = OpenOptionsEntry {
+            compression: SQLiteCompressionOptions::default(),
+            key: None,
+        };
+        let flags =
+            ffi::SQLITE_OPEN_MAIN_JOURNAL | ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE;
+        let file = VfsFile::open(path, options, flags, false).unwrap();
+        assert!(matches!(file, VfsFile::Plain(_)));
+    }
+
+    #[test]
+    fn encrypted_sqlite_journal_files_stay_encrypted_containers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main-encrypted.uqac.sqlite3-journal");
+        let options = OpenOptionsEntry {
+            compression: SQLiteCompressionOptions::default(),
+            key: Some("correct horse battery staple".to_string()),
+        };
+        let flags =
+            ffi::SQLITE_OPEN_MAIN_JOURNAL | ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE;
+        let file = VfsFile::open(path, options, flags, false).unwrap();
+        assert!(matches!(file, VfsFile::Compressed(_)));
+    }
+
+    fn scan_chunk_record_generations(path: &Path) -> Vec<u64> {
         let mut file = File::open(path).unwrap();
         let mut header_bytes = [0_u8; HEADER_SIZE];
         file.read_exact(&mut header_bytes).unwrap();
@@ -1382,8 +1683,12 @@ mod tests {
             let mut entry_bytes = [0_u8; ENTRY_SIZE];
             file.read_exact(&mut entry_bytes).unwrap();
             let entry = parse_entry(&entry_bytes).unwrap();
+            if entry.flags & CHUNK_COMMIT != 0 {
+                offset += ENTRY_SIZE as u64;
+                continue;
+            }
             let payload_offset = offset + ENTRY_SIZE as u64;
-            let payload_end = payload_offset + entry.stored_len as u64;
+            let payload_end = payload_offset + entry.allocated_len as u64;
             if payload_end > file_len {
                 break;
             }

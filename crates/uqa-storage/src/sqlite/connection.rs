@@ -137,9 +137,10 @@ impl ManagedConnection {
     }
 
     fn configure_compressed(conn: &Connection) -> Result<()> {
-        // The compressed VFS implements the byte-addressed database file
-        // and every rollback-journal file as compressed containers. WAL
-        // requires shared-memory VFS methods, so compressed databases use
+        // The compressed VFS implements the byte-addressed database file.
+        // Rollback journals stay raw because they are short-lived commit
+        // machinery; compressing them only adds autocommit write amplification.
+        // WAL requires shared-memory VFS methods, so compressed databases use
         // SQLite's rollback journal and keep temp storage in memory.
         conn.pragma_update(None, "journal_mode", "DELETE")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -331,7 +332,7 @@ mod tests {
 
         let compressed = std::fs::read(&path).unwrap();
         let plain_len = std::fs::metadata(&plain_path).unwrap().len();
-        assert_eq!(&compressed[..8], b"UQACDB2\0");
+        assert_eq!(&compressed[..8], b"UQACDB3\0");
         assert!(compressed.len() < plain_len as usize);
         assert!(ManagedConnection::open(&path).is_err());
     }
@@ -357,7 +358,7 @@ mod tests {
         }
 
         let bytes = std::fs::read(&path).unwrap();
-        assert_eq!(&bytes[..8], b"UQACDB2\0");
+        assert_eq!(&bytes[..8], b"UQACDB3\0");
 
         let mc = ManagedConnection::open_compressed(&path, options).unwrap();
         let count: i64 = mc
