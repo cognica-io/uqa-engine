@@ -54,11 +54,7 @@ impl FDWHandler for ArrowIpcHandler {
             .options
             .get("source")
             .ok_or_else(|| ArrowIpcPrepareError::MissingSource(table.name.clone()))?;
-        let format = table
-            .options
-            .get("format")
-            .map(|s| s.as_str())
-            .unwrap_or("file");
+        let format = table.options.get("format").map_or("file", String::as_str);
         let file = File::open(source)?;
         let mut out = Vec::new();
         match format {

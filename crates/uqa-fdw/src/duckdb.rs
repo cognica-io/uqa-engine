@@ -155,8 +155,7 @@ impl DuckDBHandler {
             .server
             .options
             .get("database")
-            .map(String::as_str)
-            .unwrap_or(":memory:");
+            .map_or(":memory:", String::as_str);
         let conn = if database == ":memory:" {
             ::duckdb::Connection::open_in_memory()?
         } else {
@@ -257,10 +256,9 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
         Value::Temporal(TemporalValue::Time { micros }) => {
             DuckValue::Time64(TimeUnit::Microsecond, *micros)
         }
-        Value::Temporal(TemporalValue::Timestamp { micros })
-        | Value::Temporal(TemporalValue::TimestampTz { micros }) => {
-            DuckValue::Timestamp(TimeUnit::Microsecond, *micros)
-        }
+        Value::Temporal(
+            TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
+        ) => DuckValue::Timestamp(TimeUnit::Microsecond, *micros),
         Value::Temporal(TemporalValue::TimeTz { .. }) => DuckValue::Text(value_to_string(value)),
         Value::List(items) => DuckValue::List(
             items
@@ -300,7 +298,7 @@ fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Value {
         DuckValue::Timestamp(unit, v) => Value::Temporal(TemporalValue::Timestamp {
             micros: unit.to_micros(v),
         }),
-        DuckValue::Text(v) => Value::Str(v),
+        DuckValue::Text(v) | DuckValue::Enum(v) => Value::Str(v),
         DuckValue::Blob(v) => Value::Bytes(v),
         DuckValue::Date32(days) => Value::Temporal(TemporalValue::Date { days }),
         DuckValue::Time64(unit, v) => Value::Temporal(TemporalValue::Time {
@@ -314,7 +312,6 @@ fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Value {
         DuckValue::List(items) | DuckValue::Array(items) => {
             Value::List(items.into_iter().map(duck_value_to_uqa).collect())
         }
-        DuckValue::Enum(v) => Value::Str(v),
         DuckValue::Struct(fields) => Value::Map(
             fields
                 .iter()
