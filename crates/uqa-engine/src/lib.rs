@@ -225,10 +225,25 @@ pub struct SequenceState {
     pub current: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct TransactionFrame {
     storage_savepoint: Option<String>,
     savepoints: std::collections::BTreeSet<String>,
+    data_snapshot: Option<EngineDataSnapshot>,
+    data_savepoints: BTreeMap<String, EngineDataSnapshot>,
+}
+
+#[derive(Clone)]
+struct EngineDataSnapshot {
+    tables: BTreeMap<String, TableDataSnapshot>,
+    sequences: BTreeMap<String, SequenceState>,
+}
+
+#[derive(Clone)]
+struct TableDataSnapshot {
+    state: Arc<TableState>,
+    documents: Vec<(DocId, Document)>,
+    next_id: u64,
 }
 
 struct TableState {
@@ -2498,6 +2513,8 @@ impl Engine {
         stack.push(TransactionFrame {
             storage_savepoint,
             savepoints: std::collections::BTreeSet::new(),
+            data_snapshot: self.snapshot_transaction_data(),
+            data_savepoints: BTreeMap::new(),
         });
         Ok(())
     }
@@ -2546,6 +2563,9 @@ impl Engine {
                     .map_err(|err| Self::storage_tx_error("ROLLBACK", &err))?;
             }
         }
+        if let Some(snapshot) = stack.last().and_then(|frame| frame.data_snapshot.clone()) {
+            self.restore_transaction_data(&snapshot);
+        }
         stack.pop();
         Ok(())
     }
@@ -2562,6 +2582,9 @@ impl Engine {
             backend
                 .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
+        }
+        if let Some(snapshot) = self.snapshot_transaction_data() {
+            frame.data_savepoints.insert(name.clone(), snapshot);
         }
         frame.savepoints.insert(name);
         Ok(())
@@ -2581,6 +2604,7 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
         frame.savepoints.remove(name);
+        frame.data_savepoints.remove(name);
         Ok(())
     }
 
@@ -2600,11 +2624,82 @@ impl Engine {
                 .rollback_to_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
         }
+        if let Some(snapshot) = frame.data_savepoints.get(name).cloned() {
+            self.restore_transaction_data(&snapshot);
+        }
         Ok(())
     }
 
     fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {
         SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+    }
+
+    fn snapshot_transaction_data(&self) -> Option<EngineDataSnapshot> {
+        if self.backend.is_some() {
+            return None;
+        }
+        let mut tables = BTreeMap::new();
+        for (name, table) in self.tables.read().iter() {
+            let documents = table.document_store.read().iter_all().collect();
+            let next_id = *table.next_id.lock();
+            tables.insert(
+                name.clone(),
+                TableDataSnapshot {
+                    state: table.clone(),
+                    documents,
+                    next_id,
+                },
+            );
+        }
+        Some(EngineDataSnapshot {
+            tables,
+            sequences: self.sequences_snapshot(),
+        })
+    }
+
+    fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) {
+        {
+            let mut tables = self.tables.write();
+            tables.retain(|name, _| snapshot.tables.contains_key(name));
+            for (name, table_snapshot) in &snapshot.tables {
+                tables
+                    .entry(name.clone())
+                    .or_insert_with(|| table_snapshot.state.clone());
+            }
+        }
+        for (name, table_snapshot) in &snapshot.tables {
+            let Some(table) = self.table(name) else {
+                continue;
+            };
+            table.document_store.write().clear();
+            table.inverted_index.write().clear();
+            for index in table.vector_indexes.write().values_mut() {
+                index.clear();
+            }
+            for (doc_id, document) in &table_snapshot.documents {
+                let vectors = Self::document_vector_values(&table, document);
+                self.add_document_with_vectors(name, *doc_id, document.clone(), vectors);
+            }
+            *table.next_id.lock() = table_snapshot.next_id;
+        }
+        *self.sequences.write() = snapshot.sequences.clone();
+    }
+
+    fn document_vector_values(
+        table: &Arc<TableState>,
+        document: &Document,
+    ) -> BTreeMap<FieldName, Vec<f32>> {
+        let vector_fields: Vec<FieldName> = table.vector_indexes.read().keys().cloned().collect();
+        let mut vectors = BTreeMap::new();
+        for field in vector_fields {
+            let Some(value) = document.get(&field) else {
+                continue;
+            };
+            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
+                vectors.insert(field, vector);
+            }
+        }
+        vectors
     }
 
     /// Drop a table from the catalog and release its in-memory state.
@@ -2803,6 +2898,10 @@ impl Engine {
                     local_columns: vec![col.name.clone()],
                     ref_table: reference.table,
                     ref_columns: vec![reference.column],
+                    on_update: reference.on_update,
+                    on_delete: reference.on_delete,
+                    on_delete_set_columns: Vec::new(),
+                    match_type: reference.match_type,
                 });
             }
         }
@@ -3103,7 +3202,7 @@ impl Engine {
         true
     }
 
-    fn rewrite_document(&self, table: &str, doc_id: DocId, document: Document) {
+    pub(crate) fn rewrite_document(&self, table: &str, doc_id: DocId, document: Document) {
         let Some(t) = self.table(table) else {
             return;
         };

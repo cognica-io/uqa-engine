@@ -81,6 +81,12 @@ pub struct ColumnDef {
 pub struct ForeignKeyRef {
     pub table: String,
     pub column: String,
+    #[serde(default)]
+    pub on_update: ForeignKeyAction,
+    #[serde(default)]
+    pub on_delete: ForeignKeyAction,
+    #[serde(default)]
+    pub match_type: ForeignKeyMatch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +121,34 @@ pub struct ForeignKey {
     pub local_columns: Vec<String>,
     pub ref_table: String,
     pub ref_columns: Vec<String>,
+    #[serde(default)]
+    pub on_update: ForeignKeyAction,
+    #[serde(default)]
+    pub on_delete: ForeignKeyAction,
+    /// Optional column subset for `ON DELETE SET NULL (...)` and
+    /// `ON DELETE SET DEFAULT (...)`. Empty means every local FK
+    /// column participates.
+    #[serde(default)]
+    pub on_delete_set_columns: Vec<String>,
+    #[serde(default)]
+    pub match_type: ForeignKeyMatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ForeignKeyAction {
+    #[default]
+    NoAction,
+    Restrict,
+    Cascade,
+    SetNull,
+    SetDefault,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ForeignKeyMatch {
+    #[default]
+    Simple,
+    Full,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

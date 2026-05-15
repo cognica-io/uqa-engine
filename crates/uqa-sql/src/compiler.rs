@@ -914,11 +914,25 @@ fn compile_create_table(stmt: &pg_query::protobuf::CreateStmt) -> Result<CreateT
                         } else {
                             Some(cstr.conname.clone())
                         };
+                        let on_delete_set_columns: Vec<String> = cstr
+                            .fk_del_set_cols
+                            .iter()
+                            .filter_map(|n| extract_string(n).ok())
+                            .collect();
+                        validate_foreign_key_set_columns(
+                            &local_columns,
+                            &on_delete_set_columns,
+                            &cstr.fk_del_action,
+                        )?;
                         foreign_keys.push(ForeignKey {
                             name: cname,
                             local_columns,
                             ref_table,
                             ref_columns,
+                            on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
+                            on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
+                            on_delete_set_columns,
+                            match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
                         });
                     }
                 }
@@ -978,7 +992,13 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
                         .find_map(|n| extract_string(n).ok())
                         .unwrap_or_default();
                     if !table.is_empty() && !column.is_empty() {
-                        references = Some(crate::ast::ForeignKeyRef { table, column });
+                        references = Some(crate::ast::ForeignKeyRef {
+                            table,
+                            column,
+                            on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
+                            on_delete: compile_foreign_key_action(&cstr.fk_del_action)?,
+                            match_type: compile_foreign_key_match(&cstr.fk_matchtype)?,
+                        });
                     }
                 }
                 _ => {}
@@ -1000,6 +1020,61 @@ fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnDef> 
         check,
         references,
     })
+}
+
+fn compile_foreign_key_action(raw: &str) -> Result<crate::ast::ForeignKeyAction> {
+    use crate::ast::ForeignKeyAction;
+    match raw.as_bytes().first().copied() {
+        None | Some(0) | Some(b'a') => Ok(ForeignKeyAction::NoAction),
+        Some(b'r') => Ok(ForeignKeyAction::Restrict),
+        Some(b'c') => Ok(ForeignKeyAction::Cascade),
+        Some(b'n') => Ok(ForeignKeyAction::SetNull),
+        Some(b'd') => Ok(ForeignKeyAction::SetDefault),
+        Some(other) => Err(SQLError::Unsupported(format!(
+            "unsupported FOREIGN KEY action byte {other:?}"
+        ))),
+    }
+}
+
+fn compile_foreign_key_match(raw: &str) -> Result<crate::ast::ForeignKeyMatch> {
+    use crate::ast::ForeignKeyMatch;
+    match raw.as_bytes().first().copied() {
+        None | Some(0) | Some(b's') => Ok(ForeignKeyMatch::Simple),
+        Some(b'f') => Ok(ForeignKeyMatch::Full),
+        Some(b'p') => Err(SQLError::Unsupported(
+            "FOREIGN KEY MATCH PARTIAL is not implemented by PostgreSQL".into(),
+        )),
+        Some(other) => Err(SQLError::Unsupported(format!(
+            "unsupported FOREIGN KEY match byte {other:?}"
+        ))),
+    }
+}
+
+fn validate_foreign_key_set_columns(
+    local_columns: &[String],
+    set_columns: &[String],
+    raw_delete_action: &str,
+) -> Result<()> {
+    if set_columns.is_empty() {
+        return Ok(());
+    }
+    let action = compile_foreign_key_action(raw_delete_action)?;
+    if !matches!(
+        action,
+        crate::ast::ForeignKeyAction::SetNull | crate::ast::ForeignKeyAction::SetDefault
+    ) {
+        return Err(SQLError::Unsupported(
+            "FOREIGN KEY column lists are only valid for ON DELETE SET NULL/DEFAULT".into(),
+        ));
+    }
+    for col in set_columns {
+        if !local_columns.iter().any(|local| local == col) {
+            return Err(SQLError::Unsupported(format!(
+                "FOREIGN KEY SET column `{col}` is not part of the local key"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn raw_type_name(col: &pg_query::protobuf::ColumnDef) -> Option<String> {
