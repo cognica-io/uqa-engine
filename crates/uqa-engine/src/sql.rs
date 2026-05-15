@@ -43,6 +43,8 @@ use uqa_storage::document_store::Document;
 
 use crate::{Engine, IVFIndexParams, ScoredEntry};
 
+mod age_cypher;
+
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
 
@@ -2612,8 +2614,88 @@ fn run_query_block(
 
     // Pure projection: use the Volcano Project + Sort + Limit chain.
     let projected = volcano_project_sort_limit(engine, &filtered, stmt, params)?;
-    let columns = projection_columns(&stmt.projections);
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        from,
+    );
     Ok(SQLResult::from_rows(columns, projected))
+}
+
+fn expand_from_star_columns(
+    columns: Vec<String>,
+    projections: &[Projection],
+    from: &FromClause,
+) -> Vec<String> {
+    let has_star = projections.iter().any(|p| matches!(p.expr, Expr::Star));
+    if !has_star {
+        return columns;
+    }
+    let source_cols = from_clause_output_columns(from);
+    if source_cols.is_empty() {
+        return columns;
+    }
+    let mut out = Vec::with_capacity(columns.len() + source_cols.len());
+    for column in columns {
+        if column == "*" {
+            out.extend(source_cols.iter().cloned());
+        } else {
+            out.push(column);
+        }
+    }
+    out
+}
+
+fn from_clause_output_columns(from: &FromClause) -> Vec<String> {
+    match from {
+        FromClause::Function {
+            name,
+            alias,
+            column_aliases,
+            ..
+        } => {
+            let cols = if column_aliases.is_empty() {
+                vec![name.clone()]
+            } else {
+                column_aliases.clone()
+            };
+            qualify_output_columns(alias.as_deref(), cols)
+        }
+        FromClause::Values {
+            rows,
+            alias,
+            column_aliases,
+        } => {
+            let cols = if column_aliases.is_empty() {
+                let width = rows.first().map_or(0, Vec::len);
+                (0..width).map(|idx| format!("column{}", idx + 1)).collect()
+            } else {
+                column_aliases.clone()
+            };
+            qualify_output_columns(alias.as_deref(), cols)
+        }
+        FromClause::Subquery {
+            alias,
+            column_aliases,
+            ..
+        } => qualify_output_columns(alias.as_deref(), column_aliases.clone()),
+        FromClause::Join { left, right, .. } => {
+            let mut cols = from_clause_output_columns(left);
+            cols.extend(from_clause_output_columns(right));
+            cols
+        }
+        FromClause::Table { .. } => Vec::new(),
+    }
+}
+
+fn qualify_output_columns(alias: Option<&str>, columns: Vec<String>) -> Vec<String> {
+    match alias {
+        Some(a) => columns
+            .into_iter()
+            .map(|column| format!("{a}.{column}"))
+            .collect(),
+        None => columns,
+    }
 }
 
 fn volcano_project_sort_limit(
@@ -3389,7 +3471,11 @@ fn run_joined_select(
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    let columns = projection_columns(&stmt.projections);
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        from,
+    );
     let mut rows: Vec<ResultRow> = joined
         .iter()
         .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
@@ -4781,6 +4867,7 @@ fn build_table_function_rows_with_row(
             };
             Ok(vec![r])
         }
+        "cypher" => age_cypher::build_rows(engine, args, &evaluated, qual, column_aliases),
         "rpq" => {
             if evaluated.len() != 3 {
                 return Err(SQLError::TypeMismatch(
@@ -5111,13 +5198,13 @@ fn engine_func_intercept(
                 row.get(SCORE_COLUMN).cloned().unwrap_or(Value::Float(0.0)),
             ))
         }
-        "graph_create" => {
+        "graph_create" | "create_graph" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
             }
             Ok(Some(Value::Bool(true)))
         }
-        "graph_drop" => {
+        "graph_drop" | "drop_graph" => {
             if let Some(eng) = engine {
                 let _ = run_graph_drop(eng, args, params)?;
             }

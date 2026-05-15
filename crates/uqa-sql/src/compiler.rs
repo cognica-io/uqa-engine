@@ -1506,11 +1506,16 @@ fn compile_from_node(node: &Node) -> Result<FromClause> {
                 }
             };
             let (alias, column_aliases) = compile_alias(rf.alias.as_ref());
+            let coldef_aliases = compile_column_definition_aliases(&rf.coldeflist)?;
             Ok(FromClause::Function {
                 name,
                 args,
                 alias,
-                column_aliases,
+                column_aliases: if coldef_aliases.is_empty() {
+                    column_aliases
+                } else {
+                    coldef_aliases
+                },
             })
         }
         other => Err(SQLError::Unsupported(format!("FROM form: {other:?}"))),
@@ -1540,6 +1545,18 @@ fn compile_alias(alias: Option<&pg_query::protobuf::Alias>) -> (Option<String>, 
         .filter_map(|n| extract_string(n).ok())
         .collect();
     (name, cols)
+}
+
+fn compile_column_definition_aliases(nodes: &[Node]) -> Result<Vec<String>> {
+    nodes
+        .iter()
+        .map(|node| match node.node.as_ref() {
+            Some(NodeEnum::ColumnDef(col)) => Ok(col.colname.clone()),
+            other => Err(SQLError::Unsupported(format!(
+                "function column definition: {other:?}"
+            ))),
+        })
+        .collect()
 }
 
 fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<SelectStmt> {

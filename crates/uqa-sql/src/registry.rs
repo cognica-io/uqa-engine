@@ -130,7 +130,9 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("temporal_traverse", FunctionKind::TemporalTraverse);
         m.insert("rpq", FunctionKind::RPQ);
         m.insert("graph_create", FunctionKind::GraphCreate);
+        m.insert("create_graph", FunctionKind::GraphCreate);
         m.insert("graph_drop", FunctionKind::GraphDrop);
+        m.insert("drop_graph", FunctionKind::GraphDrop);
         m.insert("graph_edges", FunctionKind::GraphEdges);
         m.insert("attention", FunctionKind::AttentionFusion);
         m.insert("fuse_attention", FunctionKind::AttentionFusion);
