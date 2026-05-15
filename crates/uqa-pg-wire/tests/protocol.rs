@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use uqa_pg_wire::backend::{sqlstate, TYPE_INT4, TYPE_TEXT};
 use uqa_pg_wire::{
     decode_frontend, decode_startup, encode_all, Authentication, BackendKeyData, BackendMessage,

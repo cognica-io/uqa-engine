@@ -327,7 +327,7 @@ impl SQLiteIVFIndex {
 
     fn save_trained_metadata(&self, snapshot: &IVFMetadataSnapshot) {
         let _ = self.persistent.conn.with_mut(|conn| {
-            let tx = conn.transaction()?;
+            let tx = conn.savepoint()?;
             tx.execute(
                 "INSERT OR REPLACE INTO _ivf_indexes
                     (table_name, field, dimensions, nlist, nprobe, train_threshold,

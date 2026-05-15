@@ -116,7 +116,7 @@ impl SQLiteInvertedIndex {
         let _ = self.ensure_aux_tables(field);
         let table = self.blockmax_table_name(field);
         let _ = self.conn.with_mut(|conn| {
-            let tx = conn.transaction()?;
+            let tx = conn.savepoint()?;
             tx.execute(
                 &format!("DELETE FROM {} WHERE term = ?1", quote_ident(&table)),
                 [term],
@@ -296,7 +296,7 @@ impl SQLiteInvertedIndex {
             by_term.entry(term).or_default().push(doc_id);
         }
         self.conn.with_mut(|conn| {
-            let tx = conn.transaction()?;
+            let tx = conn.savepoint()?;
             tx.execute(&format!("DELETE FROM {}", quote_ident(&table)), [])?;
             for (term, docs) in by_term {
                 for (block_idx, chunk) in docs.chunks(Self::BLOCK_SIZE).enumerate() {
@@ -327,7 +327,7 @@ impl SQLiteInvertedIndex {
             self.ensure_aux_tables(field)?;
         }
         self.conn.with_mut(|conn| {
-            let tx = conn.transaction()?;
+            let tx = conn.savepoint()?;
             // Replacing an existing doc: drop its prior postings + lengths.
             tx.execute(
                 "DELETE FROM _postings WHERE table_name = ?1 AND doc_id = ?2",
@@ -402,7 +402,7 @@ impl SQLiteInvertedIndex {
 
     fn remove_document_inner(&self, doc_id: DocId) -> SQLiteResult<()> {
         self.conn.with_mut(|conn| {
-            let tx = conn.transaction()?;
+            let tx = conn.savepoint()?;
             // Subtract length contributions from _field_stats.
             let mut stmt = tx.prepare(
                 "SELECT field, length FROM _doc_lengths

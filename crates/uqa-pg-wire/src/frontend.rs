@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use std::collections::BTreeMap;
 
 use crate::codec::{message_total_len, DecodeLen, Reader, MESSAGE_HEADER_LEN};

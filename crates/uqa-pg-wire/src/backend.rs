@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use crate::codec::{i16_len, i32_len, Writer};
 use crate::protocol::{FormatCode, PgWireError, TransactionStatus};
 

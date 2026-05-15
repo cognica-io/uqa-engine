@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use thiserror::Error;
 
 pub const PROTOCOL_VERSION_3_0: i32 = 196_608;
