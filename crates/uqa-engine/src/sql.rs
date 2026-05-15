@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::{DocId, TemporalValue, Value};
 use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
+    AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
     CreateTable, DeleteStmt, DropKind, DropStmt, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
     Projection, SelectStmt, SetOpKind, Statement, UpdateStmt, WindowSpec, CTE,
 };
@@ -2089,11 +2089,15 @@ pub(crate) fn run_select(
     // the multi-table executor that builds row tuples up-front and
     // filters them via the expression evaluator.
     if let FromClause::Table { name, alias } = from {
+        if alias.is_none() && engine.foreign_table(name).is_some() {
+            return run_single_foreign_select(engine, name, &stmt, params);
+        }
         // Schema-qualified names (information_schema.tables /
         // pg_catalog.pg_*) and CTE references skip the search-aware
         // fast path because they don't correspond to a registered
         // engine table.
-        let is_virtual = name.contains('.') || engine.table(name).is_none();
+        let is_virtual = name.contains('.')
+            || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
         if alias.is_none() && !has_window(&stmt.projections) && !is_virtual {
             return run_single_table_select(engine, name, &stmt, params);
         }
@@ -2749,6 +2753,204 @@ fn run_single_table_select(
     Ok(SQLResult::from_rows(columns, rows))
 }
 
+fn run_single_foreign_select(
+    engine: &Engine,
+    table: &str,
+    stmt: &SelectStmt,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let predicates = fdw_predicates_from_where(stmt.r#where.as_ref(), params);
+    let scanned = engine
+        .scan_foreign_table(table, None, &predicates, None)
+        .map_err(SQLError::Unsupported)?;
+
+    let filtered = if let Some(filter) = stmt.r#where.as_ref() {
+        let mut out = Vec::with_capacity(scanned.len());
+        for row in scanned {
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
+                out.push(row);
+            }
+        }
+        out
+    } else {
+        scanned
+    };
+
+    if has_aggregate(&stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
+        let columns = projection_columns(&stmt.projections);
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
+        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        return Ok(SQLResult::from_rows(columns, rows));
+    }
+
+    if has_window(&stmt.projections) {
+        let columns = projection_columns(&stmt.projections);
+        let with_windows = compute_window_columns(engine, &stmt.projections, filtered, params)?;
+        let mut rows: Vec<ResultRow> = with_windows
+            .iter()
+            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+            .collect::<Result<_, _>>()?;
+        rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        return Ok(SQLResult::from_rows(columns, rows));
+    }
+
+    let rows = volcano_project_sort_limit(engine, &filtered, stmt, params)?;
+    let columns = expand_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        engine,
+        Some(table),
+    );
+    Ok(SQLResult::from_rows(columns, rows))
+}
+
+fn fdw_predicates_from_where(
+    expr: Option<&Expr>,
+    params: &[SQLParam],
+) -> Vec<uqa_fdw::FDWPredicate> {
+    let Some(expr) = expr else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    collect_fdw_predicates(expr, params, &mut out);
+    out
+}
+
+fn collect_fdw_predicates(expr: &Expr, params: &[SQLParam], out: &mut Vec<uqa_fdw::FDWPredicate>) {
+    match expr {
+        Expr::And(parts) => {
+            for part in parts {
+                collect_fdw_predicates(part, params, out);
+            }
+        }
+        _ => {
+            if let Some(predicate) = fdw_predicate(expr, params) {
+                out.push(predicate);
+            }
+        }
+    }
+}
+
+fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredicate> {
+    match expr {
+        Expr::Binary { op, lhs, rhs } => {
+            if let Some(column) = fdw_column_name(lhs) {
+                let value = fdw_const_value(rhs, params)?;
+                return Some(uqa_fdw::FDWPredicate {
+                    column,
+                    operator: fdw_binary_op(*op)?,
+                    value,
+                });
+            }
+            if let Some(column) = fdw_column_name(rhs) {
+                let value = fdw_const_value(lhs, params)?;
+                return Some(uqa_fdw::FDWPredicate {
+                    column,
+                    operator: fdw_reversed_binary_op(*op)?,
+                    value,
+                });
+            }
+            None
+        }
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } if !negated => {
+            let column = fdw_column_name(expr)?;
+            let values = list
+                .iter()
+                .map(|item| fdw_const_value(item, params))
+                .collect::<Option<Vec<_>>>()?;
+            Some(uqa_fdw::FDWPredicate {
+                column,
+                operator: uqa_fdw::PredicateOp::In,
+                value: Value::List(values),
+            })
+        }
+        Expr::IsNull { expr, negated } => Some(uqa_fdw::FDWPredicate {
+            column: fdw_column_name(expr)?,
+            operator: if *negated {
+                uqa_fdw::PredicateOp::NotEq
+            } else {
+                uqa_fdw::PredicateOp::Eq
+            },
+            value: Value::Null,
+        }),
+        Expr::Func { name, args, .. } => fdw_like_predicate(name, args, false, params),
+        Expr::Not(inner) => match inner.as_ref() {
+            Expr::Func { name, args, .. } => fdw_like_predicate(name, args, true, params),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn fdw_like_predicate(
+    name: &str,
+    args: &[Expr],
+    negated: bool,
+    params: &[SQLParam],
+) -> Option<uqa_fdw::FDWPredicate> {
+    if args.len() != 2 {
+        return None;
+    }
+    let lower = name.to_ascii_lowercase();
+    let operator = match (lower.as_str(), negated) {
+        ("like", false) => uqa_fdw::PredicateOp::Like,
+        ("like", true) => uqa_fdw::PredicateOp::NotLike,
+        ("ilike", false) => uqa_fdw::PredicateOp::ILike,
+        ("ilike", true) => uqa_fdw::PredicateOp::NotILike,
+        _ => return None,
+    };
+    Some(uqa_fdw::FDWPredicate {
+        column: fdw_column_name(&args[0])?,
+        operator,
+        value: fdw_const_value(&args[1], params)?,
+    })
+}
+
+fn fdw_column_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Column(name) => Some(name.clone()),
+        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
+        _ => None,
+    }
+}
+
+fn fdw_const_value(expr: &Expr, params: &[SQLParam]) -> Option<Value> {
+    let ctx = uqa_sql::expr::EvalContext::new(None, params);
+    uqa_sql::expr::eval(expr, &ctx).ok()
+}
+
+fn fdw_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
+    Some(match op {
+        BinaryOp::Equal => uqa_fdw::PredicateOp::Eq,
+        BinaryOp::NotEqual => uqa_fdw::PredicateOp::NotEq,
+        BinaryOp::Less => uqa_fdw::PredicateOp::Lt,
+        BinaryOp::LessEqual => uqa_fdw::PredicateOp::LtEq,
+        BinaryOp::Greater => uqa_fdw::PredicateOp::Gt,
+        BinaryOp::GreaterEqual => uqa_fdw::PredicateOp::GtEq,
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => return None,
+    })
+}
+
+fn fdw_reversed_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
+    Some(match op {
+        BinaryOp::Equal => uqa_fdw::PredicateOp::Eq,
+        BinaryOp::NotEqual => uqa_fdw::PredicateOp::NotEq,
+        BinaryOp::Less => uqa_fdw::PredicateOp::Gt,
+        BinaryOp::LessEqual => uqa_fdw::PredicateOp::GtEq,
+        BinaryOp::Greater => uqa_fdw::PredicateOp::Lt,
+        BinaryOp::GreaterEqual => uqa_fdw::PredicateOp::LtEq,
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => return None,
+    })
+}
+
 fn facet_projection_fields(projections: &[Projection]) -> Result<Option<Vec<String>>, SQLError> {
     if projections.len() != 1 {
         return Ok(None);
@@ -2829,7 +3031,14 @@ fn expand_star_columns(
         return columns;
     }
     let schema_cols: Vec<String> = match table {
-        Some(t) => engine.table_columns(t),
+        Some(t) => {
+            let cols = engine.table_columns(t);
+            if cols.is_empty() {
+                engine.foreign_table_columns(t)
+            } else {
+                cols
+            }
+        }
         None => Vec::new(),
     };
     if schema_cols.is_empty() {
@@ -3545,6 +3754,12 @@ fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
 fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow {
     let qual = qualifier_for(table, alias);
     let mut out = ResultRow::new();
+    if engine.table(table).is_none() {
+        for column in engine.foreign_table_columns(table) {
+            out.insert(format!("{qual}.{column}"), Value::Null);
+        }
+        return out;
+    }
     // Emit NULLs for any column that ever appeared in the table; for an
     // empty table we still know the keys via document_count, but the
     // safe default is just an empty row - a missing key resolves to
@@ -3599,6 +3814,12 @@ fn build_join_rows_with_ctes(
             }
             // information_schema / pg_catalog virtual views.
             if let Some(rows) = build_info_schema_rows(engine, name) {
+                return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
+            }
+            if engine.foreign_table(name).is_some() {
+                let rows = engine
+                    .scan_foreign_table(name, None, &[], None)
+                    .map_err(SQLError::Unsupported)?;
                 return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
             }
             if engine.table(name).is_none() {

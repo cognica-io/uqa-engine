@@ -14,6 +14,7 @@
 //! filtering, and a row limit before returning.
 
 pub mod arrow_flight;
+pub mod arrow_ipc;
 pub mod duckdb;
 
 pub use arrow_flight::{
@@ -21,9 +22,11 @@ pub use arrow_flight::{
     prepare_query as arrow_flight_prepare_query, quote_literal as arrow_flight_quote_literal,
     ArrowFlightPrepareError,
 };
+pub use arrow_ipc::ArrowIpcHandler as ArrowHandler;
+pub use arrow_ipc::{ArrowIpcHandler, ArrowIpcPrepareError};
 pub use duckdb::{
     build_where_clause as build_duckdb_where_clause, normalize_source as duckdb_normalize_source,
-    prepare_query as duckdb_prepare_query, DuckDBPrepareError, FILE_READERS,
+    prepare_query as duckdb_prepare_query, DuckDBHandler, DuckDBPrepareError, FILE_READERS,
 };
 
 use std::collections::BTreeMap;
@@ -110,14 +113,32 @@ pub struct FDWPredicate {
 
 pub type Row = BTreeMap<String, Value>;
 
+#[derive(Debug, thiserror::Error)]
+pub enum FDWError {
+    #[error(transparent)]
+    DuckDBPrepare(#[from] DuckDBPrepareError),
+    #[error(transparent)]
+    ArrowIpcPrepare(#[from] ArrowIpcPrepareError),
+    #[error(transparent)]
+    DuckDB(#[from] ::duckdb::Error),
+    #[error(transparent)]
+    Arrow(#[from] arrow_schema::ArrowError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("Unsupported FDW value: {0}")]
+    UnsupportedValue(String),
+    #[error("{0}")]
+    Other(String),
+}
+
 pub trait FDWHandler: Send + Sync {
     fn scan(
         &self,
         table: &ForeignTable,
         columns: Option<&[String]>,
         predicates: &[FDWPredicate],
-        limit: Option<usize>,
-    ) -> Vec<Row>;
+        limit: Option<u64>,
+    ) -> Result<Vec<Row>, FDWError>;
 
     fn close(&self) {}
 }
@@ -146,36 +167,43 @@ impl FDWHandler for MemoryHandler {
         table: &ForeignTable,
         columns: Option<&[String]>,
         predicates: &[FDWPredicate],
-        limit: Option<usize>,
-    ) -> Vec<Row> {
+        limit: Option<u64>,
+    ) -> Result<Vec<Row>, FDWError> {
         let Some(rows) = self.tables.get(&table.name) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let mut out: Vec<Row> = Vec::new();
         for row in rows {
             if let Some(cap) = limit {
-                if out.len() >= cap {
+                if out.len() as u64 >= cap {
                     break;
                 }
             }
-            if !predicates.iter().all(|p| eval_predicate(p, row)) {
+            if !row_matches_predicates(row, predicates) {
                 continue;
             }
-            let projected = match columns {
-                Some(cols) => {
-                    let mut keep = Row::new();
-                    for col in cols {
-                        if let Some(v) = row.get(col) {
-                            keep.insert(col.clone(), v.clone());
-                        }
-                    }
-                    keep
-                }
-                None => row.clone(),
-            };
-            out.push(projected);
+            out.push(project_row(row, columns));
         }
-        out
+        Ok(out)
+    }
+}
+
+pub(crate) fn row_matches_predicates(row: &Row, predicates: &[FDWPredicate]) -> bool {
+    predicates.iter().all(|p| eval_predicate(p, row))
+}
+
+pub(crate) fn project_row(row: &Row, columns: Option<&[String]>) -> Row {
+    match columns {
+        Some(cols) => {
+            let mut keep = Row::new();
+            for col in cols {
+                if let Some(v) = row.get(col) {
+                    keep.insert(col.clone(), v.clone());
+                }
+            }
+            keep
+        }
+        None => row.clone(),
     }
 }
 
@@ -309,7 +337,7 @@ mod tests {
                 ]),
             ],
         );
-        let rows = handler.scan(&books_table(), None, &[], None);
+        let rows = handler.scan(&books_table(), None, &[], None).unwrap();
         assert_eq!(rows.len(), 2);
     }
 
@@ -324,16 +352,18 @@ mod tests {
                 row(&[("id", Value::Int(3)), ("year", Value::Int(2024))]),
             ],
         );
-        let rows = handler.scan(
-            &books_table(),
-            None,
-            &[FDWPredicate {
-                column: "year".into(),
-                operator: PredicateOp::Eq,
-                value: Value::Int(2024),
-            }],
-            None,
-        );
+        let rows = handler
+            .scan(
+                &books_table(),
+                None,
+                &[FDWPredicate {
+                    column: "year".into(),
+                    operator: PredicateOp::Eq,
+                    value: Value::Int(2024),
+                }],
+                None,
+            )
+            .unwrap();
         assert_eq!(rows.len(), 2);
         assert!(rows
             .iter()
@@ -352,7 +382,9 @@ mod tests {
             ])],
         );
         let cols = ["title".to_string()];
-        let rows = handler.scan(&books_table(), Some(&cols), &[], None);
+        let rows = handler
+            .scan(&books_table(), Some(&cols), &[], None)
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].len(), 1);
         assert!(rows[0].contains_key("title"));
@@ -364,7 +396,7 @@ mod tests {
         let mut handler = MemoryHandler::new();
         let rs: Vec<Row> = (0..10).map(|i| row(&[("id", Value::Int(i))])).collect();
         handler.load("books", rs);
-        let rows = handler.scan(&books_table(), None, &[], Some(3));
+        let rows = handler.scan(&books_table(), None, &[], Some(3)).unwrap();
         assert_eq!(rows.len(), 3);
     }
 
@@ -387,16 +419,18 @@ mod tests {
                 row(&[("id", Value::Int(3))]),
             ],
         );
-        let rows = handler.scan(
-            &books_table(),
-            None,
-            &[FDWPredicate {
-                column: "id".into(),
-                operator: PredicateOp::In,
-                value: Value::List(vec![Value::Int(1), Value::Int(3)]),
-            }],
-            None,
-        );
+        let rows = handler
+            .scan(
+                &books_table(),
+                None,
+                &[FDWPredicate {
+                    column: "id".into(),
+                    operator: PredicateOp::In,
+                    value: Value::List(vec![Value::Int(1), Value::Int(3)]),
+                }],
+                None,
+            )
+            .unwrap();
         assert_eq!(rows.len(), 2);
     }
 }

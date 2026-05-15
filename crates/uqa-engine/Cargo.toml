@@ -35,6 +35,10 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
+duckdb = { version = "=1.10502.0", features = ["bundled", "parquet"] }
+arrow-array = "54"
+arrow-ipc = "54"
+arrow-schema = "54"
 
 [[bench]]
 name = "sql_e2e"

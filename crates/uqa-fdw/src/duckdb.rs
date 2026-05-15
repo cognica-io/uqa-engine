@@ -7,14 +7,10 @@
 //! `DuckDBFDWHandler`: in-process `DuckDB` foreign data wrapper.
 //!
 //! 1:1 port of `uqa.fdw.duckdb_handler`. The Rust port owns the SQL
-//! generation half: source-string normalization
+//! generation and execution path: source-string normalization
 //! ([`normalize_source`]), parameterized `WHERE` clause assembly
-//! ([`build_where_clause`]), and the full `SELECT` builder
-//! ([`prepare_query`]). The actual `duckdb` execution is left to the
-//! caller because pulling the `duckdb` C library into every Rust
-//! workspace consumer is heavy; callers that need execution wire up
-//! the optional `duckdb` crate at the integration boundary and run
-//! the prepared `(sql, params)` tuple themselves.
+//! ([`build_where_clause`]), full `SELECT` builder ([`prepare_query`]),
+//! and row materialization through the `duckdb` Rust crate.
 //!
 //! Server options (passed at the [`crate::ForeignServer`] level):
 //!
@@ -31,9 +27,9 @@
 //! * `hive_partitioning` -- `"true"` to enable Hive-style partition
 //!   discovery on auto-wrapped sources.
 
-use uqa_core::Value;
+use uqa_core::{TemporalValue, Value};
 
-use crate::{FDWPredicate, ForeignTable, PredicateOp};
+use crate::{FDWError, FDWHandler, FDWPredicate, ForeignServer, ForeignTable, PredicateOp, Row};
 
 /// File extensions `DuckDB` reads natively via `read_*` table
 /// functions. Mirrors `_FILE_READERS` in the Python reference.
@@ -142,6 +138,223 @@ pub fn prepare_query(
     }
 
     Ok((sql, params))
+}
+
+#[derive(Debug, Clone)]
+pub struct DuckDBHandler {
+    server: ForeignServer,
+}
+
+impl DuckDBHandler {
+    pub fn new(server: ForeignServer) -> Self {
+        Self { server }
+    }
+
+    fn open_connection(&self) -> Result<::duckdb::Connection, FDWError> {
+        let database = self
+            .server
+            .options
+            .get("database")
+            .map(String::as_str)
+            .unwrap_or(":memory:");
+        let conn = if database == ":memory:" {
+            ::duckdb::Connection::open_in_memory()?
+        } else {
+            ::duckdb::Connection::open(database)?
+        };
+        apply_server_options(&conn, &self.server)?;
+        Ok(conn)
+    }
+}
+
+impl FDWHandler for DuckDBHandler {
+    fn scan(
+        &self,
+        table: &ForeignTable,
+        columns: Option<&[String]>,
+        predicates: &[FDWPredicate],
+        limit: Option<u64>,
+    ) -> Result<Vec<Row>, FDWError> {
+        let (sql, params) = prepare_query(table, columns, predicates, limit)?;
+        let conn = self.open_connection()?;
+        let mut stmt = conn.prepare(&sql)?;
+        let output_columns = output_columns(table, columns);
+        let bind_values = params
+            .iter()
+            .map(uqa_value_to_duck_value)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mapped = stmt.query_map(::duckdb::params_from_iter(bind_values.iter()), |row| {
+            let mut out = Row::new();
+            for (idx, name) in output_columns.iter().enumerate() {
+                let value: ::duckdb::types::Value = row.get(idx)?;
+                out.insert(name.clone(), duck_value_to_uqa(value));
+            }
+            Ok(out)
+        })?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(row?);
+        }
+        Ok(rows)
+    }
+}
+
+fn output_columns(table: &ForeignTable, columns: Option<&[String]>) -> Vec<String> {
+    match columns {
+        Some(cols) if !cols.is_empty() => cols.to_vec(),
+        _ => table.columns.iter().map(|c| c.name.clone()).collect(),
+    }
+}
+
+fn apply_server_options(
+    conn: &::duckdb::Connection,
+    server: &ForeignServer,
+) -> Result<(), FDWError> {
+    if let Some(extensions) = server.options.get("extensions") {
+        for ext in extensions
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if !ext.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(FDWError::Other(format!(
+                    "Invalid DuckDB extension name `{ext}`"
+                )));
+            }
+            conn.execute_batch(&format!("LOAD {ext}"))?;
+        }
+    }
+
+    for key in [
+        "s3_region",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        "s3_endpoint",
+        "s3_url_style",
+    ] {
+        if let Some(value) = server.options.get(key) {
+            conn.execute_batch(&format!("SET {key} = {}", quote_literal(value)))?;
+        }
+    }
+    Ok(())
+}
+
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWError> {
+    use ::duckdb::types::{TimeUnit, Value as DuckValue};
+    Ok(match value {
+        Value::Null => DuckValue::Null,
+        Value::Bool(v) => DuckValue::Boolean(*v),
+        Value::Int(v) => DuckValue::BigInt(*v),
+        Value::Float(v) => DuckValue::Double(*v),
+        Value::Str(v) => DuckValue::Text(v.clone()),
+        Value::Bytes(v) => DuckValue::Blob(v.clone()),
+        Value::Temporal(TemporalValue::Date { days }) => DuckValue::Date32(*days),
+        Value::Temporal(TemporalValue::Time { micros }) => {
+            DuckValue::Time64(TimeUnit::Microsecond, *micros)
+        }
+        Value::Temporal(TemporalValue::Timestamp { micros })
+        | Value::Temporal(TemporalValue::TimestampTz { micros }) => {
+            DuckValue::Timestamp(TimeUnit::Microsecond, *micros)
+        }
+        Value::Temporal(TemporalValue::TimeTz { .. }) => DuckValue::Text(value_to_string(value)),
+        Value::List(items) => DuckValue::List(
+            items
+                .iter()
+                .map(uqa_value_to_duck_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Map(_) => {
+            return Err(FDWError::UnsupportedValue(
+                "map literals cannot be bound to DuckDB parameters".into(),
+            ));
+        }
+    })
+}
+
+fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Value {
+    use ::duckdb::types::Value as DuckValue;
+    match value {
+        DuckValue::Null => Value::Null,
+        DuckValue::Boolean(v) => Value::Bool(v),
+        DuckValue::TinyInt(v) => Value::Int(i64::from(v)),
+        DuckValue::SmallInt(v) => Value::Int(i64::from(v)),
+        DuckValue::Int(v) => Value::Int(i64::from(v)),
+        DuckValue::BigInt(v) => Value::Int(v),
+        DuckValue::HugeInt(v) => i64::try_from(v).map_or(Value::Str(v.to_string()), Value::Int),
+        DuckValue::UTinyInt(v) => Value::Int(i64::from(v)),
+        DuckValue::USmallInt(v) => Value::Int(i64::from(v)),
+        DuckValue::UInt(v) => Value::Int(i64::from(v)),
+        DuckValue::UBigInt(v) => i64::try_from(v).map_or(Value::Str(v.to_string()), Value::Int),
+        DuckValue::Float(v) => Value::Float(f64::from(v)),
+        DuckValue::Double(v) => Value::Float(v),
+        DuckValue::Decimal(v) => {
+            let text = v.to_string();
+            text.parse::<f64>()
+                .map_or_else(|_| Value::Str(text), Value::Float)
+        }
+        DuckValue::Timestamp(unit, v) => Value::Temporal(TemporalValue::Timestamp {
+            micros: unit.to_micros(v),
+        }),
+        DuckValue::Text(v) => Value::Str(v),
+        DuckValue::Blob(v) => Value::Bytes(v),
+        DuckValue::Date32(days) => Value::Temporal(TemporalValue::Date { days }),
+        DuckValue::Time64(unit, v) => Value::Temporal(TemporalValue::Time {
+            micros: unit.to_micros(v),
+        }),
+        DuckValue::Interval {
+            months,
+            days,
+            nanos,
+        } => Value::Str(format!("{months} months {days} days {nanos} nanos")),
+        DuckValue::List(items) | DuckValue::Array(items) => {
+            Value::List(items.into_iter().map(duck_value_to_uqa).collect())
+        }
+        DuckValue::Enum(v) => Value::Str(v),
+        DuckValue::Struct(fields) => Value::Map(
+            fields
+                .iter()
+                .map(|(k, v)| (k.clone(), duck_value_to_uqa(v.clone())))
+                .collect(),
+        ),
+        DuckValue::Map(fields) => Value::Map(
+            fields
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        duck_value_key_to_string(k.clone()),
+                        duck_value_to_uqa(v.clone()),
+                    )
+                })
+                .collect(),
+        ),
+        DuckValue::Union(v) => duck_value_to_uqa(*v),
+    }
+}
+
+fn duck_value_key_to_string(value: ::duckdb::types::Value) -> String {
+    match duck_value_to_uqa(value) {
+        Value::Str(s) => s,
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Temporal(t) => t.to_sql_string(),
+        Value::Null => "null".into(),
+        Value::Bytes(bytes) => format!("<{} bytes>", bytes.len()),
+        Value::List(items) => format!("{items:?}"),
+        Value::Map(map) => format!("{map:?}"),
+    }
+}
+
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::Temporal(t) => t.to_sql_string(),
+        other => format!("{other:?}"),
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -269,5 +482,51 @@ mod tests {
         let cols = ["title".to_string()];
         let (sql, _) = prepare_query(&table, Some(&cols), &[], None).unwrap();
         assert!(sql.starts_with("SELECT title FROM"));
+    }
+
+    #[test]
+    fn duckdb_handler_scans_real_database_with_pushdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("books.duckdb");
+        {
+            let conn = ::duckdb::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE books (id INTEGER, title TEXT, year INTEGER);
+                 INSERT INTO books VALUES
+                   (1, 'Rust', 2024),
+                   (2, 'Python', 2023),
+                   (3, 'UQA', 2024);",
+            )
+            .unwrap();
+        }
+
+        let server = ForeignServer {
+            name: "duck".into(),
+            fdw_type: "duckdb_fdw".into(),
+            options: [(
+                "database".to_string(),
+                db_path.to_string_lossy().into_owned(),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let table = books_table_with_source("books");
+        let handler = DuckDBHandler::new(server);
+        let cols = ["title".to_string()];
+        let rows = handler
+            .scan(
+                &table,
+                Some(&cols),
+                &[FDWPredicate {
+                    column: "year".into(),
+                    operator: PredicateOp::Eq,
+                    value: Value::Int(2024),
+                }],
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("title"), Some(&Value::Str("Rust".into())));
+        assert!(!rows[0].contains_key("id"));
     }
 }

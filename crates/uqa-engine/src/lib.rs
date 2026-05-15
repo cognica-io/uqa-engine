@@ -211,6 +211,10 @@ pub struct Engine {
     foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
     /// `CREATE FOREIGN TABLE` registry. Keyed by table name.
     foreign_tables: RwLock<BTreeMap<String, uqa_fdw::ForeignTable>>,
+    /// Row payloads for `memory_fdw` foreign tables. This keeps the
+    /// reference FDW executable without pretending that memory rows are
+    /// part of the persistent catalog.
+    foreign_memory_tables: RwLock<BTreeMap<String, Vec<uqa_fdw::Row>>>,
 }
 
 /// Mutable state of a single SQL sequence.
@@ -372,6 +376,7 @@ impl Engine {
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
+            foreign_memory_tables: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -776,6 +781,75 @@ impl Engine {
         out
     }
 
+    pub fn foreign_table_columns(&self, table: &str) -> Vec<String> {
+        self.foreign_table(table)
+            .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn load_memory_foreign_table(
+        &self,
+        table_name: impl Into<String>,
+        rows: Vec<uqa_fdw::Row>,
+    ) -> std::result::Result<(), String> {
+        let table_name = table_name.into();
+        let table = self
+            .foreign_table(&table_name)
+            .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
+        let server = self
+            .foreign_server(&table.server_name)
+            .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
+        if server.fdw_type != "memory_fdw" {
+            return Err(format!(
+                "Foreign table `{table_name}` is backed by `{}` not `memory_fdw`",
+                server.fdw_type
+            ));
+        }
+        self.foreign_memory_tables.write().insert(table_name, rows);
+        Ok(())
+    }
+
+    pub(crate) fn scan_foreign_table(
+        &self,
+        table_name: &str,
+        columns: Option<&[String]>,
+        predicates: &[uqa_fdw::FDWPredicate],
+        limit: Option<u64>,
+    ) -> std::result::Result<Vec<uqa_fdw::Row>, String> {
+        use uqa_fdw::FDWHandler as _;
+
+        let table = self
+            .foreign_table(table_name)
+            .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
+        let server = self
+            .foreign_server(&table.server_name)
+            .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
+
+        let rows = match server.fdw_type.as_str() {
+            "memory_fdw" => {
+                let mut handler = uqa_fdw::MemoryHandler::new();
+                let rows = self
+                    .foreign_memory_tables
+                    .read()
+                    .get(table_name)
+                    .cloned()
+                    .unwrap_or_default();
+                handler.load(table_name, rows);
+                handler.scan(&table, columns, predicates, limit)
+            }
+            "duckdb_fdw" => {
+                let handler = uqa_fdw::DuckDBHandler::new(server);
+                handler.scan(&table, columns, predicates, limit)
+            }
+            "arrow_fdw" => {
+                let handler = uqa_fdw::ArrowIpcHandler::new(server);
+                handler.scan(&table, columns, predicates, limit)
+            }
+            other => return Err(format!("Unsupported FDW type: `{other}`")),
+        };
+        rows.map_err(|err| err.to_string())
+    }
+
     // -----------------------------------------------------------------
     // Catalog index registry. Mirrors Python's `_catalog_indexes`
     // table - records the CREATE INDEX statement (name + access
@@ -911,6 +985,7 @@ impl Engine {
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
+            foreign_memory_tables: RwLock::new(BTreeMap::new()),
         };
         let catalog = engine.catalog.as_ref().expect("persistent catalog").clone();
         let backend = engine.backend.as_ref().expect("persistent backend").clone();
@@ -2377,6 +2452,7 @@ impl Engine {
         // the registered handles.
         self.foreign_servers.write().clear();
         self.foreign_tables.write().clear();
+        self.foreign_memory_tables.write().clear();
     }
 
     pub fn run_transaction_statement(

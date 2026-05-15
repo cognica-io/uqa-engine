@@ -90,7 +90,7 @@ proptest! {
             operator: PredicateOp::Eq,
             value: Value::Int(needle),
         };
-        let observed = handler.scan(&table(), None, &[pred], None);
+        let observed = handler.scan(&table(), None, &[pred], None).unwrap();
         let expected: Vec<Row> = rows
             .iter()
             .filter(|r| col(r, "id") == Some(&Value::Int(needle)))
@@ -113,8 +113,8 @@ proptest! {
             operator: PredicateOp::NotEq,
             value: Value::Int(needle),
         };
-        let eq_rows = handler.scan(&table(), None, &[eq], None);
-        let neq_rows = handler.scan(&table(), None, &[neq], None);
+        let eq_rows = handler.scan(&table(), None, &[eq], None).unwrap();
+        let neq_rows = handler.scan(&table(), None, &[neq], None).unwrap();
         // Each of `rows` lands on exactly one side: every row has
         // a non-Null `id`, so `NotEq` covers the complement of `Eq`.
         prop_assert_eq!(eq_rows.len() + neq_rows.len(), rows.len());
@@ -129,7 +129,7 @@ proptest! {
             operator: PredicateOp::Lt,
             value: Value::Int(bound),
         };
-        let observed = handler.scan(&table(), None, &[pred], None);
+        let observed = handler.scan(&table(), None, &[pred], None).unwrap();
         let expected: Vec<Row> = rows
             .iter()
             .filter(|r| matches!(col(r, "score"), Some(Value::Int(s)) if *s < bound))
@@ -147,7 +147,7 @@ proptest! {
             operator: PredicateOp::In,
             value: Value::List(choices.iter().map(|n| Value::Int(*n)).collect()),
         };
-        let observed = handler.scan(&table(), None, &[pred], None);
+        let observed = handler.scan(&table(), None, &[pred], None).unwrap();
         let expected: Vec<Row> = rows
             .iter()
             .filter(|r| {
@@ -176,8 +176,8 @@ proptest! {
             operator: PredicateOp::Eq,
             value: Value::Str(needle),
         };
-        let l = handler.scan(&table(), None, &[like], None);
-        let e = handler.scan(&table(), None, &[eq], None);
+        let l = handler.scan(&table(), None, &[like], None).unwrap();
+        let e = handler.scan(&table(), None, &[eq], None).unwrap();
         prop_assert_eq!(l, e);
     }
 
@@ -192,7 +192,7 @@ proptest! {
             operator: PredicateOp::Like,
             value: Value::Str(pat),
         };
-        let observed = handler.scan(&table(), None, &[pred], None);
+        let observed = handler.scan(&table(), None, &[pred], None).unwrap();
         let expected: Vec<Row> = rows
             .iter()
             .filter(|r| matches!(col(r, "name"), Some(Value::Str(s)) if s.ends_with(&suffix)))
@@ -214,7 +214,9 @@ proptest! {
         };
         let cols = ["id".to_string(), "score".to_string()];
         let projected_then_filtered =
-            handler.scan(&table(), Some(&cols), std::slice::from_ref(&pred), None);
+            handler
+                .scan(&table(), Some(&cols), std::slice::from_ref(&pred), None)
+                .unwrap();
         // Build the oracle: filter rows by score > bound, then project.
         let expected: Vec<Row> = rows
             .iter()
@@ -242,7 +244,9 @@ proptest! {
             operator: PredicateOp::GtEq,
             value: Value::Int(bound),
         };
-        let observed = handler.scan(&table(), None, &[pred], Some(limit));
+        let observed = handler
+            .scan(&table(), None, &[pred], Some(limit as u64))
+            .unwrap();
         prop_assert!(observed.len() <= limit);
         for r in &observed {
             let s = match col(r, "score") {
@@ -258,7 +262,7 @@ proptest! {
 #[test]
 fn scan_unknown_table_returns_empty() {
     let handler = MemoryHandler::new();
-    let rows = handler.scan(&table(), None, &[], None);
+    let rows = handler.scan(&table(), None, &[], None).unwrap();
     assert!(rows.is_empty());
 }
 
@@ -273,6 +277,6 @@ fn empty_predicates_return_all_rows_in_order() {
     };
     let rows = vec![row(1, "a"), row(2, "b"), row(3, "c")];
     let handler = build_handler(rows.clone());
-    let observed = handler.scan(&table(), None, &[], None);
+    let observed = handler.scan(&table(), None, &[], None).unwrap();
     assert_eq!(observed, rows);
 }
