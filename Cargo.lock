@@ -3319,6 +3319,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-pg-wire"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "uqa-planner"
 version = "0.1.0"
 dependencies = [

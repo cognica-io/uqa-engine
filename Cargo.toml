@@ -12,6 +12,7 @@ members = [
     "crates/uqa-planner",
     "crates/uqa-execution",
     "crates/uqa-sql",
+    "crates/uqa-pg-wire",
     "crates/uqa-fdw",
     "crates/uqa-engine",
     "crates/uqa-api",
@@ -43,6 +44,7 @@ uqa-joins = { version = "0.1.0", path = "crates/uqa-joins" }
 uqa-planner = { version = "0.1.0", path = "crates/uqa-planner" }
 uqa-execution = { version = "0.1.0", path = "crates/uqa-execution" }
 uqa-sql = { version = "0.1.0", path = "crates/uqa-sql" }
+uqa-pg-wire = { version = "0.1.0", path = "crates/uqa-pg-wire" }
 uqa-fdw = { version = "0.1.0", path = "crates/uqa-fdw" }
 uqa-engine = { version = "0.1.0", path = "crates/uqa-engine" }
 uqa-api = { version = "0.1.0", path = "crates/uqa-api" }
