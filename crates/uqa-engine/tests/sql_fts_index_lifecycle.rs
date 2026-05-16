@@ -9,9 +9,13 @@
 //! real index backend, and `CREATE TABLE` must not auto-index every TEXT
 //! column.
 
+use std::path::Path;
+
+use rusqlite::params;
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_storage::{document_store::Document, ManagedConnection};
 
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
@@ -29,6 +33,52 @@ fn int_col(row: &uqa_sql::ResultRow, name: &str) -> i64 {
         Some(Value::Int(value)) => *value,
         other => panic!("expected integer column {name}, got {other:?}"),
     }
+}
+
+fn overwrite_document_body(db: &Path, table: &str, doc_id: i64, document: &Document) {
+    let body = serde_json::to_string(&document).unwrap();
+    let conn = ManagedConnection::open(db).unwrap();
+    conn.with(|c| {
+        c.execute(
+            "UPDATE _documents SET body = ?1 WHERE table_name = ?2 AND doc_id = ?3",
+            params![body, table, doc_id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn delete_ivf_metadata(db: &Path, table: &str, field: &str) {
+    let conn = ManagedConnection::open(db).unwrap();
+    conn.with(|c| {
+        c.execute(
+            "DELETE FROM _ivf_indexes WHERE table_name = ?1 AND field = ?2",
+            params![table, field],
+        )?;
+        c.execute(
+            "DELETE FROM _ivf_centroids WHERE table_name = ?1 AND field = ?2",
+            params![table, field],
+        )?;
+        c.execute(
+            "DELETE FROM _ivf_assignments WHERE table_name = ?1 AND field = ?2",
+            params![table, field],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn ivf_metadata_count(db: &Path, table: &str, field: &str) -> i64 {
+    let conn = ManagedConnection::open(db).unwrap();
+    conn.with(|c| {
+        let n = c.query_row(
+            "SELECT COUNT(*) FROM _ivf_indexes WHERE table_name = ?1 AND field = ?2",
+            params![table, field],
+            |r| r.get(0),
+        )?;
+        Ok(n)
+    })
+    .unwrap()
 }
 
 #[test]
@@ -145,5 +195,85 @@ fn gin_analyzer_assignment_persists_and_indexes_new_rows_after_reopen() {
         assert_eq!(stats.rows.len(), 1);
         assert_eq!(stats.rows[0]["analyzer"], Value::Str("standard_cjk".into()));
         assert_eq!(int_col(&stats.rows[0], "doc_length_count"), 2);
+    }
+}
+
+#[test]
+fn reopen_reuses_persisted_gin_postings_without_rebuilding() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO messages (id, content) VALUES (1, 'alpha token')",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX idx_messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    }
+
+    let mut replacement = Document::new();
+    replacement.insert("content".into(), Value::Str("beta token".into()));
+    overwrite_document_body(&db, "messages", 1, &replacement);
+
+    let eng = Engine::open(&db).unwrap();
+    let alpha = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'alpha')",
+            &[],
+        )
+        .unwrap();
+    let beta = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'beta')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(int_col(&alpha.rows[0], "n"), 1);
+    assert_eq!(int_col(&beta.rows[0], "n"), 0);
+}
+
+#[test]
+fn reopen_attaches_ivf_index_without_bootstrap_retraining() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO docs (id, embedding) VALUES \
+             (1, ARRAY[1.0, 0.0]), \
+             (2, ARRAY[0.0, 1.0]), \
+             (3, ARRAY[0.8, 0.2])",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding) \
+             WITH (lists = 2, probes = 1, train_threshold = 2)",
+            &[],
+        )
+        .unwrap();
+    }
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 1);
+    delete_ivf_metadata(&db, "docs", "embedding");
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+
+    {
+        let _eng = Engine::open(&db).unwrap();
+        assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
     }
 }

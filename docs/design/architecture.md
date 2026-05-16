@@ -95,7 +95,10 @@ graph TD
 * `uqa-api` — fluent `QueryBuilder` over the SQL surface; ships every SQL
   function as a typed method.
 * `uqa-cli` — `usql` REPL (multi-line SQL, meta commands, in-memory or
-  SQLite-backed engines).
+  persistent engines). The TTY path uses `rustyline` for editing,
+  persistent prompt history, history hints, completion, and ANSI
+  highlighting; completion combines static SQL keywords, live engine schema
+  names, and `uqa-sql` registry names for UQA functions.
 
 ## Data flow at a glance
 
@@ -168,11 +171,20 @@ buckets the right side by join key once and probes per left row in
 
 ## CLI
 
-`usql` (built from `uqa-cli`) is a multi-line REPL with meta commands.
-Statement history persists to `$UQA_HISTORY` (or `$HOME/.uqa_history`)
-between sessions; `\history` dumps the buffer, `\history clear` deletes
-it. `\open <path>` switches to a SQLite-backed engine; `\new` drops
-back to in-memory.
+`usql` (built from `uqa-cli`) is a multi-line REPL with a Python-compatible
+entrypoint shape: `--db <path>` opens persistent storage, `-c <sql>` executes
+and exits, and positional script files run before the REPL when stdin is
+interactive. Statement history persists to `$UQA_HISTORY` or the Python
+default `$HOME/.cognica/uqa/.usql_history`; `\history` dumps the buffer and
+`\history clear` deletes it. Interactive sessions add readline editing,
+history suggestions, backslash-command completion, table / foreign table /
+column completion from the live engine, and syntax highlighting. UQA function
+names are not duplicated in the CLI; the completer and highlighter ask
+`uqa_sql::registry` for registered SQL functions, so adding a function to the
+compiler registry makes it visible to the shell. Meta commands include the
+Python surface (`\?`, `\dt`, `\d`, `\di`, `\dF`, `\dS`, `\dg`, `\ds`, `\x`,
+`\o`, `\timing`, `\reset`, `\q`) plus Rust migration and engine-switching
+helpers (`\open`, `\new`, `\where`, `\run`, `\migrate-python-db`).
 
 ## Where to read next
 

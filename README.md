@@ -59,7 +59,7 @@ let result = engine.sql(
 )?;
 ```
 
-For an interactive prompt, build the CLI with `cargo run -p uqa-cli --bin usql` and pipe a SQL script in or type at the `usql>` prompt.
+For the interactive shell, run `cargo run -p uqa-cli --bin usql`. It mirrors the Python `usql` entrypoint shape: `--db <path>` opens persistent storage, `-c "SELECT ..."` executes a command and exits, positional `.sql` files run before the REPL, and backslash commands such as `\?`, `\dt`, `\d`, `\di`, `\dF`, `\dS`, `\dg`, `\ds`, `\x`, `\o`, `\timing`, and `\reset` inspect or control the session. On a TTY the shell uses readline editing with persistent prompt history, history suggestions, table/column/function completion, and ANSI SQL syntax highlighting; UQA function completions come from `uqa-sql`'s function registry rather than a duplicated CLI list.
 
 ## Examples
 

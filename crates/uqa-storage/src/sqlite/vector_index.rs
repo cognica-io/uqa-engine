@@ -254,6 +254,21 @@ impl SQLiteIVFIndex {
         idx
     }
 
+    pub fn open_existing(
+        conn: ManagedConnection,
+        table: impl Into<String>,
+        field: impl Into<String>,
+        dimensions: u32,
+        nlist: usize,
+        nprobe: usize,
+        train_threshold: usize,
+    ) -> Self {
+        Self {
+            persistent: SQLiteVectorIndex::new(conn, table, field, dimensions),
+            params: SQLiteIVFParams::new(nlist, nprobe, train_threshold),
+        }
+    }
+
     fn bootstrap_metadata(&self) {
         match self.load_meta().unwrap_or(None) {
             Some(meta)

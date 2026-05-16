@@ -11,6 +11,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **SQLCipher storage:** the bundled SQLite backend now builds against SQLCipher with vendored OpenSSL. `Engine::open` keeps the plaintext initialization path, while `Engine::open_encrypted(path, key)` applies the SQLCipher key before catalog access and reuses the same restore pipeline. The `sqlcipher_encrypted_catalog` example shows create, reopen, and wrong-key failure behavior.
 - **Compressed SQLite containers:** `uqa-storage` now registers a schema-neutral `uqa_compressed` SQLite VFS that stores byte-addressed SQLite files as zstd- or LZ4-compressed chunks. `ManagedConnection::open_compressed` / `Engine::open_compressed` use the compressed container path, and `open_compressed_encrypted` compresses chunks before encrypting them with per-container keys. The `compressed_encrypted_catalog` example shows create, reopen, wrong-key, and plaintext-open failure behavior.
 - **uqa-ml crate:** deep-model specs, deep-fusion CPU inference with dense, CNN, RNN, LSTM, graph, pooling, and attention layers, analytical `deep_learn`, feature-batch `deep_predict`, and optional Apple MLX support through the official `mlx-c` API now live outside `uqa-engine` / `uqa-operators`. The engine keeps catalog persistence and SQL adapters only.
+- **uqa-cli readline shell:** the Rust `usql` TTY now uses readline editing with persistent Python-compatible prompt history, history hints, backslash-command completion, SQL keyword highlighting, and live table/foreign-table/column completion. UQA SQL function completion and highlighting are sourced from the `uqa-sql` function registry instead of a copied CLI-side function list.
+- **Automatic column statistics refresh:** table statistics are invalidated by DML and schema changes, then recomputed lazily when `Engine::column_stats` or `\ds` reads them. Manual `ANALYZE` remains supported for eager refresh, but interactive statistics no longer require it after every data change.
+
+### Fixed
+
+- **Persistent open latency:** `Engine::open` now attaches persisted GIN/IVF metadata without replaying index builds, restores the per-table doc-id watermark with a direct `MAX(doc_id)` lookup, and lazy-loads persisted column statistics on first use instead of deserializing large histogram payloads during database open.
 
 ## [0.1.0] - 2026-05-09
 
@@ -30,7 +36,7 @@ The 0.1.0 release covers all eleven phases of [`docs/plans/0001-uqa-python-to-ru
 - **uqa-engine (Phase 1-9, 11):** schema-aware table store, catalog restore, `Engine::open` SQLite-backed durability, hash-join optimizer (~340x speedup vs nested-loop fallback on the inner-join bench), serializable `DeepModel` JSON persistence with reopen rehydration, named graph workspaces, `text_search` and `hybrid_search` examples. Concurrent-read smoke test.
 - **uqa-fdw (Phase 10):** `ForeignServer`, `ForeignTable`, predicate push-down trait `FDWHandler`, `MemoryHandler` reference impl with SQL LIKE wildcard matcher.
 - **uqa-api (Phase 10):** fluent `QueryBuilder` for the most common read patterns.
-- **uqa-cli (Phase 10):** `usql` REPL with persistent history (`$UQA_HISTORY` override), meta commands, integration test driving the binary via piped stdin.
+- **uqa-cli (Phase 10):** Python-shaped `usql` REPL with `--db`, `-c`, script-file execution, persistent history (`$UQA_HISTORY` override, otherwise `~/.cognica/uqa/.usql_history`), output redirection, expanded display, table/index/FDW/graph/statistics meta commands, and integration tests driving the binary via piped stdin.
 - **Parity (Phase 11):** SQL golden-file harness (in-memory + SQLite paths), BEIR-style relevance fixture (schema v2 with per-scorer floors for `bm25` and `bayesian_bm25`), `cargo deny` supply-chain gate, `cargo doc` rustdoc warning-free policy, libfuzzer scaffold under `fuzz/` for nightly cron, performance baseline doc.
 - **CI:** GitHub Actions workflow with separate jobs for fmt, clippy, test, build-release, doc, deny, bench-build (cross-platform on ubuntu-24.04 and macos-14 where applicable).
 

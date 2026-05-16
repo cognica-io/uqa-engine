@@ -126,6 +126,10 @@ impl DocumentStore for SQLiteDocumentStore {
             .unwrap_or_default()
     }
 
+    fn max_doc_id(&self) -> DocId {
+        SQLiteDocumentStore::max_doc_id(self)
+    }
+
     fn len(&self) -> usize {
         self.conn
             .with(|c| {

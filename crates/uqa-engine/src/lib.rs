@@ -71,6 +71,7 @@ pub mod sql;
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -263,9 +264,12 @@ struct TableState {
     /// collide with existing rows.
     next_id: parking_lot::Mutex<u64>,
     analyzer: RwLock<Analyzer>,
-    /// Per-column statistics refreshed by `ANALYZE table_name`. Keyed
-    /// by column name. Empty until `run_analyze` runs at least once.
+    /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
+    /// by `column_stats` after writes mark the table dirty. Keyed by column
+    /// name.
     column_stats: RwLock<BTreeMap<String, uqa_planner::ColumnStats>>,
+    column_stats_loaded: AtomicBool,
+    column_stats_dirty: AtomicBool,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
     table_checks: RwLock<Vec<uqa_sql::ast::TableCheck>>,
@@ -1033,7 +1037,8 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
     ) -> StorageBackendResult<()> {
-        for schema in catalog.load_tables()? {
+        let schemas = catalog.load_tables()?;
+        for schema in schemas {
             let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
             let docs = backend.document_store(&schema.name);
             let inv = backend.inverted_index(&schema.name, analyzer.clone());
@@ -1041,7 +1046,15 @@ impl Engine {
             for vf in &schema.vector_fields {
                 vectors.insert(
                     vf.field.clone(),
-                    backend.vector_index(&schema.name, &vf.field, vf.dimensions, None),
+                    backend.vector_index(
+                        &schema.name,
+                        &vf.field,
+                        vf.dimensions,
+                        Some(PersistentVectorIndexParams {
+                            initialize: false,
+                            ..PersistentVectorIndexParams::default()
+                        }),
+                    ),
                 );
             }
             let columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {
@@ -1052,11 +1065,7 @@ impl Engine {
             // Restore the per-table id watermark to one past the largest
             // existing doc id so reopened catalogs do not collide on
             // SERIAL/BIGSERIAL columns.
-            let max_id = {
-                let store = docs.snapshot();
-                store.doc_ids().into_iter().max().unwrap_or(0)
-            };
-            let column_stats = Self::load_column_stats_from_catalog(catalog, &schema.name)?;
+            let max_id = { docs.max_doc_id() };
             let table = TableState {
                 document_store: RwLock::new(docs),
                 inverted_index: RwLock::new(inv),
@@ -1065,7 +1074,9 @@ impl Engine {
                 columns: RwLock::new(columns),
                 next_id: parking_lot::Mutex::new(max_id + 1),
                 analyzer: RwLock::new(analyzer),
-                column_stats: RwLock::new(column_stats),
+                column_stats: RwLock::new(BTreeMap::new()),
+                column_stats_loaded: AtomicBool::new(false),
+                column_stats_dirty: AtomicBool::new(false),
                 table_checks: RwLock::new(Vec::new()),
                 foreign_keys: RwLock::new(Vec::new()),
             };
@@ -1226,8 +1237,7 @@ impl Engine {
                     .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
                     .map(|(_, v)| v.as_str());
                 for col in &columns {
-                    let _ =
-                        self.add_fts_field_with_analyzer(&row.table_name, col.clone(), analyzer);
+                    let _ = self.restore_fts_field_from_catalog(&row.table_name, col, analyzer);
                 }
             } else if row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw")
@@ -1399,6 +1409,8 @@ impl Engine {
             next_id: parking_lot::Mutex::new(1),
             analyzer: RwLock::new(analyzer),
             column_stats: RwLock::new(BTreeMap::new()),
+            column_stats_loaded: AtomicBool::new(true),
+            column_stats_dirty: AtomicBool::new(true),
             table_checks: RwLock::new(Vec::new()),
             foreign_keys: RwLock::new(Vec::new()),
         };
@@ -1450,9 +1462,38 @@ impl Engine {
             return false;
         };
         let field = field.into();
-        let idx = self.build_vector_index(table, &field, dimensions, params);
+        let idx = self.build_vector_index_for_restore(table, &field, dimensions, params);
         t.vector_indexes.write().insert(field, idx);
         true
+    }
+
+    fn restore_fts_field_from_catalog(
+        &self,
+        table: &str,
+        field: &str,
+        analyzer: Option<&str>,
+    ) -> Result<(), String> {
+        let t = self
+            .table(table)
+            .ok_or_else(|| format!("unknown table `{table}`"))?;
+        if let Some(analyzer_name) = analyzer {
+            let analyzer = self.resolve_analyzer(analyzer_name)?;
+            t.inverted_index
+                .write()
+                .set_field_analyzer(field, analyzer, AnalyzerPhase::Both)
+                .map_err(|e| format!("restore_fts_field: {e}"))?;
+            self.table_field_analyzers.write().insert(
+                (table.to_string(), field.to_string()),
+                (analyzer_name.to_string(), "both".to_string()),
+            );
+        }
+        {
+            let mut fts = t.fts_fields.write();
+            if !fts.iter().any(|f| f == field) {
+                fts.push(field.to_string());
+            }
+        }
+        Ok(())
     }
 
     fn install_vector_field(
@@ -1488,6 +1529,27 @@ impl Engine {
         dimensions: u32,
         params: IVFIndexParams,
     ) -> Box<dyn VectorIndex> {
+        self.build_vector_index_with_initialize(table, field, dimensions, params, true)
+    }
+
+    fn build_vector_index_for_restore(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        params: IVFIndexParams,
+    ) -> Box<dyn VectorIndex> {
+        self.build_vector_index_with_initialize(table, field, dimensions, params, false)
+    }
+
+    fn build_vector_index_with_initialize(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        params: IVFIndexParams,
+        initialize: bool,
+    ) -> Box<dyn VectorIndex> {
         if let Some(backend) = self.backend.as_ref() {
             backend.vector_index(
                 table,
@@ -1497,6 +1559,7 @@ impl Engine {
                     nlist: params.nlist,
                     nprobe: params.nprobe,
                     train_threshold: params.train_threshold,
+                    initialize,
                 }),
             )
         } else {
@@ -2143,6 +2206,7 @@ impl Engine {
             t.inverted_index.write().add_document(doc_id, text_fields);
         }
         t.document_store.write().put(doc_id, document);
+        self.mark_column_stats_dirty(table, &t);
         // Keep the auto-id watermark monotonic over manual inserts as well.
         let mut nx = t.next_id.lock();
         if doc_id >= *nx {
@@ -2300,7 +2364,14 @@ impl Engine {
         }
     }
 
-    #[allow(clippy::unused_self)]
+    fn mark_column_stats_dirty(&self, table_name: &str, table: &Arc<TableState>) {
+        if !table.column_stats_dirty.swap(true, Ordering::AcqRel) {
+            if let Some(catalog) = self.catalog.as_ref() {
+                let _ = catalog.delete_column_stats(table_name);
+            }
+        }
+    }
+
     fn analyze_table(&self, table_name: &str, t: &Arc<TableState>) {
         let snapshot = t.document_store.read().snapshot();
         let doc_ids: Vec<DocId> = {
@@ -2376,6 +2447,8 @@ impl Engine {
             let _ = Self::persist_column_stats(catalog.as_ref(), table_name, &stats_out);
         }
         *t.column_stats.write() = stats_out;
+        t.column_stats_loaded.store(true, Ordering::Release);
+        t.column_stats_dirty.store(false, Ordering::Release);
     }
 
     fn persist_column_stats(
@@ -2419,11 +2492,40 @@ impl Engine {
     }
 
     /// Snapshot of the cardinality estimator's per-column statistics
-    /// for `table`, or an empty map when ANALYZE has not been run.
+    /// for `table`. Dirty stats are recomputed lazily so callers do not
+    /// need to issue `ANALYZE` after every data change.
     pub fn column_stats(&self, table: &str) -> BTreeMap<String, uqa_planner::ColumnStats> {
-        self.table(table)
-            .map(|t| t.column_stats.read().clone())
-            .unwrap_or_default()
+        let Some(t) = self.table(table) else {
+            return BTreeMap::new();
+        };
+        self.load_column_stats_if_needed(table, &t);
+        if t.column_stats_dirty.load(Ordering::Acquire) {
+            self.analyze_table(table, &t);
+        }
+        let stats = t.column_stats.read().clone();
+        stats
+    }
+
+    fn load_column_stats_if_needed(&self, table: &str, t: &Arc<TableState>) {
+        if t.column_stats_loaded.load(Ordering::Acquire) {
+            return;
+        }
+        if t.column_stats_loaded
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let stats = self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| Self::load_column_stats_from_catalog(catalog.as_ref(), table).ok())
+            .unwrap_or_default();
+        let missing_stats = stats.is_empty() && !t.columns.read().is_empty();
+        *t.column_stats.write() = stats;
+        if missing_stats {
+            t.column_stats_dirty.store(true, Ordering::Release);
+        }
     }
 
     /// Wipe every row from the named table while keeping the schema
@@ -2444,6 +2546,7 @@ impl Engine {
             }
         }
         *t.next_id.lock() = 1;
+        self.mark_column_stats_dirty(name, &t);
     }
 
     /// Execute a transaction control statement (`BEGIN` / `COMMIT` /
@@ -2897,6 +3000,9 @@ impl Engine {
         if found && self.is_persistent() {
             self.save_table_schema(table, &t);
         }
+        if found {
+            self.mark_column_stats_dirty(table, &t);
+        }
         found
     }
 
@@ -2917,6 +3023,9 @@ impl Engine {
         }
         if found && self.is_persistent() {
             self.save_table_schema(table, &t);
+        }
+        if found {
+            self.mark_column_stats_dirty(table, &t);
         }
         found
     }
@@ -2940,6 +3049,9 @@ impl Engine {
         }
         if found && self.is_persistent() {
             self.save_table_schema(table, &t);
+        }
+        if found {
+            self.mark_column_stats_dirty(table, &t);
         }
         found
     }
@@ -3072,6 +3184,7 @@ impl Engine {
             return;
         }
         t.columns.write().push(column);
+        self.mark_column_stats_dirty(table, &t);
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }
@@ -3109,6 +3222,7 @@ impl Engine {
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }
+        self.mark_column_stats_dirty(table, &t);
     }
 
     pub fn rename_column(&self, table: &str, from: &str, to: &str) {
@@ -3155,6 +3269,7 @@ impl Engine {
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }
+        self.mark_column_stats_dirty(table, &t);
     }
 
     pub fn rename_table(&self, from: &str, to: &str) -> bool {
@@ -3173,6 +3288,7 @@ impl Engine {
         if self.is_persistent() {
             self.save_table_schema(to, &state);
         }
+        self.mark_column_stats_dirty(to, &state);
         true
     }
 
@@ -3328,6 +3444,7 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
+        self.mark_column_stats_dirty(table, &t);
     }
 
     pub fn document_count(&self, table: &str) -> u64 {

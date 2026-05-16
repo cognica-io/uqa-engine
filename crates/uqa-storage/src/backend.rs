@@ -36,6 +36,10 @@ pub struct PersistentVectorIndexParams {
     pub nlist: usize,
     pub nprobe: usize,
     pub train_threshold: usize,
+    /// Whether constructing the persistent vector index may initialize or
+    /// retrain auxiliary IVF metadata. Restore paths attach lazily to persisted
+    /// state and must not do index work just because the database was opened.
+    pub initialize: bool,
 }
 
 impl Default for PersistentVectorIndexParams {
@@ -44,6 +48,7 @@ impl Default for PersistentVectorIndexParams {
             nlist: 100,
             nprobe: 10,
             train_threshold: 256,
+            initialize: true,
         }
     }
 }
@@ -107,15 +112,29 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         params: Option<PersistentVectorIndexParams>,
     ) -> Box<dyn VectorIndex> {
         match params {
-            Some(params) => Box::new(SQLiteIVFIndex::with_params(
-                self.conn.clone(),
-                table,
-                field,
-                dimensions,
-                params.nlist,
-                params.nprobe,
-                params.train_threshold,
-            )),
+            Some(params) => {
+                if params.initialize {
+                    Box::new(SQLiteIVFIndex::with_params(
+                        self.conn.clone(),
+                        table,
+                        field,
+                        dimensions,
+                        params.nlist,
+                        params.nprobe,
+                        params.train_threshold,
+                    ))
+                } else {
+                    Box::new(SQLiteIVFIndex::open_existing(
+                        self.conn.clone(),
+                        table,
+                        field,
+                        dimensions,
+                        params.nlist,
+                        params.nprobe,
+                        params.train_threshold,
+                    ))
+                }
+            }
             None => Box::new(SQLiteIVFIndex::new(
                 self.conn.clone(),
                 table,
@@ -196,6 +215,7 @@ mod tests {
                 nlist: 2,
                 nprobe: 1,
                 train_threshold: 2,
+                initialize: true,
             }),
         );
         vectors.add(1, vec![1.0, 0.0]);

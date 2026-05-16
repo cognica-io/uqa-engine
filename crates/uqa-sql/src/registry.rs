@@ -166,6 +166,13 @@ pub fn is_registered(name: &str) -> bool {
     lookup(name).is_some()
 }
 
+/// Sorted list of registered SQL function names. CLI completion and
+/// documentation generators should consume this instead of duplicating
+/// function names.
+pub fn registered_names() -> Vec<&'static str> {
+    registry().keys().copied().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +182,7 @@ mod tests {
         assert_eq!(lookup("text_match"), Some(FunctionKind::TextMatch));
         assert_eq!(lookup("KNN_MATCH"), Some(FunctionKind::KNNMatch));
         assert_eq!(lookup("fuse_log_odds"), Some(FunctionKind::FuseLogOdds));
+        assert!(registered_names().contains(&"deep_predict"));
     }
 
     #[test]

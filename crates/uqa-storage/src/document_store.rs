@@ -58,6 +58,10 @@ pub trait DocumentStore: Send + Sync {
 
     fn doc_ids(&self) -> Vec<DocId>;
 
+    fn max_doc_id(&self) -> DocId {
+        self.doc_ids().into_iter().max().unwrap_or(0)
+    }
+
     fn len(&self) -> usize;
 
     fn is_empty(&self) -> bool {
