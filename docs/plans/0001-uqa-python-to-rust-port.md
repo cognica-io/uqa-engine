@@ -143,7 +143,7 @@ graph TD
 | `uqa-scoring` | `scoring/` | 3,500 | `BM25Scorer`, `BayesianBM25Scorer`, `WANDScorer`, `BlockMaxWANDScorer`, calibration, parameter learner |
 | `uqa-fusion` | `fusion/` | 1,500 | Log-odds, attention, learned fusion, query features |
 | `uqa-operators` | `operators/` | 3,500 | `Operator` trait + primitives + boolean + hybrid + aggregation + sparse + multi-stage + multi-field |
-| `uqa-ml` | `operators/deep_fusion.py`, `operators/deep_learn.py` | 2,000 | Serializable deep models, CPU inference, analytical training, optional MLX backend |
+| `uqa-ml` | `operators/deep_fusion.py`, `operators/deep_learn.py` | 2,000 | Serializable deep models, CPU inference with dense/CNN/RNN/LSTM layers, analytical training, optional MLX backend |
 | `uqa-graph` | `graph/` | 5,500 | `GraphStore`, vertex/edge types, pattern, RPQ, Cypher (lexer/parser/AST/compiler), centrality, message passing, temporal, versioned |
 | `uqa-joins` | `joins/` | 2,500 | Hash inner, outer, semi, cross, sort-merge, index, cross-paradigm |
 | `uqa-planner` | `planner/` | 4,000 | Cost model, cardinality, DPccp join enumeration, optimizer rewrites |
@@ -287,7 +287,7 @@ The `Operator` trait has one method (`execute(&self, ctx: &ExecutionContext) -> 
 | `operators/multi_stage.py` | `uqa-operators/src/multi_stage.rs` | `StagedRetrievalOperator` |
 | `operators/learned_fusion.py` | `uqa-operators/src/learned_fusion.rs` | `LearnedFusionOperator` |
 | `operators/progressive_fusion.py` | `uqa-operators/src/progressive_fusion.rs` | Progressive fusion (incremental log-odds update) |
-| `operators/deep_fusion.py` | `uqa-ml/src/deep_fusion.rs` | CNN-style fusion (`convolve`, `pool`, `flatten`, `dense`, `softmax`); inference path |
+| `operators/deep_fusion.py` | `uqa-ml/src/deep_fusion.rs` | Deep-fusion inference (`CNN1D`, `CNN2D`, `RNN`, `LSTM`, graph `Conv`, `Pool`, `Flatten`, `Dense`, `Softmax`) |
 | `operators/deep_learn.py` | `uqa-ml/src/training.rs` | Analytical training (no backprop). Phase 9. |
 | `operators/hierarchical.py` | `uqa-operators/src/hierarchical.rs` | Path/array/object navigation operators |
 

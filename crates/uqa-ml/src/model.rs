@@ -21,6 +21,7 @@ use crate::deep_fusion::{
 /// when the model ends in `Softmax`, per-doc class probability vectors.
 pub type PredictResult = (Vec<(DocId, f64)>, BTreeMap<DocId, Vec<f64>>);
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeepLayerSpec {
@@ -49,6 +50,31 @@ pub enum DeepLayerSpec {
     Dropout {
         p: f64,
     },
+    #[serde(rename = "cnn_1d")]
+    CNN1D {
+        weights: Vec<f64>,
+        bias: Vec<f64>,
+        output_channels: usize,
+        input_channels: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+    },
+    #[serde(rename = "cnn_2d")]
+    CNN2D {
+        weights: Vec<f64>,
+        bias: Vec<f64>,
+        output_channels: usize,
+        input_channels: usize,
+        input_height: usize,
+        input_width: usize,
+        kernel_height: usize,
+        kernel_width: usize,
+        stride_height: usize,
+        stride_width: usize,
+        padding_height: usize,
+        padding_width: usize,
+    },
     Propagate {
         edge_label: String,
         aggregation: AggregationSpec,
@@ -66,6 +92,24 @@ pub enum DeepLayerSpec {
         direction: DirectionSpec,
     },
     Attention,
+    #[serde(rename = "rnn")]
+    RNN {
+        weights_input: Vec<f64>,
+        weights_hidden: Vec<f64>,
+        bias: Vec<f64>,
+        hidden_channels: usize,
+        input_channels: usize,
+        return_sequences: bool,
+    },
+    #[serde(rename = "lstm")]
+    LSTM {
+        weights_input: Vec<f64>,
+        weights_hidden: Vec<f64>,
+        bias: Vec<f64>,
+        hidden_channels: usize,
+        input_channels: usize,
+        return_sequences: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -250,6 +294,8 @@ fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
         DeepLayerSpec::Softmax => Layer::Softmax,
         DeepLayerSpec::BatchNorm { epsilon } => Layer::BatchNorm { epsilon: *epsilon },
         DeepLayerSpec::Dropout { p } => Layer::Dropout { p: *p },
+        DeepLayerSpec::CNN1D { .. } => cnn_1d_layer_from_spec(spec),
+        DeepLayerSpec::CNN2D { .. } => cnn_2d_layer_from_spec(spec),
         DeepLayerSpec::Propagate {
             edge_label,
             aggregation,
@@ -287,6 +333,110 @@ fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
             direction: direction_runtime(*direction),
         },
         DeepLayerSpec::Attention => Layer::Attention,
+        DeepLayerSpec::RNN { .. } => rnn_layer_from_spec(spec),
+        DeepLayerSpec::LSTM { .. } => lstm_layer_from_spec(spec),
+    }
+}
+
+fn cnn_1d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+    let DeepLayerSpec::CNN1D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        kernel_size,
+        stride,
+        padding,
+    } = spec
+    else {
+        unreachable!("cnn_1d_layer_from_spec requires DeepLayerSpec::CNN1D");
+    };
+    Layer::CNN1D {
+        weights: weights.clone(),
+        bias: bias.clone(),
+        output_channels: *output_channels,
+        input_channels: *input_channels,
+        kernel_size: *kernel_size,
+        stride: *stride,
+        padding: *padding,
+    }
+}
+
+fn cnn_2d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+    let DeepLayerSpec::CNN2D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        input_height,
+        input_width,
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        padding_height,
+        padding_width,
+    } = spec
+    else {
+        unreachable!("cnn_2d_layer_from_spec requires DeepLayerSpec::CNN2D");
+    };
+    Layer::CNN2D {
+        weights: weights.clone(),
+        bias: bias.clone(),
+        output_channels: *output_channels,
+        input_channels: *input_channels,
+        input_height: *input_height,
+        input_width: *input_width,
+        kernel_height: *kernel_height,
+        kernel_width: *kernel_width,
+        stride_height: *stride_height,
+        stride_width: *stride_width,
+        padding_height: *padding_height,
+        padding_width: *padding_width,
+    }
+}
+
+fn rnn_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+    let DeepLayerSpec::RNN {
+        weights_input,
+        weights_hidden,
+        bias,
+        hidden_channels,
+        input_channels,
+        return_sequences,
+    } = spec
+    else {
+        unreachable!("rnn_layer_from_spec requires DeepLayerSpec::RNN");
+    };
+    Layer::RNN {
+        weights_input: weights_input.clone(),
+        weights_hidden: weights_hidden.clone(),
+        bias: bias.clone(),
+        hidden_channels: *hidden_channels,
+        input_channels: *input_channels,
+        return_sequences: *return_sequences,
+    }
+}
+
+fn lstm_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+    let DeepLayerSpec::LSTM {
+        weights_input,
+        weights_hidden,
+        bias,
+        hidden_channels,
+        input_channels,
+        return_sequences,
+    } = spec
+    else {
+        unreachable!("lstm_layer_from_spec requires DeepLayerSpec::LSTM");
+    };
+    Layer::LSTM {
+        weights_input: weights_input.clone(),
+        weights_hidden: weights_hidden.clone(),
+        bias: bias.clone(),
+        hidden_channels: *hidden_channels,
+        input_channels: *input_channels,
+        return_sequences: *return_sequences,
     }
 }
 
@@ -295,5 +445,47 @@ fn direction_runtime(dir: DirectionSpec) -> Direction {
         DirectionSpec::Out => Direction::Out,
         DirectionSpec::In => Direction::In,
         DirectionSpec::Both => Direction::Both,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recurrent_acronyms_serialize_as_plain_names() {
+        let rnn = DeepLayerSpec::RNN {
+            weights_input: vec![1.0],
+            weights_hidden: vec![0.0],
+            bias: vec![0.0],
+            hidden_channels: 1,
+            input_channels: 1,
+            return_sequences: true,
+        };
+        let lstm = DeepLayerSpec::LSTM {
+            weights_input: vec![0.0; 4],
+            weights_hidden: vec![0.0; 4],
+            bias: vec![0.0; 4],
+            hidden_channels: 1,
+            input_channels: 1,
+            return_sequences: false,
+        };
+
+        let rnn_json = serde_json::to_value(&rnn).unwrap();
+        let lstm_json = serde_json::to_value(&lstm).unwrap();
+        assert_eq!(rnn_json["kind"], "rnn");
+        assert_eq!(lstm_json["kind"], "lstm");
+
+        let cnn = DeepLayerSpec::CNN1D {
+            weights: vec![1.0],
+            bias: vec![0.0],
+            output_channels: 1,
+            input_channels: 1,
+            kernel_size: 1,
+            stride: 1,
+            padding: 0,
+        };
+        let cnn_json = serde_json::to_value(&cnn).unwrap();
+        assert_eq!(cnn_json["kind"], "cnn_1d");
     }
 }

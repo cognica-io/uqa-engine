@@ -67,7 +67,8 @@ graph TD
   vector (Cosine/KNN/VectorSimilarity), multi-stage, sparse,
   progressive-fusion, hierarchical (PathFilter/Project/Aggregate /
   UnifiedFilter), deep-fusion (Embed/Signal/Dense/Flatten/GlobalPool/
-  Softmax/BatchNorm/Dropout/Propagate/Conv/Pool/Attention). The deep-fusion
+  Softmax/BatchNorm/Dropout/CNN1D/CNN2D/RNN/LSTM/Propagate/Conv/Pool/
+  Attention). The deep-fusion
   graph layers depend only on a `GraphNeighborLookup` trait so they remain
   decoupled from `uqa-graph`.
 * `uqa-graph` — `MemoryGraphStore` with named graphs, `GraphPostingList`
@@ -131,7 +132,8 @@ buckets the right side by join key once and probes per left row in
   `graph_neighbors` reads them directly; the Cypher executors run
   through the same `Engine::graph_with` / `graph_with_mut` accessors.
 * `uqa-ml` exposes serializable `DeepModel` specs, deep-fusion inference
-  backends, analytical `deep_learn`, and optional Apple MLX support
+  backends for dense, CNN, RNN, LSTM, graph, pooling, and attention layers,
+  analytical `deep_learn`, and optional Apple MLX support
   through the official `mlx-c` system library when MLX development files are
   available. `uqa-engine` persists those models through the catalog's
   `_models` table and exposes the SQL adapters

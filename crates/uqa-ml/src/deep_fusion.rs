@@ -56,6 +56,7 @@ pub enum PoolMethod {
     Max,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone)]
 pub enum Layer {
     /// Runtime-provided feature vector. This layer is a no-op during
@@ -87,6 +88,36 @@ pub enum Layer {
     BatchNorm { epsilon: f64 },
     /// Inference-mode dropout: scale every value by `1 - p`.
     Dropout { p: f64 },
+    /// One-dimensional CNN over sorted sequence positions.
+    ///
+    /// Weights are row-major as `output_channels x kernel_size x input_channels`.
+    CNN1D {
+        weights: Vec<f64>,
+        bias: Vec<f64>,
+        output_channels: usize,
+        input_channels: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+    },
+    /// Two-dimensional CNN over flattened `H x W x C` spatial positions.
+    ///
+    /// Weights are row-major as
+    /// `output_channels x kernel_height x kernel_width x input_channels`.
+    CNN2D {
+        weights: Vec<f64>,
+        bias: Vec<f64>,
+        output_channels: usize,
+        input_channels: usize,
+        input_height: usize,
+        input_width: usize,
+        kernel_height: usize,
+        kernel_width: usize,
+        stride_height: usize,
+        stride_width: usize,
+        padding_height: usize,
+        padding_width: usize,
+    },
     /// Propagate channel-0 scores through graph edges.
     ///
     /// `aggregation` averages / sums / maxes the in-bounds neighbor
@@ -122,6 +153,30 @@ pub enum Layer {
     /// Self-attention across the per-node channel vectors with
     /// `Q = K = V = X`, scaled-dot-product, no learned projections.
     Attention,
+    /// Vanilla RNN over sorted sequence positions.
+    ///
+    /// Weights are row-major as `hidden_channels x input_channels` and
+    /// `hidden_channels x hidden_channels`.
+    RNN {
+        weights_input: Vec<f64>,
+        weights_hidden: Vec<f64>,
+        bias: Vec<f64>,
+        hidden_channels: usize,
+        input_channels: usize,
+        return_sequences: bool,
+    },
+    /// LSTM over sorted sequence positions.
+    ///
+    /// Gate order is input, forget, candidate, output. Both weight
+    /// matrices are row-major with `4 * hidden_channels` rows.
+    LSTM {
+        weights_input: Vec<f64>,
+        weights_hidden: Vec<f64>,
+        bias: Vec<f64>,
+        hidden_channels: usize,
+        input_channels: usize,
+        return_sequences: bool,
+    },
 }
 
 pub struct DeepFusionOperator {
@@ -138,7 +193,7 @@ impl DeepFusionOperator {
         );
         match &layers[0] {
             Layer::Signal(_) | Layer::Embed(_) | Layer::Input { .. } => {}
-            _ => panic!("DeepFusionOperator: first layer must be Signal or Embed"),
+            _ => panic!("DeepFusionOperator: first layer must be Signal, Embed, or Input"),
         }
         Self {
             layers,
@@ -183,57 +238,67 @@ impl DeepFusionOperator {
 
     fn apply_layers(&self, ctx: &ExecutionContext, state: &mut ForwardState) {
         for layer in &self.layers {
-            match layer {
-                Layer::Input { dimensions } => {
-                    state.num_channels = *dimensions;
-                }
-                Layer::Embed(embedding) => apply_embed(embedding, state),
-                Layer::Signal(signals) => {
-                    apply_signal(signals, ctx, self.alpha, self.gating, state);
-                }
-                Layer::Dense {
-                    weights,
-                    bias,
-                    output_channels,
-                    input_channels,
-                } => apply_dense(
-                    weights,
-                    bias,
-                    *output_channels,
-                    *input_channels,
-                    self.gating,
-                    state,
-                ),
-                Layer::Flatten => apply_flatten(state),
-                Layer::GlobalPool(method) => apply_global_pool(*method, state),
-                Layer::Softmax => apply_softmax(state),
-                Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, state),
-                Layer::Dropout { p } => apply_dropout(*p, state),
-                Layer::Propagate {
-                    edge_label,
-                    aggregation,
-                    direction,
-                } => apply_propagate(
-                    edge_label,
-                    *aggregation,
-                    *direction,
-                    ctx,
-                    self.gating,
-                    state,
-                ),
-                Layer::Conv {
-                    edge_label,
-                    hop_weights,
-                    direction,
-                } => apply_conv(edge_label, hop_weights, *direction, ctx, self.gating, state),
-                Layer::Pool {
-                    edge_label,
-                    pool_size,
-                    method,
-                    direction,
-                } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, state),
-                Layer::Attention => apply_attention(state),
+            self.apply_layer(ctx, state, layer);
+        }
+    }
+
+    fn apply_layer(&self, ctx: &ExecutionContext, state: &mut ForwardState, layer: &Layer) {
+        match layer {
+            Layer::Input { dimensions } => {
+                state.num_channels = *dimensions;
             }
+            Layer::Embed(embedding) => apply_embed(embedding, state),
+            Layer::Signal(signals) => apply_signal(signals, ctx, self.alpha, self.gating, state),
+            Layer::Dense {
+                weights,
+                bias,
+                output_channels,
+                input_channels,
+            } => apply_dense(
+                weights,
+                bias,
+                *output_channels,
+                *input_channels,
+                self.gating,
+                state,
+            ),
+            Layer::Flatten => apply_flatten(state),
+            Layer::GlobalPool(method) => apply_global_pool(*method, state),
+            Layer::Softmax => apply_softmax(state),
+            Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, state),
+            Layer::Dropout { p } => apply_dropout(*p, state),
+            Layer::CNN1D { .. } => {
+                apply_cnn_1d(Convolution1D::from_layer(layer), self.gating, state);
+            }
+            Layer::CNN2D { .. } => {
+                apply_cnn_2d(Convolution2D::from_layer(layer), self.gating, state);
+            }
+            Layer::Propagate {
+                edge_label,
+                aggregation,
+                direction,
+            } => apply_propagate(
+                edge_label,
+                *aggregation,
+                *direction,
+                ctx,
+                self.gating,
+                state,
+            ),
+            Layer::Conv {
+                edge_label,
+                hop_weights,
+                direction,
+            } => apply_conv(edge_label, hop_weights, *direction, ctx, self.gating, state),
+            Layer::Pool {
+                edge_label,
+                pool_size,
+                method,
+                direction,
+            } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, state),
+            Layer::Attention => apply_attention(state),
+            Layer::RNN { .. } => apply_rnn(Recurrent::from_layer(layer), state),
+            Layer::LSTM { .. } => apply_lstm(LongShortTermMemory::from_layer(layer), state),
         }
     }
 }
@@ -274,6 +339,10 @@ impl Operator for DeepFusionOperator {
                 | Layer::Softmax
                 | Layer::BatchNorm { .. }
                 | Layer::Dropout { .. }
+                | Layer::CNN1D { .. }
+                | Layer::CNN2D { .. }
+                | Layer::RNN { .. }
+                | Layer::LSTM { .. }
                 | Layer::Propagate { .. }
                 | Layer::Conv { .. }
                 | Layer::Pool { .. } => total += stats.total_docs as f64,
@@ -291,6 +360,163 @@ struct ForwardState {
     channel_map: BTreeMap<u64, Vec<f64>>,
     num_channels: usize,
     softmax_applied: bool,
+}
+
+#[derive(Clone, Copy)]
+struct Convolution1D<'a> {
+    weights: &'a [f64],
+    bias: &'a [f64],
+    output_channels: usize,
+    input_channels: usize,
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+}
+
+impl<'a> Convolution1D<'a> {
+    fn from_layer(layer: &'a Layer) -> Self {
+        let Layer::CNN1D {
+            weights,
+            bias,
+            output_channels,
+            input_channels,
+            kernel_size,
+            stride,
+            padding,
+        } = layer
+        else {
+            unreachable!("Convolution1D::from_layer requires Layer::CNN1D");
+        };
+        Self {
+            weights,
+            bias,
+            output_channels: *output_channels,
+            input_channels: *input_channels,
+            kernel_size: *kernel_size,
+            stride: *stride,
+            padding: *padding,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Convolution2D<'a> {
+    weights: &'a [f64],
+    bias: &'a [f64],
+    output_channels: usize,
+    input_channels: usize,
+    input_height: usize,
+    input_width: usize,
+    kernel_height: usize,
+    kernel_width: usize,
+    stride_height: usize,
+    stride_width: usize,
+    padding_height: usize,
+    padding_width: usize,
+}
+
+impl<'a> Convolution2D<'a> {
+    fn from_layer(layer: &'a Layer) -> Self {
+        let Layer::CNN2D {
+            weights,
+            bias,
+            output_channels,
+            input_channels,
+            input_height,
+            input_width,
+            kernel_height,
+            kernel_width,
+            stride_height,
+            stride_width,
+            padding_height,
+            padding_width,
+        } = layer
+        else {
+            unreachable!("Convolution2D::from_layer requires Layer::CNN2D");
+        };
+        Self {
+            weights,
+            bias,
+            output_channels: *output_channels,
+            input_channels: *input_channels,
+            input_height: *input_height,
+            input_width: *input_width,
+            kernel_height: *kernel_height,
+            kernel_width: *kernel_width,
+            stride_height: *stride_height,
+            stride_width: *stride_width,
+            padding_height: *padding_height,
+            padding_width: *padding_width,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Recurrent<'a> {
+    weights_input: &'a [f64],
+    weights_hidden: &'a [f64],
+    bias: &'a [f64],
+    hidden_channels: usize,
+    input_channels: usize,
+    return_sequences: bool,
+}
+
+impl<'a> Recurrent<'a> {
+    fn from_layer(layer: &'a Layer) -> Self {
+        let Layer::RNN {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            return_sequences,
+        } = layer
+        else {
+            unreachable!("Recurrent::from_layer requires Layer::RNN");
+        };
+        Self {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels: *hidden_channels,
+            input_channels: *input_channels,
+            return_sequences: *return_sequences,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LongShortTermMemory<'a> {
+    weights_input: &'a [f64],
+    weights_hidden: &'a [f64],
+    bias: &'a [f64],
+    hidden_channels: usize,
+    input_channels: usize,
+    return_sequences: bool,
+}
+
+impl<'a> LongShortTermMemory<'a> {
+    fn from_layer(layer: &'a Layer) -> Self {
+        let Layer::LSTM {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            return_sequences,
+        } = layer
+        else {
+            unreachable!("LongShortTermMemory::from_layer requires Layer::LSTM");
+        };
+        Self {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels: *hidden_channels,
+            input_channels: *input_channels,
+            return_sequences: *return_sequences,
+        }
+    }
 }
 
 fn apply_embed(embedding: &[f64], state: &mut ForwardState) {
@@ -491,6 +717,301 @@ fn apply_dropout(p: f64, state: &mut ForwardState) {
             *x *= scale;
         }
     }
+}
+
+fn apply_cnn_1d(params: Convolution1D<'_>, gating: Gating, state: &mut ForwardState) {
+    assert!(
+        params.kernel_size > 0,
+        "CNN1D kernel_size must be greater than zero"
+    );
+    assert!(params.stride > 0, "CNN1D stride must be greater than zero");
+    assert_eq!(
+        params.weights.len(),
+        params.output_channels * params.kernel_size * params.input_channels
+    );
+    assert_eq!(params.bias.len(), params.output_channels);
+    let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
+    if input_ids.is_empty() {
+        return;
+    }
+    let padded_len = input_ids.len() + 2 * params.padding;
+    if padded_len < params.kernel_size {
+        state.channel_map.clear();
+        state.num_channels = params.output_channels;
+        return;
+    }
+    let output_len = (padded_len - params.kernel_size) / params.stride + 1;
+    let base_doc_id = input_ids[0];
+    let mut output = BTreeMap::new();
+    for out_pos in 0..output_len {
+        let mut row = vec![0.0f64; params.output_channels];
+        for (out_ch, slot) in row.iter_mut().enumerate() {
+            let mut acc = params.bias[out_ch];
+            for kernel_pos in 0..params.kernel_size {
+                let raw_pos = out_pos * params.stride + kernel_pos;
+                if raw_pos < params.padding {
+                    continue;
+                }
+                let input_pos = raw_pos - params.padding;
+                if input_pos >= input_ids.len() {
+                    continue;
+                }
+                let input_vec = &state.channel_map[&input_ids[input_pos]];
+                for in_ch in 0..params.input_channels {
+                    let weight_index =
+                        (out_ch * params.kernel_size + kernel_pos) * params.input_channels + in_ch;
+                    acc +=
+                        params.weights[weight_index] * input_vec.get(in_ch).copied().unwrap_or(0.0);
+                }
+            }
+            *slot = apply_gating(acc, gating);
+        }
+        let doc_id = input_ids
+            .get(out_pos)
+            .copied()
+            .unwrap_or(base_doc_id + out_pos as u64);
+        output.insert(doc_id, row);
+    }
+    state.channel_map = output;
+    state.num_channels = params.output_channels;
+    state.softmax_applied = false;
+}
+
+fn apply_cnn_2d(params: Convolution2D<'_>, gating: Gating, state: &mut ForwardState) {
+    assert!(
+        params.input_height > 0,
+        "CNN2D input_height must be greater than zero"
+    );
+    assert!(
+        params.input_width > 0,
+        "CNN2D input_width must be greater than zero"
+    );
+    assert!(
+        params.kernel_height > 0,
+        "CNN2D kernel_height must be greater than zero"
+    );
+    assert!(
+        params.kernel_width > 0,
+        "CNN2D kernel_width must be greater than zero"
+    );
+    assert!(
+        params.stride_height > 0,
+        "CNN2D stride_height must be greater than zero"
+    );
+    assert!(
+        params.stride_width > 0,
+        "CNN2D stride_width must be greater than zero"
+    );
+    assert_eq!(
+        params.weights.len(),
+        params.output_channels * params.kernel_height * params.kernel_width * params.input_channels
+    );
+    assert_eq!(params.bias.len(), params.output_channels);
+    let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
+    if input_ids.is_empty() {
+        return;
+    }
+    let mut flat_input = Vec::new();
+    if input_ids.len() == 1 {
+        flat_input.extend_from_slice(&state.channel_map[&input_ids[0]]);
+    } else {
+        for doc_id in &input_ids {
+            flat_input.extend_from_slice(&state.channel_map[doc_id]);
+        }
+    }
+
+    let padded_height = params.input_height + 2 * params.padding_height;
+    let padded_width = params.input_width + 2 * params.padding_width;
+    if padded_height < params.kernel_height || padded_width < params.kernel_width {
+        state.channel_map.clear();
+        state.num_channels = params.output_channels;
+        return;
+    }
+    let output_height = (padded_height - params.kernel_height) / params.stride_height + 1;
+    let output_width = (padded_width - params.kernel_width) / params.stride_width + 1;
+    let base_doc_id = input_ids[0];
+    let mut output = BTreeMap::new();
+
+    for out_row in 0..output_height {
+        for out_col in 0..output_width {
+            let mut row = vec![0.0f64; params.output_channels];
+            for (out_ch, slot) in row.iter_mut().enumerate() {
+                *slot = apply_gating(
+                    cnn_2d_cell(&params, &flat_input, out_row, out_col, out_ch),
+                    gating,
+                );
+            }
+            let output_index = out_row * output_width + out_col;
+            let doc_id = input_ids
+                .get(output_index)
+                .copied()
+                .unwrap_or(base_doc_id + output_index as u64);
+            output.insert(doc_id, row);
+        }
+    }
+    state.channel_map = output;
+    state.num_channels = params.output_channels;
+    state.softmax_applied = false;
+}
+
+fn cnn_2d_cell(
+    params: &Convolution2D<'_>,
+    flat_input: &[f64],
+    out_row: usize,
+    out_col: usize,
+    out_ch: usize,
+) -> f64 {
+    let mut acc = params.bias[out_ch];
+    for kernel_row in 0..params.kernel_height {
+        let raw_row = out_row * params.stride_height + kernel_row;
+        if raw_row < params.padding_height {
+            continue;
+        }
+        let input_row = raw_row - params.padding_height;
+        if input_row >= params.input_height {
+            continue;
+        }
+        for kernel_col in 0..params.kernel_width {
+            let raw_col = out_col * params.stride_width + kernel_col;
+            if raw_col < params.padding_width {
+                continue;
+            }
+            let input_col = raw_col - params.padding_width;
+            if input_col >= params.input_width {
+                continue;
+            }
+            for in_ch in 0..params.input_channels {
+                let input_index =
+                    ((input_row * params.input_width + input_col) * params.input_channels) + in_ch;
+                let weight_index = (((out_ch * params.kernel_height + kernel_row)
+                    * params.kernel_width
+                    + kernel_col)
+                    * params.input_channels)
+                    + in_ch;
+                acc += params.weights[weight_index]
+                    * flat_input.get(input_index).copied().unwrap_or(0.0);
+            }
+        }
+    }
+    acc
+}
+
+fn apply_rnn(params: Recurrent<'_>, state: &mut ForwardState) {
+    assert!(
+        params.hidden_channels > 0,
+        "RNN hidden_channels must be greater than zero"
+    );
+    assert!(
+        params.input_channels > 0,
+        "RNN input_channels must be greater than zero"
+    );
+    assert_eq!(
+        params.weights_input.len(),
+        params.hidden_channels * params.input_channels
+    );
+    assert_eq!(
+        params.weights_hidden.len(),
+        params.hidden_channels * params.hidden_channels
+    );
+    assert_eq!(params.bias.len(), params.hidden_channels);
+    let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
+    if input_ids.is_empty() {
+        return;
+    }
+    let mut hidden = vec![0.0f64; params.hidden_channels];
+    let mut output = BTreeMap::new();
+    for doc_id in &input_ids {
+        let input = &state.channel_map[doc_id];
+        let mut next_hidden = vec![0.0f64; params.hidden_channels];
+        for (out_ch, slot) in next_hidden.iter_mut().enumerate() {
+            let mut acc = params.bias[out_ch];
+            for in_ch in 0..params.input_channels {
+                acc += params.weights_input[out_ch * params.input_channels + in_ch]
+                    * input.get(in_ch).copied().unwrap_or(0.0);
+            }
+            for (hidden_ch, hidden_value) in hidden.iter().enumerate() {
+                acc += params.weights_hidden[out_ch * params.hidden_channels + hidden_ch]
+                    * hidden_value;
+            }
+            *slot = acc.tanh();
+        }
+        hidden = next_hidden;
+        if params.return_sequences {
+            output.insert(*doc_id, hidden.clone());
+        }
+    }
+    if !params.return_sequences {
+        output.insert(*input_ids.last().expect("non-empty input"), hidden);
+    }
+    state.channel_map = output;
+    state.num_channels = params.hidden_channels;
+    state.softmax_applied = false;
+}
+
+fn apply_lstm(params: LongShortTermMemory<'_>, state: &mut ForwardState) {
+    assert!(
+        params.hidden_channels > 0,
+        "LSTM hidden_channels must be greater than zero"
+    );
+    assert!(
+        params.input_channels > 0,
+        "LSTM input_channels must be greater than zero"
+    );
+    let gate_channels = 4 * params.hidden_channels;
+    assert_eq!(
+        params.weights_input.len(),
+        gate_channels * params.input_channels
+    );
+    assert_eq!(
+        params.weights_hidden.len(),
+        gate_channels * params.hidden_channels
+    );
+    assert_eq!(params.bias.len(), gate_channels);
+    let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
+    if input_ids.is_empty() {
+        return;
+    }
+    let mut hidden = vec![0.0f64; params.hidden_channels];
+    let mut cell = vec![0.0f64; params.hidden_channels];
+    let mut output = BTreeMap::new();
+    for doc_id in &input_ids {
+        let input = &state.channel_map[doc_id];
+        let mut gates = vec![0.0f64; gate_channels];
+        for (gate_ch, gate_slot) in gates.iter_mut().enumerate() {
+            let mut acc = params.bias[gate_ch];
+            for in_ch in 0..params.input_channels {
+                acc += params.weights_input[gate_ch * params.input_channels + in_ch]
+                    * input.get(in_ch).copied().unwrap_or(0.0);
+            }
+            for (hidden_ch, hidden_value) in hidden.iter().enumerate() {
+                acc += params.weights_hidden[gate_ch * params.hidden_channels + hidden_ch]
+                    * hidden_value;
+            }
+            *gate_slot = acc;
+        }
+
+        let mut next_hidden = vec![0.0f64; params.hidden_channels];
+        let mut next_cell = vec![0.0f64; params.hidden_channels];
+        for ch in 0..params.hidden_channels {
+            let input_gate = sigmoid(gates[ch]);
+            let forget_gate = sigmoid(gates[params.hidden_channels + ch]);
+            let candidate = gates[2 * params.hidden_channels + ch].tanh();
+            let output_gate = sigmoid(gates[3 * params.hidden_channels + ch]);
+            next_cell[ch] = forget_gate * cell[ch] + input_gate * candidate;
+            next_hidden[ch] = output_gate * next_cell[ch].tanh();
+        }
+        hidden = next_hidden;
+        cell = next_cell;
+        if params.return_sequences {
+            output.insert(*doc_id, hidden.clone());
+        }
+    }
+    if !params.return_sequences {
+        output.insert(*input_ids.last().expect("non-empty input"), hidden);
+    }
+    state.channel_map = output;
+    state.num_channels = params.hidden_channels;
+    state.softmax_applied = false;
 }
 
 fn neighbors_of(ctx: &ExecutionContext, vid: u64, label: &str, direction: Direction) -> Vec<u64> {
@@ -915,6 +1436,135 @@ mod tests {
             .map(sigmoid)
             .fold(f64::NEG_INFINITY, f64::max);
         assert!((entry.payload.score - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cnn_1d_detects_adjacent_pattern() {
+        let layers = vec![
+            Layer::Embed(vec![1.0, 2.0, 3.0]),
+            Layer::CNN1D {
+                weights: vec![1.0, 1.0],
+                bias: vec![0.0],
+                output_channels: 1,
+                input_channels: 1,
+                kernel_size: 2,
+                stride: 1,
+                padding: 0,
+            },
+        ];
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
+        let result = op.execute(&ExecutionContext::new());
+        assert_eq!(result.entries().len(), 2);
+        let scores: BTreeMap<u64, f64> = result
+            .entries()
+            .iter()
+            .map(|e| (e.doc_id, e.payload.score))
+            .collect();
+        assert!((scores[&1] - sigmoid(3.0)).abs() < 1e-9);
+        assert!((scores[&2] - sigmoid(5.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cnn_2d_filters_flattened_image() {
+        let layers = vec![
+            Layer::Embed(vec![1.0, 2.0, 3.0, 4.0]),
+            Layer::Flatten,
+            Layer::CNN2D {
+                weights: vec![1.0, 1.0, 1.0, 1.0],
+                bias: vec![0.0],
+                output_channels: 1,
+                input_channels: 1,
+                input_height: 2,
+                input_width: 2,
+                kernel_height: 2,
+                kernel_width: 2,
+                stride_height: 1,
+                stride_width: 1,
+                padding_height: 0,
+                padding_width: 0,
+            },
+        ];
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
+        let result = op.execute(&ExecutionContext::new());
+        assert_eq!(result.entries().len(), 1);
+        assert!((result.entries()[0].payload.score - sigmoid(10.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cnn_2d_uses_channel_vectors_per_spatial_position() {
+        let layers = vec![
+            Layer::Embed(vec![1.0, 2.0]),
+            Layer::Dense {
+                weights: vec![1.0, 0.5],
+                bias: vec![0.0, 0.0],
+                output_channels: 2,
+                input_channels: 1,
+            },
+            Layer::CNN2D {
+                weights: vec![0.01, 0.02, 0.03, 0.04],
+                bias: vec![0.0],
+                output_channels: 1,
+                input_channels: 2,
+                input_height: 1,
+                input_width: 2,
+                kernel_height: 1,
+                kernel_width: 2,
+                stride_height: 1,
+                stride_width: 1,
+                padding_height: 0,
+                padding_width: 0,
+            },
+        ];
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
+        let result = op.execute(&ExecutionContext::new());
+        assert_eq!(result.entries().len(), 1);
+        assert!((result.entries()[0].payload.score - sigmoid(0.12)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rnn_returns_sequence_hidden_states() {
+        let layers = vec![
+            Layer::Embed(vec![1.0, 1.0]),
+            Layer::RNN {
+                weights_input: vec![1.0],
+                weights_hidden: vec![1.0],
+                bias: vec![0.0],
+                hidden_channels: 1,
+                input_channels: 1,
+                return_sequences: true,
+            },
+        ];
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
+        let result = op.execute(&ExecutionContext::new());
+        let first_hidden = 1.0_f64.tanh();
+        let second_hidden = (1.0 + first_hidden).tanh();
+        let scores: BTreeMap<u64, f64> = result
+            .entries()
+            .iter()
+            .map(|e| (e.doc_id, e.payload.score))
+            .collect();
+        assert!((scores[&1] - sigmoid(first_hidden)).abs() < 1e-9);
+        assert!((scores[&2] - sigmoid(second_hidden)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lstm_accumulates_cell_state() {
+        let layers = vec![
+            Layer::Embed(vec![1.0, 1.0]),
+            Layer::LSTM {
+                weights_input: vec![10.0, 10.0, 1.0, 10.0],
+                weights_hidden: vec![0.0; 4],
+                bias: vec![0.0; 4],
+                hidden_channels: 1,
+                input_channels: 1,
+                return_sequences: true,
+            },
+        ];
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
+        let result = op.execute(&ExecutionContext::new());
+        let scores: Vec<f64> = result.entries().iter().map(|e| e.payload.score).collect();
+        assert_eq!(scores.len(), 2);
+        assert!(scores[1] > scores[0], "{scores:?}");
     }
 
     #[test]
