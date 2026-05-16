@@ -26,7 +26,7 @@ use std::sync::Arc;
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList, Value};
 use uqa_scoring::prob::{log_odds_conjunction_weighted, logit, sigmoid, PROB_EPSILON};
 
-use crate::base::{Direction, ExecutionContext, Operator};
+use uqa_operators::{base::Direction, ExecutionContext, Operator};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Gating {
@@ -58,6 +58,10 @@ pub enum PoolMethod {
 
 #[derive(Clone)]
 pub enum Layer {
+    /// Runtime-provided feature vector. This layer is a no-op during
+    /// execution; it marks the expected input dimension for trained
+    /// models that receive feature batches from an ML backend.
+    Input { dimensions: usize },
     /// Run a list of `Operator` signals, fuse them via log-odds
     /// conjunction at the configured `alpha`, then add the resulting
     /// logit to channel 0 as a residual connection.
@@ -133,7 +137,7 @@ impl DeepFusionOperator {
             "DeepFusionOperator requires at least one layer"
         );
         match &layers[0] {
-            Layer::Signal(_) | Layer::Embed(_) => {}
+            Layer::Signal(_) | Layer::Embed(_) | Layer::Input { .. } => {}
             _ => panic!("DeepFusionOperator: first layer must be Signal or Embed"),
         }
         Self {
@@ -157,20 +161,35 @@ impl DeepFusionOperator {
         let _ = ratio;
         0.5
     }
-}
 
-impl Operator for DeepFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    pub fn execute_features(
+        &self,
+        doc_id: u64,
+        features: Vec<f64>,
+        ctx: &ExecutionContext,
+    ) -> PostingList {
         let mut state = ForwardState {
-            channel_map: BTreeMap::new(),
-            num_channels: 1,
+            num_channels: features.len(),
+            channel_map: BTreeMap::from([(doc_id, features)]),
             softmax_applied: false,
         };
+        self.apply_layers(ctx, &mut state);
+        build_result(
+            &state.channel_map,
+            state.num_channels,
+            state.softmax_applied,
+        )
+    }
+
+    fn apply_layers(&self, ctx: &ExecutionContext, state: &mut ForwardState) {
         for layer in &self.layers {
             match layer {
-                Layer::Embed(embedding) => apply_embed(embedding, &mut state),
+                Layer::Input { dimensions } => {
+                    state.num_channels = *dimensions;
+                }
+                Layer::Embed(embedding) => apply_embed(embedding, state),
                 Layer::Signal(signals) => {
-                    apply_signal(signals, ctx, self.alpha, self.gating, &mut state);
+                    apply_signal(signals, ctx, self.alpha, self.gating, state);
                 }
                 Layer::Dense {
                     weights,
@@ -183,13 +202,13 @@ impl Operator for DeepFusionOperator {
                     *output_channels,
                     *input_channels,
                     self.gating,
-                    &mut state,
+                    state,
                 ),
-                Layer::Flatten => apply_flatten(&mut state),
-                Layer::GlobalPool(method) => apply_global_pool(*method, &mut state),
-                Layer::Softmax => apply_softmax(&mut state),
-                Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, &mut state),
-                Layer::Dropout { p } => apply_dropout(*p, &mut state),
+                Layer::Flatten => apply_flatten(state),
+                Layer::GlobalPool(method) => apply_global_pool(*method, state),
+                Layer::Softmax => apply_softmax(state),
+                Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, state),
+                Layer::Dropout { p } => apply_dropout(*p, state),
                 Layer::Propagate {
                     edge_label,
                     aggregation,
@@ -200,29 +219,33 @@ impl Operator for DeepFusionOperator {
                     *direction,
                     ctx,
                     self.gating,
-                    &mut state,
+                    state,
                 ),
                 Layer::Conv {
                     edge_label,
                     hop_weights,
                     direction,
-                } => apply_conv(
-                    edge_label,
-                    hop_weights,
-                    *direction,
-                    ctx,
-                    self.gating,
-                    &mut state,
-                ),
+                } => apply_conv(edge_label, hop_weights, *direction, ctx, self.gating, state),
                 Layer::Pool {
                     edge_label,
                     pool_size,
                     method,
                     direction,
-                } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, &mut state),
-                Layer::Attention => apply_attention(&mut state),
+                } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, state),
+                Layer::Attention => apply_attention(state),
             }
         }
+    }
+}
+
+impl Operator for DeepFusionOperator {
+    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+        let mut state = ForwardState {
+            channel_map: BTreeMap::new(),
+            num_channels: 1,
+            softmax_applied: false,
+        };
+        self.apply_layers(ctx, &mut state);
         build_result(
             &state.channel_map,
             state.num_channels,
@@ -239,6 +262,7 @@ impl Operator for DeepFusionOperator {
                         total += s.cost_estimate(stats);
                     }
                 }
+                Layer::Input { dimensions } => total += *dimensions as f64,
                 Layer::Embed(emb) => total += emb.len() as f64,
                 Layer::Dense {
                     output_channels,
@@ -763,8 +787,8 @@ fn apply_gating(x: f64, gating: Gating) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::base::GraphNeighborLookup;
     use uqa_core::Payload;
+    use uqa_operators::GraphNeighborLookup;
 
     struct ConstOperator(Vec<PostingEntry>);
 

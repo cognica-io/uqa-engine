@@ -65,7 +65,6 @@
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
-pub mod deep;
 pub mod migration;
 pub mod operator_tree_bridge;
 pub mod sql;
@@ -77,6 +76,10 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, PostingEntry, PostingList, Value};
+use uqa_ml::{
+    deep_learn as ml_deep_learn, DeepLearnOutput, DeepModel, LearnOptions, TrainingExample,
+    TrainingSet,
+};
 use uqa_operators::{
     CosineProbabilityOperator, ExecutionContext, KNNOperator, LogOddsFusionOperator, Operator,
     ScoreOperator, TermOperator, VectorSimilarityOperator,
@@ -159,7 +162,7 @@ pub struct Engine {
     graphs: RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
     /// Saved deep-fusion models. Mirrors the catalog `_models` table
     /// when the engine is SQLite-backed.
-    models: RwLock<BTreeMap<String, deep::DeepModel>>,
+    models: RwLock<BTreeMap<String, DeepModel>>,
     /// Bayesian calibration parameters (`alpha`, `beta`, `base_rate`, ...)
     /// keyed by signal name. Round-trips through the catalog when the
     /// engine is `SQLite`-backed.
@@ -1009,7 +1012,7 @@ impl Engine {
         // `load_model` is one read deep.
         if let Ok(rows) = catalog.load_models() {
             for (name, json) in rows {
-                if let Ok(model) = serde_json::from_str::<deep::DeepModel>(&json) {
+                if let Ok(model) = serde_json::from_str::<DeepModel>(&json) {
                     engine.models.write().insert(name, model);
                 }
             }
@@ -1861,7 +1864,7 @@ impl Engine {
     /// through the catalog's `_models` table when the engine is in
     /// `SQLite` mode; in-memory engines keep the latest version per
     /// process.
-    pub fn save_model(&self, name: &str, model: &deep::DeepModel) -> Result<(), SQLError> {
+    pub fn save_model(&self, name: &str, model: &DeepModel) -> Result<(), SQLError> {
         let json = serde_json::to_string(model)
             .map_err(|e| SQLError::Internal(format!("model serialise: {e}")))?;
         if let Some(catalog) = self.catalog.as_ref() {
@@ -1873,13 +1876,13 @@ impl Engine {
         Ok(())
     }
 
-    pub fn load_model(&self, name: &str) -> Option<deep::DeepModel> {
+    pub fn load_model(&self, name: &str) -> Option<DeepModel> {
         if let Some(m) = self.models.read().get(name).cloned() {
             return Some(m);
         }
         let catalog = self.catalog.as_ref()?;
         let json = catalog.load_model(name).ok().flatten()?;
-        let model: deep::DeepModel = serde_json::from_str(&json).ok()?;
+        let model: DeepModel = serde_json::from_str(&json).ok()?;
         self.models.write().insert(name.to_string(), model.clone());
         Some(model)
     }
@@ -1894,6 +1897,43 @@ impl Engine {
     /// Python-parity alias for [`Engine::drop_model`].
     pub fn delete_model(&self, name: &str) {
         self.drop_model(name);
+    }
+
+    /// Train an analytical deep model and persist it under `name`.
+    pub fn deep_learn(
+        &self,
+        name: &str,
+        training_set: &TrainingSet,
+        options: &LearnOptions,
+    ) -> Result<DeepLearnOutput, SQLError> {
+        let output = ml_deep_learn(training_set, options)
+            .map_err(|e| SQLError::Unsupported(format!("deep_learn: {e}")))?;
+        self.save_model(name, &output.model)?;
+        Ok(output)
+    }
+
+    /// Parse a JSON [`TrainingSet`], train it, and persist the model.
+    pub fn deep_learn_json(
+        &self,
+        name: &str,
+        training_json: &str,
+        options: &LearnOptions,
+    ) -> Result<DeepLearnOutput, SQLError> {
+        let training_set: TrainingSet = serde_json::from_str(training_json).map_err(|e| {
+            SQLError::TypeMismatch(format!("invalid deep_learn training JSON: {e}"))
+        })?;
+        self.deep_learn(name, &training_set, options)
+    }
+
+    /// Train from a table containing `features` and `label` columns.
+    pub fn deep_learn_table(
+        &self,
+        name: &str,
+        table: &str,
+        options: &LearnOptions,
+    ) -> Result<DeepLearnOutput, SQLError> {
+        let training_set = self.training_set_from_table(table, "features", "label")?;
+        self.deep_learn(name, &training_set, options)
     }
 
     /// Persist Bayesian calibration parameters for a named signal. The
@@ -1967,8 +2007,63 @@ impl Engine {
         Some(scores)
     }
 
+    pub fn deep_predict_features(
+        &self,
+        name: &str,
+        examples: &[(DocId, Vec<f64>)],
+    ) -> Result<Vec<(DocId, f64)>, SQLError> {
+        let model = self
+            .load_model(name)
+            .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
+        let (scores, _) = model
+            .predict_features(examples)
+            .map_err(|e| SQLError::Unsupported(format!("deep_predict: {e}")))?;
+        Ok(scores)
+    }
+
     fn table(&self, name: &str) -> Option<Arc<TableState>> {
         self.tables.read().get(name).cloned()
+    }
+
+    fn training_set_from_table(
+        &self,
+        table: &str,
+        features_field: &str,
+        label_field: &str,
+    ) -> Result<TrainingSet, SQLError> {
+        let table_state = self
+            .table(table)
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let store = table_state.document_store.read();
+        let mut examples = Vec::new();
+        for (doc_id, document) in store.iter_all() {
+            let features = document.get(features_field).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "deep_learn table {table:?} row {doc_id} is missing `{features_field}`"
+                ))
+            })?;
+            let label = document.get(label_field).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "deep_learn table {table:?} row {doc_id} is missing `{label_field}`"
+                ))
+            })?;
+            examples.push(TrainingExample {
+                features: value_to_f64_vec(features).map_err(|e| {
+                    SQLError::TypeMismatch(format!(
+                        "deep_learn table {table:?} row {doc_id} `{features_field}`: {e}"
+                    ))
+                })?,
+                label: value_to_usize(label).map_err(|e| {
+                    SQLError::TypeMismatch(format!(
+                        "deep_learn table {table:?} row {doc_id} `{label_field}`: {e}"
+                    ))
+                })?,
+            });
+        }
+        Ok(TrainingSet {
+            examples,
+            class_count: None,
+        })
     }
 
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Vec<FieldName> {
@@ -3550,6 +3645,30 @@ pub struct HybridSearchParams<'a> {
     /// Confidence-scaling exponent for log-odds fusion (Paper 4 Section 4).
     pub alpha: f64,
     pub top_k: usize,
+}
+
+fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
+    match value {
+        Value::List(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Float(value) => Ok(*value),
+                Value::Int(value) => Ok(*value as f64),
+                other => Err(format!("expected numeric feature, got {other:?}")),
+            })
+            .collect(),
+        other => Err(format!("expected feature array, got {other:?}")),
+    }
+}
+
+fn value_to_usize(value: &Value) -> Result<usize, String> {
+    match value {
+        Value::Int(value) if *value >= 0 => Ok(*value as usize),
+        Value::Float(value) if value.fract() == 0.0 && *value >= 0.0 => Ok(*value as usize),
+        other => Err(format!(
+            "expected non-negative integer label, got {other:?}"
+        )),
+    }
 }
 
 // -----------------------------------------------------------------

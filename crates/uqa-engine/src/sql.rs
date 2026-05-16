@@ -5198,6 +5198,7 @@ fn engine_func_intercept(
                 row.get(SCORE_COLUMN).cloned().unwrap_or(Value::Float(0.0)),
             ))
         }
+        "deep_learn" => Ok(Some(run_deep_learn_projection(engine, args, row, params)?)),
         "graph_create" | "create_graph" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
@@ -5212,6 +5213,65 @@ fn engine_func_intercept(
         }
         _ => Ok(None),
     }
+}
+
+fn run_deep_learn_projection(
+    engine: Option<&Engine>,
+    args: &[Expr],
+    row: &ResultRow,
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    let Some(engine) = engine else {
+        return Err(SQLError::Unsupported(
+            "deep_learn requires an engine-backed projection".into(),
+        ));
+    };
+    if args.len() != 2 {
+        return Err(SQLError::BadArity {
+            name: "deep_learn".into(),
+            expected: "2".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+    let model_name = match eval(&args[0], &ctx)? {
+        Value::Str(s) => s,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "deep_learn.model must be a string, got {other:?}"
+            )));
+        }
+    };
+    let training_source = match eval(&args[1], &ctx)? {
+        Value::Str(s) => s,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "deep_learn.training_set must be a table name or JSON string, got {other:?}"
+            )));
+        }
+    };
+    let trimmed = training_source.trim();
+    let output = if trimmed.starts_with('{') {
+        engine.deep_learn_json(&model_name, trimmed, &uqa_ml::LearnOptions::default())?
+    } else {
+        engine.deep_learn_table(
+            &model_name,
+            &training_source,
+            &uqa_ml::LearnOptions::default(),
+        )?
+    };
+    let mut report = BTreeMap::new();
+    report.insert("model".into(), Value::Str(model_name));
+    report.insert("examples".into(), Value::Int(output.report.examples as i64));
+    report.insert(
+        "feature_dimensions".into(),
+        Value::Int(output.report.feature_dimensions as i64),
+    );
+    report.insert(
+        "class_count".into(),
+        Value::Int(output.report.class_count as i64),
+    );
+    Ok(Value::Map(report))
 }
 
 fn validate_score_projection_args(

@@ -7,6 +7,7 @@ members = [
     "crates/uqa-scoring",
     "crates/uqa-fusion",
     "crates/uqa-operators",
+    "crates/uqa-ml",
     "crates/uqa-graph",
     "crates/uqa-joins",
     "crates/uqa-planner",
@@ -39,6 +40,7 @@ uqa-storage = { version = "0.1.0", path = "crates/uqa-storage" }
 uqa-scoring = { version = "0.1.0", path = "crates/uqa-scoring" }
 uqa-fusion = { version = "0.1.0", path = "crates/uqa-fusion" }
 uqa-operators = { version = "0.1.0", path = "crates/uqa-operators" }
+uqa-ml = { version = "0.1.0", path = "crates/uqa-ml" }
 uqa-graph = { version = "0.1.0", path = "crates/uqa-graph" }
 uqa-joins = { version = "0.1.0", path = "crates/uqa-joins" }
 uqa-planner = { version = "0.1.0", path = "crates/uqa-planner" }

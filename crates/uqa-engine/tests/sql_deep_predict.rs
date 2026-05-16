@@ -8,8 +8,8 @@
 //! deep-model persistence.
 
 use uqa_core::Value;
-use uqa_engine::deep::{DeepLayerSpec, DeepModel, GatingSpec};
 use uqa_engine::Engine;
+use uqa_ml::{DeepLayerSpec, DeepModel, GatingSpec};
 
 fn linear_classifier_model() -> DeepModel {
     // Inputs: 2-element embedding. Linear projection picks the
@@ -31,6 +31,39 @@ fn linear_classifier_model() -> DeepModel {
         alpha: 0.0,
         gating: GatingSpec::None,
     }
+}
+
+#[test]
+fn deep_learn_sql_trains_and_persists_model_from_table() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE train (id INTEGER PRIMARY KEY, features REAL[], label INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO train (id, features, label) VALUES
+             (1, ARRAY[2.0, 0.0], 0),
+             (2, ARRAY[3.0, 0.0], 0),
+             (3, ARRAY[0.0, 2.0], 1),
+             (4, ARRAY[0.0, 3.0], 1)",
+            &[],
+        )
+        .unwrap();
+
+    let result = engine
+        .sql("SELECT deep_learn('trained', 'train') AS report", &[])
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert!(engine.load_model("trained").is_some());
+
+    let scores = engine
+        .deep_predict_features("trained", &[(10, vec![4.0, 0.0]), (11, vec![0.0, 4.0])])
+        .unwrap();
+    assert_eq!(scores.len(), 2);
+    assert!(scores.iter().all(|(_, score)| *score > 0.5), "{scores:?}");
 }
 
 #[test]

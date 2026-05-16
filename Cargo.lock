@@ -3239,6 +3239,7 @@ dependencies = [
  "uqa-fusion",
  "uqa-graph",
  "uqa-joins",
+ "uqa-ml",
  "uqa-operators",
  "uqa-planner",
  "uqa-scoring",
@@ -3304,6 +3305,18 @@ dependencies = [
  "uqa-core",
  "uqa-graph",
  "uqa-sql",
+]
+
+[[package]]
+name = "uqa-ml"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uqa-core",
+ "uqa-operators",
+ "uqa-scoring",
 ]
 
 [[package]]

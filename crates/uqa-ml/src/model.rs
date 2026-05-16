@@ -4,38 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Serializable deep-fusion model: layer specs + alpha + gating.
-//!
-//! `DeepModel` is the JSON-serializable surface persisted into the
-//! catalog under the `_models` table. `to_layers` converts the spec
-//! list back into runtime `Layer` values (no `Signal` arm — signals
-//! reference live operators that aren't serializable). `predict` runs
-//! a forward pass through the deep-fusion operator and returns either
-//! a per-document scalar score or a per-document class-probability
-//! vector when the final layer is `Softmax`.
-//!
-//! The compromise vs. the Python catalog: we do not serialize
-//! `SignalLayer` (which references arbitrary operator trees). For
-//! pure inference / classification flows the deep-fusion model is
-//! complete — embed → ... → softmax — and that's what the SQL
-//! `deep_predict` hook exercises.
+//! Serializable deep-fusion model specs plus CPU inference helpers.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use uqa_core::{DocId, Value};
+use uqa_operators::{base::Direction, ExecutionContext, Operator};
 
-/// Output of [`DeepModel::predict`]: `(doc_id, score)` pairs plus, when
-/// the model ends in `Softmax`, the per-doc class probability vector.
-pub type PredictResult = (Vec<(u64, f64)>, BTreeMap<u64, Vec<f64>>);
-use uqa_core::Value;
-use uqa_operators::{
-    base::Direction, deep_fusion::AggregationKind, deep_fusion::PoolMethod, DeepFusionOperator,
-    ExecutionContext, Gating, GlobalPoolMethod, Layer, Operator,
+use crate::backend::{MLBackend, MLError, MLResult};
+use crate::deep_fusion::{
+    AggregationKind, DeepFusionOperator, Gating, GlobalPoolMethod, Layer, PoolMethod,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Output of [`DeepModel`] inference: `(doc_id, score)` pairs plus,
+/// when the model ends in `Softmax`, per-doc class probability vectors.
+pub type PredictResult = (Vec<(DocId, f64)>, BTreeMap<DocId, Vec<f64>>);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeepLayerSpec {
+    /// Runtime feature-vector input. Used by trained models and batched
+    /// feature inference.
+    Input {
+        dimensions: usize,
+    },
     Embed {
         embedding: Vec<f64>,
     },
@@ -106,15 +99,16 @@ pub enum PoolKindSpec {
     Max,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GatingSpec {
+    #[default]
     None,
     ReLU,
     Swish,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeepModel {
     pub layers: Vec<DeepLayerSpec>,
     pub alpha: f64,
@@ -134,39 +128,107 @@ impl DeepModel {
         }
     }
 
-    /// Run a forward pass against `ctx` (with whatever document store /
-    /// graph is wired up) and return the resulting `(doc_id, score)`
-    /// pairs plus, when the model ends in `Softmax`, the per-doc class
-    /// probability vector.
-    pub fn predict(&self, ctx: &ExecutionContext) -> PredictResult {
-        let layers = self.to_layers();
-        if layers.is_empty() {
-            return (Vec::new(), BTreeMap::new());
+    pub fn input_dimensions(&self) -> Option<usize> {
+        match self.layers.first() {
+            Some(DeepLayerSpec::Input { dimensions }) => Some(*dimensions),
+            _ => None,
         }
-        let op = DeepFusionOperator::new(layers, self.alpha, self.gating_runtime());
-        let pl = op.execute(ctx);
-        let mut scores: Vec<(u64, f64)> = Vec::with_capacity(pl.len());
-        let mut probs: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
-        for entry in pl.entries() {
-            scores.push((entry.doc_id, entry.payload.score));
-            if let Some(Value::List(items)) = entry.payload.fields.get("class_probs") {
-                let v: Vec<f64> = items
-                    .iter()
-                    .filter_map(|x| match x {
-                        Value::Float(f) => Some(*f),
-                        Value::Int(n) => Some(*n as f64),
-                        _ => None,
-                    })
-                    .collect();
-                probs.insert(entry.doc_id, v);
-            }
-        }
-        (scores, probs)
     }
+
+    /// Run CPU inference against an operator execution context.
+    pub fn predict(&self, ctx: &ExecutionContext) -> PredictResult {
+        predict_cpu(self, ctx)
+    }
+
+    /// Run inference through a specific backend.
+    pub fn predict_with_backend<B: MLBackend>(
+        &self,
+        backend: &B,
+        ctx: &ExecutionContext,
+    ) -> MLResult<PredictResult> {
+        backend.predict(self, ctx)
+    }
+
+    pub fn predict_features(&self, examples: &[(DocId, Vec<f64>)]) -> MLResult<PredictResult> {
+        predict_feature_batch_cpu(self, examples)
+    }
+
+    pub fn predict_features_with_backend<B: MLBackend>(
+        &self,
+        backend: &B,
+        examples: &[(DocId, Vec<f64>)],
+    ) -> MLResult<PredictResult> {
+        backend.predict_features(self, examples)
+    }
+}
+
+pub(crate) fn predict_cpu(model: &DeepModel, ctx: &ExecutionContext) -> PredictResult {
+    let layers = model.to_layers();
+    if layers.is_empty() {
+        return (Vec::new(), BTreeMap::new());
+    }
+    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime());
+    posting_list_to_prediction(&op.execute(ctx))
+}
+
+pub(crate) fn predict_feature_batch_cpu(
+    model: &DeepModel,
+    examples: &[(DocId, Vec<f64>)],
+) -> MLResult<PredictResult> {
+    let layers = model.to_layers();
+    if layers.is_empty() {
+        return Ok((Vec::new(), BTreeMap::new()));
+    }
+    let Some(expected_dims) = model.input_dimensions() else {
+        return Err(MLError::InvalidModel(
+            "feature prediction requires a model whose first layer is Input".into(),
+        ));
+    };
+    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime());
+    let mut scores = Vec::with_capacity(examples.len());
+    let mut probs = BTreeMap::new();
+    for (doc_id, features) in examples {
+        if features.len() != expected_dims {
+            return Err(MLError::InvalidModel(format!(
+                "feature vector for doc {doc_id} has dimension {}, expected {expected_dims}",
+                features.len()
+            )));
+        }
+        let sample_prediction =
+            op.execute_features(*doc_id, features.clone(), &ExecutionContext::new());
+        let (mut sample_scores, sample_probs) = posting_list_to_prediction(&sample_prediction);
+        scores.append(&mut sample_scores);
+        probs.extend(sample_probs);
+    }
+    scores.sort_by_key(|(doc_id, _)| *doc_id);
+    Ok((scores, probs))
+}
+
+pub(crate) fn posting_list_to_prediction(pl: &uqa_core::PostingList) -> PredictResult {
+    let mut scores: Vec<(DocId, f64)> = Vec::with_capacity(pl.len());
+    let mut probs: BTreeMap<DocId, Vec<f64>> = BTreeMap::new();
+    for entry in pl.entries() {
+        scores.push((entry.doc_id, entry.payload.score));
+        if let Some(Value::List(items)) = entry.payload.fields.get("class_probs") {
+            let v: Vec<f64> = items
+                .iter()
+                .filter_map(|x| match x {
+                    Value::Float(f) => Some(*f),
+                    Value::Int(n) => Some(*n as f64),
+                    _ => None,
+                })
+                .collect();
+            probs.insert(entry.doc_id, v);
+        }
+    }
+    (scores, probs)
 }
 
 fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
     match spec {
+        DeepLayerSpec::Input { dimensions } => Layer::Input {
+            dimensions: *dimensions,
+        },
         DeepLayerSpec::Embed { embedding } => Layer::Embed(embedding.clone()),
         DeepLayerSpec::Dense {
             weights,

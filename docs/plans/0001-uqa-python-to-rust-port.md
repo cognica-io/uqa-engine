@@ -25,7 +25,7 @@ Produce a Rust implementation of the Unified Query Algebra (UQA) that is:
 - A new SQL dialect. We mirror the Python compiler's accepted grammar exactly (PostgreSQL-flavored).
 - Backward compatibility with old Python catalog files is not a hard requirement, but the SQLite schema laid down by the Python engine should be readable. We can ship a one-shot migration tool if needed.
 - HNSW vector index. The Python code reserves the enum slot but never implements it; we leave it stubbed (return `not_implemented`) and build the IVF backend first.
-- Deep-learning training (`deep_learn`) is deferred to a late phase. Inference (`deep_predict`, `deep_fusion` with a saved model) is in scope earlier.
+- The initial 0.1.0 port deferred deep-learning training (`deep_learn`) to a late phase. The current Rust layout keeps model specs, deep-fusion inference, analytical training, and optional MLX acceleration in `uqa-ml`; `uqa-engine` owns catalog persistence and SQL adapters.
 
 ## 2. Theoretical anchors (must hold)
 
@@ -142,7 +142,8 @@ graph TD
 | `uqa-storage` | `storage/` | 6,000 | `DocumentStore`, `InvertedIndex`, `IVFIndex`, `BTreeIndex`, `SpatialIndex`, `BlockMaxIndex`, `Catalog`, transactions |
 | `uqa-scoring` | `scoring/` | 3,500 | `BM25Scorer`, `BayesianBM25Scorer`, `WANDScorer`, `BlockMaxWANDScorer`, calibration, parameter learner |
 | `uqa-fusion` | `fusion/` | 1,500 | Log-odds, attention, learned fusion, query features |
-| `uqa-operators` | `operators/` | 3,500 | `Operator` trait + primitives + boolean + hybrid + aggregation + sparse + multi-stage + multi-field + deep-fusion + deep-learn |
+| `uqa-operators` | `operators/` | 3,500 | `Operator` trait + primitives + boolean + hybrid + aggregation + sparse + multi-stage + multi-field |
+| `uqa-ml` | `operators/deep_fusion.py`, `operators/deep_learn.py` | 2,000 | Serializable deep models, CPU inference, analytical training, optional MLX backend |
 | `uqa-graph` | `graph/` | 5,500 | `GraphStore`, vertex/edge types, pattern, RPQ, Cypher (lexer/parser/AST/compiler), centrality, message passing, temporal, versioned |
 | `uqa-joins` | `joins/` | 2,500 | Hash inner, outer, semi, cross, sort-merge, index, cross-paradigm |
 | `uqa-planner` | `planner/` | 4,000 | Cost model, cardinality, DPccp join enumeration, optimizer rewrites |
@@ -286,8 +287,8 @@ The `Operator` trait has one method (`execute(&self, ctx: &ExecutionContext) -> 
 | `operators/multi_stage.py` | `uqa-operators/src/multi_stage.rs` | `StagedRetrievalOperator` |
 | `operators/learned_fusion.py` | `uqa-operators/src/learned_fusion.rs` | `LearnedFusionOperator` |
 | `operators/progressive_fusion.py` | `uqa-operators/src/progressive_fusion.rs` | Progressive fusion (incremental log-odds update) |
-| `operators/deep_fusion.py` | `uqa-operators/src/deep_fusion.rs` | CNN-style fusion (`convolve`, `pool`, `flatten`, `dense`, `softmax`); inference path |
-| `operators/deep_learn.py` | `uqa-operators/src/deep_learn.rs` | Analytical training (no backprop). Phase 9. |
+| `operators/deep_fusion.py` | `uqa-ml/src/deep_fusion.rs` | CNN-style fusion (`convolve`, `pool`, `flatten`, `dense`, `softmax`); inference path |
+| `operators/deep_learn.py` | `uqa-ml/src/training.rs` | Analytical training (no backprop). Phase 9. |
 | `operators/hierarchical.py` | `uqa-operators/src/hierarchical.rs` | Path/array/object navigation operators |
 
 ### 5.7 `graph/`
@@ -520,7 +521,8 @@ The dates are illustrative and assume a single full-time engineer. Each phase ha
 - `uqa-fusion::attention::{AttentionFusion, MultiHeadAttentionFusion}`
 - `uqa-fusion::learned::LearnedFusion`
 - `uqa-fusion::query_features`
-- `uqa-operators::{multi_field, multi_stage, learned_fusion, progressive_fusion, attention, sparse, hierarchical, deep_fusion}`
+- `uqa-operators::{multi_field, multi_stage, learned_fusion, progressive_fusion, attention, sparse, hierarchical}`
+- `uqa-ml::{deep_fusion, model}`
 - `uqa-sql::compiler::function_registry`: register `staged_retrieval`, `multi_field_match`, `deep_fusion`, `convolve`, `pool`, `flatten`, `dense`, `softmax`, `attention`, `layer`, `model`, `deep_predict`
 **Exit:** Deep-fusion inference example matches Python.
 
@@ -528,7 +530,7 @@ The dates are illustrative and assume a single full-time engineer. Each phase ha
 
 **Entry:** Phase 8 done.
 **Deliverables:**
-- `uqa-operators::deep_learn`: analytical training (no backprop) per Paper 4 framework
+- `uqa-ml::deep_learn`: analytical training (no backprop) per Paper 4 framework
 - Model persistence to catalog; `Engine::save_model` / `load_model` / `delete_model` / `deep_learn` / `deep_predict`
 - Convolution weight estimation (`Engine::estimate_conv_weights`) via spatial autocorrelation
 **Exit:** MNIST CNN training example reaches the same accuracy as the Python implementation (within 1pp).

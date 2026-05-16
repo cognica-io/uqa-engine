@@ -9,8 +9,8 @@
 //! the model rehydrates and produces identical predictions.
 
 use tempfile::tempdir;
-use uqa_engine::deep::{DeepLayerSpec, DeepModel, GatingSpec};
 use uqa_engine::Engine;
+use uqa_ml::{DeepLayerSpec, DeepModel, GatingSpec};
 
 fn linear_model() -> DeepModel {
     DeepModel {

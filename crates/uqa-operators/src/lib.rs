@@ -14,7 +14,6 @@
 pub mod aggregation;
 pub mod base;
 pub mod boolean;
-pub mod deep_fusion;
 pub mod fusion_wrappers;
 pub mod hierarchical;
 pub mod hybrid;
@@ -34,10 +33,6 @@ pub use base::{
     Operator,
 };
 pub use boolean::{ComplementOperator, IntersectOperator, UnionOperator};
-pub use deep_fusion::{
-    AggregationKind as DeepAggKind, DeepFusionOperator, Gating, GlobalPoolMethod, Layer,
-    PoolMethod as DeepPoolMethod,
-};
 pub use fusion_wrappers::{
     AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator, LearnedFusionOperator,
     MultiFieldSearchOperator, WeightSource,

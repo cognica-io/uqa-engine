@@ -130,10 +130,12 @@ buckets the right side by join key once and probes per left row in
   string). The SQL function family `graph_pagerank`, `graph_traverse`,
   `graph_neighbors` reads them directly; the Cypher executors run
   through the same `Engine::graph_with` / `graph_with_mut` accessors.
-* `uqa-engine::deep` exposes a serializable `DeepModel` (layer specs +
-  alpha + gating). `Engine::save_model` / `load_model` / `drop_model`
-  round-trip through the catalog's `_models` table; `deep_predict`
-  runs a forward pass and is also reachable from SQL via
+* `uqa-ml` exposes serializable `DeepModel` specs, deep-fusion inference
+  backends, analytical `deep_learn`, and optional Apple MLX support
+  through the official `mlx-c` system library when MLX development files are
+  available. `uqa-engine` persists those models through the catalog's
+  `_models` table and exposes the SQL adapters
+  `deep_learn('model_name', 'training_table')` and
   `deep_predict('model_name')`.
 * `uqa-scoring::ParameterLearner` wraps `BayesianProbabilityTransform`
   with an SGD update on the logistic loss, so `(alpha, beta, base_rate)`

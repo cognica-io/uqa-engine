@@ -1,0 +1,27 @@
+[package]
+name = "uqa-ml"
+description = "Machine-learning model specs, training, and inference backends for UQA"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[features]
+default = ["cpu"]
+cpu = []
+mlx = []
+
+[dependencies]
+uqa-core = { workspace = true }
+uqa-operators = { workspace = true }
+uqa-scoring = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
