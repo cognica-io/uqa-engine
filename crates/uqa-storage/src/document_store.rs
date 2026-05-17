@@ -31,6 +31,33 @@ pub trait DocumentStore: Send + Sync {
         self.get(doc_id).and_then(|d| d.get(field).cloned())
     }
 
+    /// Find the first document whose top-level field equals `value`.
+    /// Persistent stores can override this with an indexed or JSON-path
+    /// lookup so point updates do not have to materialise every row.
+    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
+        self.doc_ids()
+            .into_iter()
+            .find(|id| self.get_field(*id, field).as_ref() == Some(value))
+    }
+
+    /// Apply top-level field updates without requiring callers to
+    /// materialise the whole document. `Value::Null` matches `put` by
+    /// removing the stored field.
+    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
+        let Some(mut document) = self.get(doc_id) else {
+            return false;
+        };
+        for (field, value) in updates {
+            if matches!(value, Value::Null) {
+                document.remove(field);
+            } else {
+                document.insert(field.clone(), value.clone());
+            }
+        }
+        self.put(doc_id, document);
+        true
+    }
+
     /// Bulk variant of [`DocumentStore::get_field`]. The default
     /// implementation walks each id one at a time; persistent backends
     /// should override to run a single batched query.
@@ -146,6 +173,26 @@ impl DocumentStore for MemoryDocumentStore {
             .and_then(|d| d.get(field).cloned())
     }
 
+    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
+        self.documents
+            .iter()
+            .find_map(|(doc_id, doc)| (doc.get(field) == Some(value)).then_some(*doc_id))
+    }
+
+    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
+        let Some(document) = self.documents.get_mut(&doc_id) else {
+            return false;
+        };
+        for (field, value) in updates {
+            if matches!(value, Value::Null) {
+                document.remove(field);
+            } else {
+                document.insert(field.clone(), value.clone());
+            }
+        }
+        true
+    }
+
     fn delete(&mut self, doc_id: DocId) {
         self.documents.remove(&doc_id);
     }
@@ -228,6 +275,46 @@ mod tests {
         s.put(2, doc([("color", Value::Str("blue".into()))]));
         assert!(s.has_value("color", &Value::Str("red".into())));
         assert!(!s.has_value("color", &Value::Str("green".into())));
+    }
+
+    #[test]
+    fn find_doc_id_by_field_returns_first_match() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(3, doc([("public_id", Value::Str("m-3".into()))]));
+        s.put(7, doc([("public_id", Value::Str("m-7".into()))]));
+
+        assert_eq!(
+            s.find_doc_id_by_field("public_id", &Value::Str("m-7".into())),
+            Some(7)
+        );
+        assert_eq!(
+            s.find_doc_id_by_field("public_id", &Value::Str("missing".into())),
+            None
+        );
+    }
+
+    #[test]
+    fn patch_fields_updates_and_removes_top_level_values() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(
+            1,
+            doc([
+                ("public_id", Value::Str("m-1".into())),
+                ("content", Value::Str("old".into())),
+                ("token_count", Value::Int(4)),
+            ]),
+        );
+
+        let updates = BTreeMap::from([
+            ("content".to_string(), Value::Str("new".into())),
+            ("token_count".to_string(), Value::Null),
+        ]);
+        assert!(s.patch_fields(1, &updates));
+
+        let got = s.get(1).unwrap();
+        assert_eq!(got.get("public_id"), Some(&Value::Str("m-1".into())));
+        assert_eq!(got.get("content"), Some(&Value::Str("new".into())));
+        assert!(!got.contains_key("token_count"));
     }
 
     #[test]

@@ -3386,6 +3386,12 @@ impl Engine {
         got
     }
 
+    pub fn find_doc_id_by_field(&self, table: &str, field: &str, value: &Value) -> Option<DocId> {
+        let t = self.table(table)?;
+        let found = t.document_store.read().find_doc_id_by_field(field, value);
+        found
+    }
+
     /// Find the first document whose conflict columns all match the
     /// given values. Returns the existing doc id when a conflict
     /// exists, `None` when the row would be a fresh insert. Mirrors
@@ -3452,6 +3458,67 @@ impl Engine {
             idx.as_mut().delete(doc_id);
         }
         self.add_document_with_vectors(table, doc_id, doc, vectors);
+        true
+    }
+
+    /// Apply field-level updates without materialising the whole
+    /// document. Callers must only use this path when constraints and
+    /// referential actions do not need the old or complete new row.
+    pub fn patch_document_fields(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+        vectors: &BTreeMap<String, Vec<f32>>,
+    ) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+
+        let fts_fields = t.fts_fields();
+        let touches_fts = updates
+            .keys()
+            .any(|field| fts_fields.iter().any(|fts| fts == field));
+        let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
+        if touches_fts {
+            let store = t.document_store.read();
+            for field in &fts_fields {
+                let value = updates
+                    .get(field)
+                    .cloned()
+                    .or_else(|| store.get_field(doc_id, field));
+                if let Some(Value::Str(text)) = value {
+                    text_fields.insert(field.clone(), text);
+                }
+            }
+        }
+
+        if !t.document_store.write().patch_fields(doc_id, updates) {
+            return false;
+        }
+
+        if touches_fts {
+            let mut index = t.inverted_index.write();
+            index.remove_document(doc_id);
+            if !text_fields.is_empty() {
+                index.add_document(doc_id, text_fields);
+            }
+        }
+
+        {
+            let mut indexes = t.vector_indexes.write();
+            for (field, index) in indexes.iter_mut() {
+                if !updates.contains_key(field) {
+                    continue;
+                }
+                index.delete(doc_id);
+                if let Some(vector) = vectors.get(field) {
+                    index.add(doc_id, vector.clone());
+                }
+            }
+        }
+
+        self.mark_column_stats_dirty(table, &t);
         true
     }
 

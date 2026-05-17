@@ -133,6 +133,134 @@ impl SQLiteDocumentStore {
         })
     }
 
+    fn get_field_inner(&self, doc_id: DocId, field: &str) -> SQLiteResult<Option<Value>> {
+        self.ensure_blob_table()?;
+        let path = sqlite_json_path(field);
+        self.conn.with(|c| {
+            let row: Option<(Option<String>, String)> = c
+                .query_row(
+                    "SELECT json_type(body, ?3), json_quote(json_extract(body, ?3))
+                     FROM _documents
+                     WHERE table_name = ?1 AND doc_id = ?2",
+                    params![self.table, doc_id as i64, path],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((json_type, json_text)) = row else {
+                return Ok(None);
+            };
+            let Some(json_type) = json_type else {
+                return Ok(None);
+            };
+            let mut value = match json_type.as_str() {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                "null" => Value::Null,
+                _ => serde_json::from_str::<Value>(&json_text)?,
+            };
+            if let Some(blob_field) = marker_field(&value) {
+                if let Some(bytes) = load_document_blob(c, &self.table, doc_id, blob_field)? {
+                    value = Value::Bytes(bytes);
+                }
+            }
+            Ok(Some(value))
+        })
+    }
+
+    fn find_doc_id_by_field_inner(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> SQLiteResult<Option<DocId>> {
+        let path = sqlite_json_path(field);
+        match value {
+            Value::Str(value) => self
+                .conn
+                .with(|c| find_doc_id_by_scalar(c, &self.table, &path, value)),
+            Value::Int(value) => self
+                .conn
+                .with(|c| find_doc_id_by_scalar(c, &self.table, &path, value)),
+            Value::Float(value) if value.is_finite() => self
+                .conn
+                .with(|c| find_doc_id_by_scalar(c, &self.table, &path, value)),
+            Value::Bool(value) => self.conn.with(|c| {
+                let json_type = if *value { "true" } else { "false" };
+                let doc_id: Option<i64> = c
+                    .query_row(
+                        "SELECT doc_id FROM _documents
+                         WHERE table_name = ?1 AND json_type(body, ?2) = ?3
+                         ORDER BY doc_id LIMIT 1",
+                        params![self.table, path, json_type],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                Ok(doc_id.map(|id| id as DocId))
+            }),
+            _ => Ok(self
+                .doc_ids()
+                .into_iter()
+                .find(|id| self.get_field(*id, field).as_ref() == Some(value))),
+        }
+    }
+
+    fn patch_fields_inner(
+        &self,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+    ) -> SQLiteResult<bool> {
+        if updates.is_empty() {
+            return Ok(true);
+        }
+        self.ensure_blob_table()?;
+        self.conn.with(|c| {
+            let exists: Option<i64> = c
+                .query_row(
+                    "SELECT 1 FROM _documents
+                     WHERE table_name = ?1 AND doc_id = ?2
+                     LIMIT 1",
+                    params![self.table, doc_id as i64],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if exists.is_none() {
+                return Ok(false);
+            }
+
+            for (field, value) in updates {
+                let path = sqlite_json_path(field);
+                match value {
+                    Value::Null => {
+                        delete_document_blob(c, &self.table, doc_id, field)?;
+                        c.execute(
+                            "UPDATE _documents SET body = json_remove(body, ?3)
+                             WHERE table_name = ?1 AND doc_id = ?2",
+                            params![self.table, doc_id as i64, path],
+                        )?;
+                    }
+                    Value::Bytes(bytes) => {
+                        let marker = serde_json::to_string(&blob_marker(field.clone()))?;
+                        c.execute(
+                            "UPDATE _documents SET body = json_set(body, ?3, json(?4))
+                             WHERE table_name = ?1 AND doc_id = ?2",
+                            params![self.table, doc_id as i64, path, marker],
+                        )?;
+                        upsert_document_blob(c, &self.table, doc_id, field, bytes)?;
+                    }
+                    other => {
+                        delete_document_blob(c, &self.table, doc_id, field)?;
+                        let json = serde_json::to_string(other)?;
+                        c.execute(
+                            "UPDATE _documents SET body = json_set(body, ?3, json(?4))
+                             WHERE table_name = ?1 AND doc_id = ?2",
+                            params![self.table, doc_id as i64, path, json],
+                        )?;
+                    }
+                }
+            }
+            Ok(true)
+        })
+    }
+
     fn ensure_blob_table(&self) -> SQLiteResult<()> {
         self.conn.with(|c| {
             c.execute(
@@ -150,6 +278,37 @@ impl SQLiteDocumentStore {
             Ok(())
         })
     }
+}
+
+fn sqlite_json_path(field: &str) -> String {
+    if field.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+        && field
+            .chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+    {
+        format!("$.{field}")
+    } else {
+        format!("$.{}", serde_json::to_string(field).unwrap_or_default())
+    }
+}
+
+fn find_doc_id_by_scalar<T: rusqlite::ToSql>(
+    conn: &rusqlite::Connection,
+    table: &str,
+    path: &str,
+    value: &T,
+) -> SQLiteResult<Option<DocId>> {
+    let doc_id: Option<i64> = conn
+        .query_row(
+            "SELECT doc_id FROM _documents
+             WHERE table_name = ?1 AND json_extract(body, ?2) = ?3
+             ORDER BY doc_id LIMIT 1",
+            (table, path, value),
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(doc_id.map(|id| id as DocId))
 }
 
 fn encode_document_blobs(document: Document) -> (Document, Vec<(String, Vec<u8>)>) {
@@ -221,6 +380,58 @@ fn hydrate_document_blobs(
     Ok(())
 }
 
+fn load_document_blob(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    field: &str,
+) -> SQLiteResult<Option<Vec<u8>>> {
+    conn.query_row(
+        &format!(
+            "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
+             WHERE table_name = ?1 AND doc_id = ?2 AND field_name = ?3"
+        ),
+        params![table, doc_id as i64, field],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+fn delete_document_blob(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    field: &str,
+) -> SQLiteResult<()> {
+    conn.execute(
+        &format!(
+            "DELETE FROM {DOCUMENT_BLOBS_TABLE}
+             WHERE table_name = ?1 AND doc_id = ?2 AND field_name = ?3"
+        ),
+        params![table, doc_id as i64, field],
+    )?;
+    Ok(())
+}
+
+fn upsert_document_blob(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    field: &str,
+    bytes: &[u8],
+) -> SQLiteResult<()> {
+    conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO {DOCUMENT_BLOBS_TABLE}
+             (table_name, doc_id, field_name, bytes)
+             VALUES (?1, ?2, ?3, ?4)"
+        ),
+        params![table, doc_id as i64, field, bytes],
+    )?;
+    Ok(())
+}
+
 impl DocumentStore for SQLiteDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) {
         let _ = self.put_inner(doc_id, &document);
@@ -231,8 +442,15 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> Option<uqa_core::Value> {
-        let doc = self.get_inner(doc_id).ok().flatten()?;
-        doc.get(field).cloned()
+        self.get_field_inner(doc_id, field).ok().flatten()
+    }
+
+    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
+        self.find_doc_id_by_field_inner(field, value).ok().flatten()
+    }
+
+    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
+        self.patch_fields_inner(doc_id, updates).unwrap_or(false)
     }
 
     fn delete(&mut self, doc_id: DocId) {
@@ -358,6 +576,99 @@ mod tests {
         assert_eq!(s.get_field(7, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(7, "flag"), Some(Value::Bool(true)));
         assert_eq!(s.get_field(7, "missing"), None);
+    }
+
+    #[test]
+    fn find_doc_id_by_field_uses_top_level_value() {
+        let mut s = store();
+        s.put(
+            5,
+            doc([
+                ("public_id", Value::Str("m-5".into())),
+                ("content", Value::Str("old".into())),
+            ]),
+        );
+        s.put(
+            9,
+            doc([
+                ("public_id", Value::Str("m-9".into())),
+                ("content", Value::Str("target".into())),
+            ]),
+        );
+
+        assert_eq!(
+            s.find_doc_id_by_field("public_id", &Value::Str("m-9".into())),
+            Some(9)
+        );
+        assert_eq!(
+            s.find_doc_id_by_field("public_id", &Value::Str("missing".into())),
+            None
+        );
+    }
+
+    #[test]
+    fn patch_fields_updates_body_without_losing_unmodified_values() {
+        let mut s = store();
+        s.put(
+            31,
+            doc([
+                ("public_id", Value::Str("m-31".into())),
+                ("content", Value::Str("old".into())),
+                (
+                    "embedding",
+                    Value::List(vec![Value::Float(0.25), Value::Float(0.75)]),
+                ),
+                ("token_count", Value::Int(2)),
+            ]),
+        );
+
+        let updates = BTreeMap::from([
+            ("content".to_string(), Value::Str("new".into())),
+            ("token_count".to_string(), Value::Null),
+        ]);
+        assert!(s.patch_fields(31, &updates));
+
+        let got = s.get(31).unwrap();
+        assert_eq!(got.get("public_id"), Some(&Value::Str("m-31".into())));
+        assert_eq!(got.get("content"), Some(&Value::Str("new".into())));
+        assert_eq!(
+            got.get("embedding"),
+            Some(&Value::List(vec![Value::Float(0.25), Value::Float(0.75)]))
+        );
+        assert!(!got.contains_key("token_count"));
+    }
+
+    #[test]
+    fn patch_fields_updates_blob_storage() {
+        let mut s = store();
+        s.put(
+            41,
+            doc([
+                ("public_id", Value::Str("m-41".into())),
+                ("bytes", Value::Bytes(vec![1, 2, 3])),
+            ]),
+        );
+
+        let updates = BTreeMap::from([("bytes".to_string(), Value::Bytes(vec![4, 5]))]);
+        assert!(s.patch_fields(41, &updates));
+        assert_eq!(s.get_field(41, "bytes"), Some(Value::Bytes(vec![4, 5])));
+
+        s.conn
+            .with(|c| {
+                let bytes: Vec<u8> = c.query_row(
+                    &format!(
+                        "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
+                         WHERE table_name = 'articles'
+                           AND doc_id = 41
+                           AND field_name = 'bytes'"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(bytes, vec![4, 5]);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

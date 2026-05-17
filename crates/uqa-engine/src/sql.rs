@@ -45,6 +45,10 @@ use crate::{Engine, IVFIndexParams, ScoredEntry};
 
 mod age_cypher;
 
+type RowUpdateValues = BTreeMap<String, Value>;
+type RowUpdateVectors = BTreeMap<String, Vec<f32>>;
+type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
+
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
 
@@ -1101,6 +1105,9 @@ fn run_update_inner(
     if let Some(from_clause) = stmt.from.as_ref() {
         return run_update_from(engine, &stmt, from_clause, params);
     }
+    if let Some(result) = try_run_point_update(engine, &stmt, params)? {
+        return Ok(result);
+    }
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
@@ -1152,6 +1159,180 @@ fn run_update_inner(
         ));
     }
     Ok(SQLResult::from_affected(affected))
+}
+
+fn try_run_point_update(
+    engine: &Engine,
+    stmt: &UpdateStmt,
+    params: &[SQLParam],
+) -> Result<Option<SQLResult>, SQLError> {
+    if !stmt.returning.is_empty() {
+        return Ok(None);
+    }
+    let Some((lookup_field, lookup_value)) =
+        point_lookup_filter(stmt.r#where.as_ref(), engine, params)?
+    else {
+        return Ok(None);
+    };
+    let Some((updates, vectors)) = row_independent_update_values(engine, stmt, params)? else {
+        return Ok(None);
+    };
+    if !can_patch_update_without_full_row(engine, &stmt.table, &updates) {
+        return Ok(None);
+    }
+    let Some(doc_id) = engine.find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)
+    else {
+        return Ok(Some(SQLResult::from_affected(0)));
+    };
+    let affected = engine.patch_document_fields(&stmt.table, doc_id, &updates, &vectors);
+    Ok(Some(SQLResult::from_affected(u64::from(affected))))
+}
+
+fn point_lookup_filter(
+    filter: Option<&Expr>,
+    engine: &Engine,
+    params: &[SQLParam],
+) -> Result<Option<(String, Value)>, SQLError> {
+    let Some(Expr::Binary {
+        op: BinaryOp::Equal,
+        lhs,
+        rhs,
+    }) = filter
+    else {
+        return Ok(None);
+    };
+    if let Some(field) = top_level_column(lhs) {
+        if expr_is_row_independent(rhs) {
+            let ctx = EvalContext::new(None, params).with_engine(engine);
+            return Ok(Some((field.to_string(), eval(rhs, &ctx)?)));
+        }
+    }
+    if let Some(field) = top_level_column(rhs) {
+        if expr_is_row_independent(lhs) {
+            let ctx = EvalContext::new(None, params).with_engine(engine);
+            return Ok(Some((field.to_string(), eval(lhs, &ctx)?)));
+        }
+    }
+    Ok(None)
+}
+
+fn top_level_column(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Column(name) => Some(name),
+        Expr::QualifiedColumn { column, .. } => Some(column),
+        _ => None,
+    }
+}
+
+fn row_independent_update_values(
+    engine: &Engine,
+    stmt: &UpdateStmt,
+    params: &[SQLParam],
+) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
+    let mut updates = BTreeMap::new();
+    let mut vectors = BTreeMap::new();
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    for (column, expr) in &stmt.assignments {
+        if !expr_is_row_independent(expr) {
+            return Ok(None);
+        }
+        let value = coerce_to_column_type(engine, &stmt.table, column, eval(expr, &ctx)?)?;
+        if let Ok(vector) = value_to_vector(&value) {
+            vectors.insert(column.clone(), vector);
+        }
+        updates.insert(column.clone(), value);
+    }
+    Ok(Some((updates, vectors)))
+}
+
+fn expr_is_row_independent(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(_) | Expr::Param(_) => true,
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().all(expr_is_row_independent)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_is_row_independent(lhs) && expr_is_row_independent(rhs)
+        }
+        Expr::Not(inner) => expr_is_row_independent(inner),
+        Expr::IsNull { expr, .. } => expr_is_row_independent(expr),
+        Expr::Between { expr, low, high } => {
+            expr_is_row_independent(expr)
+                && expr_is_row_independent(low)
+                && expr_is_row_independent(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_is_row_independent(expr) && list.iter().all(expr_is_row_independent)
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref().map_or(true, expr_is_row_independent)
+                && when.iter().all(|(condition, result)| {
+                    expr_is_row_independent(condition) && expr_is_row_independent(result)
+                })
+                && else_branch.as_deref().map_or(true, expr_is_row_independent)
+        }
+        Expr::Cast { expr, .. } => expr_is_row_independent(expr),
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Func { .. }
+        | Expr::WindowCall { .. }
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. }
+        | Expr::InSubquery { .. } => false,
+    }
+}
+
+fn can_patch_update_without_full_row(
+    engine: &Engine,
+    table: &str,
+    updates: &BTreeMap<String, Value>,
+) -> bool {
+    if !engine.check_constraints(table).is_empty() {
+        return false;
+    }
+    let update_keys: BTreeSet<&str> = updates.keys().map(String::as_str).collect();
+    if engine
+        .describe_table(table)
+        .unwrap_or_default()
+        .iter()
+        .any(|col| {
+            col.not_null
+                && !col.auto_increment
+                && matches!(updates.get(&col.name), Some(Value::Null))
+        })
+    {
+        return false;
+    }
+    if engine
+        .unique_columns(table)
+        .iter()
+        .any(|column| update_keys.contains(column.as_str()))
+    {
+        return false;
+    }
+    if engine.foreign_keys(table).iter().any(|fk| {
+        fk.local_columns
+            .iter()
+            .any(|column| update_keys.contains(column.as_str()))
+    }) {
+        return false;
+    }
+    if referrers_to_for_actions(engine, table)
+        .iter()
+        .any(|(_, fk)| {
+            fk.ref_columns
+                .iter()
+                .any(|column| update_keys.contains(column.as_str()))
+        })
+    {
+        return false;
+    }
+    true
 }
 
 fn validate_document_constraints(
