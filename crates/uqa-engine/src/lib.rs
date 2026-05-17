@@ -91,11 +91,11 @@ use uqa_scoring::{
 };
 use uqa_sql::SQLError;
 use uqa_storage::{
-    document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, ColumnStatsInput,
-    ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection, MemoryDocumentStore,
-    MemoryInvertedIndex, PersistentStorageBackend, PersistentVectorIndexParams,
-    SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend, StorageBackendError,
-    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
+    document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
+    ColumnStatsInput, ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
+    MemoryDocumentStore, MemoryInvertedIndex, PersistentStorageBackend,
+    PersistentVectorIndexParams, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
+    StorageBackendError, StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
@@ -172,6 +172,8 @@ pub struct Engine {
     /// `SelectStmt`; the SQL surface re-runs the body on every
     /// reference (no row caching).
     views: RwLock<BTreeMap<String, uqa_sql::ast::SelectStmt>>,
+    /// Registered secondary indexes from `CREATE INDEX`.
+    catalog_indexes: RwLock<BTreeMap<String, CatalogIndexRow>>,
     /// Registered schema names. Engine-level schemas are advisory
     /// today: the catalog records them so `CREATE SCHEMA` does not
     /// error out, but tables themselves still live in the flat
@@ -386,6 +388,7 @@ impl Engine {
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
+            catalog_indexes: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
             session_vars: RwLock::new(BTreeMap::new()),
@@ -886,18 +889,33 @@ impl Engine {
         columns: &[String],
         options: &[(String, String)],
     ) {
-        let Some(catalog) = self.catalog.as_ref() else {
-            return;
-        };
         let columns_json = serde_json::to_string(columns).unwrap_or_else(|_| "[]".into());
         let options_map: std::collections::BTreeMap<String, String> =
             options.iter().cloned().collect();
         let parameters_json = serde_json::to_string(&options_map).unwrap_or_else(|_| "{}".into());
-        let _ =
-            catalog.save_catalog_index(name, index_type, table, &columns_json, &parameters_json);
+        self.catalog_indexes.write().insert(
+            name.to_string(),
+            CatalogIndexRow {
+                name: name.to_string(),
+                index_type: index_type.to_string(),
+                table_name: table.to_string(),
+                columns_json: columns_json.clone(),
+                parameters_json: parameters_json.clone(),
+            },
+        );
+        if let Some(catalog) = self.catalog.as_ref() {
+            let _ = catalog.save_catalog_index(
+                name,
+                index_type,
+                table,
+                &columns_json,
+                &parameters_json,
+            );
+        }
     }
 
     pub fn drop_catalog_index(&self, name: &str) {
+        self.catalog_indexes.write().remove(name);
         if let Some(catalog) = self.catalog.as_ref() {
             let _ = catalog.drop_catalog_index(name);
         }
@@ -994,6 +1012,7 @@ impl Engine {
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
+            catalog_indexes: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
             session_vars: RwLock::new(BTreeMap::new()),
@@ -1227,6 +1246,9 @@ impl Engine {
             if !self.has_table(&row.table_name) {
                 continue;
             }
+            self.catalog_indexes
+                .write()
+                .insert(row.name.clone(), row.clone());
             let columns: Vec<String> = serde_json::from_str(&row.columns_json).unwrap_or_default();
             let parameters: BTreeMap<String, String> =
                 serde_json::from_str(&row.parameters_json).unwrap_or_default();
@@ -2229,6 +2251,18 @@ impl Engine {
         self.views.read().get(name).cloned()
     }
 
+    pub fn list_views(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.views.read().keys().cloned().collect();
+        out.sort_unstable();
+        out
+    }
+
+    pub fn list_catalog_indexes(&self) -> Vec<CatalogIndexRow> {
+        let mut out: Vec<CatalogIndexRow> = self.catalog_indexes.read().values().cloned().collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
     /// Register a schema name. Schemas in the engine map onto
     /// optional table prefixes; the registry just records the name
     /// so subsequent statements that reference it do not error out.
@@ -2263,6 +2297,12 @@ impl Engine {
                 out.push(name.clone());
             }
         }
+        out.sort_unstable();
+        out
+    }
+
+    pub fn list_sequences(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.sequences.read().keys().cloned().collect();
         out.sort_unstable();
         out
     }
@@ -2911,6 +2951,9 @@ impl Engine {
         self.table_field_analyzers
             .write()
             .retain(|(t, _), _| t != name);
+        self.catalog_indexes
+            .write()
+            .retain(|_, row| row.table_name != name);
         if let Some(catalog) = self.catalog.as_ref() {
             let _ = catalog.drop_table(name);
             let _ = catalog.purge_table_data(name);

@@ -12,7 +12,7 @@
 //! grammar parses cleanly via `pg_query` but compiles to
 //! [`SQLError::Unsupported`].
 
-use pg_query::protobuf::Node;
+use pg_query::protobuf::{Node, RangeVar};
 use pg_query::NodeEnum;
 use uqa_core::Value;
 
@@ -22,6 +22,14 @@ use crate::ast::{
     SelectStmt, SetOp, SetOpKind, Statement, TransactionStmt, UpdateStmt, WindowSpec, CTE,
 };
 use crate::error::{Result, SQLError};
+
+fn range_var_name(r: &RangeVar) -> String {
+    if r.schemaname.is_empty() {
+        r.relname.clone()
+    } else {
+        format!("{}.{}", r.schemaname, r.relname)
+    }
+}
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {
     let parsed = pg_query::parse(sql)?;
@@ -161,7 +169,7 @@ fn compile_create_sequence(
     let name = stmt
         .sequence
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE SEQUENCE without name".into()))?;
     let mut start = 1_i64;
     let mut increment = 1_i64;
@@ -196,7 +204,7 @@ fn compile_alter_sequence(
     let name = stmt
         .sequence
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("ALTER SEQUENCE without name".into()))?;
     let mut alter = AlterSequence {
         name,
@@ -230,7 +238,7 @@ fn compile_create_table_as(stmt: &pg_query::protobuf::CreateTableAsStmt) -> Resu
     let name = into
         .rel
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS target has no name".into()))?;
     let body = stmt
         .query
@@ -309,7 +317,7 @@ fn compile_create_foreign_table(
     let name = base
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without name".into()))?;
     let mut columns: Vec<ColumnDef> = Vec::new();
     for elt in &base.table_elts {
@@ -447,7 +455,7 @@ fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement>
     let name = stmt
         .view
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE VIEW without name".into()))?;
     let body = stmt
         .query
@@ -1183,7 +1191,7 @@ fn compile_create_index(stmt: &pg_query::protobuf::IndexStmt) -> Result<CreateIn
     let table = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .unwrap_or_default();
     let access_method = stmt.access_method.clone();
     let mut columns = Vec::new();
