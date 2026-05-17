@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! 1:1 port of `uqa/tests/test_prepared.py`.
+//! Coverage for `test_prepared`.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};

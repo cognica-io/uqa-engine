@@ -21,7 +21,7 @@ use crate::prob::PROB_EPSILON;
 /// log f_R(d) - log f_G(d) + logit(base_rate)  ->  sigmoid
 /// ```
 ///
-/// The Rust port keeps the formulation deliberately small; downstream
+/// The UQA-RS implementation keeps the formulation deliberately small; downstream
 /// callers fit the means / std dev offline (e.g. via the parameter
 /// learner) and pass the transform through. Optional per-distance
 /// weights bias the computed log-odds before the sigmoid.
@@ -59,7 +59,7 @@ impl VectorProbabilityTransform {
     }
 
     /// Vectorized calibration. Optional `weights` bias the per-distance
-    /// log-odds before the sigmoid -- mirrors the Python reference's
+    /// log-odds before the sigmoid -- mirrors the canonical UQA behavior's
     /// `weights` keyword argument.
     pub fn calibrate(&self, distances: &[f64], weights: Option<&[f64]>) -> Vec<f64> {
         let logit_prior = (self.base_rate / (1.0 - self.base_rate)).ln();
@@ -188,7 +188,7 @@ fn reliability_bins(probabilities: &[f64], labels: &[u8], n_bins: usize) -> Vec<
     }
     let mut bins: Vec<(f64, f64, usize)> = vec![(0.0, 0.0, 0); n_bins];
     let n_bins_f = n_bins as f64;
-    // Bin boundaries match the upstream Python ECE: lowest bin is
+    // Bin boundaries match the upstream UQA ECE contract: lowest bin is
     // `[lo, hi]` (inclusive both ends), the rest are `(lo, hi]`. Floor
     // division places exact upper edges into the higher bin, except for
     // `p == 0.0` which belongs to bin 0.

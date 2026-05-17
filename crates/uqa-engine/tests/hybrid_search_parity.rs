@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Parity test: hybrid (text + KNN, log-odds fused) outputs against a
-//! fixture captured from the Python UQA. Refresh the fixture with
+//! Golden-fixture test: hybrid (text + KNN, log-odds fused) output.
+//! Refresh the fixture with
 //! `python3 tests/parity/build_hybrid_fixture.py`.
 
 use std::collections::BTreeMap;
@@ -66,7 +66,7 @@ fn fixture_path() -> PathBuf {
 }
 
 #[test]
-fn hybrid_search_matches_python_fixture() {
+fn hybrid_search_matches_fixture() {
     let bytes = std::fs::read(fixture_path()).expect("fixture present");
     let fx: Fixture = serde_json::from_slice(&bytes).expect("fixture parses");
 

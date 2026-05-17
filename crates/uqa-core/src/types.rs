@@ -21,7 +21,7 @@ pub type DocId = u64;
 /// Field name within a document.
 pub type FieldName = String;
 
-/// One step of a hierarchical-document path. Mirrors Python's
+/// One step of a hierarchical-document path. Mirrors the canonical UQA implementation's
 /// `PathExpr = list[str | int]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PathSegment {

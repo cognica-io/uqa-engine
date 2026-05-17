@@ -5,8 +5,8 @@
 //
 
 //! In-memory spill buffer for blocking operators (`Sort`,
-//! `HashAggregate`, `Window`). The Python reference spills to a tmp
-//! file once an in-memory threshold is exceeded; the Rust port mirrors
+//! `HashAggregate`, `Window`). The canonical UQA behavior spills to a tmp
+//! file once an in-memory threshold is exceeded; the UQA-RS implementation mirrors
 //! the API but currently keeps every batch in memory. The on-disk
 //! tier is gated on the `arrow-rs` integration and tracked as a
 //! follow-up.

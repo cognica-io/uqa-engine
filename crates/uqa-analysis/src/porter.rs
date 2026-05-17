@@ -10,7 +10,7 @@
 //! 14(3), 1980. Note that this is the original 1980 algorithm, not Porter2
 //! (Snowball English) — they differ on edge cases such as `agreed` and
 //! `feedeing`. The output is intentionally identical to the upstream
-//! Python implementation so that BM25 doc frequencies match across
+//! UQA stemmer contract so that BM25 doc frequencies match across
 //! engines.
 
 pub fn stem(word: &str) -> String {

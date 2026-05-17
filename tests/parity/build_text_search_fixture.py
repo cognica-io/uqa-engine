@@ -5,15 +5,15 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Captures Python UQA text-search outputs into a JSON fixture.
+"""Captures UQA text-search outputs into a JSON fixture.
 
-The Rust port's integration test (`crates/uqa-engine/tests/text_search_parity.rs`)
+The UQA-RS implementation's integration test (`crates/uqa-engine/tests/text_search_parity.rs`)
 loads this fixture and asserts identical doc id ordering plus matching
 scores within a small epsilon. Run once to refresh the fixture:
 
     python3 tests/parity/build_text_search_fixture.py
 
-The fixture is committed so the Rust test runs without a Python toolchain.
+The fixture is committed so the Rust test runs without fixture-generation tooling.
 """
 
 from __future__ import annotations

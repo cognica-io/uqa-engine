@@ -5,7 +5,7 @@
 //
 
 //! Engine-level transaction lifecycle convenience methods. Mirrors
-//! Python's `Engine.begin/commit/rollback/savepoint`.
+//! the canonical UQA implementation's `Engine.begin/commit/rollback/savepoint`.
 
 use uqa_engine::Engine;
 

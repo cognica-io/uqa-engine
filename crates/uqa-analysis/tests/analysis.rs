@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_analysis.py`. Mirrors the Lucene-style text
+//! Coverage for `test_analysis`. Mirrors the Lucene-style text
 //! analysis pipeline tests: tokenizers, token filters, char filters,
 //! analyzer composition, serialization round-trips, and the named
 //! analyzer registry.
@@ -876,7 +876,7 @@ fn ngram_filter_min_zero_is_caught_by_debug_assert() {
 
 #[test]
 fn ngram_filter_max_smaller_than_min_panics() {
-    // Mirror Python's ValueError contract via Rust panic catch.
+    // Mirror the canonical UQA implementation's ValueError contract via Rust panic catch.
     let result = std::panic::catch_unwind(|| {
         let f = TokenFilter::Ngram {
             min_gram: 3,

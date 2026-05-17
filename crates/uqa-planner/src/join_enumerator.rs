@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! DPccp join enumeration (Moerkotte and Neumann, 2006). 1:1 port of
-//! `uqa/planner/join_enumerator.py`.
+//! DPccp join enumeration (Moerkotte and Neumann, 2006). Rust implementation of
+//! UQA `planner/join_enumerator`.
 //!
 //! Enumerates connected-subgraph / complement pairs of the
 //! [`JoinGraph`] in canonical order: each connected subgraph S is
@@ -20,7 +20,7 @@
 //! O(1) hash-table lookup and set operations. The cost model uses
 //! [`INDEX_JOIN_THRESHOLD`] to switch between an index-join estimate
 //! (`smaller * log2(larger + 1)`) and a hash-join estimate
-//! (`smaller + larger`), matching Python's heuristic.
+//! (`smaller + larger`), matching the canonical UQA implementation's heuristic.
 //!
 //! Returns a [`JoinPlan`] tree where each `Join` node records the
 //! `(left, right, edge, cost, cardinality)` tuple. Disconnected join
@@ -33,17 +33,17 @@ use std::collections::BTreeMap;
 use crate::cost_model::OperatorKind;
 use crate::join_graph::{JoinEdge, JoinGraph};
 
-/// Mirrors Python's `INDEX_JOIN_THRESHOLD`. When the smaller side has
+/// Mirrors the canonical UQA implementation's `INDEX_JOIN_THRESHOLD`. When the smaller side has
 /// fewer than this many rows, `_emit_csg_cmp_pair` favours the index
 /// join cost shape `c_small * log2(c_large + 1)` over the symmetric
 /// hash join cost.
 pub const INDEX_JOIN_THRESHOLD: f64 = 100.0;
 
-/// Mirrors Python's `MAX_DP_RELATIONS`. Beyond this count the exact
+/// Mirrors the canonical UQA implementation's `MAX_DP_RELATIONS`. Beyond this count the exact
 /// enumeration switches to the greedy fallback.
 pub const MAX_DP_RELATIONS: usize = 16;
 
-/// A (sub)plan for joining a set of relations. Mirrors Python's
+/// A (sub)plan for joining a set of relations. Mirrors the canonical UQA implementation's
 /// `JoinPlan` dataclass: `relations` is the bitmask of relation
 /// indices in the plan, `cardinality` and `cost` are the running
 /// estimates, and `left` / `right` / `join_edge` are populated for
@@ -93,7 +93,7 @@ pub fn enumerate_dpccp(graph: &JoinGraph) -> Option<JoinPlan> {
 
 /// DPccp join order optimiser. Public so callers that need the
 /// cancellation-friendly stages (`optimize`, `find_connected_components`)
-/// can drive it directly. Mirrors Python's `DPccp` class.
+/// can drive it directly. Mirrors the canonical UQA implementation's `DPccp` class.
 pub struct DPccp<'g> {
     graph: &'g JoinGraph,
     dp: BTreeMap<u64, JoinPlan>,
@@ -139,13 +139,13 @@ impl<'g> DPccp<'g> {
     }
 
     /// Enumerate every connected subgraph / complement pair and feed
-    /// them through `enumerate_splits`. Mirrors Python's
+    /// them through `enumerate_splits`. Mirrors the canonical UQA implementation's
     /// `_enumerate_csg_cmp_pairs`.
     fn enumerate_csg_cmp_pairs(&mut self, n: usize) {
         let neighbors: Vec<Vec<usize>> = (0..n).map(|i| self.graph.neighbors(i)).collect();
 
         // `connected[mask]` is `true` iff the subgraph encoded by
-        // `mask` is connected. The Python reference uses a bytearray;
+        // `mask` is connected. The canonical UQA behavior uses a bytearray;
         // a `Vec<bool>` is the closest Rust equivalent.
         let mut connected: Vec<bool> = vec![false; 1usize << n];
         let mut prev_layer: Vec<u64> = Vec::with_capacity(n);
@@ -187,7 +187,7 @@ impl<'g> DPccp<'g> {
     /// Enumerate every canonical split `(s1, s2)` of `subset_mask`
     /// where `s1` contains the lowest set bit. Connectivity is
     /// checked via the `connected` table; only pairs that survive get
-    /// fed through `emit_csg_cmp_pair`. Mirrors Python's
+    /// fed through `emit_csg_cmp_pair`. Mirrors the canonical UQA implementation's
     /// `_enumerate_splits`.
     fn enumerate_splits(&mut self, subset_mask: u64, connected: &[bool]) {
         let lowest_bit = subset_mask & subset_mask.wrapping_neg();
@@ -236,7 +236,7 @@ impl<'g> DPccp<'g> {
     }
 
     /// Cost a candidate join, install the best variant in the DP
-    /// table. Mirrors Python's `_emit_csg_cmp_pair` exactly:
+    /// table. Mirrors the canonical UQA implementation's `_emit_csg_cmp_pair` exactly:
     /// cardinality is the cross-product times every edge's
     /// selectivity, and the cost gate prefers an index join when the
     /// smaller side fits inside `INDEX_JOIN_THRESHOLD`.
@@ -286,7 +286,7 @@ impl<'g> DPccp<'g> {
     }
 
     /// Cross-join every connected component in cardinality-ascending
-    /// order. Mirrors Python's `_join_disconnected_components`.
+    /// order. Mirrors the canonical UQA implementation's `_join_disconnected_components`.
     fn join_disconnected_components(&mut self) -> JoinPlan {
         let components = self.find_connected_components();
         let mut component_plans: Vec<JoinPlan> = Vec::with_capacity(components.len());
@@ -303,7 +303,7 @@ impl<'g> DPccp<'g> {
                 continue;
             }
             // Component was not solved; recurse on a sub-graph. This
-            // path mirrors Python's defensive fallback.
+            // path mirrors the canonical UQA implementation's defensive fallback.
             let original_indices: Vec<usize> = {
                 let mut v: Vec<usize> = comp.clone();
                 v.sort_unstable();
@@ -340,7 +340,7 @@ impl<'g> DPccp<'g> {
     }
 
     /// BFS the join graph to enumerate the connected components.
-    /// Mirrors Python's `_find_connected_components`.
+    /// Mirrors the canonical UQA implementation's `_find_connected_components`.
     fn find_connected_components(&self) -> Vec<Vec<usize>> {
         let n = self.graph.relation_count();
         let mut remaining: std::collections::BTreeSet<usize> = (0..n).collect();
@@ -367,7 +367,7 @@ impl<'g> DPccp<'g> {
 
     /// Project a sub-graph containing only `nodes` (in their original
     /// indices). Edge bitmasks are remapped to the dense [0..k) range
-    /// used by the recursive solve. Mirrors Python's `_build_subgraph`.
+    /// used by the recursive solve. Mirrors the canonical UQA implementation's `_build_subgraph`.
     fn build_subgraph(&self, nodes: &[usize]) -> JoinGraph {
         let mut sub = JoinGraph::new();
         let mut index_map: BTreeMap<usize, usize> = BTreeMap::new();
@@ -390,7 +390,7 @@ impl<'g> DPccp<'g> {
 
     /// Greedy fallback for graphs with more than `MAX_DP_RELATIONS`
     /// relations: at every step pick the cheapest joinable pair until
-    /// only one plan remains. `O(n^3)`. Mirrors Python's
+    /// only one plan remains. `O(n^3)`. Mirrors the canonical UQA implementation's
     /// `_greedy_optimize`.
     fn greedy_optimize(self) -> JoinPlan {
         let mut active: BTreeMap<u64, JoinPlan> = self.dp.clone();
@@ -446,7 +446,7 @@ impl<'g> DPccp<'g> {
             }
             let Some(best_plan_unwrapped) = best_plan else {
                 // No more joinable edges; cross-join the rest in
-                // cardinality-ascending order, exactly as Python.
+                // cardinality-ascending order.
                 let mut remaining: Vec<JoinPlan> = active.into_values().collect();
                 remaining.sort_by(|a, b| {
                     a.cardinality
@@ -491,7 +491,7 @@ impl<'g> DPccp<'g> {
 }
 
 /// Remap relation indices in `plan` from a sub-graph's dense range
-/// back to the parent graph's original indices. Mirrors Python's
+/// back to the parent graph's original indices. Mirrors the canonical UQA implementation's
 /// `_remap_plan`.
 fn remap_plan(plan: &JoinPlan, original_indices: &[usize]) -> JoinPlan {
     let new_relations = remap_mask(plan.relations, original_indices);

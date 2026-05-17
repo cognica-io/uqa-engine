@@ -5,7 +5,7 @@
 //
 
 //! Engine-level wiring for `apply_graph_delta` and the
-//! `build/drop/get_path_index` lifecycle. Mirrors Python's
+//! `build/drop/get_path_index` lifecycle. Mirrors the canonical UQA implementation's
 //! `Engine.apply_graph_delta` / `Engine.build_path_index`.
 
 use uqa_core::{Edge, Vertex};

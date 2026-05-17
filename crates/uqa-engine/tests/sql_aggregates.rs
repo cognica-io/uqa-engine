@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_aggregates.py`. Covers `COUNT DISTINCT`,
+//! Coverage for `test_aggregates`. Covers `COUNT DISTINCT`,
 //! `STRING_AGG` / `ARRAY_AGG` with `DISTINCT` and `ORDER BY`, `BOOL_AND` /
 //! `BOOL_OR`, `FILTER (WHERE ...)`, `GROUP BY` by ordinal / alias,
 //! complex `HAVING`, `NUMERIC` precision/scale, `STDDEV` / `VARIANCE`,

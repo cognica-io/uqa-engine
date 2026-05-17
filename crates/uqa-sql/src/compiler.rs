@@ -72,7 +72,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),
         NodeEnum::VacuumStmt(_) => {
             // Treat ANALYZE / VACUUM ANALYZE the same way: ask the
-            // engine to refresh stats. The Python reference parses
+            // engine to refresh stats. The canonical UQA behavior parses
             // ANALYZE through the same node.
             Ok(Statement::Analyze { table: None })
         }

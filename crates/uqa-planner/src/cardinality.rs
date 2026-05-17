@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cardinality estimation -- 1:1 port of `uqa.planner.cardinality`.
+//! Cardinality estimation -- Rust implementation of `uqa.planner.cardinality`.
 //!
 //! Two estimator surfaces share a single [`CardinalityEstimator`]:
 //!
@@ -14,7 +14,7 @@
 //!   enumerator.
 //!
 //! * **Operator-tree surface**: `estimate(op: &OperatorTree, stats:
-//!   &IndexStats)` mirrors Python's
+//!   &IndexStats)` mirrors the canonical UQA implementation's
 //!   `CardinalityEstimator.estimate(op, stats)`. Walks the
 //!   [`OperatorTree`] variants and applies the selectivity tables,
 //!   damping exponents, entropy lower bounds, graph statistics, and
@@ -41,10 +41,10 @@ use uqa_sql::ast::{BinaryOp, Expr};
 
 /// Jaccard-style selectivity assumed for text-similarity joins when no
 /// per-column statistics are available. Mirrors
-/// `JACCARD_JOIN_SELECTIVITY` in the Python reference.
+/// `JACCARD_JOIN_SELECTIVITY` in the canonical UQA behavior.
 pub const JACCARD_JOIN_SELECTIVITY: f64 = 0.05;
 
-/// Default vector-similarity join selectivity. Matches the Python
+/// Default vector-similarity join selectivity. Matches UQA
 /// `VECTOR_JOIN_SELECTIVITY` constant.
 pub const VECTOR_JOIN_SELECTIVITY: f64 = 0.1;
 
@@ -108,8 +108,7 @@ pub struct EdgeSample {
 }
 
 /// Minimal graph store interface used by the sampler. Mirrors the
-/// `_vertices` / `_adj_out` / `_edges` private fields the Python
-/// reference reads.
+/// vertex, adjacency, and edge snapshots required by the planner.
 pub trait GraphStoreSampler: Send + Sync {
     /// IDs of every vertex in the store.
     fn vertex_ids(&self) -> Vec<u64>;
@@ -117,8 +116,8 @@ pub trait GraphStoreSampler: Send + Sync {
     /// Outgoing edges from `vid`.
     fn outgoing_edges(&self, vid: u64) -> Vec<EdgeSample>;
 
-    /// Apply a vertex constraint closure. The Python reference calls
-    /// `c(vertex)` directly; the Rust port packages this as a callback
+    /// Apply a vertex constraint closure. The canonical UQA behavior calls
+    /// `c(vertex)` directly; the UQA-RS implementation packages this as a callback
     /// so the sampler can hide vertex storage behind whichever store
     /// implements the trait.
     fn vertex_satisfies(&self, vid: u64, constraint: &VertexConstraint) -> bool;
@@ -347,7 +346,7 @@ impl CardinalityEstimator {
     }
 
     // -----------------------------------------------------------------
-    // Operator-tree surface (1:1 with Python `CardinalityEstimator`).
+    // Operator-tree surface for `CardinalityEstimator`.
     // -----------------------------------------------------------------
 
     /// Estimate the cardinality of `op` against an inverted index
@@ -732,7 +731,7 @@ impl CardinalityEstimator {
             (n * 0.1).min(10.0)
         };
 
-        // Mirror Python's `branching ** max_hops` directly: hops=0
+        // Mirror the canonical UQA implementation's `branching ** max_hops` directly: hops=0
         // collapses to a single hop's worth of branching factor (i.e.
         // 1), keeping `result = min(n, branching ** hops)` identical
         // to the reference.
@@ -830,7 +829,7 @@ impl CardinalityEstimator {
     }
 
     /// RPQ cardinality using graph statistics (Theorem 6.3.2, Paper
-    /// 2). The Rust port estimates `|R|` (NFA size) directly from the
+    /// 2). The UQA-RS implementation estimates `|R|` (NFA size) directly from the
     /// expression source string by counting label-bearing tokens.
     fn estimate_rpq(&self, rpq_source: &str, n: f64) -> f64 {
         if let Some(gs) = self.graph_stats.as_ref() {
@@ -867,7 +866,7 @@ impl CardinalityEstimator {
     }
 
     /// Random-walk sampling. Returns `-1.0` when the graph store is
-    /// unavailable, mirroring Python's sentinel.
+    /// unavailable, mirroring the canonical UQA implementation's sentinel.
     fn sample_graph_cardinality(&self, pattern: &GraphPatternIR, sample_size: usize) -> f64 {
         let Some(store) = self.graph_store.as_ref() else {
             return -1.0;
@@ -1305,7 +1304,7 @@ impl XorShiftRng {
 }
 
 /// Count label-bearing tokens in an RPQ expression source. Mirrors
-/// Count label nodes in an RPQ expression. Mirrors Python's
+/// Count label nodes in an RPQ expression. Mirrors the canonical UQA implementation's
 /// `uqa.planner.cost_model._expr_label_count`: parses the source,
 /// then walks the AST. Label = 1, Concat/Alt = sum, KleeneStar =
 /// inner * 2, Bounded = inner * max_hops. Falls back to 1 when the

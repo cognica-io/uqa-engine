@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_correlated_subquery.py`.
+//! Coverage for `test_correlated_subquery`.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

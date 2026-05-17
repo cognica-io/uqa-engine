@@ -1042,7 +1042,7 @@ fn round_numeric(value: Value, scale: u32) -> Value {
 /// Apply the new column's DEFAULT (or NULL) value to every row that
 /// existed before the ADD COLUMN. `PostgreSQL` evaluates the default
 /// once per existing row at ALTER TABLE time so NOT NULL columns stay
-/// consistent on non-empty tables; the Rust port mirrors that
+/// consistent on non-empty tables; the UQA-RS implementation mirrors that
 /// semantics by sweeping the document store.
 fn backfill_added_column(
     engine: &Engine,
@@ -1096,7 +1096,7 @@ fn run_update_inner(
 ) -> Result<SQLResult, SQLError> {
     // UPDATE ... FROM other [WHERE ...]: build the joined relation,
     // evaluate the WHERE against each joined row, and apply
-    // assignments to the matching target rows. Mirrors Python's
+    // assignments to the matching target rows. Mirrors the canonical UQA implementation's
     // _compile_update_from.
     if let Some(from_clause) = stmt.from.as_ref() {
         return run_update_from(engine, &stmt, from_clause, params);
@@ -1502,7 +1502,7 @@ fn run_delete_inner(
     let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
     // DELETE FROM t USING other WHERE ... -- materialise the join
     // first, then collect target doc ids whose joined image
-    // satisfies WHERE. Mirrors Python's _compile_delete_using.
+    // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
     let using_rows: Option<Vec<ResultRow>> = match stmt.using.as_ref() {
         Some(clause) => {
             let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
@@ -1996,7 +1996,7 @@ fn run_insert_inner(
 
     let id_index = columns.iter().position(|c| c == &id_column);
     // No explicit id and no auto-increment column: allocate a synthetic
-    // u64 doc_id at insert time. Mirrors the Python reference, which
+    // u64 doc_id at insert time. Mirrors the canonical UQA behavior, which
     // treats every table as having an implicit doc_id even when the
     // schema declares no primary key.
 
@@ -2041,7 +2041,7 @@ fn run_insert_inner(
         }
 
         // DEFAULT expression -- evaluate when the column was absent
-        // from the INSERT column list. Mirrors the Python reference's
+        // from the INSERT column list. Mirrors the canonical UQA behavior's
         // _evaluate_default. The engine hook is in scope so DEFAULT
         // nextval('seq') resolves through the sequence store.
         for col in engine.table_columns(&stmt.table) {
@@ -2292,7 +2292,7 @@ fn document_vectors(document: &Document) -> BTreeMap<uqa_core::FieldName, Vec<f3
 // -------------------------------------------------------------------------
 
 /// Render the inner statement as an EXPLAIN-style plan result. Mirrors
-/// Python's `_explain_plan`: returns a single-column `plan` table with
+/// the canonical UQA implementation's `_explain_plan`: returns a single-column `plan` table with
 /// one row per line.
 fn run_explain(
     engine: &Engine,
@@ -2363,7 +2363,7 @@ pub(crate) fn run_select(
 
     let Some(from) = stmt.from.as_ref() else {
         // SELECT without FROM -- evaluate the projection list against
-        // an empty single-row context. Mirrors Python's standalone
+        // an empty single-row context. Mirrors the canonical UQA implementation's standalone
         // SELECT 1 / SELECT (SELECT ...).
         return run_select_without_from(engine, &stmt, params);
     };
@@ -3040,7 +3040,7 @@ fn run_single_table_select(
 ) -> Result<SQLResult, SQLError> {
     // Try the operator-tree pipeline first: lower the WHERE clause to
     // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
-    // aware / fusion-reordering passes - Python parity), then execute
+    // aware / fusion-reordering passes - compatibility), then execute
     // through `PlanExecutor` against an `EngineDriver`. The bridge
     // returns `None` for shapes the operator IR can't represent
     // (arithmetic across columns, sub-queries, window calls, ...) and
@@ -3690,7 +3690,7 @@ fn evaluate_window(
 }
 
 /// Evaluate an aggregate window function (SUM/COUNT/AVG/MIN/MAX) over
-/// each row's frame. Mirrors Python `_compute_framed_aggregate` in
+/// each row's frame. Matches UQA behavior for `_compute_framed_aggregate` in
 /// uqa/execution/relational.py.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_window_aggregate(
@@ -3765,7 +3765,7 @@ fn evaluate_window_aggregate(
             ),
             // GROUPS mode is rare; treat as ROWS (offset interpreted as
             // peer groups would require extra plumbing; matches the
-            // Python fallback which also goes through `_resolve_frame_index`).
+            // fallback which also goes through `_resolve_frame_index`).
             FrameMode::Rows | FrameMode::Groups => (
                 resolve_rows_frame_index(i, n, &start_bound, rows, params, engine, indexed)?,
                 resolve_rows_frame_index(i, n, &end_bound, rows, params, engine, indexed)?,
@@ -3984,7 +3984,7 @@ fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
 }
 
 /// Synthesize rows for `information_schema` / `pg_catalog` virtual
-/// views. Mirrors Python's `_build_info_schema_*` /
+/// views. Mirrors the canonical UQA implementation's `_build_info_schema_*` /
 /// `_build_pg_*` helpers. Returns `None` for any unknown name so the
 /// caller falls back to the regular table lookup.
 fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<ResultRow>> {
@@ -4694,7 +4694,7 @@ fn build_table_function_rows_with_row(
             Ok(out)
         }
         // -------------------------------------------------------------
-        // Analyzer DDL exposed as table-functions. Mirror Python's
+        // Analyzer DDL exposed as table-functions. Mirror the canonical UQA implementation's
         // _build_create_analyzer / _build_drop_analyzer /
         // _build_list_analyzers / _build_set_table_analyzer.
         // -------------------------------------------------------------
@@ -4755,7 +4755,7 @@ fn build_table_function_rows_with_row(
             Ok(vec![r])
         }
         "list_analyzers" => {
-            // Mirror Python: include the four built-in analyzers
+            // Match UQA behavior for: include the four built-in analyzers
             // (`whitespace`, `standard`, `standard_cjk`, `keyword`) on
             // top of every user-registered named analyzer.
             let mut names: std::collections::BTreeSet<String> =
@@ -5301,7 +5301,7 @@ fn validate_score_projection_args(
 }
 
 /// Evaluate a `uqa_highlight(field, query[, start_tag, end_tag,
-/// max_fragments, fragment_size])` projection. Mirrors the Python
+/// max_fragments, fragment_size])` projection. Matches UQA
 /// reference's `_run_uqa_highlight` shape: field can be either a
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
@@ -5407,7 +5407,7 @@ fn run_uqa_highlight(
         fragment_size,
     };
     // Pull every whitespace-separated token out of the query string
-    // as a candidate match term. The Python reference parses the FTS
+    // as a candidate match term. The canonical UQA behavior parses the FTS
     // query, but a simple split is what callers reach for in
     // practice and matches what the test fixture exercises.
     let terms: Vec<String> = query_str
@@ -7214,7 +7214,7 @@ fn run_graph_edges(
 /// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
 /// -- BFS traversal that respects edge `valid_from` / `valid_to`
 /// properties. Emits `(vertex_id, score)` weighted by hop distance,
-/// matching the Python reference's shape.
+/// matching the canonical UQA behavior's shape.
 fn run_temporal_traverse(
     engine: &Engine,
     args: &[Expr],
@@ -7310,7 +7310,7 @@ fn run_temporal_traverse(
 }
 
 /// `rpq(expr, start, graph)` - evaluate a Regular Path Query
-/// (Definition 5.1.2). Mirrors Python's
+/// (Definition 5.1.2). Mirrors the canonical UQA implementation's
 /// `Engine.sql("SELECT * FROM rpq(expr, start, graph)")`.
 fn run_rpq(
     engine: &Engine,
@@ -7858,7 +7858,7 @@ fn run_fuse_log_odds(
                 alpha = *v as f64;
             }
             Expr::Literal(Value::Str(_)) => {
-                // Compatibility with Python's optional gating string
+                // Compatibility with the canonical UQA implementation's optional gating string
                 // argument. Gating is a fusion-layer concern; the SQL
                 // engine keeps the same calibrated score semantics.
             }
@@ -7929,7 +7929,7 @@ fn explain_int_expr(expr: &Expr) -> String {
 }
 
 /// Evaluate a `LIMIT` / `OFFSET` expression to a non-negative `u64`.
-/// Mirrors Python's `_extract_int_value` - accepts integer constants,
+/// Mirrors the canonical UQA implementation's `_extract_int_value` - accepts integer constants,
 /// `$N` parameter references, and any expression that the row-evaluator
 /// can fold to an integer at execute time. Returns `None` when the
 /// clause was absent.

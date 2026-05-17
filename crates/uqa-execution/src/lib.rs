@@ -6,8 +6,8 @@
 
 //! Volcano-model physical operator pipeline.
 //!
-//! The Python reference (`uqa/execution/*`) is built on top of Apache
-//! Arrow `RecordBatch`es. This Rust port keeps the same iterator
+//! The canonical UQA behavior (`uqa/execution/*`) is built on top of Apache
+//! Arrow `RecordBatch`es. This implementation keeps the same iterator
 //! protocol (`open` / `next` / `close`) but stays row-oriented for now
 //! so the engine can ship the full operator surface without dragging
 //! in the `arrow-rs` build dependency. The columnar Arrow refactor is

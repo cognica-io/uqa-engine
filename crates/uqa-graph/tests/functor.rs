@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_functor.py`.
+//! Coverage for `test_functor`.
 
 use std::collections::BTreeMap;
 

@@ -7,7 +7,7 @@
 //! IVF (Inverted File Index) backed by an in-memory centroid matrix
 //! plus per-centroid posting lists.
 //!
-//! Mirrors `uqa/storage/ivf_index.py`. The space is partitioned into
+//! Mirrors UQA `storage/ivf_index`. The space is partitioned into
 //! `nlist` Voronoi cells around centroids learned from the indexed
 //! vectors; query time walks only the `nprobe` cells whose centroids
 //! are nearest to the query, dropping search cost from `O(N)` to

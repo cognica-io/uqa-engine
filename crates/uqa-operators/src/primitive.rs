@@ -43,7 +43,7 @@ impl Operator for TermOperator {
         };
         // Search-time analyzer: synonym filters etc. expand `term` into
         // a multi-token vector that gets unioned across the field's
-        // posting lists. Mirrors Python `TermOperator.execute`.
+        // posting lists. Matches UQA behavior for `TermOperator.execute`.
         let analyzer = idx.get_search_analyzer(&self.field);
         let tokens = analyzer.analyze(&self.term);
         if tokens.is_empty() {
@@ -195,7 +195,7 @@ impl Operator for FilterOperator {
 /// `Facet_f`: count distinct values of a field over a source posting list
 /// (or the entire document store). The result is a posting list whose
 /// `payload.fields` carry `_facet_field`, `_facet_value`, `_facet_count`,
-/// matching the Python encoding.
+/// matching the serialized UQA encoding.
 pub struct FacetOperator {
     pub field: String,
     pub source: Option<Arc<dyn Operator>>,

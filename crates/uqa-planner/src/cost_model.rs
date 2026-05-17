@@ -9,7 +9,7 @@
 //! The cost is unitless: relative numbers across plans are what
 //! matters. We use the System-R style breakdown of `cpu_cost +
 //! io_cost + memory_cost`, scaled by per-operator constants from the
-//! Python reference (`uqa/planner/cost_model.py`).
+//! canonical UQA behavior (UQA `planner/cost_model`).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OperatorKind {
@@ -60,9 +60,9 @@ impl OperatorCost {
     }
 }
 
-/// Coefficients tuned against the Python reference benchmarks.
+/// Coefficients tuned against the canonical UQA behavior benchmarks.
 /// Stable enough that the join enumerator picks the same shapes the
-/// Python optimizer does on the parity test corpus.
+/// the optimizer does on the parity test corpus.
 #[derive(Debug, Clone, Copy)]
 pub struct CostCoefficients {
     pub scan_per_row: f64,
@@ -232,7 +232,7 @@ impl CostEstimator {
 }
 
 // ---------------------------------------------------------------
-// Algebraic-tree cost model (port of Python's `CostModel` class).
+// Algebraic-tree cost model (implementation of the canonical UQA implementation's `CostModel` class).
 // ---------------------------------------------------------------
 
 use uqa_core::IndexStats;
@@ -240,22 +240,22 @@ use uqa_operators::{DeepFusionLayer, OperatorTree, ProbBoolMode};
 
 use crate::cardinality::GraphStats;
 
-/// Mirrors Python's `SCORE_OVERHEAD_FACTOR`.
+/// Mirrors the canonical UQA implementation's `SCORE_OVERHEAD_FACTOR`.
 pub const SCORE_OVERHEAD_FACTOR: f64 = 1.1;
-/// Mirrors Python's `FILTER_SCAN_FRACTION`.
+/// Mirrors the canonical UQA implementation's `FILTER_SCAN_FRACTION`.
 pub const FILTER_SCAN_FRACTION: f64 = 0.1;
-/// Mirrors Python's `GROUP_BY_OVERHEAD_FACTOR`.
+/// Mirrors the canonical UQA implementation's `GROUP_BY_OVERHEAD_FACTOR`.
 pub const GROUP_BY_OVERHEAD_FACTOR: f64 = 1.5;
-/// Mirrors Python's `VERTEX_AGG_FRACTION`.
+/// Mirrors the canonical UQA implementation's `VERTEX_AGG_FRACTION`.
 pub const VERTEX_AGG_FRACTION: f64 = 0.2;
-/// Mirrors Python's `TRAVERSE_FRACTION`.
+/// Mirrors the canonical UQA implementation's `TRAVERSE_FRACTION`.
 pub const TRAVERSE_FRACTION: f64 = 0.1;
 
-/// Algebraic operator-tree cost model. 1:1 port of Python's
+/// Algebraic operator-tree cost model. Rust implementation of the canonical UQA implementation's
 /// `uqa.planner.cost_model.CostModel` — produces a unitless cost for
 /// each [`OperatorTree`] node so the query optimiser's
 /// `reorder_intersect` pass can pick a join order that matches the
-/// Python reference.
+/// canonical UQA behavior.
 #[derive(Debug, Clone, Default)]
 pub struct CostModel {
     pub graph_stats: Option<GraphStats>,
@@ -272,7 +272,7 @@ impl CostModel {
     }
 
     /// Estimate the cost of a sub-plan against `stats`. Mirrors
-    /// Python's `CostModel.estimate` (line 30 of `cost_model.py`).
+    /// the canonical UQA implementation's `CostModel.estimate` (line 30 of `cost_model`).
     pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
         let n = stats.total_docs as f64;
         match op {
@@ -290,8 +290,8 @@ impl CostModel {
                 dims * ((stats.total_docs as f64) + 1.0).log2()
             }
             OperatorTree::IndexScan { .. } => {
-                // The Rust port lacks an `IndexScanOperator.cost_estimate`
-                // hook; mirror Python's behaviour by treating the index
+                // The UQA-RS implementation lacks an `IndexScanOperator.cost_estimate`
+                // hook; mirror the canonical UQA implementation's behaviour by treating the index
                 // scan as proportional to the number of documents the
                 // index covers.
                 n * 0.1
@@ -354,7 +354,7 @@ impl CostModel {
                 let k = pattern.vertex_patterns.len() as i32;
                 // Negated edge patterns aren't represented in the Rust
                 // IR yet (`EdgePatternIR` carries no `negated` flag).
-                // The base cost matches Python's path; the +20% per
+                // The base cost matches the canonical UQA implementation's path; the +20% per
                 // negated edge will land once the IR adds the flag.
                 if let Some(gs) = self.graph_stats.as_ref() {
                     let nv = if gs.num_vertices > 0 {
@@ -392,9 +392,9 @@ impl CostModel {
                 .map(|s| self.estimate(&s.child, stats))
                 .sum::<f64>()
                 .max(n * 0.1),
-            // Python's `CostModel` reads `op.max_iterations` directly.
+            // the canonical UQA implementation's `CostModel` reads `op.max_iterations` directly.
             // The Rust IR doesn't carry this field today, so we use
-            // Python's default (20). Tracking the iteration count
+            // the canonical UQA implementation's default (20). Tracking the iteration count
             // accurately requires extending `OperatorTree::PageRank` /
             // `HITS`.
             OperatorTree::PageRank { .. } => n * 20.0 * 0.1,
@@ -444,9 +444,9 @@ impl CostModel {
     }
 }
 
-/// Quick check for `Concat(Label, Concat(Label, ...))` shape — Python
+/// Quick check for `Concat(Label, Concat(Label, ...))` shape in UQA
 /// recognises path-indexable RPQs and short-circuits the cost. Since
-/// the Rust port only stores the source string, we approximate by
+/// the UQA-RS implementation only stores the source string, we approximate by
 /// disallowing any quantifier (`*`, `+`, `?`) or alternation (`|`).
 fn is_label_chain(source: &str) -> bool {
     !source.contains('*')
@@ -456,7 +456,7 @@ fn is_label_chain(source: &str) -> bool {
         && !source.contains('{')
 }
 
-/// Mirror of Python's `_expr_label_count`, but operates on the raw
+/// Mirror of the canonical UQA implementation's `_expr_label_count`, but operates on the raw
 /// source string. Falls back to alphanumeric token counting + `* / +
 /// / ?` doubling so empty / unparseable inputs degrade to 1.
 fn rpq_source_label_count(source: &str) -> usize {

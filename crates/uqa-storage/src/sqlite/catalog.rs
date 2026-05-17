@@ -43,8 +43,8 @@ impl Catalog {
     fn run_migrations(&self) -> Result<()> {
         self.conn.with_mut(|conn| {
             // Older catalogs (pre-v7) used the table name `_meta`. v7
-            // renames it to `_metadata` to match Python — promote the
-            // legacy table before any migration query touches it.
+            // renames it to `_metadata`; promote the legacy table before
+            // any migration query touches it.
             let legacy_meta_only: bool = conn
                 .query_row(
                     "SELECT \
@@ -129,7 +129,7 @@ impl Catalog {
     }
 
     /// Store an arbitrary key/value pair in the `_metadata` table.
-    /// Mirrors Python's `Catalog.set_metadata`.
+    /// Mirrors the canonical UQA implementation's `Catalog.set_metadata`.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -292,7 +292,7 @@ impl Catalog {
     }
 
     /// Persist Bayesian calibration parameters for a named signal.
-    /// Mirrors Python `Catalog.save_scoring_params`.
+    /// Matches UQA behavior for `Catalog.save_scoring_params`.
     pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -338,7 +338,7 @@ impl Catalog {
     }
 
     /// Register the existence of a named graph in the catalog.
-    /// Mirrors Python `Catalog.save_named_graph`.
+    /// Matches UQA behavior for `Catalog.save_named_graph`.
     pub fn save_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -353,7 +353,7 @@ impl Catalog {
     /// that scopes a vertex or edge to this graph. Vertex / edge rows
     /// stay in `_graph_vertices` / `_graph_edges` until they go
     /// orphan; call [`Catalog::purge_orphan_graph_entities`] after to
-    /// GC them. Mirrors Python `Catalog.drop_named_graph` plus the
+    /// GC them. Matches UQA behavior for `Catalog.drop_named_graph` plus the
     /// orphan sweep that the engine performs on its behalf.
     pub fn drop_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
@@ -367,7 +367,7 @@ impl Catalog {
     }
 
     /// Sorted list of every persisted named graph.
-    /// Mirrors Python `Catalog.load_named_graphs`.
+    /// Matches UQA behavior for `Catalog.load_named_graphs`.
     pub fn load_named_graphs(&self) -> Result<Vec<String>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare("SELECT name FROM _named_graphs ORDER BY name")?;
@@ -381,7 +381,7 @@ impl Catalog {
     }
 
     /// Persist a vertex by global id. `properties_json` is the JSON
-    /// encoding of the property map. Mirrors Python
+    /// encoding of the property map. Matches UQA behavior for
     /// `Catalog.save_vertex` extended with the `label` column the
     /// `SQLiteGraphStore` writes alongside it.
     pub fn save_vertex(&self, vertex_id: u64, label: &str, properties_json: &str) -> Result<()> {
@@ -409,7 +409,7 @@ impl Catalog {
     /// Every vertex row sorted by id, returned as
     /// `(vertex_id, label, properties_json)` so the caller rebuilds
     /// the `Vertex` from the typed columns plus the JSON-encoded
-    /// property map. Mirrors Python `Catalog.load_vertices`.
+    /// property map. Matches UQA behavior for `Catalog.load_vertices`.
     pub fn load_vertices(&self) -> Result<Vec<(u64, String, String)>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
@@ -432,7 +432,7 @@ impl Catalog {
     }
 
     /// Persist an edge by global id with its source / target vertices,
-    /// label, and JSON-encoded property map. Mirrors Python
+    /// label, and JSON-encoded property map. Matches UQA behavior for
     /// `Catalog.save_edge`.
     pub fn save_edge(
         &self,
@@ -470,7 +470,7 @@ impl Catalog {
         })
     }
 
-    /// Every edge row sorted by id. Mirrors Python `Catalog.load_edges`.
+    /// Every edge row sorted by id. Matches UQA behavior for `Catalog.load_edges`.
     pub fn load_edges(&self) -> Result<Vec<EdgeRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
@@ -598,7 +598,7 @@ impl Catalog {
 
     // -- Named analyzers ---------------------------------------------------
 
-    /// Persist a named analyzer configuration. Mirrors Python
+    /// Persist a named analyzer configuration. Matches UQA behavior for
     /// `Catalog.save_analyzer`.
     pub fn save_analyzer(&self, name: &str, config_json: &str) -> Result<()> {
         self.conn.with(|c| {
@@ -633,7 +633,7 @@ impl Catalog {
     // -- Per-field analyzer overrides --------------------------------------
 
     /// Persist a `(table, field, phase) -> analyzer_name` row. Mirrors
-    /// Python `Catalog.save_table_field_analyzer`.
+    /// Persist a table-field analyzer mapping.
     pub fn save_table_field_analyzer(
         &self,
         table_name: &str,
@@ -1382,7 +1382,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
         ON _graph_edges (graph);
     ",
     ),
-    // Re-shape graph storage to mirror Python's `uqa/storage/catalog.py`:
+    // Re-shape graph storage to mirror the canonical UQA implementation's UQA `storage/catalog`:
     // global vertex / edge tables keyed by id, a separate
     // `_graph_membership` table mapping each entity to one or more
     // named graphs, and the four supporting indexes the planner needs
@@ -1435,7 +1435,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // only in `Engine`'s in-memory maps (named analyzers, table-field
     // analyzer overrides, foreign servers / tables, registered
     // indexes, graph path indexes). Tables and column shapes mirror
-    // Python's `uqa/storage/catalog.py` exactly.
+    // the canonical UQA implementation's UQA `storage/catalog` exactly.
     (
         7,
         r"
@@ -1481,7 +1481,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     ),
     // Persist per-column statistics produced by ANALYZE so that the
     // optimiser still has cardinality / range estimates after a
-    // restart. Mirrors Python's `_column_stats` table.
+    // restart. Mirrors the canonical UQA implementation's `_column_stats` table.
     (
         8,
         r"

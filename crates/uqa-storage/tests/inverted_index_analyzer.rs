@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of the analyzer-integration suite from
-//! `uqa/tests/test_analysis.py`: per-field analyzer overrides on
+//! Coverage for the analyzer-integration suite from
+//! `test_analysis`: per-field analyzer overrides on
 //! `MemoryInvertedIndex` / `SQLiteInvertedIndex`, dual-phase
 //! (index/search/both) analyzer assignment, and the search-time
 //! synonym fallback chain.

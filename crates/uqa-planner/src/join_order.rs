@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Join-order optimization. 1:1 port of `uqa/planner/join_order.py`.
+//! Join-order optimization.
 //!
 //! Bridges DPccp join enumeration ([`crate::join_enumerator`]) and the
 //! row-oriented join algorithms in `uqa-joins`. The optimizer accepts
@@ -14,7 +14,7 @@
 //! [`JoinOrderTree`] -- a tree of join descriptors the engine
 //! interprets to drive the actual row-tuple join algorithms.
 //!
-//! `JoinOrderTree` mirrors Python's operator construction step; the
+//! `JoinOrderTree` mirrors the canonical UQA implementation's operator construction step; the
 //! algorithm choice (hash vs index) follows the same `min(left_card,
 //! right_card) <= INDEX_JOIN_THRESHOLD` cutoff.
 
@@ -28,7 +28,7 @@ use crate::join_graph::{JoinEdge, JoinGraph};
 /// Use index join when the smaller side has fewer rows than this
 /// threshold. Index join is `O(|L1| * log|L2|)` vs hash join
 /// `O(|L1| + |L2|)`; for small inputs the lower constant factor of
-/// binary search wins. Mirrors `INDEX_JOIN_THRESHOLD` in the Python
+/// binary search wins. Mirrors `INDEX_JOIN_THRESHOLD` in the UQA implementation
 /// reference.
 pub const INDEX_JOIN_THRESHOLD: f64 = 100.0;
 

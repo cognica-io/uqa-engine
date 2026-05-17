@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! 1:1 port of `uqa/tests/test_datetime.py`.
+//! Coverage for `test_datetime`.
 //!
 //! The Rust core `Value` surface stores date/time values as ISO strings,
 //! so these tests assert the same observable SQL semantics through that
-//! representation rather than Python `date` / `datetime` object types.
+//! representation rather than host-language date/datetime object types.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};

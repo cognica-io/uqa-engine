@@ -6,7 +6,7 @@
 
 //! Index type definitions for the storage layer.
 //!
-//! Mirrors `uqa/storage/index_types.py`. Values map onto the wire-
+//! Mirrors UQA `storage/index_types`. Values map onto the wire-
 //! visible names that flow through `CREATE INDEX ... USING <name>`
 //! at SQL parse time.
 

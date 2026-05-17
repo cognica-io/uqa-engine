@@ -6,9 +6,9 @@
 
 //! Operator tree IR for the planner.
 //!
-//! Mirrors `uqa/operators/base.py` + the concrete operator subclass
-//! taxonomy. Python's `QueryOptimizer` uses `isinstance` to walk an
-//! operator tree and rewrite it; the Rust port lifts every concrete
+//! Mirrors UQA `operators/base` + the concrete operator subclass
+//! taxonomy. the canonical UQA implementation's `QueryOptimizer` uses `isinstance` to walk an
+//! operator tree and rewrite it; the UQA-RS implementation lifts every concrete
 //! operator into a single [`OperatorTree`] enum so the rewriter can
 //! pattern-match the same way.
 //!
@@ -132,7 +132,7 @@ pub enum GatingSpec {
     ReLU,
 }
 
-/// Concrete operator tree mirroring `uqa/operators` Python class hierarchy.
+/// Concrete operator tree mirroring `uqa/operators` operator class hierarchy.
 #[derive(Clone)]
 pub enum OperatorTree {
     /// Empty leaf (no input). The optimizer treats `Intersect([])` and
@@ -426,7 +426,7 @@ pub enum DeepFusionLayer {
 /// Tree-local view of a temporal filter. Mirrors
 /// `uqa.graph.temporal_filter.TemporalFilter`. The filter accepts
 /// either an exact timestamp or a `[low, high]` time range; both can
-/// be present (Python's class follows the same shape).
+/// be present (the canonical UQA implementation's class follows the same shape).
 #[derive(Clone, Debug, Default)]
 pub struct TemporalFilterIR {
     pub timestamp: Option<f64>,
@@ -445,14 +445,14 @@ impl OperatorTree {
         }
     }
 
-    /// Pointer-style identity for the absorption rule. The Python
-    /// optimizer compares operands by `is`; the Rust port uses
+    /// Pointer-style identity for the absorption rule. The UQA
+    /// optimizer compares operands by `is`; the UQA-RS implementation uses
     /// pointer-stable structural fingerprints.
     pub fn fingerprint(&self) -> usize {
         // Use the address of the heap-stored variant payload as the
         // identity. Cheap clones that share the same Box / Arc
         // payloads will collide; structurally-equal but separately
-        // allocated trees won't, matching Python's `is` semantics.
+        // allocated trees won't, matching the canonical UQA implementation's `is` semantics.
         std::ptr::from_ref::<OperatorTree>(self) as usize
     }
 }

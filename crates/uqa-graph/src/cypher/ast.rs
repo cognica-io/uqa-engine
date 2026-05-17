@@ -5,7 +5,7 @@
 //
 
 //! Cypher AST. Mirrors the openCypher subset implemented by the
-//! reference Python: `MATCH`, `OPTIONAL MATCH`, `CREATE`, `MERGE`,
+//! UQA Cypher subset: `MATCH`, `OPTIONAL MATCH`, `CREATE`, `MERGE`,
 //! `SET`, `DELETE`, `DETACH DELETE`, `RETURN`, `WITH`, `WHERE`,
 //! `ORDER BY`, `SKIP`, `LIMIT`, `UNWIND`.
 

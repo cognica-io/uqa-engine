@@ -5,8 +5,8 @@
 //
 
 //! Rayon-backed parallel split + recombine, plus a branch-level
-//! [`ParallelExecutor`] that mirrors Python's
-//! `uqa/planner/parallel.py`.
+//! [`ParallelExecutor`] that mirrors the canonical UQA implementation's
+//! UQA `planner/parallel`.
 //!
 //! Two parallelism shapes live here:
 //!
@@ -113,11 +113,11 @@ mod tests {
 }
 
 // ---------------------------------------------------------------
-// Branch-level parallel executor (mirrors Python's `ParallelExecutor`)
+// Branch-level parallel executor (mirrors the canonical UQA implementation's `ParallelExecutor`)
 // ---------------------------------------------------------------
 
 /// Default thread pool size; matches `_DEFAULT_MAX_WORKERS` in the
-/// Python reference. Setting `0` disables parallel execution.
+/// canonical UQA behavior. Setting `0` disables parallel execution.
 pub const DEFAULT_PARALLEL_WORKERS: usize = 4;
 
 /// Minimum number of branches before parallel dispatch kicks in.
@@ -165,7 +165,7 @@ impl ParallelExecutor {
     /// Run each `worker` and collect results in the same order. Uses
     /// rayon's work-stealing pool when [`Self::enabled`] is `true` and
     /// the branch count is at least [`MIN_PARALLEL_BRANCHES`];
-    /// otherwise falls back to sequential execution. Mirrors Python's
+    /// otherwise falls back to sequential execution. Mirrors the canonical UQA implementation's
     /// `ParallelExecutor.execute_branches`.
     pub fn execute_branches<R, F>(&self, workers: &[F]) -> Vec<R>
     where

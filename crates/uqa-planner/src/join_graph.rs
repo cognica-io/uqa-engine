@@ -10,7 +10,7 @@
 //!
 //! The graph is dense by design (`u64` bitmask side sets) so DP cache
 //! lookups can use bitmasks directly. With 64 relations max this
-//! suffices for every shape the Python compiler can build.
+//! suffices for every shape the UQA SQL compiler can build.
 
 #[derive(Debug, Clone)]
 pub struct JoinEdge {
@@ -91,7 +91,7 @@ impl JoinGraph {
     }
 
     /// Indices of every relation directly connected to `node` by any
-    /// edge. Mirrors Python's `JoinGraph.neighbors`. Each call walks
+    /// edge. Mirrors the canonical UQA implementation's `JoinGraph.neighbors`. Each call walks
     /// the edge list once; O(|edges|).
     pub fn neighbors(&self, node: usize) -> Vec<usize> {
         let mark = 1u64 << node;

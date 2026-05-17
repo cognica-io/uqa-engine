@@ -16,13 +16,13 @@
 //! The prior is a `Fn(&BTreeMap<String, Value>) -> f64` that maps a
 //! document's field bag to a probability in `(0, 1)`. The bundled
 //! [`recency_prior`] / [`authority_prior`] helpers cover the common
-//! shapes from the Python reference.
+//! shapes from the canonical UQA behavior.
 //!
 //! Numerical safety: probabilities are clamped to `[1e-10, 1 - 1e-10]`
 //! before the logit transform, so the combined posterior is always
 //! finite. A likelihood of `>= 1` saturates the logit at `+10`; a
 //! likelihood of `<= 0` saturates at `-10` -- same constants as
-//! Python's reference for cross-language parity.
+//! the canonical UQA implementation's reference for cross-language parity.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -55,7 +55,7 @@ impl ExternalPriorScorer {
     }
 
     /// Fused posterior with the external prior. Mirrors
-    /// `score_with_prior` in the Python reference.
+    /// `score_with_prior` in the canonical UQA behavior.
     pub fn score_with_prior(
         &self,
         term_freq: u64,
@@ -103,7 +103,7 @@ pub fn recency_prior(field: impl Into<String>, decay_days: f64) -> PriorFn {
 }
 
 /// Authority-based prior. Maps categorical authority levels to prior
-/// probabilities. The default mapping mirrors the Python reference:
+/// probabilities. The default mapping mirrors the canonical UQA behavior:
 /// `high -> 0.8`, `medium -> 0.6`, `low -> 0.4`. Returns `0.5`
 /// (neutral) when the field is missing or unrecognized.
 pub fn authority_prior(field: impl Into<String>, levels: Option<BTreeMap<String, f64>>) -> PriorFn {

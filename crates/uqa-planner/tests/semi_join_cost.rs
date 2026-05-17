@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cost coverage from `uqa/tests/test_semi_join.py`.
+//! Cost coverage from `test_semi_join`.
 
 use uqa_planner::{CostEstimator, OperatorKind};
 

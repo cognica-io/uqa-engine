@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Python `uqa.cli` parity coverage for the Rust `usql` binary.
+//! CLI behavior coverage for the `usql` binary.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
-fn banner_matches_python_usql_shape() {
+fn banner_matches_expected_usql_shape() {
     let dir = tempfile::tempdir().expect("tempdir");
     let output = run_usql(&[], "\\q\n", dir.path());
     assert!(output.status.success(), "stderr: {}", stderr(&output));

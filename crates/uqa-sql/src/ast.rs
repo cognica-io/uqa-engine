@@ -641,12 +641,12 @@ pub enum Statement {
         value: String,
     },
     /// `SHOW <variable>` - return the runtime parameter as a single
-    /// `(name -> value)` row. Mirrors Python `_compile_show`.
+    /// `(name -> value)` row. Matches UQA behavior for `_compile_show`.
     ShowVariable {
         name: String,
     },
     /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session
-    /// state. Mirrors Python `_compile_discard`. The engine resets
+    /// state. Matches UQA behavior for `_compile_discard`. The engine resets
     /// session vars, prepared statements and temp tables.
     Discard {
         target: DiscardTarget,

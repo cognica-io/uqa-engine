@@ -17,14 +17,14 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
 /// Which side of the index/search pipeline a field analyzer applies to.
-/// Mirrors Python `set_field_analyzer(field, analyzer, phase=...)`.
+/// Matches UQA behavior for `set_field_analyzer(field, analyzer, phase=...)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalyzerPhase {
     /// Run only when *adding* documents.
     Index,
     /// Run only when *querying* documents (e.g. through `TermOperator`).
     Search,
-    /// Run on both phases (the Python default).
+    /// Run on both phases (the default).
     Both,
 }
 
@@ -185,7 +185,7 @@ pub trait InvertedIndex: Send + Sync {
     }
 
     /// Search-time analyzer for `field`; falls back to the index-time
-    /// analyzer, then to the default. Mirrors Python
+    /// analyzer, then to the default. Matches UQA behavior for
     /// `get_search_analyzer`.
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
         self.get_field_analyzer(field)

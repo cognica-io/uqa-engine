@@ -5,7 +5,7 @@
 //
 
 //! Volcano `PhysicalOperator` trait shared by every operator in this
-//! crate. Mirrors `uqa/execution/physical.py`.
+//! crate. Mirrors UQA `execution/physical`.
 
 use thiserror::Error;
 

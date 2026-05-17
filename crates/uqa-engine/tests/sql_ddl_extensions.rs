@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the DDL surface added to match the upstream Python
+//! Coverage for the DDL surface added to match the UQA
 //! engine: `BIGSERIAL` / `SERIAL` columns with auto-id INSERTs,
 //! `DROP TABLE / INDEX [IF EXISTS]`, and `ALTER TABLE` action variants
 //! (ADD / DROP / RENAME COLUMN, RENAME TO).

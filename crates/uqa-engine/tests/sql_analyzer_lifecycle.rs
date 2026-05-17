@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of the analyzer SQL surface from
-//! `uqa/tests/test_analysis.py`: the `create_analyzer`,
+//! Coverage for the analyzer SQL surface from
+//! `test_analysis`: the `create_analyzer`,
 //! `list_analyzers`, `drop_analyzer`, and `set_table_analyzer` table
 //! functions plus their catalog-persistence behaviour.
 

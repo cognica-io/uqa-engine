@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! 1:1 port of `uqa/tests/test_json.py`.
+//! Coverage for `test_json`.
 
 use std::collections::BTreeMap;
 

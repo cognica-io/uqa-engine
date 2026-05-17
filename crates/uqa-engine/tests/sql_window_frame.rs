@@ -5,7 +5,7 @@
 //
 
 //! Window FRAME (ROWS/RANGE BETWEEN) over aggregate window
-//! functions. Mirrors Python `_compute_framed_aggregate` semantics.
+//! functions. Matches UQA behavior for `_compute_framed_aggregate` semantics.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_semi_join.py` onto row-oriented joins.
+//! Coverage for `test_semi_join` onto row-oriented joins.
 
 use uqa_core::Value;
 use uqa_joins::{anti_join, semi_join, JoinKey};

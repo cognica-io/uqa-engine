@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Full-text search query string parser. 1:1 port of
+//! Full-text search query string parser. Rust implementation of
 //! `uqa.sql.fts_query`.
 //!
 //! Grammar
@@ -410,7 +410,7 @@ pub fn resolve_field(node_field: Option<&str>, default_field: Option<&str>) -> O
 
 /// Default `k` used by the compiled vector node. Mirrors
 /// `_CalibratedKNNOperator(query_vec, k=10000, field=field)` in the
-/// Python reference.
+/// canonical UQA behavior.
 pub const FTS_VECTOR_K: usize = 10_000;
 
 /// Lower an [`FTSNode`] into an [`OperatorTree`]. The phrase
@@ -464,7 +464,7 @@ pub fn compile(
             let l = compile(left, default_field, phrase_tokenizer);
             let r = compile(right, default_field, phrase_tokenizer);
             // Mixed text + vector AND -> log-odds fusion (same shape
-            // as Python's `_compile_and`).
+            // as the canonical UQA implementation's `_compile_and`).
             let mixed = has_vector_signal(left) ^ has_vector_signal(right);
             if mixed {
                 OperatorTree::LogOddsFusion {

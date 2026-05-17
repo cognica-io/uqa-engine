@@ -180,7 +180,7 @@ impl Operator for LogOddsFusionOperator {
     }
 }
 
-/// Probabilistic boolean fusion. Mirrors Python
+/// Probabilistic boolean fusion. Matches UQA behavior for
 /// `ProbBoolFusionOperator`. Each signal must produce calibrated
 /// probabilities in `(0, 1)`; missing documents fall back to a
 /// coverage-based default. `mode = And` multiplies probabilities,
@@ -247,7 +247,7 @@ impl Operator for ProbBoolFusionOperator {
     }
 }
 
-/// Probabilistic NOT (`P(¬signal) = 1 - P(signal)`). Mirrors Python
+/// Probabilistic NOT (`P(¬signal) = 1 - P(signal)`). Matches UQA behavior for
 /// `ProbNotOperator`. Documents present in `signal` get
 /// `1 - score`; documents missing from the signal but present in
 /// the document store get `1 - default_prob`.
@@ -293,7 +293,7 @@ impl Operator for ProbNotOperator {
 }
 
 /// `VE(V1, V2) = V1 AND NOT V2` — keeps documents from `positive`
-/// that are dissimilar to `negative_op`'s query. Mirrors Python
+/// that are dissimilar to `negative_op`'s query. Matches UQA behavior for
 /// `VectorExclusionOperator`. The negative side is wired through a
 /// [`VectorSimilarityOperator`] threshold so the caller decides what
 /// counts as "too similar".
@@ -336,7 +336,7 @@ impl Operator for VectorExclusionOperator {
     }
 }
 
-/// Facet counts conditioned on vector similarity. Mirrors Python
+/// Facet counts conditioned on vector similarity. Matches UQA behavior for
 /// `FacetVectorOperator`. The output rows are synthetic posting
 /// entries — `doc_id` is a positional placeholder, `payload.score`
 /// is the bucket count, and `payload.fields` carries the
@@ -356,7 +356,7 @@ impl FacetVectorOperator {
     ) -> Self {
         Self {
             facet_field: facet_field.into(),
-            // Python defaults the field to "embedding".
+            // The UQA SQL contract defaults the field to "embedding".
             vector_op: VectorSimilarityOperator::new(query_vector, threshold, "embedding"),
             source,
         }
@@ -432,7 +432,7 @@ fn value_to_facet_string(v: &Value) -> String {
     }
 }
 
-/// Adaptive log-odds fusion. Mirrors Python
+/// Adaptive log-odds fusion. Matches UQA behavior for
 /// `AdaptiveLogOddsFusionOperator` — runs each signal, computes a
 /// per-signal `SignalQuality` (coverage / variance / calibration
 /// error), and combines through [`AdaptiveLogOddsFuser::fuse`].
@@ -523,7 +523,7 @@ impl Operator for AdaptiveLogOddsFusionOperator {
     }
 }
 
-/// Index-driven scan. Mirrors Python `IndexScanOperator`. Wraps a
+/// Index-driven scan. Matches UQA behavior for `IndexScanOperator`. Wraps a
 /// boxed [`uqa_storage::Index`] and runs `scan(predicate)` against
 /// it. The optimiser's `apply_index_scan` rewrites a `Filter` into
 /// this when an index covers the predicate.

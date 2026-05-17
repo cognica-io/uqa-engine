@@ -6,7 +6,7 @@
 
 //! Search-result highlighting.
 //!
-//! Mirrors `uqa/search/highlight.py`. Operates in two phases:
+//! Mirrors UQA `search/highlight`. Operates in two phases:
 //!
 //! 1. Build a set of *analyzed* query terms (lower-cased + stemmed +
 //!    char/token filtered through the same [`Analyzer`] pipeline used
@@ -21,7 +21,7 @@
 //!
 //! The matcher operates on character offsets (not byte offsets) so
 //! highlight spans in CJK / multi-byte text line up the same way the
-//! Python reference produces them.
+//! canonical UQA behavior produces them.
 //!
 //! ```rust
 //! use uqa_analysis::{highlight, HighlightOptions};
@@ -51,7 +51,7 @@ use regex::Regex;
 
 use crate::analyzer::Analyzer;
 
-/// Per-call configuration. Defaults match the Python reference:
+/// Per-call configuration. Defaults match the canonical UQA behavior:
 /// `<b>` / `</b>` tags, full-text highlight (no fragment cap),
 /// 150-char fragments when `max_fragments > 0`.
 #[derive(Debug, Clone)]

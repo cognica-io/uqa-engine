@@ -5,7 +5,7 @@
 //
 
 //! Subquery shapes: scalar `(SELECT ...)`, `EXISTS (...)`, and
-//! `IN (SELECT ...)`. Mirrors the Python compiler's
+//! `IN (SELECT ...)`. Mirrors the UQA SQL compiler's
 //! `_compile_sublink_in_where` paths.
 
 use uqa_core::Value;

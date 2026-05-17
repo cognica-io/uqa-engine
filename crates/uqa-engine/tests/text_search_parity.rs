@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Parity test: load a fixture captured from the Python UQA implementation
-//! and verify that the Rust engine produces the same top-k doc id order
+//! Golden-fixture test: load text-search expectations
+//! and verify that the engine produces the same top-k doc id order
 //! and matching BM25 / Bayesian BM25 scores within a small epsilon.
 //!
 //! Refresh the fixture with
@@ -84,7 +84,7 @@ fn parse_mode(name: &str) -> ScoringMode {
 }
 
 #[test]
-fn rust_engine_matches_python_fixture() {
+fn engine_matches_text_search_fixture() {
     let fx = load_fixture();
     let eng = Engine::new();
     eng.create_default_table("articles", vec!["title".into(), "body".into()]);

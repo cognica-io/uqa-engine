@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Vector similarity to probability conversion. 1:1 port of
+//! Vector similarity to probability conversion. Rust implementation of
 //! `uqa.scoring.vector`.
 //!
 //! Two modes:
@@ -17,7 +17,7 @@
 //!   distance distribution.
 //!
 //! The Rust API is associated functions on [`VectorScorer`]; there is
-//! no instance state. This matches the Python reference's static-only
+//! no instance state. This matches the canonical UQA behavior's static-only
 //! shape.
 
 use crate::calibration::VectorProbabilityTransform;

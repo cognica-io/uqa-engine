@@ -177,12 +177,12 @@ pub struct Engine {
     /// error out, but tables themselves still live in the flat
     /// per-name namespace.
     schemas: RwLock<std::collections::BTreeSet<String>>,
-    /// Resolution order for unqualified table names. Mirrors Python's
+    /// Resolution order for unqualified table names. Mirrors the canonical UQA implementation's
     /// `Engine._tables._search_path`. Defaults to `["public"]`.
     search_path: RwLock<Vec<String>>,
     /// Session-scoped runtime parameters. Anything assigned via SET
     /// lands here so SHOW can echo it back; `DISCARD ALL` clears the
-    /// map. Mirrors Python's `Engine._session_vars`.
+    /// map. Mirrors the canonical UQA implementation's `Engine._session_vars`.
     session_vars: RwLock<BTreeMap<String, String>>,
     /// Pre-built RPQ path indexes keyed by `<graph>::<name>`. Each
     /// entry materialises a fixed set of label sequences so RPQ can
@@ -197,7 +197,7 @@ pub struct Engine {
     /// boundaries; calling [`Engine::cancel`] from any thread tears
     /// every in-flight query down with `SQLError::Cancelled`.
     cancel: uqa_core::CancellationToken,
-    /// Named sequences. Mirrors `_engine._sequences` in the Python
+    /// Named sequences. Mirrors `_engine._sequences` in the UQA implementation
     /// reference. Each entry tracks `(start, increment, current)`.
     sequences: RwLock<BTreeMap<String, SequenceState>>,
     /// Prepared statements. Mirrors `_engine._prepared`.
@@ -405,7 +405,7 @@ impl Engine {
     // -----------------------------------------------------------------
     // Sequences. Mirrors `_engine._sequences` and the
     // `_compile_create_sequence` / `_compile_alter_sequence` paths in
-    // the Python reference.
+    // the canonical UQA behavior.
     // -----------------------------------------------------------------
 
     pub fn create_sequence(
@@ -512,7 +512,7 @@ impl Engine {
     // -----------------------------------------------------------------
     // Named analyzers + per-(table, field) analyzer assignments. Mirror
     // _engine.create_analyzer / drop_analyzer / list_analyzers /
-    // set_table_analyzer in the Python reference.
+    // set_table_analyzer in the canonical UQA behavior.
     // -----------------------------------------------------------------
 
     fn resolve_analyzer(&self, name: &str) -> std::result::Result<Analyzer, String> {
@@ -600,7 +600,7 @@ impl Engine {
             .cloned()
     }
 
-    /// Python-parity alias for [`Engine::register_named_analyzer`].
+    /// compatibility alias for [`Engine::register_named_analyzer`].
     pub fn create_analyzer(
         &self,
         name: &str,
@@ -609,12 +609,12 @@ impl Engine {
         self.register_named_analyzer(name, config_json)
     }
 
-    /// Python-parity alias for [`Engine::drop_named_analyzer`].
+    /// compatibility alias for [`Engine::drop_named_analyzer`].
     pub fn drop_analyzer(&self, name: &str) -> bool {
         self.drop_named_analyzer(name)
     }
 
-    /// Python-parity alias for [`Engine::set_table_field_analyzer`].
+    /// compatibility alias for [`Engine::set_table_field_analyzer`].
     pub fn set_table_analyzer(
         &self,
         table: &str,
@@ -628,12 +628,11 @@ impl Engine {
     /// Resolve the analyzer assigned to `(table, field)` for the given
     /// phase. `phase` is `"index"`, `"search"`, or `"both"`. Returns the
     /// analyzer config JSON (the raw form the engine persists).
-    /// Mirrors Python's `Engine.get_table_analyzer`.
+    /// Mirrors the canonical UQA implementation's `Engine.get_table_analyzer`.
     pub fn get_table_analyzer(&self, table: &str, field: &str, phase: &str) -> Option<String> {
         let (name, stored_phase) = self.table_field_analyzer(table, field)?;
-        // Python returns the field's index/search analyzer based on the
-        // requested phase; "both" means the override applies on both
-        // sides. Honour the same precedence here.
+        // Resolve the field's index/search analyzer based on the requested
+        // phase; "both" means the override applies on both sides.
         let resolved = match (stored_phase.as_str(), phase) {
             ("both", _) | ("index", "index") | ("query" | "search", "search") => name,
             _ => return None,
@@ -645,7 +644,7 @@ impl Engine {
 
     // -----------------------------------------------------------------
     // Foreign Data Wrapper registry. Mirrors `_engine._foreign_servers`
-    // / `_engine._foreign_tables` in the Python reference.
+    // / `_engine._foreign_tables` in the canonical UQA behavior.
     // -----------------------------------------------------------------
 
     #[allow(clippy::needless_pass_by_value)]
@@ -873,7 +872,7 @@ impl Engine {
     }
 
     // -----------------------------------------------------------------
-    // Catalog index registry. Mirrors Python's `_catalog_indexes`
+    // Catalog index registry. Mirrors the canonical UQA implementation's `_catalog_indexes`
     // table - records the CREATE INDEX statement (name + access
     // method + columns + WITH options) so reopen can replay any
     // metadata-bearing side effects.
@@ -906,7 +905,7 @@ impl Engine {
 
     /// Cancel every in-flight query that holds a clone of this
     /// engine's cancellation token. Mirrors `Engine.cancel()` in
-    /// the Python reference; surfaces to operator hot loops as
+    /// the canonical UQA behavior; surfaces to operator hot loops as
     /// [`uqa_core::QueryCancelled`] which the SQL layer maps to
     /// `SQLError::Cancelled` (`PostgreSQL` `SQLSTATE 57014`).
     pub fn cancel(&self) {
@@ -924,7 +923,7 @@ impl Engine {
         self.cancel.clone()
     }
 
-    /// Python-parity alias for [`Engine::cancellation_token`].
+    /// compatibility alias for [`Engine::cancellation_token`].
     pub fn cancel_token(&self) -> uqa_core::CancellationToken {
         self.cancellation_token()
     }
@@ -1637,19 +1636,19 @@ impl Engine {
     }
 
     /// Sorted list of every named graph registered on this engine.
-    /// Mirrors Python's `Engine.list_graphs`.
+    /// Mirrors the canonical UQA implementation's `Engine.list_graphs`.
     pub fn list_graphs(&self) -> Vec<String> {
         self.graphs.read().keys().cloned().collect()
     }
 
     /// Return `true` when a graph with `name` is registered.
-    /// Mirrors Python's `Engine.has_graph`.
+    /// Mirrors the canonical UQA implementation's `Engine.has_graph`.
     pub fn has_graph(&self, name: &str) -> bool {
         self.graphs.read().contains_key(name)
     }
 
     /// Insert a vertex into a named graph. Auto-creates the graph if
-    /// missing. Mirrors Python's `Engine.add_graph_vertex`.
+    /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_vertex`.
     pub fn add_graph_vertex(&self, vertex: uqa_core::Vertex, graph: &str) {
         use uqa_graph::GraphStore as _;
         let vertex_id = vertex.vertex_id;
@@ -1679,7 +1678,7 @@ impl Engine {
     }
 
     /// Insert an edge into a named graph. Auto-creates the graph if
-    /// missing. Mirrors Python's `Engine.add_graph_edge`.
+    /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_edge`.
     pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) {
         use uqa_graph::GraphStore as _;
         let edge_id = edge.edge_id;
@@ -1708,7 +1707,7 @@ impl Engine {
     }
 
     /// Apply a [`uqa_graph::GraphDelta`] to a named graph as a single
-    /// atomic batch of `add/remove vertex/edge` ops. Mirrors Python's
+    /// atomic batch of `add/remove vertex/edge` ops. Mirrors the canonical UQA implementation's
     /// `Engine.apply_graph_delta`.
     pub fn apply_graph_delta(&self, graph: &str, delta: &uqa_graph::GraphDelta) {
         use uqa_graph::DeltaOp;
@@ -1777,7 +1776,7 @@ impl Engine {
     /// Build (or replace) a path index for `graph` keyed by `name`.
     /// `label_sequences` is the set of label sequences to materialise;
     /// each sequence becomes a hash-friendly direct lookup for RPQ.
-    /// Mirrors Python's `Engine.build_path_index`.
+    /// Mirrors the canonical UQA implementation's `Engine.build_path_index`.
     pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
         let key = format!("{graph}::{name}");
         let idx = {
@@ -1795,7 +1794,7 @@ impl Engine {
     }
 
     /// Drop a path index by `(graph, name)`. Returns `true` when an
-    /// index was removed. Mirrors Python's `Engine.drop_path_index`.
+    /// index was removed. Mirrors the canonical UQA implementation's `Engine.drop_path_index`.
     pub fn drop_path_index(&self, name: &str, graph: &str) -> bool {
         let key = format!("{graph}::{name}");
         let removed = self.path_indexes.write().remove(&key).is_some();
@@ -1808,7 +1807,7 @@ impl Engine {
     }
 
     /// Look up a path index by `(graph, name)`. Returns a clone so the
-    /// caller is not tied to the engine's lock. Mirrors Python's
+    /// caller is not tied to the engine's lock. Mirrors the canonical UQA implementation's
     /// `Engine.get_path_index`.
     pub fn get_path_index(&self, name: &str, graph: &str) -> Option<uqa_graph::PathIndex> {
         let key = format!("{graph}::{name}");
@@ -1855,7 +1854,7 @@ impl Engine {
     ///
     /// This wires the full `CREATE` / `MERGE` / `SET` / `DELETE` /
     /// `UNWIND` surface through to the in-memory store. The graph is
-    /// auto-created on first use, mirroring Python's
+    /// auto-created on first use, mirroring the canonical UQA implementation's
     /// `CypherCompiler.execute` behaviour.
     pub fn run_cypher(
         &self,
@@ -1957,7 +1956,7 @@ impl Engine {
         self.models.write().remove(name);
     }
 
-    /// Python-parity alias for [`Engine::drop_model`].
+    /// compatibility alias for [`Engine::drop_model`].
     pub fn delete_model(&self, name: &str) {
         self.drop_model(name);
     }
@@ -2002,7 +2001,7 @@ impl Engine {
     /// Persist Bayesian calibration parameters for a named signal. The
     /// parameters arrive serialised as a JSON string so callers can
     /// stuff arbitrary `(alpha, beta, base_rate, ...)` shapes through
-    /// without forcing a struct. Mirrors Python's `save_scoring_params`.
+    /// without forcing a struct. Mirrors the canonical UQA implementation's `save_scoring_params`.
     pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<(), SQLError> {
         if let Some(catalog) = self.catalog.as_ref() {
             catalog
@@ -2017,7 +2016,7 @@ impl Engine {
 
     /// Load persisted scoring parameters for a single signal. Falls
     /// back to the in-memory cache when the engine is not catalog-
-    /// backed. Mirrors Python's `Engine.load_scoring_params`.
+    /// backed. Mirrors the canonical UQA implementation's `Engine.load_scoring_params`.
     pub fn load_scoring_params(&self, name: &str) -> Option<String> {
         if let Some(p) = self.scoring_params.read().get(name).cloned() {
             return Some(p);
@@ -2034,7 +2033,7 @@ impl Engine {
     }
 
     /// Snapshot every persisted `(name, params_json)` pair. Mirrors
-    /// Python's `Engine.load_all_scoring_params`.
+    /// the canonical UQA implementation's `Engine.load_all_scoring_params`.
     pub fn load_all_scoring_params(&self) -> Vec<(String, String)> {
         if let Some(catalog) = self.catalog.as_ref() {
             if let Ok(rows) = catalog.load_all_scoring_params() {
@@ -2241,7 +2240,7 @@ impl Engine {
         self.schemas.write().remove(name)
     }
 
-    /// Sorted list of every registered schema. Mirrors Python's
+    /// Sorted list of every registered schema. Mirrors the canonical UQA implementation's
     /// `Engine._tables.schemas`.
     pub fn list_schemas(&self) -> Vec<String> {
         let mut out: Vec<String> = self.schemas.read().iter().cloned().collect();
@@ -2253,7 +2252,7 @@ impl Engine {
 
     /// Tables that belong to a schema. Names matching `<schema>.X`
     /// are bucketed under `<schema>`; everything else falls under
-    /// `public`. Mirrors Python's `Engine._tables.tables_in_schema`.
+    /// `public`. Mirrors the canonical UQA implementation's `Engine._tables.tables_in_schema`.
     pub fn tables_in_schema(&self, schema: &str) -> Vec<String> {
         let prefix = format!("{schema}.");
         let mut out: Vec<String> = Vec::new();
@@ -2268,7 +2267,7 @@ impl Engine {
         out
     }
 
-    /// Current `search_path`. Mirrors Python's
+    /// Current `search_path`. Mirrors the canonical UQA implementation's
     /// `Engine._tables.search_path`.
     pub fn search_path(&self) -> Vec<String> {
         self.search_path.read().clone()
@@ -2286,7 +2285,7 @@ impl Engine {
     /// Apply `SET <name> [TO|=] <value>`. Honours `search_path`
     /// directly; every other parameter is stored in the session-vars
     /// map so a subsequent `SHOW <name>` can echo it back. Mirrors
-    /// Python's session-variable behaviour.
+    /// the canonical UQA implementation's session-variable behaviour.
     pub fn set_variable(&self, name: &str, value: &str) {
         if name.eq_ignore_ascii_case("search_path") {
             let parts: Vec<String> = value
@@ -2308,7 +2307,7 @@ impl Engine {
     /// Read back a session variable. `search_path` always resolves to
     /// the current resolution order; every other key looks up the
     /// session-vars map and falls back to an empty string. Mirrors
-    /// Python's `_compile_show`.
+    /// the canonical UQA implementation's `_compile_show`.
     pub fn show_variable(&self, name: &str) -> String {
         if name.eq_ignore_ascii_case("search_path") {
             return self.search_path().join(",");
@@ -2320,7 +2319,7 @@ impl Engine {
             .unwrap_or_default()
     }
 
-    /// Apply `DISCARD <target>`. Mirrors Python's `_compile_discard`:
+    /// Apply `DISCARD <target>`. Mirrors the canonical UQA implementation's `_compile_discard`:
     /// `ALL` resets every kind of session state; the narrower
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) {
@@ -2330,7 +2329,7 @@ impl Engine {
                 self.session_vars.write().clear();
                 self.prepared.write().clear();
                 // Temp tables aren't tracked separately yet; clearing
-                // the prepared map matches Python's effect on the bits
+                // the prepared map matches the canonical UQA implementation's effect on the bits
                 // we own today.
             }
             DiscardTarget::Plans => {
@@ -2348,7 +2347,7 @@ impl Engine {
 
     /// Refresh per-column statistics for a single table or every
     /// table when `table` is `None`. Mirrors `Table.analyze` in
-    /// the Python reference: scans every document, collects per-
+    /// the canonical UQA behavior: scans every document, collects per-
     /// column distinct count / null count / min / max / equi-depth
     /// histogram (100 buckets) / MCV list (top 10 above-average
     /// frequency), and stores the result on the per-table state so the
@@ -2552,38 +2551,38 @@ impl Engine {
     /// Execute a transaction control statement (`BEGIN` / `COMMIT` /
     /// `ROLLBACK` / savepoint variants) against the engine. The
     /// engine maintains a single transaction stack per connection.
-    /// Start an explicit transaction frame. Mirrors Python
+    /// Start an explicit transaction frame. Matches UQA behavior for
     /// `Engine.begin`. Equivalent to running `BEGIN` through `sql`.
     pub fn begin(&self) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Begin)
     }
 
-    /// Commit the top-most transaction frame. Mirrors Python
+    /// Commit the top-most transaction frame. Matches UQA behavior for
     /// `Engine.commit`.
     pub fn commit(&self) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Commit)
     }
 
-    /// Roll back the top-most transaction frame. Mirrors Python
+    /// Roll back the top-most transaction frame. Matches UQA behavior for
     /// `Engine.rollback`.
     pub fn rollback(&self) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback)
     }
 
-    /// Mark a savepoint inside the current transaction. Mirrors Python
+    /// Mark a savepoint inside the current transaction. Matches UQA behavior for
     /// `Engine.savepoint(name)`.
     pub fn savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Savepoint(name.to_string()))
     }
 
-    /// Release a savepoint. Mirrors Python `Engine.release_savepoint`.
+    /// Release a savepoint. Matches UQA behavior for `Engine.release_savepoint`.
     pub fn release_savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::ReleaseSavepoint(
             name.to_string(),
         ))
     }
 
-    /// Roll back to a named savepoint. Mirrors Python
+    /// Roll back to a named savepoint. Matches UQA behavior for
     /// `Engine.rollback_to_savepoint`.
     pub fn rollback_to_savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::RollbackToSavepoint(
@@ -2642,10 +2641,10 @@ impl Engine {
     }
 
     /// Tear down engine state cleanly. Rolls back any open transaction
-    /// frames and clears registries. Mirrors Python `Engine.close`.
+    /// frames and clears registries. Matches UQA behavior for `Engine.close`.
     /// The engine value can no longer be used afterwards in a
     /// well-defined sense; idiomatic Rust drops the value at scope
-    /// exit, but this method exists for parity with the Python
+    /// exit, but this method exists for API compatibility
     /// reference and for explicit shutdown ordering.
     pub fn close(&self) {
         // Roll back every open transaction.
@@ -3348,7 +3347,7 @@ impl Engine {
     /// given values. Returns the existing doc id when a conflict
     /// exists, `None` when the row would be a fresh insert. Mirrors
     /// `PostgreSQL`'s `ON CONFLICT (col, ...)` lookup; the conflict
-    /// columns map to the unique-constraint target. The Rust port
+    /// columns map to the unique-constraint target. The UQA-RS implementation
     /// scans every document because the planner does not yet support
     /// secondary unique indexes; the lookup is still correct for
     /// small / medium tables, which is where UPSERT is most useful.

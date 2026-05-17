@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_expr_evaluator.py`. Mirrors the SQL
+//! Coverage for `test_expr_evaluator`. Mirrors the SQL
 //! expression evaluator integration suite: IS NULL / IS NOT NULL,
 //! arithmetic, string concat, CASE / WHEN, CAST, COALESCE, string and
 //! math scalar functions, expression-based WHERE clauses, mixed

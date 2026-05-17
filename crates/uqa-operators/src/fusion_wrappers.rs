@@ -5,8 +5,8 @@
 //
 
 //! Operator-side facades over the [`uqa_fusion`] family. Mirrors
-//! `uqa/operators/attention.py`, `uqa/operators/learned_fusion.py`,
-//! `uqa/operators/multi_field.py`, and `uqa/operators/calibrated_vector.py`.
+//! UQA `operators/attention`, UQA `operators/learned_fusion`,
+//! UQA `operators/multi_field`, and UQA `operators/calibrated_vector`.
 //!
 //! Each wrapper folds the per-signal [`PostingList`]s its child
 //! operators emit into a single [`PostingList`]. Unmatched documents
@@ -50,7 +50,7 @@ fn collect_score_maps(
 }
 
 /// Single-head / multi-head attention-weighted fusion operator.
-/// Mirrors `AttentionFusionOperator` from the Python reference and
+/// Mirrors `AttentionFusionOperator` from the canonical UQA behavior and
 /// shares the dispatch with [`MultiHeadAttentionFusion`] via the
 /// [`AttentionFuser`] enum.
 pub enum AttentionFuser {
@@ -119,7 +119,7 @@ impl Operator for AttentionFusionOperator {
 }
 
 /// Learned-weight multi-signal fusion operator. Mirrors
-/// `LearnedFusionOperator` in `uqa/operators/learned_fusion.py`.
+/// `LearnedFusionOperator` in UQA `operators/learned_fusion`.
 pub struct LearnedFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub learned: LearnedFusion,
@@ -282,11 +282,11 @@ pub enum WeightSource {
 
 /// Calibrated KNN search operator (Paper 5).
 ///
-/// The Python reference draws importance weights from external BM25
+/// The canonical UQA behavior draws importance weights from external BM25
 /// probabilities, the IVF cell-density prior, or the distance-gap
-/// detector. This Rust port supports the uniform and distance-gap
+/// detector. This implementation supports the uniform and distance-gap
 /// strategies — the IVF / cross-modal BM25 variants land alongside
-/// the IVF index port.
+/// the IVF index path.
 pub struct CalibratedVectorOperator {
     pub query_vector: Vec<f32>,
     pub k: usize,

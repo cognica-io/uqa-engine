@@ -10,7 +10,7 @@
 //! case against a fresh in-memory `Engine`, asserting the result rows
 //! match the expected values. The fixture is intentionally
 //! engine-agnostic so the same JSON can be regenerated from the
-//! Python reference implementation when we want to lock down parity
+//! canonical UQA behavior implementation when we want to lock down parity
 //! at a deeper level.
 
 use std::path::PathBuf;

@@ -6,7 +6,7 @@
 
 //! `ArrowFlightSQLFDWHandler`: remote Arrow Flight SQL handler.
 //!
-//! 1:1 port of `uqa.fdw.arrow_handler`. The Rust port covers SQL
+//! Coverage for `uqa.fdw.arrow_handler`. The UQA-RS implementation covers SQL
 //! generation: SQL literal quoting ([`quote_literal`]), `WHERE`
 //! clause assembly ([`build_where_clause`]), and the full SELECT /
 //! pre-existing-query builder ([`prepare_query`]). Actual Flight
@@ -75,7 +75,7 @@ pub fn quote_literal(value: &Value) -> String {
 }
 
 /// Render a Flight-SQL `WHERE` fragment from pushdown predicates.
-/// Mirrors `_build_where_clause` in the Python reference. Flight
+/// Mirrors `_build_where_clause` in the canonical UQA behavior. Flight
 /// SQL has no parameter binding API, so literal values are inlined
 /// via [`quote_literal`].
 pub fn build_where_clause(predicates: &[FDWPredicate]) -> String {
@@ -111,7 +111,7 @@ pub fn build_where_clause(predicates: &[FDWPredicate]) -> String {
 
 /// Build the SQL query the handler ships to the remote Flight SQL
 /// server. The `query` option, when present, takes precedence over
-/// `source` -- matching the Python reference. Predicates and limit
+/// `source` -- matching the canonical UQA behavior. Predicates and limit
 /// are appended only when the prepared query doesn't already
 /// contain `WHERE` / `LIMIT` (case-insensitive).
 pub fn prepare_query(
@@ -253,7 +253,7 @@ mod tests {
             value: Value::Int(2025),
         }];
         // The pre-built query already has WHERE -- predicates are
-        // dropped, mirroring the Python reference.
+        // dropped, mirroring the canonical UQA behavior.
         let q = prepare_query(&table, None, &preds, None).unwrap();
         assert_eq!(q, "SELECT id FROM books WHERE year = 2024");
     }

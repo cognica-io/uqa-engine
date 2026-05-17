@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_sql_joins.py`.
+//! Coverage for `test_sql_joins`.
 
 use std::collections::BTreeSet;
 

@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_catalog.py` covering the SQLite-backed
+//! Coverage for `test_catalog` covering the SQLite-backed
 //! `Catalog` plus the per-module persistence stores it orchestrates.
 //!
-//! The Python reference exposes one fat `Catalog` class with methods
-//! like `save_document`, `save_postings`, `save_vector`. The Rust port
+//! The canonical UQA behavior exposes one fat `Catalog` class with methods
+//! like `save_document`, `save_postings`, `save_vector`. The UQA-RS implementation
 //! splits those concerns across `Catalog`, `SQLiteDocumentStore`,
 //! `SQLiteInvertedIndex`, and `SQLiteVectorIndex`. Tests below exercise
 //! the same observable behaviour through the Rust API surface.

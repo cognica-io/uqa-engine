@@ -6,9 +6,9 @@
 
 //! Relational joins over `ResultRow` row sets.
 //!
-//! Mirrors the Python references in `uqa/joins/inner.py`,
-//! `uqa/joins/outer.py`, `uqa/joins/semi.py`, `uqa/joins/cross.py`,
-//! `uqa/joins/sort_merge.py`, `uqa/joins/index.py`. The Rust port
+//! Implements the row-join behavior from UQA `joins/inner`,
+//! UQA `joins/outer`, UQA `joins/semi`, UQA `joins/cross`,
+//! UQA `joins/sort_merge`, UQA `joins/index`. The UQA-RS implementation
 //! operates on `ResultRow` (`BTreeMap<String, Value>`) directly so it
 //! can be plugged into the engine's row-tuple SQL pipeline without an
 //! extra adapter; the returned `Vec<ResultRow>` carries qualifier-

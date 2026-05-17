@@ -5,7 +5,7 @@
 //
 
 //! `EXPLAIN SELECT ...` returns a single-column `plan` table mirroring
-//! Python's `_explain_plan` output shape.
+//! the canonical UQA implementation's `_explain_plan` output shape.
 
 use uqa_engine::Engine;
 

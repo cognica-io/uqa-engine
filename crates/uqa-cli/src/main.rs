@@ -1747,7 +1747,7 @@ fn write_row(out: &mut (impl Write + ?Sized), cells: &[String], widths: &[usize]
 
 fn history_path() -> Option<PathBuf> {
     // Honour the Rust test override if present; otherwise mirror
-    // Python usql's ~/.cognica/uqa/.usql_history default.
+    // legacy `usql` ~/.cognica/uqa/.usql_history default.
     if let Ok(custom) = std::env::var("UQA_HISTORY") {
         if !custom.is_empty() {
             return Some(PathBuf::from(custom));

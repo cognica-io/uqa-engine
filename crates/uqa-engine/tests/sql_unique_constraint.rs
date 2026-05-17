@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! UNIQUE constraint validation. Mirrors the Python reference's
+//! UNIQUE constraint validation. Mirrors the canonical UQA behavior's
 //! per-row UNIQUE check before INSERT.
 
 use uqa_engine::Engine;

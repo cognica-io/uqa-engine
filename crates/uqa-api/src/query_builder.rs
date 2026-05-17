@@ -248,7 +248,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Execute the query and convert the result to an Arrow
-    /// [`RecordBatch`]. The batch always includes Python-parity
+    /// [`RecordBatch`]. The batch always includes compatibility
     /// metadata columns `_doc_id` and `_score` before the requested
     /// projections.
     pub fn execute_arrow(&self) -> Result<RecordBatch, QueryBuilderError> {
@@ -402,7 +402,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Add a `multi_stage(...)` projection that mirrors Python's
+    /// Add a `multi_stage(...)` projection that mirrors the canonical UQA implementation's
     /// `multi_stage` builder. Each stage is `(signal, top_k)`.
     pub fn multi_stage(mut self, stages: &[(&str, usize)]) -> Self {
         let mut parts: Vec<String> = Vec::with_capacity(stages.len() * 2);
@@ -417,7 +417,7 @@ impl<'a> QueryBuilder<'a> {
 
     /// Multi-signal attention fusion. `signals` are pre-rendered SQL
     /// expressions like `text_match('q')`, `knn_match('field', '[..]', k)`.
-    /// Mirrors Python `QueryBuilder.fuse_attention`.
+    /// Matches UQA behavior for `QueryBuilder.fuse_attention`.
     pub fn fuse_attention(mut self, signals: &[&str]) -> Self {
         self.projections
             .push(format!("attention({})", signals.join(", ")));
@@ -425,7 +425,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Learned per-feature fusion using a saved `LearnedFusion` model.
-    /// Mirrors Python `QueryBuilder.fuse_learned`.
+    /// Matches UQA behavior for `QueryBuilder.fuse_learned`.
     pub fn fuse_learned(mut self, model: &str, signals: &[&str]) -> Self {
         let mut parts = vec![quote_str(model)];
         parts.extend(signals.iter().map(|s| (*s).to_string()));
@@ -434,7 +434,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Calibrated KNN with cosine probabilities. Mirrors Python
+    /// Calibrated KNN with cosine probabilities. Matches UQA behavior for
     /// `QueryBuilder.calibrated_vector_match`.
     pub fn calibrated_vector_match(
         mut self,
@@ -458,7 +458,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `RPQ` (Regular Path Query) over a named graph. Mirrors Python
+    /// `RPQ` (Regular Path Query) over a named graph. Matches UQA behavior for
     /// `QueryBuilder.rpq`. Replaces the FROM clause with a table-
     /// function reference, since RPQ is a relation-producing function.
     pub fn rpq(mut self, expr: &str, start: u64, graph: &str) -> Self {
@@ -466,7 +466,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Graph traversal as a relation. Mirrors Python
+    /// Graph traversal as a relation. Matches UQA behavior for
     /// `QueryBuilder.traverse`.
     pub fn traverse(mut self, graph: &str, start: u64, label: Option<&str>, max_hops: u32) -> Self {
         let lbl = match label {
@@ -480,7 +480,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Temporally-bounded graph traversal. Mirrors Python
+    /// Temporally-bounded graph traversal. Matches UQA behavior for
     /// `QueryBuilder.temporal_traverse`.
     pub fn temporal_traverse(
         mut self,
@@ -503,7 +503,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
-    /// fragment_size])` projection. Mirrors Python `QueryBuilder`'s
+    /// fragment_size])` projection. Matches UQA behavior for `QueryBuilder`'s
     /// highlight helper.
     pub fn highlight(mut self, field: &str, query: &str) -> Self {
         self.projections.push(format!(
@@ -514,7 +514,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `uqa_facets(field [, field2, ...])` projection. Mirrors Python's
+    /// `uqa_facets(field [, field2, ...])` projection. Mirrors the canonical UQA implementation's
     /// facet builder.
     pub fn facets(mut self, fields: &[&str]) -> Self {
         let inner = fields
@@ -526,7 +526,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `deep_learn(model, training_set)` projection. Mirrors Python's
+    /// `deep_learn(model, training_set)` projection. Mirrors the canonical UQA implementation's
     /// analytical training trigger.
     pub fn deep_learn(mut self, model: &str, training_set: &str) -> Self {
         self.projections.push(format!(
@@ -538,7 +538,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// `bayesian_match(field, '<query>')` filter - Bayesian BM25
-    /// scoring with calibrated probabilities. Mirrors Python's
+    /// scoring with calibrated probabilities. Mirrors the canonical UQA implementation's
     /// `QueryBuilder.score_bayesian_bm25` style search.
     pub fn bayesian_match(self, field: &str, query: &str) -> Self {
         self.r#where(format!("bayesian_match({field}, {})", quote_str(query)))
@@ -591,7 +591,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Run `EXPLAIN <assembled SELECT>` and return the planner's
-    /// rendered plan as a single string. Mirrors Python
+    /// rendered plan as a single string. Matches UQA behavior for
     /// `QueryBuilder.explain`.
     pub fn explain(&self) -> Result<String, SQLError> {
         let stmt = self.to_sql();

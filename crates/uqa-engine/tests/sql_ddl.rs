@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_ddl.py`.
+//! Coverage for `test_ddl`.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

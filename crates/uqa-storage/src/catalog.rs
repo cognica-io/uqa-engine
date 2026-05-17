@@ -35,7 +35,7 @@ pub struct VectorFieldSchema {
     pub dimensions: u32,
 }
 
-/// One row from graph edge persistence. Mirrors Python's
+/// One row from graph edge persistence. Mirrors the canonical UQA implementation's
 /// `(edge_id, source_id, target_id, label, properties_json)` tuple
 /// but as a typed struct so the catalog API stays clippy-clean.
 #[derive(Debug, Clone)]

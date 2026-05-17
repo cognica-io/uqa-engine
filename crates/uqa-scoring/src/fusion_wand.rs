@@ -5,7 +5,7 @@
 //
 
 //! WAND-style top-k pruning for multi-signal fusion (Section 8.7,
-//! Paper 4). 1:1 port of `uqa.scoring.fusion_wand`.
+//! Paper 4). Rust implementation of `uqa.scoring.fusion_wand`.
 //!
 //! Treats each input posting list as a "term" in the WAND framework.
 //! Per-signal upper bounds compose into a fused upper bound through
@@ -25,7 +25,7 @@ use crate::prob::log_odds_conjunction;
 use crate::wand::BoundTightnessAnalyzer;
 
 /// Per-signal score map -- mirrors the dict-of-dicts shape used by the
-/// Python reference's `score_maps`.
+/// canonical UQA behavior's `score_maps`.
 pub type SignalScoreMap = BTreeMap<u64, f64>;
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ impl FusionWANDScorer {
 
     /// Run the WAND pivot loop and return the top-k `(doc_id, score)`
     /// pairs sorted by descending score. Mirrors `score_top_k` in the
-    /// Python reference.
+    /// canonical UQA behavior.
     pub fn score_top_k(&self) -> Vec<(u64, f64)> {
         if self.signals.is_empty() {
             return Vec::new();

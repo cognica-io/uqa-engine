@@ -288,7 +288,7 @@ impl<'a> TemporalPatternMatch<'a> {
             return;
         }
         // Pick the variable with the fewest candidates first (MRV
-        // heuristic, same as Python's `min(unassigned, key=lambda v:
+        // heuristic, same as the canonical UQA implementation's `min(unassigned, key=lambda v:
         // len(candidates[v]))`).
         let pick: String = unassigned
             .iter()

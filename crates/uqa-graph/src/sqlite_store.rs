@@ -6,7 +6,7 @@
 
 //! `SQLite`-backed graph store with write-through persistence.
 //!
-//! Mirrors `uqa/storage/sqlite_graph_store.py`. Wraps a
+//! Mirrors UQA `storage/sqlite_graph_store`. Wraps a
 //! [`MemoryGraphStore`] for the in-memory query path and routes every
 //! mutation through the [`crate::store::GraphStore`] trait into a
 //! `SQLite` connection so reopened catalogs replay the same vertex /

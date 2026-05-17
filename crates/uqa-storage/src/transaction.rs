@@ -6,7 +6,7 @@
 
 //! Explicit user transactions with savepoint stacks.
 //!
-//! Mirrors `uqa/storage/transaction.py`.
+//! Mirrors UQA `storage/transaction`.
 //!
 //! Two flavours:
 //! * [`SQLiteTransaction`] -- wraps a [`ManagedConnection`] and routes

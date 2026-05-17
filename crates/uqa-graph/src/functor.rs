@@ -5,7 +5,7 @@
 //
 
 //! Category-theoretic functors between UQA paradigms (Paper 1,
-//! Section 7). 1:1 port of `uqa.core.functor`.
+//! Section 7). Rust implementation of `uqa.core.functor`.
 //!
 //! Each paradigm (relational, text, vector, graph) is a category, and
 //! a functor is a structure-preserving map between categories. The
@@ -87,7 +87,7 @@ impl Default for RelationalToGraphFunctor {
 ///
 /// Promotes every text posting list entry to a vector-style score by
 /// using the position count as a TF proxy and normalising the result
-/// into `[0, 1]`. Mirrors the Python reference's two-pass algorithm
+/// into `[0, 1]`. Mirrors the canonical UQA behavior's two-pass algorithm
 /// (compute raw scores, divide each by the max).
 pub struct TextToVectorFunctor {
     pub dimensions: usize,

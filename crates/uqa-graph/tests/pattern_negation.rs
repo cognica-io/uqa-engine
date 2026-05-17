@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of `uqa/tests/test_pattern_negation.py`.
+//! Coverage for `test_pattern_negation`.
 
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{EdgePattern, GMatch, GraphPattern, GraphStore, MemoryGraphStore, VertexPattern};

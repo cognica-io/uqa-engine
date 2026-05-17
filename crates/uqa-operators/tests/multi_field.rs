@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Focused port of `TestMultiFieldSearchOperator::test_cost_estimate`.
+//! Focused implementation of `TestMultiFieldSearchOperator::test_cost_estimate`.
 
 use uqa_core::IndexStats;
 use uqa_operators::{MultiFieldSearchOperator, Operator};

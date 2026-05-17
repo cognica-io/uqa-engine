@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! 1:1 port of `uqa/tests/test_views.py`.
+//! Coverage for `test_views`.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};

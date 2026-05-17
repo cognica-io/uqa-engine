@@ -123,7 +123,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                 .collect::<Result<Vec<_>>>()?;
             // Sequence functions need the engine hook because they
             // mutate per-engine state (`_engine._sequences` in the
-            // Python reference). Routed before the pure-scalar
+            // canonical UQA behavior). Routed before the pure-scalar
             // dispatch so they take precedence over any future
             // built-in named the same.
             if matches!(lower.as_str(), "nextval" | "currval" | "setval") {
@@ -354,9 +354,8 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
         BinaryOp::Subtract => lf - rf,
         BinaryOp::Multiply => lf * rf,
         BinaryOp::Divide => {
-            // PostgreSQL raises division_by_zero, but the Python
-            // reference here surfaces it as NULL so SQL row evaluation
-            // does not fail mid-projection. Match that.
+            // UQA expression evaluation surfaces division by zero as NULL
+            // so SQL row evaluation does not fail mid-projection.
             if rf == 0.0 {
                 return Ok(Value::Null);
             }
@@ -390,7 +389,7 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
 // -------------------------------------------------------------------------
 
 /// Dispatch table for built-in scalar SQL functions. Mirrors
-/// `_call_scalar_function` in `uqa/sql/expr_evaluator.py`. Function
+/// `_call_scalar_function` in UQA `sql/expr_evaluator`. Function
 /// names are lower-cased before lookup.
 fn eval_sequence_function(name: &str, args: &[Value], ctx: &EvalContext<'_>) -> Result<Value> {
     let engine = ctx.engine.ok_or_else(|| {
@@ -846,7 +845,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "radians" => Ok(Value::Float(to_f64(&args[0])?.to_radians())),
         "random" => {
             // Deterministic-ish pseudo random based on system time so
-            // tests can stub it; the Python reference also wraps the
+            // tests can stub it; the canonical UQA behavior also wraps the
             // platform RNG.
             use std::time::{SystemTime, UNIX_EPOCH};
             let t = SystemTime::now()
@@ -1154,7 +1153,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "make_interval" => {
             // make_interval(years, months, weeks, days, hours, mins, secs).
-            // Mirrors the Python reference's compact HH:MM:SS interval
+            // Mirrors the canonical UQA behavior's compact HH:MM:SS interval
             // representation, with years/months normalized to days.
             let years = args.first().map(to_i64).transpose()?.unwrap_or(0);
             let months = args.get(1).map(to_i64).transpose()?.unwrap_or(0);
@@ -1435,7 +1434,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "st_within" | "st_dwithin" => {
             // Polygon containment is not yet modeled; for now interpret
-            // dwithin as a Euclidean radius check matching Python's
+            // dwithin as a Euclidean radius check matching the canonical UQA implementation's
             // simplified semantics.
             if args.len() < 2 {
                 return Err(SQLError::TypeMismatch(format!("{name} takes 2-3 args")));
@@ -1485,7 +1484,7 @@ fn value_to_json(v: &Value) -> serde_json::Value {
             .unwrap_or(serde_json::Value::Null),
         Value::Str(s) => {
             // Try to parse strings already containing JSON; otherwise
-            // wrap as a JSON string. Mirrors Python `to_json` semantics
+            // wrap as a JSON string. Matches UQA behavior for `to_json` semantics
             // for nested expressions.
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
                 if matches!(
@@ -1881,7 +1880,7 @@ fn make_timestamp(
 
 fn pg_to_chrono_fmt(fmt: &str) -> String {
     // Translate a small subset of PostgreSQL `to_date` template tokens
-    // into chrono format specifiers. The Python reference relies on
+    // into chrono format specifiers. The canonical UQA behavior relies on
     // datetime.strptime; this routine mirrors the most common patterns
     // (`YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`).
     fmt.replace("YYYY", "%Y")
@@ -1978,7 +1977,7 @@ fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     )))
 }
 
-/// `EXTRACT(field FROM ts)` field selectors. Mirrors the Python
+/// `EXTRACT(field FROM ts)` field selectors. Matches UQA
 /// reference's `_sf_extract` implementation.
 fn extract_field(field: &str, dt: &chrono::DateTime<chrono::Utc>) -> Result<Value> {
     use chrono::{Datelike, Timelike};
@@ -2210,7 +2209,7 @@ fn coerce_i64(v: &Value) -> Option<i64> {
 }
 
 // -------------------------------------------------------------------------
-// MD5 stub. The reference port carried a hand-written implementation
+// MD5 stub. The previous stub carried a hand-written implementation
 // here; it shipped with a transcription error in the constant table
 // that broke its self-test. The builtin is surfaced as Unsupported
 // for now; production callers should feed `md5()` data through the

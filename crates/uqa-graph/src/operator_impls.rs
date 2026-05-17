@@ -5,7 +5,7 @@
 //
 
 //! `Operator` trait wrappers for the graph operators that previously
-//! only existed as inherent methods (`execute(&G)`). Mirrors Python
+//! only existed as inherent methods (`execute(&G)`). Matches UQA behavior for
 //! `WeightedPathQueryOperator` and `CypherQueryOperator` so the
 //! engine's [`uqa_operators::Operator`] dispatch can run them through
 //! the standard `EngineDriver` path.
@@ -22,10 +22,10 @@ use crate::rpq::RegularPathExpr;
 
 /// `WeightedPathQueryOperator` — runs a Regular Path Query over a
 /// graph and applies a predicate to the accumulated edge weight along
-/// each matching path. Mirrors Python
+/// each matching path. Matches UQA behavior for
 /// `uqa.graph.operators.WeightedPathQueryOperator`.
 ///
-/// The Rust port today supports the predicate-on-endpoints shape
+/// The UQA-RS implementation today supports the predicate-on-endpoints shape
 /// (start/end vertex match the RPQ): full per-path weight aggregation
 /// requires NFA path tracking that lives in the Rust `RegularPathQuery`.
 /// Until that's threaded through, the operator runs the underlying
@@ -98,10 +98,10 @@ impl Operator for WeightedPathQueryOperator {
 
 /// `CypherQueryOperator` — execute a parsed openCypher query against
 /// a named graph and project the resulting `(start, end)` vertex
-/// pairs into a posting list. Mirrors Python
+/// pairs into a posting list. Matches UQA behavior for
 /// `uqa.graph.operators.CypherQueryOperator`.
 ///
-/// The Rust port routes through [`CypherWriter`] (the mutating
+/// The UQA-RS implementation routes through [`CypherWriter`] (the mutating
 /// executor) since it covers the full clause set including
 /// CREATE/MERGE/SET/DELETE/UNWIND. Read-only queries still flow
 /// through the same path; the writer leaves the store untouched

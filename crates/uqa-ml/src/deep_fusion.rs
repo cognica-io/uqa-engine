@@ -210,7 +210,7 @@ impl DeepFusionOperator {
             return 0.5;
         }
         let ratio = coverage as f64 / total as f64;
-        // 1.0 coverage -> 0.5 (no info); 0 -> 0.5 too. The Python
+        // 1.0 coverage -> 0.5 (no info); 0 -> 0.5 too. The UQA
         // helper interpolates; for our slice we go with a plain 0.5
         // prior since the calibration improvements happen elsewhere.
         let _ = ratio;

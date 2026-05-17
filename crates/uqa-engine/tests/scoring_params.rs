@@ -5,7 +5,7 @@
 //
 
 //! Engine-level Bayesian calibration parameter persistence.
-//! Mirrors Python's `Engine.save_scoring_params /
+//! Mirrors the canonical UQA implementation's `Engine.save_scoring_params /
 //! load_scoring_params / load_all_scoring_params`.
 
 use uqa_engine::Engine;

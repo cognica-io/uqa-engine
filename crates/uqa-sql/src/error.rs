@@ -38,7 +38,7 @@ pub enum SQLError {
 
 impl SQLError {
     /// `PostgreSQL` `SQLSTATE` code for the error, mirroring the
-    /// Python reference's exception-to-state mapping. `None` for
+    /// canonical UQA behavior's exception-to-state mapping. `None` for
     /// errors that do not carry a defined `SQLSTATE`.
     pub fn sqlstate(&self) -> Option<&'static str> {
         match self {

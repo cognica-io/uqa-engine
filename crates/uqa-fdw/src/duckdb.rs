@@ -6,7 +6,7 @@
 
 //! `DuckDBFDWHandler`: in-process `DuckDB` foreign data wrapper.
 //!
-//! 1:1 port of `uqa.fdw.duckdb_handler`. The Rust port owns the SQL
+//! Coverage for `uqa.fdw.duckdb_handler`. The UQA-RS implementation owns the SQL
 //! generation and execution path: source-string normalization
 //! ([`normalize_source`]), parameterized `WHERE` clause assembly
 //! ([`build_where_clause`]), full `SELECT` builder ([`prepare_query`]),
@@ -32,7 +32,7 @@ use uqa_core::{TemporalValue, Value};
 use crate::{FDWError, FDWHandler, FDWPredicate, ForeignServer, ForeignTable, PredicateOp, Row};
 
 /// File extensions `DuckDB` reads natively via `read_*` table
-/// functions. Mirrors `_FILE_READERS` in the Python reference.
+/// functions. Mirrors `_FILE_READERS` in the canonical UQA behavior.
 pub const FILE_READERS: &[(&str, &str)] = &[
     (".parquet", "read_parquet"),
     (".csv", "read_csv"),
@@ -68,7 +68,7 @@ pub fn normalize_source(source: &str, hive_partitioning: bool) -> String {
 
 /// Convert pushdown predicates into a `DuckDB`-style `WHERE` clause
 /// with `?` placeholders plus the parameter vector. Mirrors
-/// `_build_where_clause` in the Python reference.
+/// `_build_where_clause` in the canonical UQA behavior.
 ///
 /// Parameterized binding shields against SQL injection; the caller
 /// ships `(sql, params)` to `duckdb::execute`.

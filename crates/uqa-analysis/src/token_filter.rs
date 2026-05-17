@@ -36,7 +36,7 @@ pub enum TokenFilter {
         /// Path to a Solr / Elasticsearch-style synonym file. The file
         /// is parsed every time the filter runs so reload-on-edit is
         /// free; for production use cache the parsed map upstream.
-        /// Mirrors Python `SynonymFilter(synonyms_path=...)`.
+        /// Matches UQA behavior for `SynonymFilter(synonyms_path=...)`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         synonyms_path: Option<PathBuf>,
     },
@@ -69,11 +69,10 @@ pub enum SynonymFileError {
 
 impl TokenFilter {
     /// Build a `Synonym` filter from a Solr / Elasticsearch synonym
-    /// file. The file format mirrors Python `SynonymFilter`:
+    /// file. The file format follows UQA behavior for `SynonymFilter`:
     /// blank lines and `#` comments are skipped, `a => b, c` defines a
     /// one-way mapping, and `a, b, c` defines an equivalent group
-    /// where every term expands to the other group members. Mirrors
-    /// Python `SynonymFilter(synonyms_path=...)`.
+    /// where every term expands to the other group members.
     pub fn synonym_from_path<P: AsRef<Path>>(path: P) -> Result<Self, SynonymFileError> {
         let path = path.as_ref();
         if !path.exists() {

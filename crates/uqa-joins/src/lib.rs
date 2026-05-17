@@ -15,7 +15,7 @@
 //!   join shapes.
 //! * Cross-paradigm joins ([`cross_paradigm`]) that bridge text,
 //!   vector, hybrid, and graph posting lists. Mirrors
-//!   `uqa/joins/cross_paradigm.py`.
+//!   UQA `joins/cross_paradigm`.
 
 #![allow(
     clippy::enum_glob_use,

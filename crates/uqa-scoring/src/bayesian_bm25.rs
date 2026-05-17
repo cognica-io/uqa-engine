@@ -20,7 +20,7 @@ pub struct BayesianBM25Params {
     pub alpha: f64,
     pub beta: f64,
     /// Corpus base rate. `0.5` is treated as no base-rate correction
-    /// (matches `None` in the Python API).
+    /// (matches an omitted API value).
     pub base_rate: f64,
 }
 

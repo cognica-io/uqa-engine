@@ -5,7 +5,7 @@
 //
 
 //! Table functions in FROM + standalone `VALUES` + scalar table
-//! function body. Mirrors the Python reference's
+//! function body. Mirrors the canonical UQA behavior's
 //! `_build_generate_series` / `_build_unnest` /
 //! `_build_regexp_split_to_table` / `_build_json_each` /
 //! `_build_json_array_elements` paths.

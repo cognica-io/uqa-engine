@@ -30,8 +30,8 @@ pub mod query_builder;
 
 pub use query_builder::{Order, QueryBuilder};
 
-/// Python-parity convenience: build a fluent [`QueryBuilder`] scoped
-/// to `table` against `engine`. Mirrors Python's `Engine.query(table)`.
+/// compatibility convenience: build a fluent [`QueryBuilder`] scoped
+/// to `table` against `engine`. Mirrors the canonical UQA implementation's `Engine.query(table)`.
 pub fn query(engine: &uqa_engine::Engine, table: impl Into<String>) -> QueryBuilder<'_> {
     QueryBuilder::new(engine, table)
 }

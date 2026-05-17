@@ -5,7 +5,7 @@
 //
 
 //! `SET search_path TO ...` parsing/execution and the namespace
-//! introspection accessors. Mirrors Python's
+//! introspection accessors. Mirrors the canonical UQA implementation's
 //! `Engine._tables.search_path / list_schemas / tables_in_schema`.
 
 use uqa_engine::Engine;

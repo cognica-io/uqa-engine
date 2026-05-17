@@ -6,11 +6,11 @@
 
 //! Bridge between the SQL `WHERE` AST and the operator-tree IR.
 //!
-//! Python compiles every `SELECT ... WHERE ...` into an `OperatorTree`
+//! The optimizer lowers supported `SELECT ... WHERE ...` predicates into an `OperatorTree`
 //! (boolean / scoring / fusion / graph / index-scan nodes), runs the
 //! tree through `QueryOptimizer` (the 10-pass algebraic / graph-aware
 //! / fusion-reordering optimiser), and only then executes it through
-//! `PlanExecutor`. Until now the Rust port had `QueryOptimizer` ported
+//! `PlanExecutor`. Until now the UQA-RS implementation had `QueryOptimizer` implemented
 //! 1:1 in `uqa_planner::query_optimizer` but it was dead code — the
 //! engine ran the SQL `SelectStmt` directly without ever building the
 //! operator tree, so none of the optimiser's algebraic / graph-aware
@@ -147,7 +147,7 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
             // Standalone knn_match preserves raw cosine similarities;
             // calibration to (0, 1) only fires inside fusion contexts
             // (mirrors `_compile_calibrated_signal` semantics from the
-            // Python reference: only fusion arms see calibrated KNN).
+            // canonical UQA behavior: only fusion arms see calibrated KNN).
             let field = column_name(args.first()?)?;
             let vec_expr = args.get(1)?;
             let query_vector = const_vector(vec_expr, params)?;
@@ -177,7 +177,7 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
 }
 
 /// Compile a signal-function call into a node that produces calibrated
-/// probabilities in (0, 1). Mirrors Python's
+/// probabilities in (0, 1). Mirrors the canonical UQA implementation's
 /// `_compile_calibrated_signal`: in fusion contexts every signal must
 /// land on the (0, 1) probability scale before log-odds / attention /
 /// learned fusion can combine them.
@@ -235,7 +235,7 @@ fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
 
 fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
     // `fuse_log_odds(signal_1, signal_2, ...[, alpha[, gating]])`.
-    // Python defaults alpha to 0.5 when no numeric option is supplied;
+    // The UQA SQL contract defaults alpha to 0.5 when no numeric option is supplied;
     // don't treat the last signal as an alpha argument.
     if args.len() < 2 {
         return None;
@@ -295,7 +295,7 @@ fn lower_attention_fusion(args: &[Expr], params: &[SQLParam]) -> Option<Operator
         return None;
     }
     // `attention(signal_1, signal_2, ...)` defaults: alpha=0.5,
-    // n_query_features=6 (matches Python `_make_attention_fusion_op`).
+    // n_query_features=6 (matches UQA behavior `_make_attention_fusion_op`).
     // Query features are filled in lazily at execute time from the
     // engine snapshot, so the IR carries a zero-vector placeholder.
     let attention: AttentionRef =
@@ -614,7 +614,7 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             OperatorTree::Composed(parts) => {
                 // Composed = sequential; treat as left-to-right intersect
                 // of every child, giving the same semantics as the
-                // Python `ComposedOperator` no-op chain.
+                // empty `ComposedOperator` chain.
                 let mut iter = parts.iter().map(|p| self.execute_node(p));
                 let Some(first) = iter.next() else {
                     return PostingList::new();
@@ -717,7 +717,7 @@ impl EngineDriver<'_> {
         predicate: &uqa_core::Predicate,
     ) -> PostingList {
         let _ = index_name;
-        // The Rust port stores `index_name` as a String; resolving it
+        // The UQA-RS implementation stores `index_name` as a String; resolving it
         // to an `Arc<dyn Index>` requires the engine's IndexManager.
         // Until that hookup lands the driver evaluates the predicate
         // against the table directly (matches a `Filter { source: None }`

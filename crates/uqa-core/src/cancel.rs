@@ -6,7 +6,7 @@
 
 //! Query cancellation support.
 //!
-//! Mirrors `uqa/cancel.py` from the Python reference. A
+//! Mirrors UQA `cancel` from the canonical UQA behavior. A
 //! [`CancellationToken`] is a cheap-to-clone, thread-safe one-shot
 //! flag stored on `Engine` and propagated into every
 //! `PhysicalOperator` / `Operator` hot loop. Operators call
@@ -37,7 +37,7 @@ use thiserror::Error;
 
 /// Raised when a query is cancelled by user request. Matches
 /// `PostgreSQL` `SQLSTATE 57014` (`query_canceled`); the `Display`
-/// payload mirrors the Python reference's exception message so logs
+/// payload mirrors the canonical UQA behavior's exception message so logs
 /// stay aligned across the two implementations.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("canceling statement due to user request")]

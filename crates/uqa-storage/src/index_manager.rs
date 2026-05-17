@@ -6,9 +6,9 @@
 
 //! Index manager: registry that creates / drops / looks up indexes.
 //!
-//! Mirrors `uqa/storage/index_manager.py`. Owns the in-memory map of
+//! Mirrors UQA `storage/index_manager`. Owns the in-memory map of
 //! `Box<dyn Index>` and resolves `find_covering_index` lookups for
-//! the planner. The Rust port keeps the registry in memory and
+//! the planner. The UQA-RS implementation keeps the registry in memory and
 //! delegates persistence to the catalog when wired by the engine.
 
 #![allow(clippy::needless_pass_by_value, clippy::map_unwrap_or, unused_imports)]
@@ -169,7 +169,7 @@ impl IndexManager {
     /// Like [`Self::find_covering_index_name`] but returns the chosen
     /// index's name together with its `scan_cost(predicate)` so the
     /// caller can compare against a full-scan cost before committing
-    /// to the rewrite. Mirrors Python's `_apply_index_scan`
+    /// to the rewrite. Mirrors the canonical UQA implementation's `_apply_index_scan`
     /// `scan_cost < full_scan_cost` gate.
     pub fn find_covering_index_with_cost(
         &self,

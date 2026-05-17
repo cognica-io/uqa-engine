@@ -6,7 +6,7 @@
 
 //! Query optimizer: cost estimation, cardinality, join enumeration.
 //!
-//! Layout follows the Python reference (`uqa/planner/*`):
+//! Layout follows the canonical UQA behavior (`uqa/planner/*`):
 //!
 //! * [`cost_model`] -- per-operator cost model. Estimates a unitless
 //!   cost for scans, filters, projections, sorts, hash aggregates,

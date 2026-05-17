@@ -5,9 +5,9 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Captures hybrid (text + KNN, log-odds fused) outputs from the Python UQA.
+"""Captures hybrid (text + KNN, log-odds fused) UQA outputs.
 
-The Rust port's integration test
+The UQA-RS implementation's integration test
 (`crates/uqa-engine/tests/hybrid_search_parity.rs`) loads this fixture and
 asserts identical doc id ordering and matching scores within a small
 epsilon.

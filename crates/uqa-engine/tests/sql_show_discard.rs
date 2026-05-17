@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SHOW <var>` / `DISCARD ...` parity with Python `_compile_show` /
+//! `SHOW <var>` / `DISCARD ...` compatibility `_compile_show` /
 //! `_compile_discard`.
 
 use uqa_core::Value;

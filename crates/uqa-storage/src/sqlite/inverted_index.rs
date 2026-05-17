@@ -44,7 +44,7 @@ impl SQLiteInvertedIndex {
     }
 
     /// Tokenize `text` against the analyzer bound to `field`. Mirrors
-    /// Python's `SQLiteInvertedIndex._tokenize`.
+    /// the canonical UQA implementation's `SQLiteInvertedIndex._tokenize`.
     pub fn tokenize(&self, text: &str, field: &str) -> Vec<String> {
         let analyzer = self
             .index_field_analyzers

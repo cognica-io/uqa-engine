@@ -20,7 +20,7 @@ use crate::posting_list::{GraphPayload, GraphPostingList};
 use crate::rpq::{build_nfa, simplify, subset_construction, Dfa, DfaState, RegularPathExpr};
 use crate::store::GraphStore;
 
-/// Default score lifted into the traversal / match payload. The Python
+/// Default score lifted into the traversal / match payload. The UQA
 /// reference uses 0.9 so calibrated fusion treats graph hits as a
 /// strong-but-not-certain signal.
 pub const DEFAULT_GRAPH_SCORE: f64 = 0.9;

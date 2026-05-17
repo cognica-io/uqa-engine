@@ -5,7 +5,7 @@
 //
 
 //! `UPDATE t SET ... FROM other WHERE ...` and
-//! `DELETE FROM t USING other WHERE ...` shapes. Mirrors the Python
+//! `DELETE FROM t USING other WHERE ...` shapes. Matches UQA
 //! reference's `_compile_update_from` / `_compile_delete_using`.
 
 use uqa_core::Value;

@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Port of the ANALYZE persistence coverage from
-//! `uqa/tests/test_cost_optimizer.py` and `test_catalog.py`.
+//! Coverage for the ANALYZE persistence coverage from
+//! `test_cost_optimizer` and `test_catalog`.
 //!
 //! The important parity point is not just that ANALYZE runs: the
 //! histogram and MCV payloads must survive an `Engine::open` round trip

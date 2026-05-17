@@ -19,7 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// Regular path expression. Mirrors Python `pattern.RegularPathExpr`.
+/// Regular path expression. Matches UQA behavior for `pattern.RegularPathExpr`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RegularPathExpr {
     /// A single edge label.

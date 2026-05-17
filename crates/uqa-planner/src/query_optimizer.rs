@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `QueryOptimizer`: 1:1 port of `uqa/planner/optimizer.py`.
+//! `QueryOptimizer`: Rust implementation of UQA `planner/optimizer`.
 //!
 //! Walks an [`OperatorTree`] and applies the ten rewrite stages from
 //! Theorem 6.1.2 (Paper 1) and Theorem 6.1.1 (Paper 2):
@@ -381,7 +381,7 @@ impl QueryOptimizer {
                             graph: graph.clone(),
                         };
                     }
-                    // Try edge variable: "src_tgt.prop". Mirror Python's
+                    // Try edge variable: "src_tgt.prop". Mirror the canonical UQA implementation's
                     // two-stage match: first build the
                     // `source_target -> ep` lookup (last-write-wins so
                     // multi-label edges between the same vertices fall
@@ -709,7 +709,7 @@ impl QueryOptimizer {
         if vars_a.intersection(&vars_b).next().is_none() {
             return None;
         }
-        // Python uses a regular dict for the merge buffer, which keeps
+        // The merge buffer for the merge buffer, which keeps
         // insertion order. Mirror that with a parallel `Vec` (positions)
         // + `BTreeMap` (lookup) so structurally-equivalent inputs give
         // structurally-equivalent merged patterns regardless of name
@@ -817,12 +817,12 @@ impl QueryOptimizer {
                 .into_iter()
                 .map(|c| self.recurse_children(c))
                 .collect();
-            // Mirror Python: the optimizer ranks intersect arms by the
+            // Match UQA behavior for: the optimizer ranks intersect arms by the
             // algebraic operator cost (`CostModel.estimate`), not the
             // cardinality estimator. The two diverge for `Filter`,
             // `Score`, `Traverse`, `RegularPathQuery`, fusion / hybrid
             // / cross-paradigm join nodes, and any operator with a
-            // dedicated formula in `cost_model.py`.
+            // dedicated formula in `cost_model`.
             let cost_stats = uqa_core::IndexStats::new(self.row_count.unwrap_or(1_000));
             children.sort_by(|a, b| {
                 let ca = self.cost_model.estimate(a, &cost_stats);
@@ -945,7 +945,7 @@ impl QueryOptimizer {
             if let Some((name, scan_cost)) =
                 im.find_covering_index_with_cost(table, field, predicate)
             {
-                // Python's `_apply_index_scan` only rewrites when the
+                // the canonical UQA implementation's `_apply_index_scan` only rewrites when the
                 // index's `scan_cost(predicate)` beats a full scan.
                 // Mirror that gate exactly: prefer the index only when
                 // its cost is strictly cheaper.
@@ -1158,7 +1158,7 @@ mod tests {
 
     #[test]
     fn distinct_clones_in_intersect_keep_both() {
-        // Mirrors Python's `is` semantics: two cloned operators have
+        // Mirrors the canonical UQA implementation's `is` semantics: two cloned operators have
         // different identities so the optimizer leaves them intact.
         let op = OperatorTree::Intersect(vec![term("a"), term("a")]);
         let optimised = QueryOptimizer::new().optimize(op);
