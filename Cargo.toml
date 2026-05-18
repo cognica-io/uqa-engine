@@ -103,6 +103,11 @@ lto = "thin"
 codegen-units = 1
 debug = "line-tables-only"
 
+[profile.release-stripped]
+inherits = "release"
+debug = false
+strip = "symbols"
+
 [profile.bench]
 inherits = "release"
 debug = true
