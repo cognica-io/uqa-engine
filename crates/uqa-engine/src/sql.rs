@@ -7836,7 +7836,7 @@ fn mode_value(values: &[Value]) -> Value {
         .map_or(Value::Null, |(v, _)| v)
 }
 
-/// Compute a projection's output column name. PostgreSQL reports
+/// Compute a projection's output column name. `PostgreSQL` reports
 /// standalone expressions as `?column?`; `projection_columns` adds a
 /// suffix when the row map needs unique keys.
 fn projection_label_at(proj: &Projection) -> String {
