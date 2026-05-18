@@ -2578,16 +2578,7 @@ fn run_select_without_from(
 ) -> Result<SQLResult, SQLError> {
     let row = ResultRow::new();
     let projected = build_projection_row(Some(engine), &row, &stmt.projections, params)?;
-    let columns: Vec<String> = stmt
-        .projections
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            p.alias
-                .clone()
-                .unwrap_or_else(|| format!("column{}", i + 1))
-        })
-        .collect();
+    let columns = projection_columns(&stmt.projections);
     Ok(SQLResult {
         columns,
         rows: vec![projected],
@@ -7845,10 +7836,10 @@ fn mode_value(values: &[Value]) -> Value {
         .map_or(Value::Null, |(v, _)| v)
 }
 
-/// Compute a projection's output column name. The position is folded
-/// into the fallback so two unaliased expressions in the same SELECT
-/// don't collide on a single key.
-fn projection_label_at(proj: &Projection, position: usize) -> String {
+/// Compute a projection's output column name. PostgreSQL reports
+/// standalone expressions as `?column?`; `projection_columns` adds a
+/// suffix when the row map needs unique keys.
+fn projection_label_at(proj: &Projection) -> String {
     if let Some(a) = &proj.alias {
         return a.clone();
     }
@@ -7857,7 +7848,7 @@ fn projection_label_at(proj: &Projection, position: usize) -> String {
         Expr::QualifiedColumn { column, .. } => column.clone(),
         Expr::Star => "*".into(),
         Expr::Func { name, .. } => name.clone(),
-        _ => format!("expr_{position}"),
+        _ => "?column?".into(),
     }
 }
 
@@ -9233,8 +9224,8 @@ fn apply_order_limit(
 
 fn projection_columns(projections: &[Projection]) -> Vec<String> {
     let mut out = Vec::with_capacity(projections.len());
-    for (idx, proj) in projections.iter().enumerate() {
-        let base = projection_label_at(proj, idx);
+    for proj in projections {
+        let base = projection_label_at(proj);
         let mut label = base.clone();
         let mut suffix = 1usize;
         while out.iter().any(|existing: &String| existing == &label) {

@@ -24,11 +24,10 @@ use std::ptr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use argon2::Argon2;
+use argon2::{Argon2, Block};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use fs2::FileExt;
-use rand_core::{OsRng, RngCore};
 use rusqlite::ffi;
 
 pub const VFS_NAME: &str = "uqa_compressed";
@@ -427,7 +426,7 @@ impl ContainerFile {
         }
         let mut salt = [0_u8; SALT_LEN];
         if options.key.is_some() {
-            OsRng.fill_bytes(&mut salt);
+            fill_random(&mut salt)?;
         }
         Ok(Self {
             path,
@@ -543,7 +542,7 @@ impl ContainerFile {
             fs::create_dir_all(parent)?;
         }
         if self.key.is_some() && self.salt == [0_u8; SALT_LEN] {
-            OsRng.fill_bytes(&mut self.salt);
+            fill_random(&mut self.salt)?;
         }
         let next_generation = self.generation.saturating_add(1);
         let encrypted = self.key.is_some();
@@ -645,7 +644,7 @@ impl ContainerFile {
         let mut nonce = [0_u8; NONCE_LEN];
         if let Some(cipher) = cipher {
             flags |= CHUNK_ENCRYPTED;
-            OsRng.fill_bytes(&mut nonce);
+            fill_random(&mut nonce)?;
             stored = cipher
                 .encrypt(
                     XNonce::from_slice(&nonce),
@@ -944,8 +943,10 @@ fn should_store_plain(flags: c_int, path: &Path) -> bool {
 
 fn cipher_from_key(key: &str, salt: &[u8; SALT_LEN]) -> std::io::Result<XChaCha20Poly1305> {
     let mut derived = [0_u8; 32];
-    Argon2::default()
-        .hash_password_into(key.as_bytes(), salt, &mut derived)
+    let argon2 = Argon2::default();
+    let mut memory_blocks = vec![Block::default(); argon2.params().block_count()];
+    argon2
+        .hash_password_into_with_memory(key.as_bytes(), salt, &mut derived, &mut memory_blocks)
         .map_err(|_| invalid_data("failed to derive compressed container key"))?;
     XChaCha20Poly1305::new_from_slice(&derived)
         .map_err(|_| invalid_data("failed to initialize compressed container cipher"))
@@ -1123,6 +1124,11 @@ fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
 
 fn invalid_data(message: impl Into<String>) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, message.into())
+}
+
+fn fill_random(dest: &mut [u8]) -> std::io::Result<()> {
+    getrandom::fill(dest)
+        .map_err(|err| std::io::Error::other(format!("failed to obtain OS randomness: {err}")))
 }
 
 unsafe fn file_from_sqlite<'a>(file: *mut ffi::sqlite3_file) -> Option<&'a mut FileHandle> {
@@ -1475,8 +1481,11 @@ unsafe extern "C" fn vfs_randomness(
     }
     let len = amount as usize;
     let dest = unsafe { std::slice::from_raw_parts_mut(out.cast::<u8>(), len) };
-    OsRng.fill_bytes(dest);
-    amount
+    if fill_random(dest).is_ok() {
+        amount
+    } else {
+        0
+    }
 }
 
 unsafe extern "C" fn vfs_sleep(_vfs: *mut ffi::sqlite3_vfs, microseconds: c_int) -> c_int {

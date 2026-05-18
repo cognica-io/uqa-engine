@@ -22,7 +22,7 @@ chacha20poly1305 = { workspace = true }
 crc32fast = { workspace = true }
 fs2 = { workspace = true }
 lz4_flex = { workspace = true }
-rand_core = { workspace = true }
+getrandom = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]

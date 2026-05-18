@@ -13,9 +13,9 @@ rust-version.workspace = true
 uqa-engine = { workspace = true }
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
-arrow-array = "54"
-arrow-schema = "54"
-parquet = { version = "54", features = ["arrow"] }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+parquet = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"

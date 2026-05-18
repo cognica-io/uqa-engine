@@ -11,10 +11,10 @@ rust-version.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }
-arrow-array = "54"
-arrow-ipc = "54"
-arrow-schema = "54"
-duckdb = { version = "=1.10502.0", features = ["bundled", "parquet"] }
+arrow-array = { workspace = true }
+arrow-ipc = { workspace = true }
+arrow-schema = { workspace = true }
+duckdb = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

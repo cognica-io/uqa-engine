@@ -54,22 +54,27 @@ uqa-api = { version = "0.1.0", path = "crates/uqa-api" }
 # Shared external dependencies (versions added when first consumer pulls them in)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
+thiserror = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
 rayon = "1.10"
 regex = "1.11"
 unicode-normalization = "0.1"
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "blob"] }
+rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher", "blob"] }
 pg_query = "6.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-argon2 = "0.5"
-chacha20poly1305 = "0.10"
+argon2 = { version = "0.5", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 crc32fast = "1.4"
 fs2 = "0.4"
-lz4_flex = "0.11"
-rand_core = { version = "0.6", features = ["getrandom"] }
+lz4_flex = "0.13"
+getrandom = "0.3"
 zstd = "0.13"
+arrow-array = "58"
+arrow-ipc = "58"
+arrow-schema = "58"
+duckdb = { version = "=1.10502.0", features = ["bundled", "parquet"] }
+parquet = { version = "58", features = ["arrow"] }
 
 # Dev / test
 proptest = "1.5"
