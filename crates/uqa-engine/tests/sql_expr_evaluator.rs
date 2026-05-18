@@ -123,6 +123,15 @@ fn is_not_null_returns_all_rows() {
 // =====================================================================
 
 #[test]
+fn standalone_literal_select_projects_value() {
+    let eng = Engine::new();
+    let r = eng.sql("SELECT 1", &[]).unwrap();
+    assert_eq!(r.columns, vec!["?column?"]);
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0].get("?column?"), Some(&Value::Int(1)));
+}
+
+#[test]
 fn arithmetic_multiply() {
     let eng = engine();
     let r = rows(&eng, "SELECT name, price * 2 AS double_price FROM products");

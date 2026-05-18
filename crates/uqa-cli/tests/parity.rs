@@ -66,8 +66,19 @@ fn command_string_executes_without_repl_banner() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains('x'), "{out}");
-    assert!(out.contains('1'), "{out}");
+    assert!(out.lines().any(|line| line.trim() == "1"), "{out}");
     assert!(!out.contains("UQA interactive SQL shell"), "{out}");
+}
+
+#[test]
+fn command_string_unaliased_literal_displays_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&["-c", "SELECT 1"], "", dir.path());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("?column?"), "{out}");
+    assert!(out.lines().any(|line| line.trim() == "1"), "{out}");
+    assert!(!out.contains("NULL"), "{out}");
 }
 
 #[test]
