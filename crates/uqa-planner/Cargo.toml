@@ -22,6 +22,11 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "planner"
+harness = false
 
 [lints]
 workspace = true

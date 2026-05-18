@@ -61,5 +61,17 @@ harness = false
 name = "relevance"
 harness = false
 
+[[bench]]
+name = "compiler"
+harness = false
+
+[[bench]]
+name = "execution"
+harness = false
+
+[[bench]]
+name = "e2e_ported"
+harness = false
+
 [lints]
 workspace = true

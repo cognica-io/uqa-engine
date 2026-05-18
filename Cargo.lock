@@ -3358,6 +3358,7 @@ dependencies = [
 name = "uqa-fusion"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "proptest",
  "uqa-core",
  "uqa-scoring",
@@ -3406,6 +3407,7 @@ dependencies = [
 name = "uqa-operators"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "proptest",
  "uqa-analysis",
  "uqa-core",
@@ -3425,6 +3427,7 @@ dependencies = [
 name = "uqa-planner"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "proptest",
  "rayon",
  "thiserror 2.0.18",

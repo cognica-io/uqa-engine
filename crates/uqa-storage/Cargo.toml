@@ -35,5 +35,9 @@ uqa-scoring = { workspace = true }
 name = "spatial"
 harness = false
 
+[[bench]]
+name = "storage"
+harness = false
+
 [lints]
 workspace = true

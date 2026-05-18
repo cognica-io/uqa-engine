@@ -27,5 +27,25 @@ harness = false
 name = "calibration"
 harness = false
 
+[[bench]]
+name = "scoring"
+harness = false
+
+[[bench]]
+name = "multi_field"
+harness = false
+
+[[bench]]
+name = "external_prior"
+harness = false
+
+[[bench]]
+name = "fusion_wand"
+harness = false
+
+[[bench]]
+name = "beir_calibration"
+harness = false
+
 [lints]
 workspace = true

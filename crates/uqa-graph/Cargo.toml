@@ -28,5 +28,9 @@ criterion = { workspace = true }
 name = "rpq"
 harness = false
 
+[[bench]]
+name = "graph_ported"
+harness = false
+
 [lints]
 workspace = true

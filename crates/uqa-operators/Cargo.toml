@@ -18,6 +18,11 @@ uqa-fusion = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 uqa-analysis = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "operators"
+harness = false
 
 [lints]
 workspace = true

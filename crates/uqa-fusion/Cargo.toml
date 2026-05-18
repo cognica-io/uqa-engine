@@ -15,6 +15,11 @@ uqa-scoring = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "fusion"
+harness = false
 
 [lints]
 workspace = true
