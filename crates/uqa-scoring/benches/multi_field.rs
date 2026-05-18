@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Multi-field Bayesian scoring benchmarks ported from UQA
+//! Multi-field Bayesian scoring benchmarks mirroring UQA
 //! `bench_multi_field.py`.
 
 use std::collections::BTreeMap;

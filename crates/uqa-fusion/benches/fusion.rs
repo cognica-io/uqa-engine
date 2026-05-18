@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fusion benchmarks ported from UQA `bench_scoring.py` and
+//! Fusion benchmarks mirroring UQA `bench_scoring.py` and
 //! `bench_scoring_advanced.py`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};

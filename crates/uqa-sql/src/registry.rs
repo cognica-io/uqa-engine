@@ -17,81 +17,86 @@ use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionKind {
-    /// `text_match(field, query_string)` — Bayesian BM25 retrieval.
+    /// `text_match(field, query_string)` - Bayesian BM25 retrieval.
     TextMatch,
-    /// `field @@ query` — full-text query-string parser over text and
+    /// `field @@ query` - full-text query-string parser over text and
     /// vector signals.
     FTSMatch,
-    /// `bayesian_match(field, query_string)` — alias, same as
+    /// `bayesian_match(field, query_string)` - alias, same as
     /// `text_match` for now (Phase 5 ships only Bayesian BM25).
     BayesianMatch,
-    /// `bayesian_match_with_prior(field, query, prior_field, mode)` —
+    /// `bayesian_match_with_prior(field, query, prior_field, mode)` -
     /// Bayesian BM25 adjusted by a document-level external prior.
     BayesianMatchWithPrior,
-    /// `knn_match(field, query_vector, k)` — top-k cosine KNN.
+    /// `knn_match(field, query_vector, k)` - top-k cosine KNN.
     KNNMatch,
-    /// `fuse_log_odds(signal_1, signal_2, ...)` — log-odds fusion of
+    /// `fuse_log_odds(signal_1, signal_2, ...)` - log-odds fusion of
     /// other UQA function calls.
     FuseLogOdds,
-    /// `graph_pagerank(graph_name)` — `PageRank` over a named graph.
+    /// `graph_pagerank([graph_name])` - `PageRank` over a named graph.
     GraphPagerank,
-    /// `graph_traverse(graph_name, start_vertex, label, max_hops)` —
+    /// `graph_hits([graph_name])` - `HITS` over a named graph.
+    GraphHits,
+    /// `graph_betweenness([graph_name])` - betweenness centrality over a
+    /// named graph.
+    GraphBetweenness,
+    /// `graph_traverse(graph_name, start_vertex, label, max_hops)` -
     /// BFS traversal scoring.
     GraphTraverse,
-    /// `graph_neighbors(graph_name, vertex_id, label, direction)` —
+    /// `graph_neighbors(graph_name, vertex_id, label, direction)` -
     /// 1-hop neighbor expansion.
     GraphNeighbors,
-    /// `multi_field_match(field_1, query_1, field_2, query_2, ...)` —
+    /// `multi_field_match(field_1, query_1, field_2, query_2, ...)` -
     /// per-field BM25 with uniform-weight log-odds conjunction.
     MultiFieldMatch,
     /// `staged_retrieval(field_1, query_1, top_k_1, field_2, query_2,
-    /// top_k_2, ...)` — cascading `text_match`: each stage filters the
+    /// top_k_2, ...)` - cascading `text_match`: each stage filters the
     /// candidate set from the previous stage and keeps top-k.
     StagedRetrieval,
-    /// `deep_predict(model_name)` — runs the saved deep-fusion model.
+    /// `deep_predict(model_name)` - runs the saved deep-fusion model.
     DeepPredict,
     /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
-    /// fragment_size])` — markup search results around matched terms.
+    /// fragment_size])` - markup search results around matched terms.
     UQAHighlight,
-    /// `uqa_facets(field [, field2, ...])` — facet counts over the
+    /// `uqa_facets(field [, field2, ...])` - facet counts over the
     /// posting list, computed against the current row context.
     UQAFacets,
-    /// `traverse_match(graph, start, label, max_hops)` — BFS traversal
+    /// `traverse_match(graph, start, label, max_hops)` - BFS traversal
     /// emitting `(doc_id, score)` weighted by hop distance.
     TraverseMatch,
     /// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
-    /// — `traverse_match` filtered by edge `valid_from`/`valid_to`.
+    /// - `traverse_match` filtered by edge `valid_from`/`valid_to`.
     TemporalTraverse,
-    /// `rpq(expr, start, graph)` — evaluate a Regular Path Query
+    /// `rpq(expr, start [, graph])` - evaluate a Regular Path Query
     /// (Definition 5.1.2) and emit endpoint vertex ids reachable from
     /// `start` along paths matching `expr`.
     RPQ,
-    /// `graph_create(graph_name)` — register a new in-memory graph.
+    /// `graph_create(graph_name)` - register a new in-memory graph.
     GraphCreate,
-    /// `graph_drop(graph_name)` — drop a registered graph.
+    /// `graph_drop(graph_name)` - drop a registered graph.
     GraphDrop,
-    /// `graph_edges(graph_name [, label])` — emit every edge in the
+    /// `graph_edges(graph_name [, label])` - emit every edge in the
     /// graph as `(source, target, label, weight)` rows.
     GraphEdges,
-    /// `attention(signal_1, signal_2, ...)` — multi-signal attention
+    /// `attention(signal_1, signal_2, ...)` - multi-signal attention
     /// fusion (single-head).
     AttentionFusion,
-    /// `learned_fusion(model, signal_1, ...)` — learned per-feature
+    /// `learned_fusion(model, signal_1, ...)` - learned per-feature
     /// weight fusion using a saved `LearnedFusion` model.
     LearnedFusion,
-    /// `calibrated_vector_match(field, vector, k [, threshold])` —
+    /// `calibrated_vector_match(field, vector, k [, threshold])` -
     /// KNN with calibrated cosine probabilities (Paper 5).
     CalibratedVectorMatch,
-    /// `sparse_threshold(signal, threshold)` — drop scores at or below
+    /// `sparse_threshold(signal, threshold)` - drop scores at or below
     /// the threshold and subtract it from survivors.
     SparseThreshold,
-    /// `score_bm25([field,] query)` — projection helper exposing the
+    /// `score_bm25([field,] query)` - projection helper exposing the
     /// current match score.
     ScoreBM25,
-    /// `score_bayesian_bm25([field,] query)` — projection helper
+    /// `score_bayesian_bm25([field,] query)` - projection helper
     /// exposing the current Bayesian BM25 match score.
     ScoreBayesianBM25,
-    /// `deep_learn(model, training_set)` — kick off analytical
+    /// `deep_learn(model, training_set)` - kick off analytical
     /// training (Paper 4) for the named deep-fusion model.
     DeepLearn,
     /// Deep-fusion construction helpers used inside `deep_learn` /
@@ -119,6 +124,11 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         m.insert("knn_match", FunctionKind::KNNMatch);
         m.insert("fuse_log_odds", FunctionKind::FuseLogOdds);
         m.insert("graph_pagerank", FunctionKind::GraphPagerank);
+        m.insert("pagerank", FunctionKind::GraphPagerank);
+        m.insert("graph_hits", FunctionKind::GraphHits);
+        m.insert("hits", FunctionKind::GraphHits);
+        m.insert("graph_betweenness", FunctionKind::GraphBetweenness);
+        m.insert("betweenness", FunctionKind::GraphBetweenness);
         m.insert("graph_traverse", FunctionKind::GraphTraverse);
         m.insert("graph_neighbors", FunctionKind::GraphNeighbors);
         m.insert("multi_field_match", FunctionKind::MultiFieldMatch);

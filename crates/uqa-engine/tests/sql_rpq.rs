@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SELECT * FROM rpq(expr, start, graph)` — Regular Path Query
+//! `SELECT * FROM rpq(expr, start, graph)` - Regular Path Query
 //! evaluation as a SQL table function.
 
 use uqa_core::{Edge, Vertex};
@@ -46,5 +46,15 @@ fn rpq_concat_two_hops() {
         .sql("SELECT * FROM rpq('manages/manages', 1, 'g')", &[])
         .unwrap();
     // exactly one endpoint (vertex 3) is reachable in two manages hops.
+    assert_eq!(r.rows.len(), 1);
+}
+
+#[test]
+fn rpq_from_function_uses_single_registered_graph() {
+    let eng = Engine::new();
+    build_chain(&eng);
+    let r = eng
+        .sql("SELECT * FROM rpq('manages/manages', 1)", &[])
+        .unwrap();
     assert_eq!(r.rows.len(), 1);
 }

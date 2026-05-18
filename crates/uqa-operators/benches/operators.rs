@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Operator benchmarks ported from UQA `bench_multi_field.py`,
+//! Operator benchmarks mirroring UQA `bench_multi_field.py`,
 //! `bench_scoring_advanced.py`, and the operator portions of paper 4
 //! and paper 5 benchmark coverage.
 

@@ -136,6 +136,50 @@ fn graph_pagerank_scores_central_vertex_higher_in_star() {
 }
 
 #[test]
+fn centrality_short_aliases_use_single_registered_graph() {
+    let engine = engine_with_simple_graph();
+    for function_name in ["pagerank", "hits", "betweenness"] {
+        let sql =
+            format!("SELECT _doc_id, _score FROM {function_name}() ORDER BY _score DESC LIMIT 4");
+        let result = engine.sql(&sql, &[]).unwrap();
+        assert!(!result.rows.is_empty(), "{function_name} returned no rows");
+        assert!(
+            result
+                .rows
+                .iter()
+                .all(|row| matches!(row.get("_score"), Some(Value::Float(_)))),
+            "{function_name} did not project _score"
+        );
+    }
+}
+
+#[test]
+fn centrality_where_alias_uses_single_registered_graph() {
+    let engine = engine_with_simple_graph();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM seeds WHERE pagerank() ORDER BY _score DESC LIMIT 4",
+            &[],
+        )
+        .unwrap();
+    assert!(!result.rows.is_empty());
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| matches!(row.get("_score"), Some(Value::Float(_)))));
+}
+
+#[test]
+fn graph_hits_and_betweenness_named_functions_return_rows() {
+    let engine = engine_with_simple_graph();
+    for function_name in ["graph_hits", "graph_betweenness"] {
+        let sql = format!("SELECT id, _score FROM seeds WHERE {function_name}('g') ORDER BY id");
+        let result = engine.sql(&sql, &[]).unwrap();
+        assert!(!result.rows.is_empty(), "{function_name} returned no rows");
+    }
+}
+
+#[test]
 fn graph_traverse_unknown_graph_errors() {
     let engine = Engine::new();
     engine

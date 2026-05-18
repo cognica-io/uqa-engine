@@ -29,7 +29,7 @@ name = "rpq"
 harness = false
 
 [[bench]]
-name = "graph_ported"
+name = "graph_workloads"
 harness = false
 
 [lints]

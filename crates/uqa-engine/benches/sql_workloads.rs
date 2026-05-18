@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! End-to-end SQL workload benchmarks ported from UQA `bench_e2e.py`.
+//! SQL workload benchmarks mirroring Python UQA benchmark surfaces.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::fmt::Write;
@@ -51,6 +51,40 @@ fn build_engine() -> Engine {
         let _ = write!(dim, "({i}, 'cat_{i}', 'label_{i}')");
     }
     engine.sql(&dim, &[]).expect("insert dim");
+    engine
+}
+
+fn build_planner_engine() -> Engine {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE bench (
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                value INTEGER,
+                category TEXT,
+                quantity INTEGER,
+                active BOOLEAN
+            )",
+            &[],
+        )
+        .expect("create planner bench");
+    let mut values =
+        String::from("INSERT INTO bench (id, name, value, category, quantity, active) VALUES ");
+    for i in 0..1_000 {
+        if i > 0 {
+            values.push_str(", ");
+        }
+        let active = if i % 2 == 0 { "TRUE" } else { "FALSE" };
+        let _ = write!(
+            values,
+            "({i}, 'name_{i}', {}, 'cat_{}', {}, {active})",
+            i % 10_000,
+            i % 50,
+            i % 100
+        );
+    }
+    engine.sql(&values, &[]).expect("insert planner bench");
     engine
 }
 
@@ -205,11 +239,47 @@ fn bench_subquery_cte_window_analyze(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_planner_statistics(c: &mut Criterion) {
+    let analyze_engine = build_planner_engine();
+    c.bench_function("planner_histogram_analyze", |bencher| {
+        bencher.iter(|| {
+            let result = analyze_engine
+                .sql(black_box("ANALYZE bench"), &[])
+                .expect("analyze");
+            black_box(result.rows.len())
+        });
+    });
+
+    let engine = build_planner_engine();
+    engine.sql("ANALYZE bench", &[]).expect("analyze setup");
+    let cases = [
+        (
+            "planner_selectivity_equality",
+            "SELECT * FROM bench WHERE category = 'cat_5'",
+        ),
+        (
+            "planner_selectivity_range",
+            "SELECT * FROM bench WHERE value BETWEEN 100 AND 500",
+        ),
+    ];
+    let mut group = c.benchmark_group("planner_selectivity");
+    for (name, sql) in cases {
+        group.bench_function(name, |bencher| {
+            bencher.iter(|| {
+                let result = engine.sql(black_box(sql), &[]).expect("query");
+                black_box(result.rows.len())
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_oltp,
     bench_olap,
     bench_joins,
-    bench_subquery_cte_window_analyze
+    bench_subquery_cte_window_analyze,
+    bench_planner_statistics
 );
 criterion_main!(benches);

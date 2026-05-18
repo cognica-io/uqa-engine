@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Calibration benchmarks ported from UQA `bench_calibration.py`.
+//! Calibration benchmarks mirroring UQA `bench_calibration.py`.
 //! Each metric bench runs over synthetic `(prediction, label)` pairs
 //! and the parameter-learner benches cover batch fit plus streaming
 //! updates.

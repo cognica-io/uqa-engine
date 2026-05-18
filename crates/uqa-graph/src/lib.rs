@@ -29,6 +29,7 @@ mod posting_list;
 mod rpq;
 mod sqlite_store;
 mod store;
+mod subgraph_index;
 mod temporal;
 mod types;
 mod versioned_store;
@@ -56,6 +57,7 @@ pub use rpq::{
 };
 pub use sqlite_store::SQLiteGraphStore;
 pub use store::GraphStore;
+pub use subgraph_index::SubgraphIndex;
 pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;
 pub use versioned_store::VersionedGraphStore;

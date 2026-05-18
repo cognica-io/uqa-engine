@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! External-prior benchmarks ported from UQA `bench_external_prior.py`.
+//! External-prior benchmarks mirroring UQA `bench_external_prior.py`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

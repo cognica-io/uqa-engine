@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL execution benchmarks ported from UQA `bench_execution.py`.
+//! SQL execution benchmarks mirroring UQA `bench_execution.py`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::fmt::Write;

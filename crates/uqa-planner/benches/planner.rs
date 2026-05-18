@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Planner benchmarks ported from UQA `bench_planner.py`.
+//! Planner benchmarks mirroring UQA `bench_planner.py`.
 //!
 //! Covers `DPccp` join enumeration on chain, star, clique, and cycle
 //! topologies, plus the greedy fallback path for larger relation sets.

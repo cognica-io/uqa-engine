@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL parser/compiler benchmarks ported from UQA `bench_compiler.py`.
+//! SQL parser/compiler benchmarks mirroring UQA `bench_compiler.py`.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::fmt::Write;

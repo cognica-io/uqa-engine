@@ -6098,11 +6098,45 @@ fn build_table_function_rows_with_row(
             };
             Ok(vec![r])
         }
+        "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
+        | "graph_betweenness" => {
+            if evaluated.len() > 1 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "{lower} accepts at most one graph argument"
+                )));
+            }
+            let graph = expect_optional_graph_value(engine, evaluated.first(), &lower)?;
+            let entries = match lower.as_str() {
+                "pagerank" | "graph_pagerank" => graph_pagerank_entries(engine, &graph)?,
+                "hits" | "graph_hits" => graph_hits_entries(engine, &graph)?,
+                "betweenness" | "graph_betweenness" => graph_betweenness_entries(engine, &graph)?,
+                _ => unreachable!(),
+            };
+            let id_col = column_aliases
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "_doc_id".into());
+            let score_col = column_aliases
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| "_score".into());
+            for entry in entries {
+                let mut r = ResultRow::new();
+                r.insert(id_col.clone(), Value::Int(entry.doc_id as i64));
+                r.insert(score_col.clone(), Value::Float(entry.score));
+                let r = match qual {
+                    Some(a) => prefix_row(a, &r),
+                    None => r,
+                };
+                out.push(r);
+            }
+            Ok(out)
+        }
         "cypher" => age_cypher::build_rows(engine, args, &evaluated, qual, column_aliases),
         "rpq" => {
-            if evaluated.len() != 3 {
+            if !(2..=3).contains(&evaluated.len()) {
                 return Err(SQLError::TypeMismatch(
-                    "rpq requires 3 args (expr, start, graph)".into(),
+                    "rpq requires 2 or 3 args (expr, start [, graph])".into(),
                 ));
             }
             let expr_str = match &evaluated[0] {
@@ -6113,10 +6147,7 @@ fn build_table_function_rows_with_row(
                 Value::Int(n) => *n as u64,
                 _ => return Err(SQLError::TypeMismatch("rpq.start must be integer".into())),
             };
-            let graph = match &evaluated[2] {
-                Value::Str(s) => s.clone(),
-                _ => return Err(SQLError::TypeMismatch("rpq.graph must be string".into())),
-            };
+            let graph = expect_optional_graph_value(engine, evaluated.get(2), "rpq")?;
             let path = uqa_graph::parse_rpq(&expr_str)
                 .map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
             let pl = engine
@@ -7949,6 +7980,8 @@ fn execute_function(
         FunctionKind::KNNMatch => run_knn_match(engine, table, args, params),
         FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
         FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
+        FunctionKind::GraphHits => run_graph_hits(engine, args, params),
+        FunctionKind::GraphBetweenness => run_graph_betweenness(engine, args, params),
         FunctionKind::GraphTraverse => run_graph_traverse(engine, args, params),
         FunctionKind::GraphNeighbors => run_graph_neighbors(engine, args, params),
         FunctionKind::MultiFieldMatch => run_multi_field_match(engine, table, args, params),
@@ -8239,23 +8272,58 @@ fn normalize_weights(weights: Vec<f64>) -> Vec<f64> {
     }
 }
 
-fn run_graph_pagerank(
+fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQLError> {
+    let graphs = engine.list_graphs();
+    match graphs.as_slice() {
+        [name] => Ok(name.clone()),
+        [] => Err(SQLError::Unsupported(format!(
+            "{function_name} requires a graph argument because no graph is registered"
+        ))),
+        _ => Err(SQLError::Unsupported(format!(
+            "{function_name} requires a graph argument because multiple graphs are registered: {}",
+            graphs.join(", ")
+        ))),
+    }
+}
+
+fn expect_optional_graph_name(
     engine: &Engine,
     args: &[Expr],
     params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 1 {
-        return Err(SQLError::BadArity {
-            name: "graph_pagerank".into(),
-            expected: "1".into(),
+    function_name: &str,
+) -> Result<String, SQLError> {
+    match args {
+        [] => default_graph_name(engine, function_name),
+        [arg] => {
+            let ctx = EvalContext::new(None, params).with_engine(engine);
+            expect_string(arg, &format!("{function_name}.graph"), &ctx)
+        }
+        _ => Err(SQLError::BadArity {
+            name: function_name.into(),
+            expected: "0..=1".into(),
             actual: args.len(),
-        });
+        }),
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let name = expect_string(&args[0], "graph_pagerank.graph", &ctx)?;
+}
+
+fn expect_optional_graph_value(
+    engine: &Engine,
+    value: Option<&Value>,
+    function_name: &str,
+) -> Result<String, SQLError> {
+    match value {
+        Some(Value::Str(name)) => Ok(name.clone()),
+        Some(other) => Err(SQLError::TypeMismatch(format!(
+            "{function_name}.graph must be string, got {other:?}"
+        ))),
+        None => default_graph_name(engine, function_name),
+    }
+}
+
+fn graph_pagerank_entries(engine: &Engine, name: &str) -> Result<Vec<ScoredEntry>, SQLError> {
     let entries = engine
-        .graph_with(&name, |store| {
-            uqa_graph::PageRank::new(&name)
+        .graph_with(name, |store| {
+            uqa_graph::PageRank::new(name)
                 .execute(store)
                 .inner()
                 .entries()
@@ -8268,6 +8336,69 @@ fn run_graph_pagerank(
         })
         .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
     Ok(entries)
+}
+
+fn graph_hits_entries(engine: &Engine, name: &str) -> Result<Vec<ScoredEntry>, SQLError> {
+    let entries = engine
+        .graph_with(name, |store| {
+            uqa_graph::HITS::new(name)
+                .execute(store)
+                .inner()
+                .entries()
+                .iter()
+                .map(|e| ScoredEntry {
+                    doc_id: e.doc_id,
+                    score: e.payload.score,
+                })
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
+    Ok(entries)
+}
+
+fn graph_betweenness_entries(engine: &Engine, name: &str) -> Result<Vec<ScoredEntry>, SQLError> {
+    let entries = engine
+        .graph_with(name, |store| {
+            uqa_graph::BetweennessCentrality::new(name)
+                .execute(store)
+                .inner()
+                .entries()
+                .iter()
+                .map(|e| ScoredEntry {
+                    doc_id: e.doc_id,
+                    score: e.payload.score,
+                })
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
+    Ok(entries)
+}
+
+fn run_graph_pagerank(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let name = expect_optional_graph_name(engine, args, params, "graph_pagerank")?;
+    graph_pagerank_entries(engine, &name)
+}
+
+fn run_graph_hits(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let name = expect_optional_graph_name(engine, args, params, "graph_hits")?;
+    graph_hits_entries(engine, &name)
+}
+
+fn run_graph_betweenness(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let name = expect_optional_graph_name(engine, args, params, "graph_betweenness")?;
+    graph_betweenness_entries(engine, &name)
 }
 
 fn run_graph_traverse(
@@ -8540,25 +8671,29 @@ fn run_temporal_traverse(
     Ok(out)
 }
 
-/// `rpq(expr, start, graph)` - evaluate a Regular Path Query
+/// `rpq(expr, start [, graph])` - evaluate a Regular Path Query
 /// (Definition 5.1.2). Mirrors the canonical UQA implementation's
-/// `Engine.sql("SELECT * FROM rpq(expr, start, graph)")`.
+/// `Engine.sql("SELECT * FROM rpq(expr, start [, graph])")`.
 fn run_rpq(
     engine: &Engine,
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 3 {
+    if !(2..=3).contains(&args.len()) {
         return Err(SQLError::BadArity {
             name: "rpq".into(),
-            expected: "3".into(),
+            expected: "2..=3".into(),
             actual: args.len(),
         });
     }
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let expr_str = expect_string(&args[0], "rpq.expr", &ctx)?;
     let start = expect_u64(&args[1], "rpq.start", &ctx)?;
-    let graph = expect_string(&args[2], "rpq.graph", &ctx)?;
+    let graph = if args.len() == 3 {
+        expect_string(&args[2], "rpq.graph", &ctx)?
+    } else {
+        default_graph_name(engine, "rpq")?
+    };
     let path =
         uqa_graph::parse_rpq(&expr_str).map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
     let entries = engine
@@ -9043,6 +9178,8 @@ fn run_fuse_log_odds(
                         ));
                     }
                     FunctionKind::GraphPagerank
+                    | FunctionKind::GraphHits
+                    | FunctionKind::GraphBetweenness
                     | FunctionKind::GraphTraverse
                     | FunctionKind::GraphNeighbors
                     | FunctionKind::MultiFieldMatch

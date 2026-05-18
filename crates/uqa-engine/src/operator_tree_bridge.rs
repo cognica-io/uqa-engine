@@ -553,13 +553,12 @@ impl<'a> EngineDriver<'a> {
             }
             None => self.engine.table_doc_ids(self.table),
         };
-        let mut entries: Vec<PostingEntry> = Vec::new();
+        let values = self
+            .engine
+            .get_document_fields(self.table, &candidates, field);
+        let mut entries: Vec<PostingEntry> = Vec::with_capacity(candidates.len());
         for doc_id in candidates {
-            let value = self
-                .engine
-                .get_document(self.table, doc_id)
-                .and_then(|d| d.get(field).cloned());
-            if predicate.evaluate(value.as_ref()) {
+            if predicate.evaluate(values.get(&doc_id)) {
                 entries.push(PostingEntry::new(doc_id, Payload::default()));
             }
         }

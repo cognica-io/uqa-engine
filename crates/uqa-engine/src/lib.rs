@@ -3386,6 +3386,19 @@ impl Engine {
         got
     }
 
+    pub(crate) fn get_document_fields(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+        field: &str,
+    ) -> BTreeMap<DocId, Value> {
+        let Some(t) = self.table(table) else {
+            return BTreeMap::new();
+        };
+        let values = t.document_store.read().get_fields_bulk(doc_ids, field);
+        values
+    }
+
     pub fn find_doc_id_by_field(&self, table: &str, field: &str, value: &Value) -> Option<DocId> {
         let t = self.table(table)?;
         let found = t.document_store.read().find_doc_id_by_field(field, value);

@@ -3317,6 +3317,7 @@ dependencies = [
  "chrono",
  "criterion",
  "proptest",
+ "serde_json",
  "uqa-analysis",
  "uqa-core",
  "uqa-storage",
