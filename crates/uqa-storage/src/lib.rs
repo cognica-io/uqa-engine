@@ -18,6 +18,7 @@ pub mod index_manager;
 pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
+pub mod key_value;
 pub mod spatial_index;
 pub mod sqlite;
 pub mod transaction;
@@ -39,6 +40,10 @@ pub use index_manager::{BTreeIndexHandle, IndexManager};
 pub use index_types::{IndexDef, IndexType};
 pub use inverted_index::{AnalyzerPhase, InvertedIndex, MemoryInvertedIndex};
 pub use ivf_index::{IVFIndex, IVFState};
+pub use key_value::{
+    KeyValueBatch, KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex,
+    KeyValueStorageBackend, KeyValueStore, KeyValueVectorIndex, MemoryKeyValueStore,
+};
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionCodec, SQLiteCompressionOptions,

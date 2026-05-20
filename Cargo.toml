@@ -4,6 +4,7 @@ members = [
     "crates/uqa-core",
     "crates/uqa-analysis",
     "crates/uqa-storage",
+    "crates/uqa-storage-sqlite",
     "crates/uqa-scoring",
     "crates/uqa-fusion",
     "crates/uqa-operators",
@@ -37,6 +38,7 @@ rust-version = "1.85"
 uqa-core = { version = "0.1.0", path = "crates/uqa-core" }
 uqa-analysis = { version = "0.1.0", path = "crates/uqa-analysis" }
 uqa-storage = { version = "0.1.0", path = "crates/uqa-storage" }
+uqa-storage-sqlite = { version = "0.1.0", path = "crates/uqa-storage-sqlite" }
 uqa-scoring = { version = "0.1.0", path = "crates/uqa-scoring" }
 uqa-fusion = { version = "0.1.0", path = "crates/uqa-fusion" }
 uqa-operators = { version = "0.1.0", path = "crates/uqa-operators" }

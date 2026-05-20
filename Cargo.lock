@@ -3198,6 +3198,7 @@ dependencies = [
  "uqa-scoring",
  "uqa-sql",
  "uqa-storage",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]
@@ -3364,6 +3365,17 @@ dependencies = [
  "uqa-core",
  "uqa-scoring",
  "zstd",
+]
+
+[[package]]
+name = "uqa-storage-sqlite"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "tempfile",
+ "uqa-analysis",
+ "uqa-core",
+ "uqa-storage",
 ]
 
 [[package]]
