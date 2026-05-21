@@ -36,10 +36,10 @@
 //! across columns), the function returns `None` and the caller falls
 //! back to the legacy `execute_function` / `filter_table_rows` path.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value};
-use uqa_operators::{GatingSpec, OperatorTree};
+use uqa_operators::{GatingSpec, MultiStageCutoff, MultiStageEntry, OperatorTree};
 use uqa_planner::executor::{OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::QueryOptimizer;
@@ -143,6 +143,8 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
             let query = const_string(args.get(1)?, params)?;
             compile_fts_query(&query, default_field.as_deref())
         }
+        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
+        "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
         "knn_match" => {
             // Standalone knn_match preserves raw cosine similarities;
             // calibration to (0, 1) only fires inside fusion contexts
@@ -159,8 +161,10 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
             })
         }
         "fuse_log_odds" => lower_fuse_log_odds(args, params),
-        "attention" => lower_attention_fusion(args, params),
-        "learned_fusion" => lower_learned_fusion(args, params),
+        "multi_field_match" => lower_multi_field_match(args, params),
+        "staged_retrieval" => lower_staged_retrieval(args, params),
+        "attention" | "fuse_attention" | "fuse_multihead" => lower_attention_fusion(args, params),
+        "learned_fusion" | "fuse_learned" => lower_learned_fusion(args, params),
         "sparse_threshold" => {
             if args.len() != 2 {
                 return None;
@@ -174,6 +178,149 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
         }
         _ => None,
     }
+}
+
+fn lower_bayesian_match_with_prior(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    if args.len() != 4 {
+        return None;
+    }
+    let mut meta = BTreeMap::new();
+    meta.insert("field".to_string(), Value::Str(column_name(args.first()?)?));
+    meta.insert(
+        "query".to_string(),
+        Value::Str(const_string(args.get(1)?, params)?),
+    );
+    meta.insert(
+        "prior_field".to_string(),
+        Value::Str(column_name(args.get(2)?)?),
+    );
+    let mode = const_string(args.get(3)?, params)?;
+    if !matches!(mode.to_ascii_lowercase().as_str(), "authority" | "recency") {
+        return None;
+    }
+    meta.insert("mode".to_string(), Value::Str(mode));
+    Some(OperatorTree::Opaque {
+        kind: "bayesian_match_with_prior".to_string(),
+        children: Vec::new(),
+        meta,
+    })
+}
+
+fn lower_calibrated_vector_match(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    if !(3..=4).contains(&args.len()) {
+        return None;
+    }
+    let mut meta = BTreeMap::new();
+    meta.insert(
+        "field".to_string(),
+        Value::Str(field_name_arg(args.first()?, params)?),
+    );
+    meta.insert(
+        "query_vector".to_string(),
+        Value::List(
+            const_vector(args.get(1)?, params)?
+                .into_iter()
+                .map(|v| Value::Float(f64::from(v)))
+                .collect(),
+        ),
+    );
+    meta.insert(
+        "k".to_string(),
+        Value::Int(const_usize(args.get(2)?, params)? as i64),
+    );
+    if args.len() == 4 {
+        let threshold = const_f64(args.get(3)?, params)?;
+        meta.insert("threshold".to_string(), Value::Float(threshold));
+    }
+    Some(OperatorTree::Opaque {
+        kind: "calibrated_vector_match".to_string(),
+        children: Vec::new(),
+        meta,
+    })
+}
+
+fn lower_multi_field_match(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    if args.len() < 3 {
+        return None;
+    }
+    let first_non_column = args.iter().position(|arg| column_name(arg).is_none());
+    if let Some(query_idx) = first_non_column {
+        if query_idx >= 2 {
+            let fields = args[..query_idx]
+                .iter()
+                .map(column_name)
+                .collect::<Option<Vec<_>>>()?;
+            let query = const_string(args.get(query_idx)?, params)?;
+            let weight_args = &args[query_idx + 1..];
+            let weights = if weight_args.is_empty() {
+                None
+            } else {
+                if weight_args.len() != fields.len() {
+                    return None;
+                }
+                Some(
+                    weight_args
+                        .iter()
+                        .map(|arg| const_f64(arg, params))
+                        .collect::<Option<Vec<_>>>()?,
+                )
+            };
+            return Some(OperatorTree::MultiFieldSearch {
+                fields,
+                query,
+                weights,
+            });
+        }
+    }
+
+    if args.len() < 4 || args.len() % 2 != 0 {
+        return None;
+    }
+    let n_fields = args.len() / 2;
+    let mut fields = Vec::with_capacity(n_fields);
+    let mut queries = Vec::with_capacity(n_fields);
+    for i in 0..n_fields {
+        fields.push(column_name(&args[2 * i])?);
+        queries.push(const_string(&args[2 * i + 1], params)?);
+    }
+    let first_query = queries.first()?.clone();
+    if queries.iter().all(|query| query == &first_query) {
+        return Some(OperatorTree::MultiFieldSearch {
+            fields,
+            query: first_query,
+            weights: None,
+        });
+    }
+    None
+}
+
+fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+    let mut stages = Vec::new();
+    if matches!(args.first(), Some(Expr::Func { .. })) && named_arg_expr(args.first()?).is_none() {
+        if args.is_empty() || args.len() % 2 != 0 {
+            return None;
+        }
+        for pair in args.chunks(2) {
+            stages.push(MultiStageEntry {
+                child: lower_signal_arg(&pair[0], params)?,
+                cutoff: MultiStageCutoff::TopK(const_usize(&pair[1], params)?),
+            });
+        }
+    } else {
+        if args.is_empty() || args.len() % 3 != 0 {
+            return None;
+        }
+        for stage in args.chunks(3) {
+            stages.push(MultiStageEntry {
+                child: OperatorTree::Term {
+                    query: const_string(&stage[1], params)?,
+                    field: Some(column_name(&stage[0])?),
+                },
+                cutoff: MultiStageCutoff::TopK(const_usize(&stage[2], params)?),
+            });
+        }
+    }
+    (!stages.is_empty()).then_some(OperatorTree::MultiStage { stages })
 }
 
 /// Compile a signal-function call into a node that produces calibrated
@@ -203,6 +350,7 @@ fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Op
             let query = const_string(args.get(1)?, params)?;
             compile_fts_query(&query, default_field.as_deref())
         }
+        "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
         "knn_match" => {
             let field = column_name(args.first()?)?;
             let vec_expr = args.get(1)?;
@@ -216,6 +364,7 @@ fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Op
                 },
             )))
         }
+        "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
         _ => None,
     }
 }
@@ -363,6 +512,10 @@ fn column_name(expr: &Expr) -> Option<String> {
         Expr::QualifiedColumn { column, .. } => Some(column.clone()),
         _ => None,
     }
+}
+
+fn field_name_arg(expr: &Expr, params: &[SQLParam]) -> Option<String> {
+    column_name(expr).or_else(|| const_string(expr, params))
 }
 
 enum FtsDefaultField {
@@ -658,6 +811,18 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 let source = self.execute_node(source);
                 sparse_threshold_inline(&source, *threshold)
             }
+            OperatorTree::MultiFieldSearch {
+                fields,
+                query,
+                weights,
+            } => self.execute_multi_field_search(fields, query, weights.as_deref()),
+            OperatorTree::MultiStage { stages } => self.execute_multi_stage(stages),
+            OperatorTree::Opaque { kind, meta, .. } if kind == "bayesian_match_with_prior" => {
+                self.execute_bayesian_match_with_prior(meta)
+            }
+            OperatorTree::Opaque { kind, meta, .. } if kind == "calibrated_vector_match" => {
+                self.execute_calibrated_vector_match(meta)
+            }
             // The remaining graph-only IR variants (PatternMatch,
             // Traverse, RegularPathQuery, WeightedPathQuery,
             // CypherQuery, ...) need a shared graph store handle to
@@ -697,6 +862,71 @@ impl EngineDriver<'_> {
         };
         let op = ProbBoolFusionOperator::new(signal_ops, mode);
         op.execute(&self.bridge_context())
+    }
+
+    fn execute_multi_field_search(
+        &self,
+        fields: &[String],
+        query: &str,
+        weights: Option<&[f64]>,
+    ) -> PostingList {
+        use uqa_operators::base::Operator;
+        let op = uqa_operators::MultiFieldSearchOperator::new(
+            fields.to_vec(),
+            query,
+            weights.map(<[f64]>::to_vec),
+        );
+        op.execute(&self.bridge_context())
+    }
+
+    fn execute_bayesian_match_with_prior(&self, meta: &BTreeMap<String, Value>) -> PostingList {
+        let Some(Value::Str(field)) = meta.get("field") else {
+            return PostingList::new();
+        };
+        let Some(Value::Str(query)) = meta.get("query") else {
+            return PostingList::new();
+        };
+        let Some(Value::Str(prior_field)) = meta.get("prior_field") else {
+            return PostingList::new();
+        };
+        let Some(Value::Str(mode)) = meta.get("mode") else {
+            return PostingList::new();
+        };
+        let args = vec![
+            Expr::Column(field.clone()),
+            Expr::Literal(Value::Str(query.clone())),
+            Expr::Column(prior_field.clone()),
+            Expr::Literal(Value::Str(mode.clone())),
+        ];
+        match sql::run_bayesian_match_with_prior_public(self.engine, self.table, &args, self.params)
+        {
+            Ok(rows) => scored_to_posting_list(&rows),
+            Err(_) => PostingList::new(),
+        }
+    }
+
+    fn execute_calibrated_vector_match(&self, meta: &BTreeMap<String, Value>) -> PostingList {
+        let Some(Value::Str(field)) = meta.get("field") else {
+            return PostingList::new();
+        };
+        let Some(Value::List(query_vector)) = meta.get("query_vector") else {
+            return PostingList::new();
+        };
+        let Some(Value::Int(k)) = meta.get("k") else {
+            return PostingList::new();
+        };
+        let mut args = vec![
+            Expr::Literal(Value::Str(field.clone())),
+            Expr::Array(query_vector.iter().cloned().map(Expr::Literal).collect()),
+            Expr::Literal(Value::Int(*k)),
+        ];
+        if let Some(threshold) = meta.get("threshold") {
+            args.push(Expr::Literal(threshold.clone()));
+        }
+        match sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params) {
+            Ok(rows) => scored_to_posting_list(&rows),
+            Err(_) => PostingList::new(),
+        }
     }
 
     fn execute_prob_not(&self, signal: &OperatorTree, default_prob: f64) -> PostingList {
@@ -787,6 +1017,39 @@ impl EngineDriver<'_> {
         fuse_signals_with(&posting_lists, |probs| learned.fuse(probs))
     }
 
+    fn execute_multi_stage(&self, stages: &[MultiStageEntry]) -> PostingList {
+        let mut current: Option<PostingList> = None;
+        for stage in stages {
+            let stage_result = self.execute_node(&stage.child);
+            let mut entries: Vec<PostingEntry> = if let Some(prior) = &current {
+                let prior_ids: BTreeSet<DocId> = prior.entries().iter().map(|e| e.doc_id).collect();
+                stage_result
+                    .entries()
+                    .iter()
+                    .filter(|entry| prior_ids.contains(&entry.doc_id))
+                    .cloned()
+                    .collect()
+            } else {
+                stage_result.entries().to_vec()
+            };
+            entries.sort_by(|a, b| {
+                b.payload
+                    .score
+                    .partial_cmp(&a.payload.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.doc_id.cmp(&b.doc_id))
+            });
+            let keep = match stage.cutoff {
+                MultiStageCutoff::TopK(k) => k,
+                MultiStageCutoff::Ratio(r) => ((entries.len() as f64) * r).ceil() as usize,
+            };
+            entries.truncate(keep);
+            entries.sort_by_key(|e| e.doc_id);
+            current = Some(PostingList::from_sorted_unchecked(entries));
+        }
+        current.unwrap_or_default()
+    }
+
     /// Build the `n_query_features=6` vector that attention fusers
     /// expect. When the IR carries a non-empty placeholder it wins
     /// (test fixtures); otherwise the driver extracts the canonical
@@ -814,6 +1077,7 @@ impl EngineDriver<'_> {
         let mut ctx = uqa_operators::base::ExecutionContext::new();
         if let Some(state) = self.engine.table(self.table) {
             ctx.document_store = Some(state.document_store.read().snapshot());
+            ctx.inverted_index = Some(state.inverted_index.read().snapshot());
         }
         ctx
     }
@@ -892,6 +1156,15 @@ fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
 fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
         OperatorTree::Term { query, field } => field.clone().map(|f| (f, query.clone())),
+        OperatorTree::Opaque { kind, meta, .. } if kind == "bayesian_match_with_prior" => {
+            let Some(Value::Str(field)) = meta.get("field") else {
+                return None;
+            };
+            let Some(Value::Str(query)) = meta.get("query") else {
+                return None;
+            };
+            Some((field.clone(), query.clone()))
+        }
         OperatorTree::Score {
             source,
             query_terms,

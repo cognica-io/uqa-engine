@@ -13,7 +13,7 @@ fn engine_with_docs() -> Engine {
     let engine = Engine::new();
     engine
         .sql(
-            "CREATE TABLE docs (id SERIAL PRIMARY KEY, content TEXT, authority TEXT)",
+            "CREATE TABLE docs (id SERIAL PRIMARY KEY, content TEXT, authority TEXT, status TEXT)",
             &[],
         )
         .unwrap();
@@ -22,9 +22,9 @@ fn engine_with_docs() -> Engine {
         .unwrap();
     engine
         .sql(
-            "INSERT INTO docs (content, authority) VALUES
-             ('machine learning', 'high'),
-             ('deep learning', 'low')",
+            "INSERT INTO docs (content, authority, status) VALUES
+             ('machine learning', 'high', 'indexed'),
+             ('deep learning', 'low', 'draft')",
             &[],
         )
         .unwrap();
@@ -42,6 +42,55 @@ fn bayesian_with_prior_sql() {
         )
         .unwrap();
     assert!(!result.rows.is_empty());
+}
+
+#[test]
+fn bayesian_with_prior_combines_with_relational_filter() {
+    let engine = engine_with_docs();
+    let result = engine
+        .sql(
+            "SELECT id FROM docs WHERE
+             bayesian_match_with_prior(content, 'learning', authority, 'authority')
+             AND status = 'indexed'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(Value::Int(id)) => *id,
+            other => panic!("expected integer id, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(ids, vec![1]);
+}
+
+#[test]
+fn sparse_threshold_with_prior_combines_with_relational_filter() {
+    let engine = engine_with_docs();
+    let result = engine
+        .sql(
+            "SELECT id FROM docs WHERE
+             sparse_threshold(
+                 bayesian_match_with_prior(content, 'learning', authority, 'authority'),
+                 0.01
+             )
+             AND status = 'indexed'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(Value::Int(id)) => *id,
+            other => panic!("expected integer id, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(ids, vec![1]);
 }
 
 #[test]

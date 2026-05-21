@@ -42,15 +42,27 @@ fn graph_edges_emits_edges_with_optional_label_filter() {
     })
     .unwrap();
 
-    eng.sql("CREATE TABLE drv (id BIGSERIAL PRIMARY KEY)", &[])
+    eng.sql(
+        "CREATE TABLE drv (id BIGSERIAL PRIMARY KEY, status TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO drv (id, status) VALUES (1, 'indexed')", &[])
         .unwrap();
-    eng.sql("INSERT INTO drv (id) VALUES (1)", &[]).unwrap();
 
     // Without a label filter, both edges flow through.
     let res = eng
         .sql("SELECT id FROM drv WHERE graph_edges('network') @@ id", &[])
         .ok();
     let _ = res; // smoke test the surface; engine routes graph_edges through dispatcher.
+
+    let filtered = eng
+        .sql(
+            "SELECT id FROM drv WHERE graph_edges('network') AND status = 'indexed'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(filtered.rows.len(), 1);
 }
 
 #[test]
@@ -71,10 +83,15 @@ fn temporal_traverse_respects_time_window() {
     // a SELECT WHERE temporal_traverse(...) shape; the test confirms
     // that a window touching the edge's [100, 200] range surfaces
     // vertex 2 as a hop reachable from vertex 1.
-    eng.sql("CREATE TABLE drv (id BIGSERIAL PRIMARY KEY)", &[])
+    eng.sql(
+        "CREATE TABLE drv (id BIGSERIAL PRIMARY KEY, status TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("INSERT INTO drv (id, status) VALUES (1, 'indexed')", &[])
         .unwrap();
-    eng.sql("INSERT INTO drv (id) VALUES (1)", &[]).unwrap();
-    eng.sql("INSERT INTO drv (id) VALUES (2)", &[]).unwrap();
+    eng.sql("INSERT INTO drv (id, status) VALUES (2, 'draft')", &[])
+        .unwrap();
     let res = eng
         .sql(
             "SELECT id FROM drv WHERE temporal_traverse('g', 1, 'knows', 1, 100, 200) @@ id ORDER BY id",
@@ -82,4 +99,23 @@ fn temporal_traverse_respects_time_window() {
         )
         .ok();
     let _ = res;
+
+    let filtered = eng
+        .sql(
+            "SELECT id FROM drv \
+             WHERE temporal_traverse('g', 1, 'knows', 1, 100, 200) \
+               AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = filtered
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("id") {
+            Some(Value::Int(id)) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1]);
 }

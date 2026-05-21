@@ -7,7 +7,7 @@
 //! `SELECT * FROM rpq(expr, start, graph)` - Regular Path Query
 //! evaluation as a SQL table function.
 
-use uqa_core::{Edge, Vertex};
+use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::Engine;
 use uqa_graph::GraphStore;
 
@@ -57,4 +57,38 @@ fn rpq_from_function_uses_single_registered_graph() {
         .sql("SELECT * FROM rpq('manages/manages', 1)", &[])
         .unwrap();
     assert_eq!(r.rows.len(), 1);
+}
+
+#[test]
+fn rpq_combines_with_relational_filter() {
+    let eng = Engine::new();
+    build_chain(&eng);
+    eng.sql(
+        "CREATE TABLE seeds (id INTEGER PRIMARY KEY, status TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO seeds (id, status) VALUES \
+         (1, 'indexed'), (2, 'draft'), (3, 'indexed'), (4, 'draft')",
+        &[],
+    )
+    .unwrap();
+    let r = eng
+        .sql(
+            "SELECT id FROM seeds \
+             WHERE rpq('manages*', 1, 'g') AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = r
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("id") {
+            Some(Value::Int(id)) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 3]);
 }

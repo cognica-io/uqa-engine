@@ -14,10 +14,17 @@ fn engine_with_simple_graph() -> Engine {
     let engine = Engine::new();
     // Plain table the graph functions can pull doc ids from.
     engine
-        .sql("CREATE TABLE seeds (id INTEGER PRIMARY KEY)", &[])
+        .sql(
+            "CREATE TABLE seeds (id INTEGER PRIMARY KEY, status TEXT)",
+            &[],
+        )
         .unwrap();
     engine
-        .sql("INSERT INTO seeds (id) VALUES (1), (2), (3), (4)", &[])
+        .sql(
+            "INSERT INTO seeds (id, status) VALUES \
+             (1, 'indexed'), (2, 'draft'), (3, 'indexed'), (4, 'indexed')",
+            &[],
+        )
         .unwrap();
     // 1 -> 2 -> 3, 1 -> 4
     engine.create_graph("g");
@@ -54,6 +61,28 @@ fn graph_traverse_returns_reachable_vertices() {
 }
 
 #[test]
+fn graph_traverse_combines_with_relational_filter() {
+    let engine = engine_with_simple_graph();
+    let result = engine
+        .sql(
+            "SELECT id FROM seeds \
+             WHERE graph_traverse('g', 1, 'knows', 2) AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .filter_map(|r| match r.get("id") {
+            Some(Value::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 3]);
+}
+
+#[test]
 fn graph_neighbors_returns_one_hop_targets() {
     let engine = engine_with_simple_graph();
     let result = engine
@@ -74,6 +103,28 @@ fn graph_neighbors_returns_one_hop_targets() {
 }
 
 #[test]
+fn graph_neighbors_combines_with_relational_filter() {
+    let engine = engine_with_simple_graph();
+    let result = engine
+        .sql(
+            "SELECT id FROM seeds \
+             WHERE graph_neighbors('g', 1, NULL, 'out') AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .filter_map(|r| match r.get("id") {
+            Some(Value::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![4]);
+}
+
+#[test]
 fn graph_neighbors_label_filter() {
     let engine = engine_with_simple_graph();
     let result = engine
@@ -91,6 +142,28 @@ fn graph_neighbors_label_filter() {
         })
         .collect();
     assert_eq!(ids, vec![2]);
+}
+
+#[test]
+fn graph_centrality_combines_with_relational_filter() {
+    let engine = engine_with_simple_graph();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM seeds \
+             WHERE pagerank() AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .filter_map(|r| match r.get("id") {
+            Some(Value::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 3, 4]);
 }
 
 #[test]

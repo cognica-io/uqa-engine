@@ -13,7 +13,7 @@ fn engine_with_corpus() -> Engine {
     let engine = Engine::new();
     engine
         .sql(
-            "CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, body TEXT)",
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, body TEXT, status TEXT)",
             &[],
         )
         .unwrap();
@@ -25,12 +25,12 @@ fn engine_with_corpus() -> Engine {
         .unwrap();
     engine
         .sql(
-            "INSERT INTO docs (id, title, body) VALUES \
-             (1, 'rust async story', 'futures tokio and async io in rust'), \
-             (2, 'python web frameworks', 'flask django and python tooling'), \
-             (3, 'rust language guide', 'a deep dive into rust generics'), \
-             (4, 'go concurrency', 'channels and goroutines for go programs'), \
-             (5, 'rust embedded systems', 'rust on no_std targets and async drivers')",
+            "INSERT INTO docs (id, title, body, status) VALUES \
+             (1, 'rust async story', 'futures tokio and async io in rust', 'indexed'), \
+             (2, 'python web frameworks', 'flask django and python tooling', 'draft'), \
+             (3, 'rust language guide', 'a deep dive into rust generics', 'indexed'), \
+             (4, 'go concurrency', 'channels and goroutines for go programs', 'indexed'), \
+             (5, 'rust embedded systems', 'rust on no_std targets and async drivers', 'draft')",
             &[],
         )
         .unwrap();
@@ -63,6 +63,29 @@ fn staged_retrieval_filters_each_subsequent_stage_to_prior_set() {
     assert!(!ids.contains(&3));
     assert!(!ids.contains(&2));
     assert!(!ids.contains(&4));
+}
+
+#[test]
+fn staged_retrieval_combines_with_relational_filter() {
+    let engine = engine_with_corpus();
+    let result = engine
+        .sql(
+            "SELECT id FROM docs \
+             WHERE staged_retrieval(title, 'rust', 4, body, 'async', 5) \
+               AND status = 'indexed' \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .filter_map(|r| match r.get("id") {
+            Some(Value::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1]);
 }
 
 #[test]

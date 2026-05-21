@@ -87,10 +87,13 @@ fn save_load_drop_round_trips_through_engine() {
 fn deep_predict_sql_function_returns_per_doc_scores() {
     let engine = Engine::new();
     engine
-        .sql("CREATE TABLE seeds (id INTEGER PRIMARY KEY)", &[])
+        .sql(
+            "CREATE TABLE seeds (id INTEGER PRIMARY KEY, status TEXT)",
+            &[],
+        )
         .unwrap();
     engine
-        .sql("INSERT INTO seeds (id) VALUES (1)", &[])
+        .sql("INSERT INTO seeds (id, status) VALUES (1, 'indexed')", &[])
         .unwrap();
     let model = linear_classifier_model();
     engine.save_model("clf", &model).unwrap();
@@ -112,6 +115,38 @@ fn deep_predict_sql_function_returns_per_doc_scores() {
         _ => panic!("missing _score"),
     };
     assert!(score > 0.5, "{score}");
+}
+
+#[test]
+fn deep_predict_combines_with_relational_filter() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE seeds (id INTEGER PRIMARY KEY, status TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO seeds (id, status) VALUES (1, 'indexed'), (2, 'draft')",
+            &[],
+        )
+        .unwrap();
+    let model = linear_classifier_model();
+    engine.save_model("clf", &model).unwrap();
+
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM seeds WHERE deep_predict('clf') AND status = 'indexed'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    let id = match result.rows[0].get("id") {
+        Some(Value::Int(n)) => *n,
+        _ => panic!("missing id"),
+    };
+    assert_eq!(id, 1);
 }
 
 #[test]

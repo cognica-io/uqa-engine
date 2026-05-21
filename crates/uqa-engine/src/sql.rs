@@ -3245,7 +3245,7 @@ fn run_single_table_select(
             Some(Expr::Func { name, args, .. }) if uqa_sql::registry::is_registered(name) => {
                 execute_function(engine, table, name, args, params)?
             }
-            Some(filter_expr) => filter_table_rows(engine, table, filter_expr, params)?,
+            Some(filter_expr) => execute_mixed_where(engine, table, filter_expr, params)?,
         }
     };
 
@@ -7164,6 +7164,99 @@ fn filter_table_rows(
     Ok(out)
 }
 
+fn execute_mixed_where(
+    engine: &Engine,
+    table: &str,
+    filter: &Expr,
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let mut rows = execute_mixed_where_expr(engine, table, filter, params)?;
+    rows.sort_by_key(|e| e.doc_id);
+    Ok(rows)
+}
+
+fn execute_mixed_where_expr(
+    engine: &Engine,
+    table: &str,
+    filter: &Expr,
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    match filter {
+        Expr::And(parts) => {
+            let mut iter = parts.iter();
+            let Some(first) = iter.next() else {
+                return Ok(all_table_rows(engine, table));
+            };
+            let mut out = execute_mixed_where_expr(engine, table, first, params)?;
+            for part in iter {
+                let rhs = execute_mixed_where_expr(engine, table, part, params)?;
+                out = intersect_scored(out, rhs);
+            }
+            Ok(out)
+        }
+        Expr::Or(parts) => {
+            let mut out = Vec::new();
+            for part in parts {
+                out = union_scored(out, execute_mixed_where_expr(engine, table, part, params)?);
+            }
+            Ok(out)
+        }
+        Expr::Not(inner) => Ok(complement_scored(
+            engine,
+            table,
+            execute_mixed_where_expr(engine, table, inner, params)?,
+        )),
+        Expr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
+            execute_function(engine, table, name, args, params)
+        }
+        other => filter_table_rows(engine, table, other, params),
+    }
+}
+
+fn all_table_rows(engine: &Engine, table: &str) -> Vec<ScoredEntry> {
+    engine
+        .table_doc_ids(table)
+        .into_iter()
+        .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
+        .collect()
+}
+
+fn intersect_scored(left: Vec<ScoredEntry>, right: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
+    let right_scores: BTreeMap<DocId, f64> =
+        right.into_iter().map(|e| (e.doc_id, e.score)).collect();
+    let mut out = Vec::new();
+    for entry in left {
+        if let Some(rhs) = right_scores.get(&entry.doc_id) {
+            out.push(ScoredEntry {
+                doc_id: entry.doc_id,
+                score: entry.score + rhs,
+            });
+        }
+    }
+    out
+}
+
+fn union_scored(left: Vec<ScoredEntry>, right: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
+    let mut scores: BTreeMap<DocId, f64> = BTreeMap::new();
+    for entry in left.into_iter().chain(right) {
+        *scores.entry(entry.doc_id).or_insert(0.0) += entry.score;
+    }
+    scores
+        .into_iter()
+        .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+        .collect()
+}
+
+fn complement_scored(engine: &Engine, table: &str, rows: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
+    let excluded: BTreeSet<DocId> = rows.into_iter().map(|e| e.doc_id).collect();
+    engine
+        .table_doc_ids(table)
+        .into_iter()
+        .filter(|doc_id| !excluded.contains(doc_id))
+        .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
+        .collect()
+}
+
 fn has_aggregate(projections: &[Projection]) -> bool {
     projections.iter().any(|p| is_aggregate(&p.expr))
 }
@@ -7992,6 +8085,9 @@ fn execute_function(
         }
         FunctionKind::SparseThreshold => run_sparse_threshold(engine, table, args, params),
         FunctionKind::KNNMatch => run_knn_match(engine, table, args, params),
+        FunctionKind::CalibratedVectorMatch => {
+            run_calibrated_vector_match(engine, table, args, params)
+        }
         FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
         FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
         FunctionKind::GraphHits => run_graph_hits(engine, args, params),
@@ -8016,7 +8112,6 @@ fn execute_function(
         }
         FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
-        | FunctionKind::CalibratedVectorMatch
         | FunctionKind::ScoreBM25
         | FunctionKind::ScoreBayesianBM25
         | FunctionKind::DeepLearn
@@ -8779,6 +8874,24 @@ pub(crate) fn run_knn_match_public(
     run_knn_match(engine, table, args, params)
 }
 
+pub(crate) fn run_bayesian_match_with_prior_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_bayesian_match_with_prior(engine, table, args, params)
+}
+
+pub(crate) fn run_calibrated_vector_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_calibrated_vector_match(engine, table, args, params)
+}
+
 fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLError> {
     let max_u32_as_i64: i64 = i64::from(u32::MAX);
     match eval(expr, ctx)? {
@@ -8981,6 +9094,9 @@ fn run_scored_signal(
             run_bayesian_match_with_prior(engine, table, inner, params)
         }
         FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params),
+        FunctionKind::CalibratedVectorMatch => {
+            run_calibrated_vector_match(engine, table, inner, params)
+        }
         _ => Err(SQLError::Unsupported(format!(
             "function {name} cannot be nested under {parent}"
         ))),
@@ -9025,6 +9141,9 @@ fn run_attention_fusion(
                 run_bayesian_match_with_prior(engine, table, inner, params)?
             }
             FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
+            FunctionKind::CalibratedVectorMatch => {
+                run_calibrated_vector_match(engine, table, inner, params)?
+            }
             _ => {
                 return Err(SQLError::Unsupported(format!(
                     "function {name} cannot be nested under fuse_attention"
@@ -9090,6 +9209,9 @@ fn run_sparse_threshold(
             run_bayesian_match_with_prior(engine, table, inner, params)?
         }
         FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
+        FunctionKind::CalibratedVectorMatch => {
+            run_calibrated_vector_match(engine, table, inner, params)?
+        }
         _ => {
             return Err(SQLError::Unsupported(format!(
                 "function {name} cannot be nested under sparse_threshold"
@@ -9129,6 +9251,60 @@ fn run_knn_match(
     let query_vector = value_to_vector(&vec_value)?;
     let k = expect_usize(&args[2], "knn_match.k", &ctx)?;
     Ok(engine.knn_search(table, &field, query_vector, k))
+}
+
+fn run_calibrated_vector_match(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    if !(3..=4).contains(&args.len()) {
+        return Err(SQLError::BadArity {
+            name: "calibrated_vector_match".into(),
+            expected: "3..=4".into(),
+            actual: args.len(),
+        });
+    }
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let field = expect_field_name_or_string(&args[0], "calibrated_vector_match.field", &ctx)?;
+    let query_vector = value_to_vector(&eval(&args[1], &ctx)?)?;
+    let k = expect_usize(&args[2], "calibrated_vector_match.k", &ctx)?;
+    let threshold = if let Some(arg) = args.get(3) {
+        Some(expect_f64_value(
+            arg,
+            "calibrated_vector_match.threshold",
+            &ctx,
+        )?)
+    } else {
+        None
+    };
+    let Some((ctx, _)) = engine.snapshot_context(table) else {
+        return Ok(Vec::new());
+    };
+    use uqa_operators::base::Operator;
+    let op = uqa_operators::CalibratedVectorOperator::new(query_vector, k, field);
+    let pl = op.execute(&ctx);
+    let mut out: Vec<ScoredEntry> = pl
+        .iter()
+        .filter_map(|entry| {
+            let score = entry.payload.score;
+            if threshold.is_some_and(|t| score < t) {
+                return None;
+            }
+            Some(ScoredEntry {
+                doc_id: entry.doc_id,
+                score,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.doc_id.cmp(&b.doc_id))
+    });
+    Ok(out)
 }
 
 fn run_fuse_log_odds(
@@ -9186,6 +9362,9 @@ fn run_fuse_log_odds(
                         }
                         run_knn_match(engine, table, inner, params)?
                     }
+                    FunctionKind::CalibratedVectorMatch => {
+                        run_calibrated_vector_match(engine, table, inner, params)?
+                    }
                     FunctionKind::FuseLogOdds => {
                         return Err(SQLError::Unsupported(
                             "nested fuse_log_odds is not supported".into(),
@@ -9209,7 +9388,6 @@ fn run_fuse_log_odds(
                     | FunctionKind::GraphEdges
                     | FunctionKind::AttentionFusion
                     | FunctionKind::LearnedFusion
-                    | FunctionKind::CalibratedVectorMatch
                     | FunctionKind::ScoreBM25
                     | FunctionKind::ScoreBayesianBM25
                     | FunctionKind::SparseThreshold
@@ -9279,9 +9457,22 @@ fn run_fuse_log_odds(
 fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SQLError> {
     match expr {
         Expr::Column(name) => Ok(name.clone()),
+        Expr::QualifiedColumn { column, .. } => Ok(column.clone()),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be a column reference, got {other:?}"
         ))),
+    }
+}
+
+fn expect_field_name_or_string(
+    expr: &Expr,
+    label: &str,
+    ctx: &EvalContext<'_>,
+) -> Result<String, SQLError> {
+    match expr {
+        Expr::Column(name) => Ok(name.clone()),
+        Expr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        _ => expect_string(expr, label, ctx),
     }
 }
 

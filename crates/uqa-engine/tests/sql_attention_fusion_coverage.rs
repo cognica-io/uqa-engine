@@ -12,7 +12,10 @@ use uqa_engine::Engine;
 fn engine() -> Engine {
     let engine = Engine::new();
     engine
-        .sql("CREATE TABLE docs (title TEXT, body TEXT)", &[])
+        .sql(
+            "CREATE TABLE docs (title TEXT, body TEXT, status TEXT)",
+            &[],
+        )
         .unwrap();
     engine
         .sql(
@@ -22,10 +25,10 @@ fn engine() -> Engine {
         .unwrap();
     engine
         .sql(
-            "INSERT INTO docs (title, body) VALUES \
-             ('machine learning basics', 'deep neural networks for classification'), \
-             ('database systems intro', 'query optimization techniques overview'), \
-             ('information retrieval', 'search engine ranking algorithms today')",
+            "INSERT INTO docs (title, body, status) VALUES \
+             ('machine learning basics', 'deep neural networks for classification', 'indexed'), \
+             ('database systems intro', 'query optimization techniques overview', 'draft'), \
+             ('information retrieval', 'search engine ranking algorithms today', 'indexed')",
             &[],
         )
         .unwrap();
@@ -53,6 +56,22 @@ fn test_fuse_attention_sql() {
             &[],
         )
         .unwrap();
+    assert_nonempty_unit_scores(&result);
+}
+
+#[test]
+fn fuse_attention_combines_with_relational_filter() {
+    let engine = engine();
+    let result = engine
+        .sql(
+            "SELECT title, _score FROM docs WHERE fuse_attention(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'neural')) \
+             AND status = 'indexed' ORDER BY title",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
     assert_nonempty_unit_scores(&result);
 }
 
@@ -127,6 +146,22 @@ fn test_fuse_learned_with_alpha() {
             &[],
         )
         .unwrap();
+    assert_nonempty_unit_scores(&result);
+}
+
+#[test]
+fn fuse_learned_combines_with_relational_filter() {
+    let engine = engine();
+    let result = engine
+        .sql(
+            "SELECT title, _score FROM docs WHERE fuse_learned(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'neural')) \
+             AND status = 'indexed' ORDER BY title",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
     assert_nonempty_unit_scores(&result);
 }
 
