@@ -24,15 +24,23 @@ use crate::sqlite::connection::{ManagedConnection, Result};
 /// Bump this every time a migration is added.
 pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
+fn quote_sql_identifier(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 pub struct Catalog {
     conn: ManagedConnection,
+    fts_storage_was_reset: bool,
 }
 
 impl Catalog {
     /// Open (or create) the catalog and run any pending migrations.
     pub fn open(conn: ManagedConnection) -> Result<Self> {
-        let cat = Self { conn };
-        cat.run_migrations()?;
+        let mut cat = Self {
+            conn,
+            fts_storage_was_reset: false,
+        };
+        cat.fts_storage_was_reset = cat.run_migrations()?;
         Ok(cat)
     }
 
@@ -40,7 +48,7 @@ impl Catalog {
         self.conn.clone()
     }
 
-    fn run_migrations(&self) -> Result<()> {
+    fn run_migrations(&self) -> Result<bool> {
         self.conn.with_mut(|conn| {
             // Older catalogs (pre-v7) used the table name `_meta`. v7
             // renames it to `_metadata`; promote the legacy table before
@@ -89,8 +97,94 @@ impl Catalog {
                 }
             }
             Self::ensure_column_stats_shape(conn)?;
-            Ok(())
+            let fts_storage_was_reset = Self::ensure_fts_storage_shape(conn)?;
+            Ok(fts_storage_was_reset)
         })
+    }
+
+    fn ensure_fts_storage_shape(conn: &rusqlite::Connection) -> Result<bool> {
+        let doc_lengths = Self::table_columns(conn, "_doc_lengths")?;
+        let postings = Self::table_columns(conn, "_postings")?;
+        let doc_lengths_ok = doc_lengths
+            .as_ref()
+            .is_some_and(|cols| cols.contains_key("field") && cols.contains_key("length"));
+        let postings_ok = postings.as_ref().is_some_and(|cols| {
+            cols.get("positions")
+                .is_some_and(|ty| ty.eq_ignore_ascii_case("BLOB"))
+        });
+        if doc_lengths_ok && postings_ok {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS _field_stats (
+                    table_name   TEXT NOT NULL,
+                    field        TEXT NOT NULL,
+                    total_length INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (table_name, field)
+                );",
+            )?;
+            return Ok(false);
+        }
+
+        conn.execute_batch(
+            "
+            DROP TABLE IF EXISTS _postings;
+            DROP TABLE IF EXISTS _doc_lengths;
+            DROP TABLE IF EXISTS _field_stats;
+
+            CREATE TABLE IF NOT EXISTS _postings (
+                table_name TEXT NOT NULL,
+                field      TEXT NOT NULL,
+                term       TEXT NOT NULL,
+                doc_id     INTEGER NOT NULL,
+                positions  BLOB NOT NULL,
+                PRIMARY KEY (table_name, field, term, doc_id)
+            );
+            CREATE INDEX IF NOT EXISTS _postings_term_idx
+                ON _postings (table_name, field, term);
+            CREATE INDEX IF NOT EXISTS _postings_doc_idx
+                ON _postings (table_name, doc_id);
+
+            CREATE TABLE IF NOT EXISTS _doc_lengths (
+                table_name TEXT NOT NULL,
+                doc_id     INTEGER NOT NULL,
+                field      TEXT NOT NULL,
+                length     INTEGER NOT NULL,
+                PRIMARY KEY (table_name, doc_id, field)
+            );
+
+            CREATE TABLE IF NOT EXISTS _field_stats (
+                table_name   TEXT NOT NULL,
+                field        TEXT NOT NULL,
+                total_length INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (table_name, field)
+            );
+            ",
+        )?;
+        Ok(true)
+    }
+
+    fn table_columns(
+        conn: &rusqlite::Connection,
+        table_name: &str,
+    ) -> Result<Option<std::collections::BTreeMap<String, String>>> {
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+            params![table_name],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        if !exists {
+            return Ok(None);
+        }
+        let mut stmt = conn.prepare(&format!(
+            "PRAGMA table_info({})",
+            quote_sql_identifier(table_name)
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        let mut out = std::collections::BTreeMap::new();
+        for row in rows {
+            let (name, ty) = row?;
+            out.insert(name, ty);
+        }
+        Ok(Some(out))
     }
 
     fn ensure_column_stats_shape(conn: &rusqlite::Connection) -> Result<()> {
@@ -980,6 +1074,10 @@ impl CatalogFacade for Catalog {
 
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>> {
         into_storage_result(Catalog::get_metadata(self, key))
+    }
+
+    fn fts_storage_was_reset(&self) -> bool {
+        self.fts_storage_was_reset
     }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {

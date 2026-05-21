@@ -591,7 +591,7 @@ impl Engine {
         if matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field)
         {
-            Self::rebuild_fts_index(&t);
+            Self::rebuild_fts_index(&t)?;
         }
         Ok(())
     }
@@ -1259,6 +1259,11 @@ impl Engine {
                     .map(|(_, v)| v.as_str());
                 for col in &columns {
                     let _ = self.restore_fts_field_from_catalog(&row.table_name, col, analyzer);
+                }
+                if catalog.fts_storage_was_reset() {
+                    if let Some(table) = self.table(&row.table_name) {
+                        Self::rebuild_fts_index(&table).map_err(StorageBackendError::Other)?;
+                    }
                 }
             } else if row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw")
@@ -2191,14 +2196,14 @@ impl Engine {
         out
     }
 
-    fn rebuild_fts_index(t: &Arc<TableState>) {
+    fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
         let fts_fields = t.fts_fields();
         let docs: Vec<(DocId, Document)> = {
             let store = t.document_store.read();
             store.iter_all().collect()
         };
         let mut index = t.inverted_index.write();
-        index.clear();
+        index.try_clear()?;
         for (doc_id, document) in docs {
             let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
             for field in &fts_fields {
@@ -2207,9 +2212,10 @@ impl Engine {
                 }
             }
             if !text_fields.is_empty() {
-                index.add_document(doc_id, text_fields);
+                index.try_add_document(doc_id, text_fields)?;
             }
         }
+        Ok(())
     }
 
     pub fn add_document(&self, table: &str, doc_id: DocId, document: Document) {
@@ -3373,7 +3379,7 @@ impl Engine {
                 fts.push(field);
             }
         }
-        Self::rebuild_fts_index(&t);
+        Self::rebuild_fts_index(&t)?;
         if self.is_persistent() {
             self.save_table_schema(table, &t);
         }

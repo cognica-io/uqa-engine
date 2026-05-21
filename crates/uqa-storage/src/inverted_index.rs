@@ -52,9 +52,28 @@ pub trait InvertedIndex: Send + Sync {
 
     fn add_document(&mut self, doc_id: DocId, fields: BTreeMap<FieldName, String>);
 
+    fn try_add_document(
+        &mut self,
+        doc_id: DocId,
+        fields: BTreeMap<FieldName, String>,
+    ) -> Result<(), String> {
+        self.add_document(doc_id, fields);
+        Ok(())
+    }
+
     fn remove_document(&mut self, doc_id: DocId);
 
+    fn try_remove_document(&mut self, doc_id: DocId) -> Result<(), String> {
+        self.remove_document(doc_id);
+        Ok(())
+    }
+
     fn clear(&mut self);
+
+    fn try_clear(&mut self) -> Result<(), String> {
+        self.clear();
+        Ok(())
+    }
 
     fn get_posting_list(&self, field: &str, term: &str) -> PostingList;
 

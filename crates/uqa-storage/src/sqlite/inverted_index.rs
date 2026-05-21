@@ -474,8 +474,22 @@ impl InvertedIndex for SQLiteInvertedIndex {
         let _ = self.add_document_inner(doc_id, fields);
     }
 
+    fn try_add_document(
+        &mut self,
+        doc_id: DocId,
+        fields: BTreeMap<FieldName, String>,
+    ) -> Result<(), String> {
+        self.add_document_inner(doc_id, fields)
+            .map_err(|err| err.to_string())
+    }
+
     fn remove_document(&mut self, doc_id: DocId) {
         let _ = self.remove_document_inner(doc_id);
+    }
+
+    fn try_remove_document(&mut self, doc_id: DocId) -> Result<(), String> {
+        self.remove_document_inner(doc_id)
+            .map_err(|err| err.to_string())
     }
 
     fn clear(&mut self) {
@@ -494,6 +508,26 @@ impl InvertedIndex for SQLiteInvertedIndex {
             )?;
             Ok(())
         });
+    }
+
+    fn try_clear(&mut self) -> Result<(), String> {
+        self.conn
+            .with(|c| {
+                c.execute(
+                    "DELETE FROM _postings WHERE table_name = ?1",
+                    params![self.table],
+                )?;
+                c.execute(
+                    "DELETE FROM _doc_lengths WHERE table_name = ?1",
+                    params![self.table],
+                )?;
+                c.execute(
+                    "DELETE FROM _field_stats WHERE table_name = ?1",
+                    params![self.table],
+                )?;
+                Ok(())
+            })
+            .map_err(|err| err.to_string())
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> PostingList {

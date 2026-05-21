@@ -124,6 +124,9 @@ pub struct ColumnStatsRow {
 pub trait CatalogFacade: Send + Sync {
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
+    fn fts_storage_was_reset(&self) -> bool {
+        false
+    }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()>;
     fn load_tables(&self) -> StorageBackendResult<Vec<TableSchema>>;
