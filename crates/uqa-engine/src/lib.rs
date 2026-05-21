@@ -4005,6 +4005,102 @@ mod tests {
             .into()
     }
 
+    #[derive(Clone)]
+    struct StoreWithMissingDocId {
+        docs: BTreeMap<DocId, Document>,
+        missing_doc_id: DocId,
+    }
+
+    impl StoreWithMissingDocId {
+        fn from_table(engine: &Engine, table: &str, missing_doc_id: DocId) -> Self {
+            let table = engine.table(table).expect("table");
+            let docs = table.document_store.read().iter_all().collect();
+            Self {
+                docs,
+                missing_doc_id,
+            }
+        }
+    }
+
+    impl DocumentStore for StoreWithMissingDocId {
+        fn put(&mut self, doc_id: DocId, document: Document) {
+            self.docs.insert(doc_id, document);
+        }
+
+        fn get(&self, doc_id: DocId) -> Option<Document> {
+            self.docs.get(&doc_id).cloned()
+        }
+
+        fn delete(&mut self, doc_id: DocId) {
+            self.docs.remove(&doc_id);
+        }
+
+        fn clear(&mut self) {
+            self.docs.clear();
+        }
+
+        fn doc_ids(&self) -> Vec<DocId> {
+            let mut ids = vec![self.missing_doc_id];
+            ids.extend(self.docs.keys().copied());
+            ids
+        }
+
+        fn len(&self) -> usize {
+            self.docs.len() + 1
+        }
+
+        fn snapshot(&self) -> Arc<dyn DocumentStore> {
+            Arc::new(self.clone())
+        }
+    }
+
+    #[test]
+    fn sql_update_skips_stale_document_ids() {
+        let eng = Engine::new();
+        eng.sql(
+            "CREATE TABLE docs (
+               id INTEGER PRIMARY KEY,
+               status TEXT,
+               title TEXT,
+               content TEXT
+             )",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX docs_fts ON docs USING gin (title, content)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO docs (id, status, title, content)
+             VALUES (1, 'queued', 'Runtime search', 'old content'),
+                    (2, 'indexed', 'Other', 'other content')",
+            &[],
+        )
+        .unwrap();
+        {
+            let table = eng.table("docs").expect("table");
+            *table.document_store.write() =
+                Box::new(StoreWithMissingDocId::from_table(&eng, "docs", 99));
+        }
+
+        let result = eng
+            .sql(
+                "UPDATE docs
+                    SET content = 'updated content',
+                        status = 'indexed'
+                  WHERE id = 1 AND status = 'queued'",
+                &[],
+            )
+            .unwrap();
+
+        assert_eq!(result.affected_rows, 1);
+        let doc = eng.get_document("docs", 1).unwrap();
+        assert_eq!(doc.get("content"), Some(&s("updated content")));
+        assert_eq!(doc.get("status"), Some(&s("indexed")));
+    }
+
     #[test]
     fn persistent_engine_restores_through_facade_traits() {
         let dir = tempfile::tempdir().unwrap();

@@ -1113,9 +1113,9 @@ fn run_update_inner(
     let cancel = engine.cancellation_token();
     for doc_id in engine.table_doc_ids(&stmt.table) {
         cancel.check()?;
-        let mut doc = engine
-            .get_document(&stmt.table, doc_id)
-            .ok_or_else(|| SQLError::Internal("missing document during UPDATE".into()))?;
+        let Some(mut doc) = engine.get_document(&stmt.table, doc_id) else {
+            continue;
+        };
         let original_doc = doc.clone();
         if let Some(filter) = stmt.r#where.as_ref() {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
@@ -1607,9 +1607,9 @@ fn run_update_from(
     let target_doc_ids = engine.table_doc_ids(&target);
     for doc_id in target_doc_ids {
         cancel.check()?;
-        let mut doc = engine
-            .get_document(&target, doc_id)
-            .ok_or_else(|| SQLError::Internal("missing document during UPDATE FROM".into()))?;
+        let Some(mut doc) = engine.get_document(&target, doc_id) else {
+            continue;
+        };
         let original_doc = doc.clone();
         let mut applied = false;
         for from_row in &from_rows {
