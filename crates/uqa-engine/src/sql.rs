@@ -1180,6 +1180,12 @@ fn try_run_point_update(
     if !can_patch_update_without_full_row(engine, &stmt.table, &updates) {
         return Ok(None);
     }
+    if matches!(lookup_value, Value::Null) {
+        return Ok(Some(SQLResult::from_affected(0)));
+    }
+    if !point_lookup_field_is_unique(engine, &stmt.table, &lookup_field) {
+        return Ok(None);
+    }
     let Some(doc_id) = engine.find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)
     else {
         return Ok(Some(SQLResult::from_affected(0)));
@@ -1333,6 +1339,14 @@ fn can_patch_update_without_full_row(
         return false;
     }
     true
+}
+
+fn point_lookup_field_is_unique(engine: &Engine, table: &str, lookup_field: &str) -> bool {
+    engine
+        .describe_table(table)
+        .unwrap_or_default()
+        .iter()
+        .any(|column| column.name == lookup_field && (column.primary_key || column.unique))
 }
 
 fn validate_document_constraints(

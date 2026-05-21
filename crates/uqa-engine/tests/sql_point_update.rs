@@ -19,7 +19,7 @@ fn sqlite_point_update_by_public_id_preserves_unmodified_vector_field() {
             .sql(
                 "CREATE TABLE messages (\
                  id INTEGER PRIMARY KEY, \
-                 public_id TEXT, \
+                 public_id TEXT UNIQUE, \
                  content TEXT, \
                  token_count INTEGER, \
                  embedding VECTOR(2))",

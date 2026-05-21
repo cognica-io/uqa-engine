@@ -125,6 +125,152 @@ fn engine_runs_text_and_vector_workloads_on_sqlite_key_value_storage() {
 }
 
 #[test]
+fn update_to_fts_column_refreshes_sqlite_key_value_postings() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-update.sqlite3");
+
+    {
+        let engine = open_key_value_engine(&path);
+        engine
+            .sql(
+                "CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY,
+                    public_id TEXT UNIQUE,
+                    content TEXT
+                )",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX messages_content_gin ON messages USING gin (content)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO messages (id, public_id, content) VALUES
+                 (1, 'm-1', 'old alpha'),
+                 (2, 'm-2', 'old beta')",
+                &[],
+            )
+            .unwrap();
+
+        let updated = engine
+            .sql(
+                "UPDATE messages SET content = 'new gamma' WHERE public_id = 'm-2'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(updated.affected_rows, 1);
+
+        let old_hits = engine
+            .sql(
+                "SELECT id FROM messages WHERE text_match(content, 'beta') ORDER BY id",
+                &[],
+            )
+            .unwrap();
+        assert!(old_hits.rows.is_empty());
+        let new_hits = engine
+            .sql(
+                "SELECT public_id FROM messages WHERE text_match(content, 'gamma')",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(new_hits.rows.len(), 1);
+        assert_eq!(
+            new_hits.rows[0].get("public_id"),
+            Some(&Value::Str("m-2".into()))
+        );
+    }
+
+    let reopened = open_key_value_engine(&path);
+    let old_hits = reopened
+        .sql(
+            "SELECT id FROM messages WHERE text_match(content, 'beta') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert!(old_hits.rows.is_empty());
+    let new_hits = reopened
+        .sql(
+            "SELECT public_id FROM messages WHERE text_match(content, 'gamma')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(new_hits.rows.len(), 1);
+    assert_eq!(
+        new_hits.rows[0].get("public_id"),
+        Some(&Value::Str("m-2".into()))
+    );
+}
+
+#[test]
+fn update_to_fts_column_refreshes_all_non_unique_matches() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-update-many.sqlite3");
+    let engine = open_key_value_engine(&path);
+    engine
+        .sql(
+            "CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                room TEXT,
+                content TEXT
+            )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO messages (id, room, content) VALUES
+             (1, 'chat', 'old alpha'),
+             (2, 'chat', 'old beta'),
+             (3, 'note', 'old beta')",
+            &[],
+        )
+        .unwrap();
+
+    let updated = engine
+        .sql(
+            "UPDATE messages SET content = 'fresh gamma' WHERE room = 'chat'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.affected_rows, 2);
+
+    let old_chat_hits = engine
+        .sql(
+            "SELECT id FROM messages
+             WHERE text_match(content, 'old') AND room = 'chat'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert!(old_chat_hits.rows.is_empty());
+    let new_hits = engine
+        .sql(
+            "SELECT id FROM messages WHERE text_match(content, 'gamma') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = new_hits
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(Value::Int(id)) => *id,
+            other => panic!("expected integer id, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 2]);
+}
+
+#[test]
 fn sql_golden_fixture_passes_on_sqlite_key_value_storage() {
     let fixture = load_fixture();
     let dir = tempdir().unwrap();
