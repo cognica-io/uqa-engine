@@ -13,6 +13,9 @@ env:
   # test output, not local debugging sections.
   CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_PROFILE_BENCH_DEBUG: "0"
+  # Keep CI artifacts compact; incremental state is useful locally but bloats
+  # GitHub-hosted runners during workspace-wide test / bench builds.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   fmt:
@@ -40,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -59,6 +63,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo test --workspace --all-targets --locked
 
   build-release:
@@ -74,6 +79,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo build --workspace --release --locked
 
   doc:
@@ -87,6 +93,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-targets: false
       - run: cargo doc --workspace --no-deps --locked
 
   deny:
@@ -108,4 +115,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-targets: false
       - run: cargo bench --workspace --no-run --locked
