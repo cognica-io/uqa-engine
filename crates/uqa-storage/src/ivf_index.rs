@@ -38,7 +38,7 @@ use crate::vector_index::{cosine_similarity, VectorIndex};
 const DEFAULT_NLIST: usize = 100;
 const DEFAULT_NPROBE: usize = 10;
 const DEFAULT_TRAIN_THRESHOLD: usize = 256;
-/// Stale fraction: when the count of deleted-since-last-train rows
+/// Stale fraction: when the count of deleted-since-last-train vectors
 /// exceeds 20% of trained corpus size, the next query forces a
 /// retrain.
 const STALE_FRACTION: f64 = 0.20;
@@ -117,7 +117,7 @@ impl IVFIndex {
             dimensions,
             nlist: nlist.max(1),
             nprobe: Mutex::new(nprobe.max(1)),
-            train_threshold: train_threshold.max(nlist.max(1)),
+            train_threshold: train_threshold.max(1),
             state: Mutex::new(IVFState::Untrained),
             vectors: Mutex::new(BTreeMap::new()),
             centroids: Mutex::new(Vec::new()),
@@ -589,6 +589,15 @@ mod tests {
             idx.add(i, rand_vec(i + 1, 4));
         }
         assert_eq!(idx.state(), IVFState::Trained);
+    }
+
+    #[test]
+    fn auto_train_threshold_counts_tensor_vectors_below_nlist() {
+        let mut idx = IVFIndex::with_params(2, 4, 4, 2);
+        idx.add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
+        assert_eq!(idx.state(), IVFState::Trained);
+        assert_eq!(idx.metadata_snapshot().trained_size, 2);
+        assert_eq!(idx.metadata_snapshot().vector_count, 2);
     }
 
     #[test]

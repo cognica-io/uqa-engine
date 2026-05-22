@@ -10,6 +10,8 @@ use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};
 
+use rusqlite::Connection;
+
 fn int_column(row: &uqa_sql::ResultRow, column: &str) -> i64 {
     match row.get(column) {
         Some(Value::Int(value)) => *value,
@@ -70,6 +72,60 @@ fn tensor_ivf_knn_scores_best_chunk_per_row() {
     );
     assert!((float_column(&result.rows[0], "_score") - 1.0).abs() < 1e-6);
     assert!(float_column(&result.rows[1], "_score") < 1.0);
+}
+
+#[test]
+fn tensor_ivf_backfill_trains_on_all_chunk_vectors_not_tensor_rows() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("tensor-threshold.db");
+    {
+        let engine = Engine::open(&db).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE docs (id INTEGER PRIMARY KEY, chunks TENSOR(2))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO docs (id, chunks) VALUES \
+                 (1, ARRAY[ARRAY[1.0, 0.0], ARRAY[0.0, 1.0]])",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX docs_chunks_ivf ON docs USING ivf (chunks) \
+                 WITH (lists = 4, probes = 4, train_threshold = 2)",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let conn = Connection::open(&db).unwrap();
+    let (state, trained_size, vector_count, train_threshold): (String, i64, i64, i64) = conn
+        .query_row(
+            "SELECT state, trained_size, vector_count, train_threshold
+               FROM _ivf_indexes
+              WHERE table_name = 'docs' AND field = 'chunks'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "trained");
+    assert_eq!(trained_size, 2);
+    assert_eq!(vector_count, 2);
+    assert_eq!(train_threshold, 2);
+    let assignments: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+               FROM _ivf_assignments
+              WHERE table_name = 'docs' AND field = 'chunks'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(assignments, 2);
 }
 
 #[test]

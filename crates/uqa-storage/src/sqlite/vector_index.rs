@@ -288,7 +288,7 @@ impl SQLiteIVFParams {
         Self {
             nlist,
             nprobe: nprobe.max(1),
-            train_threshold: train_threshold.max(nlist),
+            train_threshold: train_threshold.max(1),
         }
     }
 }
