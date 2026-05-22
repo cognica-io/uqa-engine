@@ -35,6 +35,112 @@ fn int_col(row: &uqa_sql::ResultRow, name: &str) -> i64 {
     }
 }
 
+fn create_notes_gin_fixture(db: &Path) {
+    let eng = Engine::open(db).unwrap();
+    eng.sql(
+        "CREATE TABLE notes (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO notes (id, title, content, status) VALUES
+         ('note:a', 'Local Learning', 'Bayesian local learning notes', 'indexed'),
+         ('note:b', 'Runtime Systems', 'Executor implementation notes', 'indexed')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE INDEX notes_search_gin ON notes USING gin (title, content)
+         WITH (analyzer = 'standard_cjk')",
+        &[],
+    )
+    .unwrap();
+}
+
+fn rewrite_fts_tables_to_legacy_shape(db: &Path) {
+    let conn = ManagedConnection::open(db).unwrap();
+    conn.with(|c| {
+        c.execute("DROP TABLE _postings", [])?;
+        c.execute("DROP TABLE _doc_lengths", [])?;
+        c.execute("DROP TABLE _field_stats", [])?;
+        c.execute(
+            "CREATE TABLE _postings (
+                table_name TEXT NOT NULL,
+                field      TEXT NOT NULL,
+                term       TEXT NOT NULL,
+                doc_id     INTEGER NOT NULL,
+                positions  TEXT NOT NULL,
+                PRIMARY KEY (table_name, field, term, doc_id)
+            )",
+            [],
+        )?;
+        c.execute(
+            "CREATE TABLE _doc_lengths (
+                table_name TEXT NOT NULL,
+                doc_id     INTEGER NOT NULL,
+                lengths    TEXT NOT NULL,
+                PRIMARY KEY (table_name, doc_id)
+            )",
+            [],
+        )?;
+        c.execute(
+            "CREATE TABLE _field_stats (
+                table_name   TEXT NOT NULL,
+                field        TEXT NOT NULL,
+                total_length INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (table_name, field)
+            )",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn assert_legacy_gin_reopens_with_restored_index(db: &Path) {
+    let eng = Engine::open(db).unwrap();
+    let stats = eng
+        .sql(
+            "SELECT field, analyzer, doc_length_count
+             FROM fts_index_stats('notes')
+             ORDER BY field",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(stats.rows.len(), 2);
+    for row in &stats.rows {
+        assert_eq!(row["analyzer"], Value::Str("standard_cjk".into()));
+        assert_eq!(int_col(row, "doc_length_count"), 2);
+    }
+
+    let hits = eng
+        .sql(
+            "SELECT id FROM notes
+             WHERE multi_field_match(title, content, 'Learning', 2.0, 1.0)
+               AND status = 'indexed'
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let learning_ids: Vec<String> = hits
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("id") {
+            Some(Value::Str(id)) => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        learning_ids.iter().any(|id| id == "note:a"),
+        "expected note:a in hits, got {learning_ids:?}"
+    );
+}
+
 fn overwrite_document_body(db: &Path, table: &str, doc_id: i64, document: &Document) {
     let body = serde_json::to_string(&document).unwrap();
     let conn = ManagedConnection::open(db).unwrap();
@@ -220,109 +326,9 @@ fn gin_index_backfills_existing_rows_with_text_primary_key() {
 fn catalog_open_upgrades_legacy_fts_storage_shape_before_restoring_gin() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa.db");
-    {
-        let eng = Engine::open(&db).unwrap();
-        eng.sql(
-            "CREATE TABLE notes (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                status TEXT NOT NULL
-            )",
-            &[],
-        )
-        .unwrap();
-        eng.sql(
-            "INSERT INTO notes (id, title, content, status) VALUES
-             ('note:a', 'Local Learning', 'Bayesian local learning notes', 'indexed'),
-             ('note:b', 'Runtime Systems', 'Executor implementation notes', 'indexed')",
-            &[],
-        )
-        .unwrap();
-        eng.sql(
-            "CREATE INDEX notes_search_gin ON notes USING gin (title, content)
-             WITH (analyzer = 'standard_cjk')",
-            &[],
-        )
-        .unwrap();
-    }
-    {
-        let conn = ManagedConnection::open(&db).unwrap();
-        conn.with(|c| {
-            c.execute("DROP TABLE _postings", [])?;
-            c.execute("DROP TABLE _doc_lengths", [])?;
-            c.execute("DROP TABLE _field_stats", [])?;
-            c.execute(
-                "CREATE TABLE _postings (
-                    table_name TEXT NOT NULL,
-                    field      TEXT NOT NULL,
-                    term       TEXT NOT NULL,
-                    doc_id     INTEGER NOT NULL,
-                    positions  TEXT NOT NULL,
-                    PRIMARY KEY (table_name, field, term, doc_id)
-                )",
-                [],
-            )?;
-            c.execute(
-                "CREATE TABLE _doc_lengths (
-                    table_name TEXT NOT NULL,
-                    doc_id     INTEGER NOT NULL,
-                    lengths    TEXT NOT NULL,
-                    PRIMARY KEY (table_name, doc_id)
-                )",
-                [],
-            )?;
-            c.execute(
-                "CREATE TABLE _field_stats (
-                    table_name   TEXT NOT NULL,
-                    field        TEXT NOT NULL,
-                    total_length INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (table_name, field)
-                )",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-    }
-    {
-        let eng = Engine::open(&db).unwrap();
-        let stats = eng
-            .sql(
-                "SELECT field, analyzer, doc_length_count
-                 FROM fts_index_stats('notes')
-                 ORDER BY field",
-                &[],
-            )
-            .unwrap();
-        assert_eq!(stats.rows.len(), 2);
-        for row in &stats.rows {
-            assert_eq!(row["analyzer"], Value::Str("standard_cjk".into()));
-            assert_eq!(int_col(row, "doc_length_count"), 2);
-        }
-
-        let hits = eng
-            .sql(
-                "SELECT id FROM notes
-                 WHERE multi_field_match(title, content, 'Learning', 2.0, 1.0)
-                   AND status = 'indexed'
-                 ORDER BY id",
-                &[],
-            )
-            .unwrap();
-        let learning_ids: Vec<String> = hits
-            .rows
-            .iter()
-            .filter_map(|row| match row.get("id") {
-                Some(Value::Str(id)) => Some(id.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            learning_ids.iter().any(|id| id == "note:a"),
-            "expected note:a in hits, got {learning_ids:?}"
-        );
-    }
+    create_notes_gin_fixture(&db);
+    rewrite_fts_tables_to_legacy_shape(&db);
+    assert_legacy_gin_reopens_with_restored_index(&db);
 }
 
 #[test]

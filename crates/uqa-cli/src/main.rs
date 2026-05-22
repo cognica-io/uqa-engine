@@ -1542,6 +1542,7 @@ fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Timestamp => "timestamp".into(),
         ColumnType::TimestampTz => "timestamp with time zone".into(),
         ColumnType::Vector(dim) => format!("vector({dim})"),
+        ColumnType::Tensor(dim) => format!("tensor({dim})"),
     }
 }
 

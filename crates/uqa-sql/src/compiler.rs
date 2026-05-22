@@ -1155,6 +1155,16 @@ fn compile_pg_type_name(
             let dim = expect_integer_const(arg)? as u32;
             Ok(ColumnType::Vector(dim))
         }
+        "tensor" => {
+            // TENSOR(N): an array of N-dimensional vectors.
+            let Some(arg) = type_name.typmods.first() else {
+                return Err(SQLError::Unsupported(
+                    "TENSOR without dimension is not supported".into(),
+                ));
+            };
+            let dim = expect_integer_const(arg)? as u32;
+            Ok(ColumnType::Tensor(dim))
+        }
         other => Err(SQLError::Unsupported(format!(
             "column `{column_name}` type `{other}` is not supported"
         ))),
@@ -2819,6 +2829,15 @@ mod tests {
         assert!(ct.columns[0].primary_key);
         assert!(matches!(ct.columns[1].ty, ColumnType::Text));
         assert!(matches!(ct.columns[2].ty, ColumnType::Vector(4)));
+    }
+
+    #[test]
+    fn create_table_with_tensor_column() {
+        let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, chunks TENSOR(4))");
+        let Statement::CreateTable(ct) = stmt else {
+            panic!("not CREATE TABLE");
+        };
+        assert!(matches!(ct.columns[1].ty, ColumnType::Tensor(4)));
     }
 
     #[test]

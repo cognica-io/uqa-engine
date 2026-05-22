@@ -22,7 +22,7 @@ use crate::catalog::{
 use crate::sqlite::connection::{ManagedConnection, Result};
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 fn quote_sql_identifier(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
@@ -1632,6 +1632,40 @@ const MIGRATIONS: &[(u32, &str)] = &[
     );
     CREATE INDEX IF NOT EXISTS _ivf_assignments_centroid_idx
         ON _ivf_assignments (table_name, field, centroid_id, doc_id);
+    ",
+    ),
+    (
+        10,
+        r"
+    CREATE TABLE IF NOT EXISTS _vectors_v10 (
+        table_name     TEXT NOT NULL,
+        field          TEXT NOT NULL,
+        doc_id         INTEGER NOT NULL,
+        vector_ordinal INTEGER NOT NULL DEFAULT 0,
+        vector         BLOB NOT NULL,
+        PRIMARY KEY (table_name, field, doc_id, vector_ordinal)
+    );
+    INSERT OR IGNORE INTO _vectors_v10
+        (table_name, field, doc_id, vector_ordinal, vector)
+        SELECT table_name, field, doc_id, 0, vector FROM _vectors;
+    DROP TABLE IF EXISTS _vectors;
+    ALTER TABLE _vectors_v10 RENAME TO _vectors;
+
+    CREATE TABLE IF NOT EXISTS _ivf_assignments_v10 (
+        table_name     TEXT NOT NULL,
+        field          TEXT NOT NULL,
+        doc_id         INTEGER NOT NULL,
+        vector_ordinal INTEGER NOT NULL DEFAULT 0,
+        centroid_id    INTEGER NOT NULL,
+        PRIMARY KEY (table_name, field, doc_id, vector_ordinal)
+    );
+    INSERT OR IGNORE INTO _ivf_assignments_v10
+        (table_name, field, doc_id, vector_ordinal, centroid_id)
+        SELECT table_name, field, doc_id, 0, centroid_id FROM _ivf_assignments;
+    DROP TABLE IF EXISTS _ivf_assignments;
+    ALTER TABLE _ivf_assignments_v10 RENAME TO _ivf_assignments;
+    CREATE INDEX IF NOT EXISTS _ivf_assignments_centroid_idx
+        ON _ivf_assignments (table_name, field, centroid_id, doc_id, vector_ordinal);
     ",
     ),
 ];

@@ -41,22 +41,71 @@ impl SQLiteVectorIndex {
     }
 
     fn load_all(&self) -> SQLiteResult<Vec<(DocId, Vec<f32>)>> {
+        self.load_all_with_ordinals().map(|rows| {
+            rows.into_iter()
+                .map(|(doc_id, _, vector)| (doc_id, vector))
+                .collect()
+        })
+    }
+
+    fn load_all_with_ordinals(&self) -> SQLiteResult<Vec<(DocId, u32, Vec<f32>)>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT doc_id, vector FROM _vectors
+                "SELECT doc_id, vector_ordinal, vector FROM _vectors
                  WHERE table_name = ?1 AND field = ?2
-                 ORDER BY doc_id",
+                 ORDER BY doc_id, vector_ordinal",
             )?;
             let rows = stmt.query_map(params![self.table, self.field], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (doc_id, ordinal, blob) = row?;
+                out.push((
+                    doc_id as DocId,
+                    ordinal.try_into().unwrap_or(0),
+                    blob_to_vector(&blob),
+                ));
+            }
+            Ok(out)
+        })
+    }
+
+    fn load_doc_with_ordinals(&self, doc_id: DocId) -> SQLiteResult<Vec<(u32, Vec<f32>)>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT vector_ordinal, vector FROM _vectors
+                 WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3
+                 ORDER BY vector_ordinal",
+            )?;
+            let rows = stmt.query_map(params![self.table, self.field, doc_id as i64], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (doc_id, blob) = row?;
-                out.push((doc_id as DocId, blob_to_vector(&blob)));
+                let (ordinal, blob) = row?;
+                out.push((ordinal.try_into().unwrap_or(0), blob_to_vector(&blob)));
             }
             Ok(out)
         })
+    }
+
+    fn doc_vector_count(&self, doc_id: DocId) -> usize {
+        self.conn
+            .with(|conn| {
+                let n: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM _vectors
+                      WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
+                    params![self.table, self.field, doc_id as i64],
+                    |r| r.get(0),
+                )?;
+                Ok(n as usize)
+            })
+            .unwrap_or(0)
     }
 }
 
@@ -89,13 +138,39 @@ impl VectorIndex for SQLiteVectorIndex {
             self.dimensions,
             "vector dimension mismatch"
         );
-        let blob = vector_to_blob(&vector);
+        self.add_many(doc_id, vec![vector]);
+    }
+
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) {
+        for vector in &vectors {
+            debug_assert_eq!(
+                vector.len() as u32,
+                self.dimensions,
+                "vector dimension mismatch"
+            );
+        }
         let _ = self.conn.with(|c| {
             c.execute(
-                "INSERT OR REPLACE INTO _vectors (table_name, field, doc_id, vector)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![self.table, self.field, doc_id as i64, blob],
+                "DELETE FROM _vectors
+                 WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
+                params![self.table, self.field, doc_id as i64],
             )?;
+            let mut stmt = c.prepare(
+                "INSERT INTO _vectors (table_name, field, doc_id, vector_ordinal, vector)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (ordinal, vector) in vectors.iter().enumerate() {
+                if vector.len() as u32 != self.dimensions {
+                    continue;
+                }
+                stmt.execute(params![
+                    self.table,
+                    self.field,
+                    doc_id as i64,
+                    ordinal as i64,
+                    vector_to_blob(vector),
+                ])?;
+            }
             Ok(())
         });
     }
@@ -129,10 +204,20 @@ impl VectorIndex for SQLiteVectorIndex {
         if entries.is_empty() {
             return PostingList::new();
         }
-        let mut scored: Vec<(DocId, f32)> = entries
-            .iter()
-            .map(|(doc_id, v)| (*doc_id, cosine_similarity(query, v)))
-            .collect();
+        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+            std::collections::BTreeMap::new();
+        for (doc_id, vector) in &entries {
+            let sim = cosine_similarity(query, vector);
+            best_by_doc
+                .entry(*doc_id)
+                .and_modify(|best| {
+                    if sim > *best {
+                        *best = sim;
+                    }
+                })
+                .or_insert(sim);
+        }
+        let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
         scored.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -149,19 +234,24 @@ impl VectorIndex for SQLiteVectorIndex {
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList {
         let entries = self.load_all().unwrap_or_default();
-        let mut out: Vec<PostingEntry> = entries
-            .iter()
-            .filter_map(|(doc_id, v)| {
-                let sim = cosine_similarity(query, v);
-                if sim >= threshold {
-                    Some(PostingEntry::new(
-                        *doc_id,
-                        Payload::with_score(f64::from(sim)),
-                    ))
-                } else {
-                    None
-                }
-            })
+        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+            std::collections::BTreeMap::new();
+        for (doc_id, vector) in &entries {
+            let sim = cosine_similarity(query, vector);
+            if sim >= threshold {
+                best_by_doc
+                    .entry(*doc_id)
+                    .and_modify(|best| {
+                        if sim > *best {
+                            *best = sim;
+                        }
+                    })
+                    .or_insert(sim);
+            }
+        }
+        let mut out: Vec<PostingEntry> = best_by_doc
+            .into_iter()
+            .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
             .collect();
         out.sort_by_key(|e| e.doc_id);
         PostingList::from_sorted_unchecked(out)
@@ -315,7 +405,7 @@ impl SQLiteIVFIndex {
     }
 
     fn train_metadata(&self) {
-        let entries = self.persistent.load_all().unwrap_or_default();
+        let entries = self.persistent.load_all_with_ordinals().unwrap_or_default();
         if entries.len() < self.params.train_threshold {
             self.clear_metadata_lists();
             self.save_meta_row(IVFState::Untrained, 0, 0, entries.len());
@@ -328,8 +418,17 @@ impl SQLiteIVFIndex {
             self.params.nprobe,
             self.params.train_threshold,
         );
-        for (doc_id, vector) in entries {
-            ivf.add(doc_id, vector);
+        let mut by_doc: std::collections::BTreeMap<DocId, Vec<(u32, Vec<f32>)>> =
+            std::collections::BTreeMap::new();
+        for (doc_id, ordinal, vector) in entries {
+            by_doc.entry(doc_id).or_default().push((ordinal, vector));
+        }
+        for (doc_id, mut vectors) in by_doc {
+            vectors.sort_by_key(|(ordinal, _)| *ordinal);
+            ivf.add_many(
+                doc_id,
+                vectors.into_iter().map(|(_, vector)| vector).collect(),
+            );
         }
         ivf.train();
         self.save_trained_metadata(&ivf.metadata_snapshot());
@@ -387,14 +486,15 @@ impl SQLiteIVFIndex {
             {
                 let mut stmt = tx.prepare(
                     "INSERT INTO _ivf_assignments
-                        (table_name, field, doc_id, centroid_id)
-                     VALUES (?1, ?2, ?3, ?4)",
+                        (table_name, field, doc_id, vector_ordinal, centroid_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                 )?;
-                for (doc_id, centroid_id) in &snapshot.assignments {
+                for (doc_id, vector_ordinal, centroid_id) in &snapshot.assignments {
                     stmt.execute(params![
                         self.persistent.table,
                         self.persistent.field,
                         *doc_id as i64,
+                        i64::from(*vector_ordinal),
                         *centroid_id as i64,
                     ])?;
                 }
@@ -527,6 +627,7 @@ impl SQLiteIVFIndex {
                      ON v.table_name = a.table_name
                     AND v.field = a.field
                     AND v.doc_id = a.doc_id
+                    AND v.vector_ordinal = a.vector_ordinal
                   WHERE a.table_name = ?1
                     AND a.field = ?2
                     AND a.centroid_id = ?3
@@ -550,7 +651,13 @@ impl SQLiteIVFIndex {
         })
     }
 
-    fn assign_existing_centroid(&self, doc_id: DocId, vector: &[f32], meta: &SQLiteIVFMeta) {
+    fn assign_existing_centroid(
+        &self,
+        doc_id: DocId,
+        vector_ordinal: u32,
+        vector: &[f32],
+        meta: &SQLiteIVFMeta,
+    ) {
         if !matches!(meta.state, IVFState::Trained | IVFState::Stale) {
             return;
         }
@@ -564,12 +671,13 @@ impl SQLiteIVFIndex {
         let _ = self.persistent.conn.with(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO _ivf_assignments
-                    (table_name, field, doc_id, centroid_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                    (table_name, field, doc_id, vector_ordinal, centroid_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     self.persistent.table,
                     self.persistent.field,
                     doc_id as i64,
+                    i64::from(vector_ordinal),
                     centroid as i64,
                 ],
             )?;
@@ -583,23 +691,7 @@ impl SQLiteIVFIndex {
         });
     }
 
-    fn has_vector(&self, doc_id: DocId) -> bool {
-        self.persistent
-            .conn
-            .with(|conn| {
-                let exists: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM _vectors
-                      WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
-                    params![self.persistent.table, self.persistent.field, doc_id as i64],
-                    |r| r.get(0),
-                )?;
-                Ok(exists != 0)
-            })
-            .unwrap_or(false)
-    }
-
-    fn remove_assignment_and_mark_stale(&self, doc_id: DocId) {
-        let meta = self.load_meta().unwrap_or(None);
+    fn clear_assignments_for_doc(&self, doc_id: DocId) {
         let _ = self.persistent.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _ivf_assignments
@@ -608,8 +700,15 @@ impl SQLiteIVFIndex {
             )?;
             Ok(())
         });
+    }
+
+    fn remove_assignment_and_mark_stale(&self, doc_id: DocId, removed_vectors: usize) {
+        let meta = self.load_meta().unwrap_or(None);
+        self.clear_assignments_for_doc(doc_id);
         if let Some(meta) = meta {
-            let deletes = meta.deletes_since_train.saturating_add(1);
+            let deletes = meta
+                .deletes_since_train
+                .saturating_add(removed_vectors.max(1));
             let mut state = meta.state;
             if meta.trained_size > 0
                 && (deletes as f64) / (meta.trained_size as f64) > STALE_FRACTION
@@ -631,7 +730,12 @@ impl VectorIndex for SQLiteIVFIndex {
     }
 
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) {
-        self.persistent.add(doc_id, vector.clone());
+        self.add_many(doc_id, vec![vector]);
+    }
+
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) {
+        self.persistent.add_many(doc_id, vectors);
+        self.clear_assignments_for_doc(doc_id);
         let count = self.persistent.count();
         match self.load_meta().unwrap_or(None) {
             Some(meta) if count >= self.params.train_threshold => {
@@ -641,9 +745,16 @@ impl VectorIndex for SQLiteIVFIndex {
                 {
                     self.train_metadata();
                 } else {
-                    self.assign_existing_centroid(doc_id, &vector, &meta);
+                    let doc_vectors = self
+                        .persistent
+                        .load_doc_with_ordinals(doc_id)
+                        .unwrap_or_default();
+                    for (ordinal, vector) in doc_vectors {
+                        self.assign_existing_centroid(doc_id, ordinal, &vector, &meta);
+                    }
                 }
             }
+            Some(_meta) if count < self.params.train_threshold => self.save_untrained_metadata(),
             Some(meta) => {
                 self.save_meta_row(
                     meta.state,
@@ -658,10 +769,10 @@ impl VectorIndex for SQLiteIVFIndex {
     }
 
     fn delete(&mut self, doc_id: DocId) {
-        let existed = self.has_vector(doc_id);
+        let existing_count = self.persistent.doc_vector_count(doc_id);
         self.persistent.delete(doc_id);
-        if existed {
-            self.remove_assignment_and_mark_stale(doc_id);
+        if existing_count > 0 {
+            self.remove_assignment_and_mark_stale(doc_id, existing_count);
         }
     }
 
@@ -776,10 +887,19 @@ fn nearest_centroids_for_raw(vector: &[f32], centroids: &[Vec<f32>], nprobe: usi
 }
 
 fn scored_posting_list(query: &[f32], entries: &[(DocId, Vec<f32>)], k: usize) -> PostingList {
-    let mut scored: Vec<(DocId, f32)> = entries
-        .iter()
-        .map(|(doc_id, vector)| (*doc_id, cosine_similarity(query, vector)))
-        .collect();
+    let mut best_by_doc: std::collections::BTreeMap<DocId, f32> = std::collections::BTreeMap::new();
+    for (doc_id, vector) in entries {
+        let sim = cosine_similarity(query, vector);
+        best_by_doc
+            .entry(*doc_id)
+            .and_modify(|best| {
+                if sim > *best {
+                    *best = sim;
+                }
+            })
+            .or_insert(sim);
+    }
+    let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -892,13 +1012,13 @@ mod tests {
             // vectors would put doc 1 in centroid 0; metadata reuse keeps
             // doc 2 as the only candidate for a [1, 0] query with nprobe=1.
             conn.execute(
-                "INSERT INTO _ivf_assignments (table_name, field, doc_id, centroid_id)
-                 VALUES ('articles', 'embedding', 1, 1)",
+                "INSERT INTO _ivf_assignments (table_name, field, doc_id, vector_ordinal, centroid_id)
+                 VALUES ('articles', 'embedding', 1, 0, 1)",
                 [],
             )?;
             conn.execute(
-                "INSERT INTO _ivf_assignments (table_name, field, doc_id, centroid_id)
-                 VALUES ('articles', 'embedding', 2, 0)",
+                "INSERT INTO _ivf_assignments (table_name, field, doc_id, vector_ordinal, centroid_id)
+                 VALUES ('articles', 'embedding', 2, 0, 0)",
                 [],
             )?;
             Ok(())

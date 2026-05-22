@@ -13,6 +13,7 @@ use uqa_core::Value;
 pub enum SQLParam {
     Scalar(Value),
     Vector(Vec<f32>),
+    Tensor(Vec<Vec<f32>>),
 }
 
 impl SQLParam {
@@ -22,5 +23,9 @@ impl SQLParam {
 
     pub fn vector(v: Vec<f32>) -> Self {
         Self::Vector(v)
+    }
+
+    pub fn tensor(v: Vec<Vec<f32>>) -> Self {
+        Self::Tensor(v)
     }
 }

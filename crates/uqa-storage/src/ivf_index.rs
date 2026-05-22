@@ -54,15 +54,19 @@ pub enum IVFState {
 pub(crate) struct IVFMetadataSnapshot {
     pub state: IVFState,
     pub centroids: Vec<Vec<f32>>,
-    pub assignments: Vec<(DocId, usize)>,
+    pub assignments: Vec<(DocId, u32, usize)>,
     pub trained_size: usize,
     pub deletes_since_train: usize,
     pub vector_count: usize,
 }
 
+type VectorKey = (DocId, u32);
+
 #[derive(Debug, Clone)]
 struct StoredVector {
+    key: VectorKey,
     doc_id: DocId,
+    vector_ordinal: u32,
     raw_vector: Vec<f32>,
     vector: Vec<f32>,
     centroid: Option<usize>,
@@ -78,12 +82,14 @@ pub struct IVFIndex {
     nprobe: Mutex<usize>,
     train_threshold: usize,
     state: Mutex<IVFState>,
-    /// `vectors[doc_id] = (normalised_vector, centroid_idx)`. The
-    /// centroid index is `None` for untrained rows; populated when
-    /// the index is trained or a row is added post-training.
-    vectors: Mutex<BTreeMap<DocId, StoredVector>>,
+    /// `vectors[(doc_id, ordinal)] = (normalised_vector, centroid_idx)`.
+    /// The centroid index is `None` for untrained rows; populated when the
+    /// index is trained or a vector is added post-training. Tensor columns
+    /// keep one row identity (`doc_id`) while contributing many vector
+    /// elements through distinct ordinals.
+    vectors: Mutex<BTreeMap<VectorKey, StoredVector>>,
     centroids: Mutex<Vec<Vec<f32>>>,
-    inverted_lists: Mutex<Vec<Vec<DocId>>>,
+    inverted_lists: Mutex<Vec<Vec<VectorKey>>>,
     /// Trained corpus size at the last training pass; the stale
     /// detector compares this to the current `vectors.len()` plus the
     /// running deletion counter.
@@ -169,7 +175,7 @@ impl IVFIndex {
         for v in vectors.values_mut() {
             let centroid = nearest_centroid(&v.vector, &centroids);
             v.centroid = Some(centroid);
-            inverted_lists[centroid].push(v.doc_id);
+            inverted_lists[centroid].push(v.key);
         }
         *self.inverted_lists.lock() = inverted_lists;
         *self.trained_size.lock() = vectors.len();
@@ -188,30 +194,33 @@ impl IVFIndex {
         }
     }
 
-    fn remove_from_inverted_list(&self, centroid: usize, doc_id: DocId) {
+    fn remove_from_inverted_list(&self, centroid: usize, key: VectorKey) {
         let mut lists = self.inverted_lists.lock();
         if let Some(list) = lists.get_mut(centroid) {
-            list.retain(|id| *id != doc_id);
+            list.retain(|id| *id != key);
         }
     }
 
-    fn add_to_inverted_list(&self, centroid: usize, doc_id: DocId) {
+    fn add_to_inverted_list(&self, centroid: usize, key: VectorKey) {
         let mut lists = self.inverted_lists.lock();
         if let Some(list) = lists.get_mut(centroid) {
-            match list.binary_search(&doc_id) {
+            match list.binary_search(&key) {
                 Ok(_) => {}
-                Err(pos) => list.insert(pos, doc_id),
+                Err(pos) => list.insert(pos, key),
             }
         }
     }
 
     pub(crate) fn metadata_snapshot(&self) -> IVFMetadataSnapshot {
         let vectors = self.vectors.lock();
-        let mut assignments: Vec<(DocId, usize)> = vectors
+        let mut assignments: Vec<(DocId, u32, usize)> = vectors
             .values()
-            .filter_map(|v| v.centroid.map(|centroid| (v.doc_id, centroid)))
+            .filter_map(|v| {
+                v.centroid
+                    .map(|centroid| (v.doc_id, v.vector_ordinal, centroid))
+            })
             .collect();
-        assignments.sort_by_key(|(doc_id, _)| *doc_id);
+        assignments.sort_by_key(|(doc_id, ordinal, _)| (*doc_id, *ordinal));
         IVFMetadataSnapshot {
             state: *self.state.lock(),
             centroids: self.centroids.lock().clone(),
@@ -295,39 +304,61 @@ impl VectorIndex for IVFIndex {
         "ivf"
     }
 
-    fn add(&mut self, doc_id: DocId, mut vector: Vec<f32>) {
-        if vector.len() as u32 != self.dimensions {
-            return;
-        }
-        let raw_vector = vector.clone();
-        l2_normalise(&mut vector);
-        let centroids = self.centroids.lock();
-        let centroid = if centroids.is_empty() {
-            None
-        } else {
-            Some(nearest_centroid(&vector, &centroids))
-        };
-        drop(centroids);
+    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) {
+        self.add_many(doc_id, vec![vector]);
+    }
+
+    fn add_many(&mut self, doc_id: DocId, input_vectors: Vec<Vec<f32>>) {
+        let centroids = self.centroids.lock().clone();
         let mut vectors = self.vectors.lock();
-        let old = vectors.insert(
-            doc_id,
-            StoredVector {
-                doc_id,
-                raw_vector,
-                vector,
-                centroid,
-            },
-        );
-        // Auto-train once the corpus crosses the threshold.
+        let old_keys: Vec<VectorKey> = vectors
+            .keys()
+            .filter(|(stored_doc_id, _)| *stored_doc_id == doc_id)
+            .copied()
+            .collect();
+        for key in old_keys {
+            if let Some(old) = vectors.remove(&key) {
+                if let Some(old_centroid) = old.centroid {
+                    drop(vectors);
+                    self.remove_from_inverted_list(old_centroid, key);
+                    vectors = self.vectors.lock();
+                }
+            }
+        }
+
+        for (ordinal, mut vector) in input_vectors.into_iter().enumerate() {
+            if vector.len() as u32 != self.dimensions {
+                continue;
+            }
+            let raw_vector = vector.clone();
+            l2_normalise(&mut vector);
+            let centroid = if centroids.is_empty() {
+                None
+            } else {
+                Some(nearest_centroid(&vector, &centroids))
+            };
+            let key = (doc_id, ordinal as u32);
+            vectors.insert(
+                key,
+                StoredVector {
+                    key,
+                    doc_id,
+                    vector_ordinal: ordinal as u32,
+                    raw_vector,
+                    vector,
+                    centroid,
+                },
+            );
+            if let Some(centroid) = centroid {
+                drop(vectors);
+                self.add_to_inverted_list(centroid, key);
+                vectors = self.vectors.lock();
+            }
+        }
+
         let count = vectors.len();
         let untrained = matches!(*self.state.lock(), IVFState::Untrained);
         drop(vectors);
-        if let Some(old_centroid) = old.and_then(|v| v.centroid) {
-            self.remove_from_inverted_list(old_centroid, doc_id);
-        }
-        if let Some(centroid) = centroid {
-            self.add_to_inverted_list(centroid, doc_id);
-        }
         if untrained && count >= self.train_threshold {
             self.train();
         }
@@ -335,11 +366,24 @@ impl VectorIndex for IVFIndex {
 
     fn delete(&mut self, doc_id: DocId) {
         let mut vectors = self.vectors.lock();
-        if let Some(old) = vectors.remove(&doc_id) {
-            if let Some(centroid) = old.centroid {
-                self.remove_from_inverted_list(centroid, doc_id);
+        let old_keys: Vec<VectorKey> = vectors
+            .keys()
+            .filter(|(stored_doc_id, _)| *stored_doc_id == doc_id)
+            .copied()
+            .collect();
+        let mut removed = 0usize;
+        for key in old_keys {
+            if let Some(old) = vectors.remove(&key) {
+                removed += 1;
+                if let Some(centroid) = old.centroid {
+                    drop(vectors);
+                    self.remove_from_inverted_list(centroid, key);
+                    vectors = self.vectors.lock();
+                }
             }
-            *self.deletes_since_train.lock() += 1;
+        }
+        if removed > 0 {
+            *self.deletes_since_train.lock() += removed;
         }
         drop(vectors);
         self.maybe_mark_stale();
@@ -417,6 +461,18 @@ impl VectorIndex for IVFIndex {
                 }
             }
         }
+        let mut best_by_doc: BTreeMap<DocId, f32> = BTreeMap::new();
+        for (doc_id, score) in scored {
+            best_by_doc
+                .entry(doc_id)
+                .and_modify(|best| {
+                    if score > *best {
+                        *best = score;
+                    }
+                })
+                .or_insert(score);
+        }
+        let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
         scored.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -444,19 +500,32 @@ impl VectorIndex for IVFIndex {
             return PostingList::default();
         }
         let vectors = self.vectors.lock();
-        let mut entries: Vec<PostingEntry> = Vec::new();
+        let mut best_by_doc: BTreeMap<DocId, f32> = BTreeMap::new();
         for sv in vectors.values() {
             let sim = cosine_similarity(query, &sv.raw_vector);
             if sim >= threshold {
-                entries.push(PostingEntry::new(
-                    sv.doc_id,
+                best_by_doc
+                    .entry(sv.doc_id)
+                    .and_modify(|best| {
+                        if sim > *best {
+                            *best = sim;
+                        }
+                    })
+                    .or_insert(sim);
+            }
+        }
+        let mut entries: Vec<PostingEntry> = best_by_doc
+            .into_iter()
+            .map(|(doc_id, sim)| {
+                PostingEntry::new(
+                    doc_id,
                     Payload {
                         score: f64::from(sim),
                         ..Default::default()
                     },
-                ));
-            }
-        }
+                )
+            })
+            .collect();
         entries.sort_by_key(|e| e.doc_id);
         PostingList::from_sorted_unchecked(entries)
     }

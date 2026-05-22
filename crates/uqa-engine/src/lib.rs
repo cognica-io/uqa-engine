@@ -727,9 +727,9 @@ impl Engine {
                     | uqa_sql::ast::ColumnType::TimeTz
                     | uqa_sql::ast::ColumnType::Timestamp
                     | uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::Text,
-                    uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
-                        uqa_fdw::ColumnType::Bytes
-                    }
+                    uqa_sql::ast::ColumnType::Bytea
+                    | uqa_sql::ast::ColumnType::Vector(_)
+                    | uqa_sql::ast::ColumnType::Tensor(_) => uqa_fdw::ColumnType::Bytes,
                 },
             })
             .collect();
@@ -1219,9 +1219,9 @@ impl Engine {
                         | uqa_sql::ast::ColumnType::TimeTz
                         | uqa_sql::ast::ColumnType::Timestamp
                         | uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::Text,
-                        uqa_sql::ast::ColumnType::Bytea | uqa_sql::ast::ColumnType::Vector(_) => {
-                            uqa_fdw::ColumnType::Bytes
-                        }
+                        uqa_sql::ast::ColumnType::Bytea
+                        | uqa_sql::ast::ColumnType::Vector(_)
+                        | uqa_sql::ast::ColumnType::Tensor(_) => uqa_fdw::ColumnType::Bytes,
                     },
                 })
                 .collect();
@@ -1270,8 +1270,10 @@ impl Engine {
             {
                 let params = IVFIndexParams::from_map_lossy(&parameters);
                 for col in &columns {
-                    if let Some(uqa_sql::ast::ColumnType::Vector(dim)) =
-                        self.column_type(&row.table_name, col)
+                    if let Some(
+                        uqa_sql::ast::ColumnType::Vector(dim)
+                        | uqa_sql::ast::ColumnType::Tensor(dim),
+                    ) = self.column_type(&row.table_name, col)
                     {
                         let _ = self.restore_ivf_vector_field(&row.table_name, col, dim, params);
                     }
@@ -1604,8 +1606,8 @@ impl Engine {
             let Some(value) = document.get(field) else {
                 continue;
             };
-            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
-                idx.add(doc_id, vector);
+            if let Some(vectors) = Self::field_index_vectors(table, field, value) {
+                idx.add_many(doc_id, vectors);
             }
         }
     }
@@ -1622,6 +1624,24 @@ impl Engine {
         true
     }
 
+    pub fn add_vector_values(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        field: &str,
+        vectors: Vec<Vec<f32>>,
+    ) -> bool {
+        let Some(t) = self.table(table) else {
+            return false;
+        };
+        let mut idxs = t.vector_indexes.write();
+        let Some(idx) = idxs.get_mut(field) else {
+            return false;
+        };
+        idx.as_mut().add_many(doc_id, vectors);
+        true
+    }
+
     pub fn add_document_with_vectors(
         &self,
         table: &str,
@@ -1629,9 +1649,23 @@ impl Engine {
         document: Document,
         vectors: BTreeMap<FieldName, Vec<f32>>,
     ) {
+        let vector_values = vectors
+            .into_iter()
+            .map(|(field, vector)| (field, vec![vector]))
+            .collect();
+        self.add_document_with_vector_values(table, doc_id, document, vector_values);
+    }
+
+    pub fn add_document_with_vector_values(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+    ) {
         self.add_document(table, doc_id, document);
-        for (field, vector) in vectors {
-            self.add_vector(table, doc_id, &field, vector);
+        for (field, vectors) in vectors {
+            self.add_vector_values(table, doc_id, &field, vectors);
         }
     }
 
@@ -2921,7 +2955,7 @@ impl Engine {
             }
             for (doc_id, document) in &table_snapshot.documents {
                 let vectors = Self::document_vector_values(&table, document);
-                self.add_document_with_vectors(name, *doc_id, document.clone(), vectors);
+                self.add_document_with_vector_values(name, *doc_id, document.clone(), vectors);
             }
             *table.next_id.lock() = table_snapshot.next_id;
         }
@@ -2931,18 +2965,47 @@ impl Engine {
     fn document_vector_values(
         table: &Arc<TableState>,
         document: &Document,
-    ) -> BTreeMap<FieldName, Vec<f32>> {
+    ) -> BTreeMap<FieldName, Vec<Vec<f32>>> {
         let vector_fields: Vec<FieldName> = table.vector_indexes.read().keys().cloned().collect();
         let mut vectors = BTreeMap::new();
         for field in vector_fields {
             let Some(value) = document.get(&field) else {
                 continue;
             };
-            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
-                vectors.insert(field, vector);
+            if let Some(values) = Self::field_index_vectors(table, &field, value) {
+                vectors.insert(field, values);
             }
         }
         vectors
+    }
+
+    fn field_index_vectors(
+        table: &TableState,
+        field: &str,
+        value: &Value,
+    ) -> Option<Vec<Vec<f32>>> {
+        let ty = table
+            .columns
+            .read()
+            .iter()
+            .find(|column| column.name == field)
+            .map(|column| column.ty.clone());
+        match ty {
+            Some(uqa_sql::ast::ColumnType::Tensor(dim)) => {
+                let tensor = uqa_sql::expr::value_to_tensor(value).ok()?;
+                tensor
+                    .iter()
+                    .all(|vector| vector.len() as u32 == dim)
+                    .then_some(tensor)
+            }
+            Some(uqa_sql::ast::ColumnType::Vector(dim)) => {
+                let vector = uqa_sql::expr::value_to_vector(value).ok()?;
+                (vector.len() as u32 == dim).then_some(vec![vector])
+            }
+            _ => uqa_sql::expr::value_to_vector(value)
+                .ok()
+                .map(|vector| vec![vector]),
+        }
     }
 
     /// Drop a table from the catalog and release its in-memory state.
@@ -3460,6 +3523,20 @@ impl Engine {
         updates: BTreeMap<String, Value>,
         vectors: BTreeMap<String, Vec<f32>>,
     ) -> bool {
+        let vector_values = vectors
+            .into_iter()
+            .map(|(field, vector)| (field, vec![vector]))
+            .collect();
+        self.update_document_fields_with_vector_values(table, doc_id, updates, vector_values)
+    }
+
+    pub fn update_document_fields_with_vector_values(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        updates: BTreeMap<String, Value>,
+        vectors: BTreeMap<String, Vec<Vec<f32>>>,
+    ) -> bool {
         let Some(t) = self.table(table) else {
             return false;
         };
@@ -3476,7 +3553,7 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.add_document_with_vectors(table, doc_id, doc, vectors);
+        self.add_document_with_vector_values(table, doc_id, doc, vectors);
         true
     }
 
@@ -3489,6 +3566,20 @@ impl Engine {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
         vectors: &BTreeMap<String, Vec<f32>>,
+    ) -> bool {
+        let vector_values: BTreeMap<String, Vec<Vec<f32>>> = vectors
+            .iter()
+            .map(|(field, vector)| (field.clone(), vec![vector.clone()]))
+            .collect();
+        self.patch_document_fields_with_vector_values(table, doc_id, updates, &vector_values)
+    }
+
+    pub fn patch_document_fields_with_vector_values(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+        vectors: &BTreeMap<String, Vec<Vec<f32>>>,
     ) -> bool {
         let Some(t) = self.table(table) else {
             return false;
@@ -3531,8 +3622,8 @@ impl Engine {
                     continue;
                 }
                 index.delete(doc_id);
-                if let Some(vector) = vectors.get(field) {
-                    index.add(doc_id, vector.clone());
+                if let Some(values) = vectors.get(field) {
+                    index.add_many(doc_id, values.clone());
                 }
             }
         }
@@ -3546,13 +3637,13 @@ impl Engine {
             return;
         };
         let vector_fields: Vec<FieldName> = t.vector_indexes.read().keys().cloned().collect();
-        let mut vectors: BTreeMap<FieldName, Vec<f32>> = BTreeMap::new();
+        let mut vectors: BTreeMap<FieldName, Vec<Vec<f32>>> = BTreeMap::new();
         for field in vector_fields {
             let Some(value) = document.get(&field) else {
                 continue;
             };
-            if let Ok(vector) = uqa_sql::expr::value_to_vector(value) {
-                vectors.insert(field, vector);
+            if let Some(values) = Self::field_index_vectors(&t, &field, value) {
+                vectors.insert(field, values);
             }
         }
         t.document_store.write().delete(doc_id);
@@ -3560,7 +3651,7 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.add_document_with_vectors(table, doc_id, document, vectors);
+        self.add_document_with_vector_values(table, doc_id, document, vectors);
     }
 
     pub fn delete_document(&self, table: &str, doc_id: DocId) {

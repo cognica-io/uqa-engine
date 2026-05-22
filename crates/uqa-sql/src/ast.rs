@@ -43,6 +43,10 @@ pub enum ColumnType {
     TimestampTz,
     /// `VECTOR(N)` columns store an `N`-dimensional `f32` embedding.
     Vector(u32),
+    /// `TENSOR(N)` columns store an array of `N`-dimensional `f32`
+    /// embeddings. The row remains the retrieval identity; vector
+    /// indexes score against the best element in the tensor.
+    Tensor(u32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

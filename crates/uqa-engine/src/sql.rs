@@ -36,7 +36,7 @@ use uqa_sql::ast::{
     ForeignKeyMatch, FromClause, InsertStmt, JoinKind, OrderBy, Projection, SelectStmt, SetOpKind,
     Statement, UpdateStmt, WindowSpec, CTE,
 };
-use uqa_sql::expr::{eval, value_to_vector, EvalContext};
+use uqa_sql::expr::{eval, value_to_tensor, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, registered_names, FunctionKind};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
@@ -46,7 +46,7 @@ use crate::{Engine, IVFIndexParams, ScoredEntry};
 mod age_cypher;
 
 type RowUpdateValues = BTreeMap<String, Value>;
-type RowUpdateVectors = BTreeMap<String, Vec<f32>>;
+type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
 const SCORE_COLUMN: &str = "_score";
@@ -627,7 +627,7 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
                 )));
             }
             match column.ty {
-                ColumnType::Vector(dim) => {
+                ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
                     engine.create_vector_field(&stmt.table, col_name.clone(), dim);
                 }
                 ColumnType::Text => {
@@ -730,7 +730,7 @@ fn run_alter_table(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, S
                         return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
                 }
-                ColumnType::Vector(dim) => {
+                ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
                     engine.create_vector_field(&stmt.table, name, dim);
                 }
                 _ => {}
@@ -807,6 +807,9 @@ fn coerce_to_column_type(
             other => Ok(other),
         };
     }
+    if matches!(&def.ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+        return convert_value_to_column_type(value, &def.ty);
+    }
     if is_temporal_column_type(&def.ty) {
         return convert_value_to_column_type(value, &def.ty);
     }
@@ -838,11 +841,11 @@ fn rewrite_column_values_to_type(
         let converted = convert_value_to_column_type(value, ty)?;
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), converted.clone());
-        let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
-        if let Ok(vec) = value_to_vector(&converted) {
-            vectors.insert(column.to_string(), vec);
+        let mut vectors: RowUpdateVectors = BTreeMap::new();
+        if let Ok(values) = index_vectors_for_type(&converted, ty) {
+            vectors.insert(column.to_string(), values);
         }
-        engine.update_document_fields(table, doc_id, updates, vectors);
+        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors);
     }
     Ok(())
 }
@@ -888,10 +891,27 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
         | ColumnType::TimeTz
         | ColumnType::Timestamp
         | ColumnType::TimestampTz => convert_temporal_value(value, ty),
-        ColumnType::Vector(_) => {
-            value_to_vector(&value)?;
+        ColumnType::Vector(dim) => {
+            let vector = value_to_vector(&value)?;
+            validate_vector_dimensions(*dim, vector.len())?;
             Ok(value)
         }
+        ColumnType::Tensor(dim) => {
+            let tensor = value_to_tensor(&value)?;
+            for vector in &tensor {
+                validate_vector_dimensions(*dim, vector.len())?;
+            }
+            Ok(value)
+        }
+    }
+}
+
+fn validate_vector_dimensions(expected: u32, actual: usize) -> Result<(), SQLError> {
+    let expected = expected as usize;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(SQLError::VectorDimMismatch { expected, actual })
     }
 }
 
@@ -920,6 +940,7 @@ fn column_type_name(ty: &ColumnType) -> &'static str {
         ColumnType::Timestamp => "timestamp",
         ColumnType::TimestampTz => "timestamp with time zone",
         ColumnType::Vector(_) => "vector",
+        ColumnType::Tensor(_) => "tensor",
     }
 }
 
@@ -1072,15 +1093,17 @@ fn backfill_added_column(
         Value::Null
     };
     let default_value = coerce_to_column_type(engine, table, column, default_value)?;
-    let vector_value: Option<Vec<f32>> = value_to_vector(&default_value).ok();
+    let vector_value: Option<Vec<Vec<f32>>> = engine
+        .column_type(table, column)
+        .and_then(|ty| index_vectors_for_type(&default_value, &ty).ok());
     for doc_id in doc_ids {
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), default_value.clone());
-        let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+        let mut vectors: RowUpdateVectors = BTreeMap::new();
         if let Some(v) = vector_value.as_ref() {
             vectors.insert(column.to_string(), v.clone());
         }
-        engine.update_document_fields(table, doc_id, updates, vectors);
+        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors);
     }
     Ok(())
 }
@@ -1190,7 +1213,8 @@ fn try_run_point_update(
     else {
         return Ok(Some(SQLResult::from_affected(0)));
     };
-    let affected = engine.patch_document_fields(&stmt.table, doc_id, &updates, &vectors);
+    let affected =
+        engine.patch_document_fields_with_vector_values(&stmt.table, doc_id, &updates, &vectors);
     Ok(Some(SQLResult::from_affected(u64::from(affected))))
 }
 
@@ -1243,8 +1267,10 @@ fn row_independent_update_values(
             return Ok(None);
         }
         let value = coerce_to_column_type(engine, &stmt.table, column, eval(expr, &ctx)?)?;
-        if let Ok(vector) = value_to_vector(&value) {
-            vectors.insert(column.clone(), vector);
+        if let Some(ty) = engine.column_type(&stmt.table, column) {
+            if let Ok(values) = index_vectors_for_type(&value, &ty) {
+                vectors.insert(column.clone(), values);
+            }
         }
         updates.insert(column.clone(), value);
     }
@@ -1966,8 +1992,11 @@ fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLErr
     }
     let mut vector_fields: Vec<(String, u32)> = Vec::new();
     for col in &c.columns {
-        if let ColumnType::Vector(dim) = &col.ty {
-            vector_fields.push((col.name.clone(), *dim));
+        match &col.ty {
+            ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
+                vector_fields.push((col.name.clone(), *dim));
+            }
+            _ => {}
         }
     }
     engine.create_default_table(c.name.clone(), Vec::new());
@@ -2011,7 +2040,7 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
             let params = parse_ivf_index_params(&c.options)?;
             for col in &c.columns {
                 match engine.column_type(&c.table, col) {
-                    Some(ColumnType::Vector(dim)) => {
+                    Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
                         if !engine.rebuild_ivf_vector_field(&c.table, col.clone(), dim, params) {
                             return Err(SQLError::Unsupported(format!(
                                 "CREATE INDEX USING ivf: relation `{}` does not exist",
@@ -2021,7 +2050,7 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
                     }
                     Some(other) => {
                         return Err(SQLError::Unsupported(format!(
-                            "CREATE INDEX USING ivf requires VECTOR column `{col}`, got {other:?}"
+                            "CREATE INDEX USING ivf requires VECTOR or TENSOR column `{col}`, got {other:?}"
                         )));
                     }
                     None => {
@@ -2449,7 +2478,12 @@ fn insert_document_with_constraints(
 ) -> Result<Document, SQLError> {
     apply_missing_column_defaults(engine, table, &mut document, params)?;
     validate_document_constraints(engine, table, doc_id, &document, params)?;
-    engine.add_document_with_vectors(table, doc_id, document.clone(), document_vectors(&document));
+    engine.add_document_with_vector_values(
+        table,
+        doc_id,
+        document.clone(),
+        document_vectors(engine, table, &document),
+    );
     Ok(document)
 }
 
@@ -2472,14 +2506,42 @@ fn apply_missing_column_defaults(
     Ok(())
 }
 
-fn document_vectors(document: &Document) -> BTreeMap<uqa_core::FieldName, Vec<f32>> {
+fn document_vectors(
+    engine: &Engine,
+    table: &str,
+    document: &Document,
+) -> BTreeMap<uqa_core::FieldName, Vec<Vec<f32>>> {
     let mut vectors = BTreeMap::new();
     for (field, value) in document {
-        if let Ok(vector) = value_to_vector(value) {
-            vectors.insert(field.clone(), vector);
+        let Some(ty) = engine.column_type(table, field) else {
+            continue;
+        };
+        if let Ok(values) = index_vectors_for_type(value, &ty) {
+            vectors.insert(field.clone(), values);
         }
     }
     vectors
+}
+
+fn index_vectors_for_type(value: &Value, ty: &ColumnType) -> Result<Vec<Vec<f32>>, SQLError> {
+    match ty {
+        ColumnType::Vector(dim) => {
+            let vector = value_to_vector(value)?;
+            validate_vector_dimensions(*dim, vector.len())?;
+            Ok(vec![vector])
+        }
+        ColumnType::Tensor(dim) => {
+            let tensor = value_to_tensor(value)?;
+            for vector in &tensor {
+                validate_vector_dimensions(*dim, vector.len())?;
+            }
+            Ok(tensor)
+        }
+        _ => Err(SQLError::TypeMismatch(format!(
+            "{} is not vector-indexable",
+            column_type_name(ty)
+        ))),
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -4317,6 +4379,7 @@ fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Timestamp => 1114,
         ColumnType::TimestampTz => 1184,
         ColumnType::Vector(_) => 380_000,
+        ColumnType::Tensor(_) => 380_001,
     }
 }
 
@@ -4374,6 +4437,7 @@ fn info_udt_name(ty: &ColumnType) -> &'static str {
         ColumnType::Timestamp => "timestamp",
         ColumnType::TimestampTz => "timestamptz",
         ColumnType::Vector(_) => "vector",
+        ColumnType::Tensor(_) => "tensor",
     }
 }
 

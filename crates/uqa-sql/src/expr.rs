@@ -72,6 +72,14 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             Some(SQLParam::Vector(v)) => Ok(Value::List(
                 v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
             )),
+            Some(SQLParam::Tensor(vectors)) => Ok(Value::List(
+                vectors
+                    .iter()
+                    .map(|vector| {
+                        Value::List(vector.iter().map(|x| Value::Float(f64::from(*x))).collect())
+                    })
+                    .collect(),
+            )),
             None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {
@@ -2436,6 +2444,24 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
     }
 }
 
+/// Coerce a [`Value`] into a tensor: an array of homogeneous numeric
+/// vectors. Used by `TENSOR(N)` columns to store chunk embeddings for one
+/// row while still indexing each vector element.
+pub fn value_to_tensor(v: &Value) -> Result<Vec<Vec<f32>>> {
+    match v {
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_to_vector(item)?);
+            }
+            Ok(out)
+        }
+        other => Err(SQLError::TypeMismatch(format!(
+            "expected tensor (list of numeric lists), got {other:?}"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2475,5 +2501,15 @@ mod tests {
         let v = Value::List(vec![Value::Float(0.5), Value::Int(1), Value::Float(-1.5)]);
         let got = value_to_vector(&v).unwrap();
         assert_eq!(got, vec![0.5, 1.0, -1.5]);
+    }
+
+    #[test]
+    fn value_to_tensor_accepts_array_of_vectors() {
+        let v = Value::List(vec![
+            Value::List(vec![Value::Float(1.0), Value::Int(0)]),
+            Value::List(vec![Value::Int(0), Value::Float(1.0)]),
+        ]);
+        let got = value_to_tensor(&v).unwrap();
+        assert_eq!(got, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
     }
 }

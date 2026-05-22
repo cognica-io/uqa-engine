@@ -499,9 +499,15 @@ fn vector_field_prefix(table: &str, field: &str) -> Vec<u8> {
     key
 }
 
-fn vector_key(table: &str, field: &str, doc_id: DocId) -> Vec<u8> {
+fn vector_doc_prefix(table: &str, field: &str, doc_id: DocId) -> Vec<u8> {
     let mut key = vector_field_prefix(table, field);
     push_u64(&mut key, doc_id);
+    key
+}
+
+fn vector_key(table: &str, field: &str, doc_id: DocId, vector_ordinal: u32) -> Vec<u8> {
+    let mut key = vector_doc_prefix(table, field, doc_id);
+    push_u64(&mut key, u64::from(vector_ordinal));
     key
 }
 
@@ -1027,16 +1033,35 @@ impl VectorIndex for KeyValueVectorIndex {
             self.dimensions,
             "vector dimension mismatch"
         );
-        let _ = self.store.put(
-            &vector_key(&self.table, &self.field, doc_id),
-            &vector_to_blob(&vector),
-        );
+        self.add_many(doc_id, vec![vector]);
+    }
+
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) {
+        for vector in &vectors {
+            debug_assert_eq!(
+                vector.len() as u32,
+                self.dimensions,
+                "vector dimension mismatch"
+            );
+        }
+        let _ = self
+            .store
+            .delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id));
+        for (ordinal, vector) in vectors.iter().enumerate() {
+            if vector.len() as u32 != self.dimensions {
+                continue;
+            }
+            let _ = self.store.put(
+                &vector_key(&self.table, &self.field, doc_id, ordinal as u32),
+                &vector_to_blob(vector),
+            );
+        }
     }
 
     fn delete(&mut self, doc_id: DocId) {
         let _ = self
             .store
-            .delete(&vector_key(&self.table, &self.field, doc_id));
+            .delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id));
     }
 
     fn clear(&mut self) {
@@ -1050,10 +1075,20 @@ impl VectorIndex for KeyValueVectorIndex {
             return PostingList::new();
         }
         let entries = self.load_all();
-        let mut scored = entries
-            .iter()
-            .map(|(doc_id, vector)| (*doc_id, cosine_similarity(query, vector)))
-            .collect::<Vec<_>>();
+        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+            std::collections::BTreeMap::new();
+        for (doc_id, vector) in &entries {
+            let sim = cosine_similarity(query, vector);
+            best_by_doc
+                .entry(*doc_id)
+                .and_modify(|best| {
+                    if sim > *best {
+                        *best = sim;
+                    }
+                })
+                .or_insert(sim);
+        }
+        let mut scored = best_by_doc.into_iter().collect::<Vec<_>>();
         scored.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -1070,14 +1105,24 @@ impl VectorIndex for KeyValueVectorIndex {
     }
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList {
-        let mut entries = self
-            .load_all()
+        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+            std::collections::BTreeMap::new();
+        for (doc_id, vector) in self.load_all() {
+            let sim = cosine_similarity(query, &vector);
+            if sim >= threshold {
+                best_by_doc
+                    .entry(doc_id)
+                    .and_modify(|best| {
+                        if sim > *best {
+                            *best = sim;
+                        }
+                    })
+                    .or_insert(sim);
+            }
+        }
+        let mut entries = best_by_doc
             .into_iter()
-            .filter_map(|(doc_id, vector)| {
-                let sim = cosine_similarity(query, &vector);
-                (sim >= threshold)
-                    .then(|| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-            })
+            .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
             .collect::<Vec<_>>();
         entries.sort_by_key(|entry| entry.doc_id);
         PostingList::from_sorted_unchecked(entries)

@@ -45,6 +45,7 @@ pub trait VectorIndex: Send + Sync {
         "vector"
     }
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>);
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>);
     fn delete(&mut self, doc_id: DocId);
     fn clear(&mut self);
     fn search_knn(&self, query: &[f32], k: usize) -> PostingList;
@@ -58,7 +59,7 @@ pub trait VectorIndex: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct MemoryVectorIndex {
     dimensions: u32,
-    vectors: BTreeMap<DocId, Vec<f32>>,
+    vectors: BTreeMap<DocId, Vec<Vec<f32>>>,
 }
 
 impl MemoryVectorIndex {
@@ -69,7 +70,7 @@ impl MemoryVectorIndex {
         }
     }
 
-    pub fn vectors(&self) -> &BTreeMap<DocId, Vec<f32>> {
+    pub fn vectors(&self) -> &BTreeMap<DocId, Vec<Vec<f32>>> {
         &self.vectors
     }
 }
@@ -89,7 +90,22 @@ impl VectorIndex for MemoryVectorIndex {
             self.dimensions,
             "vector dimension mismatch"
         );
-        self.vectors.insert(doc_id, vector);
+        self.vectors.insert(doc_id, vec![vector]);
+    }
+
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) {
+        for vector in &vectors {
+            debug_assert_eq!(
+                vector.len() as u32,
+                self.dimensions,
+                "vector dimension mismatch"
+            );
+        }
+        if vectors.is_empty() {
+            self.vectors.remove(&doc_id);
+        } else {
+            self.vectors.insert(doc_id, vectors);
+        }
     }
 
     fn delete(&mut self, doc_id: DocId) {
@@ -108,7 +124,7 @@ impl VectorIndex for MemoryVectorIndex {
         let mut scored: Vec<(DocId, f32)> = self
             .vectors
             .iter()
-            .map(|(&doc_id, v)| (doc_id, cosine_similarity(query, v)))
+            .filter_map(|(&doc_id, vectors)| best_vector_score(query, vectors).map(|s| (doc_id, s)))
             .collect();
         scored.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
@@ -131,8 +147,8 @@ impl VectorIndex for MemoryVectorIndex {
         let mut entries: Vec<PostingEntry> = self
             .vectors
             .iter()
-            .filter_map(|(&doc_id, v)| {
-                let sim = cosine_similarity(query, v);
+            .filter_map(|(&doc_id, vectors)| {
+                let sim = best_vector_score(query, vectors)?;
                 if sim >= threshold {
                     Some(PostingEntry::new(
                         doc_id,
@@ -150,12 +166,19 @@ impl VectorIndex for MemoryVectorIndex {
     }
 
     fn count(&self) -> usize {
-        self.vectors.len()
+        self.vectors.values().map(Vec::len).sum()
     }
 
     fn snapshot(&self) -> Arc<dyn VectorIndex> {
         Arc::new(self.clone())
     }
+}
+
+fn best_vector_score(query: &[f32], vectors: &[Vec<f32>]) -> Option<f32> {
+    vectors
+        .iter()
+        .map(|vector| cosine_similarity(query, vector))
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 #[cfg(test)]
