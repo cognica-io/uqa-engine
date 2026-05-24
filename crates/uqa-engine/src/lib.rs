@@ -921,6 +921,10 @@ impl Engine {
         }
     }
 
+    pub fn has_catalog_index(&self, name: &str) -> bool {
+        self.catalog_indexes.read().contains_key(name)
+    }
+
     /// Cancel every in-flight query that holds a clone of this
     /// engine's cancellation token. Mirrors `Engine.cancel()` in
     /// the canonical UQA behavior; surfaces to operator hot loops as

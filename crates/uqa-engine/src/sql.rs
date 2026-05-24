@@ -2020,6 +2020,17 @@ fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLErr
     // as an FTS field with the analyzer specified in `WITH (analyzer = ...)`,
     // `ivf` rebuilds the vector field with an IVF backend, `hnsw` is a
     // compatibility alias for the same backend, and others are informational.
+    if let Some(name) = c.name.as_ref() {
+        if engine.has_catalog_index(name) {
+            if c.if_not_exists {
+                return Ok(SQLResult::empty());
+            }
+            return Err(SQLError::Unsupported(format!(
+                "Index `{name}` already exists"
+            )));
+        }
+    }
+
     let am = c.access_method.to_ascii_lowercase();
     match am.as_str() {
         "gin" => {

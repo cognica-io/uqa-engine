@@ -426,6 +426,121 @@ fn reopen_reuses_persisted_gin_postings_without_rebuilding() {
 }
 
 #[test]
+fn create_index_if_not_exists_skips_existing_gin_side_effects() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO messages (id, content) VALUES (1, 'alpha token')",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX idx_messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    }
+
+    let mut replacement = Document::new();
+    replacement.insert("content".into(), Value::Str("beta token".into()));
+    overwrite_document_body(&db, "messages", 1, &replacement);
+
+    let eng = Engine::open(&db).unwrap();
+    eng.sql(
+        "CREATE INDEX IF NOT EXISTS idx_messages_content_gin ON messages USING gin (content)",
+        &[],
+    )
+    .unwrap();
+    let alpha = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'alpha')",
+            &[],
+        )
+        .unwrap();
+    let beta = eng
+        .sql(
+            "SELECT COUNT(*) AS n FROM messages WHERE text_match(content, 'beta')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(int_col(&alpha.rows[0], "n"), 1);
+    assert_eq!(int_col(&beta.rows[0], "n"), 0);
+}
+
+#[test]
+fn create_index_duplicate_name_without_if_not_exists_errors() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE INDEX idx_messages_content_gin ON messages USING gin (content)",
+        &[],
+    )
+    .unwrap();
+
+    let err = eng
+        .sql(
+            "CREATE INDEX idx_messages_content_gin ON messages USING gin (content)",
+            &[],
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("already exists"),
+        "expected duplicate-index error, got {err}"
+    );
+}
+
+#[test]
+fn create_index_if_not_exists_skips_existing_ivf_side_effects() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO docs (id, embedding) VALUES \
+             (1, ARRAY[1.0, 0.0]), \
+             (2, ARRAY[0.0, 1.0]), \
+             (3, ARRAY[0.8, 0.2])",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding) \
+             WITH (lists = 2, probes = 1, train_threshold = 2)",
+            &[],
+        )
+        .unwrap();
+    }
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 1);
+    delete_ivf_metadata(&db, "docs", "embedding");
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+
+    let eng = Engine::open(&db).unwrap();
+    eng.sql(
+        "CREATE INDEX IF NOT EXISTS docs_embedding_ivf ON docs USING ivf (embedding) \
+         WITH (lists = 2, probes = 1, train_threshold = 2)",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+}
+
+#[test]
 fn reopen_attaches_ivf_index_without_bootstrap_retraining() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa.db");
