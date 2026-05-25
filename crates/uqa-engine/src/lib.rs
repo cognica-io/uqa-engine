@@ -2435,7 +2435,7 @@ impl Engine {
     /// whenever a query references the view name.
     pub fn register_view(&self, name: &str, body: uqa_sql::ast::SelectStmt) {
         let name = self.relation_name_for_create(name);
-        self.views.write().insert(name.to_string(), body);
+        self.views.write().insert(name.clone(), body);
         self.persist_views();
     }
 
@@ -3601,7 +3601,7 @@ impl Engine {
         let Some(state) = tables.remove(&from) else {
             return false;
         };
-        tables.insert(to.to_string(), state.clone());
+        tables.insert(to.clone(), state.clone());
         drop(tables);
         if let Some(catalog) = self.catalog.as_ref() {
             let _ = catalog.drop_table(&from);
