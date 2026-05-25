@@ -9,8 +9,8 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   # Full debuginfo for every workspace test binary exhausts the Ubuntu runner's
-  # disk during `cargo test --workspace --all-targets`. CI only needs build and
-  # test output, not local debugging sections.
+  # disk during broad workspace builds. CI only needs build and test output,
+  # not local debugging sections.
   CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_PROFILE_BENCH_DEBUG: "0"
   # Keep CI artifacts compact; incremental state is useful locally but bloats
@@ -64,7 +64,19 @@ jobs:
         with:
           cache-bin: false
           cache-targets: ${{ runner.os != 'Linux' }}
-      - run: cargo test --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
+
+  example-build:
+    name: cargo build --examples
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - run: cargo build -p uqa-engine --examples --locked
 
   build-release:
     name: cargo build --release
