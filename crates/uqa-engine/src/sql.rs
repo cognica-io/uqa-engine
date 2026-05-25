@@ -8957,15 +8957,31 @@ fn run_graph_drop(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 1 {
+    if !(1..=2).contains(&args.len()) {
         return Err(SQLError::BadArity {
             name: "graph_drop".into(),
-            expected: "1".into(),
+            expected: "1 or 2".into(),
             actual: args.len(),
         });
     }
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let name = expect_string(&args[0], "graph_drop.name", &ctx)?;
+    if let Some(cascade_expr) = args.get(1) {
+        match eval(cascade_expr, &ctx)? {
+            Value::Bool(true) => {}
+            Value::Bool(false) if engine.has_graph(&name) => {
+                return Err(SQLError::Unsupported(format!(
+                    "cannot drop graph {name:?} without cascade"
+                )));
+            }
+            Value::Bool(false) => {}
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "graph_drop.cascade must be a boolean, got {other:?}"
+                )));
+            }
+        }
+    }
     engine.drop_graph(&name);
     Ok(Vec::new())
 }

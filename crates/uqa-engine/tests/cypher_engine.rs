@@ -147,6 +147,31 @@ fn apache_age_create_graph_aliases_existing_graph_functions() {
 }
 
 #[test]
+fn apache_age_drop_graph_accepts_cascade_argument() {
+    let eng = Engine::new();
+    eng.sql("SELECT create_graph('social') AS ok", &[]).unwrap();
+    eng.sql(
+        "SELECT * FROM cypher('social', $$
+            CREATE (:Person {name: 'Alice'})
+        $$) AS (ignored agtype)",
+        &[],
+    )
+    .unwrap();
+
+    let err = eng
+        .sql("SELECT drop_graph('social', false) AS ok", &[])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("without cascade"), "{err}");
+
+    let dropped = eng
+        .sql("SELECT drop_graph('social', true) AS ok", &[])
+        .unwrap();
+    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Bool(true)));
+    assert!(!eng.has_graph("social"));
+}
+
+#[test]
 fn merge_creates_when_missing_then_matches_on_repeat() {
     let eng = Engine::new();
     let (_, _) = eng
