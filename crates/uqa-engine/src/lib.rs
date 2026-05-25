@@ -100,6 +100,9 @@ use uqa_storage::{
 
 pub use uqa_sql::{SQLParam, SQLResult};
 
+const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
+const VIEWS_METADATA_KEY: &str = "sql_views_json";
+
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
     #[error("SQL error: {0}")]
@@ -224,7 +227,7 @@ pub struct Engine {
 }
 
 /// Mutable state of a single SQL sequence.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct SequenceState {
     pub start: i64,
     pub increment: i64,
@@ -418,18 +421,21 @@ impl Engine {
         increment: i64,
         if_not_exists: bool,
     ) -> bool {
+        let name = self.relation_name_for_create(name);
         let mut seqs = self.sequences.write();
-        if seqs.contains_key(name) {
+        if seqs.contains_key(&name) {
             return if_not_exists;
         }
         seqs.insert(
-            name.to_string(),
+            name,
             SequenceState {
                 start,
                 increment,
                 current: start - increment,
             },
         );
+        drop(seqs);
+        self.persist_sequences();
         true
     }
 
@@ -440,9 +446,12 @@ impl Engine {
         increment: Option<i64>,
         start: Option<i64>,
     ) -> Result<(), String> {
+        let name = self
+            .resolve_sequence_name(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let mut seqs = self.sequences.write();
         let seq = seqs
-            .get_mut(name)
+            .get_mut(&name)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         if let Some(start_val) = start {
             seq.start = start_val;
@@ -454,41 +463,96 @@ impl Engine {
             let restart_val = opt.unwrap_or(seq.start);
             seq.current = restart_val - seq.increment;
         }
+        drop(seqs);
+        self.persist_sequences();
         Ok(())
     }
 
     pub fn drop_sequence(&self, name: &str) -> bool {
-        self.sequences.write().remove(name).is_some()
+        let Some(name) = self.resolve_sequence_name(name) else {
+            return false;
+        };
+        let removed = self.sequences.write().remove(&name).is_some();
+        if removed {
+            self.persist_sequences();
+        }
+        removed
     }
 
     pub fn nextval(&self, name: &str) -> Result<i64, String> {
+        let name = self
+            .resolve_sequence_name(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let mut seqs = self.sequences.write();
         let seq = seqs
-            .get_mut(name)
+            .get_mut(&name)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         seq.current += seq.increment;
-        Ok(seq.current)
+        let current = seq.current;
+        drop(seqs);
+        self.persist_sequences();
+        Ok(current)
     }
 
     pub fn currval(&self, name: &str) -> Result<i64, String> {
+        let name = self
+            .resolve_sequence_name(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let seqs = self.sequences.read();
-        seqs.get(name)
+        seqs.get(&name)
             .map(|s| s.current)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
+        let name = self
+            .resolve_sequence_name(name)
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let mut seqs = self.sequences.write();
         let seq = seqs
-            .get_mut(name)
+            .get_mut(&name)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         seq.current = value;
+        drop(seqs);
+        self.persist_sequences();
         Ok(value)
     }
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.
     pub fn sequences_snapshot(&self) -> BTreeMap<String, SequenceState> {
         self.sequences.read().clone()
+    }
+
+    /// Resolve a sequence name through the current `search_path` and return
+    /// its canonical name with the current state.
+    pub fn sequence_state(&self, name: &str) -> Option<(String, SequenceState)> {
+        let canonical = self.resolve_sequence_name(name)?;
+        let seqs = self.sequences.read();
+        seqs.get(&canonical)
+            .copied()
+            .map(|state| (canonical, state))
+    }
+
+    fn persist_sequences(&self) {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        if let Ok(json) = serde_json::to_string(&*self.sequences.read()) {
+            let _ = catalog.set_metadata(SEQUENCES_METADATA_KEY, &json);
+        }
+    }
+
+    fn restore_sequences_from_metadata(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        let Some(json) = catalog.get_metadata(SEQUENCES_METADATA_KEY)? else {
+            return Ok(());
+        };
+        if let Ok(sequences) = serde_json::from_str::<BTreeMap<String, SequenceState>>(&json) {
+            *self.sequences.write() = sequences;
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------
@@ -698,6 +762,7 @@ impl Engine {
         options: Vec<(String, String)>,
         if_not_exists: bool,
     ) -> std::result::Result<(), String> {
+        let name = self.relation_name_for_create(&name);
         if self.has_table(&name) {
             return Err(format!("Table `{name}` already exists"));
         }
@@ -776,10 +841,13 @@ impl Engine {
     }
 
     pub fn drop_foreign_table(&self, name: &str) -> bool {
-        let removed = self.foreign_tables.write().remove(name).is_some();
+        let Some(name) = self.resolve_foreign_table_name(name) else {
+            return false;
+        };
+        let removed = self.foreign_tables.write().remove(&name).is_some();
         if removed {
             if let Some(catalog) = self.catalog.as_ref() {
-                let _ = catalog.drop_foreign_table(name);
+                let _ = catalog.drop_foreign_table(&name);
             }
         }
         removed
@@ -790,7 +858,8 @@ impl Engine {
     }
 
     pub fn foreign_table(&self, name: &str) -> Option<uqa_fdw::ForeignTable> {
-        self.foreign_tables.read().get(name).cloned()
+        let resolved = self.resolve_foreign_table_name(name)?;
+        self.foreign_tables.read().get(&resolved).cloned()
     }
 
     pub fn list_foreign_servers(&self) -> Vec<String> {
@@ -817,6 +886,9 @@ impl Engine {
         rows: Vec<uqa_fdw::Row>,
     ) -> std::result::Result<(), String> {
         let table_name = table_name.into();
+        let table_name = self
+            .resolve_foreign_table_name(&table_name)
+            .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
         let table = self
             .foreign_table(&table_name)
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
@@ -889,6 +961,9 @@ impl Engine {
         columns: &[String],
         options: &[(String, String)],
     ) {
+        let table = self
+            .resolve_table_name(table)
+            .unwrap_or_else(|| table.to_string());
         let columns_json = serde_json::to_string(columns).unwrap_or_else(|_| "[]".into());
         let options_map: std::collections::BTreeMap<String, String> =
             options.iter().cloned().collect();
@@ -898,7 +973,7 @@ impl Engine {
             CatalogIndexRow {
                 name: name.to_string(),
                 index_type: index_type.to_string(),
-                table_name: table.to_string(),
+                table_name: table.clone(),
                 columns_json: columns_json.clone(),
                 parameters_json: parameters_json.clone(),
             },
@@ -907,7 +982,7 @@ impl Engine {
             let _ = catalog.save_catalog_index(
                 name,
                 index_type,
-                table,
+                &table,
                 &columns_json,
                 &parameters_json,
             );
@@ -1151,6 +1226,8 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
+        self.restore_sequences_from_metadata(catalog)?;
+        self.restore_views_from_metadata(catalog)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
@@ -1419,7 +1496,7 @@ impl Engine {
         analyzer: Analyzer,
         fts_fields: Vec<FieldName>,
     ) {
-        let name = name.into();
+        let name = self.relation_name_for_create(&name.into());
         let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
             if let Some(backend) = self.backend.as_ref() {
                 (
@@ -2148,8 +2225,78 @@ impl Engine {
         Ok(scores)
     }
 
+    fn relation_lookup_candidates(&self, name: &str) -> Vec<String> {
+        if name.contains('.') {
+            return vec![name.to_string()];
+        }
+        let mut candidates = Vec::new();
+        for schema in self.search_path.read().iter() {
+            if schema == "pg_catalog" || schema == "information_schema" {
+                continue;
+            }
+            if schema == "public" {
+                candidates.push(name.to_string());
+            } else {
+                candidates.push(format!("{schema}.{name}"));
+            }
+        }
+        if !candidates.iter().any(|candidate| candidate == name) {
+            candidates.push(name.to_string());
+        }
+        candidates
+    }
+
+    fn relation_name_for_create(&self, name: &str) -> String {
+        if name.contains('.') {
+            return name.to_string();
+        }
+        let schema = self
+            .search_path
+            .read()
+            .iter()
+            .find(|schema| {
+                schema.as_str() != "pg_catalog" && schema.as_str() != "information_schema"
+            })
+            .cloned()
+            .unwrap_or_else(|| "public".to_string());
+        if schema == "public" {
+            name.to_string()
+        } else {
+            format!("{schema}.{name}")
+        }
+    }
+
+    pub(crate) fn resolve_table_name(&self, name: &str) -> Option<String> {
+        let tables = self.tables.read();
+        self.relation_lookup_candidates(name)
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+    }
+
+    fn resolve_view_name(&self, name: &str) -> Option<String> {
+        let views = self.views.read();
+        self.relation_lookup_candidates(name)
+            .into_iter()
+            .find(|candidate| views.contains_key(candidate))
+    }
+
+    fn resolve_sequence_name(&self, name: &str) -> Option<String> {
+        let sequences = self.sequences.read();
+        self.relation_lookup_candidates(name)
+            .into_iter()
+            .find(|candidate| sequences.contains_key(candidate))
+    }
+
+    fn resolve_foreign_table_name(&self, name: &str) -> Option<String> {
+        let tables = self.foreign_tables.read();
+        self.relation_lookup_candidates(name)
+            .into_iter()
+            .find(|candidate| tables.contains_key(candidate))
+    }
+
     fn table(&self, name: &str) -> Option<Arc<TableState>> {
-        self.tables.read().get(name).cloned()
+        let resolved = self.resolve_table_name(name)?;
+        self.tables.read().get(&resolved).cloned()
     }
 
     fn training_set_from_table(
@@ -2257,6 +2404,9 @@ impl Engine {
     }
 
     pub fn add_document(&self, table: &str, doc_id: DocId, document: Document) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -2271,7 +2421,7 @@ impl Engine {
             t.inverted_index.write().add_document(doc_id, text_fields);
         }
         t.document_store.write().put(doc_id, document);
-        self.mark_column_stats_dirty(table, &t);
+        self.mark_column_stats_dirty(&table_name, &t);
         // Keep the auto-id watermark monotonic over manual inserts as well.
         let mut nx = t.next_id.lock();
         if doc_id >= *nx {
@@ -2284,21 +2434,51 @@ impl Engine {
     /// body is stored verbatim and resolved by the SQL surface
     /// whenever a query references the view name.
     pub fn register_view(&self, name: &str, body: uqa_sql::ast::SelectStmt) {
+        let name = self.relation_name_for_create(name);
         self.views.write().insert(name.to_string(), body);
+        self.persist_views();
     }
 
     pub fn drop_view(&self, name: &str) -> bool {
-        self.views.write().remove(name).is_some()
+        let Some(name) = self.resolve_view_name(name) else {
+            return false;
+        };
+        let removed = self.views.write().remove(&name).is_some();
+        if removed {
+            self.persist_views();
+        }
+        removed
     }
 
     pub fn view(&self, name: &str) -> Option<uqa_sql::ast::SelectStmt> {
-        self.views.read().get(name).cloned()
+        let resolved = self.resolve_view_name(name)?;
+        self.views.read().get(&resolved).cloned()
     }
 
     pub fn list_views(&self) -> Vec<String> {
         let mut out: Vec<String> = self.views.read().keys().cloned().collect();
         out.sort_unstable();
         out
+    }
+
+    fn persist_views(&self) {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        if let Ok(json) = serde_json::to_string(&*self.views.read()) {
+            let _ = catalog.set_metadata(VIEWS_METADATA_KEY, &json);
+        }
+    }
+
+    fn restore_views_from_metadata(&self, catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+        let Some(json) = catalog.get_metadata(VIEWS_METADATA_KEY)? else {
+            return Ok(());
+        };
+        if let Ok(views) = serde_json::from_str::<BTreeMap<String, uqa_sql::ast::SelectStmt>>(&json)
+        {
+            *self.views.write() = views;
+        }
+        Ok(())
     }
 
     pub fn list_catalog_indexes(&self) -> Vec<CatalogIndexRow> {
@@ -2412,6 +2592,7 @@ impl Engine {
             DiscardTarget::All => {
                 self.session_vars.write().clear();
                 self.prepared.write().clear();
+                self.set_search_path(vec!["public".to_string()]);
                 // Temp tables aren't tracked separately yet; clearing
                 // the prepared map matches the canonical UQA implementation's effect on the bits
                 // we own today.
@@ -3015,7 +3196,10 @@ impl Engine {
     /// Drop a table from the catalog and release its in-memory state.
     /// Returns `true` if the table existed.
     pub fn drop_table(&self, name: &str) -> bool {
-        let removed = self.tables.write().remove(name).is_some();
+        let Some(name) = self.resolve_table_name(name) else {
+            return false;
+        };
+        let removed = self.tables.write().remove(&name).is_some();
         if !removed {
             return false;
         }
@@ -3023,21 +3207,21 @@ impl Engine {
         // does not outlive the table.
         self.table_field_analyzers
             .write()
-            .retain(|(t, _), _| t != name);
+            .retain(|(t, _), _| t != &name);
         self.catalog_indexes
             .write()
             .retain(|_, row| row.table_name != name);
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_table(name);
-            let _ = catalog.purge_table_data(name);
-            let _ = catalog.drop_table_field_analyzers(name);
-            let _ = catalog.drop_catalog_indexes_for_table(name);
+            let _ = catalog.drop_table(&name);
+            let _ = catalog.purge_table_data(&name);
+            let _ = catalog.drop_table_field_analyzers(&name);
+            let _ = catalog.drop_catalog_indexes_for_table(&name);
         }
         true
     }
 
     pub fn has_table(&self, name: &str) -> bool {
-        self.tables.read().contains_key(name)
+        self.resolve_table_name(name).is_some()
     }
 
     /// All schema-declared columns for `table`, in declaration order.
@@ -3101,6 +3285,9 @@ impl Engine {
         column: &str,
         default: Option<uqa_sql::ast::Expr>,
     ) -> bool {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return false;
+        };
         let Some(t) = self.table(table) else {
             return false;
         };
@@ -3113,15 +3300,18 @@ impl Engine {
             }
         }
         if found && self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
         if found {
-            self.mark_column_stats_dirty(table, &t);
+            self.mark_column_stats_dirty(&table_name, &t);
         }
         found
     }
 
     pub fn set_column_not_null(&self, table: &str, column: &str, not_null: bool) -> bool {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return false;
+        };
         let Some(t) = self.table(table) else {
             return false;
         };
@@ -3137,10 +3327,10 @@ impl Engine {
             }
         }
         if found && self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
         if found {
-            self.mark_column_stats_dirty(table, &t);
+            self.mark_column_stats_dirty(&table_name, &t);
         }
         found
     }
@@ -3151,6 +3341,9 @@ impl Engine {
         column: &str,
         ty: &uqa_sql::ast::ColumnType,
     ) -> bool {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return false;
+        };
         let Some(t) = self.table(table) else {
             return false;
         };
@@ -3163,10 +3356,10 @@ impl Engine {
             }
         }
         if found && self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
         if found {
-            self.mark_column_stats_dirty(table, &t);
+            self.mark_column_stats_dirty(&table_name, &t);
         }
         found
     }
@@ -3292,6 +3485,9 @@ impl Engine {
     /// the document store is sparse; rows missing the column read back as
     /// `Value::Null`.
     pub fn register_column(&self, table: &str, column: uqa_sql::ast::ColumnDef) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -3299,13 +3495,16 @@ impl Engine {
             return;
         }
         t.columns.write().push(column);
-        self.mark_column_stats_dirty(table, &t);
+        self.mark_column_stats_dirty(&table_name, &t);
         if self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
     }
 
     pub fn drop_column(&self, table: &str, column: &str) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -3331,16 +3530,19 @@ impl Engine {
                 continue;
             };
             if doc.remove(column).is_some() {
-                self.rewrite_document(table, doc_id, doc);
+                self.rewrite_document(&table_name, doc_id, doc);
             }
         }
         if self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
-        self.mark_column_stats_dirty(table, &t);
+        self.mark_column_stats_dirty(&table_name, &t);
     }
 
     pub fn rename_column(&self, table: &str, from: &str, to: &str) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -3375,35 +3577,39 @@ impl Engine {
             };
             if let Some(value) = doc.remove(from) {
                 doc.insert(to.to_string(), value);
-                self.rewrite_document(table, doc_id, doc);
+                self.rewrite_document(&table_name, doc_id, doc);
             }
         }
         if let Some(dimensions) = vector_dimensions {
-            self.create_vector_field(table, to, dimensions);
+            self.create_vector_field(&table_name, to, dimensions);
         }
         if self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
-        self.mark_column_stats_dirty(table, &t);
+        self.mark_column_stats_dirty(&table_name, &t);
     }
 
     pub fn rename_table(&self, from: &str, to: &str) -> bool {
+        let Some(from) = self.resolve_table_name(from) else {
+            return false;
+        };
+        let to = self.relation_name_for_create(to);
         let mut tables = self.tables.write();
-        if tables.contains_key(to) {
+        if tables.contains_key(&to) {
             return false;
         }
-        let Some(state) = tables.remove(from) else {
+        let Some(state) = tables.remove(&from) else {
             return false;
         };
         tables.insert(to.to_string(), state.clone());
         drop(tables);
         if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_table(from);
+            let _ = catalog.drop_table(&from);
         }
         if self.is_persistent() {
-            self.save_table_schema(to, &state);
+            self.save_table_schema(&to, &state);
         }
-        self.mark_column_stats_dirty(to, &state);
+        self.mark_column_stats_dirty(&to, &state);
         true
     }
 
@@ -3423,6 +3629,9 @@ impl Engine {
         field: FieldName,
         analyzer: Option<&str>,
     ) -> Result<(), String> {
+        let table_name = self
+            .resolve_table_name(table)
+            .ok_or_else(|| format!("unknown table `{table}`"))?;
         let t = self
             .table(table)
             .ok_or_else(|| format!("unknown table `{table}`"))?;
@@ -3433,11 +3642,12 @@ impl Engine {
                 .set_field_analyzer(&field, analyzer, AnalyzerPhase::Both)
                 .map_err(|e| format!("add_fts_field: {e}"))?;
             self.table_field_analyzers.write().insert(
-                (table.to_string(), field.clone()),
+                (table_name.clone(), field.clone()),
                 (analyzer_name.to_string(), "both".to_string()),
             );
             if let Some(catalog) = self.catalog.as_ref() {
-                let _ = catalog.save_table_field_analyzer(table, &field, "both", analyzer_name);
+                let _ =
+                    catalog.save_table_field_analyzer(&table_name, &field, "both", analyzer_name);
             }
         }
         {
@@ -3448,7 +3658,7 @@ impl Engine {
         }
         Self::rebuild_fts_index(&t)?;
         if self.is_persistent() {
-            self.save_table_schema(table, &t);
+            self.save_table_schema(&table_name, &t);
         }
         Ok(())
     }
@@ -3637,6 +3847,9 @@ impl Engine {
     }
 
     pub(crate) fn rewrite_document(&self, table: &str, doc_id: DocId, document: Document) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -3655,10 +3868,13 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.add_document_with_vector_values(table, doc_id, document, vectors);
+        self.add_document_with_vector_values(&table_name, doc_id, document, vectors);
     }
 
     pub fn delete_document(&self, table: &str, doc_id: DocId) {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return;
+        };
         let Some(t) = self.table(table) else {
             return;
         };
@@ -3667,7 +3883,7 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.mark_column_stats_dirty(table, &t);
+        self.mark_column_stats_dirty(&table_name, &t);
     }
 
     pub fn document_count(&self, table: &str) -> u64 {

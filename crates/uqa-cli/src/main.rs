@@ -367,7 +367,7 @@ impl UsqlHelper {
         let start = args_start + word_offset;
         match command {
             "d" | "describe" => Some((start, self.table_completion_candidates(prefix, true))),
-            "ds" | "stats" => Some((start, self.table_completion_candidates(prefix, false))),
+            "stats" => Some((start, self.table_completion_candidates(prefix, false))),
             _ => Some((start, Vec::new())),
         }
     }
@@ -1087,8 +1087,11 @@ impl Session {
             "di" => {
                 self.cmd_list_indexes(out);
             }
-            "stats" | "ds" => {
+            "stats" => {
                 self.cmd_show_stats(arg, out);
+            }
+            "ds" => {
+                self.cmd_list_sequences(arg, out);
             }
             "dg" | "graphs" => {
                 self.cmd_list_graphs(out);
@@ -1258,7 +1261,7 @@ impl Session {
 
     fn cmd_show_stats(&self, name: &str, out: &mut impl Write) {
         if name.is_empty() {
-            let _ = writeln!(out, "Usage: \\ds <table_name>");
+            let _ = writeln!(out, "Usage: \\stats <table_name>");
             return;
         }
         if self.engine.describe_table(name).is_none() {
@@ -1294,6 +1297,38 @@ impl Session {
                     "min".into(),
                     "max".into(),
                     "selectivity".into(),
+                ],
+                rows,
+            ),
+            out,
+        );
+    }
+
+    fn cmd_list_sequences(&self, name: &str, out: &mut impl Write) {
+        let rows: Vec<_> = if name.is_empty() {
+            self.engine
+                .sequences_snapshot()
+                .into_iter()
+                .map(sequence_row)
+                .collect()
+        } else if let Some((canonical, state)) = self.engine.sequence_state(name) {
+            vec![sequence_row((canonical, state))]
+        } else {
+            let _ = writeln!(out, "Sequence '{name}' does not exist.");
+            return;
+        };
+
+        if rows.is_empty() {
+            let _ = writeln!(out, "No sequences.");
+            return;
+        }
+        print_result(
+            &SQLResult::from_rows(
+                vec![
+                    "sequence_name".into(),
+                    "start".into(),
+                    "increment".into(),
+                    "current".into(),
                 ],
                 rows,
             ),
@@ -1472,10 +1507,11 @@ fn print_backslash_help(out: &mut impl Write) {
     let _ = writeln!(out, "  \\dt             List tables");
     let _ = writeln!(out, "  \\d  <table>     Describe table schema");
     let _ = writeln!(out, "  \\di             List inverted-index fields");
+    let _ = writeln!(out, "  \\ds [sequence]  List sequences");
     let _ = writeln!(out, "  \\dF             List foreign tables");
     let _ = writeln!(out, "  \\dS             List foreign servers");
     let _ = writeln!(out, "  \\dg             List named graphs");
-    let _ = writeln!(out, "  \\ds <table>     Show column statistics");
+    let _ = writeln!(out, "  \\stats <table>  Show column statistics");
     let _ = writeln!(out, "  \\x              Toggle expanded display");
     let _ = writeln!(out, "  \\o  [file]      Redirect output to file");
     let _ = writeln!(out, "  \\timing         Toggle query timing");
@@ -1495,6 +1531,15 @@ fn result_row(entries: Vec<(&str, Value)>) -> BTreeMap<String, Value> {
         .into_iter()
         .map(|(key, value)| (key.to_string(), value))
         .collect()
+}
+
+fn sequence_row((name, state): (String, uqa_engine::SequenceState)) -> BTreeMap<String, Value> {
+    result_row(vec![
+        ("sequence_name", Value::Str(name)),
+        ("start", Value::Int(state.start)),
+        ("increment", Value::Int(state.increment)),
+        ("current", Value::Int(state.current)),
+    ])
 }
 
 fn print_columns(cols: &[ColumnDef], out: &mut impl Write) {
@@ -1847,7 +1892,8 @@ mod tests {
         let history = MemHistory::new();
         let ctx = Context::new(&history);
 
-        let (_start, stats_candidates) = helper.complete("\\ds ", "\\ds ".len(), &ctx).unwrap();
+        let (_start, stats_candidates) =
+            helper.complete("\\stats ", "\\stats ".len(), &ctx).unwrap();
         assert!(stats_candidates
             .iter()
             .any(|candidate| candidate.replacement() == "users"));
@@ -1860,6 +1906,30 @@ mod tests {
         assert!(describe_candidates
             .iter()
             .any(|candidate| candidate.replacement() == "events_ext"));
+    }
+
+    #[test]
+    fn meta_ds_lists_sequences_using_search_path() {
+        let engine = Engine::new();
+        engine.set_search_path(vec!["app".into(), "public".into()]);
+        assert!(engine.create_sequence("acct_seq", 10, 2, false));
+        assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
+        let mut session = Session {
+            engine,
+            db_path: None,
+            location: ":memory:".into(),
+            history: Vec::new(),
+            history_path: None,
+            show_timing: false,
+            expanded: false,
+            output_path: None,
+        };
+
+        let mut out = Vec::new();
+        assert!(session.handle_meta("ds acct_seq", &mut out));
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("app.acct_seq"));
+        assert!(text.contains("10"));
     }
 
     #[test]

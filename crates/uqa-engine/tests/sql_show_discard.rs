@@ -48,11 +48,17 @@ fn set_then_show_round_trips_value() {
 #[test]
 fn discard_all_clears_session_state() {
     let eng = Engine::new();
+    eng.sql("SET search_path TO app, public", &[]).unwrap();
     eng.sql("SET work_mem TO '64MB'", &[]).unwrap();
     eng.sql("DISCARD ALL", &[]).unwrap();
     let r = eng.sql("SHOW work_mem", &[]).unwrap();
     let v = r.rows[0].get("work_mem").unwrap();
     assert_eq!(v, &Value::Str(String::new()));
+    let search_path = eng.sql("SHOW search_path", &[]).unwrap();
+    assert_eq!(
+        search_path.rows[0].get("search_path"),
+        Some(&Value::Str("public".into()))
+    );
 }
 
 #[test]

@@ -122,6 +122,20 @@ fn count_distinct_basic() {
 }
 
 #[test]
+fn aggregates_can_be_nested_inside_projection_expressions() {
+    let eng = engine_with_data();
+    let r = eng
+        .sql(
+            "SELECT 'users' AS label, COUNT(*) = 4 AS count_ok, SUM(age) > 100 AS sum_ok FROM users",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(str_col(&r.rows[0], "label"), Some("users"));
+    assert_eq!(bool_col(&r.rows[0], "count_ok"), Some(true));
+    assert_eq!(bool_col(&r.rows[0], "sum_ok"), Some(true));
+}
+
+#[test]
 fn count_distinct_with_group_by() {
     let eng = engine();
     eng.sql("CREATE TABLE sales (dept TEXT, product TEXT)", &[])

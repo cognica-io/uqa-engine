@@ -106,3 +106,26 @@ fn setval_overrides_current() {
     let _ = eng.setval("s5", 100).unwrap();
     assert_eq!(eng.nextval("s5").unwrap(), 101);
 }
+
+#[test]
+fn sequence_state_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("sequences.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql("CREATE SCHEMA app", &[]).unwrap();
+        eng.sql("SET search_path TO app, public", &[]).unwrap();
+        eng.sql("CREATE SEQUENCE app.s START 10 INCREMENT 5", &[])
+            .unwrap();
+        assert_eq!(
+            eng.sql("SELECT nextval('s') AS v", &[]).unwrap().rows[0]["v"],
+            Value::Int(10)
+        );
+    }
+    let eng = Engine::open(&db).unwrap();
+    eng.sql("SET search_path TO app, public", &[]).unwrap();
+    assert_eq!(
+        eng.sql("SELECT nextval('s') AS v", &[]).unwrap().rows[0]["v"],
+        Value::Int(15)
+    );
+}

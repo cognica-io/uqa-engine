@@ -50,6 +50,31 @@ fn create_view_and_drop_round_trip() {
 }
 
 #[test]
+fn create_view_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("views.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql("CREATE SCHEMA app", &[]).unwrap();
+        eng.sql("SET search_path TO app, public", &[]).unwrap();
+        eng.sql(
+            "CREATE TABLE app.notes (id BIGSERIAL PRIMARY KEY, body TEXT)",
+            &[],
+        )
+        .unwrap();
+        eng.sql("INSERT INTO notes (body) VALUES ('hello')", &[])
+            .unwrap();
+        eng.sql("CREATE VIEW app.note_bodies AS SELECT body FROM notes", &[])
+            .unwrap();
+    }
+    let eng = Engine::open(&db).unwrap();
+    eng.sql("SET search_path TO app, public", &[]).unwrap();
+    let rows = eng.sql("SELECT body FROM note_bodies", &[]).unwrap().rows;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["body"], Value::Str("hello".into()));
+}
+
+#[test]
 fn create_schema_records_name() {
     let eng = Engine::new();
     eng.sql("CREATE SCHEMA app", &[]).unwrap();

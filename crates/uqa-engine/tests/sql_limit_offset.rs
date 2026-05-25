@@ -175,6 +175,28 @@ fn outer_limit_applies_to_union_result() {
 }
 
 #[test]
+fn union_without_all_removes_non_adjacent_duplicates() {
+    let eng = engine();
+    let r = eng
+        .sql(
+            "SELECT x FROM (VALUES (1), (2), (1)) AS t(x) \
+             UNION \
+             SELECT x FROM (VALUES (2), (1)) AS u(x)",
+            &[],
+        )
+        .unwrap();
+    let values: Vec<i64> = r
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("x") {
+            Some(Value::Int(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(values, vec![1, 2]);
+}
+
+#[test]
 fn limit_inside_cte_is_honoured() {
     let eng = engine();
     let r = ids(

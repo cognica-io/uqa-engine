@@ -2694,13 +2694,7 @@ fn execute_select(
     if stmt.distinct {
         // SELECT DISTINCT: collapse duplicate output rows.
         // Stable so the relative order of survivors matches PG.
-        let mut seen: Vec<ResultRow> = Vec::with_capacity(lhs.rows.len());
-        for row in lhs.rows.drain(..) {
-            if !seen.iter().any(|r| r == &row) {
-                seen.push(row);
-            }
-        }
-        lhs.rows = seen;
+        lhs.rows = distinct_rows_stable(lhs.rows);
     }
 
     let Some(set_op) = stmt.set_op.as_ref() else {
@@ -2716,8 +2710,7 @@ fn execute_select(
         (SetOpKind::Union, false) => {
             let mut rows = lhs.rows;
             rows.extend(rhs.rows);
-            rows.dedup();
-            SQLResult::from_rows(lhs.columns, rows)
+            SQLResult::from_rows(lhs.columns, distinct_rows_stable(rows))
         }
         (SetOpKind::Intersect, _) => {
             let mut rows: Vec<ResultRow> = lhs
@@ -2726,7 +2719,7 @@ fn execute_select(
                 .filter(|r| rhs.rows.iter().any(|s| s == r))
                 .collect();
             if !set_op.all {
-                rows.dedup();
+                rows = distinct_rows_stable(rows);
             }
             SQLResult::from_rows(lhs.columns, rows)
         }
@@ -2737,7 +2730,7 @@ fn execute_select(
                 .filter(|r| !rhs.rows.iter().any(|s| s == r))
                 .collect();
             if !set_op.all {
-                rows.dedup();
+                rows = distinct_rows_stable(rows);
             }
             SQLResult::from_rows(lhs.columns, rows)
         }
@@ -2770,6 +2763,16 @@ fn execute_select(
         combined.columns = columns;
     }
     Ok(combined)
+}
+
+fn distinct_rows_stable(rows: Vec<ResultRow>) -> Vec<ResultRow> {
+    let mut seen = Vec::with_capacity(rows.len());
+    for row in rows {
+        if !seen.iter().any(|existing| existing == &row) {
+            seen.push(row);
+        }
+    }
+    seen
 }
 
 struct ScopedEngineHook<'a> {
@@ -6794,7 +6797,7 @@ fn aggregate_join_rows(
             for mut row in part {
                 for (idx, proj) in stmt.projections.iter().enumerate() {
                     let label = labels[idx].clone();
-                    if is_aggregate(&proj.expr) {
+                    if contains_aggregate(&proj.expr) {
                         continue;
                     }
                     let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
@@ -6807,11 +6810,7 @@ fn aggregate_join_rows(
         }
         return Ok(combined);
     }
-    let agg_targets: Vec<&Projection> = stmt
-        .projections
-        .iter()
-        .filter(|p| is_aggregate(&p.expr))
-        .collect();
+    let agg_targets = aggregate_exprs(&stmt.projections);
 
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
 
@@ -6830,14 +6829,14 @@ fn aggregate_join_rows(
                 group_values,
             )
         });
-        for (i, proj) in agg_targets.iter().enumerate() {
+        for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } = &proj.expr
+            } = expr
             else {
                 continue;
             };
@@ -6884,17 +6883,22 @@ fn aggregate_join_rows(
     let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
+        let group_row = group_context_row(stmt, &group_values);
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if is_aggregate(&proj.expr) {
-                let Expr::Func { name, args, .. } = &proj.expr else {
-                    return Err(SQLError::Internal("aggregate expr lost".into()));
-                };
-                let acc = &accs[agg_idx];
-                agg_idx += 1;
-                row.insert(label, aggregate_value_with_args(name, acc, args));
+            if contains_aggregate(&proj.expr) {
+                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
+                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
             } else {
+                if !expr_references_columns(&proj.expr) {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
+                        .with_engine(engine);
+                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    continue;
+                }
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
                     if exprs_match(&proj.expr, g_expr) {
@@ -6946,14 +6950,9 @@ fn resolve_having(
             // Find the matching projection so we can pluck the
             // already-computed accumulator value. Falls back to
             // matching by aggregate-function shape (name + args).
-            for (idx, proj) in stmt
-                .projections
-                .iter()
-                .filter(|p| is_aggregate(&p.expr))
-                .enumerate()
-            {
-                if exprs_match(&proj.expr, e) {
-                    if let Expr::Func { name, args, .. } = &proj.expr {
+            for (idx, agg_expr) in aggregate_exprs(&stmt.projections).into_iter().enumerate() {
+                if exprs_match(agg_expr, e) {
+                    if let Expr::Func { name, args, .. } = agg_expr {
                         let v = aggregate_value_with_args(name, &accs[idx], args);
                         return Ok(Expr::Literal(v));
                     }
@@ -7036,11 +7035,7 @@ fn aggregate_join_rows_relaxed(
     rows: &[ResultRow],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
-    let agg_targets: Vec<&Projection> = stmt
-        .projections
-        .iter()
-        .filter(|p| is_aggregate(&p.expr))
-        .collect();
+    let agg_targets = aggregate_exprs(&stmt.projections);
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     for row in rows {
         let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
@@ -7057,14 +7052,14 @@ fn aggregate_join_rows_relaxed(
                 group_values,
             )
         });
-        for (i, proj) in agg_targets.iter().enumerate() {
+        for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } = &proj.expr
+            } = expr
             else {
                 continue;
             };
@@ -7109,17 +7104,22 @@ fn aggregate_join_rows_relaxed(
     let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
+        let group_row = group_context_row(stmt, &group_values);
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if is_aggregate(&proj.expr) {
-                let Expr::Func { name, args, .. } = &proj.expr else {
-                    return Err(SQLError::Internal("aggregate expr lost".into()));
-                };
-                let acc = &accs[agg_idx];
-                agg_idx += 1;
-                row.insert(label, aggregate_value_with_args(name, acc, args));
+            if contains_aggregate(&proj.expr) {
+                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
+                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
             } else {
+                if !expr_references_columns(&proj.expr) {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
+                        .with_engine(engine);
+                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    continue;
+                }
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
                     if exprs_match(&proj.expr, g_expr) {
@@ -7333,7 +7333,7 @@ fn complement_scored(engine: &Engine, table: &str, rows: Vec<ScoredEntry>) -> Ve
 }
 
 fn has_aggregate(projections: &[Projection]) -> bool {
-    projections.iter().any(|p| is_aggregate(&p.expr))
+    projections.iter().any(|p| contains_aggregate(&p.expr))
 }
 
 fn is_aggregate(expr: &Expr) -> bool {
@@ -7360,6 +7360,266 @@ fn is_aggregate(expr: &Expr) -> bool {
             | "json_object_agg"
             | "jsonb_object_agg"
     ))
+}
+
+fn aggregate_exprs(projections: &[Projection]) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    for projection in projections {
+        collect_aggregate_exprs(&projection.expr, &mut out);
+    }
+    out
+}
+
+fn collect_aggregate_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if is_aggregate(expr) {
+        out.push(expr);
+        return;
+    }
+    match expr {
+        Expr::Func { args, filter, .. } => {
+            for arg in args {
+                collect_aggregate_exprs(arg, out);
+            }
+            if let Some(filter) = filter.as_deref() {
+                collect_aggregate_exprs(filter, out);
+            }
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            for item in items {
+                collect_aggregate_exprs(item, out);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_aggregate_exprs(lhs, out);
+            collect_aggregate_exprs(rhs, out);
+        }
+        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
+            collect_aggregate_exprs(inner, out);
+        }
+        Expr::IsNull { expr, .. } => collect_aggregate_exprs(expr, out),
+        Expr::Between { expr, low, high } => {
+            collect_aggregate_exprs(expr, out);
+            collect_aggregate_exprs(low, out);
+            collect_aggregate_exprs(high, out);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_aggregate_exprs(expr, out);
+            for item in list {
+                collect_aggregate_exprs(item, out);
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base.as_deref() {
+                collect_aggregate_exprs(base, out);
+            }
+            for (condition, result) in when {
+                collect_aggregate_exprs(condition, out);
+                collect_aggregate_exprs(result, out);
+            }
+            if let Some(else_branch) = else_branch.as_deref() {
+                collect_aggregate_exprs(else_branch, out);
+            }
+        }
+        Expr::InSubquery { expr, .. } => collect_aggregate_exprs(expr, out),
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::WindowCall { .. }
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. } => {}
+    }
+}
+
+fn contains_aggregate(expr: &Expr) -> bool {
+    let mut found = Vec::new();
+    collect_aggregate_exprs(expr, &mut found);
+    !found.is_empty()
+}
+
+fn expr_references_columns(expr: &Expr) -> bool {
+    match expr {
+        Expr::Star | Expr::Column(_) | Expr::QualifiedColumn { .. } => true,
+        Expr::Func { args, filter, .. } => {
+            args.iter().any(expr_references_columns)
+                || filter.as_deref().is_some_and(expr_references_columns)
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_references_columns)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_references_columns(lhs) || expr_references_columns(rhs)
+        }
+        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => expr_references_columns(inner),
+        Expr::IsNull { expr, .. } => expr_references_columns(expr),
+        Expr::Between { expr, low, high } => {
+            expr_references_columns(expr)
+                || expr_references_columns(low)
+                || expr_references_columns(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_references_columns(expr) || list.iter().any(expr_references_columns)
+        }
+        Expr::WindowCall { args, .. } => args.iter().any(expr_references_columns),
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref().is_some_and(expr_references_columns)
+                || when.iter().any(|(condition, result)| {
+                    expr_references_columns(condition) || expr_references_columns(result)
+                })
+                || else_branch.as_deref().is_some_and(expr_references_columns)
+        }
+        Expr::InSubquery { expr, .. } => expr_references_columns(expr),
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } => true,
+        Expr::Literal(_) | Expr::Param(_) => false,
+    }
+}
+
+fn group_context_row(stmt: &SelectStmt, group_values: &[Value]) -> ResultRow {
+    let mut row = ResultRow::new();
+    for (expr, value) in stmt.group_by.iter().zip(group_values) {
+        match expr {
+            Expr::Column(column) => {
+                row.insert(column.clone(), value.clone());
+            }
+            Expr::QualifiedColumn { qualifier, column } => {
+                row.insert(format!("{qualifier}.{column}"), value.clone());
+                row.insert(column.clone(), value.clone());
+            }
+            _ => {}
+        }
+    }
+    row
+}
+
+fn replace_aggregates_with_values(
+    expr: &Expr,
+    accs: &[AggregateAccumulator],
+    cursor: &mut usize,
+) -> Result<Expr, SQLError> {
+    if is_aggregate(expr) {
+        let Expr::Func { name, args, .. } = expr else {
+            return Err(SQLError::Internal("aggregate expr lost".into()));
+        };
+        let Some(acc) = accs.get(*cursor) else {
+            return Err(SQLError::Internal("aggregate accumulator missing".into()));
+        };
+        *cursor += 1;
+        return Ok(Expr::Literal(aggregate_value_with_args(name, acc, args)));
+    }
+    match expr {
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => Ok(Expr::Func {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| replace_aggregates_with_values(arg, accs, cursor))
+                .collect::<Result<Vec<_>, _>>()?,
+            distinct: *distinct,
+            order_by: order_by.clone(),
+            filter: filter
+                .as_deref()
+                .map(|filter| replace_aggregates_with_values(filter, accs, cursor).map(Box::new))
+                .transpose()?,
+        }),
+        Expr::Array(items) => Ok(Expr::Array(
+            items
+                .iter()
+                .map(|item| replace_aggregates_with_values(item, accs, cursor))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
+            op: *op,
+            lhs: Box::new(replace_aggregates_with_values(lhs, accs, cursor)?),
+            rhs: Box::new(replace_aggregates_with_values(rhs, accs, cursor)?),
+        }),
+        Expr::Not(inner) => Ok(Expr::Not(Box::new(replace_aggregates_with_values(
+            inner, accs, cursor,
+        )?))),
+        Expr::And(parts) => Ok(Expr::And(
+            parts
+                .iter()
+                .map(|part| replace_aggregates_with_values(part, accs, cursor))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::Or(parts) => Ok(Expr::Or(
+            parts
+                .iter()
+                .map(|part| replace_aggregates_with_values(part, accs, cursor))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
+            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            negated: *negated,
+        }),
+        Expr::Between { expr, low, high } => Ok(Expr::Between {
+            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            low: Box::new(replace_aggregates_with_values(low, accs, cursor)?),
+            high: Box::new(replace_aggregates_with_values(high, accs, cursor)?),
+        }),
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => Ok(Expr::InList {
+            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            list: list
+                .iter()
+                .map(|item| replace_aggregates_with_values(item, accs, cursor))
+                .collect::<Result<Vec<_>, _>>()?,
+            negated: *negated,
+        }),
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => Ok(Expr::Case {
+            base: base
+                .as_deref()
+                .map(|base| replace_aggregates_with_values(base, accs, cursor).map(Box::new))
+                .transpose()?,
+            when: when
+                .iter()
+                .map(|(condition, result)| {
+                    Ok((
+                        replace_aggregates_with_values(condition, accs, cursor)?,
+                        replace_aggregates_with_values(result, accs, cursor)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?,
+            else_branch: else_branch
+                .as_deref()
+                .map(|branch| replace_aggregates_with_values(branch, accs, cursor).map(Box::new))
+                .transpose()?,
+        }),
+        Expr::Cast { expr, ty } => Ok(Expr::Cast {
+            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            ty: ty.clone(),
+        }),
+        Expr::InSubquery {
+            expr,
+            body,
+            negated,
+        } => Ok(Expr::InSubquery {
+            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            body: body.clone(),
+            negated: *negated,
+        }),
+        other => Ok(other.clone()),
+    }
 }
 
 fn aggregate_input_value(
@@ -7535,7 +7795,7 @@ fn build_aggregate_rows(
             for mut row in part {
                 for (idx, proj) in stmt.projections.iter().enumerate() {
                     let label = labels[idx].clone();
-                    if is_aggregate(&proj.expr) {
+                    if contains_aggregate(&proj.expr) {
                         continue;
                     }
                     let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
@@ -7551,11 +7811,7 @@ fn build_aggregate_rows(
     // group_key -> per-aggregate accumulator vector + the raw group key
     // values used to project the GROUP BY columns.
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets: Vec<&Projection> = stmt
-        .projections
-        .iter()
-        .filter(|p| is_aggregate(&p.expr))
-        .collect();
+    let agg_targets = aggregate_exprs(&stmt.projections);
 
     for entry in scored {
         let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
@@ -7573,14 +7829,14 @@ fn build_aggregate_rows(
                 group_values,
             )
         });
-        for (i, proj) in agg_targets.iter().enumerate() {
+        for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } = &proj.expr
+            } = expr
             else {
                 continue;
             };
@@ -7629,17 +7885,22 @@ fn build_aggregate_rows(
     let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
+        let group_row = group_context_row(stmt, &group_values);
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if is_aggregate(&proj.expr) {
-                let Expr::Func { name, args, .. } = &proj.expr else {
-                    return Err(SQLError::Internal("aggregate expr lost".into()));
-                };
-                let acc = &accs[agg_idx];
-                agg_idx += 1;
-                row.insert(label, aggregate_value_with_args(name, acc, args));
+            if contains_aggregate(&proj.expr) {
+                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
+                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
             } else {
+                if !expr_references_columns(&proj.expr) {
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
+                        .with_engine(engine);
+                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    continue;
+                }
                 // Match a non-aggregate projection against the GROUP BY
                 // key list using `exprs_match`, which understands both
                 // bare column refs and complex expressions.
@@ -7684,11 +7945,7 @@ fn build_aggregate_rows_relaxed(
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets: Vec<&Projection> = stmt
-        .projections
-        .iter()
-        .filter(|p| is_aggregate(&p.expr))
-        .collect();
+    let agg_targets = aggregate_exprs(&stmt.projections);
     for entry in scored {
         let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
         let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
@@ -7705,14 +7962,14 @@ fn build_aggregate_rows_relaxed(
                 group_values,
             )
         });
-        for (i, proj) in agg_targets.iter().enumerate() {
+        for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } = &proj.expr
+            } = expr
             else {
                 continue;
             };
@@ -7757,16 +8014,19 @@ fn build_aggregate_rows_relaxed(
     let labels = projection_columns(&stmt.projections);
     for (_, (accs, group_values)) in groups {
         let mut row = ResultRow::new();
+        let group_row = group_context_row(stmt, &group_values);
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if is_aggregate(&proj.expr) {
-                let Expr::Func { name, args, .. } = &proj.expr else {
-                    return Err(SQLError::Internal("aggregate expr lost".into()));
-                };
-                let acc = &accs[agg_idx];
-                agg_idx += 1;
-                row.insert(label, aggregate_value_with_args(name, acc, args));
+            if contains_aggregate(&proj.expr) {
+                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
+                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
+            } else if !expr_references_columns(&proj.expr) {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
+                row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
             } else if let Expr::Column(col) = &proj.expr {
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
@@ -9721,7 +9981,7 @@ impl Engine {
     /// All doc ids on a table, used by the SELECT path when there is no
     /// WHERE clause.
     pub fn table_doc_ids(&self, table: &str) -> Vec<uqa_core::DocId> {
-        let Some(t) = self.tables.read().get(table).cloned() else {
+        let Some(t) = self.table(table) else {
             return Vec::new();
         };
         let ids = t.document_store.read().doc_ids();

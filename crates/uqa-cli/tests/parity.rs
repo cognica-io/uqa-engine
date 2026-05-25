@@ -134,7 +134,9 @@ fn python_backslash_surface_is_available() {
          \\d users\n\
          CREATE INDEX idx_users_name ON users USING gin (name);\n\
          \\di\n\
-         \\ds users\n\
+         \\stats users\n\
+         CREATE SEQUENCE user_seq START WITH 5;\n\
+         \\ds user_seq\n\
          \\x\n\
          SELECT id, name FROM users ORDER BY id;\n\
          \\x\n\
@@ -151,8 +153,10 @@ fn python_backslash_surface_is_available() {
     let out = stdout(&output);
     assert!(out.contains("Backslash commands:"), "{out}");
     assert!(out.contains("\\di"), "{out}");
+    assert!(out.contains("\\ds [sequence]"), "{out}");
     assert!(out.contains("\\dF"), "{out}");
     assert!(out.contains("\\dS"), "{out}");
+    assert!(out.contains("\\stats <table>"), "{out}");
     assert!(
         out.contains("\\open <path>    Switch to persistent storage"),
         "{out}"
@@ -163,6 +167,8 @@ fn python_backslash_surface_is_available() {
     assert!(out.contains("Table \"users\""), "{out}");
     assert!(out.contains("indexed_fields"), "{out}");
     assert!(out.contains("Statistics for \"users\""), "{out}");
+    assert!(out.contains("sequence_name"), "{out}");
+    assert!(out.contains("user_seq"), "{out}");
     assert!(out.contains("-[ RECORD 1 ]"), "{out}");
     assert!(out.contains("Output redirected to:"), "{out}");
     assert!(out.contains("Output restored to stdout"), "{out}");
