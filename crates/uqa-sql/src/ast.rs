@@ -722,6 +722,8 @@ pub struct MergeStmt {
     pub source: FromClause,
     pub join_condition: Expr,
     pub when_clauses: Vec<MergeWhen>,
+    /// `MERGE ... RETURNING ...` projection list. Empty when absent.
+    pub returning: Vec<Projection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

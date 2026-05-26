@@ -51,6 +51,7 @@ type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
+const MERGE_ACTION_COLUMN: &str = "_merge_action";
 
 pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
@@ -220,6 +221,7 @@ fn run_merge_inner(
     let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
     let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &ctes)?;
     let mut affected = 0_u64;
+    let mut returning_rows = Vec::new();
 
     struct Pairing {
         doc_id: Option<uqa_core::DocId>,
@@ -332,14 +334,34 @@ fn run_merge_inner(
                             &target_table,
                             doc_id,
                             &original_doc,
-                            doc,
+                            doc.clone(),
                             params,
                         )?;
                         affected += 1;
+                        if !stmt.returning.is_empty() {
+                            returning_rows.push(build_merge_returning_row(
+                                engine,
+                                MergeReturningRow {
+                                    target_table: &target_table,
+                                    target_qual: &target_qual,
+                                    doc_id,
+                                    document: &doc,
+                                    source_row: pair.source_row.as_ref(),
+                                    action: "UPDATE",
+                                },
+                                &stmt.returning,
+                                params,
+                            )?);
+                        }
                     }
                 }
                 (1, MergeWhen::DeleteMatched { .. }) => {
                     if let Some(doc_id) = pair.doc_id {
+                        let returning_doc = if stmt.returning.is_empty() {
+                            None
+                        } else {
+                            engine.get_document(&target_table, doc_id)
+                        };
                         let root_deletes = BTreeSet::from([(target_table.clone(), doc_id)]);
                         let mut delete_stack = Vec::new();
                         delete_document_with_referential_actions(
@@ -351,6 +373,21 @@ fn run_merge_inner(
                             &mut delete_stack,
                         )?;
                         affected += 1;
+                        if let Some(doc) = returning_doc.as_ref() {
+                            returning_rows.push(build_merge_returning_row(
+                                engine,
+                                MergeReturningRow {
+                                    target_table: &target_table,
+                                    target_qual: &target_qual,
+                                    doc_id,
+                                    document: doc,
+                                    source_row: pair.source_row.as_ref(),
+                                    action: "DELETE",
+                                },
+                                &stmt.returning,
+                                params,
+                            )?);
+                        }
                     }
                 }
                 (
@@ -386,7 +423,7 @@ fn run_merge_inner(
                         document.insert(c.into(), Value::Int(doc_id as i64));
                     }
                     engine.advance_next_id(&target_table, doc_id);
-                    insert_document_with_constraints(
+                    let inserted = insert_document_with_constraints(
                         engine,
                         &target_table,
                         doc_id,
@@ -394,6 +431,21 @@ fn run_merge_inner(
                         params,
                     )?;
                     affected += 1;
+                    if !stmt.returning.is_empty() {
+                        returning_rows.push(build_merge_returning_row(
+                            engine,
+                            MergeReturningRow {
+                                target_table: &target_table,
+                                target_qual: &target_qual,
+                                doc_id,
+                                document: &inserted,
+                                source_row: pair.source_row.as_ref(),
+                                action: "INSERT",
+                            },
+                            &stmt.returning,
+                            params,
+                        )?);
+                    }
                 }
                 (2, _) => {}
                 _ => {}
@@ -401,7 +453,50 @@ fn run_merge_inner(
             break;
         }
     }
+    if !stmt.returning.is_empty() {
+        return Ok(dml_returning_result(
+            engine,
+            &target_table,
+            &stmt.returning,
+            returning_rows,
+            affected,
+        ));
+    }
     Ok(SQLResult::from_affected(affected))
+}
+
+struct MergeReturningRow<'a> {
+    target_table: &'a str,
+    target_qual: &'a str,
+    doc_id: DocId,
+    document: &'a Document,
+    source_row: Option<&'a ResultRow>,
+    action: &'a str,
+}
+
+fn build_merge_returning_row(
+    engine: &Engine,
+    input: MergeReturningRow<'_>,
+    returning: &[Projection],
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
+    let mut row_doc = input.document.clone();
+    row_doc.insert(DOC_ID_COLUMN.into(), Value::Int(input.doc_id as i64));
+    row_doc.insert(MERGE_ACTION_COLUMN.into(), Value::Str(input.action.into()));
+    for (key, value) in prefix_row(input.target_qual, input.document) {
+        row_doc.insert(key, value);
+    }
+    if let Some(source) = input.source_row {
+        for (key, value) in source {
+            row_doc.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
+    build_projection_row(Some(engine), &row_doc, returning, params).map_err(|err| {
+        SQLError::Internal(format!(
+            "MERGE RETURNING projection failed for table `{}` doc {}: {err}",
+            input.target_table, input.doc_id
+        ))
+    })
 }
 
 fn run_create_sequence(
@@ -6553,6 +6648,19 @@ fn engine_func_intercept(
             ))
         }
         "deep_learn" => Ok(Some(run_deep_learn_projection(engine, args, row, params)?)),
+        "merge_action" => {
+            if !args.is_empty() {
+                return Err(SQLError::BadArity {
+                    name: "merge_action".into(),
+                    expected: "0".into(),
+                    actual: args.len(),
+                });
+            }
+            let action = row.get(MERGE_ACTION_COLUMN).cloned().ok_or_else(|| {
+                SQLError::Unsupported("merge_action() is only valid in MERGE RETURNING".into())
+            })?;
+            Ok(Some(action))
+        }
         "graph_create" | "create_graph" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
@@ -9964,7 +10072,10 @@ fn build_projection_row(
         let label = labels[idx].clone();
         if let Expr::Star = proj.expr {
             for (k, v) in document {
-                if k.as_str() == SCORE_COLUMN || k.as_str() == DOC_ID_COLUMN {
+                if k.as_str() == SCORE_COLUMN
+                    || k.as_str() == DOC_ID_COLUMN
+                    || k.as_str() == MERGE_ACTION_COLUMN
+                {
                     continue;
                 }
                 row.insert(k.clone(), v.clone());

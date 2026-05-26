@@ -426,12 +426,14 @@ fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::Mer
         }
     }
 
+    let returning = compile_projections(&stmt.returning_list)?;
     Ok(MergeStmt {
         target,
         target_alias,
         source,
         join_condition,
         when_clauses,
+        returning,
     })
 }
 
@@ -1989,6 +1991,13 @@ fn compile_expr(node: &Node) -> Result<Expr> {
         NodeEnum::TypeCast(tc) => compile_type_cast(tc),
         NodeEnum::AExpr(a) => compile_a_expr(a),
         NodeEnum::SqlvalueFunction(svf) => compile_sql_value_function(svf),
+        NodeEnum::MergeSupportFunc(_) => Ok(Expr::Func {
+            name: "merge_action".into(),
+            args: Vec::new(),
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        }),
         NodeEnum::BoolExpr(b) => compile_bool_expr(b),
         NodeEnum::NullTest(n) => compile_null_test(n),
         NodeEnum::CaseExpr(c) => compile_case_expr(c),
