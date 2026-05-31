@@ -26,6 +26,44 @@ fn show_search_path_returns_current_resolution_order() {
 }
 
 #[test]
+fn show_server_version_reports_postgresql_17_compatibility() {
+    let eng = Engine::new();
+    let r = eng.sql("SHOW server_version", &[]).unwrap();
+    assert_eq!(r.columns, vec!["server_version".to_string()]);
+    assert_eq!(
+        r.rows[0].get("server_version"),
+        Some(&Value::Str("17.0-uqa".into()))
+    );
+
+    let settings = eng
+        .sql(
+            "SELECT setting FROM pg_catalog.pg_settings WHERE name = 'server_version'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        settings.rows[0].get("setting"),
+        Some(&Value::Str("17.0-uqa".into()))
+    );
+}
+
+#[test]
+fn show_builtin_runtime_parameters_are_case_insensitive() {
+    let eng = Engine::new();
+    assert_eq!(
+        eng.show_variable("TimeZone"),
+        "UTC",
+        "TimeZone should expose PostgreSQL-compatible default"
+    );
+    eng.sql("SET TimeZone TO 'Asia/Seoul'", &[]).unwrap();
+    assert_eq!(
+        eng.show_variable("timezone"),
+        "Asia/Seoul",
+        "session override lookup should be case-insensitive"
+    );
+}
+
+#[test]
 fn show_unknown_variable_returns_empty_string() {
     let eng = Engine::new();
     let r = eng.sql("SHOW some_unknown_var", &[]).unwrap();

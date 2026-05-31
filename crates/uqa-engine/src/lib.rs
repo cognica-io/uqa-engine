@@ -2570,17 +2570,24 @@ impl Engine {
 
     /// Read back a session variable. `search_path` always resolves to
     /// the current resolution order; every other key looks up the
-    /// session-vars map and falls back to an empty string. Mirrors
-    /// the canonical UQA implementation's `_compile_show`.
+    /// session-vars map, then PostgreSQL-compatible runtime defaults,
+    /// and finally an empty string. Mirrors the canonical UQA
+    /// implementation's `_compile_show`.
     pub fn show_variable(&self, name: &str) -> String {
         if name.eq_ignore_ascii_case("search_path") {
             return self.search_path().join(",");
         }
-        self.session_vars
-            .read()
-            .get(name)
-            .cloned()
-            .unwrap_or_default()
+        let session_vars = self.session_vars.read();
+        if let Some(value) = session_vars.get(name) {
+            return value.clone();
+        }
+        if let Some((_, value)) = session_vars
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        {
+            return value.clone();
+        }
+        default_runtime_parameter(name).unwrap_or("").to_string()
     }
 
     /// Apply `DISCARD <target>`. Mirrors the canonical UQA implementation's `_compile_discard`:
@@ -4160,6 +4167,24 @@ impl Engine {
         let result = fusion.execute(&ctx);
         Self::rank_top_k(&result, params.top_k)
     }
+}
+
+fn default_runtime_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("server_version") {
+        return Some("17.0-uqa");
+    }
+    if name.eq_ignore_ascii_case("server_encoding")
+        || name.eq_ignore_ascii_case("client_encoding")
+    {
+        return Some("UTF8");
+    }
+    if name.eq_ignore_ascii_case("datestyle") {
+        return Some("ISO, MDY");
+    }
+    if name.eq_ignore_ascii_case("timezone") {
+        return Some("UTC");
+    }
+    None
 }
 
 impl uqa_sql::expr::EngineHook for Engine {
