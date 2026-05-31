@@ -10,26 +10,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **Encrypted catalogs:** `Engine::open_encrypted(path, key)` opens SQLCipher-backed catalogs through the same restore path as plaintext catalogs. The `sqlcipher_encrypted_catalog` example covers create, reopen, and wrong-key behavior.
 - **Compressed catalogs:** `uqa-storage` registers a schema-neutral `uqa_compressed` SQLite VFS that stores byte-addressed SQLite pages as zstd or LZ4 chunks. `Engine::open_compressed` and `Engine::open_compressed_encrypted` expose compressed and compressed-encrypted catalog paths.
+- **SQLite KeyValue backend:** `uqa-storage` now includes backend-neutral `KeyValueStore`, `KeyValueCatalog`, `KeyValueDocumentStore`, `KeyValueInvertedIndex`, and `KeyValueVectorIndex` implementations. `uqa-storage-sqlite` provides the physical SQLite `_key_value` store, and `Engine::from_persistent_backends` opens engines from either relational SQLite or KeyValue facade objects.
 - **Standalone ML crate:** `uqa-ml` owns deep-model specs, training data, analytical `deep_learn`, feature-batch `deep_predict`, CPU inference, and the `MLBackend` trait. Dense, CNN1D, CNN2D, RNN, LSTM, graph, pooling, global pooling, softmax, batch norm, dropout, and attention layers are covered by the deep-fusion executor.
 - **Apple MLX backend:** the optional `mlx` feature links to Apple's `mlx-c` API and exposes `MLXBackend` behind the same backend trait as CPU inference.
 - **PostgreSQL wire protocol crate:** `uqa-pg-wire` provides network-independent PostgreSQL v3 startup/frontend decoders and backend encoders for SSL/GSSENC negotiation, authentication, parse/bind/execute/describe/close/sync/terminate, row descriptions, data rows, command completion, errors, notices, and ready-for-query status.
-- **AGE-style Cypher table function:** SQL can call `cypher('graph', $$ ... $$)` or `ag_catalog.cypher(...)` to execute Cypher against named graph workspaces and return table-function rows.
+- **PostgreSQL compatibility matrix:** CI-grade tests now cover schemas, `search_path`, catalog views, JSON/JSONB operators, arrays, temporal types, prepared statements, sequences, views, DML, MERGE, CTAS, ALTER TABLE, TRUNCATE, SHOW, DISCARD, and DROP lifecycle behavior. The compatibility surface was also checked against a live PostgreSQL 17.10 container for shared SQL behavior.
+- **AGE-style Cypher table function:** SQL can call `cypher('graph', $$ ... $$)` or `ag_catalog.cypher(...)` with an `AS (col agtype, ...)` record definition to execute Cypher against named graph workspaces and return table-function rows.
+- **AGE graph lifecycle aliases:** `create_graph(name)` and `drop_graph(name [, cascade])` are available as Apache AGE-compatible aliases. `drop_graph(name, false)` rejects non-empty graphs, while `drop_graph(name, true)` drops graph data.
+- **Tensor embeddings:** SQL supports `TENSOR(N)` columns and `SQLParam::tensor`. Tensor KNN scores each row against its best chunk, trains IVF with chunk counts, and preserves tensor IVF indexes across SQLite reopen.
 - **Referential actions:** foreign keys now enforce `ON DELETE` and `ON UPDATE` actions including `CASCADE`, `SET NULL`, `SET DEFAULT`, `RESTRICT`, and `NO ACTION`, including self-referential cascades and `MERGE` interactions.
 - **Readline `usql`:** TTY sessions now use readline editing, persistent history, history hints, backslash-command completion, SQL keyword highlighting, live table/foreign-table/column completion, and SQL function completion from the `uqa-sql` registry.
 - **Automatic column statistics refresh:** DML and schema changes invalidate table statistics; `Engine::column_stats`, planning paths, and `usql \ds` recompute them lazily. `ANALYZE` remains available for eager refresh.
-- **Catalog migration utility:** `usql` and `uqa-engine` include a migration path for older catalog layouts, including documents, indexes, analyzers, graphs, models, foreign definitions, scoring parameters, and column statistics.
+- **Python catalog migration utility:** `usql migrate-python-db <source> <destination>` and `\migrate-python-db` migrate Python UQA catalogs into Rust UQA catalogs, including documents, indexes, analyzers, graphs, models, foreign definitions, scoring parameters, and column statistics.
+- **Benchmark parity workloads:** Criterion targets now cover Python-parity SQL workloads, graph workloads, planner statistics/selectivity paths, graph SQL, compiler and execution loops, fusion, operators, storage, scoring, calibration, relevance, and BEIR calibration surfaces.
 
 ### Changed
 
 - **Persistent restore path:** `Engine::open` now attaches to persisted GIN and IVF metadata without rebuilding indexes on database open, restores table doc-id watermarks via direct lookups, and lazy-loads column statistics on first use.
+- **Storage construction boundary:** persistent engine restore now goes through `CatalogFacade` and `PersistentStorageBackend`, so new storage implementations can reuse the same table, graph, model, analyzer, statistics, and index restore path.
 - **Model ownership:** engine and operator crates now keep only catalog persistence and SQL adapters for ML; model specs, training, and backend execution live in `uqa-ml`.
 - **CLI storage wording:** `usql \open` and startup messaging describe persistent UQA storage rather than a single concrete backend.
 - **Function registry reuse:** CLI completion and highlighting read UQA function names from `uqa-sql::registry::registered_names` instead of duplicating a hard-coded CLI list.
+- **SQL point updates:** point UPDATE paths now use direct document replacement where possible while keeping FTS, vector, tensor, and KeyValue index state synchronized.
 
 ### Fixed
 
 - **Persistent open latency:** large persistent catalogs no longer rebuild inverted/vector indexes or deserialize large statistics payloads during open.
 - **Nested persistent writes:** SQLite-backed inverted and vector index writes use savepoints when they run inside outer engine transactions, avoiding transaction conflicts in SQL-managed index lifecycle tests.
+- **Mixed SQL function predicates:** search-aware functions now compose with ordinary WHERE predicates instead of dropping the non-function filters during operator-tree lowering.
+- **FTS index lifecycle:** GIN index creation and reopen paths now preserve existing posting data, avoid unintended backfill side effects when `CREATE INDEX IF NOT EXISTS` skips an existing index, and refresh every matching row when non-unique UPDATE predicates touch indexed text.
+- **Tensor IVF lifecycle:** tensor IVF metadata now counts chunk vectors for training thresholds, keeps one result per row, rejects dimension mismatches, and restores persisted assignments after reopen.
+- **PostgreSQL runtime parameter defaults:** `SHOW server_version` now reports `17.0-uqa`, PostgreSQL-compatible defaults are exposed for server/client encoding, `DateStyle`, and `TimeZone`, and runtime parameter lookup honors case-insensitive session overrides.
+- **UPDATE document id handling:** UPDATE paths now skip stale document ids and keep table/index state consistent after row replacement.
 - **Supply-chain license gate:** `deny.toml` now allows `BSL-1.0`, which is required by `rustyline` transitive dependencies and is accepted by the project's license policy.
 
 ## [0.1.0] - 2026-05-09
