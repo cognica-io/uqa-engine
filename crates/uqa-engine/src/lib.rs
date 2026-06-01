@@ -4173,8 +4173,7 @@ fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("server_version") {
         return Some("17.0-uqa");
     }
-    if name.eq_ignore_ascii_case("server_encoding")
-        || name.eq_ignore_ascii_case("client_encoding")
+    if name.eq_ignore_ascii_case("server_encoding") || name.eq_ignore_ascii_case("client_encoding")
     {
         return Some("UTF8");
     }
