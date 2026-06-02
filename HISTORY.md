@@ -23,6 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Automatic column statistics refresh:** DML and schema changes invalidate table statistics; `Engine::column_stats`, planning paths, and `usql \ds` recompute them lazily. `ANALYZE` remains available for eager refresh.
 - **Python catalog migration utility:** `usql migrate-python-db <source> <destination>` and `\migrate-python-db` migrate Python UQA catalogs into Rust UQA catalogs, including documents, indexes, analyzers, graphs, models, foreign definitions, scoring parameters, and column statistics.
 - **Benchmark parity workloads:** Criterion targets now cover Python-parity SQL workloads, graph workloads, planner statistics/selectivity paths, graph SQL, compiler and execution loops, fusion, operators, storage, scoring, calibration, relevance, and BEIR calibration surfaces.
+- **Rust-backed SQL function registration:** `Engine` can register Rust scalar, table, and aggregate implementations as SQL functions. Registered scalars evaluate in projections and filters, registered table functions run in `FROM` with aliases, and registered aggregates participate in `GROUP BY`; unordered registered aggregates stream inputs into per-group state, while ordered registered aggregates spill sorted temp-file runs once the in-memory run buffer is exceeded.
 
 ### Changed
 

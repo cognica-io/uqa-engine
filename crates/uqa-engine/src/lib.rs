@@ -65,6 +65,7 @@
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
+pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;
 pub mod sql;
@@ -99,6 +100,11 @@ use uqa_storage::{
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
+
+pub use functions::{
+    SQLAggregateFunction, SQLAggregateState, SQLScalarFunction, SQLTableFunction,
+    SQLTableFunctionResult,
+};
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const VIEWS_METADATA_KEY: &str = "sql_views_json";
@@ -224,6 +230,12 @@ pub struct Engine {
     /// reference FDW executable without pretending that memory rows are
     /// part of the persistent catalog.
     foreign_memory_tables: RwLock<BTreeMap<String, Vec<uqa_fdw::Row>>>,
+    /// Engine-local Rust scalar SQL functions.
+    sql_scalar_functions: RwLock<BTreeMap<String, Arc<dyn SQLScalarFunction>>>,
+    /// Engine-local Rust table SQL functions.
+    sql_table_functions: RwLock<BTreeMap<String, Arc<dyn SQLTableFunction>>>,
+    /// Engine-local Rust aggregate SQL functions.
+    sql_aggregate_functions: RwLock<BTreeMap<String, Arc<dyn SQLAggregateFunction>>>,
 }
 
 /// Mutable state of a single SQL sequence.
@@ -405,7 +417,118 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
             foreign_memory_tables: RwLock::new(BTreeMap::new()),
+            sql_scalar_functions: RwLock::new(BTreeMap::new()),
+            sql_table_functions: RwLock::new(BTreeMap::new()),
+            sql_aggregate_functions: RwLock::new(BTreeMap::new()),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Rust SQL function registry. Registered functions are engine-local
+    // runtime objects; they are not persisted to the catalog.
+    // -----------------------------------------------------------------
+
+    fn normalize_sql_function_name(name: &str) -> std::result::Result<String, SQLError> {
+        let normalized = name.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "SQL function name cannot be empty".into(),
+            ));
+        }
+        Ok(normalized)
+    }
+
+    pub fn register_scalar_function<F>(
+        &self,
+        name: &str,
+        function: F,
+    ) -> std::result::Result<(), SQLError>
+    where
+        F: SQLScalarFunction + 'static,
+    {
+        let name = Self::normalize_sql_function_name(name)?;
+        self.sql_scalar_functions
+            .write()
+            .insert(name, Arc::new(function));
+        Ok(())
+    }
+
+    pub fn register_table_function<F>(
+        &self,
+        name: &str,
+        function: F,
+    ) -> std::result::Result<(), SQLError>
+    where
+        F: SQLTableFunction + 'static,
+    {
+        let name = Self::normalize_sql_function_name(name)?;
+        self.sql_table_functions
+            .write()
+            .insert(name, Arc::new(function));
+        Ok(())
+    }
+
+    pub fn register_aggregate_function<F>(
+        &self,
+        name: &str,
+        function: F,
+    ) -> std::result::Result<(), SQLError>
+    where
+        F: SQLAggregateFunction + 'static,
+    {
+        let name = Self::normalize_sql_function_name(name)?;
+        self.sql_aggregate_functions
+            .write()
+            .insert(name, Arc::new(function));
+        Ok(())
+    }
+
+    pub(crate) fn call_registered_scalar_function(
+        &self,
+        name: &str,
+        args: &[Value],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        let function = self
+            .sql_scalar_functions
+            .read()
+            .get(&name.to_ascii_lowercase())
+            .cloned()?;
+        Some(function.call(args))
+    }
+
+    pub(crate) fn has_registered_scalar_function(&self, name: &str) -> bool {
+        self.sql_scalar_functions
+            .read()
+            .contains_key(&name.to_ascii_lowercase())
+    }
+
+    pub(crate) fn call_registered_table_function(
+        &self,
+        name: &str,
+        args: &[Value],
+    ) -> Option<std::result::Result<SQLTableFunctionResult, SQLError>> {
+        let function = self
+            .sql_table_functions
+            .read()
+            .get(&name.to_ascii_lowercase())
+            .cloned()?;
+        Some(function.call(args))
+    }
+
+    pub(crate) fn has_registered_aggregate_function(&self, name: &str) -> bool {
+        self.sql_aggregate_functions
+            .read()
+            .contains_key(&name.to_ascii_lowercase())
+    }
+
+    pub(crate) fn registered_aggregate_function(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn SQLAggregateFunction>> {
+        self.sql_aggregate_functions
+            .read()
+            .get(&name.to_ascii_lowercase())
+            .cloned()
     }
 
     // -----------------------------------------------------------------
@@ -1105,6 +1228,9 @@ impl Engine {
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
             foreign_memory_tables: RwLock::new(BTreeMap::new()),
+            sql_scalar_functions: RwLock::new(BTreeMap::new()),
+            sql_table_functions: RwLock::new(BTreeMap::new()),
+            sql_aggregate_functions: RwLock::new(BTreeMap::new()),
         };
         let catalog = engine.catalog.as_ref().expect("persistent catalog").clone();
         let backend = engine.backend.as_ref().expect("persistent backend").clone();
@@ -4195,6 +4321,13 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
     fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String> {
         Engine::setval(self, name, value)
+    }
+    fn call_scalar_function(
+        &self,
+        name: &str,
+        args: &[Value],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        self.call_registered_scalar_function(name, args)
     }
     fn run_subquery(
         &self,

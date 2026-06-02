@@ -27,7 +27,11 @@
     clippy::too_many_lines
 )]
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
+use std::sync::Arc;
 
 use uqa_core::{DocId, TemporalValue, Value};
 use uqa_sql::ast::{
@@ -41,7 +45,10 @@ use uqa_sql::registry::{lookup, registered_names, FunctionKind};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, IVFIndexParams, ScoredEntry};
+use crate::{
+    Engine, IVFIndexParams, SQLAggregateFunction, SQLAggregateState, SQLTableFunctionResult,
+    ScoredEntry,
+};
 
 mod age_cypher;
 
@@ -52,6 +59,7 @@ type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
+const REGISTERED_AGGREGATE_SPILL_ROWS: usize = 4096;
 
 pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
@@ -2888,6 +2896,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.engine.setval(name, value)
     }
 
+    fn call_scalar_function(
+        &self,
+        name: &str,
+        args: &[Value],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        self.engine.call_registered_scalar_function(name, args)
+    }
+
     fn run_subquery(
         &self,
         stmt: &uqa_sql::ast::SelectStmt,
@@ -2948,7 +2964,7 @@ fn run_query_block(
         joined
     };
 
-    if has_aggregate(&stmt.projections)
+    if has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
     {
@@ -3070,7 +3086,10 @@ fn volcano_project_sort_limit(
         let mut found = false;
         walk_expr(&p.expr, &mut |e| {
             if let Expr::Func { name, .. } = e {
-                if uqa_sql::registry::is_registered(&name.to_ascii_lowercase()) {
+                let lower = name.to_ascii_lowercase();
+                if uqa_sql::registry::is_registered(&lower)
+                    || engine.has_registered_scalar_function(&lower)
+                {
                     found = true;
                 }
             }
@@ -3420,7 +3439,7 @@ fn run_single_table_select(
         }
     };
 
-    if has_aggregate(&stmt.projections)
+    if has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
     {
@@ -3498,7 +3517,7 @@ fn run_single_foreign_select(
         scanned
     };
 
-    if has_aggregate(&stmt.projections)
+    if has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
     {
@@ -3807,7 +3826,7 @@ fn run_joined_select(
         });
     }
 
-    if has_aggregate(&stmt.projections)
+    if has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
     {
@@ -3949,7 +3968,8 @@ fn evaluate_window(
                     None => 1i64,
                     Some(expr) => {
                         let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
+                                .with_engine(engine);
                         match uqa_sql::expr::eval(expr, &ctx)? {
                             Value::Int(n) => n,
                             other => {
@@ -3964,7 +3984,8 @@ fn evaluate_window(
                     None => Value::Null,
                     Some(expr) => {
                         let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
+                                .with_engine(engine);
                         uqa_sql::expr::eval(expr, &ctx)?
                     }
                 };
@@ -3985,7 +4006,8 @@ fn evaluate_window(
                 let n = match args.first() {
                     Some(expr) => {
                         let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params);
+                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
+                                .with_engine(engine);
                         match uqa_sql::expr::eval(expr, &ctx)? {
                             Value::Int(n) if n > 0 => n,
                             other => {
@@ -4084,7 +4106,7 @@ fn evaluate_window_aggregate(
             for v in &materialized {
                 acc.observe(v);
             }
-            let result = aggregate_value(name, &acc);
+            let result = aggregate_value(name, &acc)?;
             for (orig, _) in indexed {
                 output[*orig] = result.clone();
             }
@@ -4136,7 +4158,7 @@ fn evaluate_window_aggregate(
                 acc.observe(v);
             }
         }
-        output[*orig] = aggregate_value(name, &acc);
+        output[*orig] = aggregate_value(name, &acc)?;
     }
     Ok(())
 }
@@ -5901,7 +5923,7 @@ fn execute_lateral_subquery(
         }
     }
 
-    if has_aggregate(&stmt.projections)
+    if has_aggregate(engine, &stmt.projections)
         || !stmt.group_by.is_empty()
         || !stmt.grouping_sets.is_empty()
     {
@@ -5975,6 +5997,9 @@ fn build_table_function_rows_with_row(
         };
         out.push(r);
     };
+    if let Some(result) = engine.call_registered_table_function(&lower, &evaluated) {
+        return registered_table_function_rows(name, result?, qual, column_aliases);
+    }
     match lower.as_str() {
         "generate_series" => {
             if !(2..=3).contains(&evaluated.len()) {
@@ -6363,6 +6388,50 @@ fn build_table_function_rows_with_row(
             "table function `{other}` in FROM"
         ))),
     }
+}
+
+fn registered_table_function_rows(
+    name: &str,
+    result: SQLTableFunctionResult,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<Vec<ResultRow>, SQLError> {
+    if result.columns.is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "table function `{name}` returned no columns"
+        )));
+    }
+    let columns: Vec<String> = result
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(idx, column)| {
+            column_aliases
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| column.clone())
+        })
+        .collect();
+    let mut out = Vec::with_capacity(result.rows.len());
+    for values in result.rows {
+        if values.len() != result.columns.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "table function `{name}` row has {} values for {} columns",
+                values.len(),
+                result.columns.len()
+            )));
+        }
+        let mut row = ResultRow::new();
+        for (column, value) in columns.iter().zip(values) {
+            row.insert(column.clone(), value);
+        }
+        let row = match alias {
+            Some(alias) => prefix_row(alias, &row),
+            None => row,
+        };
+        out.push(row);
+    }
+    Ok(out)
 }
 
 /// Detect an equijoin shape `<col_a> = <col_b>` and run a hash join.
@@ -6905,7 +6974,7 @@ fn aggregate_join_rows(
             for mut row in part {
                 for (idx, proj) in stmt.projections.iter().enumerate() {
                     let label = labels[idx].clone();
-                    if contains_aggregate(&proj.expr) {
+                    if contains_aggregate(engine, &proj.expr) {
                         continue;
                     }
                     let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
@@ -6918,7 +6987,7 @@ fn aggregate_join_rows(
         }
         return Ok(combined);
     }
-    let agg_targets = aggregate_exprs(&stmt.projections);
+    let agg_targets = aggregate_exprs(engine, &stmt.projections);
 
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
 
@@ -6929,14 +6998,7 @@ fn aggregate_join_rows(
             .iter()
             .map(|g| uqa_sql::expr::eval(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
-        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
-            (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
-                group_values,
-            )
-        });
+        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
@@ -6955,23 +7017,7 @@ fn aggregate_join_rows(
                     continue;
                 }
             }
-            let value = aggregate_input_value(name, args, order_by, &ctx)?;
-            if *distinct && !matches!(value, Value::Null) {
-                let key = distinct_key(&value);
-                if !bucket.0[i].distinct.insert(key) {
-                    continue;
-                }
-            }
-            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by {
-                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
-                sort_keys.push((v, ob.descending));
-            }
-            if order_by.is_empty() {
-                bucket.0[i].observe(&value);
-            } else {
-                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
-            }
+            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
         }
     }
 
@@ -6979,9 +7025,7 @@ fn aggregate_join_rows(
         groups.insert(
             Vec::new(),
             (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
+                new_aggregate_accumulators(engine, &agg_targets)?,
                 Vec::new(),
             ),
         );
@@ -6995,8 +7039,9 @@ fn aggregate_join_rows(
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if contains_aggregate(&proj.expr) {
-                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+            if contains_aggregate(engine, &proj.expr) {
+                let resolved =
+                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
                 row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
@@ -7028,7 +7073,15 @@ fn aggregate_join_rows(
         // resolve through `eval_aggregate_in_having` which walks the
         // group rows to recompute the aggregate without re-projecting.
         if let Some(having_expr) = stmt.having.as_ref() {
-            let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
+            let resolved = resolve_having(
+                engine,
+                having_expr,
+                &row,
+                stmt,
+                &accs,
+                &group_values,
+                params,
+            )?;
             let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
             let kept =
                 uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
@@ -7046,6 +7099,7 @@ fn aggregate_join_rows(
 /// Non-aggregate sub-expressions (column refs, comparisons, AND / OR)
 /// pass through untouched so the caller can `eval` the result.
 fn resolve_having(
+    engine: &Engine,
     expr: &Expr,
     _projected_row: &ResultRow,
     stmt: &SelectStmt,
@@ -7053,15 +7107,23 @@ fn resolve_having(
     _group_values: &[Value],
     _params: &[SQLParam],
 ) -> Result<Expr, SQLError> {
-    fn walk(e: &Expr, stmt: &SelectStmt, accs: &[AggregateAccumulator]) -> Result<Expr, SQLError> {
-        if is_aggregate(e) {
+    fn walk(
+        engine: &Engine,
+        e: &Expr,
+        stmt: &SelectStmt,
+        accs: &[AggregateAccumulator],
+    ) -> Result<Expr, SQLError> {
+        if is_aggregate(engine, e) {
             // Find the matching projection so we can pluck the
             // already-computed accumulator value. Falls back to
             // matching by aggregate-function shape (name + args).
-            for (idx, agg_expr) in aggregate_exprs(&stmt.projections).into_iter().enumerate() {
+            for (idx, agg_expr) in aggregate_exprs(engine, &stmt.projections)
+                .into_iter()
+                .enumerate()
+            {
                 if exprs_match(agg_expr, e) {
                     if let Expr::Func { name, args, .. } = agg_expr {
-                        let v = aggregate_value_with_args(name, &accs[idx], args);
+                        let v = aggregate_value_with_args(name, &accs[idx], args)?;
                         return Ok(Expr::Literal(v));
                     }
                 }
@@ -7075,39 +7137,39 @@ fn resolve_having(
             Expr::And(parts) => Ok(Expr::And(
                 parts
                     .iter()
-                    .map(|p| walk(p, stmt, accs))
+                    .map(|p| walk(engine, p, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             Expr::Or(parts) => Ok(Expr::Or(
                 parts
                     .iter()
-                    .map(|p| walk(p, stmt, accs))
+                    .map(|p| walk(engine, p, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            Expr::Not(inner) => Ok(Expr::Not(Box::new(walk(inner, stmt, accs)?))),
+            Expr::Not(inner) => Ok(Expr::Not(Box::new(walk(engine, inner, stmt, accs)?))),
             Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
                 op: *op,
-                lhs: Box::new(walk(lhs, stmt, accs)?),
-                rhs: Box::new(walk(rhs, stmt, accs)?),
+                lhs: Box::new(walk(engine, lhs, stmt, accs)?),
+                rhs: Box::new(walk(engine, rhs, stmt, accs)?),
             }),
             Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
-                expr: Box::new(walk(expr, stmt, accs)?),
+                expr: Box::new(walk(engine, expr, stmt, accs)?),
                 negated: *negated,
             }),
             Expr::Between { expr, low, high } => Ok(Expr::Between {
-                expr: Box::new(walk(expr, stmt, accs)?),
-                low: Box::new(walk(low, stmt, accs)?),
-                high: Box::new(walk(high, stmt, accs)?),
+                expr: Box::new(walk(engine, expr, stmt, accs)?),
+                low: Box::new(walk(engine, low, stmt, accs)?),
+                high: Box::new(walk(engine, high, stmt, accs)?),
             }),
             Expr::InList {
                 expr,
                 list,
                 negated,
             } => Ok(Expr::InList {
-                expr: Box::new(walk(expr, stmt, accs)?),
+                expr: Box::new(walk(engine, expr, stmt, accs)?),
                 list: list
                     .iter()
-                    .map(|x| walk(x, stmt, accs))
+                    .map(|x| walk(engine, x, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
                 negated: *negated,
             }),
@@ -7121,7 +7183,7 @@ fn resolve_having(
                 name: name.clone(),
                 args: args
                     .iter()
-                    .map(|a| walk(a, stmt, accs))
+                    .map(|a| walk(engine, a, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
                 distinct: *distinct,
                 order_by: order_by.clone(),
@@ -7130,7 +7192,7 @@ fn resolve_having(
             other => Ok(other.clone()),
         }
     }
-    walk(expr, stmt, accs)
+    walk(engine, expr, stmt, accs)
 }
 
 /// Variant of [`aggregate_join_rows`] used by the GROUPING SETS
@@ -7143,7 +7205,7 @@ fn aggregate_join_rows_relaxed(
     rows: &[ResultRow],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
-    let agg_targets = aggregate_exprs(&stmt.projections);
+    let agg_targets = aggregate_exprs(engine, &stmt.projections);
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     for row in rows {
         let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
@@ -7152,14 +7214,7 @@ fn aggregate_join_rows_relaxed(
             .iter()
             .map(|g| uqa_sql::expr::eval(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
-        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
-            (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
-                group_values,
-            )
-        });
+        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
@@ -7178,32 +7233,14 @@ fn aggregate_join_rows_relaxed(
                     continue;
                 }
             }
-            let value = aggregate_input_value(name, args, order_by, &ctx)?;
-            if *distinct && !matches!(value, Value::Null) {
-                let key = distinct_key(&value);
-                if !bucket.0[i].distinct.insert(key) {
-                    continue;
-                }
-            }
-            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by {
-                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
-                sort_keys.push((v, ob.descending));
-            }
-            if order_by.is_empty() {
-                bucket.0[i].observe(&value);
-            } else {
-                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
-            }
+            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
         }
     }
     if groups.is_empty() && stmt.group_by.is_empty() {
         groups.insert(
             Vec::new(),
             (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
+                new_aggregate_accumulators(engine, &agg_targets)?,
                 Vec::new(),
             ),
         );
@@ -7216,8 +7253,9 @@ fn aggregate_join_rows_relaxed(
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if contains_aggregate(&proj.expr) {
-                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+            if contains_aggregate(engine, &proj.expr) {
+                let resolved =
+                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
                 row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
@@ -7440,11 +7478,13 @@ fn complement_scored(engine: &Engine, table: &str, rows: Vec<ScoredEntry>) -> Ve
         .collect()
 }
 
-fn has_aggregate(projections: &[Projection]) -> bool {
-    projections.iter().any(|p| contains_aggregate(&p.expr))
+fn has_aggregate(engine: &Engine, projections: &[Projection]) -> bool {
+    projections
+        .iter()
+        .any(|p| contains_aggregate(engine, &p.expr))
 }
 
-fn is_aggregate(expr: &Expr) -> bool {
+fn is_aggregate(engine: &Engine, expr: &Expr) -> bool {
     matches!(expr, Expr::Func { name, .. } if matches!(
         name.to_ascii_lowercase().as_str(),
         "count"
@@ -7467,53 +7507,53 @@ fn is_aggregate(expr: &Expr) -> bool {
             | "mode"
             | "json_object_agg"
             | "jsonb_object_agg"
-    ))
+    ) || engine.has_registered_aggregate_function(name))
 }
 
-fn aggregate_exprs(projections: &[Projection]) -> Vec<&Expr> {
+fn aggregate_exprs<'a>(engine: &Engine, projections: &'a [Projection]) -> Vec<&'a Expr> {
     let mut out = Vec::new();
     for projection in projections {
-        collect_aggregate_exprs(&projection.expr, &mut out);
+        collect_aggregate_exprs(engine, &projection.expr, &mut out);
     }
     out
 }
 
-fn collect_aggregate_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
-    if is_aggregate(expr) {
+fn collect_aggregate_exprs<'a>(engine: &Engine, expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if is_aggregate(engine, expr) {
         out.push(expr);
         return;
     }
     match expr {
         Expr::Func { args, filter, .. } => {
             for arg in args {
-                collect_aggregate_exprs(arg, out);
+                collect_aggregate_exprs(engine, arg, out);
             }
             if let Some(filter) = filter.as_deref() {
-                collect_aggregate_exprs(filter, out);
+                collect_aggregate_exprs(engine, filter, out);
             }
         }
         Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
-                collect_aggregate_exprs(item, out);
+                collect_aggregate_exprs(engine, item, out);
             }
         }
         Expr::Binary { lhs, rhs, .. } => {
-            collect_aggregate_exprs(lhs, out);
-            collect_aggregate_exprs(rhs, out);
+            collect_aggregate_exprs(engine, lhs, out);
+            collect_aggregate_exprs(engine, rhs, out);
         }
         Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
-            collect_aggregate_exprs(inner, out);
+            collect_aggregate_exprs(engine, inner, out);
         }
-        Expr::IsNull { expr, .. } => collect_aggregate_exprs(expr, out),
+        Expr::IsNull { expr, .. } => collect_aggregate_exprs(engine, expr, out),
         Expr::Between { expr, low, high } => {
-            collect_aggregate_exprs(expr, out);
-            collect_aggregate_exprs(low, out);
-            collect_aggregate_exprs(high, out);
+            collect_aggregate_exprs(engine, expr, out);
+            collect_aggregate_exprs(engine, low, out);
+            collect_aggregate_exprs(engine, high, out);
         }
         Expr::InList { expr, list, .. } => {
-            collect_aggregate_exprs(expr, out);
+            collect_aggregate_exprs(engine, expr, out);
             for item in list {
-                collect_aggregate_exprs(item, out);
+                collect_aggregate_exprs(engine, item, out);
             }
         }
         Expr::Case {
@@ -7522,17 +7562,17 @@ fn collect_aggregate_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
             else_branch,
         } => {
             if let Some(base) = base.as_deref() {
-                collect_aggregate_exprs(base, out);
+                collect_aggregate_exprs(engine, base, out);
             }
             for (condition, result) in when {
-                collect_aggregate_exprs(condition, out);
-                collect_aggregate_exprs(result, out);
+                collect_aggregate_exprs(engine, condition, out);
+                collect_aggregate_exprs(engine, result, out);
             }
             if let Some(else_branch) = else_branch.as_deref() {
-                collect_aggregate_exprs(else_branch, out);
+                collect_aggregate_exprs(engine, else_branch, out);
             }
         }
-        Expr::InSubquery { expr, .. } => collect_aggregate_exprs(expr, out),
+        Expr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
         Expr::Star
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
@@ -7544,9 +7584,9 @@ fn collect_aggregate_exprs<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
     }
 }
 
-fn contains_aggregate(expr: &Expr) -> bool {
+fn contains_aggregate(engine: &Engine, expr: &Expr) -> bool {
     let mut found = Vec::new();
-    collect_aggregate_exprs(expr, &mut found);
+    collect_aggregate_exprs(engine, expr, &mut found);
     !found.is_empty()
 }
 
@@ -7609,11 +7649,12 @@ fn group_context_row(stmt: &SelectStmt, group_values: &[Value]) -> ResultRow {
 }
 
 fn replace_aggregates_with_values(
+    engine: &Engine,
     expr: &Expr,
     accs: &[AggregateAccumulator],
     cursor: &mut usize,
 ) -> Result<Expr, SQLError> {
-    if is_aggregate(expr) {
+    if is_aggregate(engine, expr) {
         let Expr::Func { name, args, .. } = expr else {
             return Err(SQLError::Internal("aggregate expr lost".into()));
         };
@@ -7621,7 +7662,7 @@ fn replace_aggregates_with_values(
             return Err(SQLError::Internal("aggregate accumulator missing".into()));
         };
         *cursor += 1;
-        return Ok(Expr::Literal(aggregate_value_with_args(name, acc, args)));
+        return Ok(Expr::Literal(aggregate_value_with_args(name, acc, args)?));
     }
     match expr {
         Expr::Func {
@@ -7634,59 +7675,61 @@ fn replace_aggregates_with_values(
             name: name.clone(),
             args: args
                 .iter()
-                .map(|arg| replace_aggregates_with_values(arg, accs, cursor))
+                .map(|arg| replace_aggregates_with_values(engine, arg, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
             distinct: *distinct,
             order_by: order_by.clone(),
             filter: filter
                 .as_deref()
-                .map(|filter| replace_aggregates_with_values(filter, accs, cursor).map(Box::new))
+                .map(|filter| {
+                    replace_aggregates_with_values(engine, filter, accs, cursor).map(Box::new)
+                })
                 .transpose()?,
         }),
         Expr::Array(items) => Ok(Expr::Array(
             items
                 .iter()
-                .map(|item| replace_aggregates_with_values(item, accs, cursor))
+                .map(|item| replace_aggregates_with_values(engine, item, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
             op: *op,
-            lhs: Box::new(replace_aggregates_with_values(lhs, accs, cursor)?),
-            rhs: Box::new(replace_aggregates_with_values(rhs, accs, cursor)?),
+            lhs: Box::new(replace_aggregates_with_values(engine, lhs, accs, cursor)?),
+            rhs: Box::new(replace_aggregates_with_values(engine, rhs, accs, cursor)?),
         }),
         Expr::Not(inner) => Ok(Expr::Not(Box::new(replace_aggregates_with_values(
-            inner, accs, cursor,
+            engine, inner, accs, cursor,
         )?))),
         Expr::And(parts) => Ok(Expr::And(
             parts
                 .iter()
-                .map(|part| replace_aggregates_with_values(part, accs, cursor))
+                .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         Expr::Or(parts) => Ok(Expr::Or(
             parts
                 .iter()
-                .map(|part| replace_aggregates_with_values(part, accs, cursor))
+                .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
-            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             negated: *negated,
         }),
         Expr::Between { expr, low, high } => Ok(Expr::Between {
-            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
-            low: Box::new(replace_aggregates_with_values(low, accs, cursor)?),
-            high: Box::new(replace_aggregates_with_values(high, accs, cursor)?),
+            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
+            low: Box::new(replace_aggregates_with_values(engine, low, accs, cursor)?),
+            high: Box::new(replace_aggregates_with_values(engine, high, accs, cursor)?),
         }),
         Expr::InList {
             expr,
             list,
             negated,
         } => Ok(Expr::InList {
-            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             list: list
                 .iter()
-                .map(|item| replace_aggregates_with_values(item, accs, cursor))
+                .map(|item| replace_aggregates_with_values(engine, item, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
             negated: *negated,
         }),
@@ -7697,24 +7740,28 @@ fn replace_aggregates_with_values(
         } => Ok(Expr::Case {
             base: base
                 .as_deref()
-                .map(|base| replace_aggregates_with_values(base, accs, cursor).map(Box::new))
+                .map(|base| {
+                    replace_aggregates_with_values(engine, base, accs, cursor).map(Box::new)
+                })
                 .transpose()?,
             when: when
                 .iter()
                 .map(|(condition, result)| {
                     Ok((
-                        replace_aggregates_with_values(condition, accs, cursor)?,
-                        replace_aggregates_with_values(result, accs, cursor)?,
+                        replace_aggregates_with_values(engine, condition, accs, cursor)?,
+                        replace_aggregates_with_values(engine, result, accs, cursor)?,
                     ))
                 })
                 .collect::<Result<Vec<_>, SQLError>>()?,
             else_branch: else_branch
                 .as_deref()
-                .map(|branch| replace_aggregates_with_values(branch, accs, cursor).map(Box::new))
+                .map(|branch| {
+                    replace_aggregates_with_values(engine, branch, accs, cursor).map(Box::new)
+                })
                 .transpose()?,
         }),
         Expr::Cast { expr, ty } => Ok(Expr::Cast {
-            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             ty: ty.clone(),
         }),
         Expr::InSubquery {
@@ -7722,7 +7769,7 @@ fn replace_aggregates_with_values(
             body,
             negated,
         } => Ok(Expr::InSubquery {
-            expr: Box::new(replace_aggregates_with_values(expr, accs, cursor)?),
+            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             body: body.clone(),
             negated: *negated,
         }),
@@ -7767,8 +7814,97 @@ fn aggregate_input_value(
     }
 }
 
-#[derive(Default)]
+fn aggregate_input_values(args: &[Expr], ctx: &EvalContext<'_>) -> Result<Vec<Value>, SQLError> {
+    args.iter()
+        .map(|arg| match arg {
+            Expr::Star => Ok(Value::Int(1)),
+            other => uqa_sql::expr::eval(other, ctx),
+        })
+        .collect()
+}
+
+fn new_aggregate_accumulators(
+    engine: &Engine,
+    agg_targets: &[&Expr],
+) -> Result<Vec<AggregateAccumulator>, SQLError> {
+    agg_targets
+        .iter()
+        .map(|expr| match expr {
+            Expr::Func { name, .. } => Ok(engine.registered_aggregate_function(name).map_or_else(
+                AggregateAccumulator::default,
+                AggregateAccumulator::registered,
+            )),
+            _ => Ok(AggregateAccumulator::default()),
+        })
+        .collect()
+}
+
+fn group_bucket<'a>(
+    engine: &Engine,
+    groups: &'a mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+    group_values: Vec<Value>,
+    agg_targets: &[&Expr],
+) -> Result<&'a mut (Vec<AggregateAccumulator>, Vec<Value>), SQLError> {
+    use std::collections::btree_map::Entry;
+
+    match groups.entry(group_values.clone()) {
+        Entry::Occupied(entry) => Ok(entry.into_mut()),
+        Entry::Vacant(entry) => {
+            let accs = new_aggregate_accumulators(engine, agg_targets)?;
+            Ok(entry.insert((accs, group_values)))
+        }
+    }
+}
+
+fn observe_aggregate(
+    acc: &mut AggregateAccumulator,
+    name: &str,
+    args: &[Expr],
+    distinct: bool,
+    order_by: &[OrderBy],
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
+    if acc.registered.is_some() {
+        let values = aggregate_input_values(args, ctx)?;
+        if distinct {
+            let key = distinct_key(&Value::List(values.clone()));
+            if !acc.distinct.insert(key) {
+                return Ok(());
+            }
+        }
+        let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+        for ob in order_by {
+            let v = uqa_sql::expr::eval(&ob.expr, ctx)?;
+            sort_keys.push((v, ob.descending));
+        }
+        acc.observe_registered(values, sort_keys)?;
+        return Ok(());
+    }
+
+    let value = aggregate_input_value(name, args, order_by, ctx)?;
+    if distinct && !matches!(value, Value::Null) {
+        let key = distinct_key(&value);
+        if !acc.distinct.insert(key) {
+            return Ok(());
+        }
+    }
+    let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+    for ob in order_by {
+        let v = uqa_sql::expr::eval(&ob.expr, ctx)?;
+        sort_keys.push((v, ob.descending));
+    }
+    if order_by.is_empty() {
+        acc.observe(&value);
+    } else {
+        acc.observe_with_sort_keys(&value, sort_keys);
+    }
+    Ok(())
+}
+
 struct AggregateAccumulator {
+    registered: Option<Arc<dyn SQLAggregateFunction>>,
+    registered_state: Option<Box<dyn SQLAggregateState>>,
+    registered_ordered: RegisteredAggregateBuffer,
     count: u64,
     sum: f64,
     min: Option<Value>,
@@ -7792,7 +7928,35 @@ struct AggregateAccumulator {
     bool_or: Option<bool>,
 }
 
+impl Default for AggregateAccumulator {
+    fn default() -> Self {
+        Self {
+            registered: None,
+            registered_state: None,
+            registered_ordered: RegisteredAggregateBuffer::default(),
+            count: 0,
+            sum: 0.0,
+            min: None,
+            max: None,
+            distinct: BTreeSet::new(),
+            values: Vec::new(),
+            sort_keys: Vec::new(),
+            bool_and: None,
+            bool_or: None,
+        }
+    }
+}
+
 impl AggregateAccumulator {
+    fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
+        let state = function.create_state();
+        Self {
+            registered: Some(function),
+            registered_state: Some(state),
+            ..Self::default()
+        }
+    }
+
     fn observe(&mut self, value: &Value) {
         if matches!(value, Value::Null) {
             return;
@@ -7840,6 +8004,233 @@ impl AggregateAccumulator {
             self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
         }
     }
+
+    fn observe_registered(
+        &mut self,
+        values: Vec<Value>,
+        sort_keys: Vec<(Value, bool)>,
+    ) -> Result<(), SQLError> {
+        if sort_keys.is_empty() {
+            let state = self
+                .registered_state
+                .as_mut()
+                .ok_or_else(|| SQLError::Internal("registered aggregate state missing".into()))?;
+            state.observe(&values)?;
+            return Ok(());
+        }
+        self.registered_ordered.push(values, sort_keys)
+    }
+
+    fn registered_value(&self) -> Option<Result<Value, SQLError>> {
+        let function = self.registered.as_ref()?;
+        if self.registered_ordered.is_empty() {
+            let state = self
+                .registered_state
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("registered aggregate state missing".into()));
+            return Some(state.and_then(|state| state.finish()));
+        }
+        Some((|| {
+            let mut state = function.create_state();
+            self.registered_ordered
+                .observe_ordered_into(state.as_mut())?;
+            state.finish()
+        })())
+    }
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+struct RegisteredAggregateRecord {
+    values: Vec<Value>,
+    sort_keys: Vec<(Value, bool)>,
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct RegisteredAggregateBuffer {
+    rows: Vec<RegisteredAggregateRecord>,
+    runs: Vec<tempfile::NamedTempFile>,
+    next_sequence: u64,
+}
+
+impl RegisteredAggregateBuffer {
+    fn is_empty(&self) -> bool {
+        self.rows.is_empty() && self.runs.is_empty()
+    }
+
+    fn push(&mut self, values: Vec<Value>, sort_keys: Vec<(Value, bool)>) -> Result<(), SQLError> {
+        self.rows.push(RegisteredAggregateRecord {
+            values,
+            sort_keys,
+            sequence: self.next_sequence,
+        });
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        if self.rows.len() >= REGISTERED_AGGREGATE_SPILL_ROWS {
+            self.flush_run()?;
+        }
+        Ok(())
+    }
+
+    fn observe_ordered_into(&self, state: &mut dyn SQLAggregateState) -> Result<(), SQLError> {
+        if self.runs.is_empty() {
+            let mut rows = self.rows.clone();
+            rows.sort_by(compare_registered_aggregate_records);
+            for row in rows {
+                state.observe(&row.values)?;
+            }
+            return Ok(());
+        }
+
+        let mut rows = self.rows.clone();
+        rows.sort_by(compare_registered_aggregate_records);
+        let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!rows.is_empty()));
+        if !rows.is_empty() {
+            readers.push(RegisteredAggregateRunReader::memory(rows));
+        }
+        for run in &self.runs {
+            readers.push(RegisteredAggregateRunReader::file(run)?);
+        }
+
+        while let Some((idx, _)) = readers
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, reader)| reader.current().map(|record| (idx, record)))
+            .min_by(|(_, a), (_, b)| compare_registered_aggregate_records(a, b))
+        {
+            let record = readers[idx].take_current()?;
+            state.observe(&record.values)?;
+        }
+        Ok(())
+    }
+
+    fn flush_run(&mut self) -> Result<(), SQLError> {
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+        self.rows.sort_by(compare_registered_aggregate_records);
+        let mut run = tempfile::NamedTempFile::new().map_err(|err| {
+            SQLError::Internal(format!(
+                "failed to create registered aggregate spill file: {err}"
+            ))
+        })?;
+        {
+            let mut writer = BufWriter::new(run.as_file_mut());
+            for row in self.rows.drain(..) {
+                serde_json::to_writer(&mut writer, &row).map_err(|err| {
+                    SQLError::Internal(format!(
+                        "failed to serialize registered aggregate spill row: {err}"
+                    ))
+                })?;
+                writer.write_all(b"\n").map_err(|err| {
+                    SQLError::Internal(format!(
+                        "failed to write registered aggregate spill row: {err}"
+                    ))
+                })?;
+            }
+            writer.flush().map_err(|err| {
+                SQLError::Internal(format!(
+                    "failed to flush registered aggregate spill file: {err}"
+                ))
+            })?;
+        }
+        run.as_file_mut().seek(SeekFrom::Start(0)).map_err(|err| {
+            SQLError::Internal(format!(
+                "failed to rewind registered aggregate spill file: {err}"
+            ))
+        })?;
+        self.runs.push(run);
+        Ok(())
+    }
+}
+
+enum RegisteredAggregateRunReader {
+    Memory {
+        rows: std::vec::IntoIter<RegisteredAggregateRecord>,
+        current: Option<RegisteredAggregateRecord>,
+    },
+    File {
+        reader: BufReader<File>,
+        current: Option<RegisteredAggregateRecord>,
+    },
+}
+
+impl RegisteredAggregateRunReader {
+    fn memory(rows: Vec<RegisteredAggregateRecord>) -> Self {
+        let mut rows = rows.into_iter();
+        let current = rows.next();
+        Self::Memory { rows, current }
+    }
+
+    fn file(run: &tempfile::NamedTempFile) -> Result<Self, SQLError> {
+        let file = run.reopen().map_err(|err| {
+            SQLError::Internal(format!(
+                "failed to reopen registered aggregate spill file: {err}"
+            ))
+        })?;
+        let mut reader = BufReader::new(file);
+        let current = read_registered_aggregate_record(&mut reader)?;
+        Ok(Self::File { reader, current })
+    }
+
+    fn current(&self) -> Option<&RegisteredAggregateRecord> {
+        match self {
+            Self::Memory { current, .. } | Self::File { current, .. } => current.as_ref(),
+        }
+    }
+
+    fn take_current(&mut self) -> Result<RegisteredAggregateRecord, SQLError> {
+        match self {
+            Self::Memory { rows, current } => {
+                let record = current.take().ok_or_else(|| {
+                    SQLError::Internal("registered aggregate memory run exhausted".into())
+                })?;
+                *current = rows.next();
+                Ok(record)
+            }
+            Self::File { reader, current } => {
+                let record = current.take().ok_or_else(|| {
+                    SQLError::Internal("registered aggregate spill run exhausted".into())
+                })?;
+                *current = read_registered_aggregate_record(reader)?;
+                Ok(record)
+            }
+        }
+    }
+}
+
+fn read_registered_aggregate_record(
+    reader: &mut BufReader<File>,
+) -> Result<Option<RegisteredAggregateRecord>, SQLError> {
+    let mut line = String::new();
+    let bytes = reader.read_line(&mut line).map_err(|err| {
+        SQLError::Internal(format!(
+            "failed to read registered aggregate spill row: {err}"
+        ))
+    })?;
+    if bytes == 0 {
+        return Ok(None);
+    }
+    serde_json::from_str(line.trim_end())
+        .map(Some)
+        .map_err(|err| {
+            SQLError::Internal(format!(
+                "failed to deserialize registered aggregate spill row: {err}"
+            ))
+        })
+}
+
+fn compare_registered_aggregate_records(
+    a: &RegisteredAggregateRecord,
+    b: &RegisteredAggregateRecord,
+) -> Ordering {
+    for ((av, ad), (bv, _bd)) in a.sort_keys.iter().zip(b.sort_keys.iter()) {
+        let cmp = av.cmp(bv);
+        let cmp = if *ad { cmp.reverse() } else { cmp };
+        if cmp != Ordering::Equal {
+            return cmp;
+        }
+    }
+    a.sequence.cmp(&b.sequence)
 }
 
 /// Canonical-form key for `DISTINCT` deduplication. Mirrors the
@@ -7903,7 +8294,7 @@ fn build_aggregate_rows(
             for mut row in part {
                 for (idx, proj) in stmt.projections.iter().enumerate() {
                     let label = labels[idx].clone();
-                    if contains_aggregate(&proj.expr) {
+                    if contains_aggregate(engine, &proj.expr) {
                         continue;
                     }
                     let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
@@ -7919,7 +8310,7 @@ fn build_aggregate_rows(
     // group_key -> per-aggregate accumulator vector + the raw group key
     // values used to project the GROUP BY columns.
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets = aggregate_exprs(&stmt.projections);
+    let agg_targets = aggregate_exprs(engine, &stmt.projections);
 
     for entry in scored {
         let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
@@ -7929,14 +8320,7 @@ fn build_aggregate_rows(
             .iter()
             .map(|g| uqa_sql::expr::eval(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
-        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
-            (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
-                group_values,
-            )
-        });
+        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
@@ -7955,23 +8339,7 @@ fn build_aggregate_rows(
                     continue;
                 }
             }
-            let value = aggregate_input_value(name, args, order_by, &ctx)?;
-            if *distinct && !matches!(value, Value::Null) {
-                let key = distinct_key(&value);
-                if !bucket.0[i].distinct.insert(key) {
-                    continue;
-                }
-            }
-            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by {
-                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
-                sort_keys.push((v, ob.descending));
-            }
-            if order_by.is_empty() {
-                bucket.0[i].observe(&value);
-            } else {
-                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
-            }
+            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
         }
     }
 
@@ -7981,9 +8349,7 @@ fn build_aggregate_rows(
         groups.insert(
             Vec::new(),
             (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
+                new_aggregate_accumulators(engine, &agg_targets)?,
                 Vec::new(),
             ),
         );
@@ -7997,8 +8363,9 @@ fn build_aggregate_rows(
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if contains_aggregate(&proj.expr) {
-                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+            if contains_aggregate(engine, &proj.expr) {
+                let resolved =
+                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
                 row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
@@ -8028,7 +8395,15 @@ fn build_aggregate_rows(
             }
         }
         if let Some(having_expr) = stmt.having.as_ref() {
-            let resolved = resolve_having(having_expr, &row, stmt, &accs, &group_values, params)?;
+            let resolved = resolve_having(
+                engine,
+                having_expr,
+                &row,
+                stmt,
+                &accs,
+                &group_values,
+                params,
+            )?;
             let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
             let kept =
                 uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
@@ -8053,7 +8428,7 @@ fn build_aggregate_rows_relaxed(
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets = aggregate_exprs(&stmt.projections);
+    let agg_targets = aggregate_exprs(engine, &stmt.projections);
     for entry in scored {
         let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
         let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
@@ -8062,14 +8437,7 @@ fn build_aggregate_rows_relaxed(
             .iter()
             .map(|g| uqa_sql::expr::eval(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
-        let bucket = groups.entry(group_values.clone()).or_insert_with(|| {
-            (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
-                group_values,
-            )
-        });
+        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
             let Expr::Func {
                 name,
@@ -8088,32 +8456,14 @@ fn build_aggregate_rows_relaxed(
                     continue;
                 }
             }
-            let value = aggregate_input_value(name, args, order_by, &ctx)?;
-            if *distinct && !matches!(value, Value::Null) {
-                let key = distinct_key(&value);
-                if !bucket.0[i].distinct.insert(key) {
-                    continue;
-                }
-            }
-            let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
-            for ob in order_by {
-                let v = uqa_sql::expr::eval(&ob.expr, &ctx)?;
-                sort_keys.push((v, ob.descending));
-            }
-            if order_by.is_empty() {
-                bucket.0[i].observe(&value);
-            } else {
-                bucket.0[i].observe_with_sort_keys(&value, sort_keys);
-            }
+            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
         }
     }
     if groups.is_empty() && stmt.group_by.is_empty() {
         groups.insert(
             Vec::new(),
             (
-                (0..agg_targets.len())
-                    .map(|_| AggregateAccumulator::default())
-                    .collect(),
+                new_aggregate_accumulators(engine, &agg_targets)?,
                 Vec::new(),
             ),
         );
@@ -8126,8 +8476,9 @@ fn build_aggregate_rows_relaxed(
         let mut agg_idx = 0;
         for (idx, proj) in stmt.projections.iter().enumerate() {
             let label = labels[idx].clone();
-            if contains_aggregate(&proj.expr) {
-                let resolved = replace_aggregates_with_values(&proj.expr, &accs, &mut agg_idx)?;
+            if contains_aggregate(engine, &proj.expr) {
+                let resolved =
+                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
                 row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
@@ -8160,11 +8511,18 @@ fn build_aggregate_rows_relaxed(
     Ok(rows)
 }
 
-fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Value {
+fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Result<Value, SQLError> {
     aggregate_value_with_args(name, acc, &[])
 }
 
-fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Expr]) -> Value {
+fn aggregate_value_with_args(
+    name: &str,
+    acc: &AggregateAccumulator,
+    args: &[Expr],
+) -> Result<Value, SQLError> {
+    if let Some(value) = acc.registered_value() {
+        return value;
+    }
     let lname = name.to_ascii_lowercase();
     // Order the collected `values` by the captured sort keys when the
     // aggregate was annotated with ORDER BY (string_agg / array_agg /
@@ -8189,7 +8547,7 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         acc.values.clone()
     };
 
-    match lname.as_str() {
+    let value = match lname.as_str() {
         "count" => Value::Int(acc.count as i64),
         "sum" => {
             if acc.count == 0 {
@@ -8211,7 +8569,7 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         "max" => acc.max.clone().unwrap_or(Value::Null),
         "string_agg" => {
             if ordered_values.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             // Separator: literal second positional arg, or empty.
             let sep = match args.get(1) {
@@ -8233,7 +8591,7 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         }
         "array_agg" => {
             if ordered_values.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             Value::List(ordered_values)
         }
@@ -8264,31 +8622,31 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         },
         "stddev" | "stddev_samp" => {
             if acc.count < 2 {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             Value::Float(stddev_samp(&acc.values))
         }
         "stddev_pop" => {
             if acc.count == 0 {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             Value::Float(stddev_pop(&acc.values))
         }
         "variance" | "var_samp" => {
             if acc.count < 2 {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             Value::Float(variance_samp(&acc.values))
         }
         "var_pop" => {
             if acc.count == 0 {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             Value::Float(variance_pop(&acc.values))
         }
         "percentile_cont" => {
             if ordered_values.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             let frac = match args.first() {
                 Some(Expr::Literal(Value::Float(f))) => *f,
@@ -8299,7 +8657,7 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         }
         "percentile_disc" => {
             if ordered_values.is_empty() {
-                return Value::Null;
+                return Ok(Value::Null);
             }
             let frac = match args.first() {
                 Some(Expr::Literal(Value::Float(f))) => *f,
@@ -8310,7 +8668,8 @@ fn aggregate_value_with_args(name: &str, acc: &AggregateAccumulator, args: &[Exp
         }
         "mode" => mode_value(&ordered_values),
         _ => Value::Null,
-    }
+    };
+    Ok(value)
 }
 
 fn aggregate_json_key(value: &Value) -> String {

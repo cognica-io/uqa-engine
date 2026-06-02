@@ -37,6 +37,10 @@ pub trait EngineHook {
     ) -> std::result::Result<(Vec<String>, Vec<crate::result::ResultRow>), String> {
         Err("subquery execution not supported by this engine".into())
     }
+
+    fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {
+        None
+    }
 }
 
 pub struct EvalContext<'a> {
@@ -136,6 +140,11 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // built-in named the same.
             if matches!(lower.as_str(), "nextval" | "currval" | "setval") {
                 return eval_sequence_function(&lower, &evaluated, ctx);
+            }
+            if let Some(engine) = ctx.engine {
+                if let Some(result) = engine.call_scalar_function(&lower, &evaluated) {
+                    return result;
+                }
             }
             eval_scalar_function(&lower, &evaluated)
         }
