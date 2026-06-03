@@ -4,9 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Robustness fuzz for `uqa_graph::cypher::parse_cypher`. Phase 11
-//! Section 7.5 calls out random-input fuzzing of the Cypher parser;
-//! this is the stable-Rust variant — no `cargo fuzz`, no nightly. The
+//! Robustness fuzz for `uqa_graph::cypher::parse_cypher`. The master
+//! plan calls out random-input fuzzing of the Cypher parser; this is
+//! the stable-Rust variant - no `cargo fuzz`, no nightly. The
 //! harness asserts every input either parses cleanly or returns a
 //! `ParseError` — no panics, no UB, no timeouts.
 

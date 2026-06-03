@@ -7,8 +7,8 @@
 //! Document storage abstraction.
 //!
 //! A `DocumentStore` maps [`DocId`] keys to field maps and supports
-//! field-level access. Phase 1 ships only [`MemoryDocumentStore`];
-//! `SQLite`-backed implementations land alongside the catalog.
+//! field-level access. The storage crate provides in-memory, `SQLite`,
+//! and Key/Value-backed implementations behind the same trait.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

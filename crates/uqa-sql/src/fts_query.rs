@@ -427,6 +427,7 @@ pub fn compile(
             OperatorTree::Term {
                 query: term.clone(),
                 field: resolved,
+                scoring: None,
             }
         }
         FTSNode::Phrase { field, phrase } => {
@@ -439,6 +440,7 @@ pub fn compile(
                 return OperatorTree::Term {
                     query: terms.into_iter().next().unwrap(),
                     field: resolved,
+                    scoring: None,
                 };
             }
             OperatorTree::Intersect(
@@ -447,6 +449,7 @@ pub fn compile(
                     .map(|t| OperatorTree::Term {
                         query: t,
                         field: resolved.clone(),
+                        scoring: None,
                     })
                     .collect(),
             )
@@ -614,6 +617,19 @@ mod tests {
         let op = compile(&ast, Some("body"), &whitespace_tokenizer);
         match op {
             OperatorTree::Term { field, .. } => assert!(field.is_none()),
+            _ => panic!("expected Term"),
+        }
+    }
+
+    #[test]
+    fn compile_leaves_text_scoring_unbound() {
+        let ast = FTSNode::Term {
+            field: Some("body".into()),
+            term: "rust".into(),
+        };
+        let op = compile(&ast, None, &whitespace_tokenizer);
+        match op {
+            OperatorTree::Term { scoring, .. } => assert!(scoring.is_none()),
             _ => panic!("expected Term"),
         }
     }

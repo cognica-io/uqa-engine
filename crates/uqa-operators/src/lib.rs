@@ -57,7 +57,7 @@ pub use tree::{
     AttentionFuserDyn, AttentionRef, DeepFusionLayer, EdgeConstraint, EdgePatternIR, GatingSpec,
     GraphPatternIR, LearnedFuserDyn, LearnedFusionRef, MultiStageCutoff, MultiStageEntry,
     OperatorTree, ProbBoolMode, ProgressiveFusionEntry, ScorerRef, TemporalFilterIR,
-    VertexConstraint, VertexPatternIR, VertexPredicate,
+    TextScoringMode, VertexConstraint, VertexPatternIR, VertexPredicate,
 };
 pub use uqa_core::{PathExpr, PathSegment};
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

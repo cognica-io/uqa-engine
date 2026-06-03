@@ -277,7 +277,7 @@ impl CostModel {
         let n = stats.total_docs as f64;
         match op {
             OperatorTree::Empty => 0.0,
-            OperatorTree::Term { query, field } => {
+            OperatorTree::Term { query, field, .. } => {
                 if stats.total_docs == 0 {
                     1.0
                 } else {

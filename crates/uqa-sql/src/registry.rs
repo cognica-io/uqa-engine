@@ -17,13 +17,12 @@ use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionKind {
-    /// `text_match(field, query_string)` - Bayesian BM25 retrieval.
+    /// `text_match(field, query_string)` - BM25 text retrieval.
     TextMatch,
     /// `field @@ query` - full-text query-string parser over text and
     /// vector signals.
     FTSMatch,
-    /// `bayesian_match(field, query_string)` - alias, same as
-    /// `text_match` for now (Phase 5 ships only Bayesian BM25).
+    /// `bayesian_match(field, query_string)` - Bayesian BM25 retrieval.
     BayesianMatch,
     /// `bayesian_match_with_prior(field, query, prior_field, mode)` -
     /// Bayesian BM25 adjusted by a document-level external prior.
@@ -47,10 +46,10 @@ pub enum FunctionKind {
     /// 1-hop neighbor expansion.
     GraphNeighbors,
     /// `multi_field_match(field_1, query_1, field_2, query_2, ...)` -
-    /// per-field BM25 with uniform-weight log-odds conjunction.
+    /// per-field Bayesian BM25 probabilities fused with log-odds conjunction.
     MultiFieldMatch,
     /// `staged_retrieval(field_1, query_1, top_k_1, field_2, query_2,
-    /// top_k_2, ...)` - cascading `text_match`: each stage filters the
+    /// top_k_2, ...)` - cascading BM25 `text_match`: each stage filters the
     /// candidate set from the previous stage and keeps top-k.
     StagedRetrieval,
     /// `deep_predict(model_name)` - runs the saved deep-fusion model.

@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Robustness fuzz for `uqa_sql::compile`. Phase 11 Section 7.5 calls
-//! out random-input fuzzing of the SQL parser; this is the stable-Rust
+//! Robustness fuzz for `uqa_sql::compile`. The master plan calls out
+//! random-input fuzzing of the SQL parser; this is the stable-Rust
 //! variant — no `cargo fuzz`, no nightly. We drive `compile` with a
 //! mix of pure-random byte strings and randomly stitched fragments of
 //! near-SQL syntax. The harness asserts every input either succeeds

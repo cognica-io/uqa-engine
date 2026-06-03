@@ -9,10 +9,10 @@
 //! Builds a 1,000,000-row in-memory corpus where every document is
 //! tagged with a 7-token rotating vocabulary plus an integer `qty`.
 //! `text_match_1m` runs `text_match(body, 'quokka')` (the rare term)
-//! and ranks the top 10 by Bayesian BM25. `select_filter_1m` runs a
+//! and ranks the top 10 by BM25. `select_filter_1m` runs a
 //! numeric range scan with `ORDER BY qty DESC LIMIT 20`. Useful for
 //! measuring the headline scaling figures called for by the master
-//! plan's Phase 11 performance gate.
+//! plan's performance gate.
 //!
 //! Run with `cargo bench -p uqa-engine --bench sql_1m`.
 

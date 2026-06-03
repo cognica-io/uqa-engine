@@ -2,7 +2,7 @@
 
 Thanks for considering a contribution. This document explains the gates every change has to clear, the conventions the codebase follows, and where new code lives.
 
-The master plan in [`docs/plans/0001-uqa-rs-implementation-plan.md`](docs/plans/0001-uqa-rs-implementation-plan.md) is the source of truth for what each phase ships and what is explicitly deferred. Read the relevant section before starting work on a new crate or operator.
+The master plan in [`docs/plans/0001-uqa-rs-implementation-plan.md`](docs/plans/0001-uqa-rs-implementation-plan.md) is the source of truth for staged deliverables and explicit deferrals. Read the relevant section before starting work on a new crate or operator.
 
 ## Local gates
 
@@ -41,7 +41,7 @@ Source code, doc comments, and committed text use ASCII characters only. Use `->
 
 ### Workarounds
 
-The codebase does not ship workarounds, "for now" patches, or backwards-compatibility shims. If you find yourself wanting to write "this is temporary," step back and fix the root cause instead. If the root cause is genuinely out of scope, file an issue and link to it from the PR.
+The codebase does not ship workarounds, stopgap patches, or backwards-compatibility shims. If you find yourself about to describe a change as short-lived, step back and fix the root cause instead. If the root cause is genuinely out of scope, file an issue and link to it from the PR.
 
 ## Tests
 
@@ -73,9 +73,9 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 
 ## Commit messages
 
-Commits are small and topic-focused. The first line is imperative ("Add ...", "Fix ...", "Refactor ..."), under 70 characters, and followed by a blank line. The body explains the _why_ and any relevant context that would not be obvious from the diff. Reference the master-plan section number when the change implements a named algebraic invariant or phase deliverable.
+Commits are small and topic-focused. The first line is imperative ("Add ...", "Fix ...", "Refactor ..."), under 70 characters, and followed by a blank line. The body explains the _why_ and any relevant context that would not be obvious from the diff. Reference the master-plan section number when the change implements a named algebraic invariant or staged deliverable.
 
-If a single PR introduces several logically distinct changes (for example, a Phase deliverable with both implementation and tests), split it into multiple commits along the natural seams. The session-bundling commits in the initial 0.1.0 push are an example of how to structure that split: implementation, parity infrastructure, docs, benches, integration tests, property tests + fuzz.
+If a single PR introduces several logically distinct changes (for example, an implementation change plus a separate test harness), split it into multiple commits along the natural seams. The session-bundling commits in the initial 0.1.0 push are an example of how to structure that split: implementation, parity infrastructure, docs, benches, integration tests, property tests + fuzz.
 
 ## Pull requests
 

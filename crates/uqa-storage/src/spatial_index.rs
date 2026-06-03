@@ -6,8 +6,8 @@
 
 //! In-memory spatial index over geographic points.
 //!
-//! Phase 4 ships a brute-force Haversine scan: simple, correct, and
-//! sufficient for the algebra. R*Tree-based persistence lands later.
+//! The current implementation uses a brute-force Haversine scan: simple,
+//! correct, and sufficient for the algebraic operators that consume it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

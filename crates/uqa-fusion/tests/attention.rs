@@ -5,7 +5,7 @@
 //
 
 //! `AttentionFusion` and `MultiHeadAttentionFusion` property tests
-//! (Phase 8, Paper 4 Section 8).
+//! (Paper 4 Section 8).
 //!
 //! Pins:
 //! - `fuse` output in `[0, 1]` for any `(probs, query_features, weights)`,

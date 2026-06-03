@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `LearnedFusion` property tests (Phase 8, Paper 4 Section 8).
+//! `LearnedFusion` property tests (Paper 4 Section 8).
 //!
 //! Pins:
 //! - `n = 0` returns `0.5` (neutral fallback),

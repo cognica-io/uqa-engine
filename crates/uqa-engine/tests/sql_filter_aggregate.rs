@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Phase 6 SQL surface: predicate WHERE clauses (Boolean / comparison /
-//! BETWEEN / IN / IS NULL) and aggregate functions with GROUP BY.
+//! SQL surface coverage for predicate WHERE clauses (Boolean /
+//! comparison / BETWEEN / IN / IS NULL) and aggregate functions with GROUP BY.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

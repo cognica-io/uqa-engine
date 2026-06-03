@@ -106,7 +106,7 @@ Run a single target locally with:
 cargo +nightly fuzz run sql_compile -- -max_total_time=300
 ```
 
-Phase 11 Section 7.5 calls for a nightly cron that runs each target for ~5 minutes; the in-process proptest fuzz under `crates/<crate>/tests/*_fuzz.rs` covers the same parsers but with much smaller corpora and runs as part of regular `cargo test`. The two are complementary: proptest catches obvious bugs every PR, and cargo-fuzz finds the slow corpus-driven discoveries on the cron.
+The master-plan fuzzing section calls for a nightly cron that runs each target for ~5 minutes; the in-process proptest fuzz under `crates/<crate>/tests/*_fuzz.rs` covers the same parsers but with much smaller corpora and runs as part of regular `cargo test`. The two are complementary: proptest catches obvious bugs every PR, and cargo-fuzz finds the slow corpus-driven discoveries on the cron.
 
 Run the full bench suite locally (or on a perf-stable runner) before landing changes that touch the inner loop:
 

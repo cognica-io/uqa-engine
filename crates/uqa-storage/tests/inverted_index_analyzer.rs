@@ -254,7 +254,7 @@ fn sqlite_dual_analyzer_separate_phases() {
 #[test]
 fn sqlite_backward_compat_no_phase_arg_uses_both() {
     // The Rust API requires an explicit phase, so the "no phase"
-    // backwards-compat check is exercised via `Phase::Both`.
+    // backwards-compat check is exercised via `AnalyzerPhase::Both`.
     let conn = sqlite_with_catalog();
     let mut idx = SQLiteInvertedIndex::new(conn, "test", standard_analyzer("english"));
     idx.set_field_analyzer("body", standard_analyzer("english"), AnalyzerPhase::Both)

@@ -35,6 +35,6 @@ The hash-join path on `sql_inner_join_10k_x_1k` came down from ~3.46 s (nested-l
 
 ## Caveats
 
-- Criterion times are wall-clock, single-threaded. Multi-threaded workloads are not represented in the table; Phase 11 focused on the hot single-threaded paths.
+- Criterion times are wall-clock, single-threaded. Multi-threaded workloads are not represented in the table; the benchmark gate focuses on the hot single-threaded paths.
 - `--quick` undercuts measurement stability; use the default sample count (100) for any number you intend to publish or compare against.
 - `sql_1m` exercises a single text match across the full corpus without any pre-filtering. It exists as a scaling check, not as a representative latency target.

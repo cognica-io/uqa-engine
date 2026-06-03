@@ -6,11 +6,9 @@
 
 //! Lift a `pg_query` parse tree into the internal [`Statement`] AST.
 //!
-//! This is intentionally tight in scope: it covers `CREATE TABLE`,
-//! `CREATE INDEX`, `INSERT`, and `SELECT` with the subset of clauses the
-//! Phase 5 quickstart and parity fixture exercise. Anything outside that
-//! grammar parses cleanly via `pg_query` but compiles to
-//! [`SQLError::Unsupported`].
+//! The compiler accepts `PostgreSQL` syntax through `pg_query` and lifts
+//! supported statements into the internal AST. Syntax that parses but is
+//! outside the current SQL surface compiles to [`SQLError::Unsupported`].
 
 use pg_query::protobuf::{Node, RangeVar};
 use pg_query::NodeEnum;

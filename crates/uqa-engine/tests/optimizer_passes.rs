@@ -12,7 +12,7 @@
 
 use uqa_engine::operator_tree_bridge::{lower_where, optimised_tree_for};
 use uqa_engine::Engine;
-use uqa_operators::OperatorTree;
+use uqa_operators::{OperatorTree, TextScoringMode};
 use uqa_sql::ast::Statement;
 use uqa_sql::compile;
 
@@ -40,6 +40,43 @@ fn where_of(sql: &str) -> uqa_sql::ast::Expr {
         panic!("expected SELECT");
     };
     stmt.r#where.expect("expected WHERE")
+}
+
+fn assert_term_scoring(tree: &OperatorTree, expected: TextScoringMode) {
+    let OperatorTree::Term { scoring, .. } = tree else {
+        panic!("expected Term");
+    };
+    assert_eq!(*scoring, Some(expected));
+}
+
+#[test]
+fn lower_where_preserves_text_match_scoring_mode() {
+    let expr = where_of("SELECT id FROM notes WHERE text_match(body, 'tokio')");
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    assert_term_scoring(&lowered, TextScoringMode::BM25);
+}
+
+#[test]
+fn lower_where_preserves_bayesian_match_scoring_mode() {
+    let expr = where_of("SELECT id FROM notes WHERE bayesian_match(body, 'tokio')");
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    assert_term_scoring(&lowered, TextScoringMode::BayesianBM25);
+}
+
+#[test]
+fn lower_where_binds_fts_query_text_terms_after_parsing() {
+    let expr = where_of("SELECT id FROM notes WHERE body @@ 'tokio'");
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    assert_term_scoring(&lowered, TextScoringMode::BayesianBM25);
+}
+
+#[test]
+fn fusion_lowering_rejects_raw_text_match_signal() {
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_log_odds(text_match(title, 'rust'), bayesian_match(body, 'tokio'))",
+    );
+    assert!(lower_where(&expr, &[]).is_none());
 }
 
 #[test]
@@ -157,7 +194,7 @@ fn fuse_log_odds_lowers_to_logoddsfusion_and_reorder_keeps_signals() {
     let eng = engine_with_corpus();
     let expr = where_of(
         "SELECT id FROM notes \
-         WHERE fuse_log_odds(text_match(title, 'rust'), text_match(body, 'tokio'), 0.5)",
+         WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'), 0.5)",
     );
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
     let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
@@ -175,7 +212,7 @@ fn fuse_log_odds_lowers_with_default_alpha() {
     let eng = engine_with_corpus();
     let expr = where_of(
         "SELECT id FROM notes \
-         WHERE fuse_log_odds(text_match(title, 'rust'), text_match(body, 'tokio'))",
+         WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'))",
     );
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
     let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
@@ -190,7 +227,7 @@ fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
     let eng = engine_with_corpus();
     let expr = where_of(
         "SELECT id FROM notes \
-         WHERE fuse_log_odds(text_match(title, 'rust'), text_match(body, 'tokio')) \
+         WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio')) \
            AND year >= 2024",
     );
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
@@ -278,7 +315,7 @@ fn fuse_log_odds_calibrates_knn_signal() {
     let expr = where_of(
         "SELECT id FROM notes \
          WHERE fuse_log_odds( \
-             text_match(body, 'tokio'), \
+             bayesian_match(body, 'tokio'), \
              knn_match(body, ARRAY[0.1, 0.2], 5), \
              0.5 \
          )",
@@ -304,7 +341,7 @@ fn attention_fusion_lowers_with_calibrated_signals() {
     let expr = where_of(
         "SELECT id FROM notes \
          WHERE attention( \
-             text_match(title, 'rust'), \
+             bayesian_match(title, 'rust'), \
              knn_match(body, ARRAY[0.1, 0.2], 5) \
          )",
     );
@@ -331,7 +368,7 @@ fn learned_fusion_lowers_with_calibrated_signals() {
     let expr = where_of(
         "SELECT id FROM notes \
          WHERE learned_fusion( \
-             text_match(title, 'rust'), \
+             bayesian_match(title, 'rust'), \
              knn_match(body, ARRAY[0.1, 0.2], 5) \
          )",
     );
@@ -368,7 +405,7 @@ fn fuse_log_odds_calibrated_scores_lie_in_unit_interval() {
         .sql(
             "SELECT id, _score AS s FROM notes \
              WHERE fuse_log_odds( \
-                 text_match(body, 'tokio'), \
+                 bayesian_match(body, 'tokio'), \
                  knn_match(embedding, ARRAY[0.5, 0.5], 3), \
                  0.5 \
              ) ORDER BY s DESC",

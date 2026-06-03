@@ -8,12 +8,11 @@
 //! statement onto the engine's mutation / search APIs, and roll the
 //! result rows into a [`SQLResult`].
 //!
-//! Phase 5 covers the quickstart slice: `CREATE TABLE` (with `VECTOR(N)`
-//! columns), `CREATE INDEX ... USING gin (...)` (recorded as an FTS
-//! field), `CREATE INDEX ... USING ivf (...)` (`hnsw` is accepted as an
-//! IVF alias), `INSERT ... VALUES`, and `SELECT` with `text_match`,
-//! `knn_match`, and `fuse_log_odds` calls in `WHERE`. Statements outside this surface return
-//! [`uqa_sql::SQLError::Unsupported`] cleanly.
+//! The SQL surface covers table DDL/DML, indexes, joins, CTEs, windows,
+//! aggregates, graph functions, retrieval functions, and engine-registered
+//! Rust functions. Unsupported statements return
+//! [`uqa_sql::SQLError::Unsupported`] cleanly instead of silently falling
+//! through.
 
 #![allow(
     clippy::useless_format,
@@ -8878,9 +8877,8 @@ fn execute_function(
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
     match kind {
-        FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
-            run_text_match(engine, table, args, params)
-        }
+        FunctionKind::TextMatch => run_text_match(engine, table, args, params),
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, args, params),
         FunctionKind::FTSMatch => run_fts_match(engine, table, args, params),
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, args, params)
@@ -8910,7 +8908,7 @@ fn execute_function(
         // projection-side handler instead of this row-emitting
         // dispatcher.
         FunctionKind::AttentionFusion | FunctionKind::LearnedFusion => {
-            run_attention_fusion(engine, table, args, params)
+            run_attention_fusion(engine, table, name, args, params)
         }
         FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
@@ -9004,7 +9002,7 @@ fn run_staged_retrieval(
         });
     }
     let ctx = EvalContext::new(None, params).with_engine(engine);
-    let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
+    let mode = crate::ScoringMode::BM25(uqa_scoring::BM25Params::default());
     let n_stages = args.len() / 3;
     let mut current: Option<Vec<ScoredEntry>> = None;
     for i in 0..n_stages {
@@ -9683,6 +9681,15 @@ pub(crate) fn run_text_match_public(
     run_text_match(engine, table, args, params)
 }
 
+pub(crate) fn run_bayesian_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_bayesian_match(engine, table, args, params)
+}
+
 pub(crate) fn run_knn_match_public(
     engine: &Engine,
     table: &str,
@@ -9726,9 +9733,43 @@ fn run_text_match(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_text_match_scored(
+        engine,
+        table,
+        args,
+        params,
+        "text_match",
+        crate::ScoringMode::BM25(uqa_scoring::BM25Params::default()),
+    )
+}
+
+fn run_bayesian_match(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_text_match_scored(
+        engine,
+        table,
+        args,
+        params,
+        "bayesian_match",
+        crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default()),
+    )
+}
+
+fn run_text_match_scored(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+    function_name: &str,
+    mode: crate::ScoringMode,
+) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
         return Err(SQLError::BadArity {
-            name: "text_match".into(),
+            name: function_name.into(),
             expected: "2".into(),
             actual: args.len(),
         });
@@ -9739,7 +9780,7 @@ fn run_text_match(
         Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => "_all".to_string(),
         other => {
             return Err(SQLError::TypeMismatch(format!(
-                "text_match.field must be a column reference, got {other:?}"
+                "{function_name}.field must be a column reference, got {other:?}"
             )));
         }
     };
@@ -9749,11 +9790,10 @@ fn run_text_match(
         Value::Str(s) => s,
         other => {
             return Err(SQLError::TypeMismatch(format!(
-                "text_match query must be a string, got {other:?}"
+                "{function_name} query must be a string, got {other:?}"
             )));
         }
     };
-    let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
     if field == "_all" || field.is_empty() {
         let mut by_doc: BTreeMap<DocId, f64> = BTreeMap::new();
         for field_name in engine.fts_fields_for_table(table) {
@@ -9836,7 +9876,7 @@ fn run_bayesian_match_with_prior(
     let query = expect_string(&args[1], "bayesian_match_with_prior.query", &ctx)?;
     let mode = expect_string(&args[3], "bayesian_match_with_prior.mode", &ctx)?;
 
-    let base = run_text_match(
+    let base = run_bayesian_match(
         engine,
         table,
         &[Expr::Column(field), Expr::Literal(Value::Str(query))],
@@ -9904,9 +9944,8 @@ fn run_scored_signal(
         )));
     };
     match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
-            run_text_match(engine, table, inner, params)
-        }
+        FunctionKind::TextMatch => run_text_match(engine, table, inner, params),
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params),
         FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params),
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, inner, params)
@@ -9924,6 +9963,7 @@ fn run_scored_signal(
 fn run_attention_fusion(
     engine: &Engine,
     table: &str,
+    function_name: &str,
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -9951,14 +9991,17 @@ fn run_attention_fusion(
             ));
         };
         let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-            FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
-                run_text_match(engine, table, inner, params)?
+            FunctionKind::TextMatch => {
+                return Err(non_probability_signal_error(name, function_name));
             }
+            FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params)?,
             FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
             FunctionKind::BayesianMatchWithPrior => {
                 run_bayesian_match_with_prior(engine, table, inner, params)?
             }
-            FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
+            FunctionKind::KNNMatch => {
+                cosine_rows_to_probabilities(run_knn_match(engine, table, inner, params)?)
+            }
             FunctionKind::CalibratedVectorMatch => {
                 run_calibrated_vector_match(engine, table, inner, params)?
             }
@@ -9998,6 +10041,19 @@ fn run_attention_fusion(
         .collect())
 }
 
+fn non_probability_signal_error(name: &str, parent: &str) -> SQLError {
+    SQLError::TypeMismatch(format!(
+        "{parent} requires probability-valued signals; `{name}` returns BM25 scores, use `bayesian_match`"
+    ))
+}
+
+fn cosine_rows_to_probabilities(mut rows: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
+    for row in &mut rows {
+        row.score = uqa_scoring::cosine_to_probability(row.score);
+    }
+    rows
+}
+
 fn run_sparse_threshold(
     engine: &Engine,
     table: &str,
@@ -10020,9 +10076,8 @@ fn run_sparse_threshold(
         ));
     };
     let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
-            run_text_match(engine, table, inner, params)?
-        }
+        FunctionKind::TextMatch => run_text_match(engine, table, inner, params)?,
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params)?,
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, inner, params)?
         }
@@ -10164,7 +10219,15 @@ fn run_fuse_log_odds(
                                 actual: inner.len(),
                             });
                         }
-                        run_text_match(engine, table, inner, params)?
+                        match kind {
+                            FunctionKind::TextMatch => {
+                                return Err(non_probability_signal_error(name, "fuse_log_odds"));
+                            }
+                            FunctionKind::BayesianMatch => {
+                                run_bayesian_match(engine, table, inner, params)?
+                            }
+                            _ => unreachable!("matched text scoring function"),
+                        }
                     }
                     FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
                     FunctionKind::BayesianMatchWithPrior => {
@@ -10178,7 +10241,7 @@ fn run_fuse_log_odds(
                                 actual: inner.len(),
                             });
                         }
-                        run_knn_match(engine, table, inner, params)?
+                        cosine_rows_to_probabilities(run_knn_match(engine, table, inner, params)?)
                     }
                     FunctionKind::CalibratedVectorMatch => {
                         run_calibrated_vector_match(engine, table, inner, params)?
@@ -10355,10 +10418,9 @@ fn apply_order_limit(
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if !stmt.order_by.is_empty() {
-        // Phase 5 only honours `ORDER BY <score-alias|_score>`. Any
-        // expression resolves to the entry's score in our limited
-        // surface; richer ordering lands in Phase 6 with the proper
-        // expression evaluator.
+        // Scored-entry retrieval paths sort by the computed score. Full
+        // row projection paths evaluate arbitrary ORDER BY expressions
+        // before reaching this helper.
         let descending = stmt.order_by.iter().any(|o| o.descending);
         entries.sort_by(|a, b| {
             let cmp = a
@@ -10457,9 +10519,7 @@ fn build_projection_row(
 }
 
 impl Engine {
-    /// Run an arbitrary SQL statement against the engine. Phase 5
-    /// supports the quickstart slice; statements outside the supported
-    /// grammar return a structured `Unsupported` error.
+    /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         execute(self, query, params)
     }

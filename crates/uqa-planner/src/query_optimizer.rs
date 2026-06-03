@@ -1146,6 +1146,7 @@ mod tests {
         OperatorTree::Term {
             query: "q".into(),
             field: Some(field.into()),
+            scoring: None,
         }
     }
 

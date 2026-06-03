@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `MultiFieldBayesianScorer` property tests (Phase 8, Paper 3
-//! Section 12.2 #1).
+//! `MultiFieldBayesianScorer` property tests (Paper 3 Section 12.2 #1).
 //!
 //! Pins:
 //! - score in `[0, 1]` for any valid input,

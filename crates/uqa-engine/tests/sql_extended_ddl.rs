@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the SQL surface added beyond the Phase 5 quickstart:
+//! Coverage for the extended SQL surface:
 //! `INSERT ... SELECT`, `CREATE VIEW`, `CREATE SCHEMA`, `EXPLAIN`,
 //! `ANALYZE`, `TRUNCATE`, transaction control statements.
 

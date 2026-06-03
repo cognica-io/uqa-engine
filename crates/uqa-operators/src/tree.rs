@@ -132,6 +132,13 @@ pub enum GatingSpec {
     ReLU,
 }
 
+/// Text scoring algorithm used by [`OperatorTree::Term`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextScoringMode {
+    BM25,
+    BayesianBM25,
+}
+
 /// Concrete operator tree mirroring `uqa/operators` operator class hierarchy.
 #[derive(Clone)]
 pub enum OperatorTree {
@@ -143,6 +150,10 @@ pub enum OperatorTree {
     Term {
         query: String,
         field: Option<String>,
+        /// Bound by SQL function lowering when a caller explicitly
+        /// chooses `text_match` or `bayesian_match`. Query-string
+        /// parsers leave this unset so they stay syntax-only.
+        scoring: Option<TextScoringMode>,
     },
     /// `FilterOperator(field, predicate, source)`.
     Filter {

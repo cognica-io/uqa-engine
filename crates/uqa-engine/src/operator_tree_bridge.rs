@@ -39,7 +39,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value};
-use uqa_operators::{GatingSpec, MultiStageCutoff, MultiStageEntry, OperatorTree};
+use uqa_operators::{GatingSpec, MultiStageCutoff, MultiStageEntry, OperatorTree, TextScoringMode};
 use uqa_planner::executor::{OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::QueryOptimizer;
@@ -127,27 +127,34 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
 fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "text_match" | "bayesian_match" => {
-            // Standalone text_match / bayesian_match -- the Term node
-            // already runs through the Bayesian BM25 scorer, so the
-            // standalone path produces calibrated probabilities.
+        "text_match" => {
             let field = column_name(args.first()?)?;
             let query = const_string(args.get(1)?, params)?;
             Some(OperatorTree::Term {
                 query,
                 field: Some(field),
+                scoring: Some(TextScoringMode::BM25),
+            })
+        }
+        "bayesian_match" => {
+            let field = column_name(args.first()?)?;
+            let query = const_string(args.get(1)?, params)?;
+            Some(OperatorTree::Term {
+                query,
+                field: Some(field),
+                scoring: Some(TextScoringMode::BayesianBM25),
             })
         }
         "fts_match" => {
             let default_field = fts_default_field(args.first()?)?;
             let query = const_string(args.get(1)?, params)?;
-            compile_fts_query(&query, default_field.as_deref())
+            compile_fts_query(&query, default_field.as_deref()).map(prepare_fts_probability_tree)
         }
         "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
         "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
         "knn_match" => {
             // Standalone knn_match preserves raw cosine similarities;
-            // calibration to (0, 1) only fires inside fusion contexts
+            // calibration to (0, 1) only fires inside fusion contexts.
             // (mirrors `_compile_calibrated_signal` semantics from the
             // canonical UQA behavior: only fusion arms see calibrated KNN).
             let field = column_name(args.first()?)?;
@@ -315,6 +322,7 @@ fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<Operator
                 child: OperatorTree::Term {
                     query: const_string(&stage[1], params)?,
                     field: Some(column_name(&stage[0])?),
+                    scoring: Some(TextScoringMode::BM25),
                 },
                 cutoff: MultiStageCutoff::TopK(const_usize(&stage[2], params)?),
             });
@@ -329,26 +337,27 @@ fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<Operator
 /// land on the (0, 1) probability scale before log-odds / attention /
 /// learned fusion can combine them.
 ///
-/// - `text_match` / `bayesian_match` --> [`OperatorTree::Term`] (the
-///   engine evaluates `Term` through the Bayesian BM25 scorer, so the
-///   result is already calibrated).
+/// - `bayesian_match` --> [`OperatorTree::Term`] with Bayesian BM25 scoring.
+/// - `fts_match` text terms --> [`OperatorTree::Term`] with Bayesian BM25
+///   scoring because `@@` participates in probabilistic fusion.
 /// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
 ///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
 ///   rescaled to `(0, 1)` via `(1 + s) / 2`.
 fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
     match name {
-        "text_match" | "bayesian_match" => {
+        "bayesian_match" => {
             let field = column_name(args.first()?)?;
             let query = const_string(args.get(1)?, params)?;
             Some(OperatorTree::Term {
                 query,
                 field: Some(field),
+                scoring: Some(TextScoringMode::BayesianBM25),
             })
         }
         "fts_match" => {
             let default_field = fts_default_field(args.first()?)?;
             let query = const_string(args.get(1)?, params)?;
-            compile_fts_query(&query, default_field.as_deref())
+            compile_fts_query(&query, default_field.as_deref()).map(prepare_fts_probability_tree)
         }
         "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
         "knn_match" => {
@@ -446,7 +455,7 @@ fn lower_attention_fusion(args: &[Expr], params: &[SQLParam]) -> Option<Operator
     // `attention(signal_1, signal_2, ...)` defaults: alpha=0.5,
     // n_query_features=6 (matches UQA behavior `_make_attention_fusion_op`).
     // Query features are filled in lazily at execute time from the
-    // engine snapshot, so the IR carries a zero-vector placeholder.
+    // engine snapshot, so the IR carries an empty explicit vector.
     let attention: AttentionRef =
         Arc::new(AttentionFusion::new(signals.len(), N_QUERY_FEATURES, 0.5));
     Some(OperatorTree::AttentionFusion {
@@ -549,6 +558,58 @@ fn compile_fts_query(query: &str, default_field: Option<&str>) -> Option<Operato
             .collect::<Vec<_>>()
     };
     uqa_sql::compile_fts_query_string(query, default_field, &tokenizer).ok()
+}
+
+fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
+    match tree {
+        OperatorTree::Term {
+            query,
+            field,
+            scoring,
+        } => OperatorTree::Term {
+            query,
+            field,
+            scoring: scoring.or(Some(TextScoringMode::BayesianBM25)),
+        },
+        OperatorTree::KNN {
+            query_vector,
+            k,
+            field,
+        } => OperatorTree::CosineProbability(Box::new(OperatorTree::KNN {
+            query_vector,
+            k,
+            field,
+        })),
+        OperatorTree::Intersect(children) => OperatorTree::Intersect(
+            children
+                .into_iter()
+                .map(prepare_fts_probability_tree)
+                .collect(),
+        ),
+        OperatorTree::Union(children) => OperatorTree::Union(
+            children
+                .into_iter()
+                .map(prepare_fts_probability_tree)
+                .collect(),
+        ),
+        OperatorTree::Complement(child) => {
+            OperatorTree::Complement(Box::new(prepare_fts_probability_tree(*child)))
+        }
+        OperatorTree::LogOddsFusion {
+            signals,
+            alpha,
+            gating,
+        } => OperatorTree::LogOddsFusion {
+            signals: signals
+                .into_iter()
+                .map(prepare_fts_probability_tree)
+                .collect(),
+            alpha,
+            gating,
+        },
+        OperatorTree::CosineProbability(child) => OperatorTree::CosineProbability(child),
+        other => other,
+    }
 }
 
 fn const_value(expr: &Expr, params: &[SQLParam]) -> Option<Value> {
@@ -661,15 +722,28 @@ impl<'a> EngineDriver<'a> {
         self.parallel.execute_branches(&workers)
     }
 
-    fn execute_term(&self, query: &str, field: Option<&str>) -> PostingList {
-        // Re-use the existing text_match dispatcher. `text_match(field,
-        // 'q')` produces a scored posting list against the table.
+    fn execute_term(
+        &self,
+        query: &str,
+        field: Option<&str>,
+        scoring: Option<TextScoringMode>,
+    ) -> PostingList {
+        let scoring =
+            scoring.expect("OperatorTree::Term reached EngineDriver without bound text scoring");
         let field_expr = match field {
             Some(f) => Expr::Column(f.to_string()),
             None => Expr::Literal(Value::Str(String::new())),
         };
         let args = vec![field_expr, Expr::Literal(Value::Str(query.to_string()))];
-        match sql::run_text_match_public(self.engine, self.table, &args, self.params) {
+        let result = match scoring {
+            TextScoringMode::BM25 => {
+                sql::run_text_match_public(self.engine, self.table, &args, self.params)
+            }
+            TextScoringMode::BayesianBM25 => {
+                sql::run_bayesian_match_public(self.engine, self.table, &args, self.params)
+            }
+        };
+        match result {
             Ok(rows) => scored_to_posting_list(&rows),
             Err(_) => PostingList::new(),
         }
@@ -725,7 +799,11 @@ impl OperatorTreeDriver for EngineDriver<'_> {
     fn execute_node(&self, op: &OperatorTree) -> PostingList {
         match op {
             OperatorTree::Empty => PostingList::new(),
-            OperatorTree::Term { query, field } => self.execute_term(query, field.as_deref()),
+            OperatorTree::Term {
+                query,
+                field,
+                scoring,
+            } => self.execute_term(query, field.as_deref(), *scoring),
             OperatorTree::KNN {
                 query_vector,
                 k,
@@ -736,43 +814,10 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 predicate,
                 source,
             } => self.execute_filter(field, predicate, source.as_deref()),
-            OperatorTree::Intersect(parts) => {
-                let mut iter = self.execute_branches(parts).into_iter();
-                let Some(first) = iter.next() else {
-                    return PostingList::new();
-                };
-                iter.fold(first, |acc, next| acc.intersect(&next))
-            }
-            OperatorTree::Union(parts) => {
-                let mut iter = self.execute_branches(parts).into_iter();
-                let Some(first) = iter.next() else {
-                    return PostingList::new();
-                };
-                iter.fold(first, |acc, next| acc.union(&next))
-            }
-            OperatorTree::Complement(inner) => {
-                let inner_pl = self.execute_node(inner);
-                let included: BTreeSet<DocId> =
-                    inner_pl.entries().iter().map(|e| e.doc_id).collect();
-                let mut entries: Vec<PostingEntry> = Vec::new();
-                for doc_id in self.engine.table_doc_ids(self.table) {
-                    if !included.contains(&doc_id) {
-                        entries.push(PostingEntry::new(doc_id, Payload::default()));
-                    }
-                }
-                entries.sort_by_key(|e| e.doc_id);
-                PostingList::from_sorted_unchecked(entries)
-            }
-            OperatorTree::Composed(parts) => {
-                // Composed = sequential; treat as left-to-right intersect
-                // of every child, giving the same semantics as the
-                // empty `ComposedOperator` chain.
-                let mut iter = parts.iter().map(|p| self.execute_node(p));
-                let Some(first) = iter.next() else {
-                    return PostingList::new();
-                };
-                iter.fold(first, |acc, next| acc.intersect(&next))
-            }
+            OperatorTree::Intersect(parts) => self.execute_intersect(parts),
+            OperatorTree::Union(parts) => self.execute_union(parts),
+            OperatorTree::Complement(inner) => self.execute_complement(inner),
+            OperatorTree::Composed(parts) => self.execute_composed(parts),
             OperatorTree::LogOddsFusion { signals, alpha, .. } => {
                 self.execute_log_odds_fusion(signals, *alpha)
             }
@@ -794,10 +839,7 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             OperatorTree::FacetVector {
                 vector_op,
                 facet_field,
-            } => {
-                let vec_pl = self.execute_node(vector_op);
-                self.facet_vector_inline(&vec_pl, facet_field)
-            }
+            } => self.execute_facet_vector(vector_op, facet_field),
             OperatorTree::CosineProbability(source) => self.execute_cosine_probability(source),
             OperatorTree::AttentionFusion {
                 signals,
@@ -835,6 +877,48 @@ impl OperatorTreeDriver for EngineDriver<'_> {
 }
 
 impl EngineDriver<'_> {
+    fn execute_intersect(&self, parts: &[OperatorTree]) -> PostingList {
+        let mut iter = self.execute_branches(parts).into_iter();
+        let Some(first) = iter.next() else {
+            return PostingList::new();
+        };
+        iter.fold(first, |acc, next| acc.intersect(&next))
+    }
+
+    fn execute_union(&self, parts: &[OperatorTree]) -> PostingList {
+        let mut iter = self.execute_branches(parts).into_iter();
+        let Some(first) = iter.next() else {
+            return PostingList::new();
+        };
+        iter.fold(first, |acc, next| acc.union(&next))
+    }
+
+    fn execute_complement(&self, inner: &OperatorTree) -> PostingList {
+        let inner_pl = self.execute_node(inner);
+        let included: BTreeSet<DocId> = inner_pl.entries().iter().map(|e| e.doc_id).collect();
+        let mut entries: Vec<PostingEntry> = Vec::new();
+        for doc_id in self.engine.table_doc_ids(self.table) {
+            if !included.contains(&doc_id) {
+                entries.push(PostingEntry::new(doc_id, Payload::default()));
+            }
+        }
+        entries.sort_by_key(|e| e.doc_id);
+        PostingList::from_sorted_unchecked(entries)
+    }
+
+    fn execute_composed(&self, parts: &[OperatorTree]) -> PostingList {
+        let mut iter = parts.iter().map(|p| self.execute_node(p));
+        let Some(first) = iter.next() else {
+            return PostingList::new();
+        };
+        iter.fold(first, |acc, next| acc.intersect(&next))
+    }
+
+    fn execute_facet_vector(&self, vector_op: &OperatorTree, facet_field: &str) -> PostingList {
+        let vec_pl = self.execute_node(vector_op);
+        self.facet_vector_inline(&vec_pl, facet_field)
+    }
+
     fn execute_prob_bool_fusion(
         &self,
         signals: &[OperatorTree],
@@ -846,9 +930,8 @@ impl EngineDriver<'_> {
             return PostingList::new();
         }
         // Pre-execute every child through the driver, then wrap the
-        // results in static signal stubs so the fusion operator can
-        // consume them without taking a back-reference into the
-        // driver.
+        // results in static signal operators so the fusion operator can
+        // consume them without taking a back-reference into the driver.
         let signal_ops: Vec<std::sync::Arc<dyn Operator>> = self
             .execute_branches(signals)
             .into_iter()
@@ -933,9 +1016,9 @@ impl EngineDriver<'_> {
         use uqa_operators::base::Operator;
         use uqa_operators::ProbNotOperator;
         let signal_pl = self.execute_node(signal);
-        let stub: std::sync::Arc<dyn Operator> =
+        let signal_op: std::sync::Arc<dyn Operator> =
             std::sync::Arc::new(StaticPostingList { pl: signal_pl });
-        let op = ProbNotOperator::new(stub, default_prob);
+        let op = ProbNotOperator::new(signal_op, default_prob);
         op.execute(&self.bridge_context())
     }
 
@@ -1051,7 +1134,7 @@ impl EngineDriver<'_> {
     }
 
     /// Build the `n_query_features=6` vector that attention fusers
-    /// expect. When the IR carries a non-empty placeholder it wins
+    /// expect. When the IR carries a non-empty explicit vector it wins
     /// (test fixtures); otherwise the driver extracts the canonical
     /// `[mean_idf, max_idf, min_idf, coverage, query_length,
     /// vocab_overlap]` vector from the table's inverted-index stats
@@ -1155,7 +1238,7 @@ fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
 
 fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
-        OperatorTree::Term { query, field } => field.clone().map(|f| (f, query.clone())),
+        OperatorTree::Term { query, field, .. } => field.clone().map(|f| (f, query.clone())),
         OperatorTree::Opaque { kind, meta, .. } if kind == "bayesian_match_with_prior" => {
             let Some(Value::Str(field)) = meta.get("field") else {
                 return None;

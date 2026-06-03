@@ -238,8 +238,14 @@ fn operator_name(op: &OperatorTree) -> String {
 fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) {
     let prefix = "  ".repeat(indent);
     match op {
-        OperatorTree::Term { query, field } => {
-            lines.push(format!("{prefix}TermOp(term={query:?}, field={field:?})"));
+        OperatorTree::Term {
+            query,
+            field,
+            scoring,
+        } => {
+            lines.push(format!(
+                "{prefix}TermOp(term={query:?}, field={field:?}, scoring={scoring:?})"
+            ));
         }
         OperatorTree::VectorSimilarity {
             threshold, field, ..
@@ -446,6 +452,7 @@ mod tests {
             OperatorTree::Term {
                 query: "rust".into(),
                 field: Some("body".into()),
+                scoring: None,
             },
             OperatorTree::Filter {
                 field: "year".into(),
@@ -466,6 +473,7 @@ mod tests {
         let op = OperatorTree::Term {
             query: "x".into(),
             field: Some("body".into()),
+            scoring: None,
         };
         let driver = EmptyDriver;
         let mut executor = PlanExecutor::new(&driver);

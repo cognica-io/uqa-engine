@@ -361,7 +361,7 @@ impl CardinalityEstimator {
 
         match op {
             OperatorTree::Empty => 0.0,
-            OperatorTree::Term { query, field } => {
+            OperatorTree::Term { query, field, .. } => {
                 let field_name = field.as_deref().unwrap_or("_default");
                 stats.doc_freq(field_name, query) as f64
             }
@@ -1401,6 +1401,7 @@ mod tests {
         let op = OperatorTree::Term {
             query: "rust".into(),
             field: Some("body".into()),
+            scoring: None,
         };
         assert_eq!(est.estimate(&op, &stats), 42.0);
     }
@@ -1420,6 +1421,7 @@ mod tests {
         let op = OperatorTree::Complement(Box::new(OperatorTree::Term {
             query: "x".into(),
             field: Some("body".into()),
+            scoring: None,
         }));
         assert!((est.estimate(&op, &stats) - 70.0).abs() < 1e-9);
     }

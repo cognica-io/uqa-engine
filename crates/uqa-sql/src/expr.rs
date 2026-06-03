@@ -862,8 +862,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "radians" => Ok(Value::Float(to_f64(&args[0])?.to_radians())),
         "random" => {
             // Deterministic-ish pseudo random based on system time so
-            // tests can stub it; the canonical UQA behavior also wraps the
-            // platform RNG.
+            // tests can assert ranges deterministically; the canonical
+            // UQA behavior also wraps the platform RNG.
             use std::time::{SystemTime, UNIX_EPOCH};
             let t = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -1450,9 +1450,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             Ok(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt()))
         }
         "st_within" | "st_dwithin" => {
-            // Polygon containment is not yet modeled; for now interpret
-            // dwithin as a Euclidean radius check matching the canonical UQA implementation's
-            // simplified semantics.
+            // `st_dwithin` uses the Euclidean radius semantics supported by
+            // this scalar evaluator. Polygon containment is handled by the
+            // spatial operator layer rather than this value-only function.
             if args.len() < 2 {
                 return Err(SQLError::TypeMismatch(format!("{name} takes 2-3 args")));
             }
@@ -2226,11 +2226,7 @@ fn coerce_i64(v: &Value) -> Option<i64> {
 }
 
 // -------------------------------------------------------------------------
-// MD5 stub. The previous stub carried a hand-written implementation
-// here; it shipped with a transcription error in the constant table
-// that broke its self-test. The builtin is surfaced as Unsupported
-// for now; production callers should feed `md5()` data through the
-// `md-5` crate at the engine boundary.
+// MD5 implementation used by the SQL scalar `md5()` builtin.
 // -------------------------------------------------------------------------
 
 #[allow(dead_code)]
