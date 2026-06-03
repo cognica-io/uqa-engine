@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL aggregate execution and registered aggregate spill buffering.
+//! SQL aggregate execution and spill buffering for blocking inputs.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,7 +21,7 @@ use crate::{Engine, SQLAggregateFunction, SQLAggregateState, ScoredEntry};
 
 use super::{core_value_to_json, projection_columns};
 
-const REGISTERED_AGGREGATE_SPILL_ROWS: usize = 4096;
+const AGGREGATE_SPILL_ROWS: usize = 4096;
 
 pub(super) fn aggregate_join_rows(
     engine: &Engine,
@@ -855,9 +855,9 @@ fn observe_aggregate(
         sort_keys.push((v, ob.descending));
     }
     if order_by.is_empty() {
-        acc.observe(&value);
+        acc.observe(&value)?;
     } else {
-        acc.observe_with_sort_keys(&value, sort_keys);
+        acc.observe_with_sort_keys(&value, sort_keys)?;
     }
     Ok(())
 }
@@ -874,14 +874,8 @@ pub(super) struct AggregateAccumulator {
     /// aggregate was annotated with `DISTINCT`. Holds canonical-form
     /// keys so `Int(1)` and `Float(1.0)` collapse to the same bucket.
     distinct: std::collections::BTreeSet<String>,
-    /// Every observed (non-null) value for collection-style
-    /// aggregates (`STRING_AGG`, `ARRAY_AGG`, statistical aggregates,
-    /// percentile / mode). Sort keys for ordered aggregates land in
-    /// `sort_keys` parallel to this vector.
-    values: Vec<Value>,
-    /// Optional sort key per `values` entry, packed as a `Vec<(key,
-    /// descending)>` so multi-key ORDER BY composes lexicographically.
-    sort_keys: Vec<Vec<(Value, bool)>>,
+    values: AggregateValueBuffer,
+    all_values_int: bool,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
     /// first observation so an empty input set returns `NULL` (matches
     /// `PostgreSQL`).
@@ -900,8 +894,8 @@ impl Default for AggregateAccumulator {
             min: None,
             max: None,
             distinct: BTreeSet::new(),
-            values: Vec::new(),
-            sort_keys: Vec::new(),
+            values: AggregateValueBuffer::default(),
+            all_values_int: true,
             bool_and: None,
             bool_or: None,
         }
@@ -918,11 +912,19 @@ impl AggregateAccumulator {
         }
     }
 
-    pub(super) fn observe(&mut self, value: &Value) {
+    pub(super) fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
         if matches!(value, Value::Null) {
-            return;
+            return Ok(());
         }
+        self.observe_numeric(value);
+        self.values.push(value.clone(), Vec::new())
+    }
+
+    fn observe_numeric(&mut self, value: &Value) {
         self.count += 1;
+        if !matches!(value, Value::Int(_)) {
+            self.all_values_int = false;
+        }
         if let Ok(f) = value_as_f64(value) {
             self.sum += f;
         }
@@ -934,36 +936,22 @@ impl AggregateAccumulator {
             Some(cur) if !value_gt(value, cur) => {}
             _ => self.max = Some(value.clone()),
         }
-        self.values.push(value.clone());
-        self.sort_keys.push(Vec::new());
         if let Value::Bool(b) = value {
             self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
             self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
         }
     }
 
-    fn observe_with_sort_keys(&mut self, value: &Value, keys: Vec<(Value, bool)>) {
+    fn observe_with_sort_keys(
+        &mut self,
+        value: &Value,
+        keys: Vec<(Value, bool)>,
+    ) -> Result<(), SQLError> {
         if matches!(value, Value::Null) {
-            return;
+            return Ok(());
         }
-        self.count += 1;
-        if let Ok(f) = value_as_f64(value) {
-            self.sum += f;
-        }
-        match &self.min {
-            Some(cur) if !value_lt(value, cur) => {}
-            _ => self.min = Some(value.clone()),
-        }
-        match &self.max {
-            Some(cur) if !value_gt(value, cur) => {}
-            _ => self.max = Some(value.clone()),
-        }
-        self.values.push(value.clone());
-        self.sort_keys.push(keys);
-        if let Value::Bool(b) = value {
-            self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
-            self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
-        }
+        self.observe_numeric(value);
+        self.values.push(value.clone(), keys)
     }
 
     fn observe_registered(
@@ -1001,6 +989,125 @@ impl AggregateAccumulator {
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
+struct AggregateValueRecord {
+    value: Value,
+    sort_keys: Vec<(Value, bool)>,
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct AggregateValueBuffer {
+    rows: Vec<AggregateValueRecord>,
+    runs: Vec<tempfile::NamedTempFile>,
+    next_sequence: u64,
+    has_sort_keys: bool,
+}
+
+impl AggregateValueBuffer {
+    fn push(&mut self, value: Value, sort_keys: Vec<(Value, bool)>) -> Result<(), SQLError> {
+        self.has_sort_keys |= !sort_keys.is_empty();
+        self.rows.push(AggregateValueRecord {
+            value,
+            sort_keys,
+            sequence: self.next_sequence,
+        });
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        if self.rows.len() >= AGGREGATE_SPILL_ROWS {
+            self.flush_run()?;
+        }
+        Ok(())
+    }
+
+    fn values(&self) -> Result<Vec<Value>, SQLError> {
+        let mut records = self.records()?;
+        records.sort_by_key(|record| record.sequence);
+        Ok(records.into_iter().map(|record| record.value).collect())
+    }
+
+    fn ordered_values(&self) -> Result<Vec<Value>, SQLError> {
+        let mut records = self.records()?;
+        if self.has_sort_keys {
+            records.sort_by(compare_aggregate_value_records);
+        } else {
+            records.sort_by_key(|record| record.sequence);
+        }
+        Ok(records.into_iter().map(|record| record.value).collect())
+    }
+
+    fn records(&self) -> Result<Vec<AggregateValueRecord>, SQLError> {
+        let mut records = Vec::with_capacity(self.rows.len());
+        for run in &self.runs {
+            records.extend(read_aggregate_value_run(run)?);
+        }
+        records.extend(self.rows.iter().cloned());
+        Ok(records)
+    }
+
+    fn flush_run(&mut self) -> Result<(), SQLError> {
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+        let mut run = tempfile::NamedTempFile::new().map_err(|err| {
+            SQLError::Internal(format!("failed to create aggregate spill file: {err}"))
+        })?;
+        {
+            let mut writer = BufWriter::new(run.as_file_mut());
+            for row in self.rows.drain(..) {
+                serde_json::to_writer(&mut writer, &row).map_err(|err| {
+                    SQLError::Internal(format!("failed to serialize aggregate spill row: {err}"))
+                })?;
+                writer.write_all(b"\n").map_err(|err| {
+                    SQLError::Internal(format!("failed to write aggregate spill row: {err}"))
+                })?;
+            }
+            writer.flush().map_err(|err| {
+                SQLError::Internal(format!("failed to flush aggregate spill file: {err}"))
+            })?;
+        }
+        run.as_file_mut().seek(SeekFrom::Start(0)).map_err(|err| {
+            SQLError::Internal(format!("failed to rewind aggregate spill file: {err}"))
+        })?;
+        self.runs.push(run);
+        Ok(())
+    }
+}
+
+fn read_aggregate_value_run(
+    run: &tempfile::NamedTempFile,
+) -> Result<Vec<AggregateValueRecord>, SQLError> {
+    let file = run.reopen().map_err(|err| {
+        SQLError::Internal(format!("failed to reopen aggregate spill file: {err}"))
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut records = Vec::new();
+    loop {
+        let mut line = String::new();
+        let bytes = reader.read_line(&mut line).map_err(|err| {
+            SQLError::Internal(format!("failed to read aggregate spill row: {err}"))
+        })?;
+        if bytes == 0 {
+            break;
+        }
+        let record = serde_json::from_str(line.trim_end()).map_err(|err| {
+            SQLError::Internal(format!("failed to deserialize aggregate spill row: {err}"))
+        })?;
+        records.push(record);
+    }
+    Ok(records)
+}
+
+fn compare_aggregate_value_records(a: &AggregateValueRecord, b: &AggregateValueRecord) -> Ordering {
+    for ((av, ad), (bv, _bd)) in a.sort_keys.iter().zip(b.sort_keys.iter()) {
+        let cmp = av.cmp(bv);
+        let cmp = if *ad { cmp.reverse() } else { cmp };
+        if cmp != Ordering::Equal {
+            return cmp;
+        }
+    }
+    a.sequence.cmp(&b.sequence)
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 struct RegisteredAggregateRecord {
     values: Vec<Value>,
     sort_keys: Vec<(Value, bool)>,
@@ -1026,7 +1133,7 @@ impl RegisteredAggregateBuffer {
             sequence: self.next_sequence,
         });
         self.next_sequence = self.next_sequence.saturating_add(1);
-        if self.rows.len() >= REGISTERED_AGGREGATE_SPILL_ROWS {
+        if self.rows.len() >= AGGREGATE_SPILL_ROWS {
             self.flush_run()?;
         }
         Ok(())
@@ -1485,35 +1592,13 @@ fn aggregate_value_with_args(
         return value;
     }
     let lname = name.to_ascii_lowercase();
-    // Order the collected `values` by the captured sort keys when the
-    // aggregate was annotated with ORDER BY (string_agg / array_agg /
-    // percentile_*). This is a stable sort so equal keys preserve
-    // insertion order, matching PostgreSQL.
-    let ordered_values: Vec<Value> = if acc.sort_keys.iter().any(|k| !k.is_empty()) {
-        let mut indexed: Vec<usize> = (0..acc.values.len()).collect();
-        indexed.sort_by(|a, b| {
-            let ak = &acc.sort_keys[*a];
-            let bk = &acc.sort_keys[*b];
-            for ((av, ad), (bv, _bd)) in ak.iter().zip(bk.iter()) {
-                let cmp = av.cmp(bv);
-                let cmp = if *ad { cmp.reverse() } else { cmp };
-                if cmp != std::cmp::Ordering::Equal {
-                    return cmp;
-                }
-            }
-            std::cmp::Ordering::Equal
-        });
-        indexed.into_iter().map(|i| acc.values[i].clone()).collect()
-    } else {
-        acc.values.clone()
-    };
 
     let value = match lname.as_str() {
         "count" => Value::Int(acc.count as i64),
         "sum" => {
             if acc.count == 0 {
                 Value::Null
-            } else if acc.values.iter().all(|v| matches!(v, Value::Int(_))) {
+            } else if acc.all_values_int {
                 Value::Int(acc.sum as i64)
             } else {
                 Value::Float(acc.sum)
@@ -1529,6 +1614,7 @@ fn aggregate_value_with_args(
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
         "string_agg" => {
+            let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -1551,12 +1637,14 @@ fn aggregate_value_with_args(
             Value::Str(parts.join(&sep))
         }
         "array_agg" => {
+            let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
             Value::List(ordered_values)
         }
         "json_object_agg" | "jsonb_object_agg" => {
+            let ordered_values = acc.values.ordered_values()?;
             let mut map = BTreeMap::new();
             for value in ordered_values {
                 let Value::List(pair) = value else {
@@ -1585,27 +1673,28 @@ fn aggregate_value_with_args(
             if acc.count < 2 {
                 return Ok(Value::Null);
             }
-            Value::Float(stddev_samp(&acc.values))
+            Value::Float(stddev_samp(&acc.values.values()?))
         }
         "stddev_pop" => {
             if acc.count == 0 {
                 return Ok(Value::Null);
             }
-            Value::Float(stddev_pop(&acc.values))
+            Value::Float(stddev_pop(&acc.values.values()?))
         }
         "variance" | "var_samp" => {
             if acc.count < 2 {
                 return Ok(Value::Null);
             }
-            Value::Float(variance_samp(&acc.values))
+            Value::Float(variance_samp(&acc.values.values()?))
         }
         "var_pop" => {
             if acc.count == 0 {
                 return Ok(Value::Null);
             }
-            Value::Float(variance_pop(&acc.values))
+            Value::Float(variance_pop(&acc.values.values()?))
         }
         "percentile_cont" => {
+            let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -1617,6 +1706,7 @@ fn aggregate_value_with_args(
             Value::Float(percentile_cont(&ordered_values, frac))
         }
         "percentile_disc" => {
+            let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -1627,7 +1717,7 @@ fn aggregate_value_with_args(
             };
             percentile_disc(&ordered_values, frac)
         }
-        "mode" => mode_value(&ordered_values),
+        "mode" => mode_value(&acc.values.ordered_values()?),
         _ => Value::Null,
     };
     Ok(value)

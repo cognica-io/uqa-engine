@@ -72,6 +72,19 @@ fn engine_with_products() -> Engine {
     eng
 }
 
+fn engine_with_large_numbers(n: i64) -> Engine {
+    let eng = engine();
+    eng.sql("CREATE TABLE big_numbers (n INTEGER)", &[])
+        .unwrap();
+    let values = (0..n)
+        .map(|n| format!("({n})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    eng.sql(&format!("INSERT INTO big_numbers (n) VALUES {values}"), &[])
+        .unwrap();
+    eng
+}
+
 fn int_col(row: &uqa_sql::ResultRow, col: &str) -> Option<i64> {
     match row.get(col)? {
         Value::Int(n) => Some(*n),
@@ -358,6 +371,29 @@ fn array_agg_with_order_by_desc() {
         strs,
         vec!["Eggplant", "Daikon", "Cherry", "Banana", "Apple"]
     );
+}
+
+#[test]
+fn aggregate_value_buffer_spills_and_restores_ordered_and_unordered_values() {
+    let eng = engine_with_large_numbers(5000);
+    let r = eng
+        .sql(
+            "SELECT array_agg(n ORDER BY n DESC) AS nums, \
+                    var_pop(n) AS variance, \
+                    sum(n) AS total \
+             FROM big_numbers",
+            &[],
+        )
+        .unwrap();
+
+    let nums = list_col(&r.rows[0], "nums").unwrap();
+    assert_eq!(nums.len(), 5000);
+    assert_eq!(nums.first(), Some(&Value::Int(4999)));
+    assert_eq!(nums.get(4095), Some(&Value::Int(904)));
+    assert_eq!(nums.last(), Some(&Value::Int(0)));
+    assert_eq!(int_col(&r.rows[0], "total"), Some(12_497_500));
+    let variance = float_col(&r.rows[0], "variance").unwrap();
+    assert!((variance - 2_083_333.25).abs() < 0.001);
 }
 
 // =====================================================================

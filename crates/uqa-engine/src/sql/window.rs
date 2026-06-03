@@ -255,7 +255,7 @@ fn evaluate_window_aggregate(
             // whole partition.
             let mut acc = AggregateAccumulator::default();
             for v in &materialized {
-                acc.observe(v);
+                acc.observe(v)?;
             }
             let result = aggregate_value(name, &acc)?;
             for (orig, _) in indexed {
@@ -306,7 +306,7 @@ fn evaluate_window_aggregate(
             let lo = start.max(0) as usize;
             let hi = (end as usize).min(n.saturating_sub(1));
             for v in &materialized[lo..=hi] {
-                acc.observe(v);
+                acc.observe(v)?;
             }
         }
         output[*orig] = aggregate_value(name, &acc)?;
