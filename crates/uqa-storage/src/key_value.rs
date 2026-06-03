@@ -433,9 +433,14 @@ fn posting_key_prefix(table: &str) -> Vec<u8> {
     table_prefixed_key(TAG_POSTING, table)
 }
 
-fn posting_term_prefix(table: &str, field: &str, term: &str) -> Vec<u8> {
+fn posting_field_prefix(table: &str, field: &str) -> Vec<u8> {
     let mut key = posting_key_prefix(table);
     push_str(&mut key, field);
+    key
+}
+
+fn posting_term_prefix(table: &str, field: &str, term: &str) -> Vec<u8> {
+    let mut key = posting_field_prefix(table, field);
     push_str(&mut key, term);
     key
 }
@@ -1210,9 +1215,14 @@ fn table_field_analyzer_prefix(table_name: &str) -> Vec<u8> {
 }
 
 fn table_field_analyzer_key(table_name: &str, field: &str, phase: &str) -> Vec<u8> {
+    let mut key = table_field_analyzer_field_prefix(table_name, field);
+    push_str(&mut key, phase);
+    key
+}
+
+fn table_field_analyzer_field_prefix(table_name: &str, field: &str) -> Vec<u8> {
     let mut key = table_field_analyzer_prefix(table_name);
     push_str(&mut key, field);
-    push_str(&mut key, phase);
     key
 }
 
@@ -1232,6 +1242,72 @@ fn column_stats_key(table_name: &str, column_name: &str) -> Vec<u8> {
 #[derive(Clone)]
 pub struct KeyValueCatalog {
     store: Arc<dyn KeyValueStore>,
+}
+
+fn batch_rekey_prefix(
+    store: &dyn KeyValueStore,
+    batch: &mut dyn KeyValueBatch,
+    old_prefix: &[u8],
+    new_prefix: &[u8],
+) -> StorageBackendResult<()> {
+    for (key, value) in store.scan_prefix(old_prefix)? {
+        let mut new_key = new_prefix.to_vec();
+        new_key.extend_from_slice(&key[old_prefix.len()..]);
+        batch.put(&new_key, &value)?;
+        batch.delete(&key)?;
+    }
+    Ok(())
+}
+
+fn batch_rekey_prefix_or_keep_existing(
+    store: &dyn KeyValueStore,
+    batch: &mut dyn KeyValueBatch,
+    old_prefix: &[u8],
+    new_prefix: &[u8],
+) -> StorageBackendResult<()> {
+    for (key, value) in store.scan_prefix(old_prefix)? {
+        let mut new_key = new_prefix.to_vec();
+        new_key.extend_from_slice(&key[old_prefix.len()..]);
+        if store.get(&new_key)?.is_none() {
+            batch.put(&new_key, &value)?;
+        }
+        batch.delete(&key)?;
+    }
+    Ok(())
+}
+
+fn batch_put_or_keep_existing(
+    store: &dyn KeyValueStore,
+    batch: &mut dyn KeyValueBatch,
+    key: &[u8],
+    value: &[u8],
+) -> StorageBackendResult<()> {
+    if store.get(key)?.is_none() {
+        batch.put(key, value)?;
+    }
+    Ok(())
+}
+
+fn catalog_index_references_column(row: &CatalogIndexRow, column_name: &str) -> bool {
+    serde_json::from_str::<Vec<String>>(&row.columns_json).is_ok_and(|columns| {
+        columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case(column_name))
+    })
+}
+
+fn catalog_index_rename_column(row: &CatalogIndexRow, from: &str, to: &str) -> Option<String> {
+    let mut columns = serde_json::from_str::<Vec<String>>(&row.columns_json).ok()?;
+    let mut changed = false;
+    for column in &mut columns {
+        if column.eq_ignore_ascii_case(from) {
+            *column = to.to_string();
+            changed = true;
+        }
+    }
+    changed
+        .then(|| serde_json::to_string(&columns).ok())
+        .flatten()
 }
 
 impl KeyValueCatalog {
@@ -1288,6 +1364,195 @@ impl CatalogFacade for KeyValueCatalog {
         batch.delete_prefix(&reverse_posting_key_prefix(name))?;
         batch.delete_prefix(&vector_key_prefix(name))?;
         batch.delete_prefix(&column_stats_prefix(name))?;
+        batch.commit()
+    }
+
+    fn rename_table_data(&self, from: &str, to: &str) -> StorageBackendResult<()> {
+        let mut batch = self.store.batch();
+        if let Some(value) = self.store.get(&single_str_key(TAG_TABLE, from))? {
+            let mut schema = decode_value::<TableSchema>(&value)?;
+            schema.name = to.to_string();
+            batch.put(&single_str_key(TAG_TABLE, to), &encode_value(&schema)?)?;
+            batch.delete(&single_str_key(TAG_TABLE, from))?;
+        }
+        for (old_prefix, new_prefix) in [
+            (document_key_prefix(from), document_key_prefix(to)),
+            (posting_key_prefix(from), posting_key_prefix(to)),
+            (doc_length_key_prefix(from), doc_length_key_prefix(to)),
+            (field_stats_key_prefix(from), field_stats_key_prefix(to)),
+            (
+                reverse_posting_key_prefix(from),
+                reverse_posting_key_prefix(to),
+            ),
+            (vector_key_prefix(from), vector_key_prefix(to)),
+            (column_stats_prefix(from), column_stats_prefix(to)),
+            (
+                table_field_analyzer_prefix(from),
+                table_field_analyzer_prefix(to),
+            ),
+        ] {
+            batch_rekey_prefix(
+                self.store.as_ref(),
+                batch.as_mut(),
+                &old_prefix,
+                &new_prefix,
+            )?;
+        }
+        for row in self.load_catalog_indexes()? {
+            if row.table_name == from {
+                batch.put(
+                    &single_str_key(TAG_CATALOG_INDEX, &row.name),
+                    &encode_value(&StoredCatalogIndex {
+                        index_type: row.index_type,
+                        table_name: to.to_string(),
+                        columns_json: row.columns_json,
+                        parameters_json: row.parameters_json,
+                    })?,
+                )?;
+            }
+        }
+        batch.commit()
+    }
+
+    fn drop_column_data(&self, table_name: &str, column_name: &str) -> StorageBackendResult<()> {
+        let mut batch = self.store.batch();
+        for (key, value) in self.store.scan_prefix(&document_key_prefix(table_name))? {
+            let mut document = decode_value::<Document>(&value)?;
+            if document.remove(column_name).is_some() {
+                batch.put(&key, &encode_value(&document)?)?;
+            }
+        }
+        batch.delete_prefix(&posting_field_prefix(table_name, column_name))?;
+        batch.delete_prefix(&field_stats_key(table_name, column_name))?;
+        batch.delete_prefix(&vector_field_prefix(table_name, column_name))?;
+        batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name))?;
+        batch.delete(&column_stats_key(table_name, column_name))?;
+        for (key, _) in self.store.scan_prefix(&doc_length_key_prefix(table_name))? {
+            let mut offset = 1;
+            let _table = read_str(&key, &mut offset)?;
+            let _doc_id = read_u64(&key, &mut offset)?;
+            let field = read_str(&key, &mut offset)?;
+            if field.eq_ignore_ascii_case(column_name) {
+                batch.delete(&key)?;
+            }
+        }
+        for (key, _) in self
+            .store
+            .scan_prefix(&reverse_posting_key_prefix(table_name))?
+        {
+            let mut offset = 1;
+            let _table = read_str(&key, &mut offset)?;
+            let _doc_id = read_u64(&key, &mut offset)?;
+            let field = read_str(&key, &mut offset)?;
+            if field.eq_ignore_ascii_case(column_name) {
+                batch.delete(&key)?;
+            }
+        }
+        for row in self.load_catalog_indexes()? {
+            if row.table_name == table_name && catalog_index_references_column(&row, column_name) {
+                batch.delete(&single_str_key(TAG_CATALOG_INDEX, &row.name))?;
+            }
+        }
+        batch.commit()
+    }
+
+    fn rename_column_data(
+        &self,
+        table_name: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        let mut batch = self.store.batch();
+        for (key, value) in self.store.scan_prefix(&document_key_prefix(table_name))? {
+            let mut document = decode_value::<Document>(&value)?;
+            if let Some(value) = document.remove(from) {
+                document.insert(to.to_string(), value);
+                batch.put(&key, &encode_value(&document)?)?;
+            }
+        }
+        batch_rekey_prefix_or_keep_existing(
+            self.store.as_ref(),
+            batch.as_mut(),
+            &posting_field_prefix(table_name, from),
+            &posting_field_prefix(table_name, to),
+        )?;
+        batch_rekey_prefix_or_keep_existing(
+            self.store.as_ref(),
+            batch.as_mut(),
+            &field_stats_key(table_name, from),
+            &field_stats_key(table_name, to),
+        )?;
+        batch_rekey_prefix_or_keep_existing(
+            self.store.as_ref(),
+            batch.as_mut(),
+            &vector_field_prefix(table_name, from),
+            &vector_field_prefix(table_name, to),
+        )?;
+        batch_rekey_prefix_or_keep_existing(
+            self.store.as_ref(),
+            batch.as_mut(),
+            &table_field_analyzer_field_prefix(table_name, from),
+            &table_field_analyzer_field_prefix(table_name, to),
+        )?;
+        if let Some(value) = self.store.get(&column_stats_key(table_name, from))? {
+            batch_put_or_keep_existing(
+                self.store.as_ref(),
+                batch.as_mut(),
+                &column_stats_key(table_name, to),
+                &value,
+            )?;
+            batch.delete(&column_stats_key(table_name, from))?;
+        }
+        for (key, value) in self.store.scan_prefix(&doc_length_key_prefix(table_name))? {
+            let mut offset = 1;
+            let _table = read_str(&key, &mut offset)?;
+            let doc_id = read_u64(&key, &mut offset)?;
+            let field = read_str(&key, &mut offset)?;
+            if field.eq_ignore_ascii_case(from) {
+                batch_put_or_keep_existing(
+                    self.store.as_ref(),
+                    batch.as_mut(),
+                    &doc_length_key(table_name, doc_id, to),
+                    &value,
+                )?;
+                batch.delete(&key)?;
+            }
+        }
+        for (key, value) in self
+            .store
+            .scan_prefix(&reverse_posting_key_prefix(table_name))?
+        {
+            let mut offset = 1;
+            let _table = read_str(&key, &mut offset)?;
+            let doc_id = read_u64(&key, &mut offset)?;
+            let field = read_str(&key, &mut offset)?;
+            let term = read_str(&key, &mut offset)?;
+            if field.eq_ignore_ascii_case(from) {
+                batch_put_or_keep_existing(
+                    self.store.as_ref(),
+                    batch.as_mut(),
+                    &reverse_posting_key(table_name, doc_id, to, &term),
+                    &value,
+                )?;
+                batch.delete(&key)?;
+            }
+        }
+        for row in self.load_catalog_indexes()? {
+            if row.table_name != table_name {
+                continue;
+            }
+            if let Some(columns_json) = catalog_index_rename_column(&row, from, to) {
+                batch.put(
+                    &single_str_key(TAG_CATALOG_INDEX, &row.name),
+                    &encode_value(&StoredCatalogIndex {
+                        index_type: row.index_type,
+                        table_name: row.table_name,
+                        columns_json,
+                        parameters_json: row.parameters_json,
+                    })?,
+                )?;
+            }
+        }
         batch.commit()
     }
 

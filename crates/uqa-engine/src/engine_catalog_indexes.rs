@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{CatalogIndexRow, Engine};
+use super::{CatalogIndexRow, Engine, StorageBackendError, StorageBackendResult};
 
 impl Engine {
     pub fn register_catalog_index(
@@ -15,13 +15,34 @@ impl Engine {
         columns: &[String],
         options: &[(String, String)],
     ) {
+        let _ = self.try_register_catalog_index(name, index_type, table, columns, options);
+    }
+
+    pub(crate) fn try_register_catalog_index(
+        &self,
+        name: &str,
+        index_type: &str,
+        table: &str,
+        columns: &[String],
+        options: &[(String, String)],
+    ) -> StorageBackendResult<()> {
         let table = self
             .resolve_table_name(table)
             .unwrap_or_else(|| table.to_string());
-        let columns_json = serde_json::to_string(columns).unwrap_or_else(|_| "[]".into());
+        let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
         let options_map: std::collections::BTreeMap<String, String> =
             options.iter().cloned().collect();
-        let parameters_json = serde_json::to_string(&options_map).unwrap_or_else(|_| "{}".into());
+        let parameters_json =
+            serde_json::to_string(&options_map).map_err(StorageBackendError::from)?;
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.save_catalog_index(
+                name,
+                index_type,
+                &table,
+                &columns_json,
+                &parameters_json,
+            )?;
+        }
         self.catalog_indexes.write().insert(
             name.to_string(),
             CatalogIndexRow {
@@ -32,23 +53,25 @@ impl Engine {
                 parameters_json: parameters_json.clone(),
             },
         );
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_catalog_index(
-                name,
-                index_type,
-                &table,
-                &columns_json,
-                &parameters_json,
-            );
-        }
+        Ok(())
     }
 
     pub fn drop_catalog_index(&self, name: &str) -> Option<CatalogIndexRow> {
-        let removed = self.catalog_indexes.write().remove(name);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_catalog_index(name);
+        self.try_drop_catalog_index(name).ok().flatten()
+    }
+
+    pub(crate) fn try_drop_catalog_index(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<CatalogIndexRow>> {
+        let existing = self.catalog_indexes.read().get(name).cloned();
+        if existing.is_none() {
+            return Ok(None);
         }
-        removed
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.drop_catalog_index(name)?;
+        }
+        Ok(self.catalog_indexes.write().remove(name))
     }
 
     pub fn catalog_index(&self, name: &str) -> Option<CatalogIndexRow> {

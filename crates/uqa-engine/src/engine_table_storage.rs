@@ -5,10 +5,143 @@
 //
 
 use super::{
-    AnalyzerPhase, Arc, BTreeMap, DocId, Document, Engine, FieldName, SQLError, TableState, Value,
+    AnalyzerPhase, Arc, BTreeMap, DocId, Document, Engine, FieldName, IVFIndexParams, SQLError,
+    StorageBackendError, StorageBackendResult, TableState, Value,
 };
+use crate::CatalogIndexRow;
 
 impl Engine {
+    fn catalog_index_columns(row: &CatalogIndexRow) -> Vec<String> {
+        serde_json::from_str(&row.columns_json).unwrap_or_default()
+    }
+
+    fn catalog_index_references_column(row: &CatalogIndexRow, column: &str) -> bool {
+        Self::catalog_index_columns(row)
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(column))
+    }
+
+    fn catalog_index_with_renamed_column(
+        mut row: CatalogIndexRow,
+        from: &str,
+        to: &str,
+    ) -> CatalogIndexRow {
+        let mut columns = Self::catalog_index_columns(&row);
+        let mut changed = false;
+        for column in &mut columns {
+            if column.eq_ignore_ascii_case(from) {
+                *column = to.to_string();
+                changed = true;
+            }
+        }
+        if changed {
+            row.columns_json = serde_json::to_string(&columns).unwrap_or(row.columns_json);
+        }
+        row
+    }
+
+    fn remove_catalog_indexes_for_column(&self, table: &str, column: &str) {
+        self.catalog_indexes.write().retain(|_, row| {
+            !(row.table_name == table && Self::catalog_index_references_column(row, column))
+        });
+    }
+
+    fn rename_catalog_index_table_refs(&self, from: &str, to: &str) {
+        for row in self.catalog_indexes.write().values_mut() {
+            if row.table_name == from {
+                row.table_name = to.to_string();
+            }
+        }
+    }
+
+    fn rename_catalog_index_column_refs(&self, table: &str, from: &str, to: &str) {
+        let mut rows = self.catalog_indexes.write();
+        for row in rows.values_mut() {
+            if row.table_name == table && Self::catalog_index_references_column(row, from) {
+                let renamed = Self::catalog_index_with_renamed_column(row.clone(), from, to);
+                row.columns_json = renamed.columns_json;
+            }
+        }
+    }
+
+    fn ivf_catalog_params_for_column(&self, table: &str, column: &str) -> Option<IVFIndexParams> {
+        self.catalog_indexes.read().values().find_map(|row| {
+            let is_vector_index = row.index_type.eq_ignore_ascii_case("ivf")
+                || row.index_type.eq_ignore_ascii_case("hnsw");
+            (row.table_name == table
+                && is_vector_index
+                && Self::catalog_index_references_column(row, column))
+            .then(|| {
+                let parameters: BTreeMap<String, String> =
+                    serde_json::from_str(&row.parameters_json).unwrap_or_default();
+                IVFIndexParams::from_map_lossy(&parameters)
+            })
+        })
+    }
+
+    fn vector_catalog_index_names_for_column(&self, table: &str, column: &str) -> Vec<String> {
+        self.catalog_indexes
+            .read()
+            .values()
+            .filter(|row| {
+                row.table_name == table
+                    && (row.index_type.eq_ignore_ascii_case("ivf")
+                        || row.index_type.eq_ignore_ascii_case("hnsw"))
+                    && Self::catalog_index_references_column(row, column)
+            })
+            .map(|row| row.name.clone())
+            .collect()
+    }
+
+    fn rebind_persistent_table_stores(&self, table_name: &str, table: &TableState) {
+        let Some(backend) = self.backend.as_ref() else {
+            return;
+        };
+        let analyzer = table.analyzer.read().clone();
+        *table.document_store.write() = backend.document_store(table_name);
+        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
+
+        let analyzer_rows: Vec<(String, String, String)> = self
+            .table_field_analyzers
+            .read()
+            .iter()
+            .filter(|((table, _), _)| table == table_name)
+            .map(|((_, field), (analyzer, phase))| (field.clone(), analyzer.clone(), phase.clone()))
+            .collect();
+        for (field, analyzer_name, phase) in analyzer_rows {
+            if let Ok(analyzer) = self.resolve_analyzer(&analyzer_name) {
+                let phase = if phase.eq_ignore_ascii_case("index") {
+                    AnalyzerPhase::Index
+                } else if phase.eq_ignore_ascii_case("search") {
+                    AnalyzerPhase::Search
+                } else {
+                    AnalyzerPhase::Both
+                };
+                let _ = table
+                    .inverted_index
+                    .write()
+                    .set_field_analyzer(&field, analyzer, phase);
+            }
+        }
+
+        let vector_fields: Vec<(String, u32)> = table
+            .vector_indexes
+            .read()
+            .iter()
+            .map(|(field, idx)| (field.clone(), idx.dimensions()))
+            .collect();
+        let mut rebound = BTreeMap::new();
+        for (field, dimensions) in vector_fields {
+            let idx = if let Some(params) = self.ivf_catalog_params_for_column(table_name, &field) {
+                self.build_vector_index_for_restore(table_name, &field, dimensions, params)
+            } else {
+                self.build_vector_index_with_initialize(table_name, &field, dimensions, None, false)
+            };
+            rebound.insert(field, idx);
+        }
+        *table.vector_indexes.write() = rebound;
+    }
+
     pub(crate) fn document_vector_values(
         table: &Arc<TableState>,
         document: &Document,
@@ -58,13 +191,23 @@ impl Engine {
     /// Drop a table from the catalog and release its in-memory state.
     /// Returns `true` if the table existed.
     pub fn drop_table(&self, name: &str) -> bool {
+        self.try_drop_table(name).unwrap_or(false)
+    }
+
+    pub(crate) fn try_drop_table(&self, name: &str) -> StorageBackendResult<bool> {
         let Some(name) = self.resolve_table_name(name) else {
-            return false;
+            return Ok(false);
         };
-        let removed = self.tables.write().remove(&name).is_some();
-        if !removed {
-            return false;
+        if !self.tables.read().contains_key(&name) {
+            return Ok(false);
         }
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.drop_table(&name)?;
+            catalog.purge_table_data(&name)?;
+            catalog.drop_table_field_analyzers(&name)?;
+            catalog.drop_catalog_indexes_for_table(&name)?;
+        }
+        self.tables.write().remove(&name);
         // Sweep every related per-table registry so catalog state
         // does not outlive the table.
         self.table_field_analyzers
@@ -73,13 +216,7 @@ impl Engine {
         self.catalog_indexes
             .write()
             .retain(|_, row| row.table_name != name);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_table(&name);
-            let _ = catalog.purge_table_data(&name);
-            let _ = catalog.drop_table_field_analyzers(&name);
-            let _ = catalog.drop_catalog_indexes_for_table(&name);
-        }
-        true
+        Ok(true)
     }
 
     pub fn has_table(&self, name: &str) -> bool {
@@ -364,11 +501,15 @@ impl Engine {
     }
 
     pub fn drop_column(&self, table: &str, column: &str) {
+        let _ = self.try_drop_column(table, column);
+    }
+
+    pub(crate) fn try_drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(false);
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(false);
         };
         {
             let mut cols = t.columns.write();
@@ -386,6 +527,10 @@ impl Engine {
                 idx.clear();
             }
         }
+        self.remove_catalog_indexes_for_column(&table_name, column);
+        self.table_field_analyzers
+            .write()
+            .retain(|(table, field), _| !(table == &table_name && field == column));
         let ids: Vec<DocId> = t.document_store.read().snapshot().doc_ids();
         for doc_id in ids {
             let Some(mut doc) = t.document_store.read().get(doc_id) else {
@@ -396,17 +541,77 @@ impl Engine {
             }
         }
         if self.is_persistent() {
-            self.save_table_schema(&table_name, &t);
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.drop_column_data(&table_name, column)?;
+            }
+            self.try_save_table_schema(&table_name, &t)?;
         }
         self.mark_column_stats_dirty(&table_name, &t);
+        Ok(true)
+    }
+
+    pub(crate) fn try_drop_vector_indexes_for_column(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return Ok(false);
+        };
+        let Some(t) = self.table(table) else {
+            return Ok(false);
+        };
+        if let Some(mut idx) = t.vector_indexes.write().remove(column) {
+            idx.clear();
+        }
+        for index_name in self.vector_catalog_index_names_for_column(&table_name, column) {
+            self.try_drop_catalog_index(&index_name)?;
+        }
+        self.try_save_table_schema(&table_name, &t)?;
+        Ok(true)
+    }
+
+    pub(crate) fn try_rebuild_vector_index_for_column(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return Ok(false);
+        };
+        let params = self.ivf_catalog_params_for_column(&table_name, column);
+        let rebuilt = if let Some(params) = params {
+            self.rebuild_ivf_vector_field(&table_name, column, dimensions, params)
+        } else {
+            self.rebuild_vector_field(&table_name, column, dimensions)
+        };
+        if !rebuilt {
+            return Err(StorageBackendError::Other(format!(
+                "failed to rebuild vector index for `{table_name}`.`{column}`"
+            )));
+        }
+        if let Some(t) = self.table(&table_name) {
+            self.try_save_table_schema(&table_name, &t)?;
+        }
+        Ok(true)
     }
 
     pub fn rename_column(&self, table: &str, from: &str, to: &str) {
+        let _ = self.try_rename_column(table, from, to);
+    }
+
+    pub(crate) fn try_rename_column(
+        &self,
+        table: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<bool> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(false);
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(false);
         };
         {
             let mut cols = t.columns.write();
@@ -445,34 +650,88 @@ impl Engine {
         if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions);
         }
+        self.rename_catalog_index_column_refs(&table_name, from, to);
+        {
+            let mut analyzers = self.table_field_analyzers.write();
+            let mut moved = Vec::new();
+            analyzers.retain(|(table, field), value| {
+                if table == &table_name && field == from {
+                    moved.push(((table_name.clone(), to.to_string()), value.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+            analyzers.extend(moved);
+        }
         if self.is_persistent() {
-            self.save_table_schema(&table_name, &t);
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.rename_column_data(&table_name, from, to)?;
+            }
+            if let Some(dimensions) = vector_dimensions {
+                if let Some(params) = self.ivf_catalog_params_for_column(&table_name, to) {
+                    if !self.rebuild_ivf_vector_field(&table_name, to, dimensions, params) {
+                        return Err(StorageBackendError::Other(format!(
+                            "failed to rebuild IVF index for `{table_name}`.`{to}`"
+                        )));
+                    }
+                }
+            }
+            self.try_save_table_schema(&table_name, &t)?;
         }
         self.mark_column_stats_dirty(&table_name, &t);
+        Ok(true)
     }
 
     pub fn rename_table(&self, from: &str, to: &str) -> bool {
+        self.try_rename_table(from, to).unwrap_or(false)
+    }
+
+    pub(crate) fn try_rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
         let Some(from) = self.resolve_table_name(from) else {
-            return false;
+            return Ok(false);
         };
         let to = self.relation_name_for_create(to);
+        {
+            let tables = self.tables.read();
+            if !tables.contains_key(&from) || tables.contains_key(&to) {
+                return Ok(false);
+            }
+        }
+        if self.is_persistent() {
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.rename_table_data(&from, &to)?;
+            }
+        }
         let mut tables = self.tables.write();
         if tables.contains_key(&to) {
-            return false;
+            return Ok(false);
         }
         let Some(state) = tables.remove(&from) else {
-            return false;
+            return Ok(false);
         };
         tables.insert(to.clone(), state.clone());
         drop(tables);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_table(&from);
+        self.rename_catalog_index_table_refs(&from, &to);
+        {
+            let mut analyzers = self.table_field_analyzers.write();
+            let mut moved = Vec::new();
+            analyzers.retain(|(table, field), value| {
+                if table == &from {
+                    moved.push(((to.clone(), field.clone()), value.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+            analyzers.extend(moved);
         }
         if self.is_persistent() {
-            self.save_table_schema(&to, &state);
+            self.rebind_persistent_table_stores(&to, &state);
+            self.try_save_table_schema(&to, &state)?;
         }
         self.mark_column_stats_dirty(&to, &state);
-        true
+        Ok(true)
     }
 
     /// Append `field` to the table's FTS field list. Existing rows are

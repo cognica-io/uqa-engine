@@ -12,7 +12,7 @@
 //! (`_documents`, `_postings`, `_vectors`, ...) are created by their
 //! respective stores.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 use crate::catalog::{
@@ -26,6 +26,181 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 fn quote_sql_identifier(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn columns_json_references(columns_json: &str, column_name: &str) -> bool {
+    serde_json::from_str::<Vec<String>>(columns_json).is_ok_and(|columns| {
+        columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case(column_name))
+    })
+}
+
+fn renamed_columns_json(columns_json: &str, from: &str, to: &str) -> Option<String> {
+    let mut columns = serde_json::from_str::<Vec<String>>(columns_json).ok()?;
+    let mut changed = false;
+    for column in &mut columns {
+        if column.eq_ignore_ascii_case(from) {
+            *column = to.to_string();
+            changed = true;
+        }
+    }
+    changed
+        .then(|| serde_json::to_string(&columns).ok())
+        .flatten()
+}
+
+fn drop_fts_aux_tables_for_table(conn: &Connection, table_name: &str) -> Result<()> {
+    let prefixes = [
+        format!("_skip_{table_name}_"),
+        format!("_blockmax_{table_name}_"),
+    ];
+    let mut stale_tables = Vec::new();
+    for prefix in prefixes {
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE ?1",
+        )?;
+        let rows = stmt.query_map([format!("{prefix}%")], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            stale_tables.push(row?);
+        }
+    }
+    for table in stale_tables {
+        conn.execute(
+            &format!("DROP TABLE IF EXISTS {}", quote_sql_identifier(&table)),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn drop_fts_aux_tables_for_field(conn: &Connection, table_name: &str, field: &str) -> Result<()> {
+    for table in [
+        format!("_skip_{table_name}_{field}"),
+        format!("_blockmax_{table_name}_{field}"),
+    ] {
+        conn.execute(
+            &format!("DROP TABLE IF EXISTS {}", quote_sql_identifier(&table)),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count != 0)?)
+}
+
+fn rename_or_drop_existing_aux_table(
+    conn: &Connection,
+    from_table: &str,
+    to_table: &str,
+) -> Result<()> {
+    if !table_exists(conn, from_table)? {
+        return Ok(());
+    }
+    if table_exists(conn, to_table)? {
+        conn.execute(
+            &format!("DROP TABLE IF EXISTS {}", quote_sql_identifier(from_table)),
+            [],
+        )?;
+    } else {
+        conn.execute(
+            &format!(
+                "ALTER TABLE {} RENAME TO {}",
+                quote_sql_identifier(from_table),
+                quote_sql_identifier(to_table)
+            ),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn rename_fts_aux_tables_for_field(
+    conn: &Connection,
+    table_name: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    rename_or_drop_existing_aux_table(
+        conn,
+        &format!("_skip_{table_name}_{from}"),
+        &format!("_skip_{table_name}_{to}"),
+    )?;
+    rename_or_drop_existing_aux_table(
+        conn,
+        &format!("_blockmax_{table_name}_{from}"),
+        &format!("_blockmax_{table_name}_{to}"),
+    )
+}
+
+fn rename_field_rows_or_keep_existing(
+    conn: &Connection,
+    table: &str,
+    field_column: &str,
+    table_name: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    if !table_exists(conn, table)? {
+        return Ok(());
+    }
+    let table = quote_sql_identifier(table);
+    let field_column = quote_sql_identifier(field_column);
+    conn.execute(
+        &format!(
+            "UPDATE OR IGNORE {table}
+                SET {field_column} = ?3
+              WHERE table_name = ?1 AND {field_column} = ?2"
+        ),
+        params![table_name, from, to],
+    )?;
+    conn.execute(
+        &format!("DELETE FROM {table} WHERE table_name = ?1 AND {field_column} = ?2"),
+        params![table_name, from],
+    )?;
+    Ok(())
+}
+
+fn delete_table_rows_if_exists(conn: &Connection, table: &str, table_name: &str) -> Result<()> {
+    if !table_exists(conn, table)? {
+        return Ok(());
+    }
+    conn.execute(
+        &format!(
+            "DELETE FROM {} WHERE table_name = ?1",
+            quote_sql_identifier(table)
+        ),
+        params![table_name],
+    )?;
+    Ok(())
+}
+
+fn update_table_name_rows_if_exists(
+    conn: &Connection,
+    table: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    if !table_exists(conn, table)? {
+        return Ok(());
+    }
+    conn.execute(
+        &format!(
+            "UPDATE {} SET table_name = ?2 WHERE table_name = ?1",
+            quote_sql_identifier(table)
+        ),
+        params![from, to],
+    )?;
+    Ok(())
 }
 
 pub struct Catalog {
@@ -310,38 +485,177 @@ impl Catalog {
     /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
-            c.execute(
-                "DELETE FROM _documents WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute("DELETE FROM _postings WHERE table_name = ?1", params![name])?;
-            c.execute(
-                "DELETE FROM _doc_lengths WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute(
-                "DELETE FROM _field_stats WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute("DELETE FROM _vectors WHERE table_name = ?1", params![name])?;
-            c.execute(
-                "DELETE FROM _ivf_indexes WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute(
-                "DELETE FROM _ivf_centroids WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute(
-                "DELETE FROM _ivf_assignments WHERE table_name = ?1",
-                params![name],
-            )?;
-            c.execute(
-                "DELETE FROM _column_stats WHERE table_name = ?1",
-                params![name],
-            )?;
+            for table in [
+                "_documents",
+                "_document_blobs",
+                "_postings",
+                "_doc_lengths",
+                "_field_stats",
+                "_vectors",
+                "_ivf_indexes",
+                "_ivf_centroids",
+                "_ivf_assignments",
+                "_column_stats",
+            ] {
+                delete_table_rows_if_exists(c, table, name)?;
+            }
+            drop_fts_aux_tables_for_table(c, name)?;
             Ok(())
         })
+    }
+
+    pub fn rename_table_data(&self, from: &str, to: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "UPDATE _tables SET name = ?2 WHERE name = ?1",
+                params![from, to],
+            )?;
+            for table in [
+                "_documents",
+                "_document_blobs",
+                "_postings",
+                "_doc_lengths",
+                "_field_stats",
+                "_vectors",
+                "_ivf_indexes",
+                "_ivf_centroids",
+                "_ivf_assignments",
+                "_column_stats",
+                "_table_field_analyzers",
+                "_catalog_indexes",
+            ] {
+                update_table_name_rows_if_exists(c, table, from, to)?;
+            }
+            drop_fts_aux_tables_for_table(c, from)?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_column_data(&self, table_name: &str, column_name: &str) -> Result<()> {
+        let indexes = self.catalog_indexes_referencing_column(table_name, column_name)?;
+        self.conn.with(|c| {
+            if table_exists(c, "_document_blobs")? {
+                c.execute(
+                    "DELETE FROM _document_blobs WHERE table_name = ?1 AND field_name = ?2",
+                    params![table_name, column_name],
+                )?;
+            }
+            for table in [
+                "_postings",
+                "_doc_lengths",
+                "_field_stats",
+                "_vectors",
+                "_ivf_indexes",
+                "_ivf_centroids",
+                "_ivf_assignments",
+            ] {
+                c.execute(
+                    &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
+                    params![table_name, column_name],
+                )?;
+            }
+            c.execute(
+                "DELETE FROM _column_stats WHERE table_name = ?1 AND column_name = ?2",
+                params![table_name, column_name],
+            )?;
+            c.execute(
+                "DELETE FROM _table_field_analyzers WHERE table_name = ?1 AND field = ?2",
+                params![table_name, column_name],
+            )?;
+            for index_name in indexes {
+                c.execute(
+                    "DELETE FROM _catalog_indexes WHERE name = ?1",
+                    params![index_name],
+                )?;
+            }
+            drop_fts_aux_tables_for_field(c, table_name, column_name)?;
+            Ok(())
+        })
+    }
+
+    pub fn rename_column_data(&self, table_name: &str, from: &str, to: &str) -> Result<()> {
+        let index_updates = self.catalog_index_column_renames(table_name, from, to)?;
+        self.conn.with(|c| {
+            rename_field_rows_or_keep_existing(
+                c,
+                "_document_blobs",
+                "field_name",
+                table_name,
+                from,
+                to,
+            )?;
+            for table in [
+                "_postings",
+                "_doc_lengths",
+                "_field_stats",
+                "_vectors",
+                "_ivf_indexes",
+                "_ivf_centroids",
+                "_ivf_assignments",
+            ] {
+                rename_field_rows_or_keep_existing(c, table, "field", table_name, from, to)?;
+            }
+            rename_field_rows_or_keep_existing(
+                c,
+                "_column_stats",
+                "column_name",
+                table_name,
+                from,
+                to,
+            )?;
+            rename_field_rows_or_keep_existing(
+                c,
+                "_table_field_analyzers",
+                "field",
+                table_name,
+                from,
+                to,
+            )?;
+            for (index_name, columns_json) in index_updates {
+                c.execute(
+                    "UPDATE _catalog_indexes
+                        SET columns = ?2
+                      WHERE name = ?1",
+                    params![index_name, columns_json],
+                )?;
+            }
+            rename_fts_aux_tables_for_field(c, table_name, from, to)?;
+            Ok(())
+        })
+    }
+
+    fn catalog_indexes_referencing_column(
+        &self,
+        table_name: &str,
+        column_name: &str,
+    ) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        for row in self.load_catalog_indexes()? {
+            if row.table_name == table_name
+                && columns_json_references(&row.columns_json, column_name)
+            {
+                out.push(row.name);
+            }
+        }
+        Ok(out)
+    }
+
+    fn catalog_index_column_renames(
+        &self,
+        table_name: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let mut out = Vec::new();
+        for row in self.load_catalog_indexes()? {
+            if row.table_name != table_name {
+                continue;
+            }
+            if let Some(columns_json) = renamed_columns_json(&row.columns_json, from, to) {
+                out.push((row.name, columns_json));
+            }
+        }
+        Ok(out)
     }
 
     pub fn save_model(&self, name: &str, json: &str) -> Result<()> {
@@ -1094,6 +1408,23 @@ impl CatalogFacade for Catalog {
 
     fn purge_table_data(&self, name: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::purge_table_data(self, name))
+    }
+
+    fn rename_table_data(&self, from: &str, to: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::rename_table_data(self, from, to))
+    }
+
+    fn drop_column_data(&self, table_name: &str, column_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_column_data(self, table_name, column_name))
+    }
+
+    fn rename_column_data(
+        &self,
+        table_name: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::rename_column_data(self, table_name, from, to))
     }
 
     fn save_model(&self, name: &str, json: &str) -> StorageBackendResult<()> {

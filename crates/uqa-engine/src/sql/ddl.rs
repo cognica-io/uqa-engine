@@ -111,7 +111,9 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
                             for (next, _) in engine.referrers_to(&other) {
                                 queue.push(next);
                             }
-                            engine.drop_table(&other);
+                            engine
+                                .try_drop_table(&other)
+                                .map_err(|e| ddl_storage_error("DROP TABLE", e))?;
                         }
                     } else {
                         let names: Vec<String> = referrers.iter().map(|(n, _)| n.clone()).collect();
@@ -121,7 +123,9 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
                         )));
                     }
                 }
-                engine.drop_table(name);
+                engine
+                    .try_drop_table(name)
+                    .map_err(|e| ddl_storage_error("DROP TABLE", e))?;
             }
         }
         DropKind::Index => {
@@ -135,7 +139,9 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
                     )));
                 };
                 drop_index_side_effects(engine, &row)?;
-                engine.drop_catalog_index(name);
+                engine
+                    .try_drop_catalog_index(name)
+                    .map_err(|e| ddl_storage_error("DROP INDEX", e))?;
             }
         }
         DropKind::View => {
@@ -158,6 +164,10 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn ddl_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
+    SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
 fn drop_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
@@ -262,6 +272,9 @@ pub(super) fn run_alter_table(
                 default_expr.as_ref(),
                 column_not_null,
             )?;
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
         }
         AlterTableAction::DropColumn {
             name,
@@ -276,7 +289,9 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE DROP COLUMN: column `{name}` does not exist"
                 )));
             }
-            engine.drop_column(&stmt.table, &name);
+            engine
+                .try_drop_column(&stmt.table, &name)
+                .map_err(|e| ddl_storage_error("ALTER TABLE DROP COLUMN", e))?;
         }
         AlterTableAction::RenameColumn { from, to } => {
             if !engine.table_has_column(&stmt.table, &from) {
@@ -289,7 +304,9 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE RENAME COLUMN: column `{to}` already exists"
                 )));
             }
-            engine.rename_column(&stmt.table, &from, &to);
+            engine
+                .try_rename_column(&stmt.table, &from, &to)
+                .map_err(|e| ddl_storage_error("ALTER TABLE RENAME COLUMN", e))?;
         }
         AlterTableAction::RenameTable { to } => {
             if engine.has_table(&to) {
@@ -297,7 +314,10 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE RENAME: relation `{to}` already exists"
                 )));
             }
-            if !engine.rename_table(&stmt.table, &to) {
+            if !engine
+                .try_rename_table(&stmt.table, &to)
+                .map_err(|e| ddl_storage_error("ALTER TABLE RENAME", e))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME: rename of `{}` failed",
                     stmt.table
@@ -310,6 +330,9 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
             }
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::DropDefault { name } => {
             if !engine.set_column_default(&stmt.table, &name, None) {
@@ -317,11 +340,17 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
             }
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::SetNotNull { name } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
             ensure_existing_values_not_null(engine, &stmt.table, &name)?;
             engine.set_column_not_null(&stmt.table, &name, true);
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::DropNotNull { name } => {
             if !engine.set_column_not_null(&stmt.table, &name, false) {
@@ -329,22 +358,43 @@ pub(super) fn run_alter_table(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
             }
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::AlterColumnType { name, ty } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
+            let old_ty = engine.column_type(&stmt.table, &name);
             rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
             engine.set_column_type(&stmt.table, &name, &ty);
+            let old_was_vector =
+                matches!(old_ty, Some(ColumnType::Vector(_) | ColumnType::Tensor(_)));
             match ty {
                 ColumnType::Text => {
+                    if old_was_vector {
+                        engine
+                            .try_drop_vector_indexes_for_column(&stmt.table, &name)
+                            .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
+                    }
                     if let Err(e) = engine.add_fts_field(&stmt.table, name.clone()) {
                         return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
                 }
                 ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
-                    engine.create_vector_field(&stmt.table, name, dim);
+                    engine
+                        .try_rebuild_vector_index_for_column(&stmt.table, &name, dim)
+                        .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
+                }
+                _ if old_was_vector => {
+                    engine
+                        .try_drop_vector_indexes_for_column(&stmt.table, &name)
+                        .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
                 }
                 _ => {}
             }
+            engine
+                .try_persist_table_schema(&stmt.table)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
     }
     Ok(SQLResult::empty())
@@ -748,6 +798,9 @@ pub(super) fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLRes
         engine.register_column(&c.name, col.clone());
     }
     engine.register_table_constraints(&c.name, c.checks.clone(), c.foreign_keys.clone());
+    engine
+        .try_persist_table_schema(&c.name)
+        .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;
     let _ = column_names(&c.columns);
     Ok(SQLResult::empty())
 }
@@ -827,7 +880,9 @@ pub(super) fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLRes
             "hnsw" => "ivf",
             other => other,
         };
-        engine.register_catalog_index(name, catalog_index_type, &c.table, &c.columns, &c.options);
+        engine
+            .try_register_catalog_index(name, catalog_index_type, &c.table, &c.columns, &c.options)
+            .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     }
     Ok(SQLResult::empty())
 }

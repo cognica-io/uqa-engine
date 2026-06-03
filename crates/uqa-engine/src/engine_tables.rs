@@ -8,7 +8,8 @@ use super::{
     standard_analyzer, Analyzer, AnalyzerPhase, Arc, AtomicBool, BTreeMap, DocId, Document,
     DocumentStore, Engine, FieldName, IVFIndex, IVFIndexParams, InvertedIndex, MemoryDocumentStore,
     MemoryInvertedIndex, MemoryVectorIndex, PersistentVectorIndexParams, RwLock,
-    StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
+    StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorFieldSchema,
+    VectorIndex,
 };
 
 impl Engine {
@@ -17,12 +18,19 @@ impl Engine {
     }
 
     pub(crate) fn save_table_schema(&self, name: &str, table: &TableState) {
+        let _ = self.try_save_table_schema(name, table);
+    }
+
+    pub(crate) fn try_save_table_schema(
+        &self,
+        name: &str,
+        table: &TableState,
+    ) -> StorageBackendResult<()> {
         let Some(catalog) = self.catalog.as_ref() else {
-            return;
+            return Ok(());
         };
-        let Ok(analyzer_json) = serde_json::to_string(&*table.analyzer.read()) else {
-            return;
-        };
+        let analyzer_json =
+            serde_json::to_string(&*table.analyzer.read()).map_err(StorageBackendError::from)?;
         let vector_fields: Vec<VectorFieldSchema> = table
             .vector_indexes
             .read()
@@ -32,14 +40,26 @@ impl Engine {
                 dimensions: idx.dimensions(),
             })
             .collect();
-        let columns_json = serde_json::to_string(&*table.columns.read()).unwrap_or_default();
-        let _ = catalog.save_table(&TableSchema {
+        let columns_json =
+            serde_json::to_string(&*table.columns.read()).map_err(StorageBackendError::from)?;
+        catalog.save_table(&TableSchema {
             name: name.to_string(),
             analyzer_json,
             fts_fields: table.fts_fields(),
             vector_fields,
             columns_json,
-        });
+        })
+    }
+
+    pub(crate) fn try_persist_table_schema(&self, table: &str) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return Ok(false);
+        };
+        let Some(t) = self.table(table) else {
+            return Ok(false);
+        };
+        self.try_save_table_schema(&table_name, &t)?;
+        Ok(true)
     }
 
     /// Register a table. `fts_fields` is the list of field names that are
@@ -107,6 +127,15 @@ impl Engine {
         params: IVFIndexParams,
     ) -> bool {
         self.install_vector_field(table, field.into(), dimensions, Some(params), true, true)
+    }
+
+    pub(crate) fn rebuild_vector_field(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+    ) -> bool {
+        self.install_vector_field(table, field.into(), dimensions, None, true, true)
     }
 
     pub(crate) fn drop_ivf_vector_field_index(
@@ -210,7 +239,7 @@ impl Engine {
         self.build_vector_index_with_initialize(table, field, dimensions, params, true)
     }
 
-    fn build_vector_index_for_restore(
+    pub(crate) fn build_vector_index_for_restore(
         &self,
         table: &str,
         field: &str,
@@ -220,7 +249,7 @@ impl Engine {
         self.build_vector_index_with_initialize(table, field, dimensions, Some(params), false)
     }
 
-    fn build_vector_index_with_initialize(
+    pub(crate) fn build_vector_index_with_initialize(
         &self,
         table: &str,
         field: &str,

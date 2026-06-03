@@ -132,6 +132,14 @@ pub trait CatalogFacade: Send + Sync {
     fn load_tables(&self) -> StorageBackendResult<Vec<TableSchema>>;
     fn drop_table(&self, name: &str) -> StorageBackendResult<()>;
     fn purge_table_data(&self, name: &str) -> StorageBackendResult<()>;
+    fn rename_table_data(&self, from: &str, to: &str) -> StorageBackendResult<()>;
+    fn drop_column_data(&self, table_name: &str, column_name: &str) -> StorageBackendResult<()>;
+    fn rename_column_data(
+        &self,
+        table_name: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()>;
 
     fn save_model(&self, name: &str, json: &str) -> StorageBackendResult<()>;
     fn load_models(&self) -> StorageBackendResult<Vec<(String, String)>>;
