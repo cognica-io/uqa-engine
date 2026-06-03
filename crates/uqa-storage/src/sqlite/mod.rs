@@ -8,6 +8,7 @@
 //! inverted index, vector index.
 
 pub mod catalog;
+mod catalog_lifecycle;
 pub mod compressed_vfs;
 pub mod connection;
 pub mod document_store;
