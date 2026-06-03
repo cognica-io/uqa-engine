@@ -16,6 +16,7 @@ use crate::document_store::DocumentStore;
 use crate::inverted_index::InvertedIndex;
 use crate::sqlite::{
     ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex,
+    SQLiteVectorIndex,
 };
 use crate::vector_index::VectorIndex;
 
@@ -66,6 +67,10 @@ pub trait PersistentStorageBackend: Send + Sync {
         dimensions: u32,
         params: Option<PersistentVectorIndexParams>,
     ) -> Box<dyn VectorIndex>;
+
+    fn drop_vector_index_metadata(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
 
     fn begin_transaction(&self) -> StorageBackendResult<()>;
 
@@ -135,13 +140,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
                     ))
                 }
             }
-            None => Box::new(SQLiteIVFIndex::new(
+            None => Box::new(SQLiteVectorIndex::new(
                 self.conn.clone(),
                 table,
                 field,
                 dimensions,
             )),
         }
+    }
+
+    fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+        SQLiteIVFIndex::drop_metadata(&self.conn, table, field)?;
+        Ok(())
     }
 
     fn begin_transaction(&self) -> StorageBackendResult<()> {

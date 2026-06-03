@@ -43,11 +43,16 @@ impl Engine {
         }
     }
 
-    pub fn drop_catalog_index(&self, name: &str) {
-        self.catalog_indexes.write().remove(name);
+    pub fn drop_catalog_index(&self, name: &str) -> Option<CatalogIndexRow> {
+        let removed = self.catalog_indexes.write().remove(name);
         if let Some(catalog) = self.catalog.as_ref() {
             let _ = catalog.drop_catalog_index(name);
         }
+        removed
+    }
+
+    pub fn catalog_index(&self, name: &str) -> Option<CatalogIndexRow> {
+        self.catalog_indexes.read().get(name).cloned()
     }
 
     pub fn has_catalog_index(&self, name: &str) -> bool {

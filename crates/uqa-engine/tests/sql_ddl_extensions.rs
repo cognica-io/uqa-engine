@@ -82,6 +82,19 @@ fn drop_index_if_exists_is_noop() {
 }
 
 #[test]
+fn drop_index_without_if_exists_errors_when_missing() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE notes (id BIGSERIAL PRIMARY KEY, body TEXT)",
+        &[],
+    )
+    .unwrap();
+    let err = eng.sql("DROP INDEX notes_body_idx", &[]).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("DROP INDEX"), "unexpected error: {msg}");
+}
+
+#[test]
 fn alter_table_add_column_and_insert_uses_it() {
     let eng = Engine::new();
     eng.sql(

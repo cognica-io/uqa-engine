@@ -12,6 +12,7 @@ use super::{
     Engine, EvalContext, IVFIndexParams, RowUpdateVectors, SQLColumnDef, SQLError, SQLParam,
     SQLResult, TemporalValue, Value,
 };
+use crate::CatalogIndexRow;
 
 pub(super) fn run_create_sequence(
     engine: &Engine,
@@ -124,12 +125,16 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
             }
         }
         DropKind::Index => {
-            // Persisted as `_catalog_indexes` rows. The in-memory
-            // physical structures (FTS / vector indexes attached to
-            // table fields) are not torn down here -- the catalog
-            // entry merely tracks the CREATE INDEX statement so it
-            // survives Engine::open.
             for name in &stmt.names {
+                let Some(row) = engine.catalog_index(name) else {
+                    if stmt.if_exists {
+                        continue;
+                    }
+                    return Err(SQLError::Unsupported(format!(
+                        "DROP INDEX: index `{name}` does not exist"
+                    )));
+                };
+                drop_index_side_effects(engine, &row)?;
                 engine.drop_catalog_index(name);
             }
         }
@@ -153,6 +158,55 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn drop_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
+    if row.index_type.eq_ignore_ascii_case("ivf") || row.index_type.eq_ignore_ascii_case("hnsw") {
+        drop_ivf_index_side_effects(engine, row)?;
+    }
+    Ok(())
+}
+
+fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
+    let columns: Vec<String> = serde_json::from_str(&row.columns_json).map_err(|e| {
+        SQLError::Internal(format!(
+            "DROP INDEX `{}`: invalid index column metadata: {e}",
+            row.name
+        ))
+    })?;
+    for col in columns {
+        match engine.column_type(&row.table_name, &col) {
+            Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
+                if !engine.drop_ivf_vector_field_index(&row.table_name, col.clone(), dim) {
+                    return Err(SQLError::Unsupported(format!(
+                        "DROP INDEX `{}`: relation `{}` does not exist",
+                        row.name, row.table_name
+                    )));
+                }
+                engine
+                    .drop_vector_index_metadata(&row.table_name, &col)
+                    .map_err(|e| {
+                        SQLError::Internal(format!(
+                            "DROP INDEX `{}`: failed to drop IVF metadata for `{}`.`{col}`: {e}",
+                            row.name, row.table_name
+                        ))
+                    })?;
+            }
+            Some(other) => {
+                return Err(SQLError::Unsupported(format!(
+                    "DROP INDEX `{}`: IVF column `{}`.`{col}` is no longer VECTOR or TENSOR, got {other:?}",
+                    row.name, row.table_name
+                )));
+            }
+            None => {
+                return Err(SQLError::Unsupported(format!(
+                    "DROP INDEX `{}`: column `{}`.`{col}` does not exist",
+                    row.name, row.table_name
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn run_alter_table(

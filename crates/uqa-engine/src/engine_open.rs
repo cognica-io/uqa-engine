@@ -7,9 +7,8 @@
 use super::{
     normalize_analyzer_phase, Analyzer, Arc, AtomicBool, BTreeMap, Catalog, CatalogFacade,
     ColumnStatsRow, DeepModel, Engine, FieldName, IVFIndexParams, ManagedConnection, Path,
-    PersistentStorageBackend, PersistentVectorIndexParams, RwLock, SQLiteCompressionOptions,
-    SQLiteError, SQLiteStorageBackend, StorageBackendError, StorageBackendResult, TableState,
-    Value, VectorIndex,
+    PersistentStorageBackend, RwLock, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
+    StorageBackendError, StorageBackendResult, TableState, Value, VectorIndex,
 };
 
 impl Engine {
@@ -127,15 +126,7 @@ impl Engine {
             for vf in &schema.vector_fields {
                 vectors.insert(
                     vf.field.clone(),
-                    backend.vector_index(
-                        &schema.name,
-                        &vf.field,
-                        vf.dimensions,
-                        Some(PersistentVectorIndexParams {
-                            initialize: false,
-                            ..PersistentVectorIndexParams::default()
-                        }),
-                    ),
+                    backend.vector_index(&schema.name, &vf.field, vf.dimensions, None),
                 );
             }
             let columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {

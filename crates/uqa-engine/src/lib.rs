@@ -112,7 +112,7 @@ use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, PersistentStorageBackend,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
     PersistentVectorIndexParams, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
     StorageBackendError, StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
 };
@@ -963,10 +963,22 @@ mod tests {
     }
 
     #[test]
-    fn vector_fields_use_ivf_backends() {
+    fn vector_fields_use_bruteforce_until_explicit_ivf_index() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec![]);
-        eng.create_vector_field("articles", "embedding", 3);
+        eng.sql(
+            "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            vector_index_kind(&eng, "articles", "embedding"),
+            "memory-bruteforce"
+        );
+        eng.sql(
+            "CREATE INDEX articles_embedding_ivf ON articles USING ivf (embedding)",
+            &[],
+        )
+        .unwrap();
         assert_eq!(vector_index_kind(&eng, "articles", "embedding"), "ivf");
 
         let dir = tempfile::tempdir().unwrap();
@@ -975,6 +987,15 @@ mod tests {
             let eng = Engine::open(&db).unwrap();
             eng.sql(
                 "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                vector_index_kind(&eng, "articles", "embedding"),
+                "sqlite-bruteforce"
+            );
+            eng.sql(
+                "CREATE INDEX articles_embedding_ivf ON articles USING ivf (embedding)",
                 &[],
             )
             .unwrap();

@@ -359,6 +359,24 @@ impl SQLiteIVFIndex {
         }
     }
 
+    pub fn drop_metadata(conn: &ManagedConnection, table: &str, field: &str) -> SQLiteResult<()> {
+        conn.with(|conn| {
+            conn.execute(
+                "DELETE FROM _ivf_indexes WHERE table_name = ?1 AND field = ?2",
+                params![table, field],
+            )?;
+            conn.execute(
+                "DELETE FROM _ivf_centroids WHERE table_name = ?1 AND field = ?2",
+                params![table, field],
+            )?;
+            conn.execute(
+                "DELETE FROM _ivf_assignments WHERE table_name = ?1 AND field = ?2",
+                params![table, field],
+            )?;
+            Ok(())
+        })
+    }
+
     fn bootstrap_metadata(&self) {
         match self.load_meta().unwrap_or(None) {
             Some(meta)

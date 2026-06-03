@@ -541,6 +541,56 @@ fn create_index_if_not_exists_skips_existing_ivf_side_effects() {
 }
 
 #[test]
+fn drop_index_removes_ivf_backend_metadata_and_reopen_stays_bruteforce() {
+    let dir = TempDir::new().unwrap();
+    let db = dir.path().join("uqa.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO docs (id, embedding) VALUES \
+             (1, ARRAY[1.0, 0.0]), \
+             (2, ARRAY[0.0, 1.0]), \
+             (3, ARRAY[0.8, 0.2])",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding) \
+             WITH (lists = 2, probes = 1, train_threshold = 2)",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 1);
+
+        eng.sql("DROP INDEX docs_embedding_ivf", &[]).unwrap();
+        assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+
+        let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 1);
+        assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
+
+        eng.sql(
+            "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding) \
+             WITH (lists = 2, probes = 1, train_threshold = 2)",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 1);
+        eng.sql("DROP INDEX docs_embedding_ivf", &[]).unwrap();
+    }
+
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+    let reopened = Engine::open(&db).unwrap();
+    assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
+    let hits = reopened.knn_search("docs", "embedding", vec![1.0, 0.0], 1);
+    assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
+}
+
+#[test]
 fn reopen_attaches_ivf_index_without_bootstrap_retraining() {
     let dir = TempDir::new().unwrap();
     let db = dir.path().join("uqa.db");

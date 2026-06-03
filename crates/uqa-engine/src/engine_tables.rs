@@ -7,8 +7,8 @@
 use super::{
     standard_analyzer, Analyzer, AnalyzerPhase, Arc, AtomicBool, BTreeMap, DocId, Document,
     DocumentStore, Engine, FieldName, IVFIndex, IVFIndexParams, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, PersistentVectorIndexParams, RwLock, TableSchema, TableState,
-    VectorFieldSchema, VectorIndex,
+    MemoryInvertedIndex, MemoryVectorIndex, PersistentVectorIndexParams, RwLock,
+    StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
 };
 
 impl Engine {
@@ -45,7 +45,7 @@ impl Engine {
     /// Register a table. `fts_fields` is the list of field names that are
     /// tokenized into the inverted index when documents are inserted.
     /// Other fields are still stored in the document store but are not
-    /// queryable via `text_match` / [`TermOperator`].
+    /// queryable via `text_match` / [`uqa_operators::TermOperator`].
     pub fn create_table(
         &self,
         name: impl Into<String>,
@@ -86,24 +86,17 @@ impl Engine {
         }
     }
 
-    /// Register an IVF vector field on a table. Existing document values
-    /// in the same field are indexed immediately; later calls to
-    /// [`Engine::add_vector`] or [`Engine::add_document_with_vectors`] keep
-    /// it current.
+    /// Register a vector field on a table. Existing document values in the
+    /// same field are indexed immediately; later calls to [`Engine::add_vector`]
+    /// or [`Engine::add_document_with_vectors`] keep it current. `CREATE INDEX
+    /// ... USING ivf` upgrades the field to an IVF backend.
     pub fn create_vector_field(
         &self,
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
     ) -> bool {
-        self.install_vector_field(
-            table,
-            field.into(),
-            dimensions,
-            IVFIndexParams::default(),
-            false,
-            true,
-        )
+        self.install_vector_field(table, field.into(), dimensions, None, false, true)
     }
 
     pub(crate) fn rebuild_ivf_vector_field(
@@ -113,7 +106,27 @@ impl Engine {
         dimensions: u32,
         params: IVFIndexParams,
     ) -> bool {
-        self.install_vector_field(table, field.into(), dimensions, params, true, true)
+        self.install_vector_field(table, field.into(), dimensions, Some(params), true, true)
+    }
+
+    pub(crate) fn drop_ivf_vector_field_index(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+    ) -> bool {
+        self.install_vector_field(table, field.into(), dimensions, None, true, true)
+    }
+
+    pub(crate) fn drop_vector_index_metadata(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> StorageBackendResult<()> {
+        if let Some(backend) = self.backend.as_ref() {
+            backend.drop_vector_index_metadata(table, field)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn restore_ivf_vector_field(
@@ -166,7 +179,7 @@ impl Engine {
         table: &str,
         field: FieldName,
         dimensions: u32,
-        params: IVFIndexParams,
+        params: Option<IVFIndexParams>,
         replace_existing: bool,
         persist_schema: bool,
     ) -> bool {
@@ -192,7 +205,7 @@ impl Engine {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: IVFIndexParams,
+        params: Option<IVFIndexParams>,
     ) -> Box<dyn VectorIndex> {
         self.build_vector_index_with_initialize(table, field, dimensions, params, true)
     }
@@ -204,7 +217,7 @@ impl Engine {
         dimensions: u32,
         params: IVFIndexParams,
     ) -> Box<dyn VectorIndex> {
-        self.build_vector_index_with_initialize(table, field, dimensions, params, false)
+        self.build_vector_index_with_initialize(table, field, dimensions, Some(params), false)
     }
 
     fn build_vector_index_with_initialize(
@@ -212,7 +225,7 @@ impl Engine {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: IVFIndexParams,
+        params: Option<IVFIndexParams>,
         initialize: bool,
     ) -> Box<dyn VectorIndex> {
         if let Some(backend) = self.backend.as_ref() {
@@ -220,20 +233,22 @@ impl Engine {
                 table,
                 field,
                 dimensions,
-                Some(PersistentVectorIndexParams {
+                params.map(|params| PersistentVectorIndexParams {
                     nlist: params.nlist,
                     nprobe: params.nprobe,
                     train_threshold: params.train_threshold,
                     initialize,
                 }),
             )
-        } else {
+        } else if let Some(params) = params {
             Box::new(IVFIndex::with_params(
                 dimensions,
                 params.nlist,
                 params.nprobe,
                 params.train_threshold,
             ))
+        } else {
+            Box::new(MemoryVectorIndex::new(dimensions))
         }
     }
 
