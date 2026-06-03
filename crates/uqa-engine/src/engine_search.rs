@@ -1,0 +1,282 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use super::{
+    Arc, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport,
+    CosineProbabilityOperator, DocId, Engine, ExecutionContext, HybridSearchParams, KNNOperator,
+    LogOddsFusionOperator, Operator, ParameterLearner, PostingList, SQLError, ScoreOperator,
+    ScoredEntry, Scorer, ScoringMode, TermOperator, VectorSimilarityOperator,
+};
+
+impl Engine {
+    pub(crate) fn snapshot_context(
+        &self,
+        table: &str,
+    ) -> Option<(ExecutionContext, Arc<uqa_core::IndexStats>)> {
+        let t = self.table(table)?;
+        let inv = t.inverted_index.read().snapshot();
+        let stats = inv.stats();
+        let stats_arc = Arc::new(stats.clone());
+        let docs = t.document_store.read().snapshot();
+
+        let mut ctx = ExecutionContext::new()
+            .with_inverted_index(inv)
+            .with_document_store(docs)
+            .with_stats(stats);
+
+        for (field, idx) in t.vector_indexes.read().iter() {
+            ctx = ctx.with_vector_index(field.clone(), idx.snapshot());
+        }
+
+        Some((ctx, stats_arc))
+    }
+
+    fn build_text_scorer(
+        mode: &ScoringMode,
+        stats_arc: Arc<uqa_core::IndexStats>,
+    ) -> Arc<dyn Scorer> {
+        match mode {
+            ScoringMode::BM25(p) => Arc::new(BM25Scorer::new(*p, stats_arc)),
+            ScoringMode::BayesianBM25(p) => Arc::new(BayesianBM25Scorer::new(*p, stats_arc)),
+        }
+    }
+
+    fn rank_top_k(pl: &PostingList, top_k: usize) -> Vec<ScoredEntry> {
+        let mut entries: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
+        entries.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.doc_id.cmp(&b.doc_id))
+        });
+        entries.truncate(top_k);
+        entries
+    }
+
+    /// Run a single-term or multi-term `text_match` query against `field`
+    /// with the chosen scoring mode and return the top-`k` entries.
+    pub fn search(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &ScoringMode,
+        top_k: usize,
+    ) -> Vec<ScoredEntry> {
+        let Some((ctx, stats_arc)) = self.snapshot_context(table) else {
+            return Vec::new();
+        };
+        let analyzer = ctx
+            .inverted_index
+            .as_ref()
+            .expect("snapshot_context populates the inverted index")
+            .get_search_analyzer(field);
+        let analyzed_terms = analyzer.analyze(query);
+        if analyzed_terms.is_empty() {
+            return Vec::new();
+        }
+        let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
+        let scorer = Self::build_text_scorer(mode, stats_arc);
+        let score_op = ScoreOperator::new(scorer, term_op, analyzed_terms, field);
+        let result = score_op.execute(&ctx);
+        Self::rank_top_k(&result, top_k)
+    }
+
+    /// Compute calibration diagnostics for a Bayesian BM25 query
+    /// against every document in `table`, aligned to `labels` in
+    /// ascending document-id order.
+    pub fn calibration_report(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: &[u8],
+    ) -> Result<CalibrationReport, SQLError> {
+        if self.table(table).is_none() {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        }
+        let doc_ids = self.table_doc_ids(table);
+        if labels.len() != doc_ids.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "labels length ({}) must match document count ({})",
+                labels.len(),
+                doc_ids.len()
+            )));
+        }
+
+        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let score_map: std::collections::BTreeMap<DocId, f64> = self
+            .search(table, field, query, &mode, usize::MAX)
+            .into_iter()
+            .map(|entry| (entry.doc_id, entry.score))
+            .collect();
+        let probabilities: Vec<f64> = doc_ids
+            .iter()
+            .map(|doc_id| score_map.get(doc_id).copied().unwrap_or(0.0))
+            .collect();
+        Ok(CalibrationMetrics::report(&probabilities, labels, 10))
+    }
+
+    pub fn learn_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: &[u8],
+    ) -> Result<std::collections::BTreeMap<String, f64>, SQLError> {
+        if self.table(table).is_none() {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        }
+        let doc_ids = self.table_doc_ids(table);
+        if labels.len() != doc_ids.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "labels length ({}) must match document count ({})",
+                labels.len(),
+                doc_ids.len()
+            )));
+        }
+
+        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let score_map: std::collections::BTreeMap<DocId, f64> = self
+            .search(table, field, query, &mode, usize::MAX)
+            .into_iter()
+            .map(|entry| (entry.doc_id, entry.score))
+            .collect();
+        let scores: Vec<f64> = doc_ids
+            .iter()
+            .map(|doc_id| score_map.get(doc_id).copied().unwrap_or(0.0))
+            .collect();
+        let labels_f: Vec<f64> = labels.iter().map(|label| f64::from(*label)).collect();
+        let mut learner = ParameterLearner::default();
+        let params = learner.fit_with_options(&scores, &labels_f, None, None);
+        let json = serde_json::to_string(&params)
+            .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
+        self.save_scoring_params(&format!("{table}.{field}"), &json)?;
+        Ok(params)
+    }
+
+    pub fn update_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        score: f64,
+        label: u8,
+    ) -> Result<(), SQLError> {
+        let key = format!("{table}.{field}");
+        let mut learner = if let Some(json) = self.load_scoring_params(&key) {
+            let params: std::collections::BTreeMap<String, f64> =
+                serde_json::from_str(&json).unwrap_or_default();
+            ParameterLearner::new(
+                params.get("alpha").copied().unwrap_or(1.0),
+                params.get("beta").copied().unwrap_or(0.0),
+                Some(params.get("base_rate").copied().unwrap_or(0.5)),
+            )
+        } else {
+            ParameterLearner::default()
+        };
+        learner.update(score, f64::from(label), 1.0, 1.0, 0.1);
+        let json = serde_json::to_string(&learner.params())
+            .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
+        self.save_scoring_params(&key, &json)
+    }
+
+    /// Top-`k` nearest neighbors against the named vector field.
+    pub fn knn_search(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: Vec<f32>,
+        top_k: usize,
+    ) -> Vec<ScoredEntry> {
+        let Some((ctx, _)) = self.snapshot_context(table) else {
+            return Vec::new();
+        };
+        let knn = KNNOperator::new(query_vector, top_k, field);
+        let pl = knn.execute(&ctx);
+        Self::rank_top_k(&pl, top_k)
+    }
+
+    /// All documents whose cosine similarity to `query_vector` is at least
+    /// `threshold`.
+    pub fn vector_similarity_search(
+        &self,
+        table: &str,
+        field: &str,
+        query_vector: Vec<f32>,
+        threshold: f32,
+    ) -> Vec<ScoredEntry> {
+        let Some((ctx, _)) = self.snapshot_context(table) else {
+            return Vec::new();
+        };
+        let op = VectorSimilarityOperator::new(query_vector, threshold, field);
+        let pl = op.execute(&ctx);
+        let mut out: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
+        out.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.doc_id.cmp(&b.doc_id))
+        });
+        out
+    }
+
+    /// Hybrid search: Bayesian BM25 over `text_field` AND KNN over
+    /// `vector_field`, combined via log-odds conjunction (Section 4,
+    /// Paper 4). Both signals are pre-calibrated to (0, 1) before
+    /// fusion: BM25 via the three-term posterior, vector via
+    /// `cosine_to_probability`. Returns top-`top_k` by fused score
+    /// descending.
+    pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
+        let Some((ctx, stats_arc)) = self.snapshot_context(params.table) else {
+            return Vec::new();
+        };
+        let analyzer = ctx
+            .inverted_index
+            .as_ref()
+            .expect("snapshot_context populates the inverted index")
+            .get_search_analyzer(params.text_field);
+        let analyzed_terms = analyzer.analyze(params.text_query);
+        if analyzed_terms.is_empty() && !ctx.vector_indexes.contains_key(params.vector_field) {
+            return Vec::new();
+        }
+
+        let mut signals: Vec<Arc<dyn Operator>> = Vec::new();
+
+        if !analyzed_terms.is_empty() {
+            let term_op: Arc<dyn Operator> =
+                Arc::new(TermOperator::new(params.text_query, params.text_field));
+            let bayes = Arc::new(BayesianBM25Scorer::new(
+                BayesianBM25Params::default(),
+                stats_arc,
+            )) as Arc<dyn Scorer>;
+            let scored: Arc<dyn Operator> = Arc::new(ScoreOperator::new(
+                bayes,
+                term_op,
+                analyzed_terms,
+                params.text_field,
+            ));
+            signals.push(scored);
+        }
+
+        if ctx.vector_indexes.contains_key(params.vector_field) {
+            let knn: Arc<dyn Operator> = Arc::new(KNNOperator::new(
+                params.query_vector.clone(),
+                params.knn_pool,
+                params.vector_field,
+            ));
+            let cosine_prob: Arc<dyn Operator> = Arc::new(CosineProbabilityOperator::new(knn));
+            signals.push(cosine_prob);
+        }
+
+        if signals.is_empty() {
+            return Vec::new();
+        }
+
+        let fusion = LogOddsFusionOperator::new(signals, params.alpha);
+        let result = fusion.execute(&ctx);
+        Self::rank_top_k(&result, params.top_k)
+    }
+}
