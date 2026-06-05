@@ -19,6 +19,7 @@ members = [
     "crates/uqa-engine",
     "crates/uqa-api",
     "crates/uqa-cli",
+    "crates/uqa-python",
 ]
 # `fuzz/` is its own cargo-fuzz workspace; only nightly + cargo-fuzz
 # can build it, so we exclude it from the regular workspace.
@@ -77,6 +78,7 @@ arrow-ipc = "58"
 arrow-schema = "58"
 duckdb = { version = "=1.10502.0", features = ["bundled", "parquet"] }
 parquet = { version = "58", features = ["arrow"] }
+pyo3 = "0.28.3"
 
 # Dev / test
 proptest = "1.5"

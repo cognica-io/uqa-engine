@@ -2,6 +2,20 @@
 /target
 **/target/
 
+# Python build and cache output
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+*.whl
+
 # OS
 .DS_Store
 Thumbs.db

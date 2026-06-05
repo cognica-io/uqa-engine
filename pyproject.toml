@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "uqa"
+version = "0.1.0"
+description = "Python bindings for the UQA Rust engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "Jaepil Jeong", email = "jaepil@cognica.io" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/cognica-io/uqa-rs"
+Repository = "https://github.com/cognica-io/uqa-rs"
+
+[tool.maturin]
+manifest-path = "crates/uqa-python/Cargo.toml"
+module-name = "uqa._uqa"
+python-source = "python"
+strip = true

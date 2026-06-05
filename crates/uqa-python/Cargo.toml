@@ -1,0 +1,25 @@
+[package]
+name = "uqa-python"
+description = "Python bindings for the UQA engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "_uqa"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { workspace = true, features = ["abi3-py38"] }
+uqa-core = { workspace = true }
+uqa-engine = { workspace = true }
+uqa-scoring = { workspace = true }
+uqa-sql = { workspace = true }
+uqa-storage = { workspace = true }
+
+[lints]
+workspace = true
