@@ -414,14 +414,8 @@ mod tests {
     fn pushdown_does_not_alter_filter_with_multiple_qualifiers() {
         let pred = Expr::Binary {
             op: uqa_sql::ast::BinaryOp::Equal,
-            lhs: Box::new(Expr::QualifiedColumn {
-                qualifier: "a".into(),
-                column: "id".into(),
-            }),
-            rhs: Box::new(Expr::QualifiedColumn {
-                qualifier: "b".into(),
-                column: "id".into(),
-            }),
+            lhs: Box::new(Expr::qualified_column("a", "id")),
+            rhs: Box::new(Expr::qualified_column("b", "id")),
         };
         let stmt = SelectStmt {
             projections: vec![Projection {

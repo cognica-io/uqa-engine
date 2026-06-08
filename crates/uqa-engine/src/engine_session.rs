@@ -180,6 +180,7 @@ impl Engine {
             DiscardTarget::All => {
                 self.session_vars.write().clear();
                 self.prepared.write().clear();
+                self.clear_sql_statement_cache();
                 self.set_search_path(vec!["public".to_string()]);
                 // Temp tables aren't tracked separately yet; clearing
                 // the prepared map matches the canonical UQA implementation's effect on the bits
@@ -187,6 +188,7 @@ impl Engine {
             }
             DiscardTarget::Plans => {
                 self.prepared.write().clear();
+                self.clear_sql_statement_cache();
             }
             DiscardTarget::Sequences => {
                 self.sequences.write().clear();

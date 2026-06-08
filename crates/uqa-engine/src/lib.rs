@@ -88,7 +88,7 @@ mod engine_tables;
 mod engine_transactions;
 mod engine_truncate;
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -126,6 +126,7 @@ pub use functions::{
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const VIEWS_METADATA_KEY: &str = "sql_views_json";
+const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -231,6 +232,8 @@ pub struct Engine {
     sequences: RwLock<BTreeMap<String, SequenceState>>,
     /// Prepared statements. Mirrors `_engine._prepared`.
     prepared: RwLock<BTreeMap<String, uqa_sql::ast::Statement>>,
+    /// Parsed and planner-optimized statements keyed by SQL text.
+    sql_statement_cache: RwLock<SQLStatementCache>,
     /// Named analyzers from `CREATE ANALYZER`. Stores the config
     /// JSON string for `list_analyzers` introspection. Mirrors
     /// `_engine.create_analyzer` / `drop_analyzer`.
@@ -254,6 +257,41 @@ pub struct Engine {
     sql_table_functions: RwLock<BTreeMap<String, Arc<dyn SQLTableFunction>>>,
     /// Engine-local Rust aggregate SQL functions.
     sql_aggregate_functions: RwLock<BTreeMap<String, Arc<dyn SQLAggregateFunction>>>,
+}
+
+#[derive(Default)]
+struct SQLStatementCache {
+    entries: BTreeMap<String, Vec<uqa_sql::ast::Statement>>,
+    insertion_order: VecDeque<String>,
+}
+
+impl SQLStatementCache {
+    fn get(&self, sql: &str) -> Option<Vec<uqa_sql::ast::Statement>> {
+        self.entries.get(sql).cloned()
+    }
+
+    fn insert(&mut self, sql: String, statements: Vec<uqa_sql::ast::Statement>) {
+        if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
+            entry.insert(statements);
+            return;
+        }
+        while self.entries.len() >= SQL_STATEMENT_CACHE_LIMIT {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                self.entries.clear();
+                break;
+            };
+            if self.entries.remove(&oldest).is_some() {
+                break;
+            }
+        }
+        self.insertion_order.push_back(sql.clone());
+        self.entries.insert(sql, statements);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.insertion_order.clear();
+    }
 }
 
 /// Mutable state of a single SQL sequence.
@@ -430,6 +468,7 @@ impl Engine {
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
             prepared: RwLock::new(BTreeMap::new()),
+            sql_statement_cache: RwLock::new(SQLStatementCache::default()),
             named_analyzers: RwLock::new(BTreeMap::new()),
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),
@@ -439,6 +478,22 @@ impl Engine {
             sql_table_functions: RwLock::new(BTreeMap::new()),
             sql_aggregate_functions: RwLock::new(BTreeMap::new()),
         }
+    }
+
+    pub(crate) fn cached_sql_statements(&self, sql: &str) -> Option<Vec<uqa_sql::ast::Statement>> {
+        self.sql_statement_cache.read().get(sql)
+    }
+
+    pub(crate) fn cache_sql_statements(
+        &self,
+        sql: String,
+        statements: Vec<uqa_sql::ast::Statement>,
+    ) {
+        self.sql_statement_cache.write().insert(sql, statements);
+    }
+
+    pub(crate) fn clear_sql_statement_cache(&self) {
+        self.sql_statement_cache.write().clear();
     }
 
     // -----------------------------------------------------------------
@@ -481,13 +536,16 @@ impl uqa_sql::expr::EngineHook for Engine {
     ) -> Option<std::result::Result<Value, SQLError>> {
         self.call_registered_scalar_function(name, args)
     }
+    fn has_scalar_functions(&self) -> bool {
+        self.has_registered_scalar_functions()
+    }
     fn run_subquery(
         &self,
         stmt: &uqa_sql::ast::SelectStmt,
         outer_row: Option<&uqa_sql::result::ResultRow>,
         params: &[uqa_sql::SQLParam],
     ) -> std::result::Result<(Vec<String>, Vec<uqa_sql::result::ResultRow>), String> {
-        let ctes = BTreeMap::new();
+        let ctes = crate::sql::CteScope::new();
         match crate::sql::run_correlated_subquery(self, stmt, outer_row, params, &ctes) {
             Ok(r) => Ok((r.columns, r.rows)),
             Err(e) => Err(format!("subquery failed: {e}")),

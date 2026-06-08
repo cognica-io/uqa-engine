@@ -6,8 +6,32 @@
 
 //! Coverage for `test_cte`.
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use uqa_core::Value;
-use uqa_engine::{Engine, SQLResult};
+use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
+use uqa_sql::SQLError;
+
+struct CountCalls {
+    calls: Arc<AtomicUsize>,
+}
+
+impl SQLScalarFunction for CountCalls {
+    fn call(&self, args: &[Value]) -> Result<Value, SQLError> {
+        if !args.is_empty() {
+            return Err(SQLError::BadArity {
+                name: "count_calls".into(),
+                expected: "0 arguments".into(),
+                actual: args.len(),
+            });
+        }
+        let value = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(Value::Int(value as i64))
+    }
+}
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
@@ -287,6 +311,72 @@ fn recursive_count() {
          ) SELECT x FROM cnt",
     );
     assert_eq!(ints(&result, "x"), vec![1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn recursive_cte_applies_output_filter_to_working_branch() {
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(&engine, "CREATE TABLE seeds(id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO seeds(id) VALUES (1), (2), (3), (4)");
+
+    let result = exec(
+        &engine,
+        "WITH RECURSIVE walk(player_id, depth, marker) AS (
+            SELECT id, 0, count_calls() FROM seeds
+            UNION ALL
+            SELECT w.player_id, w.depth + 1, count_calls()
+            FROM walk w
+            WHERE w.depth < 2
+         )
+         SELECT COUNT(*) AS cnt FROM walk w WHERE w.player_id = 1",
+    );
+
+    assert_eq!(result.rows[0]["cnt"], Value::Int(3));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn recursive_cte_view_applies_outer_output_filter_to_working_branch() {
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(&engine, "CREATE TABLE seeds(id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO seeds(id) VALUES (1), (2), (3), (4)");
+    exec(
+        &engine,
+        "CREATE VIEW walked AS
+         WITH RECURSIVE walk(player_id, depth, marker) AS (
+            SELECT id, 0, count_calls() FROM seeds
+            UNION ALL
+            SELECT w.player_id, w.depth + 1, count_calls()
+            FROM walk w
+            WHERE w.depth < 2
+         )
+         SELECT w.player_id, COUNT(*) AS cnt
+         FROM walk w
+         GROUP BY w.player_id",
+    );
+
+    let result = exec(&engine, "SELECT cnt FROM walked WHERE player_id = 1");
+
+    assert_eq!(result.rows[0]["cnt"], Value::Int(3));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 #[test]

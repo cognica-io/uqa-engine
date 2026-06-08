@@ -7,6 +7,8 @@
 //! Scalar expression evaluator: turns an [`Expr`] into a [`Value`] under
 //! a row context (column -> value) and a parameter binding.
 
+use std::borrow::Cow;
+
 use uqa_core::{TemporalValue, Value};
 
 use crate::ast::{BinaryOp, Expr};
@@ -55,6 +57,10 @@ pub trait EngineHook {
 
     fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {
         None
+    }
+
+    fn has_scalar_functions(&self) -> bool {
+        true
     }
 }
 
@@ -111,20 +117,27 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             if let Some(v) = row.get(name) {
                 return Ok(v.clone());
             }
-            let suffix = format!(".{name}");
             for (key, value) in row {
-                if key.ends_with(&suffix) {
+                if key.rsplit_once('.').is_some_and(|(_, col)| col == name) {
                     return Ok(value.clone());
                 }
             }
             Ok(Value::Null)
         }
-        Expr::QualifiedColumn { qualifier, column } => {
+        Expr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
             let row = ctx
                 .row
                 .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
-            let key = format!("{qualifier}.{column}");
-            Ok(row.get(&key).cloned().unwrap_or(Value::Null))
+            if key.is_empty() {
+                let key = format!("{qualifier}.{column}");
+                Ok(row.get(&key).cloned().unwrap_or(Value::Null))
+            } else {
+                Ok(row.get(key).cloned().unwrap_or(Value::Null))
+            }
         }
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());
@@ -138,8 +151,9 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // Functions registered in the operator registry (text_match,
             // knn_match, ...) are dispatched by the engine; only pure
             // scalar built-ins are evaluated inline here.
-            let lower = name.to_ascii_lowercase();
-            if crate::registry::is_registered(&lower) {
+            let lower = normalized_function_name(name);
+            let lower = lower.as_ref();
+            if crate::registry::is_registered(lower) {
                 return Err(SQLError::Unsupported(format!(
                     "scalar evaluation of `{name}` is not supported (use the function registry)"
                 )));
@@ -153,15 +167,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             // canonical UQA behavior). Routed before the pure-scalar
             // dispatch so they take precedence over any future
             // built-in named the same.
-            if matches!(lower.as_str(), "nextval" | "currval" | "setval") {
-                return eval_sequence_function(&lower, &evaluated, ctx);
+            if matches!(lower, "nextval" | "currval" | "setval") {
+                return eval_sequence_function(lower, &evaluated, ctx);
             }
-            if let Some(engine) = ctx.engine {
-                if let Some(result) = engine.call_scalar_function(&lower, &evaluated) {
+            if let Some(engine) = ctx.engine.filter(|engine| engine.has_scalar_functions()) {
+                if let Some(result) = engine.call_scalar_function(lower, &evaluated) {
                     return result;
                 }
             }
-            eval_scalar_function(&lower, &evaluated)
+            eval_scalar_function(lower, &evaluated)
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
@@ -302,7 +316,19 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     }
 }
 
+fn normalized_function_name(name: &str) -> Cow<'_, str> {
+    let stripped = name.strip_prefix("pg_catalog.").unwrap_or(name);
+    if stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Owned(stripped.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(stripped)
+    }
+}
+
 fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
+    if let Some(value) = eval_binary_borrowed(op, lhs, rhs, ctx)? {
+        return Ok(value);
+    }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
     match op {
@@ -317,6 +343,109 @@ fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> R
         BinaryOp::Multiply => arith(&l, &r, op),
         BinaryOp::Divide => arith(&l, &r, op),
     }
+}
+
+enum EvalOperand<'a> {
+    Borrowed(&'a Value),
+    Owned(Value),
+}
+
+impl EvalOperand<'_> {
+    fn as_value(&self) -> &Value {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
+}
+
+fn eval_binary_borrowed(
+    op: BinaryOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    ctx: &EvalContext<'_>,
+) -> Result<Option<Value>> {
+    if !matches!(
+        op,
+        BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+    ) {
+        return Ok(None);
+    }
+    let Some(l) = eval_operand_borrowed(lhs, ctx)? else {
+        return Ok(None);
+    };
+    let Some(r) = eval_operand_borrowed(rhs, ctx)? else {
+        return Ok(None);
+    };
+    let l = l.as_value();
+    let r = r.as_value();
+    let out = match op {
+        BinaryOp::Equal => Value::Bool(values_equal(l, r)),
+        BinaryOp::NotEqual => Value::Bool(!values_equal(l, r)),
+        BinaryOp::Less => Value::Bool(compare(l, r)?.is_lt()),
+        BinaryOp::LessEqual => Value::Bool(compare(l, r)?.is_le()),
+        BinaryOp::Greater => Value::Bool(compare(l, r)?.is_gt()),
+        BinaryOp::GreaterEqual => Value::Bool(compare(l, r)?.is_ge()),
+        _ => unreachable!("non-comparison op filtered above"),
+    };
+    Ok(Some(out))
+}
+
+fn eval_operand_borrowed<'a>(
+    expr: &Expr,
+    ctx: &EvalContext<'a>,
+) -> Result<Option<EvalOperand<'a>>> {
+    match expr {
+        Expr::Literal(value) => Ok(Some(EvalOperand::Owned(value.clone()))),
+        Expr::Param(i) => match ctx.params.get(i.saturating_sub(1)) {
+            Some(SQLParam::Scalar(value)) => Ok(Some(EvalOperand::Borrowed(value))),
+            Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
+            None => Err(SQLError::MissingParam(*i)),
+        },
+        Expr::Column(name) => {
+            let row = ctx
+                .row
+                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
+            Ok(Some(match row_column_value(row, name) {
+                Some(value) => EvalOperand::Borrowed(value),
+                None => EvalOperand::Owned(Value::Null),
+            }))
+        }
+        Expr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
+            let row = ctx
+                .row
+                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
+            let value = if key.is_empty() {
+                let key = format!("{qualifier}.{column}");
+                row.get(&key)
+            } else {
+                row.get(key)
+            };
+            Ok(Some(match value {
+                Some(value) => EvalOperand::Borrowed(value),
+                None => EvalOperand::Owned(Value::Null),
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn row_column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
+    if let Some(value) = row.get(name) {
+        return Some(value);
+    }
+    row.iter()
+        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
+        .map(|(_, value)| value)
 }
 
 /// `NULL` is falsy; otherwise truthy iff the value coerces to a non-zero

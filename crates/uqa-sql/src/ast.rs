@@ -483,6 +483,8 @@ pub enum Expr {
     QualifiedColumn {
         qualifier: String,
         column: String,
+        #[serde(default)]
+        key: String,
     },
     Literal(Value),
     /// A positional bind parameter (`$1`, `$2`, ...).
@@ -571,6 +573,19 @@ pub enum Expr {
         body: Box<SelectStmt>,
         negated: bool,
     },
+}
+
+impl Expr {
+    pub fn qualified_column(qualifier: impl Into<String>, column: impl Into<String>) -> Self {
+        let qualifier = qualifier.into();
+        let column = column.into();
+        let key = format!("{qualifier}.{column}");
+        Self::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -78,6 +78,10 @@ impl Engine {
         Some(function.call(args))
     }
 
+    pub(crate) fn has_registered_scalar_functions(&self) -> bool {
+        !self.sql_scalar_functions.read().is_empty()
+    }
+
     pub(crate) fn has_registered_scalar_function(&self, name: &str) -> bool {
         self.sql_scalar_functions
             .read()

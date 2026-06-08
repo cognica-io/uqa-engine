@@ -8,12 +8,12 @@
 
 use super::{
     build_join_rows_with_ctes, build_projection_row, coerce_to_column_type, column_type_name, eval,
-    execute_select, expand_star_columns, materialize_ctes, prefix_row, projection_columns,
+    execute_select, expand_star_columns, materialize_cte_list, prefix_row, projection_columns,
     validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey,
+    ColumnType, CteScope, DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, InsertStmt, Projection, ResultRow,
-    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, UpdateStmt, Value, DOC_ID_COLUMN,
-    MERGE_ACTION_COLUMN,
+    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScopedEngineHook, UpdateStmt, Value,
+    DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -38,8 +38,9 @@ fn run_merge_inner(
         .target_alias
         .clone()
         .unwrap_or_else(|| target_table.clone());
-    let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+    let mut ctes = CteScope::new();
     let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &mut ctes)?;
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = engine;
     let mut affected = 0_u64;
     let mut returning_rows = Vec::new();
 
@@ -68,7 +69,7 @@ fn run_merge_inner(
             for (k, v) in src {
                 joined.insert(k.clone(), v.clone());
             }
-            let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+            let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
             if truthy(&eval(&stmt.join_condition, &ctx)?) {
                 paired_idx = Some(idx);
                 matched_source.insert(idx);
@@ -127,7 +128,7 @@ fn run_merge_inner(
                 continue;
             }
             if let Some(c) = condition {
-                let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
                 if !truthy(&eval(c, &ctx)?) {
                     continue;
                 }
@@ -139,7 +140,7 @@ fn run_merge_inner(
                             break;
                         };
                         let original_doc = doc.clone();
-                        let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                        let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
                         for (col, expr) in assignments {
                             let value = coerce_to_column_type(
                                 engine,
@@ -216,7 +217,7 @@ fn run_merge_inner(
                         columns, values, ..
                     },
                 ) => {
-                    let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                    let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
                     let mut document = Document::new();
                     if values.len() != columns.len() {
                         return Err(SQLError::Internal(format!(
@@ -339,9 +340,24 @@ fn run_update_inner(
     if let Some(from_clause) = stmt.from.as_ref() {
         return run_update_from(engine, &stmt, from_clause, params);
     }
-    if let Some(result) = try_run_point_update(engine, &stmt, params)? {
-        return Ok(result);
+    if stmt.with.is_empty() {
+        if let Some(result) = try_run_point_update(engine, &stmt, params)? {
+            return Ok(result);
+        }
     }
+    let mut ctes = CteScope::new();
+    if !stmt.with.is_empty() {
+        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
+    }
+    let scoped_hook = if stmt.with.is_empty() {
+        None
+    } else {
+        Some(ScopedEngineHook::new(engine, &ctes))
+    };
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
+        Some(hook) => hook,
+        None => engine,
+    };
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
@@ -352,13 +368,13 @@ fn run_update_inner(
         };
         let original_doc = doc.clone();
         if let Some(filter) = stmt.r#where.as_ref() {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
             if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
                 continue;
             }
         }
         for (col, expr) in &stmt.assignments {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
             let value =
                 coerce_to_column_type(engine, &stmt.table, col, uqa_sql::expr::eval(expr, &ctx)?)?;
             doc.insert(col.clone(), value);
@@ -835,9 +851,20 @@ fn run_update_from(
     from_clause: &uqa_sql::ast::FromClause,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-    materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
+    let mut ctes = CteScope::new();
+    if !stmt.with.is_empty() {
+        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
+    }
     let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &mut ctes)?;
+    let scoped_hook = if stmt.with.is_empty() {
+        None
+    } else {
+        Some(ScopedEngineHook::new(engine, &ctes))
+    };
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
+        Some(hook) => hook,
+        None => engine,
+    };
     let cancel = engine.cancellation_token();
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
@@ -866,14 +893,14 @@ fn run_update_from(
             }
             if let Some(filter) = stmt.r#where.as_ref() {
                 let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+                    uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(eval_hook);
                 if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
                     continue;
                 }
             }
             // Apply assignments evaluated against the joined row so
             // RHS expressions can read FROM-side columns.
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(eval_hook);
             for (col, expr) in &stmt.assignments {
                 let value =
                     coerce_to_column_type(engine, &target, col, uqa_sql::expr::eval(expr, &ctx)?)?;
@@ -933,18 +960,27 @@ fn run_delete_inner(
     let cancel = engine.cancellation_token();
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
     let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
+    let mut ctes = CteScope::new();
+    if !stmt.with.is_empty() {
+        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
+    }
     // DELETE FROM t USING other WHERE ... -- materialise the join
     // first, then collect target doc ids whose joined image
     // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
     let using_rows: Option<Vec<ResultRow>> = match stmt.using.as_ref() {
-        Some(clause) => {
-            let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-            materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
-            Some(build_join_rows_with_ctes(
-                engine, clause, params, &mut ctes,
-            )?)
-        }
+        Some(clause) => Some(build_join_rows_with_ctes(
+            engine, clause, params, &mut ctes,
+        )?),
         None => None,
+    };
+    let scoped_hook = if stmt.with.is_empty() {
+        None
+    } else {
+        Some(ScopedEngineHook::new(engine, &ctes))
+    };
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
+        Some(hook) => hook,
+        None => engine,
     };
     for doc_id in engine.table_doc_ids(&stmt.table) {
         cancel.check()?;
@@ -954,7 +990,8 @@ fn run_delete_inner(
         let keep = match (stmt.r#where.as_ref(), using_rows.as_ref()) {
             (None, _) => true,
             (Some(filter), None) => {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(engine);
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
                 matches!(
                     uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
                     Ok(true)
@@ -971,8 +1008,8 @@ fn run_delete_inner(
                     for (k, v) in using_row {
                         joined.insert(k.clone(), v.clone());
                     }
-                    let ctx =
-                        uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(engine);
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params)
+                        .with_engine(eval_hook);
                     if matches!(
                         uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
                         Ok(true)
@@ -1215,8 +1252,8 @@ fn run_insert_inner(
     // route each row through the standard add_document path under
     // the named columns.
     if let Some(source) = stmt.select_source.clone() {
-        let mut ctes = BTreeMap::new();
-        materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
+        let mut ctes = CteScope::new();
+        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
         let result = execute_select(engine, &source, params, &mut ctes)?;
         let columns: Vec<String> = if stmt.columns.is_empty() {
             result.columns.clone()

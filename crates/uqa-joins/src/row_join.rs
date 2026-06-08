@@ -34,39 +34,46 @@ pub enum JoinKind {
 /// hash join's lookup map fast and avoids re-hashing the underlying
 /// `Value` for every probe.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JoinKey {
-    /// The same canonical encoding used by the aggregate operator's
-    /// `DISTINCT` bookkeeping so the two layers agree on equality.
-    pub repr: String,
+pub enum JoinKey {
+    Bool(bool),
+    Int(i64),
+    Float(u64),
+    Str(String),
+    Bytes(Vec<u8>),
+    Other(String),
+    Composite(Vec<JoinKey>),
 }
 
 impl JoinKey {
     pub fn new(value: &Value) -> Self {
-        Self {
-            repr: encode(value),
+        match value {
+            Value::Bool(value) => Self::Bool(*value),
+            Value::Int(value) => Self::Int(*value),
+            Value::Float(value) => Self::Float(normalized_float_bits(*value)),
+            Value::Str(value) => Self::Str(value.clone()),
+            Value::Bytes(value) => Self::Bytes(value.clone()),
+            other => Self::Other(encode_fallback(other)),
         }
     }
 
     /// Composite key for multi-column equijoins.
     pub fn composite(values: &[&Value]) -> Self {
-        let mut repr = String::new();
-        for (i, v) in values.iter().enumerate() {
-            if i > 0 {
-                repr.push('\x1f');
-            }
-            repr.push_str(&encode(v));
-        }
-        Self { repr }
+        Self::Composite(values.iter().map(|value| Self::new(value)).collect())
     }
 }
 
-fn encode(v: &Value) -> String {
+fn normalized_float_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0.0f64.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+fn encode_fallback(v: &Value) -> String {
     match v {
         Value::Null => "\x00".into(),
-        Value::Int(i) => format!("i:{i}"),
-        Value::Float(f) => format!("f:{f:.17}"),
-        Value::Str(s) => format!("s:{s}"),
-        Value::Bool(b) => format!("b:{b}"),
+        Value::Temporal(value) => format!("t:{}", value.to_sql_string()),
         other => format!("o:{other:?}"),
     }
 }
@@ -75,11 +82,19 @@ fn encode(v: &Value) -> String {
 /// by inserting `left` first, then non-conflicting `right` columns. SQL
 /// projection later picks out the columns it cares about by name.
 fn merge(left: &ResultRow, right: &ResultRow) -> ResultRow {
-    let mut out = left.clone();
-    for (k, v) in right {
-        out.insert(k.clone(), v.clone());
+    if left.len() >= right.len() {
+        let mut out = left.clone();
+        for (k, v) in right {
+            out.insert(k.clone(), v.clone());
+        }
+        out
+    } else {
+        let mut out = right.clone();
+        for (k, v) in left {
+            out.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        out
     }
-    out
 }
 
 /// Construct a row containing every column from `row` and each

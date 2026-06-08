@@ -364,10 +364,12 @@ fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
             Expr::QualifiedColumn {
                 qualifier: aq,
                 column: ac,
+                ..
             },
             Expr::QualifiedColumn {
                 qualifier: bq,
                 column: bc,
+                ..
             },
         ) => aq == bq && ac == bc,
         (Expr::Column(c), Expr::QualifiedColumn { column, .. })
@@ -602,8 +604,16 @@ fn group_context_row(stmt: &SelectStmt, group_values: &[Value]) -> ResultRow {
             Expr::Column(column) => {
                 row.insert(column.clone(), value.clone());
             }
-            Expr::QualifiedColumn { qualifier, column } => {
-                row.insert(format!("{qualifier}.{column}"), value.clone());
+            Expr::QualifiedColumn {
+                qualifier,
+                column,
+                key,
+            } => {
+                if key.is_empty() {
+                    row.insert(format!("{qualifier}.{column}"), value.clone());
+                } else {
+                    row.insert(key.clone(), value.clone());
+                }
                 row.insert(column.clone(), value.clone());
             }
             _ => {}

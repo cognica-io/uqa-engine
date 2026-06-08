@@ -168,7 +168,11 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
 }
 
 pub fn lookup(name: &str) -> Option<FunctionKind> {
-    registry().get(name.to_ascii_lowercase().as_str()).copied()
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        registry().get(name.to_ascii_lowercase().as_str()).copied()
+    } else {
+        registry().get(name).copied()
+    }
 }
 
 pub fn is_registered(name: &str) -> bool {

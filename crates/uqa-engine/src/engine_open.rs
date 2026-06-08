@@ -80,6 +80,7 @@ impl Engine {
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
             prepared: RwLock::new(BTreeMap::new()),
+            sql_statement_cache: RwLock::new(super::SQLStatementCache::default()),
             named_analyzers: RwLock::new(BTreeMap::new()),
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),

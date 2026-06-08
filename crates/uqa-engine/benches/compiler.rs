@@ -34,6 +34,12 @@ fn build_engine() -> Engine {
             &[],
         )
         .expect("create dml");
+    engine
+        .sql(
+            "CREATE TABLE bench_dml_insert (id INTEGER, name TEXT, value INTEGER)",
+            &[],
+        )
+        .expect("create dml insert");
     let mut values = String::from("INSERT INTO bench (id, name, category, value) VALUES ");
     for i in 0..1_000 {
         if i > 0 {
@@ -177,7 +183,7 @@ fn bench_compile_dml(c: &mut Criterion) {
         let mut next_id = 10_000_i64;
         bencher.iter(|| {
             let sql = format!(
-                "INSERT INTO bench_dml (id, name, value) VALUES ({next_id}, 'inserted', 1)"
+                "INSERT INTO bench_dml_insert (id, name, value) VALUES ({next_id}, 'inserted', 1)"
             );
             next_id += 1;
             let result = engine.sql(black_box(&sql), &[]).expect("insert");

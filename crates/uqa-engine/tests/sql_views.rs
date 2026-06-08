@@ -369,3 +369,78 @@ fn view_materializes_once_per_statement() {
     assert_eq!(r.rows[0]["marker"], Value::Int(2));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn nested_view_cache_is_shared_by_parent_statement() {
+    let engine = engine();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(
+        &engine,
+        "CREATE VIEW counted AS SELECT count_calls() AS marker",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW left_counted AS SELECT marker FROM counted",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW right_counted AS SELECT marker FROM counted",
+    );
+
+    let r = exec(
+        &engine,
+        "SELECT l.marker AS left_marker, r.marker AS right_marker
+         FROM left_counted l CROSS JOIN right_counted r",
+    );
+
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn filtered_nested_view_cache_reuses_unspecialized_base_view() {
+    let engine = engine();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(
+        &engine,
+        "CREATE VIEW counted AS SELECT DISTINCT 1 AS id, count_calls() AS marker",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW left_counted AS SELECT id, marker FROM counted",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW right_counted AS SELECT id, marker FROM counted",
+    );
+
+    let r = exec(
+        &engine,
+        "SELECT l.marker AS left_marker, r.marker AS right_marker
+         FROM left_counted l CROSS JOIN right_counted r
+         WHERE l.id = 1 AND r.id = 1",
+    );
+
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

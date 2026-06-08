@@ -1638,7 +1638,7 @@ fn compile_column_ref(c: &pg_query::protobuf::ColumnRef) -> Result<Expr> {
             // round-trips as a qualified ref.
             let column = parts.pop().unwrap();
             let qualifier = parts.pop().unwrap();
-            Ok(Expr::QualifiedColumn { qualifier, column })
+            Ok(Expr::qualified_column(qualifier, column))
         }
     }
 }

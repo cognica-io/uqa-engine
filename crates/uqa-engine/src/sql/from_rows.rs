@@ -6,28 +6,56 @@
 
 //! FROM/JOIN row assembly, table functions, and projection intercepts.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
 use uqa_joins::row_join::JoinKey;
-use uqa_sql::ast::{Expr, FromClause, JoinKind, Projection, SelectStmt};
+use uqa_sql::ast::{Expr, FromClause, JoinKind, Projection, SelectStmt, SetOpKind};
 use uqa_sql::expr::{eval, EvalContext};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLTableFunctionResult};
 
-use super::select::select_contains_volatile_function;
+use super::select::{select_contains_volatile_function, CteScope};
 use super::{
     age_cypher, aggregate_join_rows, apply_row_order_limit, build_info_schema_rows, execute_select,
     expect_column_name, expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
     graph_pagerank_entries, has_aggregate, json_table_arg, json_table_value_to_text,
-    materialize_ctes, projection_columns, run_graph_create, run_graph_drop, run_select,
-    MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    materialize_ctes, projected_value_from_row, projection_columns, run_graph_create,
+    run_graph_drop, run_select, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
+
+pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
+pub(super) type QualifierFilters = BTreeMap<String, Vec<Expr>>;
+type RowFilter<'a> = &'a mut dyn FnMut(&mut Vec<ResultRow>) -> Result<(), SQLError>;
 
 fn qualifier_for(name: &str, alias: Option<&str>) -> String {
     alias.unwrap_or(name).to_string()
+}
+
+fn qualified_key(qual: &str, column: &str) -> String {
+    let mut key = String::with_capacity(qual.len() + 1 + column.len());
+    key.push_str(qual);
+    key.push('.');
+    key.push_str(column);
+    key
+}
+
+fn table_row_cache_key(name: &str) -> String {
+    format!("__uqa_internal_table_cache__:{name}")
+}
+
+fn prefixed_table_row_cache_key(name: &str, qual: &str) -> String {
+    format!("__uqa_internal_prefixed_table_cache__:{name}:{qual}")
+}
+
+fn prefixed_view_row_cache_key(name: &str, qual: &str) -> String {
+    format!("__uqa_internal_prefixed_view_cache__:{name}:{qual}")
+}
+
+fn prefixed_cte_row_cache_key(name: &str, qual: &str) -> String {
+    format!("__uqa_internal_prefixed_cte_cache__:{name}:{qual}")
 }
 
 fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
@@ -44,7 +72,19 @@ fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
 pub(super) fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
     let mut out = ResultRow::new();
     for (k, v) in doc {
-        out.insert(format!("{qual}.{k}"), v.clone());
+        out.insert(qualified_key(qual, k), v.clone());
+    }
+    out
+}
+
+fn prefix_row_pruned(qual: &str, doc: &Document, prune: Option<&ColumnPrune>) -> ResultRow {
+    let mut out = ResultRow::new();
+    let wanted = prune.and_then(|columns| columns.get(qual));
+    for (k, v) in doc {
+        if wanted.is_some_and(|columns| !columns.contains(k)) {
+            continue;
+        }
+        out.insert(qualified_key(qual, k), v.clone());
     }
     out
 }
@@ -52,30 +92,903 @@ pub(super) fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
 /// Re-key a row that already has unprefixed column labels onto a new
 /// qualifier. Used to plug CTE materializations into the JOIN executor
 /// under whatever alias the outer query referenced them by.
-fn reprefix_row(qual: &str, row: &ResultRow) -> ResultRow {
+fn reprefix_row_pruned(qual: &str, row: &ResultRow, prune: Option<&ColumnPrune>) -> ResultRow {
     let mut out = ResultRow::new();
+    let wanted = prune.and_then(|columns| columns.get(qual));
     for (k, v) in row {
         // CTE rows are already keyed by their projection labels; lift
         // unqualified labels under the new qualifier so qualified refs
         // (`alias.col`) and unqualified suffix matches both resolve.
-        let key = if k.contains('.') {
-            // Strip an existing qualifier and re-prefix.
-            let (_, col) = k.split_once('.').unwrap_or((qual, k.as_str()));
-            format!("{qual}.{col}")
-        } else {
-            format!("{qual}.{k}")
-        };
+        let column = k.rsplit_once('.').map_or(k.as_str(), |(_, col)| col);
+        if wanted.is_some_and(|columns| !columns.contains(column)) {
+            continue;
+        }
+        let key = qualified_key(qual, column);
         out.insert(key, v.clone());
     }
     out
 }
 
-fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
-    let mut out = left.clone();
-    for (k, v) in right {
-        out.insert(k.clone(), v.clone());
+fn reprefix_rows_pruned(
+    qual: &str,
+    rows: &[ResultRow],
+    prune: Option<&ColumnPrune>,
+) -> Vec<ResultRow> {
+    let Some(first) = rows.first() else {
+        return Vec::new();
+    };
+    let same_schema = rows
+        .iter()
+        .all(|row| row.len() == first.len() && row.keys().eq(first.keys()));
+    if !same_schema {
+        return rows
+            .iter()
+            .map(|row| reprefix_row_pruned(qual, row, prune))
+            .collect();
     }
+
+    let wanted = prune.and_then(|columns| columns.get(qual));
+    let keys: Vec<(String, String)> = first
+        .keys()
+        .filter_map(|key| {
+            let column = key.rsplit_once('.').map_or(key.as_str(), |(_, col)| col);
+            if wanted.is_some_and(|columns| !columns.contains(column)) {
+                return None;
+            }
+            Some((key.clone(), qualified_key(qual, column)))
+        })
+        .collect();
+    rows.iter()
+        .map(|row| {
+            let mut out = ResultRow::new();
+            for (source_key, target_key) in &keys {
+                if let Some(value) = row.get(source_key) {
+                    out.insert(target_key.clone(), value.clone());
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
+    if left.len() >= right.len() {
+        let mut out = left.clone();
+        for (k, v) in right {
+            out.insert(k.clone(), v.clone());
+        }
+        out
+    } else {
+        let mut out = right.clone();
+        for (k, v) in left {
+            out.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        out
+    }
+}
+
+fn has_filters_for_qualifier(filters: Option<&QualifierFilters>, qual: &str) -> bool {
+    filters
+        .and_then(|filters| filters.get(qual))
+        .is_some_and(|filters| !filters.is_empty())
+}
+
+fn apply_qualifier_filters(
+    engine: &Engine,
+    rows: Vec<ResultRow>,
+    filters: Option<&QualifierFilters>,
+    qual: &str,
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let Some(filters) = filters.and_then(|filters| filters.get(qual)) else {
+        return Ok(rows);
+    };
+    if filters.is_empty() || rows.is_empty() {
+        return Ok(rows);
+    }
+    let filter = combine_filters(filters.iter().cloned());
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
+        if uqa_sql::expr::truthy(&eval(&filter, &ctx)?) {
+            out.push(row);
+        }
+    }
+    Ok(out)
+}
+
+fn combine_filters(filters: impl IntoIterator<Item = Expr>) -> Expr {
+    let mut filters: Vec<Expr> = filters.into_iter().collect();
+    if filters.len() == 1 {
+        filters.pop().unwrap()
+    } else {
+        Expr::And(filters)
+    }
+}
+
+fn specialize_select_for_qualifier_filters(
+    engine: &Engine,
+    body: &SelectStmt,
+    filters: Option<&QualifierFilters>,
+    qual: &str,
+) -> Option<SelectStmt> {
+    let filters = filters?.get(qual)?;
+    if filters.is_empty() {
+        return None;
+    }
+    if select_contains_volatile_function(body) {
+        return None;
+    }
+    let filter = combine_filters(filters.iter().cloned());
+    push_output_filter_into_select(engine, body.clone(), qual, &filter)
+}
+
+pub(super) fn push_output_filter_into_select(
+    engine: &Engine,
+    stmt: SelectStmt,
+    qual: &str,
+    filter: &Expr,
+) -> Option<SelectStmt> {
+    push_output_filter_into_select_inner(engine, stmt, qual, filter, None)
+}
+
+pub(super) fn push_output_filter_into_select_with_columns(
+    engine: &Engine,
+    stmt: SelectStmt,
+    qual: &str,
+    filter: &Expr,
+    output_columns: &[String],
+) -> Option<SelectStmt> {
+    push_output_filter_into_select_inner(engine, stmt, qual, filter, Some(output_columns))
+}
+
+fn push_output_filter_into_select_inner(
+    engine: &Engine,
+    mut stmt: SelectStmt,
+    qual: &str,
+    filter: &Expr,
+    output_columns: Option<&[String]>,
+) -> Option<SelectStmt> {
+    if let Some(mut set_op) = stmt.set_op.take() {
+        if set_op.kind != SetOpKind::Union
+            || !set_op.all
+            || !set_op.combined_order_by.is_empty()
+            || set_op.combined_limit.is_some()
+            || set_op.combined_offset.is_some()
+        {
+            stmt.set_op = Some(set_op);
+            return None;
+        }
+        let right = push_output_filter_into_select_inner(
+            engine,
+            set_op.right,
+            qual,
+            filter,
+            output_columns,
+        )?;
+        let lhs = push_output_filter_into_select_inner(engine, stmt, qual, filter, output_columns)?;
+        let mut out = lhs;
+        set_op.right = right;
+        out.set_op = Some(set_op);
+        return Some(out);
+    }
+
+    if stmt.limit.is_some()
+        || stmt.offset.is_some()
+        || stmt.distinct
+        || !stmt.distinct_on.is_empty()
+    {
+        return None;
+    }
+    if has_window_projection_in_select(&stmt) {
+        return None;
+    }
+    let rewritten = rewrite_output_filter_for_select(filter, qual, &stmt, output_columns)?;
+    if !filter_can_apply_before_group(engine, &stmt, &rewritten) {
+        return None;
+    }
+    stmt.r#where = Some(match stmt.r#where.take() {
+        Some(existing) => Expr::And(vec![existing, rewritten]),
+        None => rewritten,
+    });
+    Some(stmt)
+}
+
+fn rewrite_output_filter_for_select(
+    filter: &Expr,
+    qual: &str,
+    stmt: &SelectStmt,
+    output_columns: Option<&[String]>,
+) -> Option<Expr> {
+    let output_map = direct_projection_output_map(stmt, output_columns)?;
+    let star_qualifier = star_projection_source_qualifier(stmt);
+    rewrite_output_filter_expr(filter, qual, &output_map, star_qualifier.as_deref())
+}
+
+fn direct_projection_output_map(
+    stmt: &SelectStmt,
+    output_columns: Option<&[String]>,
+) -> Option<BTreeMap<String, Expr>> {
+    let owned_labels;
+    let labels: &[String] = if let Some(columns) = output_columns {
+        if columns.len() != stmt.projections.len() {
+            return None;
+        }
+        columns
+    } else {
+        owned_labels = projection_columns(&stmt.projections);
+        &owned_labels
+    };
+    let mut out = BTreeMap::new();
+    for (idx, projection) in stmt.projections.iter().enumerate() {
+        if matches!(projection.expr, Expr::Star) {
+            continue;
+        }
+        if expr_contains_subquery_local(&projection.expr)
+            || expr_contains_volatile_local(&projection.expr)
+            || expr_has_window(&projection.expr)
+        {
+            continue;
+        }
+        if direct_column_name(&projection.expr).is_some() {
+            out.insert(labels[idx].clone(), projection.expr.clone());
+        }
+    }
+    Some(out)
+}
+
+fn star_projection_source_qualifier(stmt: &SelectStmt) -> Option<String> {
+    if stmt.projections.len() != 1 || !matches!(stmt.projections[0].expr, Expr::Star) {
+        return None;
+    }
+    match stmt.from.as_ref()? {
+        FromClause::Table { name, alias } => Some(alias.clone().unwrap_or_else(|| name.clone())),
+        _ => None,
+    }
+}
+
+fn rewrite_output_filter_expr(
+    expr: &Expr,
+    qual: &str,
+    output_map: &BTreeMap<String, Expr>,
+    star_qualifier: Option<&str>,
+) -> Option<Expr> {
+    match expr {
+        Expr::QualifiedColumn {
+            qualifier, column, ..
+        } => {
+            if qualifier == qual {
+                output_map
+                    .get(column)
+                    .cloned()
+                    .or_else(|| star_qualifier.map(|source| Expr::qualified_column(source, column)))
+            } else {
+                None
+            }
+        }
+        Expr::Column(column) => output_map
+            .get(column)
+            .cloned()
+            .or_else(|| star_qualifier.map(|source| Expr::qualified_column(source, column))),
+        Expr::Literal(value) => Some(Expr::Literal(value.clone())),
+        Expr::Param(index) => Some(Expr::Param(*index)),
+        Expr::Array(items) => Some(Expr::Array(
+            items
+                .iter()
+                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::And(items) => Some(Expr::And(
+            items
+                .iter()
+                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::Or(items) => Some(Expr::Or(
+            items
+                .iter()
+                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::Binary { op, lhs, rhs } => Some(Expr::Binary {
+            op: *op,
+            lhs: Box::new(rewrite_output_filter_expr(
+                lhs,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            rhs: Box::new(rewrite_output_filter_expr(
+                rhs,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+        }),
+        Expr::Not(inner) => Some(Expr::Not(Box::new(rewrite_output_filter_expr(
+            inner,
+            qual,
+            output_map,
+            star_qualifier,
+        )?))),
+        Expr::IsNull { expr, negated } => Some(Expr::IsNull {
+            expr: Box::new(rewrite_output_filter_expr(
+                expr,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            negated: *negated,
+        }),
+        Expr::Between { expr, low, high } => Some(Expr::Between {
+            expr: Box::new(rewrite_output_filter_expr(
+                expr,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            low: Box::new(rewrite_output_filter_expr(
+                low,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            high: Box::new(rewrite_output_filter_expr(
+                high,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+        }),
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => Some(Expr::InList {
+            expr: Box::new(rewrite_output_filter_expr(
+                expr,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            list: list
+                .iter()
+                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
+                .collect::<Option<Vec<_>>>()?,
+            negated: *negated,
+        }),
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => Some(Expr::Func {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| rewrite_output_filter_expr(arg, qual, output_map, star_qualifier))
+                .collect::<Option<Vec<_>>>()?,
+            distinct: *distinct,
+            order_by: order_by.clone(),
+            filter: match filter.as_ref() {
+                Some(filter) => Some(Box::new(rewrite_output_filter_expr(
+                    filter,
+                    qual,
+                    output_map,
+                    star_qualifier,
+                )?)),
+                None => None,
+            },
+        }),
+        Expr::Cast { expr, ty } => Some(Expr::Cast {
+            expr: Box::new(rewrite_output_filter_expr(
+                expr,
+                qual,
+                output_map,
+                star_qualifier,
+            )?),
+            ty: ty.clone(),
+        }),
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => Some(Expr::Case {
+            base: match base.as_ref() {
+                Some(expr) => Some(Box::new(rewrite_output_filter_expr(
+                    expr,
+                    qual,
+                    output_map,
+                    star_qualifier,
+                )?)),
+                None => None,
+            },
+            when: when
+                .iter()
+                .map(|(cond, result)| {
+                    Some((
+                        rewrite_output_filter_expr(cond, qual, output_map, star_qualifier)?,
+                        rewrite_output_filter_expr(result, qual, output_map, star_qualifier)?,
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?,
+            else_branch: match else_branch.as_ref() {
+                Some(expr) => Some(Box::new(rewrite_output_filter_expr(
+                    expr,
+                    qual,
+                    output_map,
+                    star_qualifier,
+                )?)),
+                None => None,
+            },
+        }),
+        Expr::Star
+        | Expr::WindowCall { .. }
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. }
+        | Expr::InSubquery { .. } => None,
+    }
+}
+
+fn filter_can_apply_before_group(engine: &Engine, stmt: &SelectStmt, filter: &Expr) -> bool {
+    if stmt.grouping_sets.is_empty()
+        && stmt.group_by.is_empty()
+        && !has_aggregate(engine, &stmt.projections)
+        && stmt.having.is_none()
+    {
+        return true;
+    }
+    if !stmt.grouping_sets.is_empty() || stmt.having.is_some() {
+        return false;
+    }
+    let group_columns: BTreeSet<String> = stmt
+        .group_by
+        .iter()
+        .filter_map(direct_column_name)
+        .collect();
+    if group_columns.is_empty() {
+        return false;
+    }
+    filter_column_names(filter)
+        .into_iter()
+        .all(|column| group_columns.contains(&column))
+}
+
+fn direct_column_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Column(column) => Some(column.clone()),
+        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
+        _ => None,
+    }
+}
+
+fn filter_column_names(expr: &Expr) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    collect_filter_column_names(expr, &mut out);
     out
+}
+
+fn collect_filter_column_names(expr: &Expr, out: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
+            out.insert(column.clone());
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            for item in items {
+                collect_filter_column_names(item, out);
+            }
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for arg in args {
+                collect_filter_column_names(arg, out);
+            }
+            for order in order_by {
+                collect_filter_column_names(&order.expr, out);
+            }
+            if let Some(filter) = filter.as_ref() {
+                collect_filter_column_names(filter, out);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_filter_column_names(lhs, out);
+            collect_filter_column_names(rhs, out);
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            collect_filter_column_names(inner, out);
+        }
+        Expr::Between { expr, low, high } => {
+            collect_filter_column_names(expr, out);
+            collect_filter_column_names(low, out);
+            collect_filter_column_names(high, out);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_filter_column_names(expr, out);
+            for item in list {
+                collect_filter_column_names(item, out);
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base.as_ref() {
+                collect_filter_column_names(base, out);
+            }
+            for (cond, result) in when {
+                collect_filter_column_names(cond, out);
+                collect_filter_column_names(result, out);
+            }
+            if let Some(else_branch) = else_branch.as_ref() {
+                collect_filter_column_names(else_branch, out);
+            }
+        }
+        Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::Star
+        | Expr::WindowCall { .. }
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. }
+        | Expr::InSubquery { .. } => {}
+    }
+}
+
+fn has_window_projection_in_select(stmt: &SelectStmt) -> bool {
+    stmt.projections
+        .iter()
+        .any(|projection| expr_has_window(&projection.expr))
+        || stmt.group_by.iter().any(expr_has_window)
+        || stmt
+            .grouping_sets
+            .iter()
+            .any(|set| set.iter().any(expr_has_window))
+        || stmt.having.as_ref().is_some_and(expr_has_window)
+        || stmt
+            .order_by
+            .iter()
+            .any(|order| expr_has_window(&order.expr))
+}
+
+fn expr_has_window(expr: &Expr) -> bool {
+    match expr {
+        Expr::WindowCall { .. } => true,
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_has_window)
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter().any(expr_has_window)
+                || order_by.iter().any(|order| expr_has_window(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|filter| expr_has_window(filter))
+        }
+        Expr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_has_window(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_has_window(expr) || expr_has_window(low) || expr_has_window(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_has_window(expr) || list.iter().any(expr_has_window)
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref().is_some_and(|expr| expr_has_window(expr))
+                || when
+                    .iter()
+                    .any(|(cond, result)| expr_has_window(cond) || expr_has_window(result))
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_has_window(expr))
+        }
+        Expr::InSubquery { expr, .. } => expr_has_window(expr),
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. } => false,
+    }
+}
+
+fn expr_contains_subquery_local(expr: &Expr) -> bool {
+    match expr {
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_contains_subquery_local)
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter().any(expr_contains_subquery_local)
+                || order_by
+                    .iter()
+                    .any(|order| expr_contains_subquery_local(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|filter| expr_contains_subquery_local(filter))
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_contains_subquery_local(lhs) || expr_contains_subquery_local(rhs)
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_contains_subquery_local(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_contains_subquery_local(expr)
+                || expr_contains_subquery_local(low)
+                || expr_contains_subquery_local(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_contains_subquery_local(expr) || list.iter().any(expr_contains_subquery_local)
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_contains_subquery_local(expr))
+                || when.iter().any(|(cond, result)| {
+                    expr_contains_subquery_local(cond) || expr_contains_subquery_local(result)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_subquery_local(expr))
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter().any(expr_contains_subquery_local)
+                || spec.partition_by.iter().any(expr_contains_subquery_local)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expr_contains_subquery_local(&order.expr))
+        }
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_) => false,
+    }
+}
+
+fn expr_contains_volatile_local(expr: &Expr) -> bool {
+    match expr {
+        Expr::Func {
+            name,
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "random" | "nextval" | "currval" | "setval"
+            ) || args.iter().any(expr_contains_volatile_local)
+                || order_by
+                    .iter()
+                    .any(|order| expr_contains_volatile_local(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|filter| expr_contains_volatile_local(filter))
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_contains_volatile_local)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_contains_volatile_local(lhs) || expr_contains_volatile_local(rhs)
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_contains_volatile_local(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_contains_volatile_local(expr)
+                || expr_contains_volatile_local(low)
+                || expr_contains_volatile_local(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_contains_volatile_local(expr) || list.iter().any(expr_contains_volatile_local)
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_contains_volatile_local(expr))
+                || when.iter().any(|(cond, result)| {
+                    expr_contains_volatile_local(cond) || expr_contains_volatile_local(result)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_volatile_local(expr))
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter().any(expr_contains_volatile_local)
+                || spec.partition_by.iter().any(expr_contains_volatile_local)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expr_contains_volatile_local(&order.expr))
+        }
+        Expr::InSubquery { expr, body, .. } => {
+            expr_contains_volatile_local(expr) || select_contains_volatile_function(body)
+        }
+        Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
+            select_contains_volatile_function(body)
+        }
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_) => false,
+    }
+}
+
+fn propagated_join_filters(
+    filters: &QualifierFilters,
+    source_from: &FromClause,
+    target_from: &FromClause,
+    on: Option<&Expr>,
+) -> Option<QualifierFilters> {
+    let on = on?;
+    let mut out = filters.clone();
+    let mut changed = false;
+    let source_quals = from_qualifiers(source_from);
+    let target_quals = from_qualifiers(target_from);
+    for (left, right) in join_column_equalities(on) {
+        changed |= propagate_join_filter_pair(
+            filters,
+            &mut out,
+            &source_quals,
+            &target_quals,
+            &left,
+            &right,
+        );
+        changed |= propagate_join_filter_pair(
+            filters,
+            &mut out,
+            &source_quals,
+            &target_quals,
+            &right,
+            &left,
+        );
+    }
+    changed.then_some(out)
+}
+
+fn propagate_join_filter_pair(
+    filters: &QualifierFilters,
+    out: &mut QualifierFilters,
+    source_quals: &BTreeSet<String>,
+    target_quals: &BTreeSet<String>,
+    source: &(String, String),
+    target: &(String, String),
+) -> bool {
+    if !source_quals.contains(&source.0) || !target_quals.contains(&target.0) {
+        return false;
+    }
+    let mut changed = false;
+    if let Some(source_filters) = filters.get(&source.0) {
+        for filter in source_filters {
+            if let Some(value) = constant_equality_for_column(filter, &source.0, &source.1) {
+                let propagated = Expr::Binary {
+                    op: uqa_sql::ast::BinaryOp::Equal,
+                    lhs: Box::new(Expr::qualified_column(&target.0, &target.1)),
+                    rhs: Box::new(value),
+                };
+                out.entry(target.0.clone()).or_default().push(propagated);
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn constant_equality_for_column(expr: &Expr, qual: &str, column: &str) -> Option<Expr> {
+    let Expr::Binary {
+        op: uqa_sql::ast::BinaryOp::Equal,
+        lhs,
+        rhs,
+    } = expr
+    else {
+        return None;
+    };
+    if expr_is_qualified_column(lhs, qual, column) && expr_is_constant(rhs) {
+        return Some((**rhs).clone());
+    }
+    if expr_is_qualified_column(rhs, qual, column) && expr_is_constant(lhs) {
+        return Some((**lhs).clone());
+    }
+    None
+}
+
+fn expr_is_qualified_column(expr: &Expr, qual: &str, column: &str) -> bool {
+    matches!(
+        expr,
+        Expr::QualifiedColumn {
+            qualifier,
+            column: col,
+            ..
+        } if qualifier == qual && col == column
+    )
+}
+
+fn expr_is_constant(expr: &Expr) -> bool {
+    matches!(expr, Expr::Literal(_) | Expr::Param(_))
+}
+
+fn join_column_equalities(expr: &Expr) -> Vec<((String, String), (String, String))> {
+    match expr {
+        Expr::And(items) => items.iter().flat_map(join_column_equalities).collect(),
+        Expr::Binary {
+            op: uqa_sql::ast::BinaryOp::Equal,
+            lhs,
+            rhs,
+        } => {
+            let Some(left) = qualified_column_pair(lhs) else {
+                return Vec::new();
+            };
+            let Some(right) = qualified_column_pair(rhs) else {
+                return Vec::new();
+            };
+            vec![(left, right)]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn qualified_column_pair(expr: &Expr) -> Option<(String, String)> {
+    match expr {
+        Expr::QualifiedColumn {
+            qualifier, column, ..
+        } => Some((qualifier.clone(), column.clone())),
+        _ => None,
+    }
+}
+
+fn from_qualifiers(from: &FromClause) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    collect_from_qualifiers(from, &mut out);
+    out
+}
+
+fn collect_from_qualifiers(from: &FromClause, out: &mut BTreeSet<String>) {
+    match from {
+        FromClause::Table { name, alias } => {
+            out.insert(alias.clone().unwrap_or_else(|| name.clone()));
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_from_qualifiers(left, out);
+            collect_from_qualifiers(right, out);
+        }
+        FromClause::Values { alias, .. }
+        | FromClause::Function { alias, .. }
+        | FromClause::Subquery { alias, .. } => {
+            if let Some(alias) = alias {
+                out.insert(alias.clone());
+            }
+        }
+    }
 }
 
 fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow {
@@ -83,7 +996,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
     let mut out = ResultRow::new();
     if engine.table(table).is_none() {
         for column in engine.foreign_table_columns(table) {
-            out.insert(format!("{qual}.{column}"), Value::Null);
+            out.insert(qualified_key(&qual, &column), Value::Null);
         }
         return out;
     }
@@ -103,7 +1016,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
         }
     }
     for k in sample_keys {
-        out.insert(format!("{qual}.{k}"), Value::Null);
+        out.insert(qualified_key(&qual, &k), Value::Null);
     }
     out
 }
@@ -112,47 +1025,256 @@ pub(super) fn build_join_rows_with_ctes(
     engine: &Engine,
     from: &FromClause,
     params: &[SQLParam],
-    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+    ctes: &mut CteScope,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = None;
+    build_join_rows_with_ctes_inner(engine, from, params, ctes, &mut row_filter, None, None)
+}
+
+pub(super) fn build_join_rows_with_ctes_pruned(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    prune: &ColumnPrune,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = None;
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        Some(prune),
+        None,
+    )
+}
+
+pub(super) fn build_join_rows_with_ctes_filtered_by_qualifier(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    filters: &QualifierFilters,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = None;
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        None,
+        Some(filters),
+    )
+}
+
+pub(super) fn build_join_rows_with_ctes_pruned_filtered_by_qualifier(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    prune: &ColumnPrune,
+    filters: &QualifierFilters,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = None;
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        Some(prune),
+        Some(filters),
+    )
+}
+
+pub(super) fn build_join_rows_with_ctes_filtered(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    row_filter: RowFilter<'_>,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = Some(row_filter);
+    build_join_rows_with_ctes_inner(engine, from, params, ctes, &mut row_filter, None, None)
+}
+
+pub(super) fn build_join_rows_with_ctes_filtered_pruned(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    row_filter: RowFilter<'_>,
+    prune: &ColumnPrune,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = Some(row_filter);
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        Some(prune),
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    row_filter: RowFilter<'_>,
+    prune: &ColumnPrune,
+    filters: &QualifierFilters,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = Some(row_filter);
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        Some(prune),
+        Some(filters),
+    )
+}
+
+pub(super) fn build_join_rows_with_ctes_filtered_filtered_by_qualifier(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    row_filter: RowFilter<'_>,
+    filters: &QualifierFilters,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut row_filter = Some(row_filter);
+    build_join_rows_with_ctes_inner(
+        engine,
+        from,
+        params,
+        ctes,
+        &mut row_filter,
+        None,
+        Some(filters),
+    )
+}
+
+fn build_join_rows_with_ctes_inner(
+    engine: &Engine,
+    from: &FromClause,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    row_filter: &mut Option<RowFilter<'_>>,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     match from {
         FromClause::Table { name, alias } => {
             let qual = qualifier_for(name, alias.as_deref());
             // CTE reference takes precedence over a real table of the
             // same name (matches `PostgreSQL` semantics).
-            if let Some(rows) = ctes.get(name) {
-                return Ok(rows.iter().map(|row| reprefix_row(&qual, row)).collect());
+            let prefixed_cte_cache_key = prefixed_cte_row_cache_key(name, &qual);
+            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                if let Some(rows) = ctes.rows.get(&prefixed_cte_cache_key) {
+                    return Ok(rows.clone());
+                }
+            }
+            if let Some(rows) = ctes.rows.get(name) {
+                let prefixed = reprefix_rows_pruned(&qual, rows, prune);
+                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
+                if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                    ctes.rows.insert(prefixed_cte_cache_key, prefixed.clone());
+                }
+                return Ok(prefixed);
+            }
+            if let Some(body) = ctes.inlined.get(name).cloned() {
+                let local_cte_names = select_cte_names(&body);
+                let specialized =
+                    specialize_select_for_qualifier_filters(engine, &body, filters, &qual);
+                let is_specialized = specialized.is_some();
+                let body = specialized.unwrap_or(body);
+                let result =
+                    execute_view_with_parent_cache(engine, &body, params, ctes, &local_cte_names)?;
+                let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
+                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
+                if prune.is_none() && !is_specialized && !has_filters_for_qualifier(filters, &qual)
+                {
+                    ctes.rows.insert(prefixed_cte_cache_key, prefixed.clone());
+                }
+                return Ok(prefixed);
+            }
+            let prefixed_view_cache_key = prefixed_view_row_cache_key(name, &qual);
+            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                if let Some(rows) = ctes.rows.get(&prefixed_view_cache_key) {
+                    return Ok(rows.clone());
+                }
             }
             if let Some(body) = engine.view(name) {
-                let mut scoped_ctes = ctes.clone();
-                let result = execute_select(engine, &body, params, &mut scoped_ctes)?;
-                if !select_contains_volatile_function(&body) {
-                    ctes.insert(name.clone(), result.rows.clone());
+                let local_cte_names = select_cte_names(&body);
+                let is_volatile = select_contains_volatile_function(&body);
+                let specialized =
+                    specialize_select_for_qualifier_filters(engine, &body, filters, &qual);
+                let is_specialized = specialized.is_some();
+                let body = specialized.unwrap_or(body);
+                let result = if is_volatile {
+                    let mut scoped_ctes = ctes.clone();
+                    execute_select(engine, &body, params, &mut scoped_ctes)?
+                } else {
+                    execute_view_with_parent_cache(engine, &body, params, ctes, &local_cte_names)?
+                };
+                let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
+                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
+                if !is_volatile && !is_specialized {
+                    ctes.rows.insert(name.clone(), result.rows);
+                    if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                        ctes.rows.insert(prefixed_view_cache_key, prefixed.clone());
+                    }
                 }
-                return Ok(result
-                    .rows
-                    .iter()
-                    .map(|row| reprefix_row(&qual, row))
-                    .collect());
+                return Ok(prefixed);
             }
             // information_schema / pg_catalog virtual views.
             if let Some(rows) = build_info_schema_rows(engine, name) {
-                return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
+                let prefixed = reprefix_rows_pruned(&qual, &rows, prune);
+                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
             }
             if engine.foreign_table(name).is_some() {
                 let rows = engine
                     .scan_foreign_table(name, None, &[], None)
                     .map_err(SQLError::Unsupported)?;
-                return Ok(rows.iter().map(|r| reprefix_row(&qual, r)).collect());
+                let prefixed = reprefix_rows_pruned(&qual, &rows, prune);
+                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
             }
             if engine.table(name).is_none() {
                 return Err(SQLError::Unsupported(format!(
                     "relation `{name}` does not exist"
                 )));
             }
-            Ok(load_table_rows(engine, name)
+            let prefixed_cache_key = prefixed_table_row_cache_key(name, &qual);
+            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                if let Some(rows) = ctes.rows.get(&prefixed_cache_key) {
+                    return Ok(rows.clone());
+                }
+            }
+            let cache_key = table_row_cache_key(name);
+            let rows = if let Some(rows) = ctes.rows.get(&cache_key) {
+                rows.clone()
+            } else {
+                let rows: Vec<ResultRow> = load_table_rows(engine, name);
+                ctes.rows.insert(cache_key, rows.clone());
+                rows
+            };
+            let prefixed: Vec<ResultRow> = rows
                 .iter()
-                .map(|d| prefix_row(&qual, d))
-                .collect())
+                .map(|row| prefix_row_pruned(&qual, row, prune))
+                .collect();
+            let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
+            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
+                ctes.rows.insert(prefixed_cache_key, prefixed.clone());
+            }
+            Ok(prefixed)
         }
         FromClause::Join {
             left,
@@ -161,7 +1283,18 @@ pub(super) fn build_join_rows_with_ctes(
             on,
             lateral,
         } => {
-            let left_rows = build_join_rows_with_ctes(engine, left, params, ctes)?;
+            let left_filters = filters
+                .and_then(|filters| propagated_join_filters(filters, right, left, on.as_ref()));
+            let left_filter_ref = left_filters.as_ref().or(filters);
+            let left_rows = build_join_rows_with_ctes_inner(
+                engine,
+                left,
+                params,
+                ctes,
+                row_filter,
+                prune,
+                left_filter_ref,
+            )?;
             // LATERAL: re-evaluate the right side once per left row,
             // so the right body can reference outer columns. The
             // engine substitutes the outer row into the EvalContext
@@ -178,50 +1311,47 @@ pub(super) fn build_join_rows_with_ctes(
                     ctes,
                 );
             }
-            let right_rows = build_join_rows_with_ctes(engine, right, params, ctes)?;
+            let right_filters = filters
+                .and_then(|filters| propagated_join_filters(filters, left, right, on.as_ref()));
+            let right_filter_ref = right_filters.as_ref().or(filters);
+            let right_rows = build_join_rows_with_ctes_inner(
+                engine,
+                right,
+                params,
+                ctes,
+                row_filter,
+                prune,
+                right_filter_ref,
+            )?;
             let on_expr = on.as_ref();
 
-            match kind {
+            let mut rows = match kind {
                 JoinKind::Inner | JoinKind::Cross => {
                     if matches!(kind, JoinKind::Inner) {
                         if let Some(rows) =
                             try_hash_inner_join(engine, &left_rows, &right_rows, on_expr, params)?
                         {
-                            return Ok(rows);
+                            rows
+                        } else {
+                            cross_filter(engine, &left_rows, &right_rows, on_expr, params)?
                         }
+                    } else {
+                        cross_filter(engine, &left_rows, &right_rows, on_expr, params)?
                     }
-                    Ok(cross_filter(
-                        engine,
-                        &left_rows,
-                        &right_rows,
-                        on_expr,
-                        params,
-                    )?)
                 }
                 JoinKind::Left => {
                     if let Some(rows) =
                         try_hash_left_join(engine, &left_rows, &right_rows, right, on_expr, params)?
                     {
-                        return Ok(rows);
+                        rows
+                    } else {
+                        left_outer(&left_rows, &right_rows, right, on_expr, params, engine)?
                     }
-                    Ok(left_outer(
-                        &left_rows,
-                        &right_rows,
-                        right,
-                        on_expr,
-                        params,
-                        engine,
-                    )?)
                 }
-                JoinKind::Right => Ok(left_outer(
-                    &right_rows,
-                    &left_rows,
-                    left,
-                    on_expr,
-                    params,
-                    engine,
-                )?),
-                JoinKind::Full => Ok(full_outer(
+                JoinKind::Right => {
+                    left_outer(&right_rows, &left_rows, left, on_expr, params, engine)?
+                }
+                JoinKind::Full => full_outer(
                     &left_rows,
                     &right_rows,
                     left,
@@ -229,8 +1359,12 @@ pub(super) fn build_join_rows_with_ctes(
                     on_expr,
                     params,
                     engine,
-                )?),
+                )?,
+            };
+            if let Some(filter) = row_filter.as_deref_mut() {
+                filter(&mut rows)?;
             }
+            Ok(rows)
         }
         FromClause::Values {
             rows,
@@ -268,6 +1402,75 @@ pub(super) fn build_join_rows_with_ctes(
                 column_aliases,
             ))
         }
+    }
+}
+
+fn execute_view_with_parent_cache(
+    engine: &Engine,
+    body: &SelectStmt,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    local_cte_names: &BTreeSet<String>,
+) -> Result<SQLResult, SQLError> {
+    let saved = save_and_remove_cte_names(ctes, local_cte_names);
+    let result = execute_select(engine, body, params, ctes);
+    restore_cte_names(ctes, saved);
+    result
+}
+
+fn save_and_remove_cte_names(
+    ctes: &mut CteScope,
+    names: &BTreeSet<String>,
+) -> Vec<(String, Option<Vec<ResultRow>>, Option<SelectStmt>)> {
+    names
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                ctes.remove_materialized(name),
+                ctes.inlined.remove(name),
+            )
+        })
+        .collect()
+}
+
+fn restore_cte_names(
+    ctes: &mut CteScope,
+    saved: Vec<(String, Option<Vec<ResultRow>>, Option<SelectStmt>)>,
+) {
+    for (name, rows, inlined) in saved {
+        match rows {
+            Some(rows) => {
+                ctes.rows.insert(name.clone(), rows);
+            }
+            None => {
+                ctes.remove_materialized(&name);
+            }
+        }
+        match inlined {
+            Some(query) => {
+                ctes.inlined.insert(name, query);
+            }
+            None => {
+                ctes.inlined.remove(&name);
+            }
+        }
+    }
+}
+
+fn select_cte_names(stmt: &SelectStmt) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    collect_select_cte_names(stmt, &mut names);
+    names
+}
+
+fn collect_select_cte_names(stmt: &SelectStmt, names: &mut BTreeSet<String>) {
+    for cte in &stmt.with {
+        names.insert(cte.name.clone());
+        collect_select_cte_names(&cte.query, names);
+    }
+    if let Some(set_op) = &stmt.set_op {
+        collect_select_cte_names(&set_op.right, names);
     }
 }
 
@@ -357,7 +1560,7 @@ fn build_lateral_join_rows(
     kind: JoinKind,
     on: Option<&Expr>,
     params: &[SQLParam],
-    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+    ctes: &mut CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     use uqa_sql::expr::{eval, truthy, EvalContext};
     let mut out: Vec<ResultRow> = Vec::new();
@@ -415,10 +1618,10 @@ pub(super) fn execute_lateral_subquery(
     stmt: &SelectStmt,
     outer_row: &ResultRow,
     params: &[SQLParam],
-    ctes: &BTreeMap<String, Vec<ResultRow>>,
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     let mut scoped_ctes = ctes.clone();
-    materialize_ctes(engine, &stmt.with, params, &mut scoped_ctes)?;
+    materialize_ctes(engine, stmt, params, &mut scoped_ctes)?;
 
     let Some(from) = stmt.from.as_ref() else {
         let projected =
@@ -1111,9 +2314,15 @@ impl<'a> JoinKeyAccessor<'a> {
     fn new(expr: &'a Expr) -> Self {
         match expr {
             Expr::Column(name) => Self::Column(name.as_str()),
-            Expr::QualifiedColumn { qualifier, column } => {
-                Self::QualifiedColumn(format!("{qualifier}.{column}"))
-            }
+            Expr::QualifiedColumn {
+                qualifier,
+                column,
+                key,
+            } => Self::QualifiedColumn(if key.is_empty() {
+                qualified_key(qualifier, column)
+            } else {
+                key.clone()
+            }),
             _ => Self::Expr(expr),
         }
     }
@@ -1357,7 +2566,8 @@ pub(super) fn project_join_row_with_engine(
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
     let hook = engine.map(|engine| engine as &dyn uqa_sql::expr::EngineHook);
-    project_join_row_inner(engine, hook, src, projections, params)
+    let labels = projection_columns(projections);
+    project_join_row_inner(engine, hook, src, projections, &labels, params)
 }
 
 pub(super) fn project_join_row_with_hook(
@@ -1366,7 +2576,18 @@ pub(super) fn project_join_row_with_hook(
     projections: &[Projection],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    project_join_row_inner(None, engine, src, projections, params)
+    let labels = projection_columns(projections);
+    project_join_row_inner(None, engine, src, projections, &labels, params)
+}
+
+pub(super) fn project_join_row_with_hook_and_labels(
+    engine: Option<&dyn uqa_sql::expr::EngineHook>,
+    src: &ResultRow,
+    projections: &[Projection],
+    labels: &[String],
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
+    project_join_row_inner(None, engine, src, projections, labels, params)
 }
 
 fn project_join_row_inner(
@@ -1374,13 +2595,13 @@ fn project_join_row_inner(
     eval_engine: Option<&dyn uqa_sql::expr::EngineHook>,
     src: &ResultRow,
     projections: &[Projection],
+    labels: &[String],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
     let mut ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
     if let Some(e) = eval_engine {
         ctx = ctx.with_engine(e);
     }
-    let labels = projection_columns(projections);
     let mut out = ResultRow::new();
     for (idx, proj) in projections.iter().enumerate() {
         let label = labels[idx].clone();
@@ -1395,6 +2616,10 @@ fn project_join_row_inner(
         // read the cached value through.
         if matches!(proj.expr, Expr::WindowCall { .. }) {
             let value = src.get(&label).cloned().unwrap_or(Value::Null);
+            out.insert(label, value);
+            continue;
+        }
+        if let Some(value) = projected_value_from_row(&proj.expr, src) {
             out.insert(label, value);
             continue;
         }
@@ -1581,8 +2806,19 @@ fn run_uqa_highlight(
             Some(other) => format!("{other:?}"),
             None => return Ok(Value::Null),
         },
-        Expr::QualifiedColumn { qualifier, column } => {
-            match row.get(&format!("{qualifier}.{column}")) {
+        Expr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
+            let fallback_key;
+            let lookup_key = if key.is_empty() {
+                fallback_key = qualified_key(qualifier, column);
+                fallback_key.as_str()
+            } else {
+                key.as_str()
+            };
+            match row.get(lookup_key) {
                 Some(Value::Str(s)) => s.clone(),
                 Some(Value::Null) => return Ok(Value::Null),
                 Some(other) => format!("{other:?}"),

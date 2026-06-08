@@ -65,8 +65,15 @@ use ddl::{
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{
-    build_join_rows_with_ctes, engine_func_intercept, execute_lateral_subquery, prefix_row,
-    project_join_row_with_engine, project_join_row_with_hook,
+    build_join_rows_with_ctes, build_join_rows_with_ctes_filtered,
+    build_join_rows_with_ctes_filtered_by_qualifier,
+    build_join_rows_with_ctes_filtered_filtered_by_qualifier,
+    build_join_rows_with_ctes_filtered_pruned,
+    build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier,
+    build_join_rows_with_ctes_pruned, build_join_rows_with_ctes_pruned_filtered_by_qualifier,
+    engine_func_intercept, execute_lateral_subquery, prefix_row, project_join_row_with_engine,
+    project_join_row_with_hook, project_join_row_with_hook_and_labels, ColumnPrune,
+    QualifierFilters,
 };
 use row_functions::{
     execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,
@@ -77,11 +84,12 @@ pub(crate) use row_functions::{
     run_bayesian_match_public, run_bayesian_match_with_prior_public,
     run_calibrated_vector_match_public, run_knn_match_public, run_text_match_public,
 };
-pub(crate) use select::run_correlated_subquery;
 use select::{
     apply_row_order_limit, build_projection_row, execute_select, expand_star_columns,
-    materialize_ctes, projection_columns, run_explain, run_select,
+    materialize_cte_list, materialize_ctes, projection_columns, run_explain, run_select,
+    ScopedEngineHook,
 };
+pub(crate) use select::{run_correlated_subquery, CteScope};
 use where_eval::execute_mixed_where;
 use window::{compute_window_columns, has_window};
 
@@ -93,26 +101,70 @@ const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 
+fn projected_value_from_row(expr: &Expr, row: &ResultRow) -> Option<Value> {
+    match expr {
+        Expr::Column(name) => Some(row_column_value(row, name).cloned().unwrap_or(Value::Null)),
+        Expr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
+            let value = if key.is_empty() {
+                let lookup = format!("{qualifier}.{column}");
+                row.get(&lookup)
+            } else {
+                row.get(key)
+            };
+            Some(value.cloned().unwrap_or(Value::Null))
+        }
+        _ => None,
+    }
+}
+
+fn row_column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
+    if let Some(value) = row.get(name) {
+        return Some(value);
+    }
+    row.iter()
+        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
+        .map(|(_, value)| value)
+}
+
 pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
     // not leak into a fresh batch. Callers that want the
     // cancellation flag preserved across statements should use
     // [`crate::Engine::reset_cancellation`] explicitly between calls.
     engine.cancellation_token().check()?;
-    let stmts = compile(sql)?;
+    let stmts = compile_optimized_statements(engine, sql)?;
     if stmts.is_empty() {
         return Ok(SQLResult::empty());
     }
     let mut last = SQLResult::empty();
     for stmt in stmts {
         engine.cancellation_token().check()?;
-        last = run_stmt(engine, stmt, params)?;
+        last = run_optimized_stmt(engine, stmt, params)?;
     }
     Ok(last)
 }
 
-fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-    let stmt = optimize_statement(stmt);
+fn compile_optimized_statements(engine: &Engine, sql: &str) -> Result<Vec<Statement>, SQLError> {
+    if let Some(statements) = engine.cached_sql_statements(sql) {
+        return Ok(statements);
+    }
+    let statements = compile(sql)?
+        .into_iter()
+        .map(optimize_statement)
+        .collect::<Vec<_>>();
+    engine.cache_sql_statements(sql.to_string(), statements.clone());
+    Ok(statements)
+}
+
+fn run_optimized_stmt(
+    engine: &Engine,
+    stmt: Statement,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
     match stmt {
         Statement::CreateTable(c) => run_create_table(engine, c),
         Statement::CreateIndex(c) => run_create_index(engine, c),
@@ -198,7 +250,7 @@ fn run_stmt(engine: &Engine, stmt: Statement, params: &[SQLParam]) -> Result<SQL
                     "Prepared statement `{name}` already exists"
                 )));
             }
-            engine.register_prepared(name, *body);
+            engine.register_prepared(name, optimize_statement(*body));
             Ok(SQLResult::empty())
         }
         Statement::Execute { name, params: ps } => run_execute_prepared(engine, &name, &ps, params),
@@ -251,7 +303,7 @@ fn run_execute_prepared(
         let v = uqa_sql::expr::eval(a, &ctx)?;
         bound.push(SQLParam::Scalar(v));
     }
-    run_stmt(engine, stmt, &bound)
+    run_optimized_stmt(engine, stmt, &bound)
 }
 
 fn run_values(
