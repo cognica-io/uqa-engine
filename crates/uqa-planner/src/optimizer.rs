@@ -442,6 +442,7 @@ mod tests {
             with: vec![],
             set_op: None,
             distinct: false,
+            distinct_on: Vec::new(),
         };
         let optimised = pushdown_filters(stmt);
         assert!(optimised.r#where.is_some());

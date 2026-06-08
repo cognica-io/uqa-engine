@@ -303,6 +303,9 @@ pub struct SelectStmt {
     /// `SELECT DISTINCT` -- de-duplicate the final result rows. Set by
     /// the compiler whenever the parsed `distinct_clause` is non-empty.
     pub distinct: bool,
+    /// `SELECT DISTINCT ON (<expr>, ...)` keys. Empty for plain
+    /// `SELECT DISTINCT`.
+    pub distinct_on: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

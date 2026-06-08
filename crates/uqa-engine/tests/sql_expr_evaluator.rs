@@ -705,3 +705,55 @@ fn null_with_distinct() {
     assert!(cats.contains("tools"));
     assert!(cats.contains("electronics"));
 }
+
+#[test]
+fn distinct_on_keeps_first_ordered_row_per_key() {
+    let eng = engine();
+    eng.sql(
+        "INSERT INTO products (id, name, price, quantity, category) \
+         VALUES (4, 'Toolbox', 20.00, 8, 'tools')",
+        &[],
+    )
+    .unwrap();
+
+    let r = rows(
+        &eng,
+        "SELECT DISTINCT ON (category) category, name \
+         FROM products \
+         WHERE category IS NOT NULL \
+         ORDER BY category, price DESC",
+    );
+
+    assert_eq!(r.len(), 2);
+    assert_eq!(str_col(&r[0], "category"), Some("electronics"));
+    assert_eq!(str_col(&r[0], "name"), Some("Gadget"));
+    assert_eq!(str_col(&r[1], "category"), Some("tools"));
+    assert_eq!(str_col(&r[1], "name"), Some("Toolbox"));
+}
+
+#[test]
+fn distinct_on_applies_limit_after_dedup() {
+    let eng = engine();
+    eng.sql(
+        "INSERT INTO products (id, name, price, quantity, category) VALUES \
+         (4, 'Cable', 3.00, 30, 'electronics'), \
+         (5, 'Toolbox', 20.00, 8, 'tools')",
+        &[],
+    )
+    .unwrap();
+
+    let r = rows(
+        &eng,
+        "SELECT DISTINCT ON (category) category, name \
+         FROM products \
+         WHERE category IS NOT NULL \
+         ORDER BY category, price DESC \
+         LIMIT 2",
+    );
+
+    assert_eq!(r.len(), 2);
+    assert_eq!(str_col(&r[0], "category"), Some("electronics"));
+    assert_eq!(str_col(&r[0], "name"), Some("Gadget"));
+    assert_eq!(str_col(&r[1], "category"), Some("tools"));
+    assert_eq!(str_col(&r[1], "name"), Some("Toolbox"));
+}

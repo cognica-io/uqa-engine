@@ -23,10 +23,21 @@ pub(super) fn execute_function(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    execute_function_with_top_k(engine, table, name, args, params, None)
+}
+
+pub(super) fn execute_function_with_top_k(
+    engine: &Engine,
+    table: &str,
+    name: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+    top_k: Option<usize>,
+) -> Result<Vec<ScoredEntry>, SQLError> {
     let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
     match kind {
-        FunctionKind::TextMatch => run_text_match(engine, table, args, params),
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, args, params),
+        FunctionKind::TextMatch => run_text_match(engine, table, args, params, top_k),
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, args, params, top_k),
         FunctionKind::FTSMatch => run_fts_match(engine, table, args, params),
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, args, params)
@@ -835,7 +846,7 @@ pub(crate) fn run_text_match_public(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_text_match(engine, table, args, params)
+    run_text_match(engine, table, args, params, None)
 }
 
 pub(crate) fn run_bayesian_match_public(
@@ -844,7 +855,7 @@ pub(crate) fn run_bayesian_match_public(
     args: &[Expr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_match(engine, table, args, params)
+    run_bayesian_match(engine, table, args, params, None)
 }
 
 pub(crate) fn run_knn_match_public(
@@ -889,6 +900,7 @@ fn run_text_match(
     table: &str,
     args: &[Expr],
     params: &[SQLParam],
+    top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match_scored(
         engine,
@@ -897,6 +909,7 @@ fn run_text_match(
         params,
         "text_match",
         crate::ScoringMode::BM25(uqa_scoring::BM25Params::default()),
+        top_k,
     )
 }
 
@@ -905,6 +918,7 @@ fn run_bayesian_match(
     table: &str,
     args: &[Expr],
     params: &[SQLParam],
+    top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match_scored(
         engine,
@@ -913,6 +927,7 @@ fn run_bayesian_match(
         params,
         "bayesian_match",
         crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default()),
+        top_k,
     )
 }
 
@@ -923,6 +938,7 @@ fn run_text_match_scored(
     params: &[SQLParam],
     function_name: &str,
     mode: crate::ScoringMode,
+    top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
         return Err(SQLError::BadArity {
@@ -966,7 +982,7 @@ fn run_text_match_scored(
             .map(|(doc_id, score)| ScoredEntry { doc_id, score })
             .collect());
     }
-    Ok(engine.search(table, &field, &query, &mode, usize::MAX))
+    Ok(engine.search(table, &field, &query, &mode, top_k.unwrap_or(usize::MAX)))
 }
 
 fn run_fts_match(
@@ -1038,6 +1054,7 @@ fn run_bayesian_match_with_prior(
         table,
         &[Expr::Column(field), Expr::Literal(Value::Str(query))],
         params,
+        None,
     )?;
     let prior_fn = prior_fn_for_mode(&mode, &prior_field)?;
     Ok(base
@@ -1101,8 +1118,8 @@ fn run_scored_signal(
         )));
     };
     match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch => run_text_match(engine, table, inner, params),
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params),
+        FunctionKind::TextMatch => run_text_match(engine, table, inner, params, None),
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None),
         FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params),
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, inner, params)
@@ -1151,7 +1168,7 @@ fn run_attention_fusion(
             FunctionKind::TextMatch => {
                 return Err(non_probability_signal_error(name, function_name));
             }
-            FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params)?,
+            FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None)?,
             FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
             FunctionKind::BayesianMatchWithPrior => {
                 run_bayesian_match_with_prior(engine, table, inner, params)?
@@ -1233,8 +1250,8 @@ fn run_sparse_threshold(
         ));
     };
     let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch => run_text_match(engine, table, inner, params)?,
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params)?,
+        FunctionKind::TextMatch => run_text_match(engine, table, inner, params, None)?,
+        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None)?,
         FunctionKind::BayesianMatchWithPrior => {
             run_bayesian_match_with_prior(engine, table, inner, params)?
         }
@@ -1381,7 +1398,7 @@ fn run_fuse_log_odds(
                                 return Err(non_probability_signal_error(name, "fuse_log_odds"));
                             }
                             FunctionKind::BayesianMatch => {
-                                run_bayesian_match(engine, table, inner, params)?
+                                run_bayesian_match(engine, table, inner, params, None)?
                             }
                             _ => unreachable!("matched text scoring function"),
                         }

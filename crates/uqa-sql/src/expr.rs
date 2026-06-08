@@ -521,10 +521,16 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "upper" => string1(args, |s| s.to_uppercase()),
         "lower" => string1(args, |s| s.to_lowercase()),
         "length" | "char_length" | "character_length" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
             let s = expect_str(args, 0)?;
             Ok(Value::Int(s.chars().count() as i64))
         }
         "octet_length" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
             let s = expect_str(args, 0)?;
             Ok(Value::Int(s.len() as i64))
         }
@@ -580,6 +586,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 3 {
                 return Err(SQLError::TypeMismatch("replace takes 3 args".into()));
             }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
             let s = value_to_string(&args[0]);
             let from = value_to_string(&args[1]);
             let to = value_to_string(&args[2]);
@@ -589,6 +598,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             // SUBSTRING(string, start [, length]). 1-indexed per SQL.
             if args.len() < 2 || args.len() > 3 {
                 return Err(SQLError::TypeMismatch("substring takes 2-3 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
             }
             let s = value_to_string(&args[0]);
             let start = to_i64(&args[1])?;
@@ -608,6 +620,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("left takes 2 args".into()));
             }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
             let chars: Vec<char> = s.chars().collect();
@@ -617,6 +632,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "right" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("right takes 2 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
             }
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
@@ -641,6 +659,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 other => Err(SQLError::TypeMismatch(format!("round({other:?})"))),
             },
             2 => {
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
                 let v = to_f64(&args[0])?;
                 let places = to_i64(&args[1])?;
                 let scale = 10f64.powi(places as i32);
@@ -664,9 +685,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("power takes 2 args".into()));
             }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
             Ok(Value::Float(to_f64(&args[0])?.powf(to_f64(&args[1])?)))
         }
-        "sqrt" => Ok(Value::Float(to_f64(&args[0])?.sqrt())),
+        "sqrt" => float1(args, "sqrt", f64::sqrt),
         "mod" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("mod takes 2 args".into()));
@@ -829,42 +853,59 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             Ok(Value::Str(out))
         }
         // Trig / math
-        "sin" => Ok(Value::Float(to_f64(&args[0])?.sin())),
-        "cos" => Ok(Value::Float(to_f64(&args[0])?.cos())),
-        "tan" => Ok(Value::Float(to_f64(&args[0])?.tan())),
-        "asin" => Ok(Value::Float(to_f64(&args[0])?.asin())),
-        "acos" => Ok(Value::Float(to_f64(&args[0])?.acos())),
-        "atan" => Ok(Value::Float(to_f64(&args[0])?.atan())),
+        "sin" => float1(args, "sin", f64::sin),
+        "cos" => float1(args, "cos", f64::cos),
+        "tan" => float1(args, "tan", f64::tan),
+        "asin" => float1(args, "asin", f64::asin),
+        "acos" => float1(args, "acos", f64::acos),
+        "atan" => float1(args, "atan", f64::atan),
         "atan2" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("atan2 takes 2 args".into()));
             }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
             Ok(Value::Float(to_f64(&args[0])?.atan2(to_f64(&args[1])?)))
         }
-        "sinh" => Ok(Value::Float(to_f64(&args[0])?.sinh())),
-        "cosh" => Ok(Value::Float(to_f64(&args[0])?.cosh())),
-        "tanh" => Ok(Value::Float(to_f64(&args[0])?.tanh())),
-        "exp" => Ok(Value::Float(to_f64(&args[0])?.exp())),
-        "ln" => Ok(Value::Float(to_f64(&args[0])?.ln())),
+        "sinh" => float1(args, "sinh", f64::sinh),
+        "cosh" => float1(args, "cosh", f64::cosh),
+        "tanh" => float1(args, "tanh", f64::tanh),
+        "exp" => float1(args, "exp", f64::exp),
+        "ln" => float1(args, "ln", f64::ln),
         "log" | "log10" => match args.len() {
-            1 => Ok(Value::Float(to_f64(&args[0])?.log10())),
+            1 => float1(args, "log", f64::log10),
             2 => {
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
                 let base = to_f64(&args[0])?;
                 let v = to_f64(&args[1])?;
                 Ok(Value::Float(v.log(base)))
             }
             _ => Err(SQLError::TypeMismatch("log takes 1 or 2 args".into())),
         },
-        "log2" => Ok(Value::Float(to_f64(&args[0])?.log2())),
-        "cbrt" => Ok(Value::Float(to_f64(&args[0])?.cbrt())),
-        "sign" => Ok(Value::Int(match to_f64(&args[0])? {
-            v if v > 0.0 => 1,
-            v if v < 0.0 => -1,
-            _ => 0,
-        })),
+        "log2" => float1(args, "log2", f64::log2),
+        "cbrt" => float1(args, "cbrt", f64::cbrt),
+        "sign" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("sign takes 1 arg".into()));
+            }
+            if matches!(args[0], Value::Null) {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Int(match to_f64(&args[0])? {
+                v if v > 0.0 => 1,
+                v if v < 0.0 => -1,
+                _ => 0,
+            }))
+        }
         "trunc" => match args.len() {
-            1 => Ok(Value::Float(to_f64(&args[0])?.trunc())),
+            1 => float1(args, "trunc", f64::trunc),
             2 => {
+                if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                    return Ok(Value::Null);
+                }
                 let v = to_f64(&args[0])?;
                 let p = to_i64(&args[1])?;
                 let scale = 10f64.powi(p as i32);
@@ -873,8 +914,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             _ => Err(SQLError::TypeMismatch("trunc takes 1 or 2 args".into())),
         },
         "pi" => Ok(Value::Float(std::f64::consts::PI)),
-        "degrees" => Ok(Value::Float(to_f64(&args[0])?.to_degrees())),
-        "radians" => Ok(Value::Float(to_f64(&args[0])?.to_radians())),
+        "degrees" => float1(args, "degrees", f64::to_degrees),
+        "radians" => float1(args, "radians", f64::to_radians),
         "random" => {
             // Deterministic-ish pseudo random based on system time so
             // tests can assert ranges deterministically; the canonical
@@ -1671,6 +1712,16 @@ fn string1<F: FnOnce(&str) -> String>(args: &[Value], f: F) -> Result<Value> {
     }
     let s = value_to_string(&args[0]);
     Ok(Value::Str(f(&s)))
+}
+
+fn float1<F: FnOnce(f64) -> f64>(args: &[Value], name: &str, f: F) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
+    }
+    if matches!(args[0], Value::Null) {
+        return Ok(Value::Null);
+    }
+    Ok(Value::Float(f(to_f64(&args[0])?)))
 }
 
 fn initcap_str(s: &str) -> String {

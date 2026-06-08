@@ -69,8 +69,9 @@ use from_rows::{
     prefix_row, project_join_row_with_engine,
 };
 use row_functions::{
-    execute_function, expect_column_name, expect_optional_graph_value, graph_betweenness_entries,
-    graph_hits_entries, graph_pagerank_entries, run_graph_create, run_graph_drop,
+    execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,
+    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries, run_graph_create,
+    run_graph_drop,
 };
 pub(crate) use row_functions::{
     run_bayesian_match_public, run_bayesian_match_with_prior_public,

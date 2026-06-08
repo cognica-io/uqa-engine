@@ -116,6 +116,41 @@ fn math_functions_coverage_cases() {
 }
 
 #[test]
+fn null_scalar_functions_return_null() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE vals (x DOUBLE PRECISION, s TEXT)", &[])
+        .unwrap();
+    engine
+        .sql("INSERT INTO vals VALUES (NULL, NULL)", &[])
+        .unwrap();
+
+    let result = engine
+        .sql(
+            "SELECT \
+             LENGTH(s) AS len_s, \
+             OCTET_LENGTH(s) AS bytes_s, \
+             ROUND(x) AS round_x, \
+             ROUND(x, 2) AS round2_x, \
+             SQRT(x) AS sqrt_x, \
+             COS(x) AS cos_x, \
+             SIN(x) AS sin_x, \
+             TAN(x) AS tan_x, \
+             FLOOR(x) AS floor_x, \
+             CEIL(x) AS ceil_x, \
+             TRUNC(x) AS trunc_x, \
+             SIGN(x) AS sign_x \
+             FROM vals",
+            &[],
+        )
+        .unwrap();
+
+    for column in &result.columns {
+        assert_eq!(result.rows[0][column], Value::Null, "{column}");
+    }
+}
+
+#[test]
 fn step7_string_functions_coverage_cases() {
     assert_eq!(
         scalar("SELECT initcap('hello world') FROM t"),

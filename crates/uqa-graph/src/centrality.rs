@@ -236,69 +236,70 @@ impl<'a> BetweennessCentrality<'a> {
             return single_vertex_result(vertices[0], 0.0, &vertices, self.graph);
         }
 
-        let mut out_neighbors: BTreeMap<VertexId, Vec<VertexId>> = BTreeMap::new();
-        for v in &vertices {
-            let mut outs = Vec::new();
-            for eid in store.out_edge_ids(*v, self.graph) {
+        let vertex_index: BTreeMap<VertexId, usize> = vertices
+            .iter()
+            .enumerate()
+            .map(|(idx, vertex_id)| (*vertex_id, idx))
+            .collect();
+        let mut out_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (idx, vertex_id) in vertices.iter().enumerate() {
+            for eid in store.out_edge_ids(*vertex_id, self.graph) {
                 if let Some(edge) = store.get_edge(eid) {
-                    outs.push(edge.target_id);
+                    if let Some(target_idx) = vertex_index.get(&edge.target_id) {
+                        out_neighbors[idx].push(*target_idx);
+                    }
                 }
             }
-            out_neighbors.insert(*v, outs);
         }
 
-        let mut cb: BTreeMap<VertexId, f64> = vertices.iter().map(|v| (*v, 0.0)).collect();
-        for s in &vertices {
-            let mut stack: Vec<VertexId> = Vec::new();
-            let mut predecessors: BTreeMap<VertexId, Vec<VertexId>> =
-                vertices.iter().map(|v| (*v, Vec::new())).collect();
-            let mut sigma: BTreeMap<VertexId, u64> = vertices.iter().map(|v| (*v, 0)).collect();
-            sigma.insert(*s, 1);
-            let mut dist: BTreeMap<VertexId, i64> = vertices.iter().map(|v| (*v, -1)).collect();
-            dist.insert(*s, 0);
-            let mut queue: VecDeque<VertexId> = VecDeque::new();
-            queue.push_back(*s);
+        let mut cb = vec![0.0; n];
+        for s in 0..n {
+            let mut stack: Vec<usize> = Vec::with_capacity(n);
+            let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); n];
+            let mut sigma = vec![0u64; n];
+            sigma[s] = 1;
+            let mut dist = vec![-1i64; n];
+            dist[s] = 0;
+            let mut queue: VecDeque<usize> = VecDeque::new();
+            queue.push_back(s);
             while let Some(v) = queue.pop_front() {
                 stack.push(v);
-                let neighbors = out_neighbors.get(&v).cloned().unwrap_or_default();
-                for w in neighbors {
-                    if dist[&w] < 0 {
-                        dist.insert(w, dist[&v] + 1);
+                for &w in &out_neighbors[v] {
+                    if dist[w] < 0 {
+                        dist[w] = dist[v] + 1;
                         queue.push_back(w);
                     }
-                    if dist[&w] == dist[&v] + 1 {
-                        let sv = sigma[&v];
-                        *sigma.get_mut(&w).unwrap() += sv;
-                        predecessors.get_mut(&w).unwrap().push(v);
+                    if dist[w] == dist[v] + 1 {
+                        sigma[w] += sigma[v];
+                        predecessors[w].push(v);
                     }
                 }
             }
-            let mut delta: BTreeMap<VertexId, f64> = vertices.iter().map(|v| (*v, 0.0)).collect();
+            let mut delta = vec![0.0; n];
             while let Some(w) = stack.pop() {
-                if let Some(preds) = predecessors.get(&w).cloned() {
-                    for v in preds {
-                        if sigma[&w] > 0 {
-                            let contrib = (sigma[&v] as f64 / sigma[&w] as f64) * (1.0 + delta[&w]);
-                            *delta.get_mut(&v).unwrap() += contrib;
-                        }
+                for &v in &predecessors[w] {
+                    if sigma[w] > 0 {
+                        let contrib = (sigma[v] as f64 / sigma[w] as f64) * (1.0 + delta[w]);
+                        delta[v] += contrib;
                     }
                 }
-                if w != *s {
-                    *cb.get_mut(&w).unwrap() += delta[&w];
+                if w != s {
+                    cb[w] += delta[w];
                 }
             }
         }
 
         let normalization = ((n - 1) * n.saturating_sub(2)) as f64;
         if normalization > 0.0 {
-            for v in &vertices {
-                *cb.get_mut(v).unwrap() /= normalization;
+            for value in &mut cb {
+                *value /= normalization;
             }
         }
-        for v in &vertices {
-            let value = cb[v].clamp(0.0, 1.0);
-            cb.insert(*v, value);
-        }
+        let cb: BTreeMap<VertexId, f64> = vertices
+            .iter()
+            .zip(cb)
+            .map(|(vertex_id, score)| (*vertex_id, score.clamp(0.0, 1.0)))
+            .collect();
         build_score_result(&vertices, &cb, &[], self.graph, &BTreeMap::new())
     }
 }

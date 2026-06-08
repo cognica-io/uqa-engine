@@ -6,14 +6,17 @@
 
 //! SQL SELECT, set-operation, CTE, ordering, and projection execution.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use super::{
     aggregate_join_rows, build_aggregate_rows, build_join_rows, build_join_rows_with_ctes,
     compute_window_columns, engine_func_intercept, eval, execute_function,
-    execute_lateral_subquery, execute_mixed_where, expect_column_name, has_aggregate, has_window,
-    project_join_row_with_engine, projection_label_at, BTreeMap, BinaryOp, Document, Engine,
-    EvalContext, Expr, FromClause, Projection, ResultRow, SQLError, SQLParam, SQLResult,
-    ScoredEntry, SelectStmt, SetOpKind, Statement, Value, CTE, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN,
+    execute_function_with_top_k, execute_lateral_subquery, execute_mixed_where, expect_column_name,
+    has_aggregate, has_window, project_join_row_with_engine, projection_label_at, BTreeMap,
+    BinaryOp, Document, Engine, EvalContext, Expr, FromClause, Projection, ResultRow, SQLError,
+    SQLParam, SQLResult, ScoredEntry, SelectStmt, SetOpKind, Statement, Value, CTE, DOC_ID_COLUMN,
+    MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 
 // -------------------------------------------------------------------------
@@ -85,16 +88,21 @@ pub(super) fn run_select(
     stmt: SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if !stmt.with.is_empty() || stmt.set_op.is_some() {
+    let defer_distinct_limit = should_defer_distinct_limit(&stmt);
+    let exec_stmt = select_execution_stmt(&stmt, defer_distinct_limit);
+
+    if !exec_stmt.with.is_empty() || exec_stmt.set_op.is_some() {
         let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-        return execute_select(engine, &stmt, params, &mut ctes);
+        let result = execute_select(engine, &exec_stmt, params, &mut ctes)?;
+        return finish_select_result(engine, &stmt, result, params, true, defer_distinct_limit);
     }
 
-    let Some(from) = stmt.from.as_ref() else {
+    let Some(from) = exec_stmt.from.as_ref() else {
         // SELECT without FROM -- evaluate the projection list against
         // an empty single-row context. Mirrors the canonical UQA implementation's standalone
         // SELECT 1 / SELECT (SELECT ...).
-        return run_select_without_from(engine, &stmt, params);
+        let result = run_select_without_from(engine, &exec_stmt, params)?;
+        return finish_select_result(engine, &stmt, result, params, false, defer_distinct_limit);
     };
 
     // Single-table FROM with no alias and no window function keeps the
@@ -103,7 +111,15 @@ pub(super) fn run_select(
     // filters them via the expression evaluator.
     if let FromClause::Table { name, alias } = from {
         if alias.is_none() && engine.foreign_table(name).is_some() {
-            return run_single_foreign_select(engine, name, &stmt, params);
+            let result = run_single_foreign_select(engine, name, &exec_stmt, params)?;
+            return finish_select_result(
+                engine,
+                &stmt,
+                result,
+                params,
+                false,
+                defer_distinct_limit,
+            );
         }
         // Schema-qualified names (information_schema.tables /
         // pg_catalog.pg_*) and CTE references skip the search-aware
@@ -111,12 +127,43 @@ pub(super) fn run_select(
         // engine table.
         let is_virtual = name.contains('.')
             || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
-        if alias.is_none() && !has_window(&stmt.projections) && !is_virtual {
-            return run_single_table_select(engine, name, &stmt, params);
+        let has_subquery_filter = exec_stmt
+            .r#where
+            .as_ref()
+            .is_some_and(expr_contains_subquery);
+        if alias.is_none()
+            && !has_window(&exec_stmt.projections)
+            && !is_virtual
+            && !has_subquery_filter
+        {
+            let result = run_single_table_select(engine, name, &exec_stmt, params)?;
+            return finish_select_result(
+                engine,
+                &stmt,
+                result,
+                params,
+                false,
+                defer_distinct_limit,
+            );
         }
     }
 
-    run_joined_select(engine, from, &stmt, params)
+    let result = run_joined_select(engine, from, &exec_stmt, params)?;
+    finish_select_result(engine, &stmt, result, params, false, defer_distinct_limit)
+}
+
+fn should_defer_distinct_limit(stmt: &SelectStmt) -> bool {
+    stmt.distinct && (stmt.limit.is_some() || stmt.offset.is_some())
+}
+
+fn select_execution_stmt(stmt: &SelectStmt, defer_distinct_limit: bool) -> SelectStmt {
+    if !defer_distinct_limit {
+        return stmt.clone();
+    }
+    let mut exec_stmt = stmt.clone();
+    exec_stmt.limit = None;
+    exec_stmt.offset = None;
+    exec_stmt
 }
 
 fn run_select_without_from(
@@ -152,11 +199,7 @@ pub(super) fn execute_select(
     // clauses applied; the merged result then takes the combined
     // clauses below.
     let mut lhs = run_query_block(engine, stmt, params, ctes)?;
-    if stmt.distinct {
-        // SELECT DISTINCT: collapse duplicate output rows.
-        // Stable so the relative order of survivors matches PG.
-        lhs.rows = distinct_rows_stable(lhs.rows);
-    }
+    lhs = apply_select_distinct(engine, stmt, lhs, params)?;
 
     let Some(set_op) = stmt.set_op.as_ref() else {
         return Ok(lhs);
@@ -218,6 +261,7 @@ pub(super) fn execute_select(
             with: Vec::new(),
             set_op: None,
             distinct: false,
+            distinct_on: Vec::new(),
         };
         let columns = combined.columns.clone();
         combined.rows = apply_row_order_limit(combined.rows, &synthetic, engine, params)?;
@@ -227,18 +271,157 @@ pub(super) fn execute_select(
 }
 
 fn distinct_rows_stable(rows: Vec<ResultRow>) -> Vec<ResultRow> {
-    let mut seen = Vec::with_capacity(rows.len());
+    const HASH_THRESHOLD: usize = 64;
+    let row_count = rows.len();
+    let mut seen_keys: Option<std::collections::HashSet<String>> = None;
+    let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        if !seen.iter().any(|existing| existing == &row) {
-            seen.push(row);
+        if let Some(seen) = seen_keys.as_mut() {
+            if seen.insert(distinct_row_key(&row)) {
+                out.push(row);
+            }
+            continue;
+        }
+        if out.iter().any(|existing| existing == &row) {
+            continue;
+        }
+        if out.len() >= HASH_THRESHOLD {
+            let mut seen = std::collections::HashSet::with_capacity(row_count);
+            for existing in &out {
+                seen.insert(distinct_row_key(existing));
+            }
+            seen.insert(distinct_row_key(&row));
+            seen_keys = Some(seen);
+            out.push(row);
+        } else {
+            out.push(row);
         }
     }
-    seen
+    out
 }
+
+fn apply_select_distinct(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    mut result: SQLResult,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    if stmt.distinct {
+        result.rows = if stmt.distinct_on.is_empty() {
+            distinct_rows_stable(result.rows)
+        } else {
+            distinct_on_rows(engine, result.rows, &stmt.distinct_on, params)?
+        };
+    }
+    Ok(result)
+}
+
+fn finish_select_result(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    mut result: SQLResult,
+    params: &[SQLParam],
+    distinct_already_applied: bool,
+    apply_deferred_limit: bool,
+) -> Result<SQLResult, SQLError> {
+    if !distinct_already_applied {
+        result = apply_select_distinct(engine, stmt, result, params)?;
+    }
+    if apply_deferred_limit {
+        let columns = result.columns.clone();
+        result.rows = apply_limit_offset_only(result.rows, stmt, engine, params)?;
+        result.columns = columns;
+    }
+    Ok(result)
+}
+
+fn apply_limit_offset_only(
+    rows: Vec<ResultRow>,
+    stmt: &SelectStmt,
+    engine: &Engine,
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let synthetic = SelectStmt {
+        projections: Vec::new(),
+        from: None,
+        r#where: None,
+        group_by: Vec::new(),
+        grouping_sets: Vec::new(),
+        having: None,
+        order_by: Vec::new(),
+        limit: stmt.limit.clone(),
+        offset: stmt.offset.clone(),
+        with: Vec::new(),
+        set_op: None,
+        distinct: false,
+        distinct_on: Vec::new(),
+    };
+    apply_row_order_limit(rows, &synthetic, engine, params)
+}
+
+fn distinct_on_rows(
+    engine: &Engine,
+    rows: Vec<ResultRow>,
+    keys: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut seen: std::collections::HashSet<String> =
+        std::collections::HashSet::with_capacity(rows.len());
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+        let mut key = String::new();
+        for expr in keys {
+            let value = eval(expr, &ctx)?;
+            push_distinct_key_segment(&mut key, &distinct_value_key(&value));
+        }
+        if seen.insert(key) {
+            out.push(row);
+        }
+    }
+    Ok(out)
+}
+
+fn distinct_row_key(row: &ResultRow) -> String {
+    let mut key = String::new();
+    for (column, value) in row {
+        push_distinct_key_segment(&mut key, column);
+        push_distinct_key_segment(&mut key, &distinct_value_key(value));
+    }
+    key
+}
+
+fn push_distinct_key_segment(key: &mut String, segment: &str) {
+    key.push_str(&segment.len().to_string());
+    key.push(':');
+    key.push_str(segment);
+}
+
+fn distinct_value_key(value: &Value) -> String {
+    match value {
+        Value::Null => "\x00".into(),
+        Value::Bool(value) => format!("b:{value}"),
+        Value::Int(value) => format!("i:{value}"),
+        Value::Float(value) => format!("f:{value:.17}"),
+        Value::Str(value) => format!("s:{value}"),
+        Value::Bytes(value) => format!("y:{value:?}"),
+        Value::Temporal(value) => format!("t:{}", value.to_sql_string()),
+        other => format!("o:{other:?}"),
+    }
+}
+
+type SubqueryCache = BTreeMap<String, (Vec<String>, Vec<ResultRow>)>;
 
 struct ScopedEngineHook<'a> {
     engine: &'a Engine,
     ctes: &'a BTreeMap<String, Vec<ResultRow>>,
+    subquery_cache: RefCell<SubqueryCache>,
+}
+
+struct ExistsMembershipFilter {
+    outer_expr: Expr,
+    inner_keys: HashSet<String>,
+    negated: bool,
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
@@ -268,6 +451,30 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
     ) -> std::result::Result<(Vec<String>, Vec<ResultRow>), String> {
+        let correlated = outer_row.is_some() && select_references_outer(stmt);
+        let cache_key = if select_contains_volatile_function(stmt) {
+            None
+        } else if correlated {
+            outer_row.and_then(|row| correlated_subquery_cache_key(stmt, row))
+        } else {
+            Some(format!("uncorrelated:{stmt:?}"))
+        };
+        if let Some(key) = cache_key {
+            if let Some(cached) = self.subquery_cache.borrow().get(&key) {
+                return Ok(cached.clone());
+            }
+            let result = run_correlated_subquery(
+                self.engine,
+                stmt,
+                if correlated { outer_row } else { None },
+                params,
+                self.ctes,
+            )
+            .map(|result| (result.columns, result.rows))
+            .map_err(|e| format!("subquery failed: {e}"))?;
+            self.subquery_cache.borrow_mut().insert(key, result.clone());
+            return Ok(result);
+        }
         run_correlated_subquery(self.engine, stmt, outer_row, params, self.ctes)
             .map(|result| (result.columns, result.rows))
             .map_err(|e| format!("subquery failed: {e}"))
@@ -289,6 +496,904 @@ pub(crate) fn run_correlated_subquery(
     }
 }
 
+fn select_references_outer(stmt: &SelectStmt) -> bool {
+    let mut local_qualifiers = std::collections::BTreeSet::new();
+    if let Some(from) = stmt.from.as_ref() {
+        collect_local_qualifiers(from, &mut local_qualifiers);
+    }
+    let has_local_from = stmt.from.is_some();
+    stmt.projections.iter().any(|projection| {
+        expr_references_outer(&projection.expr, &local_qualifiers, has_local_from)
+    }) || stmt
+        .r#where
+        .as_ref()
+        .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt
+            .group_by
+            .iter()
+            .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt.grouping_sets.iter().any(|set| {
+            set.iter()
+                .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        })
+        || stmt
+            .having
+            .as_ref()
+            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt
+            .order_by
+            .iter()
+            .any(|order| expr_references_outer(&order.expr, &local_qualifiers, has_local_from))
+        || stmt
+            .limit
+            .as_ref()
+            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt
+            .offset
+            .as_ref()
+            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt
+            .distinct_on
+            .iter()
+            .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+}
+
+fn correlated_subquery_cache_key(stmt: &SelectStmt, outer_row: &ResultRow) -> Option<String> {
+    let refs = select_outer_references(stmt);
+    if refs.is_empty() {
+        return None;
+    }
+    let mut key = format!("correlated:{stmt:?}:");
+    for (qualifier, column) in refs {
+        push_distinct_key_segment(&mut key, &qualifier);
+        push_distinct_key_segment(&mut key, &column);
+        let value = outer_reference_value(outer_row, &qualifier, &column);
+        push_distinct_key_segment(&mut key, &distinct_value_key(&value));
+    }
+    Some(key)
+}
+
+fn select_outer_references(stmt: &SelectStmt) -> Vec<(String, String)> {
+    let mut local_qualifiers = std::collections::BTreeSet::new();
+    if let Some(from) = stmt.from.as_ref() {
+        collect_local_qualifiers(from, &mut local_qualifiers);
+    }
+    let has_local_from = stmt.from.is_some();
+    let mut refs = std::collections::BTreeSet::new();
+    for projection in &stmt.projections {
+        collect_expr_outer_references(
+            &projection.expr,
+            &local_qualifiers,
+            has_local_from,
+            &mut refs,
+        );
+    }
+    if let Some(expr) = stmt.r#where.as_ref() {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    for expr in &stmt.group_by {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    for set in &stmt.grouping_sets {
+        for expr in set {
+            collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+        }
+    }
+    if let Some(expr) = stmt.having.as_ref() {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    for order in &stmt.order_by {
+        collect_expr_outer_references(&order.expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    if let Some(expr) = stmt.limit.as_ref() {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    if let Some(expr) = stmt.offset.as_ref() {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    for expr in &stmt.distinct_on {
+        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    refs.into_iter().collect()
+}
+
+fn outer_reference_value(row: &ResultRow, qualifier: &str, column: &str) -> Value {
+    if qualifier.is_empty() {
+        return row.get(column).cloned().unwrap_or(Value::Null);
+    }
+    let lookup_key = format!("{qualifier}.{column}");
+    row.get(&lookup_key)
+        .or_else(|| row.get(column))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn collect_local_qualifiers(from: &FromClause, out: &mut std::collections::BTreeSet<String>) {
+    match from {
+        FromClause::Table { name, alias } => {
+            out.insert(name.clone());
+            if let Some(alias) = alias {
+                out.insert(alias.clone());
+            }
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_local_qualifiers(left, out);
+            collect_local_qualifiers(right, out);
+        }
+        FromClause::Values { alias, .. }
+        | FromClause::Function { alias, .. }
+        | FromClause::Subquery { alias, .. } => {
+            if let Some(alias) = alias {
+                out.insert(alias.clone());
+            }
+        }
+    }
+}
+
+fn collect_expr_outer_references(
+    expr: &Expr,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+    has_local_from: bool,
+    refs: &mut std::collections::BTreeSet<(String, String)>,
+) {
+    match expr {
+        Expr::Column(column) => {
+            if !has_local_from {
+                refs.insert((String::new(), column.clone()));
+            }
+        }
+        Expr::QualifiedColumn { qualifier, column } => {
+            if !local_qualifiers.contains(qualifier) {
+                refs.insert((qualifier.clone(), column.clone()));
+            }
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            for item in items {
+                collect_expr_outer_references(item, local_qualifiers, has_local_from, refs);
+            }
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for arg in args {
+                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
+            }
+            for order in order_by {
+                collect_expr_outer_references(&order.expr, local_qualifiers, has_local_from, refs);
+            }
+            if let Some(filter) = filter.as_ref() {
+                collect_expr_outer_references(filter, local_qualifiers, has_local_from, refs);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_expr_outer_references(lhs, local_qualifiers, has_local_from, refs);
+            collect_expr_outer_references(rhs, local_qualifiers, has_local_from, refs);
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            collect_expr_outer_references(inner, local_qualifiers, has_local_from, refs);
+        }
+        Expr::Between { expr, low, high } => {
+            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
+            collect_expr_outer_references(low, local_qualifiers, has_local_from, refs);
+            collect_expr_outer_references(high, local_qualifiers, has_local_from, refs);
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
+            for item in list {
+                collect_expr_outer_references(item, local_qualifiers, has_local_from, refs);
+            }
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            for arg in args {
+                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
+            }
+            for arg in &spec.partition_by {
+                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
+            }
+            for order in &spec.order_by {
+                collect_expr_outer_references(&order.expr, local_qualifiers, has_local_from, refs);
+            }
+            if let Some(frame) = spec.frame.as_ref() {
+                collect_frame_bound_outer_references(
+                    &frame.start,
+                    local_qualifiers,
+                    has_local_from,
+                    refs,
+                );
+                collect_frame_bound_outer_references(
+                    &frame.end,
+                    local_qualifiers,
+                    has_local_from,
+                    refs,
+                );
+            }
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base.as_ref() {
+                collect_expr_outer_references(base, local_qualifiers, has_local_from, refs);
+            }
+            for (cond, result) in when {
+                collect_expr_outer_references(cond, local_qualifiers, has_local_from, refs);
+                collect_expr_outer_references(result, local_qualifiers, has_local_from, refs);
+            }
+            if let Some(else_branch) = else_branch.as_ref() {
+                collect_expr_outer_references(else_branch, local_qualifiers, has_local_from, refs);
+            }
+        }
+        Expr::Star
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. }
+        | Expr::InSubquery { .. } => {}
+    }
+}
+
+fn collect_frame_bound_outer_references(
+    bound: &uqa_sql::ast::FrameBound,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+    has_local_from: bool,
+    refs: &mut std::collections::BTreeSet<(String, String)>,
+) {
+    match bound {
+        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
+        }
+        uqa_sql::ast::FrameBound::UnboundedPreceding
+        | uqa_sql::ast::FrameBound::UnboundedFollowing
+        | uqa_sql::ast::FrameBound::CurrentRow => {}
+    }
+}
+
+fn prepare_exists_membership_filter(
+    engine: &Engine,
+    filter: &Expr,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Option<ExistsMembershipFilter>, SQLError> {
+    let Expr::Exists { body, negated } = filter else {
+        return Ok(None);
+    };
+    if !body.with.is_empty()
+        || body.set_op.is_some()
+        || body.distinct
+        || !body.distinct_on.is_empty()
+        || !body.group_by.is_empty()
+        || !body.grouping_sets.is_empty()
+        || body.having.is_some()
+        || !body.order_by.is_empty()
+        || body.limit.is_some()
+        || body.offset.is_some()
+        || select_contains_volatile_function(body)
+    {
+        return Ok(None);
+    }
+    let Some(from) = body.from.as_ref() else {
+        return Ok(None);
+    };
+    let Some(where_expr) = body.r#where.as_ref() else {
+        return Ok(None);
+    };
+
+    let mut local_qualifiers = std::collections::BTreeSet::new();
+    collect_local_qualifiers(from, &mut local_qualifiers);
+    let Some((inner_expr, outer_expr, local_filter)) =
+        split_exists_membership_where(where_expr, &local_qualifiers)
+    else {
+        return Ok(None);
+    };
+
+    let inner_rows = build_join_rows_with_ctes(engine, from, params, ctes)?;
+    let mut inner_keys = HashSet::with_capacity(inner_rows.len());
+    for row in &inner_rows {
+        if let Some(local_filter) = local_filter.as_ref() {
+            let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+            if !eval(local_filter, &ctx).is_ok_and(|value| uqa_sql::expr::truthy(&value)) {
+                continue;
+            }
+        }
+        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+        let value = eval(&inner_expr, &ctx)?;
+        if !matches!(value, Value::Null) {
+            inner_keys.insert(distinct_value_key(&value));
+        }
+    }
+
+    Ok(Some(ExistsMembershipFilter {
+        outer_expr,
+        inner_keys,
+        negated: *negated,
+    }))
+}
+
+fn split_exists_membership_where(
+    expr: &Expr,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+) -> Option<(Expr, Expr, Option<Expr>)> {
+    match expr {
+        Expr::And(items) => {
+            let mut equality = None;
+            let mut local_filters = Vec::new();
+            for item in items {
+                if let Some((inner_expr, outer_expr)) =
+                    split_correlated_column_equality(item, local_qualifiers)
+                {
+                    if equality.is_some() {
+                        return None;
+                    }
+                    equality = Some((inner_expr, outer_expr));
+                } else if !expr_references_outer(item, local_qualifiers, true)
+                    && !expr_contains_subquery(item)
+                    && !expr_contains_volatile_function(item)
+                {
+                    local_filters.push(item.clone());
+                } else {
+                    return None;
+                }
+            }
+            let (inner_expr, outer_expr) = equality?;
+            let local_filter = match local_filters.len() {
+                0 => None,
+                1 => local_filters.into_iter().next(),
+                _ => Some(Expr::And(local_filters)),
+            };
+            Some((inner_expr, outer_expr, local_filter))
+        }
+        other => split_correlated_column_equality(other, local_qualifiers)
+            .map(|(inner_expr, outer_expr)| (inner_expr, outer_expr, None)),
+    }
+}
+
+fn split_correlated_column_equality(
+    expr: &Expr,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+) -> Option<(Expr, Expr)> {
+    let Expr::Binary {
+        op: BinaryOp::Equal,
+        lhs,
+        rhs,
+    } = expr
+    else {
+        return None;
+    };
+    match (
+        classify_exists_column_ref(lhs, local_qualifiers)?,
+        classify_exists_column_ref(rhs, local_qualifiers)?,
+    ) {
+        (ExistsColumnSide::Inner, ExistsColumnSide::Outer) => {
+            Some(((**lhs).clone(), (**rhs).clone()))
+        }
+        (ExistsColumnSide::Outer, ExistsColumnSide::Inner) => {
+            Some(((**rhs).clone(), (**lhs).clone()))
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExistsColumnSide {
+    Inner,
+    Outer,
+}
+
+fn classify_exists_column_ref(
+    expr: &Expr,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+) -> Option<ExistsColumnSide> {
+    match expr {
+        Expr::Column(_) => Some(ExistsColumnSide::Inner),
+        Expr::QualifiedColumn { qualifier, .. } => {
+            if local_qualifiers.contains(qualifier) {
+                Some(ExistsColumnSide::Inner)
+            } else {
+                Some(ExistsColumnSide::Outer)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn apply_exists_membership_filter(
+    engine: &Engine,
+    rows: Vec<ResultRow>,
+    filter: &ExistsMembershipFilter,
+    params: &[SQLParam],
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
+        let value = eval(&filter.outer_expr, &ctx)?;
+        let contains = if matches!(value, Value::Null) {
+            false
+        } else {
+            filter.inner_keys.contains(&distinct_value_key(&value))
+        };
+        if contains != filter.negated {
+            out.push(row);
+        }
+    }
+    Ok(out)
+}
+
+fn precompute_uncorrelated_subqueries(
+    engine: &Engine,
+    expr: &Expr,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Expr, SQLError> {
+    match expr {
+        Expr::ScalarSubquery(body)
+            if !select_references_outer(body) && !select_contains_volatile_function(body) =>
+        {
+            Ok(Expr::Literal(evaluate_scalar_subquery_once(
+                engine, body, params, ctes,
+            )?))
+        }
+        Expr::Exists { body, negated }
+            if !select_references_outer(body) && !select_contains_volatile_function(body) =>
+        {
+            let result = run_correlated_subquery(engine, body, None, params, ctes)?;
+            let exists = !result.rows.is_empty();
+            Ok(Expr::Literal(Value::Bool(if *negated {
+                !exists
+            } else {
+                exists
+            })))
+        }
+        Expr::Array(items) => Ok(Expr::Array(
+            items
+                .iter()
+                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
+                .collect::<Result<_, _>>()?,
+        )),
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => Ok(Expr::Func {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| precompute_uncorrelated_subqueries(engine, arg, params, ctes))
+                .collect::<Result<_, _>>()?,
+            distinct: *distinct,
+            order_by: order_by.clone(),
+            filter: filter
+                .as_ref()
+                .map(|filter| precompute_uncorrelated_subqueries(engine, filter, params, ctes))
+                .transpose()?
+                .map(Box::new),
+        }),
+        Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
+            op: *op,
+            lhs: Box::new(precompute_uncorrelated_subqueries(
+                engine, lhs, params, ctes,
+            )?),
+            rhs: Box::new(precompute_uncorrelated_subqueries(
+                engine, rhs, params, ctes,
+            )?),
+        }),
+        Expr::Not(inner) => Ok(Expr::Not(Box::new(precompute_uncorrelated_subqueries(
+            engine, inner, params, ctes,
+        )?))),
+        Expr::And(items) => Ok(Expr::And(
+            items
+                .iter()
+                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
+                .collect::<Result<_, _>>()?,
+        )),
+        Expr::Or(items) => Ok(Expr::Or(
+            items
+                .iter()
+                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
+                .collect::<Result<_, _>>()?,
+        )),
+        Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
+            expr: Box::new(precompute_uncorrelated_subqueries(
+                engine, expr, params, ctes,
+            )?),
+            negated: *negated,
+        }),
+        Expr::Between { expr, low, high } => Ok(Expr::Between {
+            expr: Box::new(precompute_uncorrelated_subqueries(
+                engine, expr, params, ctes,
+            )?),
+            low: Box::new(precompute_uncorrelated_subqueries(
+                engine, low, params, ctes,
+            )?),
+            high: Box::new(precompute_uncorrelated_subqueries(
+                engine, high, params, ctes,
+            )?),
+        }),
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => Ok(Expr::InList {
+            expr: Box::new(precompute_uncorrelated_subqueries(
+                engine, expr, params, ctes,
+            )?),
+            list: list
+                .iter()
+                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
+                .collect::<Result<_, _>>()?,
+            negated: *negated,
+        }),
+        Expr::WindowCall { name, args, spec } => Ok(Expr::WindowCall {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| precompute_uncorrelated_subqueries(engine, arg, params, ctes))
+                .collect::<Result<_, _>>()?,
+            spec: spec.clone(),
+        }),
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => Ok(Expr::Case {
+            base: base
+                .as_ref()
+                .map(|expr| precompute_uncorrelated_subqueries(engine, expr, params, ctes))
+                .transpose()?
+                .map(Box::new),
+            when: when
+                .iter()
+                .map(|(cond, result)| {
+                    Ok((
+                        precompute_uncorrelated_subqueries(engine, cond, params, ctes)?,
+                        precompute_uncorrelated_subqueries(engine, result, params, ctes)?,
+                    ))
+                })
+                .collect::<Result<_, SQLError>>()?,
+            else_branch: else_branch
+                .as_ref()
+                .map(|expr| precompute_uncorrelated_subqueries(engine, expr, params, ctes))
+                .transpose()?
+                .map(Box::new),
+        }),
+        Expr::Cast { expr, ty } => Ok(Expr::Cast {
+            expr: Box::new(precompute_uncorrelated_subqueries(
+                engine, expr, params, ctes,
+            )?),
+            ty: ty.clone(),
+        }),
+        _ => Ok(expr.clone()),
+    }
+}
+
+fn evaluate_scalar_subquery_once(
+    engine: &Engine,
+    body: &SelectStmt,
+    params: &[SQLParam],
+    ctes: &BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Value, SQLError> {
+    let result = run_correlated_subquery(engine, body, None, params, ctes)?;
+    if result.rows.is_empty() {
+        return Ok(Value::Null);
+    }
+    if result.rows.len() > 1 {
+        return Err(SQLError::TypeMismatch(
+            "scalar subquery returned more than one row".into(),
+        ));
+    }
+    let first_col = result
+        .columns
+        .first()
+        .ok_or_else(|| SQLError::TypeMismatch("scalar subquery returned no columns".into()))?;
+    Ok(result.rows[0]
+        .get(first_col)
+        .cloned()
+        .unwrap_or(Value::Null))
+}
+
+fn expr_references_outer(
+    expr: &Expr,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+    has_local_from: bool,
+) -> bool {
+    match expr {
+        Expr::Star | Expr::Literal(_) | Expr::Param(_) => false,
+        Expr::Column(_) => !has_local_from,
+        Expr::QualifiedColumn { qualifier, .. } => !local_qualifiers.contains(qualifier),
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => items
+            .iter()
+            .any(|item| expr_references_outer(item, local_qualifiers, has_local_from)),
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter()
+                .any(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
+                || order_by.iter().any(|order| {
+                    expr_references_outer(&order.expr, local_qualifiers, has_local_from)
+                })
+                || filter
+                    .as_ref()
+                    .is_some_and(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_references_outer(lhs, local_qualifiers, has_local_from)
+                || expr_references_outer(rhs, local_qualifiers, has_local_from)
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_references_outer(inner, local_qualifiers, has_local_from)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_references_outer(expr, local_qualifiers, has_local_from)
+                || expr_references_outer(low, local_qualifiers, has_local_from)
+                || expr_references_outer(high, local_qualifiers, has_local_from)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_references_outer(expr, local_qualifiers, has_local_from)
+                || list
+                    .iter()
+                    .any(|item| expr_references_outer(item, local_qualifiers, has_local_from))
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter()
+                .any(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
+                || spec
+                    .partition_by
+                    .iter()
+                    .any(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
+                || spec.order_by.iter().any(|order| {
+                    expr_references_outer(&order.expr, local_qualifiers, has_local_from)
+                })
+                || spec.frame.as_ref().is_some_and(|frame| {
+                    frame_bound_references_outer(&frame.start, local_qualifiers, has_local_from)
+                        || frame_bound_references_outer(
+                            &frame.end,
+                            local_qualifiers,
+                            has_local_from,
+                        )
+                })
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_references_outer(expr, local_qualifiers, has_local_from))
+                || when.iter().any(|(cond, result)| {
+                    expr_references_outer(cond, local_qualifiers, has_local_from)
+                        || expr_references_outer(result, local_qualifiers, has_local_from)
+                })
+                || else_branch.as_ref().is_some_and(|expr| {
+                    expr_references_outer(expr, local_qualifiers, has_local_from)
+                })
+        }
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
+    }
+}
+
+fn expr_contains_subquery(expr: &Expr) -> bool {
+    match expr {
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_contains_subquery)
+        }
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter().any(expr_contains_subquery)
+                || order_by
+                    .iter()
+                    .any(|order| expr_contains_subquery(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_subquery(expr))
+        }
+        Expr::Binary { lhs, rhs, .. } => expr_contains_subquery(lhs) || expr_contains_subquery(rhs),
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_contains_subquery(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_contains_subquery(expr)
+                || expr_contains_subquery(low)
+                || expr_contains_subquery(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_contains_subquery(expr) || list.iter().any(expr_contains_subquery)
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter().any(expr_contains_subquery)
+                || spec.partition_by.iter().any(expr_contains_subquery)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expr_contains_subquery(&order.expr))
+                || spec.frame.as_ref().is_some_and(|frame| {
+                    frame_bound_contains_subquery(&frame.start)
+                        || frame_bound_contains_subquery(&frame.end)
+                })
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_contains_subquery(expr))
+                || when.iter().any(|(cond, result)| {
+                    expr_contains_subquery(cond) || expr_contains_subquery(result)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_subquery(expr))
+        }
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_) => false,
+    }
+}
+
+fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
+    stmt.projections
+        .iter()
+        .any(|projection| expr_contains_volatile_function(&projection.expr))
+        || stmt
+            .r#where
+            .as_ref()
+            .is_some_and(expr_contains_volatile_function)
+        || stmt.group_by.iter().any(expr_contains_volatile_function)
+        || stmt
+            .grouping_sets
+            .iter()
+            .any(|set| set.iter().any(expr_contains_volatile_function))
+        || stmt
+            .having
+            .as_ref()
+            .is_some_and(expr_contains_volatile_function)
+        || stmt
+            .order_by
+            .iter()
+            .any(|order| expr_contains_volatile_function(&order.expr))
+        || stmt
+            .limit
+            .as_ref()
+            .is_some_and(expr_contains_volatile_function)
+        || stmt
+            .offset
+            .as_ref()
+            .is_some_and(expr_contains_volatile_function)
+        || stmt.distinct_on.iter().any(expr_contains_volatile_function)
+}
+
+fn expr_contains_volatile_function(expr: &Expr) -> bool {
+    match expr {
+        Expr::Func {
+            name,
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "random" | "nextval" | "currval" | "setval"
+            ) || args.iter().any(expr_contains_volatile_function)
+                || order_by
+                    .iter()
+                    .any(|order| expr_contains_volatile_function(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_volatile_function(expr))
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_contains_volatile_function)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_contains_volatile_function(lhs) || expr_contains_volatile_function(rhs)
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_contains_volatile_function(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_contains_volatile_function(expr)
+                || expr_contains_volatile_function(low)
+                || expr_contains_volatile_function(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_contains_volatile_function(expr)
+                || list.iter().any(expr_contains_volatile_function)
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter().any(expr_contains_volatile_function)
+                || spec
+                    .partition_by
+                    .iter()
+                    .any(expr_contains_volatile_function)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expr_contains_volatile_function(&order.expr))
+                || spec.frame.as_ref().is_some_and(|frame| {
+                    frame_bound_contains_volatile_function(&frame.start)
+                        || frame_bound_contains_volatile_function(&frame.end)
+                })
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_contains_volatile_function(expr))
+                || when.iter().any(|(cond, result)| {
+                    expr_contains_volatile_function(cond) || expr_contains_volatile_function(result)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_volatile_function(expr))
+        }
+        Expr::ScalarSubquery(body) => select_contains_volatile_function(body),
+        Expr::Exists { body, .. } => select_contains_volatile_function(body),
+        Expr::InSubquery { expr, body, .. } => {
+            expr_contains_volatile_function(expr) || select_contains_volatile_function(body)
+        }
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_) => false,
+    }
+}
+
+fn frame_bound_contains_volatile_function(bound: &uqa_sql::ast::FrameBound) -> bool {
+    match bound {
+        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+            expr_contains_volatile_function(expr)
+        }
+        uqa_sql::ast::FrameBound::UnboundedPreceding
+        | uqa_sql::ast::FrameBound::UnboundedFollowing
+        | uqa_sql::ast::FrameBound::CurrentRow => false,
+    }
+}
+
+fn frame_bound_contains_subquery(bound: &uqa_sql::ast::FrameBound) -> bool {
+    match bound {
+        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+            expr_contains_subquery(expr)
+        }
+        uqa_sql::ast::FrameBound::UnboundedPreceding
+        | uqa_sql::ast::FrameBound::UnboundedFollowing
+        | uqa_sql::ast::FrameBound::CurrentRow => false,
+    }
+}
+
+fn frame_bound_references_outer(
+    bound: &uqa_sql::ast::FrameBound,
+    local_qualifiers: &std::collections::BTreeSet<String>,
+    has_local_from: bool,
+) -> bool {
+    match bound {
+        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+            expr_references_outer(expr, local_qualifiers, has_local_from)
+        }
+        uqa_sql::ast::FrameBound::UnboundedPreceding
+        | uqa_sql::ast::FrameBound::UnboundedFollowing
+        | uqa_sql::ast::FrameBound::CurrentRow => false,
+    }
+}
+
 fn run_query_block(
     engine: &Engine,
     stmt: &SelectStmt,
@@ -300,7 +1405,11 @@ fn run_query_block(
     };
 
     let joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
-    let scoped_hook = ScopedEngineHook { engine, ctes };
+    let scoped_hook = ScopedEngineHook {
+        engine,
+        ctes,
+        subquery_cache: RefCell::new(BTreeMap::new()),
+    };
 
     // Aggregates and window functions still go through their dedicated
     // routines because they need access to the SQL function registry
@@ -310,14 +1419,24 @@ fn run_query_block(
     // built on the operators in `uqa-execution` so the planner-driven
     // execution layer is exercised on every projection-only SELECT.
     let filtered = if let Some(filter) = stmt.r#where.as_ref() {
-        let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
-        for row in joined {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(&scoped_hook);
-            if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
-                out.push(row);
+        if joined.is_empty() {
+            joined
+        } else if let Some(exists_filter) =
+            prepare_exists_membership_filter(engine, filter, params, ctes)?
+        {
+            apply_exists_membership_filter(engine, joined, &exists_filter, params)?
+        } else {
+            let filter = precompute_uncorrelated_subqueries(engine, filter, params, ctes)?;
+            let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
+            for row in joined {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(&scoped_hook);
+                if uqa_sql::expr::eval(&filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
+                    out.push(row);
+                }
             }
+            out
         }
-        out
     } else {
         joined
     };
@@ -468,16 +1587,28 @@ fn volcano_project_sort_limit(
     // FROM relation produced.
     let resolved_offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?;
     let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
+    let top_k_rows = top_k_ordered_source_rows(
+        engine,
+        src_rows,
+        stmt,
+        params,
+        resolved_offset,
+        resolved_limit,
+    )?;
 
     if has_engine_funcs || has_star {
-        let staged = stage_source_rows(
-            src_rows,
-            stmt,
-            engine,
-            params,
-            resolved_offset,
-            resolved_limit,
-        )?;
+        let staged = if let Some(rows) = top_k_rows {
+            rows
+        } else {
+            stage_source_rows(
+                src_rows,
+                stmt,
+                engine,
+                params,
+                resolved_offset,
+                resolved_limit,
+            )?
+        };
         let rows: Vec<ResultRow> = staged
             .iter()
             .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
@@ -493,10 +1624,11 @@ fn volcano_project_sort_limit(
         .first()
         .map(|r| r.keys().cloned().collect())
         .unwrap_or_default();
-    let mut op: Box<dyn PhysicalOperator> =
-        Box::new(TableScan::from_rows(columns, src_rows.to_vec()));
+    let top_k_applied = top_k_rows.is_some();
+    let source_rows = top_k_rows.unwrap_or_else(|| src_rows.to_vec());
+    let mut op: Box<dyn PhysicalOperator> = Box::new(TableScan::from_rows(columns, source_rows));
 
-    if !stmt.order_by.is_empty() {
+    if !top_k_applied && !stmt.order_by.is_empty() {
         let keys: Vec<SortKey> = stmt
             .order_by
             .iter()
@@ -510,7 +1642,7 @@ fn volcano_project_sort_limit(
             .collect();
         op = Box::new(Sort::new(op, keys, params.to_vec()));
     }
-    if resolved_offset.is_some() || resolved_limit.is_some() {
+    if !top_k_applied && (resolved_offset.is_some() || resolved_limit.is_some()) {
         op = Box::new(Limit::new(op, resolved_offset.unwrap_or(0), resolved_limit));
     }
 
@@ -537,7 +1669,7 @@ fn volcano_project_sort_limit(
 fn stage_source_rows(
     src_rows: &[ResultRow],
     stmt: &SelectStmt,
-    _engine: &Engine,
+    engine: &Engine,
     params: &[SQLParam],
     offset: Option<u64>,
     limit: Option<u64>,
@@ -548,6 +1680,9 @@ fn stage_source_rows(
 
     if stmt.order_by.is_empty() && offset.is_none() && limit.is_none() {
         return Ok(src_rows.to_vec());
+    }
+    if let Some(rows) = top_k_ordered_source_rows(engine, src_rows, stmt, params, offset, limit)? {
+        return Ok(rows);
     }
     let columns: Vec<String> = src_rows
         .first()
@@ -577,6 +1712,126 @@ fn stage_source_rows(
         uqa_execution::physical::ExecError::Other(msg) => SQLError::Internal(msg),
     })?;
     Ok(rows)
+}
+
+fn top_k_ordered_source_rows(
+    engine: &Engine,
+    src_rows: &[ResultRow],
+    stmt: &SelectStmt,
+    params: &[SQLParam],
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
+    let Some(limit) = limit else {
+        return Ok(None);
+    };
+    if stmt.order_by.is_empty() {
+        return Ok(None);
+    }
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit as usize;
+    let keep = offset.saturating_add(limit);
+    if keep == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    if keep >= src_rows.len() {
+        return Ok(None);
+    }
+
+    let mut decorated = Vec::with_capacity(src_rows.len());
+    for (idx, row) in src_rows.iter().enumerate() {
+        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+        let mut key_values = Vec::with_capacity(stmt.order_by.len());
+        for order in &stmt.order_by {
+            key_values.push(eval(&order.expr, &ctx)?);
+        }
+        decorated.push((key_values, idx, row.clone()));
+    }
+
+    decorated.select_nth_unstable_by(keep, |a, b| {
+        compare_order_key_values(&a.0, a.1, &b.0, b.1, stmt)
+    });
+    decorated.truncate(keep);
+    decorated.sort_by(|a, b| compare_order_key_values(&a.0, a.1, &b.0, b.1, stmt));
+    if offset > 0 {
+        decorated.drain(0..offset);
+    }
+    Ok(Some(
+        decorated
+            .into_iter()
+            .map(|(_, _, row)| row)
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn compare_order_key_values(
+    left: &[Value],
+    left_idx: usize,
+    right: &[Value],
+    right_idx: usize,
+    stmt: &SelectStmt,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for (i, order) in stmt.order_by.iter().enumerate() {
+        let left_null = matches!(left[i], Value::Null);
+        let right_null = matches!(right[i], Value::Null);
+        let nulls_first = order.nulls.map_or(order.descending, |n| {
+            matches!(n, uqa_sql::ast::NullsOrder::First)
+        });
+        if left_null || right_null {
+            let null_cmp = match (left_null, right_null) {
+                (true, true) => Ordering::Equal,
+                (true, false) => {
+                    if nulls_first {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                }
+                (false, true) => {
+                    if nulls_first {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Less
+                    }
+                }
+                (false, false) => Ordering::Equal,
+            };
+            if null_cmp != Ordering::Equal {
+                return null_cmp;
+            }
+            continue;
+        }
+        let ord = compare_sort_values(&left[i], &right[i]);
+        let ord = if order.descending { ord.reverse() } else { ord };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    left_idx.cmp(&right_idx)
+}
+
+fn compare_sort_values(left: &Value, right: &Value) -> std::cmp::Ordering {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    match (left, right) {
+        (Value::Null, Value::Null) => Equal,
+        (Value::Null, _) => Less,
+        (_, Value::Null) => Greater,
+        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
+        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
+        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
+        (Value::Str(x), Value::Str(y)) => x.cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
+        (Value::Temporal(x), Value::Str(y)) => {
+            x.parse_same_kind(y).map_or(Equal, |parsed| x.cmp(&parsed))
+        }
+        (Value::Str(x), Value::Temporal(y)) => {
+            y.parse_same_kind(x).map_or(Equal, |parsed| parsed.cmp(y))
+        }
+        _ => Equal,
+    }
 }
 
 fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
@@ -772,6 +2027,8 @@ fn run_single_table_select(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let score_top_k = score_order_top_k(stmt, engine, params)?;
+    let score_top_k = score_top_k.filter(|_| score_limited_text_filter(stmt.r#where.as_ref()));
     // Try the operator-tree pipeline first: lower the WHERE clause to
     // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
     // aware / fusion-reordering passes - compatibility), then execute
@@ -779,7 +2036,11 @@ fn run_single_table_select(
     // returns `None` for shapes the operator IR can't represent
     // (arithmetic across columns, sub-queries, window calls, ...) and
     // we fall back to the legacy direct dispatch in that case.
-    let scored = if let Some(rows) =
+    let scored = if let (Some(top_k), Some(Expr::Func { name, args, .. })) =
+        (score_top_k, stmt.r#where.as_ref())
+    {
+        execute_function_with_top_k(engine, table, name, args, params, Some(top_k))?
+    } else if let Some(rows) =
         crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
     {
         rows
@@ -1159,9 +2420,43 @@ pub(super) fn expand_star_columns(
 
 fn order_by_references_field(stmt: &SelectStmt) -> bool {
     stmt.order_by.iter().any(|o| match &o.expr {
-        Expr::Column(name) => name != "_score",
+        Expr::Column(name) => name != SCORE_COLUMN,
         _ => true,
     })
+}
+
+fn score_limited_text_filter(expr: Option<&Expr>) -> bool {
+    let Some(Expr::Func { name, .. }) = expr else {
+        return false;
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "text_match" | "bayesian_match"
+    )
+}
+
+fn score_order_top_k(
+    stmt: &SelectStmt,
+    engine: &Engine,
+    params: &[SQLParam],
+) -> Result<Option<usize>, SQLError> {
+    if stmt.distinct
+        || !stmt.distinct_on.is_empty()
+        || stmt.order_by.is_empty()
+        || order_by_references_field(stmt)
+        || stmt.order_by.iter().any(|order| !order.descending)
+        || has_aggregate(engine, &stmt.projections)
+        || !stmt.group_by.is_empty()
+        || !stmt.grouping_sets.is_empty()
+    {
+        return Ok(None);
+    }
+    let Some(limit) = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")? else {
+        return Ok(None);
+    };
+    let offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?.unwrap_or(0);
+    let top_k = usize::try_from(limit.saturating_add(offset)).unwrap_or(usize::MAX);
+    Ok(Some(top_k))
 }
 
 /// Multi-table SELECT path. Each input table contributes a row set
@@ -1178,10 +2473,31 @@ fn run_joined_select(
     let mut joined = build_join_rows(engine, from, params)?;
 
     if let Some(filter) = stmt.r#where.as_ref() {
-        joined.retain(|row| {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
-            uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
-        });
+        if joined.is_empty() {
+            // No row means no row-level predicate evaluation.
+        } else if let Some(exists_filter) =
+            prepare_exists_membership_filter(engine, filter, params, &BTreeMap::new())?
+        {
+            joined = apply_exists_membership_filter(engine, joined, &exists_filter, params)?;
+        } else if expr_contains_subquery(filter) {
+            let empty_ctes = BTreeMap::new();
+            let filter = precompute_uncorrelated_subqueries(engine, filter, params, &empty_ctes)?;
+            let scoped_hook = ScopedEngineHook {
+                engine,
+                ctes: &empty_ctes,
+                subquery_cache: RefCell::new(BTreeMap::new()),
+            };
+            joined.retain(|row| {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(&scoped_hook);
+                uqa_sql::expr::eval(&filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
+            });
+        } else {
+            joined.retain(|row| {
+                let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+                uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
+            });
+        }
     }
 
     if has_aggregate(engine, &stmt.projections)
@@ -1205,16 +2521,16 @@ fn run_joined_select(
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        from,
-    );
     let mut rows: Vec<ResultRow> = joined
         .iter()
         .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
         .collect::<Result<_, _>>()?;
     rows = apply_row_order_limit(rows, stmt, engine, params)?;
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        from,
+    );
     Ok(SQLResult::from_rows(columns, rows))
 }
 

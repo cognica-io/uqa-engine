@@ -269,6 +269,23 @@ fn evaluate_window_aggregate(
             FrameBound::CurrentRow,
         ),
     };
+    if matches!(mode, FrameMode::Rows)
+        && matches!(start_bound, FrameBound::UnboundedPreceding)
+        && matches!(end_bound, FrameBound::CurrentRow)
+    {
+        if let Some(values) = prefix_numeric_window_values(name, &materialized) {
+            for ((orig, _), value) in indexed.iter().zip(values) {
+                output[*orig] = value;
+            }
+            return Ok(());
+        }
+        let mut acc = AggregateAccumulator::default();
+        for (i, (orig, _)) in indexed.iter().enumerate() {
+            acc.observe(&materialized[i])?;
+            output[*orig] = aggregate_value(name, &acc)?;
+        }
+        return Ok(());
+    }
     for (i, (orig, _)) in indexed.iter().enumerate() {
         let (start, end) = match mode {
             FrameMode::Range => (
@@ -312,6 +329,77 @@ fn evaluate_window_aggregate(
         output[*orig] = aggregate_value(name, &acc)?;
     }
     Ok(())
+}
+
+fn prefix_numeric_window_values(name: &str, values: &[Value]) -> Option<Vec<Value>> {
+    match name {
+        "count" => {
+            let mut count = 0i64;
+            let mut out = Vec::with_capacity(values.len());
+            for value in values {
+                if !matches!(value, Value::Null) {
+                    count += 1;
+                }
+                out.push(Value::Int(count));
+            }
+            Some(out)
+        }
+        "sum" => {
+            let mut count = 0i64;
+            let mut sum = 0.0f64;
+            let mut all_int = true;
+            let mut out = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    Value::Null => {}
+                    Value::Int(n) => {
+                        count += 1;
+                        sum += *n as f64;
+                    }
+                    Value::Float(f) => {
+                        count += 1;
+                        sum += *f;
+                        all_int = false;
+                    }
+                    _ => return None,
+                }
+                if count == 0 {
+                    out.push(Value::Null);
+                } else if all_int {
+                    out.push(Value::Int(sum as i64));
+                } else {
+                    out.push(Value::Float(sum));
+                }
+            }
+            Some(out)
+        }
+        "avg" => {
+            let mut count = 0i64;
+            let mut sum = 0.0f64;
+            let mut out = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    Value::Null => {}
+                    Value::Int(n) => {
+                        count += 1;
+                        sum += *n as f64;
+                    }
+                    Value::Float(f) => {
+                        count += 1;
+                        sum += *f;
+                    }
+                    _ => return None,
+                }
+                if count == 0 {
+                    out.push(Value::Null);
+                } else {
+                    out.push(Value::Float(sum / count as f64));
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

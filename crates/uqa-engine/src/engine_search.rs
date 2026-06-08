@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::cmp::Ordering;
+
 use super::{
     Arc, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport,
     CosineProbabilityOperator, DocId, Engine, ExecutionContext, HybridSearchParams, KNNOperator,
@@ -45,15 +47,28 @@ impl Engine {
     }
 
     fn rank_top_k(pl: &PostingList, top_k: usize) -> Vec<ScoredEntry> {
-        let mut entries: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
-        entries.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.doc_id.cmp(&b.doc_id))
-        });
+        let entries: Vec<ScoredEntry> = pl.iter().map(ScoredEntry::from_entry).collect();
+        Self::rank_scored_entries_top_k(entries, top_k)
+    }
+
+    fn rank_scored_entries_top_k(mut entries: Vec<ScoredEntry>, top_k: usize) -> Vec<ScoredEntry> {
+        if top_k == 0 {
+            return Vec::new();
+        }
+        if top_k < entries.len() {
+            entries.select_nth_unstable_by(top_k, Self::compare_scored_entry_desc);
+            entries.truncate(top_k);
+        }
+        entries.sort_by(Self::compare_scored_entry_desc);
         entries.truncate(top_k);
         entries
+    }
+
+    fn compare_scored_entry_desc(a: &ScoredEntry, b: &ScoredEntry) -> Ordering {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.doc_id.cmp(&b.doc_id))
     }
 
     /// Run a single-term or multi-term `text_match` query against `field`
@@ -66,23 +81,60 @@ impl Engine {
         mode: &ScoringMode,
         top_k: usize,
     ) -> Vec<ScoredEntry> {
-        let Some((ctx, stats_arc)) = self.snapshot_context(table) else {
+        let Some(t) = self.table(table) else {
             return Vec::new();
         };
-        let analyzer = ctx
-            .inverted_index
-            .as_ref()
-            .expect("snapshot_context populates the inverted index")
-            .get_search_analyzer(field);
+        let index = t.inverted_index.read();
+        let analyzer = index.get_search_analyzer(field);
         let analyzed_terms = analyzer.analyze(query);
         if analyzed_terms.is_empty() {
             return Vec::new();
         }
-        let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(query, field));
+
+        let mut source_pl = index.get_posting_list(field, &analyzed_terms[0]);
+        for term in &analyzed_terms[1..] {
+            source_pl = source_pl.union(&index.get_posting_list(field, term));
+        }
+
+        let stats_arc = Arc::new(index.stats());
         let scorer = Self::build_text_scorer(mode, stats_arc);
-        let score_op = ScoreOperator::new(scorer, term_op, analyzed_terms, field);
-        let result = score_op.execute(&ctx);
-        Self::rank_top_k(&result, top_k)
+        let term_idfs: Vec<f64> = analyzed_terms
+            .iter()
+            .map(|term| scorer.idf(index.doc_freq(field, term)))
+            .collect();
+
+        let entries = if analyzed_terms.len() == 1 {
+            let idf = term_idfs[0];
+            source_pl
+                .iter()
+                .map(|entry| {
+                    let term_freq = entry.payload.positions.len() as u64;
+                    let doc_length = index.get_doc_length(entry.doc_id, field);
+                    ScoredEntry {
+                        doc_id: entry.doc_id,
+                        score: scorer.score_with_idf(term_freq, doc_length, idf),
+                    }
+                })
+                .collect()
+        } else {
+            let mut per_term = Vec::with_capacity(analyzed_terms.len());
+            source_pl
+                .iter()
+                .map(|entry| {
+                    per_term.clear();
+                    for (term, idf) in analyzed_terms.iter().zip(&term_idfs) {
+                        let term_freq = index.get_term_freq(entry.doc_id, field, term);
+                        let doc_length = index.get_doc_length(entry.doc_id, field);
+                        per_term.push(scorer.score_with_idf(term_freq, doc_length, *idf));
+                    }
+                    ScoredEntry {
+                        doc_id: entry.doc_id,
+                        score: scorer.combine_scores(&per_term),
+                    }
+                })
+                .collect()
+        };
+        Self::rank_scored_entries_top_k(entries, top_k)
     }
 
     /// Compute calibration diagnostics for a Bayesian BM25 query

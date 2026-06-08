@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{DocId, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
+use uqa_core::{DocId, Edge, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
 
 use std::collections::VecDeque;
 
@@ -239,6 +239,13 @@ impl<'a> GMatch<'a> {
     }
 
     pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+        if let Some(result) = self.try_execute_single_edge(store) {
+            return result;
+        }
+        if let Some(result) = self.try_execute_two_edge_path(store) {
+            return result;
+        }
+
         let candidates = self.compute_candidates(store);
 
         let (positive_edges, negated_edges): (Vec<&EdgePattern>, Vec<&EdgePattern>) =
@@ -300,6 +307,240 @@ impl<'a> GMatch<'a> {
             );
         }
         GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+    }
+
+    fn try_execute_single_edge<G: GraphStore>(&self, store: &G) -> Option<GraphPostingList> {
+        if self.pattern.vertex_patterns.len() != 2 || self.pattern.edge_patterns.len() != 1 {
+            return None;
+        }
+        let edge_pattern = &self.pattern.edge_patterns[0];
+        if edge_pattern.negated || edge_pattern.source_var == edge_pattern.target_var {
+            return None;
+        }
+        let source_pattern = self.vertex_pattern(&edge_pattern.source_var)?;
+        let target_pattern = self.vertex_pattern(&edge_pattern.target_var)?;
+        let edge_list = self.edge_list_for_pattern(store, edge_pattern);
+
+        let mut seen_assignments: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
+        let mut entries: Vec<PostingEntry> = Vec::new();
+        let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
+        for edge in edge_list {
+            if !edge_pattern.satisfies(&edge) {
+                continue;
+            }
+            let Some(source) = store.get_vertex(edge.source_id) else {
+                continue;
+            };
+            if !source_pattern.satisfies(source) {
+                continue;
+            }
+            let Some(target) = store.get_vertex(edge.target_id) else {
+                continue;
+            };
+            if !target_pattern.satisfies(target) {
+                continue;
+            }
+            if !seen_assignments.insert((edge.source_id, edge.target_id)) {
+                continue;
+            }
+
+            let doc_id = (entries.len() + 1) as DocId;
+            let mut fields = BTreeMap::new();
+            fields.insert(
+                edge_pattern.source_var.clone(),
+                Value::Int(edge.source_id as i64),
+            );
+            fields.insert(
+                edge_pattern.target_var.clone(),
+                Value::Int(edge.target_id as i64),
+            );
+            entries.push(PostingEntry::new(
+                doc_id,
+                Payload {
+                    positions: Vec::new(),
+                    score: self.score,
+                    fields,
+                },
+            ));
+            let mut subgraph_vertices = vec![edge.source_id, edge.target_id];
+            subgraph_vertices.sort_unstable();
+            subgraph_vertices.dedup();
+            graph_payloads.insert(
+                doc_id,
+                GraphPayload {
+                    subgraph_vertices,
+                    subgraph_edges: vec![edge.edge_id],
+                    graph_name: self.graph.to_string(),
+                    score_override: Some(self.score),
+                },
+            );
+        }
+
+        Some(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
+    }
+
+    fn try_execute_two_edge_path<G: GraphStore>(&self, store: &G) -> Option<GraphPostingList> {
+        if self.pattern.vertex_patterns.len() != 3 || self.pattern.edge_patterns.len() != 2 {
+            return None;
+        }
+        let edge_patterns = &self.pattern.edge_patterns;
+        if edge_patterns.iter().any(|edge| edge.negated) {
+            return None;
+        }
+        let (first, second) = if edge_patterns[0].target_var == edge_patterns[1].source_var {
+            (&edge_patterns[0], &edge_patterns[1])
+        } else if edge_patterns[1].target_var == edge_patterns[0].source_var {
+            (&edge_patterns[1], &edge_patterns[0])
+        } else {
+            return None;
+        };
+        if first.source_var == first.target_var
+            || second.source_var == second.target_var
+            || first.source_var == second.target_var
+        {
+            return None;
+        }
+        let source_pattern = self.vertex_pattern(&first.source_var)?;
+        let middle_pattern = self.vertex_pattern(&first.target_var)?;
+        let target_pattern = self.vertex_pattern(&second.target_var)?;
+
+        let first_edges = self.edge_list_for_pattern(store, first);
+        let mut seen_assignments: BTreeSet<(VertexId, VertexId, VertexId)> = BTreeSet::new();
+        let mut entries: Vec<PostingEntry> = Vec::new();
+        let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
+
+        for first_edge in first_edges {
+            if !first.satisfies(&first_edge) {
+                continue;
+            }
+            let Some(source) = store.get_vertex(first_edge.source_id) else {
+                continue;
+            };
+            if !source_pattern.satisfies(source) {
+                continue;
+            }
+            let Some(middle) = store.get_vertex(first_edge.target_id) else {
+                continue;
+            };
+            if !middle_pattern.satisfies(middle) {
+                continue;
+            }
+
+            for second_edge_id in store.out_edge_ids(first_edge.target_id, self.graph) {
+                let Some(second_edge) = store.get_edge(second_edge_id) else {
+                    continue;
+                };
+                if !second.satisfies(second_edge) {
+                    continue;
+                }
+                if first_edge.source_id == second_edge.target_id
+                    || first_edge.target_id == second_edge.target_id
+                {
+                    continue;
+                }
+                let Some(target) = store.get_vertex(second_edge.target_id) else {
+                    continue;
+                };
+                if !target_pattern.satisfies(target) {
+                    continue;
+                }
+                let assignment = (
+                    first_edge.source_id,
+                    first_edge.target_id,
+                    second_edge.target_id,
+                );
+                if !seen_assignments.insert(assignment) {
+                    continue;
+                }
+                self.push_two_edge_path_match(
+                    first,
+                    second,
+                    &first_edge,
+                    second_edge,
+                    &mut entries,
+                    &mut graph_payloads,
+                );
+            }
+        }
+
+        Some(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
+    }
+
+    fn push_two_edge_path_match(
+        &self,
+        first: &EdgePattern,
+        second: &EdgePattern,
+        first_edge: &Edge,
+        second_edge: &Edge,
+        entries: &mut Vec<PostingEntry>,
+        graph_payloads: &mut BTreeMap<DocId, GraphPayload>,
+    ) {
+        let doc_id = (entries.len() + 1) as DocId;
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            first.source_var.clone(),
+            Value::Int(first_edge.source_id as i64),
+        );
+        fields.insert(
+            first.target_var.clone(),
+            Value::Int(first_edge.target_id as i64),
+        );
+        fields.insert(
+            second.target_var.clone(),
+            Value::Int(second_edge.target_id as i64),
+        );
+        entries.push(PostingEntry::new(
+            doc_id,
+            Payload {
+                positions: Vec::new(),
+                score: self.score,
+                fields,
+            },
+        ));
+
+        let mut subgraph_edges = vec![first_edge.edge_id, second_edge.edge_id];
+        subgraph_edges.sort_unstable();
+        subgraph_edges.dedup();
+        let mut subgraph_vertices = vec![
+            first_edge.source_id,
+            first_edge.target_id,
+            second_edge.target_id,
+        ];
+        subgraph_vertices.sort_unstable();
+        subgraph_vertices.dedup();
+        graph_payloads.insert(
+            doc_id,
+            GraphPayload {
+                subgraph_vertices,
+                subgraph_edges,
+                graph_name: self.graph.to_string(),
+                score_override: Some(self.score),
+            },
+        );
+    }
+
+    fn edge_list_for_pattern<G: GraphStore>(&self, store: &G, pattern: &EdgePattern) -> Vec<Edge> {
+        match pattern.label.as_deref() {
+            Some(label) => store
+                .edge_ids_by_label(label, self.graph)
+                .into_iter()
+                .filter_map(|edge_id| store.get_edge(edge_id).cloned())
+                .collect(),
+            None => store.edges_in_graph(self.graph),
+        }
+    }
+
+    fn vertex_pattern(&self, variable: &str) -> Option<&crate::pattern::VertexPattern> {
+        self.pattern
+            .vertex_patterns
+            .iter()
+            .find(|pattern| pattern.variable == variable)
     }
 
     fn compute_candidates<G: GraphStore>(&self, store: &G) -> BTreeMap<String, Vec<VertexId>> {

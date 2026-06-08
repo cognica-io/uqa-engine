@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
+use uqa_joins::row_join::JoinKey;
 use uqa_sql::ast::{Expr, FromClause, JoinKind, Projection, SelectStmt};
 use uqa_sql::expr::{eval, EvalContext};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
@@ -981,21 +982,64 @@ fn try_hash_inner_join(
     // evaluate the picked join keys against each row and lift the
     // result into a hashable `JoinKey`; null-valued keys are skipped
     // so they do not match anything.
-    use uqa_joins::row_join::{hash_inner_join, JoinKey};
-    let key_of = |row: &ResultRow, expr: &Expr| -> Option<JoinKey> {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
-        match uqa_sql::expr::eval(expr, &ctx) {
-            Ok(uqa_core::Value::Null) | Err(_) => None,
-            Ok(v) => Some(JoinKey::new(&v)),
-        }
-    };
+    use uqa_joins::row_join::hash_inner_join;
+    let left_accessor = JoinKeyAccessor::new(left_key);
+    let right_accessor = JoinKeyAccessor::new(right_key);
     let out = hash_inner_join(
         left_rows,
         right_rows,
-        |row| key_of(row, left_key),
-        |row| key_of(row, right_key),
+        |row| left_accessor.key(row, engine, params),
+        |row| right_accessor.key(row, engine, params),
     );
     Ok(Some(out))
+}
+
+enum JoinKeyAccessor<'a> {
+    Column(&'a str),
+    QualifiedColumn(String),
+    Expr(&'a Expr),
+}
+
+impl<'a> JoinKeyAccessor<'a> {
+    fn new(expr: &'a Expr) -> Self {
+        match expr {
+            Expr::Column(name) => Self::Column(name.as_str()),
+            Expr::QualifiedColumn { qualifier, column } => {
+                Self::QualifiedColumn(format!("{qualifier}.{column}"))
+            }
+            _ => Self::Expr(expr),
+        }
+    }
+
+    fn key(&self, row: &ResultRow, engine: &Engine, params: &[SQLParam]) -> Option<JoinKey> {
+        match self {
+            Self::Column(name) => value_to_join_key(column_value(row, name)),
+            Self::QualifiedColumn(key) => value_to_join_key(row.get(key)),
+            Self::Expr(expr) => {
+                let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+                match eval(expr, &ctx) {
+                    Ok(Value::Null) | Err(_) => None,
+                    Ok(value) => Some(JoinKey::new(&value)),
+                }
+            }
+        }
+    }
+}
+
+fn column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
+    if let Some(value) = row.get(name) {
+        return Some(value);
+    }
+    row.iter()
+        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
+        .map(|(_, value)| value)
+}
+
+fn value_to_join_key(value: Option<&Value>) -> Option<JoinKey> {
+    match value {
+        Some(Value::Null) | None => None,
+        Some(value) => Some(JoinKey::new(value)),
+    }
 }
 
 /// Pick which expression evaluates over the left side and which over

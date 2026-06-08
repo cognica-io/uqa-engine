@@ -903,6 +903,42 @@ mod tests {
     }
 
     #[test]
+    fn search_top_k_matches_full_score_prefix() {
+        let eng = Engine::new();
+        eng.create_default_table("articles", vec!["title".into()]);
+        for doc_id in 1..=20 {
+            let body = std::iter::repeat_n("rust", doc_id as usize)
+                .collect::<Vec<_>>()
+                .join(" ");
+            eng.add_document("articles", doc_id, doc([("title", s(&body))]));
+        }
+
+        let full = eng.search(
+            "articles",
+            "title",
+            "rust",
+            &ScoringMode::BM25(BM25Params::default()),
+            usize::MAX,
+        );
+        let top = eng.search(
+            "articles",
+            "title",
+            "rust",
+            &ScoringMode::BM25(BM25Params::default()),
+            3,
+        );
+
+        assert_eq!(top.len(), 3);
+        assert_eq!(
+            top.iter().map(|hit| hit.doc_id).collect::<Vec<_>>(),
+            full.iter()
+                .take(3)
+                .map(|hit| hit.doc_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn search_returns_calibrated_probabilities_under_bayesian_bm25() {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);

@@ -43,6 +43,17 @@ pub const INDEX_JOIN_THRESHOLD: f64 = 100.0;
 /// enumeration switches to the greedy fallback.
 pub const MAX_DP_RELATIONS: usize = 16;
 
+type StarLeaves = Vec<(usize, Vec<JoinEdge>)>;
+type StarShape = (usize, StarLeaves);
+
+#[derive(Clone, Copy)]
+struct StarState {
+    cardinality: f64,
+    cost: f64,
+    prev_mask: usize,
+    leaf_pos: usize,
+}
+
 /// A (sub)plan for joining a set of relations. Mirrors the canonical UQA implementation's
 /// `JoinPlan` dataclass: `relations` is the bitmask of relation
 /// indices in the plan, `cardinality` and `cost` are the running
@@ -127,6 +138,11 @@ impl<'g> DPccp<'g> {
             self.dp
                 .insert(1u64 << i, JoinPlan::leaf(i, self.graph.cardinalities[i]));
         }
+        if n <= MAX_DP_RELATIONS {
+            if let Some(plan) = self.optimize_star(n) {
+                return Some(plan);
+            }
+        }
         if n > MAX_DP_RELATIONS {
             return Some(self.greedy_optimize());
         }
@@ -182,6 +198,120 @@ impl<'g> DPccp<'g> {
             }
             prev_layer = cur_layer;
         }
+    }
+
+    fn optimize_star(&self, n: usize) -> Option<JoinPlan> {
+        let (centre, leaves) = self.star_shape(n)?;
+        let states = 1usize.checked_shl(leaves.len() as u32)?;
+        let mut dp: Vec<Option<StarState>> = vec![None; states];
+        dp[0] = Some(StarState {
+            cardinality: self.graph.cardinalities[centre],
+            cost: self.graph.cardinalities[centre],
+            prev_mask: 0,
+            leaf_pos: usize::MAX,
+        });
+
+        for mask in 0..states {
+            let Some(base) = dp[mask] else {
+                continue;
+            };
+            for (leaf_pos, (leaf_idx, edges)) in leaves.iter().enumerate() {
+                let bit = 1usize << leaf_pos;
+                if mask & bit != 0 {
+                    continue;
+                }
+                let leaf_cardinality = self.graph.cardinalities[*leaf_idx];
+                let mut cardinality = base.cardinality * leaf_cardinality;
+                for edge in edges {
+                    cardinality *= edge.selectivity;
+                }
+                let join_cost = Self::join_cost(base.cardinality, leaf_cardinality).0;
+                let candidate = StarState {
+                    cardinality,
+                    cost: base.cost + leaf_cardinality + join_cost,
+                    prev_mask: mask,
+                    leaf_pos,
+                };
+                let next_mask = mask | bit;
+                let install = match &dp[next_mask] {
+                    Some(existing) => candidate.cost < existing.cost,
+                    None => true,
+                };
+                if install {
+                    dp[next_mask] = Some(candidate);
+                }
+            }
+        }
+
+        dp[states - 1]?;
+        let mut order: Vec<usize> = Vec::with_capacity(leaves.len());
+        let mut mask = states - 1;
+        while mask != 0 {
+            let state = dp[mask]?;
+            order.push(state.leaf_pos);
+            mask = state.prev_mask;
+        }
+        order.reverse();
+
+        let mut plan = JoinPlan::leaf(centre, self.graph.cardinalities[centre]);
+        for leaf_pos in order {
+            let (leaf_idx, edges) = &leaves[leaf_pos];
+            let leaf = JoinPlan::leaf(*leaf_idx, self.graph.cardinalities[*leaf_idx]);
+            plan = Self::join_plans(&plan, &leaf, edges);
+        }
+        Some(plan)
+    }
+
+    fn star_shape(&self, n: usize) -> Option<StarShape> {
+        if n < 3 || self.graph.edges.is_empty() {
+            return None;
+        }
+        let mut neighbor_masks = vec![0u64; n];
+        for edge in &self.graph.edges {
+            if edge.left.count_ones() != 1 || edge.right.count_ones() != 1 {
+                return None;
+            }
+            let left = edge.left.trailing_zeros() as usize;
+            let right = edge.right.trailing_zeros() as usize;
+            if left == right || left >= n || right >= n {
+                return None;
+            }
+            neighbor_masks[left] |= edge.right;
+            neighbor_masks[right] |= edge.left;
+        }
+        let candidates: Vec<usize> = neighbor_masks
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, mask)| (mask.count_ones() as usize == n - 1).then_some(idx))
+            .collect();
+        if candidates.len() != 1 {
+            return None;
+        }
+        for centre in candidates {
+            let centre_mask = 1u64 << centre;
+            let mut by_leaf: BTreeMap<usize, Vec<JoinEdge>> = BTreeMap::new();
+            let mut valid = true;
+            for edge in &self.graph.edges {
+                let leaf_mask = if edge.left == centre_mask {
+                    edge.right
+                } else if edge.right == centre_mask {
+                    edge.left
+                } else {
+                    valid = false;
+                    break;
+                };
+                if leaf_mask == 0 || leaf_mask == centre_mask {
+                    valid = false;
+                    break;
+                }
+                let leaf = leaf_mask.trailing_zeros() as usize;
+                by_leaf.entry(leaf).or_default().push(edge.clone());
+            }
+            if valid && by_leaf.len() == n - 1 {
+                return Some((centre, by_leaf.into_iter().collect()));
+            }
+        }
+        None
     }
 
     /// Enumerate every canonical split `(s1, s2)` of `subset_mask`
@@ -247,13 +377,37 @@ impl<'g> DPccp<'g> {
         edges: &[JoinEdge],
         combined_mask: u64,
     ) {
+        let candidate = Self::join_plans(plan1, plan2, edges);
+        let install = match self.dp.get(&combined_mask) {
+            Some(existing) => candidate.cost < existing.cost,
+            None => true,
+        };
+        if install {
+            self.dp.insert(combined_mask, candidate);
+        }
+    }
+
+    fn join_plans(plan1: &JoinPlan, plan2: &JoinPlan, edges: &[JoinEdge]) -> JoinPlan {
         let mut cardinality = plan1.cardinality * plan2.cardinality;
         for edge in edges {
             cardinality *= edge.selectivity;
         }
         let c1 = plan1.cardinality;
         let c2 = plan2.cardinality;
-        let (join_cost, kind) = if c1 <= c2 {
+        let (join_cost, kind) = Self::join_cost(c1, c2);
+        JoinPlan {
+            relations: plan1.relations | plan2.relations,
+            cardinality,
+            cost: join_cost + plan1.cost + plan2.cost,
+            left: Some(Box::new(plan1.clone())),
+            right: Some(Box::new(plan2.clone())),
+            join_edge: Some(edges[0].clone()),
+            kind: Some(kind),
+        }
+    }
+
+    fn join_cost(c1: f64, c2: f64) -> (f64, OperatorKind) {
+        if c1 <= c2 {
             if c1 <= INDEX_JOIN_THRESHOLD {
                 (c1 * (c2 + 1.0).log2(), OperatorKind::IndexJoin)
             } else {
@@ -263,25 +417,6 @@ impl<'g> DPccp<'g> {
             (c2 * (c1 + 1.0).log2(), OperatorKind::IndexJoin)
         } else {
             (c1 + c2, OperatorKind::HashJoinInner)
-        };
-        let total_cost = join_cost + plan1.cost + plan2.cost;
-        let install = match self.dp.get(&combined_mask) {
-            Some(existing) => total_cost < existing.cost,
-            None => true,
-        };
-        if install {
-            self.dp.insert(
-                combined_mask,
-                JoinPlan {
-                    relations: plan1.relations | plan2.relations,
-                    cardinality,
-                    cost: total_cost,
-                    left: Some(Box::new(plan1.clone())),
-                    right: Some(Box::new(plan2.clone())),
-                    join_edge: Some(edges[0].clone()),
-                    kind: Some(kind),
-                },
-            );
         }
     }
 
@@ -606,5 +741,21 @@ mod tests {
         }
         let plan = enumerate_dpccp(&g).unwrap();
         assert_eq!(plan.relations.count_ones() as usize, n);
+    }
+
+    #[test]
+    fn threshold_sized_star_uses_exact_plan() {
+        let mut g = JoinGraph::new();
+        let centre = g.add_relation("centre", 1_000.0);
+        for i in 1..MAX_DP_RELATIONS {
+            let leaf = g.add_relation(format!("leaf{i}"), 100.0 + i as f64);
+            g.add_edge(centre, leaf, 0.01);
+        }
+
+        let plan = enumerate_dpccp(&g).unwrap();
+
+        assert_eq!(plan.relations.count_ones() as usize, MAX_DP_RELATIONS);
+        assert_eq!(plan.relations, g.full_set());
+        assert!(plan.cost > 0.0);
     }
 }

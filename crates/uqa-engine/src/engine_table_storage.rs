@@ -813,10 +813,10 @@ impl Engine {
     /// given values. Returns the existing doc id when a conflict
     /// exists, `None` when the row would be a fresh insert. Mirrors
     /// `PostgreSQL`'s `ON CONFLICT (col, ...)` lookup; the conflict
-    /// columns map to the unique-constraint target. The UQA-RS implementation
-    /// scans every document because the planner does not yet support
-    /// secondary unique indexes; the lookup is still correct for
-    /// small / medium tables, which is where UPSERT is most useful.
+    /// columns map to the unique-constraint target. The lookup scans
+    /// document ids and compares only the requested fields, so it does
+    /// not materialize whole rows for primary key, unique, or foreign
+    /// key validation.
     pub fn find_conflict(
         &self,
         table: &str,
@@ -827,24 +827,11 @@ impl Engine {
             return None;
         }
         let t = self.table(table)?;
-        let snap = t.document_store.read().snapshot();
-        for doc_id in snap.doc_ids() {
-            let Some(doc) = snap.get(doc_id) else {
-                continue;
-            };
-            let mut all_match = true;
-            for (col, want) in conflict_columns.iter().zip(values.iter()) {
-                let got = doc.get(col).cloned().unwrap_or(Value::Null);
-                if &got != want {
-                    all_match = false;
-                    break;
-                }
-            }
-            if all_match {
-                return Some(doc_id);
-            }
-        }
-        None
+        let found = t
+            .document_store
+            .read()
+            .find_doc_id_by_fields(conflict_columns, values);
+        found
     }
 
     /// Apply per-column updates to an existing document. Mirrors the

@@ -688,7 +688,7 @@ pub(super) fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<Se
             )
         };
 
-    let distinct = !stmt.distinct_clause.is_empty();
+    let (distinct, distinct_on) = compile_distinct_clause(&stmt.distinct_clause)?;
 
     Ok(SelectStmt {
         projections,
@@ -703,7 +703,25 @@ pub(super) fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<Se
         with,
         set_op,
         distinct,
+        distinct_on,
     })
+}
+
+fn compile_distinct_clause(nodes: &[Node]) -> Result<(bool, Vec<Expr>)> {
+    if nodes.is_empty() {
+        return Ok((false, Vec::new()));
+    }
+    let mut distinct_on = Vec::new();
+    for node in nodes {
+        match node.node.as_ref() {
+            None => return Ok((true, Vec::new())),
+            Some(NodeEnum::AConst(c)) if c.isnull || c.val.is_none() => {
+                return Ok((true, Vec::new()));
+            }
+            Some(_) => distinct_on.push(compile_expr(node)?),
+        }
+    }
+    Ok((true, distinct_on))
 }
 
 fn compile_from_list(nodes: &[Node]) -> Result<Option<FromClause>> {

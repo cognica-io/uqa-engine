@@ -75,6 +75,20 @@ pub trait DocumentStore: Send + Sync {
             .any(|id| self.get_field(id, field).as_ref() == Some(value))
     }
 
+    /// Find the first document whose top-level fields match every
+    /// requested value.
+    fn find_doc_id_by_fields(&self, fields: &[String], values: &[Value]) -> Option<DocId> {
+        if fields.is_empty() || fields.len() != values.len() {
+            return None;
+        }
+        self.doc_ids().into_iter().find(|id| {
+            fields
+                .iter()
+                .zip(values.iter())
+                .all(|(field, value)| self.get_field(*id, field).unwrap_or(Value::Null) == *value)
+        })
+    }
+
     /// Evaluate a hierarchical path expression against a document.
     /// Matches UQA behavior for `DocumentStore.eval_path` /
     /// `HierarchicalDocument.eval_path` semantics.
@@ -177,6 +191,19 @@ impl DocumentStore for MemoryDocumentStore {
         self.documents
             .iter()
             .find_map(|(doc_id, doc)| (doc.get(field) == Some(value)).then_some(*doc_id))
+    }
+
+    fn find_doc_id_by_fields(&self, fields: &[String], values: &[Value]) -> Option<DocId> {
+        if fields.is_empty() || fields.len() != values.len() {
+            return None;
+        }
+        self.documents.iter().find_map(|(doc_id, doc)| {
+            fields
+                .iter()
+                .zip(values.iter())
+                .all(|(field, value)| doc.get(field).unwrap_or(&Value::Null) == value)
+                .then_some(*doc_id)
+        })
     }
 
     fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {

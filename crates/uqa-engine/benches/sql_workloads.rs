@@ -8,6 +8,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::fmt::Write;
+use std::sync::atomic::{AtomicI64, Ordering};
 use uqa_engine::Engine;
 
 fn build_engine() -> Engine {
@@ -115,21 +116,21 @@ fn bench_oltp(c: &mut Criterion) {
     }
     group.finish();
 
+    let next_insert_id = AtomicI64::new(100_000);
     c.bench_function("e2e_oltp_insert_single", |bencher| {
-        let mut next_id = 100_000_i64;
         bencher.iter(|| {
+            let next_id = next_insert_id.fetch_add(1, Ordering::Relaxed);
             let sql = format!("INSERT INTO audit (id, value) VALUES ({next_id}, 1)");
-            next_id += 1;
             let result = engine.sql(black_box(&sql), &[]).expect("insert");
             black_box(result.rows.len())
         });
     });
+    let next_delete_id = AtomicI64::new(200_000);
     c.bench_function("e2e_oltp_delete_where", |bencher| {
-        let mut next_id = 200_000_i64;
         bencher.iter(|| {
+            let next_id = next_delete_id.fetch_add(1, Ordering::Relaxed);
             let insert = format!("INSERT INTO audit (id, value) VALUES ({next_id}, 1)");
             let delete = format!("DELETE FROM audit WHERE id = {next_id}");
-            next_id += 1;
             engine.sql(&insert, &[]).expect("insert before delete");
             let result = engine.sql(black_box(&delete), &[]).expect("delete");
             black_box(result.rows.len())
