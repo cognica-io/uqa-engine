@@ -235,6 +235,8 @@ pub enum AlterTableAction {
 pub struct InsertStmt {
     pub table: String,
     pub columns: Vec<String>,
+    /// Common table expressions defined with `WITH [RECURSIVE] ...`.
+    pub with: Vec<CTE>,
     /// Inline `VALUES (...) (...)` rows. Empty when the statement is
     /// an `INSERT ... SELECT` form; in that case `select_source` is
     /// populated with the underlying SELECT.
@@ -593,6 +595,8 @@ pub struct UpdateStmt {
     pub table: String,
     pub assignments: Vec<(String, Expr)>,
     pub r#where: Option<Expr>,
+    /// Common table expressions defined with `WITH [RECURSIVE] ...`.
+    pub with: Vec<CTE>,
     /// `UPDATE t SET ... FROM other [JOIN ...]` -- the engine joins
     /// the target with this clause before applying the assignments.
     pub from: Option<FromClause>,
@@ -604,6 +608,8 @@ pub struct UpdateStmt {
 pub struct DeleteStmt {
     pub table: String,
     pub r#where: Option<Expr>,
+    /// Common table expressions defined with `WITH [RECURSIVE] ...`.
+    pub with: Vec<CTE>,
     /// `DELETE FROM t USING other [JOIN ...]` -- the engine joins
     /// the target with this clause and deletes target rows whose
     /// joined image satisfies WHERE.

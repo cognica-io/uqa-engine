@@ -10,10 +10,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use super::{
-    aggregate_join_rows, build_aggregate_rows, build_join_rows, build_join_rows_with_ctes,
-    compute_window_columns, engine_func_intercept, eval, execute_function,
-    execute_function_with_top_k, execute_lateral_subquery, execute_mixed_where, expect_column_name,
-    has_aggregate, has_window, project_join_row_with_engine, projection_label_at, BTreeMap,
+    aggregate_join_rows, build_aggregate_rows, build_join_rows_with_ctes, compute_window_columns,
+    engine_func_intercept, eval, execute_function, execute_function_with_top_k,
+    execute_lateral_subquery, execute_mixed_where, expect_column_name, has_aggregate, has_window,
+    project_join_row_with_engine, project_join_row_with_hook, projection_label_at, BTreeMap,
     BinaryOp, Document, Engine, EvalContext, Expr, FromClause, Projection, ResultRow, SQLError,
     SQLParam, SQLResult, ScoredEntry, SelectStmt, SetOpKind, Statement, Value, CTE, DOC_ID_COLUMN,
     MERGE_ACTION_COLUMN, SCORE_COLUMN,
@@ -418,8 +418,13 @@ struct ScopedEngineHook<'a> {
     subquery_cache: RefCell<SubqueryCache>,
 }
 
+struct ExistsMembershipPlan {
+    filters: Vec<ExistsMembershipFilter>,
+    residual: Option<Expr>,
+}
+
 struct ExistsMembershipFilter {
-    outer_expr: Expr,
+    outer_exprs: Vec<Expr>,
     inner_keys: HashSet<String>,
     negated: bool,
 }
@@ -756,9 +761,55 @@ fn prepare_exists_membership_filter(
     engine: &Engine,
     filter: &Expr,
     params: &[SQLParam],
-    ctes: &BTreeMap<String, Vec<ResultRow>>,
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
+) -> Result<Option<ExistsMembershipPlan>, SQLError> {
+    match filter {
+        _ if exists_predicate_parts(filter).is_some() => {
+            let Some(filter) = prepare_single_exists_membership(engine, filter, params, ctes)?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(ExistsMembershipPlan {
+                filters: vec![filter],
+                residual: None,
+            }))
+        }
+        Expr::And(items) => {
+            let mut filters = Vec::new();
+            let mut residual = Vec::new();
+            for item in items {
+                if exists_predicate_parts(item).is_some() {
+                    let Some(filter) =
+                        prepare_single_exists_membership(engine, item, params, ctes)?
+                    else {
+                        return Ok(None);
+                    };
+                    filters.push(filter);
+                } else if !expr_contains_subquery(item) && !expr_contains_volatile_function(item) {
+                    residual.push(item.clone());
+                } else {
+                    return Ok(None);
+                }
+            }
+            if filters.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(ExistsMembershipPlan {
+                filters,
+                residual: combine_and_items(residual),
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn prepare_single_exists_membership(
+    engine: &Engine,
+    filter: &Expr,
+    params: &[SQLParam],
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
 ) -> Result<Option<ExistsMembershipFilter>, SQLError> {
-    let Expr::Exists { body, negated } = filter else {
+    let Some((body, negated)) = exists_predicate_parts(filter) else {
         return Ok(None);
     };
     if !body.with.is_empty()
@@ -784,7 +835,7 @@ fn prepare_exists_membership_filter(
 
     let mut local_qualifiers = std::collections::BTreeSet::new();
     collect_local_qualifiers(from, &mut local_qualifiers);
-    let Some((inner_expr, outer_expr, local_filter)) =
+    let Some((inner_exprs, outer_exprs, local_filter)) =
         split_exists_membership_where(where_expr, &local_qualifiers)
     else {
         return Ok(None);
@@ -800,35 +851,44 @@ fn prepare_exists_membership_filter(
             }
         }
         let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-        let value = eval(&inner_expr, &ctx)?;
-        if !matches!(value, Value::Null) {
-            inner_keys.insert(distinct_value_key(&value));
+        if let Some(key) = membership_key_for_exprs(&inner_exprs, &ctx)? {
+            inner_keys.insert(key);
         }
     }
 
     Ok(Some(ExistsMembershipFilter {
-        outer_expr,
+        outer_exprs,
         inner_keys,
-        negated: *negated,
+        negated,
     }))
+}
+
+fn exists_predicate_parts(expr: &Expr) -> Option<(&SelectStmt, bool)> {
+    match expr {
+        Expr::Exists { body, negated } => Some((body, *negated)),
+        Expr::Not(inner) => match inner.as_ref() {
+            Expr::Exists { body, negated } => Some((body, !*negated)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn split_exists_membership_where(
     expr: &Expr,
     local_qualifiers: &std::collections::BTreeSet<String>,
-) -> Option<(Expr, Expr, Option<Expr>)> {
+) -> Option<(Vec<Expr>, Vec<Expr>, Option<Expr>)> {
     match expr {
         Expr::And(items) => {
-            let mut equality = None;
+            let mut inner_exprs = Vec::new();
+            let mut outer_exprs = Vec::new();
             let mut local_filters = Vec::new();
             for item in items {
                 if let Some((inner_expr, outer_expr)) =
-                    split_correlated_column_equality(item, local_qualifiers)
+                    split_correlated_equality(item, local_qualifiers)
                 {
-                    if equality.is_some() {
-                        return None;
-                    }
-                    equality = Some((inner_expr, outer_expr));
+                    inner_exprs.push(inner_expr);
+                    outer_exprs.push(outer_expr);
                 } else if !expr_references_outer(item, local_qualifiers, true)
                     && !expr_contains_subquery(item)
                     && !expr_contains_volatile_function(item)
@@ -838,20 +898,25 @@ fn split_exists_membership_where(
                     return None;
                 }
             }
-            let (inner_expr, outer_expr) = equality?;
-            let local_filter = match local_filters.len() {
-                0 => None,
-                1 => local_filters.into_iter().next(),
-                _ => Some(Expr::And(local_filters)),
-            };
-            Some((inner_expr, outer_expr, local_filter))
+            if inner_exprs.is_empty() {
+                return None;
+            }
+            Some((inner_exprs, outer_exprs, combine_and_items(local_filters)))
         }
-        other => split_correlated_column_equality(other, local_qualifiers)
-            .map(|(inner_expr, outer_expr)| (inner_expr, outer_expr, None)),
+        other => split_correlated_equality(other, local_qualifiers)
+            .map(|(inner_expr, outer_expr)| (vec![inner_expr], vec![outer_expr], None)),
     }
 }
 
-fn split_correlated_column_equality(
+fn combine_and_items(items: Vec<Expr>) -> Option<Expr> {
+    match items.len() {
+        0 => None,
+        1 => items.into_iter().next(),
+        _ => Some(Expr::And(items)),
+    }
+}
+
+fn split_correlated_equality(
     expr: &Expr,
     local_qualifiers: &std::collections::BTreeSet<String>,
 ) -> Option<(Expr, Expr)> {
@@ -864,62 +929,78 @@ fn split_correlated_column_equality(
         return None;
     };
     match (
-        classify_exists_column_ref(lhs, local_qualifiers)?,
-        classify_exists_column_ref(rhs, local_qualifiers)?,
+        classify_exists_expr_side(lhs, local_qualifiers)?,
+        classify_exists_expr_side(rhs, local_qualifiers)?,
     ) {
-        (ExistsColumnSide::Inner, ExistsColumnSide::Outer) => {
-            Some(((**lhs).clone(), (**rhs).clone()))
-        }
-        (ExistsColumnSide::Outer, ExistsColumnSide::Inner) => {
-            Some(((**rhs).clone(), (**lhs).clone()))
-        }
+        (ExistsExprSide::Inner, ExistsExprSide::Outer) => Some(((**lhs).clone(), (**rhs).clone())),
+        (ExistsExprSide::Outer, ExistsExprSide::Inner) => Some(((**rhs).clone(), (**lhs).clone())),
         _ => None,
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ExistsColumnSide {
+enum ExistsExprSide {
     Inner,
     Outer,
 }
 
-fn classify_exists_column_ref(
+fn classify_exists_expr_side(
     expr: &Expr,
     local_qualifiers: &std::collections::BTreeSet<String>,
-) -> Option<ExistsColumnSide> {
-    match expr {
-        Expr::Column(_) => Some(ExistsColumnSide::Inner),
-        Expr::QualifiedColumn { qualifier, .. } => {
-            if local_qualifiers.contains(qualifier) {
-                Some(ExistsColumnSide::Inner)
-            } else {
-                Some(ExistsColumnSide::Outer)
-            }
-        }
-        _ => None,
+) -> Option<ExistsExprSide> {
+    if expr_contains_subquery(expr) || expr_contains_volatile_function(expr) {
+        return None;
+    }
+    if expr_references_outer(expr, local_qualifiers, true) {
+        Some(ExistsExprSide::Outer)
+    } else {
+        Some(ExistsExprSide::Inner)
     }
 }
 
 fn apply_exists_membership_filter(
     engine: &Engine,
     rows: Vec<ResultRow>,
-    filter: &ExistsMembershipFilter,
+    plan: &ExistsMembershipPlan,
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
-        let value = eval(&filter.outer_expr, &ctx)?;
-        let contains = if matches!(value, Value::Null) {
-            false
-        } else {
-            filter.inner_keys.contains(&distinct_value_key(&value))
-        };
-        if contains != filter.negated {
+        if let Some(residual) = plan.residual.as_ref() {
+            if !eval(residual, &ctx).is_ok_and(|value| uqa_sql::expr::truthy(&value)) {
+                continue;
+            }
+        }
+        let mut keep = true;
+        for filter in &plan.filters {
+            let contains = membership_key_for_exprs(&filter.outer_exprs, &ctx)?
+                .is_some_and(|key| filter.inner_keys.contains(&key));
+            if contains == filter.negated {
+                keep = false;
+                break;
+            }
+        }
+        if keep {
             out.push(row);
         }
     }
     Ok(out)
+}
+
+fn membership_key_for_exprs(
+    exprs: &[Expr],
+    ctx: &EvalContext<'_>,
+) -> Result<Option<String>, SQLError> {
+    let mut key = String::new();
+    for expr in exprs {
+        let value = eval(expr, ctx)?;
+        if matches!(value, Value::Null) {
+            return Ok(None);
+        }
+        push_distinct_key_segment(&mut key, &distinct_value_key(&value));
+    }
+    Ok(Some(key))
 }
 
 fn precompute_uncorrelated_subqueries(
@@ -1245,7 +1326,7 @@ fn expr_contains_subquery(expr: &Expr) -> bool {
     }
 }
 
-fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
+pub(super) fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
     stmt.projections
         .iter()
         .any(|projection| expr_contains_volatile_function(&projection.expr))
@@ -1398,18 +1479,13 @@ fn run_query_block(
     engine: &Engine,
     stmt: &SelectStmt,
     params: &[SQLParam],
-    ctes: &BTreeMap<String, Vec<ResultRow>>,
+    ctes: &mut BTreeMap<String, Vec<ResultRow>>,
 ) -> Result<SQLResult, SQLError> {
     let Some(from) = stmt.from.as_ref() else {
         return run_select_without_from(engine, stmt, params);
     };
 
     let joined = build_join_rows_with_ctes(engine, from, params, ctes)?;
-    let scoped_hook = ScopedEngineHook {
-        engine,
-        ctes,
-        subquery_cache: RefCell::new(BTreeMap::new()),
-    };
 
     // Aggregates and window functions still go through their dedicated
     // routines because they need access to the SQL function registry
@@ -1427,6 +1503,11 @@ fn run_query_block(
             apply_exists_membership_filter(engine, joined, &exists_filter, params)?
         } else {
             let filter = precompute_uncorrelated_subqueries(engine, filter, params, ctes)?;
+            let scoped_hook = ScopedEngineHook {
+                engine,
+                ctes,
+                subquery_cache: RefCell::new(BTreeMap::new()),
+            };
             let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
             for row in joined {
                 let ctx =
@@ -1453,17 +1534,25 @@ fn run_query_block(
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(engine, &stmt.projections, filtered, params)?;
-        let mut rows: Vec<ResultRow> = with_windows
+        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
+        let mut rows: Vec<ResultRow> = windowed
+            .rows
             .iter()
-            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+            .map(|src| {
+                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
+            })
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
     // Pure projection: use the Volcano Project + Sort + Limit chain.
-    let projected = volcano_project_sort_limit(engine, &filtered, stmt, params)?;
+    let scoped_hook = ScopedEngineHook {
+        engine,
+        ctes,
+        subquery_cache: RefCell::new(BTreeMap::new()),
+    };
+    let projected = volcano_project_sort_limit(engine, &filtered, stmt, params, &scoped_hook)?;
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,
@@ -1553,6 +1642,7 @@ fn volcano_project_sort_limit(
     src_rows: &[ResultRow],
     stmt: &SelectStmt,
     params: &[SQLParam],
+    projection_hook: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<Vec<ResultRow>, SQLError> {
     // Some projection callsites (e.g. `text_match` in the SELECT
     // list) need the engine-side function registry, which the
@@ -1577,6 +1667,10 @@ fn volcano_project_sort_limit(
         .projections
         .iter()
         .any(|p| matches!(p.expr, Expr::Star));
+    let has_subquery_projection = stmt
+        .projections
+        .iter()
+        .any(|p| expr_contains_subquery(&p.expr));
     // Pre-projection ordering / limiting. PG semantics: ORDER BY can
     // reference columns that the SELECT list drops, so the sort and
     // the limit must happen against the source rows -- the Project
@@ -1596,7 +1690,7 @@ fn volcano_project_sort_limit(
         resolved_limit,
     )?;
 
-    if has_engine_funcs || has_star {
+    if has_engine_funcs || has_star || has_subquery_projection {
         let staged = if let Some(rows) = top_k_rows {
             rows
         } else {
@@ -1611,7 +1705,9 @@ fn volcano_project_sort_limit(
         };
         let rows: Vec<ResultRow> = staged
             .iter()
-            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+            .map(|src| {
+                project_join_row_with_hook(Some(projection_hook), src, &stmt.projections, params)
+            })
             .collect::<Result<_, _>>()?;
         return Ok(rows);
     }
@@ -2148,16 +2244,19 @@ fn run_single_foreign_select(
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(engine, &stmt.projections, filtered, params)?;
-        let mut rows: Vec<ResultRow> = with_windows
+        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
+        let mut rows: Vec<ResultRow> = windowed
+            .rows
             .iter()
-            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+            .map(|src| {
+                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
+            })
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    let rows = volcano_project_sort_limit(engine, &filtered, stmt, params)?;
+    let rows = volcano_project_sort_limit(engine, &filtered, stmt, params, engine)?;
     let columns = expand_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,
@@ -2470,21 +2569,21 @@ fn run_joined_select(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let mut joined = build_join_rows(engine, from, params)?;
+    let mut ctes = BTreeMap::new();
+    let mut joined = build_join_rows_with_ctes(engine, from, params, &mut ctes)?;
 
     if let Some(filter) = stmt.r#where.as_ref() {
         if joined.is_empty() {
             // No row means no row-level predicate evaluation.
         } else if let Some(exists_filter) =
-            prepare_exists_membership_filter(engine, filter, params, &BTreeMap::new())?
+            prepare_exists_membership_filter(engine, filter, params, &mut ctes)?
         {
             joined = apply_exists_membership_filter(engine, joined, &exists_filter, params)?;
         } else if expr_contains_subquery(filter) {
-            let empty_ctes = BTreeMap::new();
-            let filter = precompute_uncorrelated_subqueries(engine, filter, params, &empty_ctes)?;
+            let filter = precompute_uncorrelated_subqueries(engine, filter, params, &ctes)?;
             let scoped_hook = ScopedEngineHook {
                 engine,
-                ctes: &empty_ctes,
+                ctes: &ctes,
                 subquery_cache: RefCell::new(BTreeMap::new()),
             };
             joined.retain(|row| {
@@ -2512,10 +2611,13 @@ fn run_joined_select(
 
     if has_window(&stmt.projections) {
         let columns = projection_columns(&stmt.projections);
-        let with_windows = compute_window_columns(engine, &stmt.projections, joined, params)?;
-        let mut rows: Vec<ResultRow> = with_windows
+        let windowed = compute_window_columns(engine, &stmt.projections, joined, params)?;
+        let mut rows: Vec<ResultRow> = windowed
+            .rows
             .iter()
-            .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+            .map(|src| {
+                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
+            })
             .collect::<Result<_, _>>()?;
         rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));

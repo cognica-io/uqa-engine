@@ -163,7 +163,7 @@ pub(super) fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<
     let name = col.colname.clone();
     let raw_type = raw_type_name(col).unwrap_or_default();
     let ty = compile_type_name(col)?;
-    let auto_increment = matches!(raw_type.as_str(), "serial" | "bigserial");
+    let mut auto_increment = matches!(raw_type.as_str(), "serial" | "bigserial");
     let mut primary_key = false;
     let mut not_null = false;
     let mut unique = false;
@@ -179,6 +179,7 @@ pub(super) fn compile_column_def(col: &pg_query::protobuf::ColumnDef) -> Result<
                 pg_query::protobuf::ConstrType::ConstrPrimary => primary_key = true,
                 pg_query::protobuf::ConstrType::ConstrNotnull => not_null = true,
                 pg_query::protobuf::ConstrType::ConstrUnique => unique = true,
+                pg_query::protobuf::ConstrType::ConstrIdentity => auto_increment = true,
                 pg_query::protobuf::ConstrType::ConstrDefault => {
                     if let Some(raw) = cstr.raw_expr.as_deref() {
                         default = Some(compile_expr(raw)?);
@@ -358,9 +359,14 @@ pub(super) fn compile_insert(stmt: &pg_query::protobuf::InsertStmt) -> Result<In
         .map(|c| compile_on_conflict(c.as_ref()))
         .transpose()?;
     let returning = compile_projections(&stmt.returning_list)?;
+    let with = match stmt.with_clause.as_ref() {
+        Some(wc) => compile_with_clause(wc)?,
+        None => Vec::new(),
+    };
     Ok(InsertStmt {
         table,
         columns,
+        with,
         rows,
         select_source,
         on_conflict,
@@ -943,7 +949,7 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
     })))
 }
 
-fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<CTE>> {
+pub(super) fn compile_with_clause(wc: &pg_query::protobuf::WithClause) -> Result<Vec<CTE>> {
     let mut out = Vec::with_capacity(wc.ctes.len());
     for cte_node in &wc.ctes {
         let Some(inner) = cte_node.node.as_ref() else {
@@ -1226,6 +1232,22 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 .filter_map(|n| extract_string(n).ok())
                 .collect::<Vec<_>>()
                 .join("");
+            if a.lexpr.is_none() {
+                let rhs = a
+                    .rexpr
+                    .as_ref()
+                    .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
+                let rhs = compile_expr(rhs)?;
+                return match op_name.as_str() {
+                    "+" => Ok(rhs),
+                    "-" => Ok(Expr::Binary {
+                        op: BinaryOp::Subtract,
+                        lhs: Box::new(Expr::Literal(Value::Int(0))),
+                        rhs: Box::new(rhs),
+                    }),
+                    other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
+                };
+            }
             let lhs = a
                 .lexpr
                 .as_ref()

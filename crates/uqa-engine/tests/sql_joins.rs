@@ -107,6 +107,88 @@ fn inner_join_excludes_unmatched() {
 }
 
 #[test]
+fn inner_join_uses_composite_expression_key() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE points (id INTEGER PRIMARY KEY, x REAL, y REAL)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO points (id, x, y) VALUES
+            (1, 1.2, 2.8),
+            (2, 4.1, 5.0),
+            (3, 9.9, 9.9)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO tiles (x, y, label) VALUES
+            (1, 2, 'wall'),
+            (4, 5, 'floor'),
+            (9, 8, 'miss')",
+    );
+
+    let result = query(
+        &engine,
+        "SELECT p.id, t.label
+         FROM points p
+         JOIN tiles t
+           ON t.x = CAST(p.x AS INT)
+          AND t.y = CAST(p.y AS INT)
+         ORDER BY p.id",
+    );
+
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0]["label"], Value::Str("wall".into()));
+    assert_eq!(result.rows[1]["label"], Value::Str("floor".into()));
+}
+
+#[test]
+fn left_join_uses_composite_expression_key_and_pads_unmatched() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE points (id INTEGER PRIMARY KEY, x REAL, y REAL)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO points (id, x, y) VALUES
+            (1, 1.2, 2.8),
+            (2, 4.1, 5.0),
+            (3, 9.9, 9.9)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO tiles (x, y, label) VALUES
+            (1, 2, 'wall'),
+            (4, 5, 'floor')",
+    );
+
+    let result = query(
+        &engine,
+        "SELECT p.id, t.label
+         FROM points p
+         LEFT JOIN tiles t
+           ON t.x = CAST(p.x AS INT)
+          AND t.y = CAST(p.y AS INT)
+         ORDER BY p.id",
+    );
+
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0]["label"], Value::Str("wall".into()));
+    assert_eq!(result.rows[1]["label"], Value::Str("floor".into()));
+    assert_eq!(result.rows[2]["label"], Value::Null);
+}
+
+#[test]
 fn left_join_preserves_left() {
     let engine = engine_with_orders();
     let result = query(

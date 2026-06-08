@@ -72,6 +72,30 @@ fn row_number_over_partition() {
 }
 
 #[test]
+fn row_number_inside_projection_expression() {
+    let eng = corpus();
+    let r = eng
+        .sql(
+            "SELECT row_number() OVER (ORDER BY id) - 1 AS zero_based
+             FROM sales
+             ORDER BY zero_based
+             LIMIT 3",
+            &[],
+        )
+        .unwrap();
+
+    let got: Vec<i64> = r
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("zero_based") {
+            Some(Value::Int(value)) => Some(*value),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(got, vec![0, 1, 2]);
+}
+
+#[test]
 fn rank_assigns_ties_then_skips() {
     let eng = corpus();
     // Rank within rep=alice by amount DESC. ids 2 and 3 share amount=200.

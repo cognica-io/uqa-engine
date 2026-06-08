@@ -6,8 +6,32 @@
 
 //! Coverage for `test_views`.
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use uqa_core::Value;
-use uqa_engine::{Engine, SQLResult};
+use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
+use uqa_sql::SQLError;
+
+struct CountCalls {
+    calls: Arc<AtomicUsize>,
+}
+
+impl SQLScalarFunction for CountCalls {
+    fn call(&self, args: &[Value]) -> Result<Value, SQLError> {
+        if !args.is_empty() {
+            return Err(SQLError::BadArity {
+                name: "count_calls".into(),
+                expected: "0 arguments".into(),
+                actual: args.len(),
+            });
+        }
+        let value = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(Value::Int(value as i64))
+    }
+}
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
@@ -311,4 +335,37 @@ fn cte_and_view_together() {
          SELECT name FROM top",
     );
     assert_eq!(names(&r), vec!["Eve"]);
+}
+
+#[test]
+fn view_materializes_once_per_statement() {
+    let engine = engine();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(
+        &engine,
+        "CREATE VIEW counted AS SELECT count_calls() AS marker",
+    );
+
+    let r = exec(
+        &engine,
+        "SELECT a.marker AS left_marker, b.marker AS right_marker
+         FROM counted a CROSS JOIN counted b",
+    );
+
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let r = exec(&engine, "SELECT marker FROM counted");
+    assert_eq!(r.rows[0]["marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }

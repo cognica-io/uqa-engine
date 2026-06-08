@@ -24,7 +24,8 @@ mod types;
 
 use tree::{
     compile_column_def, compile_create_index, compile_create_table, compile_expr,
-    compile_from_node, compile_insert, compile_projections, compile_select, extract_string,
+    compile_from_node, compile_insert, compile_projections, compile_select, compile_with_clause,
+    extract_string,
 };
 
 pub(super) fn range_var_name(r: &RangeVar) -> String {
@@ -599,10 +600,15 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
         None => None,
     };
     let returning = compile_projections(&stmt.returning_list)?;
+    let with = match stmt.with_clause.as_ref() {
+        Some(wc) => compile_with_clause(wc)?,
+        None => Vec::new(),
+    };
     Ok(UpdateStmt {
         table,
         assignments,
         r#where,
+        with,
         from,
         returning,
     })
@@ -624,9 +630,14 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
         None => None,
     };
     let returning = compile_projections(&stmt.returning_list)?;
+    let with = match stmt.with_clause.as_ref() {
+        Some(wc) => compile_with_clause(wc)?,
+        None => Vec::new(),
+    };
     Ok(DeleteStmt {
         table,
         r#where,
+        with,
         using,
         returning,
     })

@@ -8,11 +8,12 @@
 
 use super::{
     build_join_rows_with_ctes, build_projection_row, coerce_to_column_type, column_type_name, eval,
-    expand_star_columns, prefix_row, projection_columns, run_select, validate_vector_dimensions,
-    value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp, ColumnType, DeleteStmt, DocId,
-    Document, Engine, EvalContext, Expr, ForeignKey, ForeignKeyAction, ForeignKeyMatch, InsertStmt,
-    Projection, ResultRow, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, UpdateStmt,
-    Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    execute_select, expand_star_columns, materialize_ctes, prefix_row, projection_columns,
+    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
+    ColumnType, DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey,
+    ForeignKeyAction, ForeignKeyMatch, InsertStmt, Projection, ResultRow,
+    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, UpdateStmt, Value, DOC_ID_COLUMN,
+    MERGE_ACTION_COLUMN,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -37,8 +38,8 @@ fn run_merge_inner(
         .target_alias
         .clone()
         .unwrap_or_else(|| target_table.clone());
-    let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-    let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &ctes)?;
+    let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+    let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &mut ctes)?;
     let mut affected = 0_u64;
     let mut returning_rows = Vec::new();
 
@@ -834,8 +835,9 @@ fn run_update_from(
     from_clause: &uqa_sql::ast::FromClause,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-    let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &ctes)?;
+    let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+    materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
+    let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &mut ctes)?;
     let cancel = engine.cancellation_token();
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
@@ -936,8 +938,11 @@ fn run_delete_inner(
     // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
     let using_rows: Option<Vec<ResultRow>> = match stmt.using.as_ref() {
         Some(clause) => {
-            let ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
-            Some(build_join_rows_with_ctes(engine, clause, params, &ctes)?)
+            let mut ctes: BTreeMap<String, Vec<ResultRow>> = BTreeMap::new();
+            materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
+            Some(build_join_rows_with_ctes(
+                engine, clause, params, &mut ctes,
+            )?)
         }
         None => None,
     };
@@ -1210,12 +1215,21 @@ fn run_insert_inner(
     // route each row through the standard add_document path under
     // the named columns.
     if let Some(source) = stmt.select_source.clone() {
-        let result = run_select(engine, *source, params)?;
+        let mut ctes = BTreeMap::new();
+        materialize_ctes(engine, &stmt.with, params, &mut ctes)?;
+        let result = execute_select(engine, &source, params, &mut ctes)?;
         let columns: Vec<String> = if stmt.columns.is_empty() {
             result.columns.clone()
         } else {
             stmt.columns.clone()
         };
+        if result.columns.len() != columns.len() {
+            return Err(SQLError::Internal(format!(
+                "INSERT SELECT width {} != column count {}",
+                result.columns.len(),
+                columns.len()
+            )));
+        }
         let auto_id_col = engine.auto_increment_column(&stmt.table);
         let mut affected = 0u64;
         let mut returning_rows = Vec::new();
@@ -1223,8 +1237,13 @@ fn run_insert_inner(
         for source_row in result.rows {
             cancel.check()?;
             let mut document = Document::new();
-            for col in &columns {
-                if let Some(v) = source_row.get(col) {
+            for (idx, col) in columns.iter().enumerate() {
+                let source_col = if stmt.columns.is_empty() {
+                    col
+                } else {
+                    &result.columns[idx]
+                };
+                if let Some(v) = source_row.get(source_col) {
                     document.insert(
                         col.clone(),
                         coerce_to_column_type(engine, &stmt.table, col, v.clone())?,

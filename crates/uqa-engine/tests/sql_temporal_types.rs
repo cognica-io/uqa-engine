@@ -78,6 +78,28 @@ fn temporal_columns_store_typed_values_and_compare_by_time_key() {
 }
 
 #[test]
+fn timestamp_without_time_zone_accepts_now_default() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE inputs (
+                id INTEGER PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT NOW()
+            )",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("INSERT INTO inputs (id) VALUES (1)", &[])
+        .unwrap();
+    let doc = engine.get_document("inputs", 1).unwrap();
+    assert!(matches!(
+        doc.get("created_at"),
+        Some(Value::Temporal(TemporalValue::Timestamp { .. }))
+    ));
+}
+
+#[test]
 fn information_schema_reports_temporal_column_types() {
     let engine = Engine::new();
     engine

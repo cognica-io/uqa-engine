@@ -216,6 +216,66 @@ fn cte_with_distinct() {
 }
 
 #[test]
+fn cte_insert_select_materializes_cte() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(
+        &engine,
+        "WITH src AS (SELECT 1 AS id, 10 AS value)
+         INSERT INTO t(id, value)
+         SELECT id, value FROM src",
+    );
+    let result = exec(&engine, "SELECT value FROM t WHERE id = 1");
+    assert_eq!(ints(&result, "value"), vec![10]);
+}
+
+#[test]
+fn insert_select_maps_explicit_columns_by_position() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE events (
+            id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+            kind TEXT NOT NULL,
+            amount INTEGER NOT NULL
+        )",
+    );
+
+    exec(
+        &engine,
+        "INSERT INTO events(kind, amount)
+         SELECT 'spawn', 7",
+    );
+
+    let result = exec(&engine, "SELECT kind, amount FROM events");
+    assert_eq!(result.rows[0]["kind"], uqa_core::Value::Str("spawn".into()));
+    assert_eq!(result.rows[0]["amount"], uqa_core::Value::Int(7));
+}
+
+#[test]
+fn cte_update_from_materializes_cte() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER)",
+    );
+    exec(&engine, "INSERT INTO t(id, value) VALUES (1, 10)");
+    exec(
+        &engine,
+        "WITH delta AS (SELECT 1 AS id, 7 AS amount)
+         UPDATE t
+         SET value = value + delta.amount
+         FROM delta
+         WHERE t.id = delta.id",
+    );
+    let result = exec(&engine, "SELECT value FROM t WHERE id = 1");
+    assert_eq!(ints(&result, "value"), vec![17]);
+}
+
+#[test]
 fn recursive_count() {
     let engine = Engine::new();
     let result = exec(

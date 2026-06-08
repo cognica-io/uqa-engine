@@ -154,6 +154,17 @@ fn arithmetic_subtract() {
 }
 
 #[test]
+fn arithmetic_unary_plus_and_minus() {
+    let eng = engine();
+    let r = rows(
+        &eng,
+        "SELECT -quantity AS neg_quantity, +quantity AS pos_quantity FROM products WHERE id = 1",
+    );
+    assert_eq!(int_col(&r[0], "neg_quantity"), Some(-100));
+    assert_eq!(int_col(&r[0], "pos_quantity"), Some(100));
+}
+
+#[test]
 fn arithmetic_divide() {
     let eng = engine();
     let r = rows(

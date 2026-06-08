@@ -137,6 +137,58 @@ fn not_exists() {
 }
 
 #[test]
+fn not_exists_with_composite_key_and_residual_filter() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE candidates (
+            id INTEGER PRIMARY KEY,
+            x REAL,
+            y REAL,
+            active INTEGER
+        )",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE walls (
+            x INTEGER,
+            y INTEGER,
+            tile TEXT
+        )",
+    );
+    exec(
+        &engine,
+        "INSERT INTO candidates (id, x, y, active) VALUES
+            (1, 1.2, 2.8, 1),
+            (2, 4.1, 5.0, 1),
+            (3, 6.0, 7.0, 0)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO walls (x, y, tile) VALUES
+            (1, 2, '#'),
+            (6, 7, '#'),
+            (4, 5, '.')",
+    );
+
+    let result = query(
+        &engine,
+        "SELECT id FROM candidates c
+         WHERE c.active = 1
+           AND NOT EXISTS (
+             SELECT 1 FROM walls w
+             WHERE w.x = CAST(c.x AS INT)
+               AND w.y = CAST(c.y AS INT)
+               AND w.tile = '#'
+           )
+         ORDER BY id",
+    );
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(2));
+}
+
+#[test]
 fn exists_with_additional_condition() {
     let engine = setup();
     let result = query(

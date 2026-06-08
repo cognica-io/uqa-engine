@@ -422,6 +422,9 @@ fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
         (Expr::Not(a), Expr::Not(b)) => exprs_match(a, b),
+        (Expr::Cast { expr: a, ty: at }, Expr::Cast { expr: b, ty: bt }) => {
+            at == bt && exprs_match(a, b)
+        }
         _ => false,
     }
 }

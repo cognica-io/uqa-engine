@@ -606,21 +606,54 @@ pub(super) fn column_type_name(ty: &ColumnType) -> &'static str {
 
 fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
     match value {
-        Value::Temporal(temporal) => Ok(Value::Temporal(temporal)),
+        Value::Temporal(temporal) => coerce_temporal_kind(temporal, ty)
+            .map(Value::Temporal)
+            .ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "cannot cast temporal value to {}",
+                    column_type_name(ty)
+                ))
+            }),
         other => {
             let text = value_to_text(&other);
-            let parsed = match ty {
-                ColumnType::Date => TemporalValue::parse_date(&text),
-                ColumnType::Time => TemporalValue::parse_time(&text),
-                ColumnType::TimeTz => TemporalValue::parse_time_tz(&text),
-                ColumnType::Timestamp => TemporalValue::parse_timestamp(&text),
-                ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(&text),
-                _ => None,
-            };
+            let parsed = parse_temporal_text_for_type(&text, ty);
             parsed.map(Value::Temporal).ok_or_else(|| {
                 SQLError::TypeMismatch(format!("cannot cast `{text}` to {}", column_type_name(ty)))
             })
         }
+    }
+}
+
+fn coerce_temporal_kind(value: TemporalValue, ty: &ColumnType) -> Option<TemporalValue> {
+    match (ty, value) {
+        (ColumnType::Date, value @ TemporalValue::Date { .. })
+        | (ColumnType::Time, value @ TemporalValue::Time { .. })
+        | (ColumnType::TimeTz, value @ TemporalValue::TimeTz { .. })
+        | (ColumnType::Timestamp, value @ TemporalValue::Timestamp { .. })
+        | (ColumnType::TimestampTz, value @ TemporalValue::TimestampTz { .. }) => Some(value),
+        (ColumnType::Timestamp, TemporalValue::TimestampTz { micros }) => {
+            Some(TemporalValue::Timestamp { micros })
+        }
+        (ColumnType::TimestampTz, TemporalValue::Timestamp { micros }) => {
+            Some(TemporalValue::TimestampTz { micros })
+        }
+        _ => None,
+    }
+}
+
+fn parse_temporal_text_for_type(text: &str, ty: &ColumnType) -> Option<TemporalValue> {
+    match ty {
+        ColumnType::Date => TemporalValue::parse_date(text),
+        ColumnType::Time => TemporalValue::parse_time(text),
+        ColumnType::TimeTz => TemporalValue::parse_time_tz(text),
+        ColumnType::Timestamp => TemporalValue::parse_timestamp(text).or_else(|| {
+            TemporalValue::parse_timestamp_tz(text).and_then(|value| match value {
+                TemporalValue::TimestampTz { micros } => Some(TemporalValue::Timestamp { micros }),
+                _ => None,
+            })
+        }),
+        ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
+        _ => None,
     }
 }
 

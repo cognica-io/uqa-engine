@@ -36,6 +36,18 @@ fn generate_series_basic() {
 }
 
 #[test]
+fn generate_series_relation_alias_is_default_column_alias() {
+    let eng = Engine::new();
+    let r = eng
+        .sql("SELECT x FROM generate_series(1, 3) AS x", &[])
+        .unwrap();
+    assert_eq!(
+        values(&r, "x"),
+        vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+    );
+}
+
+#[test]
 fn generate_series_with_step() {
     let eng = Engine::new();
     let r = eng

@@ -11,10 +11,21 @@ use super::{
     Projection, ResultRow, SQLError, SQLParam, Value, WindowSpec,
 };
 
+pub(super) struct WindowProjectionResult {
+    pub rows: Vec<ResultRow>,
+    pub projections: Vec<Projection>,
+}
+
+#[derive(Clone)]
+struct WindowSlot {
+    key: String,
+    name: String,
+    args: Vec<Expr>,
+    spec: WindowSpec,
+}
+
 pub(super) fn has_window(projections: &[Projection]) -> bool {
-    projections
-        .iter()
-        .any(|p| matches!(p.expr, Expr::WindowCall { .. }))
+    projections.iter().any(|p| expr_has_window(&p.expr))
 }
 
 pub(super) fn compute_window_columns(
@@ -22,20 +33,290 @@ pub(super) fn compute_window_columns(
     projections: &[Projection],
     rows: Vec<ResultRow>,
     params: &[SQLParam],
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<WindowProjectionResult, SQLError> {
     let mut rows = rows;
     let labels = projection_columns(projections);
-    for (idx, proj) in projections.iter().enumerate() {
-        let Expr::WindowCall { name, args, spec } = &proj.expr else {
-            continue;
-        };
-        let label = labels[idx].clone();
-        let values = evaluate_window(engine, name, args, spec, &rows, params)?;
+    let mut slots = Vec::new();
+    let mut rewritten = Vec::with_capacity(projections.len());
+    for (idx, projection) in projections.iter().enumerate() {
+        let mut counter = 0usize;
+        let (expr, changed) = rewrite_window_expr(&projection.expr, idx, &mut counter, &mut slots);
+        let mut projection = projection.clone();
+        projection.expr = expr;
+        if changed && projection.alias.is_none() {
+            projection.alias = Some(labels[idx].clone());
+        }
+        rewritten.push(projection);
+    }
+    for slot in slots {
+        let values = evaluate_window(engine, &slot.name, &slot.args, &slot.spec, &rows, params)?;
         for (row, value) in rows.iter_mut().zip(values) {
-            row.insert(label.clone(), value);
+            row.insert(slot.key.clone(), value);
         }
     }
-    Ok(rows)
+    Ok(WindowProjectionResult {
+        rows,
+        projections: rewritten,
+    })
+}
+
+fn expr_has_window(expr: &Expr) -> bool {
+    match expr {
+        Expr::WindowCall { .. } => true,
+        Expr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter().any(expr_has_window)
+                || order_by.iter().any(|order| expr_has_window(&order.expr))
+                || filter.as_ref().is_some_and(|expr| expr_has_window(expr))
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_has_window)
+        }
+        Expr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_has_window(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_has_window(expr) || expr_has_window(low) || expr_has_window(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_has_window(expr) || list.iter().any(expr_has_window)
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref().is_some_and(|expr| expr_has_window(expr))
+                || when
+                    .iter()
+                    .any(|(cond, result)| expr_has_window(cond) || expr_has_window(result))
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_has_window(expr))
+        }
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. }
+        | Expr::InSubquery { .. } => false,
+    }
+}
+
+fn rewrite_window_expr(
+    expr: &Expr,
+    projection_index: usize,
+    counter: &mut usize,
+    slots: &mut Vec<WindowSlot>,
+) -> (Expr, bool) {
+    match expr {
+        Expr::WindowCall { name, args, spec } => {
+            let key = format!("__window_{projection_index}_{}", *counter);
+            *counter += 1;
+            slots.push(WindowSlot {
+                key: key.clone(),
+                name: name.clone(),
+                args: args.clone(),
+                spec: spec.clone(),
+            });
+            (Expr::Column(key), true)
+        }
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => {
+            let (args, args_changed) = rewrite_window_exprs(args, projection_index, counter, slots);
+            let (order_by, order_changed) =
+                rewrite_window_order_by(order_by, projection_index, counter, slots);
+            let (filter, filter_changed) = match filter {
+                Some(expr) => {
+                    let (expr, changed) =
+                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    (Some(Box::new(expr)), changed)
+                }
+                None => (None, false),
+            };
+            (
+                Expr::Func {
+                    name: name.clone(),
+                    args,
+                    distinct: *distinct,
+                    order_by,
+                    filter,
+                },
+                args_changed || order_changed || filter_changed,
+            )
+        }
+        Expr::Array(items) => {
+            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            (Expr::Array(items), changed)
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            let (lhs, lhs_changed) = rewrite_window_expr(lhs, projection_index, counter, slots);
+            let (rhs, rhs_changed) = rewrite_window_expr(rhs, projection_index, counter, slots);
+            (
+                Expr::Binary {
+                    op: *op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+                lhs_changed || rhs_changed,
+            )
+        }
+        Expr::Not(inner) => {
+            let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
+            (Expr::Not(Box::new(inner)), changed)
+        }
+        Expr::And(items) => {
+            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            (Expr::And(items), changed)
+        }
+        Expr::Or(items) => {
+            let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
+            (Expr::Or(items), changed)
+        }
+        Expr::IsNull { expr, negated } => {
+            let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            (
+                Expr::IsNull {
+                    expr: Box::new(expr),
+                    negated: *negated,
+                },
+                changed,
+            )
+        }
+        Expr::Between { expr, low, high } => {
+            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            let (low, low_changed) = rewrite_window_expr(low, projection_index, counter, slots);
+            let (high, high_changed) = rewrite_window_expr(high, projection_index, counter, slots);
+            (
+                Expr::Between {
+                    expr: Box::new(expr),
+                    low: Box::new(low),
+                    high: Box::new(high),
+                },
+                expr_changed || low_changed || high_changed,
+            )
+        }
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => {
+            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            let (list, list_changed) = rewrite_window_exprs(list, projection_index, counter, slots);
+            (
+                Expr::InList {
+                    expr: Box::new(expr),
+                    list,
+                    negated: *negated,
+                },
+                expr_changed || list_changed,
+            )
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            let (base, base_changed) = match base {
+                Some(expr) => {
+                    let (expr, changed) =
+                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    (Some(Box::new(expr)), changed)
+                }
+                None => (None, false),
+            };
+            let mut changed = base_changed;
+            let mut rewritten_when = Vec::with_capacity(when.len());
+            for (cond, result) in when {
+                let (cond, cond_changed) =
+                    rewrite_window_expr(cond, projection_index, counter, slots);
+                let (result, result_changed) =
+                    rewrite_window_expr(result, projection_index, counter, slots);
+                changed |= cond_changed || result_changed;
+                rewritten_when.push((cond, result));
+            }
+            let (else_branch, else_changed) = match else_branch {
+                Some(expr) => {
+                    let (expr, changed) =
+                        rewrite_window_expr(expr, projection_index, counter, slots);
+                    (Some(Box::new(expr)), changed)
+                }
+                None => (None, false),
+            };
+            (
+                Expr::Case {
+                    base,
+                    when: rewritten_when,
+                    else_branch,
+                },
+                changed || else_changed,
+            )
+        }
+        Expr::Cast { expr, ty } => {
+            let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            (
+                Expr::Cast {
+                    expr: Box::new(expr),
+                    ty: ty.clone(),
+                },
+                changed,
+            )
+        }
+        _ => (expr.clone(), false),
+    }
+}
+
+fn rewrite_window_exprs(
+    exprs: &[Expr],
+    projection_index: usize,
+    counter: &mut usize,
+    slots: &mut Vec<WindowSlot>,
+) -> (Vec<Expr>, bool) {
+    let mut changed = false;
+    let rewritten = exprs
+        .iter()
+        .map(|expr| {
+            let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
+            changed |= expr_changed;
+            expr
+        })
+        .collect();
+    (rewritten, changed)
+}
+
+fn rewrite_window_order_by(
+    order_by: &[OrderBy],
+    projection_index: usize,
+    counter: &mut usize,
+    slots: &mut Vec<WindowSlot>,
+) -> (Vec<OrderBy>, bool) {
+    let mut changed = false;
+    let rewritten = order_by
+        .iter()
+        .map(|order| {
+            let (expr, expr_changed) =
+                rewrite_window_expr(&order.expr, projection_index, counter, slots);
+            changed |= expr_changed;
+            OrderBy {
+                expr,
+                descending: order.descending,
+                nulls: order.nulls,
+            }
+        })
+        .collect();
+    (rewritten, changed)
 }
 
 fn evaluate_window(

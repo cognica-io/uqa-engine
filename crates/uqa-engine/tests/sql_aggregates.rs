@@ -687,6 +687,32 @@ fn group_by_alias() {
     assert_eq!(counts.get("B").copied(), Some(1));
 }
 
+#[test]
+fn group_by_alias_for_cast_expression() {
+    let eng = engine();
+    eng.sql("CREATE TABLE points (id INTEGER PRIMARY KEY, x REAL)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO points (id, x) VALUES (1, 1.2), (2, 1.8), (3, 2.1)",
+        &[],
+    )
+    .unwrap();
+    let r = eng
+        .sql(
+            "SELECT CAST(x AS INT) AS tile_x, COUNT(*) AS cnt
+             FROM points
+             GROUP BY tile_x
+             ORDER BY tile_x",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows[0]["tile_x"], Value::Int(1));
+    assert_eq!(r.rows[0]["cnt"], Value::Int(2));
+    assert_eq!(r.rows[1]["tile_x"], Value::Int(2));
+    assert_eq!(r.rows[1]["cnt"], Value::Int(1));
+}
+
 // =====================================================================
 // Complex HAVING
 // =====================================================================

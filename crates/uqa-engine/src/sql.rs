@@ -65,8 +65,8 @@ use ddl::{
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{
-    build_join_rows, build_join_rows_with_ctes, engine_func_intercept, execute_lateral_subquery,
-    prefix_row, project_join_row_with_engine,
+    build_join_rows_with_ctes, engine_func_intercept, execute_lateral_subquery, prefix_row,
+    project_join_row_with_engine, project_join_row_with_hook,
 };
 use row_functions::{
     execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,

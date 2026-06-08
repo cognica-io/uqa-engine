@@ -173,6 +173,23 @@ fn alter_table_add_column_and_insert_uses_it() {
 }
 
 #[test]
+fn generated_identity_insert_returning_reports_generated_id() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE notes (
+             id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+             body TEXT
+         )",
+        &[],
+    )
+    .unwrap();
+    let result = eng
+        .sql("INSERT INTO notes(body) VALUES ('hello') RETURNING id", &[])
+        .unwrap();
+    assert_eq!(result.rows[0].get("id"), Some(&Value::Int(1)));
+}
+
+#[test]
 fn alter_table_drop_column_removes_visibility() {
     let eng = Engine::new();
     eng.sql(
