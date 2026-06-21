@@ -803,6 +803,32 @@ fn having_simple() {
     assert_eq!(str_col(&r.rows[0], "cat"), Some("a"));
 }
 
+#[test]
+fn having_count_equals_grouped_column() {
+    // Regression: HAVING comparing an aggregate to a grouped column that is not itself
+    // projected must filter by the per-group column value, not silently drop every row.
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, cat TEXT, need BIGINT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO t (id, cat, need) VALUES (1, 'a', 2), (2, 'a', 2), (3, 'b', 5)",
+        &[],
+    )
+    .unwrap();
+    let r = eng
+        .sql(
+            "SELECT cat, COUNT(*) AS cnt FROM t GROUP BY cat, need HAVING COUNT(*) = need",
+            &[],
+        )
+        .unwrap();
+    // Group 'a' has count 2 == need 2; group 'b' has count 1 != need 5.
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(str_col(&r.rows[0], "cat"), Some("a"));
+}
+
 // =====================================================================
 // NUMERIC(precision, scale)
 // =====================================================================

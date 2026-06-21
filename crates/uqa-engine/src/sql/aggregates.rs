@@ -154,7 +154,14 @@ pub(super) fn aggregate_join_rows(
                 &group_values,
                 params,
             )?;
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            // Evaluate HAVING against the group-by column values merged with the projection
+            // aliases, so it can reference grouped columns that are not themselves projected.
+            let mut having_row = group_row.clone();
+            for (key, value) in &row {
+                having_row.insert(key.clone(), value.clone());
+            }
+            let ctx =
+                uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
             let kept =
                 uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
             if !kept {
@@ -1485,7 +1492,14 @@ pub(super) fn build_aggregate_rows(
                 &group_values,
                 params,
             )?;
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+            // Evaluate HAVING against the group-by column values merged with the projection
+            // aliases, so it can reference grouped columns that are not themselves projected.
+            let mut having_row = group_row.clone();
+            for (key, value) in &row {
+                having_row.insert(key.clone(), value.clone());
+            }
+            let ctx =
+                uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
             let kept =
                 uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
             if !kept {
