@@ -316,6 +316,22 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         Ok(out)
     }
 
+    /// Whether `vertex_id` is consistent with an already-bound pattern variable. An unbound (or
+    /// absent) variable always matches; a variable already bound to a vertex must refer to that
+    /// same vertex. This enforces openCypher semantics when a relationship traversal reaches an
+    /// end node whose variable was bound earlier in the pattern (e.g. `MERGE (a)-[:R]->(b)` with
+    /// `b` already bound), so distinct edges from one start node are not collapsed.
+    fn binding_allows_vertex(&self, variable: &Option<String>, vertex_id: VertexId, row: &BindingRow) -> bool {
+        let Some(var) = variable else {
+            return true;
+        };
+        match row.get(var) {
+            Some(Binding::Vertex(prev)) => prev.vertex_id == vertex_id,
+            Some(_) => false,
+            None => true,
+        }
+    }
+
     fn node_matches(
         &self,
         np: &NodePattern,
@@ -418,6 +434,9 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     if !self.node_matches(next, &end_vertex, row)? {
                         continue;
                     }
+                    if !self.binding_allows_vertex(&next.variable, end_vertex.vertex_id, row) {
+                        continue;
+                    }
                     let mut new_row = row.clone();
                     if let Some(var) = &rp.variable {
                         new_row.insert(var.clone(), Binding::EdgeList(edges));
@@ -441,6 +460,9 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                         continue;
                     };
                     if !self.node_matches(next, &end_vertex, row)? {
+                        continue;
+                    }
+                    if !self.binding_allows_vertex(&next.variable, end_vertex.vertex_id, row) {
                         continue;
                     }
                     let mut new_row = row.clone();

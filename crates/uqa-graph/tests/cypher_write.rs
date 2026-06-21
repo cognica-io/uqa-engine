@@ -64,6 +64,55 @@ fn create_relationship_between_existing_nodes() {
 }
 
 #[test]
+fn merge_relationship_with_bound_end_creates_distinct_edges() {
+    // Regression: MERGE of (a)-[:R]->(b) with `b` already bound by a prior MERGE must respect
+    // that binding. Previously the relationship match honored only the start node and the end
+    // node's label/properties, so a second distinct end was treated as already-present and the
+    // edge was dropped - collapsing the several distinct ends a start node can have.
+    let mut g = fresh();
+    for stem in ["wu", "yi", "gui"] {
+        run_write(
+            &mut g,
+            &format!(
+                "MERGE (a:Branch {{id: 'chen'}}) \
+                 MERGE (b:Stem {{id: '{stem}'}}) \
+                 MERGE (a)-[:HIDES]->(b)"
+            ),
+        );
+    }
+    let (_, rows) = run_read(
+        &g,
+        "MATCH (a:Branch {id: 'chen'})-[r:HIDES]->(b:Stem) RETURN b.id AS bid",
+    );
+    let mut ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| match r.get("bid") {
+            Some(Value::Str(s)) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["gui", "wu", "yi"], "all distinct ends must be linked");
+
+    // Re-running the same MERGEs must be idempotent (no duplicate edges).
+    for stem in ["wu", "yi", "gui"] {
+        run_write(
+            &mut g,
+            &format!(
+                "MERGE (a:Branch {{id: 'chen'}}) \
+                 MERGE (b:Stem {{id: '{stem}'}}) \
+                 MERGE (a)-[:HIDES]->(b)"
+            ),
+        );
+    }
+    let (_, rows) = run_read(
+        &g,
+        "MATCH (a:Branch {id: 'chen'})-[r:HIDES]->(b:Stem) RETURN b.id AS bid",
+    );
+    assert_eq!(rows.len(), 3, "MERGE relationship must be idempotent");
+}
+
+#[test]
 fn set_property_assign_and_update() {
     let mut g = fresh();
     let mut v = Vertex::new(1, "Person");
