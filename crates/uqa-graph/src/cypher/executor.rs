@@ -321,7 +321,12 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     /// same vertex. This enforces openCypher semantics when a relationship traversal reaches an
     /// end node whose variable was bound earlier in the pattern (e.g. `MERGE (a)-[:R]->(b)` with
     /// `b` already bound), so distinct edges from one start node are not collapsed.
-    fn binding_allows_vertex(&self, variable: &Option<String>, vertex_id: VertexId, row: &BindingRow) -> bool {
+    fn binding_allows_vertex(
+        &self,
+        variable: &Option<String>,
+        vertex_id: VertexId,
+        row: &BindingRow,
+    ) -> bool {
         let Some(var) = variable else {
             return true;
         };
@@ -1047,6 +1052,7 @@ fn value_truthy(v: &Value) -> bool {
         Value::Null => false,
         Value::Int(n) => *n != 0,
         Value::Float(f) => *f != 0.0,
+        Value::Decimal(d) => !d.is_zero(),
         Value::Str(s) => !s.is_empty(),
         Value::List(l) => !l.is_empty(),
         Value::Map(m) => !m.is_empty(),
@@ -1059,6 +1065,7 @@ fn value_as_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Int(n) => Some(*n as f64),
         Value::Float(f) => Some(*f),
+        Value::Decimal(d) => d.to_f64(),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }

@@ -3234,7 +3234,9 @@ dependencies = [
  "chrono",
  "criterion",
  "proptest",
+ "rust_decimal",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

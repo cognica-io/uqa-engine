@@ -11,7 +11,7 @@
 //! tree through `QueryOptimizer` (the 10-pass algebraic / graph-aware
 //! / fusion-reordering optimiser), and only then executes it through
 //! `PlanExecutor`. Until now the UQA-RS implementation had `QueryOptimizer` implemented
-//! 1:1 in `uqa_planner::query_optimizer` but it was dead code — the
+//! 1:1 in `uqa_planner::query_optimizer` but it was dead code - the
 //! engine ran the SQL `SelectStmt` directly without ever building the
 //! operator tree, so none of the optimiser's algebraic / graph-aware
 //! rewrites fired in production.
@@ -28,10 +28,10 @@
 //!    / `run_fuse_log_odds` / ... helpers, and combining child posting
 //!    lists with the Boolean algebra in `uqa_core::PostingList`.
 //!
-//! The integration target is a "lower → optimise → execute" pipeline:
+//! The integration target is a "lower -> optimise -> execute" pipeline:
 //! [`run_optimised`] does the three-step sequence and returns a
 //! [`Vec<ScoredEntry>`] that the caller can project, sort, and limit
-//! through the existing row pipeline. Lowering is best-effort — when a
+//! through the existing row pipeline. Lowering is best-effort - when a
 //! WHERE expression doesn't fit the operator tree (e.g. arithmetic
 //! across columns), the function returns `None` and the caller falls
 //! back to the legacy `execute_function` / `filter_table_rows` path.
@@ -628,6 +628,7 @@ fn const_f64(expr: &Expr, params: &[SQLParam]) -> Option<f64> {
     match const_value(expr, params)? {
         Value::Int(n) => Some(n as f64),
         Value::Float(f) => Some(f),
+        Value::Decimal(d) => d.to_f64(),
         _ => None,
     }
 }
@@ -1382,7 +1383,7 @@ pub fn optimised_tree_for(
     )
 }
 
-/// The "lower → optimise → execute" pipeline. `Some(rows)` when the
+/// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
 /// WHERE expression maps cleanly onto the operator tree; `None`
 /// signals the caller to fall back to its direct-dispatch path. Any
 /// engine-side failure returned by the helpers it re-uses bubbles up

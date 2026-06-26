@@ -101,6 +101,33 @@ fn create_table_with_jsonb() {
 }
 
 #[test]
+fn json_and_jsonb_catalog_types_are_distinct() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE typed_json (id INTEGER PRIMARY KEY, raw JSON, bin JSONB)",
+    );
+    let result = exec(
+        &engine,
+        "SELECT column_name, data_type, udt_name
+         FROM information_schema.columns
+         WHERE table_name = 'typed_json'
+         ORDER BY column_name",
+    );
+    let row_for = |name: &str| {
+        result
+            .rows
+            .iter()
+            .find(|row| row["column_name"] == s(name))
+            .unwrap()
+    };
+    assert_eq!(row_for("raw")["data_type"], s("json"));
+    assert_eq!(row_for("raw")["udt_name"], s("json"));
+    assert_eq!(row_for("bin")["data_type"], s("jsonb"));
+    assert_eq!(row_for("bin")["udt_name"], s("jsonb"));
+}
+
+#[test]
 fn insert_json_string_round_trips_as_map() {
     let engine = engine_with_json();
     let result = exec(&engine, "SELECT data FROM docs WHERE id = 1");
@@ -187,6 +214,171 @@ fn arrow_missing_key_returns_null() {
         "SELECT data->'nonexistent' AS v FROM docs WHERE id = 1",
     );
     assert_eq!(result.rows[0]["v"], Value::Null);
+}
+
+#[test]
+fn jsonb_negative_index_extracts_from_end() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT '[\"a\", \"b\", \"c\"]'::jsonb -> -1 AS v");
+    assert_eq!(result.rows[0]["v"], s("c"));
+}
+
+#[test]
+fn jsonb_key_exists_checks_string_array_elements() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '[\"a\", \"b\", \"c\"]'::jsonb ? 'b' AS has_b,
+                '[\"a\", \"b\", \"c\"]'::jsonb ?| ARRAY['x', 'c'] AS has_any,
+                '[\"a\", \"b\", \"c\"]'::jsonb ?& ARRAY['a', 'b'] AS has_all",
+    );
+    assert_eq!(result.rows[0]["has_b"], Value::Bool(true));
+    assert_eq!(result.rows[0]["has_any"], Value::Bool(true));
+    assert_eq!(result.rows[0]["has_all"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_delete_key_and_path() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\":1,\"b\":{\"c\":2,\"d\":3}}'::jsonb - 'a' AS removed_key,
+                '{\"a\":1,\"b\":{\"c\":2,\"d\":3}}'::jsonb #- '{b,c}' AS removed_path",
+    );
+    assert_eq!(
+        result.rows[0]["removed_key"],
+        map([("b", map([("c", Value::Int(2)), ("d", Value::Int(3))]))])
+    );
+    assert_eq!(
+        result.rows[0]["removed_path"],
+        map([("a", Value::Int(1)), ("b", map([("d", Value::Int(3))]))])
+    );
+}
+
+#[test]
+fn jsonb_concat_objects() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\":1}'::jsonb || '{\"b\":2}'::jsonb AS v",
+    );
+    assert_eq!(
+        result.rows[0]["v"],
+        map([("a", Value::Int(1)), ("b", Value::Int(2))])
+    );
+}
+
+#[test]
+fn jsonb_set_respects_create_missing_false() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_set('{\"a\":1}'::jsonb, ARRAY['b'], '2'::jsonb, false) AS v",
+    );
+    assert_eq!(result.rows[0]["v"], map([("a", Value::Int(1))]));
+}
+
+#[test]
+fn jsonb_insert_array_before_and_after() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_insert('{\"a\":[0,1,2]}'::jsonb, ARRAY['a','1'], '9'::jsonb) AS before,
+                jsonb_insert('{\"a\":[0,1,2]}'::jsonb, ARRAY['a','1'], '9'::jsonb, true) AS after",
+    );
+    assert_eq!(
+        result.rows[0]["before"],
+        map([(
+            "a",
+            list([Value::Int(0), Value::Int(9), Value::Int(1), Value::Int(2)])
+        )])
+    );
+    assert_eq!(
+        result.rows[0]["after"],
+        map([(
+            "a",
+            list([Value::Int(0), Value::Int(1), Value::Int(9), Value::Int(2)])
+        )])
+    );
+}
+
+#[test]
+fn jsonb_insert_object_only_when_key_is_missing() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_insert('{\"a\":1}'::jsonb, ARRAY['b'], '2'::jsonb) AS inserted,
+                jsonb_insert('{\"a\":1}'::jsonb, ARRAY['a'], '2'::jsonb) AS unchanged",
+    );
+    assert_eq!(
+        result.rows[0]["inserted"],
+        map([("a", Value::Int(1)), ("b", Value::Int(2))])
+    );
+    assert_eq!(result.rows[0]["unchanged"], map([("a", Value::Int(1))]));
+}
+
+#[test]
+fn jsonb_pretty_returns_indented_text() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT jsonb_pretty('{\"a\":[1,2]}'::jsonb) AS v");
+    let Value::Str(text) = &result.rows[0]["v"] else {
+        panic!("expected text");
+    };
+    assert!(text.contains('\n'));
+    assert!(text.contains("\"a\""));
+}
+
+#[test]
+fn jsonb_path_exists_function_and_at_question_operator() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\":[1,2,3]}'::jsonb @? '$.a[*] ? (@ > 2)' AS op,
+                jsonb_path_exists('{\"a\":[1,2,3]}'::jsonb, '$.a[*] ? (@ == 2)') AS fn",
+    );
+    assert_eq!(result.rows[0]["op"], Value::Bool(true));
+    assert_eq!(result.rows[0]["fn"], Value::Bool(true));
+}
+
+#[test]
+fn jsonb_path_match_function_and_at_at_operator() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT '{\"a\":1}'::jsonb @@ '$.a == 1' AS op,
+                jsonb_path_match('{\"a\":1}'::jsonb, '$.a == 2') AS fn",
+    );
+    assert_eq!(result.rows[0]["op"], Value::Bool(true));
+    assert_eq!(result.rows[0]["fn"], Value::Bool(false));
+}
+
+#[test]
+fn jsonpath_operators_filter_rows() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE jpath (id INTEGER PRIMARY KEY, data JSONB)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO jpath (id, data) VALUES
+         (1, '{\"a\":1,\"tags\":[\"a\"]}'::jsonb),
+         (2, '{\"a\":2,\"tags\":[\"a\",\"b\"]}'::jsonb)",
+    );
+
+    let matched = exec(
+        &engine,
+        "SELECT id FROM jpath WHERE data @@ '$.a == 2' ORDER BY id",
+    );
+    assert_eq!(matched.rows.len(), 1);
+    assert_eq!(matched.rows[0]["id"], Value::Int(2));
+
+    let exists = exec(
+        &engine,
+        "SELECT id FROM jpath WHERE data @? '$.tags[*] ? (@ == \"b\")' ORDER BY id",
+    );
+    assert_eq!(exists.rows.len(), 1);
+    assert_eq!(exists.rows[0]["id"], Value::Int(2));
 }
 
 #[test]
@@ -346,6 +538,47 @@ fn jsonb_object_agg_variant() {
         panic!("expected map");
     };
     assert_eq!(v["alpha"], Value::Int(10));
+}
+
+#[test]
+fn json_agg_orders_values() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT json_agg(data->>'name' ORDER BY id) AS v FROM docs",
+    );
+    assert_eq!(
+        result.rows[0]["v"],
+        list([s("Alice"), s("Bob"), s("Carol")])
+    );
+}
+
+#[test]
+fn json_agg_includes_null_inputs() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE t (id INTEGER, v TEXT)");
+    exec(
+        &engine,
+        "INSERT INTO t (id, v) VALUES (1, 'alpha'), (2, NULL), (3, 'charlie')",
+    );
+    let result = exec(&engine, "SELECT json_agg(v ORDER BY id) AS v FROM t");
+    assert_eq!(
+        result.rows[0]["v"],
+        list([s("alpha"), Value::Null, s("charlie")])
+    );
+}
+
+#[test]
+fn jsonb_agg_collects_json_values() {
+    let engine = engine_with_json();
+    let result = exec(
+        &engine,
+        "SELECT jsonb_agg(data->'tags' ORDER BY id) AS v FROM docs",
+    );
+    assert_eq!(
+        result.rows[0]["v"],
+        list([list([s("a"), s("b")]), list([s("c")]), Value::Null,])
+    );
 }
 
 #[test]

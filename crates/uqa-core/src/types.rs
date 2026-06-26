@@ -9,8 +9,11 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use rust_decimal::{Decimal, RoundingStrategy};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Document identifier.
 ///
@@ -173,6 +176,213 @@ impl Ord for TemporalValue {
     }
 }
 
+/// Exact base-10 numeric value for PostgreSQL `NUMERIC` / `DECIMAL`.
+///
+/// The JSON representation is tagged so persisted document values do not
+/// collide with ordinary JSON strings, numbers, or maps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecimalValue {
+    inner: Decimal,
+}
+
+impl DecimalValue {
+    pub fn new(inner: Decimal) -> Self {
+        Self { inner }
+    }
+
+    pub fn parse(input: &str) -> Option<Self> {
+        Decimal::from_str(input.trim()).ok().map(Self::new)
+    }
+
+    pub fn from_i64(value: i64) -> Self {
+        Self::new(Decimal::from(value))
+    }
+
+    pub fn from_bool(value: bool) -> Self {
+        Self::from_i64(i64::from(value))
+    }
+
+    pub fn from_f64_lossy(value: f64) -> Option<Self> {
+        if value.is_finite() {
+            Self::parse(&value.to_string())
+        } else {
+            None
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.inner.is_zero()
+    }
+
+    pub fn checked_add(&self, rhs: &Self) -> Option<Self> {
+        self.inner.checked_add(rhs.inner).map(Self::new)
+    }
+
+    pub fn checked_sub(&self, rhs: &Self) -> Option<Self> {
+        self.inner.checked_sub(rhs.inner).map(Self::new)
+    }
+
+    pub fn checked_mul(&self, rhs: &Self) -> Option<Self> {
+        self.inner.checked_mul(rhs.inner).map(Self::new)
+    }
+
+    pub fn checked_div(&self, rhs: &Self) -> Option<Self> {
+        self.inner.checked_div(rhs.inner).map(Self::new)
+    }
+
+    pub fn checked_rem(&self, rhs: &Self) -> Option<Self> {
+        self.inner.checked_rem(rhs.inner).map(Self::new)
+    }
+
+    pub fn abs(&self) -> Self {
+        if self.inner < Decimal::from(0) {
+            Self::new(-self.inner)
+        } else {
+            self.clone()
+        }
+    }
+
+    pub fn ceil(&self) -> Self {
+        Self::new(self.inner.ceil())
+    }
+
+    pub fn floor(&self) -> Self {
+        Self::new(self.inner.floor())
+    }
+
+    pub fn trunc(&self) -> Self {
+        Self::new(self.inner.trunc())
+    }
+
+    pub fn round_dp(&self, scale: u32) -> Self {
+        Self::new(
+            self.inner
+                .round_dp_with_strategy(scale, RoundingStrategy::MidpointAwayFromZero),
+        )
+    }
+
+    pub fn round_to_scale(&self, scale: i32) -> Option<Self> {
+        if scale >= 0 {
+            return Some(self.round_dp(scale as u32));
+        }
+        let factor = decimal_pow10(scale.unsigned_abs())?;
+        self.inner
+            .checked_div(factor)
+            .map(|value| value.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero))
+            .and_then(|value| value.checked_mul(factor))
+            .map(Self::new)
+    }
+
+    pub fn trunc_to_scale(&self, scale: i32) -> Option<Self> {
+        if scale >= 0 {
+            return Some(Self::new(self.inner.trunc_with_scale(scale as u32)));
+        }
+        let factor = decimal_pow10(scale.unsigned_abs())?;
+        self.inner
+            .checked_div(factor)
+            .map(|value| value.trunc())
+            .and_then(|value| value.checked_mul(factor))
+            .map(Self::new)
+    }
+
+    pub fn fits_precision(&self, precision: u32, scale: i32) -> bool {
+        let Some(factor) = decimal_pow10(scale.unsigned_abs()) else {
+            return false;
+        };
+        let scaled = if scale >= 0 {
+            self.inner.checked_mul(factor)
+        } else {
+            self.inner.checked_div(factor)
+        };
+        let Some(scaled) = scaled else {
+            return false;
+        };
+        decimal_integer_digit_count(scaled) <= precision as usize
+    }
+
+    pub fn to_sql_string(&self) -> String {
+        self.inner.to_string()
+    }
+
+    pub fn to_canonical_string(&self) -> String {
+        self.inner.normalize().to_string()
+    }
+
+    pub fn to_i64_trunc(&self) -> Option<i64> {
+        self.inner.trunc().to_string().parse::<i64>().ok()
+    }
+
+    pub fn to_f64(&self) -> Option<f64> {
+        self.inner.to_string().parse::<f64>().ok()
+    }
+}
+
+fn decimal_pow10(power: u32) -> Option<Decimal> {
+    let mut value = Decimal::from(1);
+    for _ in 0..power {
+        value = value.checked_mul(Decimal::from(10))?;
+    }
+    Some(value)
+}
+
+fn decimal_integer_digit_count(value: Decimal) -> usize {
+    let text = value.abs().trunc().normalize().to_string();
+    let digits = text.trim_start_matches('0');
+    digits.len().max(1)
+}
+
+impl PartialOrd for DecimalValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DecimalValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.inner.cmp(&other.inner)
+    }
+}
+
+impl Serialize for DecimalValue {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct TaggedDecimal<'a> {
+            #[serde(rename = "$uqa_type")]
+            kind: &'a str,
+            value: String,
+        }
+
+        TaggedDecimal {
+            kind: "decimal",
+            value: self.to_sql_string(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DecimalValue {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct TaggedDecimal {
+            #[serde(rename = "$uqa_type")]
+            kind: String,
+            value: String,
+        }
+
+        let tagged = TaggedDecimal::deserialize(deserializer)?;
+        if tagged.kind != "decimal" {
+            return Err(serde::de::Error::custom("not a decimal value"));
+        }
+        Self::parse(&tagged.value).ok_or_else(|| serde::de::Error::custom("invalid decimal value"))
+    }
+}
+
 fn epoch_date() -> NaiveDate {
     NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid epoch date")
 }
@@ -307,6 +517,7 @@ pub enum Value {
     Str(String),
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
+    Decimal(DecimalValue),
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
 }
@@ -485,6 +696,7 @@ impl Ord for Value {
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             (Value::Int(a), Value::Int(b)) => a.cmp(b),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+            (Value::Decimal(a), Value::Decimal(b)) => a.cmp(b),
             // Numeric cross-type compare: Int / Float / Bool all coerce
             // to f64 so SQL `WHERE price > 15` (Float vs Int literal)
             // and `WHERE flag > 0` line up with PostgreSQL semantics
@@ -495,6 +707,14 @@ impl Ord for Value {
             (Value::Float(a), Value::Int(b)) => {
                 a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
             }
+            (Value::Int(a), Value::Decimal(b)) => DecimalValue::from_i64(*a).cmp(b),
+            (Value::Decimal(a), Value::Int(b)) => a.cmp(&DecimalValue::from_i64(*b)),
+            (Value::Float(a), Value::Decimal(b)) => {
+                DecimalValue::from_f64_lossy(*a).map_or(Ordering::Equal, |a| a.cmp(b))
+            }
+            (Value::Decimal(a), Value::Float(b)) => {
+                DecimalValue::from_f64_lossy(*b).map_or(Ordering::Equal, |b| a.cmp(&b))
+            }
             (Value::Bool(a), Value::Int(b)) => i64::from(*a).cmp(b),
             (Value::Int(a), Value::Bool(b)) => a.cmp(&i64::from(*b)),
             (Value::Bool(a), Value::Float(b)) => f64::from(i64::from(*a) as i32)
@@ -503,6 +723,8 @@ impl Ord for Value {
             (Value::Float(a), Value::Bool(b)) => a
                 .partial_cmp(&f64::from(i64::from(*b) as i32))
                 .unwrap_or(Ordering::Equal),
+            (Value::Bool(a), Value::Decimal(b)) => DecimalValue::from_bool(*a).cmp(b),
+            (Value::Decimal(a), Value::Bool(b)) => a.cmp(&DecimalValue::from_bool(*b)),
             (Value::Str(a), Value::Str(b)) => a.cmp(b),
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
@@ -522,8 +744,9 @@ fn discriminant(v: &Value) -> u8 {
         Value::Str(_) => 4,
         Value::Bytes(_) => 5,
         Value::Temporal(_) => 6,
-        Value::List(_) => 7,
-        Value::Map(_) => 8,
+        Value::Decimal(_) => 7,
+        Value::List(_) => 8,
+        Value::Map(_) => 9,
     }
 }
 
@@ -588,5 +811,19 @@ mod tests {
         // Float vs Int compares numerically (not by discriminant).
         assert!(Value::Float(10.0) < Value::Int(15));
         assert!(Value::Float(20.0) > Value::Int(15));
+        assert!(Value::Decimal(DecimalValue::parse("10.5").unwrap()) > Value::Int(10));
+        assert_eq!(
+            Value::Decimal(DecimalValue::parse("1.0").unwrap()).cmp(&Value::Int(1)),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn decimal_value_uses_tagged_json() {
+        let value = Value::Decimal(DecimalValue::parse("123.4500").unwrap());
+        let json = serde_json::to_string(&value).unwrap();
+        assert!(json.contains("\"$uqa_type\":\"decimal\""));
+        assert!(json.contains("\"value\":\"123.4500\""));
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
     }
 }

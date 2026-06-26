@@ -321,6 +321,9 @@ fn expect_f64_value(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<f
     match eval(expr, ctx)? {
         Value::Float(f) => Ok(f),
         Value::Int(i) => Ok(i as f64),
+        Value::Decimal(d) => d
+            .to_f64()
+            .ok_or_else(|| SQLError::TypeMismatch(format!("{label} decimal is outside f64 range"))),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be numeric, got {other:?}"
         ))),
@@ -656,6 +659,9 @@ fn run_graph_edges(
         let weight = match edge.properties.get("weight") {
             Some(Value::Float(f)) => *f,
             Some(Value::Int(i)) => *i as f64,
+            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
+                SQLError::TypeMismatch("graph_edges.weight decimal is outside f64 range".into())
+            })?,
             _ => 1.0,
         };
         out.push(ScoredEntry {
@@ -690,6 +696,9 @@ fn run_temporal_traverse(
     let t_min = match eval(&args[4], &ctx)? {
         Value::Int(n) => n as f64,
         Value::Float(f) => f,
+        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
+            SQLError::TypeMismatch("temporal_traverse.t_min decimal is outside f64 range".into())
+        })?,
         Value::Null => f64::NEG_INFINITY,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -700,6 +709,9 @@ fn run_temporal_traverse(
     let t_max = match eval(&args[5], &ctx)? {
         Value::Int(n) => n as f64,
         Value::Float(f) => f,
+        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
+            SQLError::TypeMismatch("temporal_traverse.t_max decimal is outside f64 range".into())
+        })?,
         Value::Null => f64::INFINITY,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -708,54 +720,70 @@ fn run_temporal_traverse(
         }
     };
     let traversed = engine
-        .graph_with(&name, |store| {
-            use std::collections::VecDeque;
-            use uqa_graph::GraphStore;
-            let mut visited: std::collections::BTreeMap<u64, f64> =
-                std::collections::BTreeMap::new();
-            let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
-            queue.push_back((start, 0));
-            visited.insert(start, 1.0);
-            while let Some((v, depth)) = queue.pop_front() {
-                if depth >= max_hops {
-                    continue;
-                }
-                let edges = store.out_edge_ids(v, &name);
-                for eid in edges {
-                    let Some(edge) = store.get_edge(eid) else {
+        .graph_with(
+            &name,
+            |store| -> Result<std::collections::BTreeMap<u64, f64>, SQLError> {
+                use std::collections::VecDeque;
+                use uqa_graph::GraphStore;
+                let mut visited: std::collections::BTreeMap<u64, f64> =
+                    std::collections::BTreeMap::new();
+                let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
+                queue.push_back((start, 0));
+                visited.insert(start, 1.0);
+                while let Some((v, depth)) = queue.pop_front() {
+                    if depth >= max_hops {
                         continue;
-                    };
-                    if let Some(target_label) = label.as_deref() {
-                        if edge.label != target_label {
+                    }
+                    let edges = store.out_edge_ids(v, &name);
+                    for eid in edges {
+                        let Some(edge) = store.get_edge(eid) else {
+                            continue;
+                        };
+                        if let Some(target_label) = label.as_deref() {
+                            if edge.label != target_label {
+                                continue;
+                            }
+                        }
+                        // Read the edge's temporal range; fall back to
+                        // unbounded when the property is missing.
+                        let edge_from = match edge.properties.get("valid_from") {
+                            Some(Value::Int(n)) => *n as f64,
+                            Some(Value::Float(f)) => *f,
+                            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
+                                SQLError::TypeMismatch(
+                                    "temporal_traverse.valid_from decimal is outside f64 range"
+                                        .into(),
+                                )
+                            })?,
+                            _ => f64::NEG_INFINITY,
+                        };
+                        let edge_to = match edge.properties.get("valid_to") {
+                            Some(Value::Int(n)) => *n as f64,
+                            Some(Value::Float(f)) => *f,
+                            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
+                                SQLError::TypeMismatch(
+                                    "temporal_traverse.valid_to decimal is outside f64 range"
+                                        .into(),
+                                )
+                            })?,
+                            _ => f64::INFINITY,
+                        };
+                        if edge_to < t_min || edge_from > t_max {
                             continue;
                         }
-                    }
-                    // Read the edge's temporal range; fall back to
-                    // unbounded when the property is missing.
-                    let edge_from = match edge.properties.get("valid_from") {
-                        Some(Value::Int(n)) => *n as f64,
-                        Some(Value::Float(f)) => *f,
-                        _ => f64::NEG_INFINITY,
-                    };
-                    let edge_to = match edge.properties.get("valid_to") {
-                        Some(Value::Int(n)) => *n as f64,
-                        Some(Value::Float(f)) => *f,
-                        _ => f64::INFINITY,
-                    };
-                    if edge_to < t_min || edge_from > t_max {
-                        continue;
-                    }
-                    let nbr = edge.target_id;
-                    let score = 1.0 / ((depth + 1) as f64 + 1.0);
-                    if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(nbr) {
-                        slot.insert(score);
-                        queue.push_back((nbr, depth + 1));
+                        let nbr = edge.target_id;
+                        let score = 1.0 / ((depth + 1) as f64 + 1.0);
+                        if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(nbr)
+                        {
+                            slot.insert(score);
+                            queue.push_back((nbr, depth + 1));
+                        }
                     }
                 }
-            }
-            visited
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
+                Ok(visited)
+            },
+        )
+        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))??;
     let mut out: Vec<ScoredEntry> = traversed
         .into_iter()
         .map(|(v, score)| ScoredEntry { doc_id: v, score })
@@ -1471,6 +1499,13 @@ fn run_fuse_log_odds(
             }
             Expr::Literal(Value::Int(v)) => {
                 alpha = *v as f64;
+            }
+            Expr::Literal(Value::Decimal(v)) => {
+                alpha = v.to_f64().ok_or_else(|| {
+                    SQLError::TypeMismatch(
+                        "fuse_log_odds.alpha decimal is outside f64 range".into(),
+                    )
+                })?;
             }
             Expr::Literal(Value::Str(_)) => {
                 // Compatibility with the canonical UQA implementation's optional gating string

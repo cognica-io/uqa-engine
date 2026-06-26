@@ -8,7 +8,7 @@
 
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 
 use crate::ast::{
     BinaryOp, ColumnDef, CreateIndex, CreateTable, Expr, FromClause, InsertStmt, JoinKind, OrderBy,
@@ -1290,6 +1290,15 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                         filter: None,
                     });
                 }
+                "@?" => {
+                    return Ok(Expr::Func {
+                        name: "jsonpath_exists".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
                 "%" => {
                     return Ok(Expr::Func {
                         name: "mod".into(),
@@ -1366,6 +1375,15 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                     return Ok(Expr::Func {
                         name: "json_extract_path_text".into(),
                         args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "#-" => {
+                    return Ok(Expr::Func {
+                        name: "json_delete_path".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
                         order_by: Vec::new(),
                         filter: None,
@@ -1604,11 +1622,15 @@ fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
     };
     let value = match val {
         Val::Ival(i) => Value::Int(i64::from(i.ival)),
-        Val::Fval(f) => Value::Float(
-            f.fval
-                .parse::<f64>()
-                .map_err(|e| SQLError::Internal(e.to_string()))?,
-        ),
+        Val::Fval(f) => DecimalValue::parse(&f.fval).map_or_else(
+            || {
+                f.fval
+                    .parse::<f64>()
+                    .map(Value::Float)
+                    .map_err(|e| SQLError::Internal(e.to_string()))
+            },
+            |d| Ok(Value::Decimal(d)),
+        )?,
         Val::Sval(s) => Value::Str(s.sval.clone()),
         Val::Boolval(b) => Value::Bool(b.boolval),
         other => {

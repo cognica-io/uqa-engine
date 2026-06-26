@@ -6,7 +6,7 @@
 
 //! Coverage for `test_types`.
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_engine::{Engine, SQLResult};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
@@ -32,6 +32,107 @@ fn engine_with_table() -> Engine {
         "INSERT INTO t (id, val, name) VALUES (3, 30, 'charlie')",
     );
     engine
+}
+
+fn dec(value: &str) -> Value {
+    Value::Decimal(DecimalValue::parse(value).unwrap())
+}
+
+#[test]
+fn numeric_literal_arithmetic_is_decimal() {
+    let engine = Engine::new();
+    let result = exec(&engine, "SELECT 0.1 + 0.2 AS v");
+    assert_eq!(result.rows[0]["v"], dec("0.3"));
+}
+
+#[test]
+fn numeric_column_rounds_to_declared_scale() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE prices (id INTEGER PRIMARY KEY, amount NUMERIC(10, 2))",
+    );
+    exec(
+        &engine,
+        "INSERT INTO prices (id, amount) VALUES (1, 12.345)",
+    );
+    let result = exec(&engine, "SELECT amount FROM prices WHERE id = 1");
+    assert_eq!(result.rows[0]["amount"], dec("12.35"));
+}
+
+#[test]
+fn numeric_negative_scale_rounds_left_of_decimal() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE buckets (id INTEGER PRIMARY KEY, amount NUMERIC(2, -3))",
+    );
+    exec(
+        &engine,
+        "INSERT INTO buckets (id, amount) VALUES (1, 12345)",
+    );
+    let result = exec(&engine, "SELECT amount FROM buckets WHERE id = 1");
+    assert_eq!(result.rows[0]["amount"], dec("12000"));
+}
+
+#[test]
+fn numeric_negative_scale_enforces_precision_after_rounding() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE buckets (id INTEGER PRIMARY KEY, amount NUMERIC(2, -3))",
+    );
+    let err = engine
+        .sql("INSERT INTO buckets (id, amount) VALUES (1, 99999)", &[])
+        .unwrap_err();
+    assert!(err.to_string().contains("numeric field overflow"));
+}
+
+#[test]
+fn numeric_scale_larger_than_precision_restricts_fractional_range() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE tiny (id INTEGER PRIMARY KEY, amount NUMERIC(3, 5))",
+    );
+    exec(
+        &engine,
+        "INSERT INTO tiny (id, amount) VALUES (1, 0.009994)",
+    );
+    let result = exec(&engine, "SELECT amount FROM tiny WHERE id = 1");
+    assert_eq!(result.rows[0]["amount"], dec("0.00999"));
+
+    let err = engine
+        .sql("INSERT INTO tiny (id, amount) VALUES (2, 0.009995)", &[])
+        .unwrap_err();
+    assert!(err.to_string().contains("numeric field overflow"));
+}
+
+#[test]
+fn numeric_information_schema_reports_negative_scale() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE buckets (id INTEGER PRIMARY KEY, amount NUMERIC(2, -3))",
+    );
+    let result = exec(
+        &engine,
+        "SELECT numeric_precision, numeric_scale
+         FROM information_schema.columns
+         WHERE table_name = 'buckets' AND column_name = 'amount'",
+    );
+    assert_eq!(result.rows[0]["numeric_precision"], Value::Int(2));
+    assert_eq!(result.rows[0]["numeric_scale"], Value::Int(-3));
+}
+
+#[test]
+fn numeric_cast_preserves_decimal_value() {
+    let engine = Engine::new();
+    let result = exec(
+        &engine,
+        "SELECT CAST('123456789012345.6789' AS NUMERIC) AS v",
+    );
+    assert_eq!(result.rows[0]["v"], dec("123456789012345.6789"));
 }
 
 #[test]

@@ -80,6 +80,7 @@ impl Engine {
                     }
                     uqa_sql::ast::ColumnType::Text
                     | uqa_sql::ast::ColumnType::Json
+                    | uqa_sql::ast::ColumnType::JsonB
                     | uqa_sql::ast::ColumnType::Date
                     | uqa_sql::ast::ColumnType::Time
                     | uqa_sql::ast::ColumnType::TimeTz

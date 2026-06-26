@@ -250,6 +250,7 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
         Value::Bool(v) => DuckValue::Boolean(*v),
         Value::Int(v) => DuckValue::BigInt(*v),
         Value::Float(v) => DuckValue::Double(*v),
+        Value::Decimal(v) => DuckValue::Text(v.to_sql_string()),
         Value::Str(v) => DuckValue::Text(v.clone()),
         Value::Bytes(v) => DuckValue::Blob(v.clone()),
         Value::Temporal(TemporalValue::Date { days }) => DuckValue::Date32(*days),
@@ -338,6 +339,7 @@ fn duck_value_key_to_string(value: ::duckdb::types::Value) -> String {
         Value::Str(s) => s,
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Bool(b) => b.to_string(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Null => "null".into(),
@@ -350,6 +352,7 @@ fn duck_value_key_to_string(value: ::duckdb::types::Value) -> String {
 fn value_to_string(value: &Value) -> String {
     match value {
         Value::Temporal(t) => t.to_sql_string(),
+        Value::Decimal(d) => d.to_sql_string(),
         other => format!("{other:?}"),
     }
 }

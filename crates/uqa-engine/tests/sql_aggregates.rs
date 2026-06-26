@@ -10,7 +10,7 @@
 //! complex `HAVING`, `NUMERIC` precision/scale, `STDDEV` / `VARIANCE`,
 //! `PERCENTILE_CONT` / `PERCENTILE_DISC`, and `MODE`.
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_engine::Engine;
 
 fn engine() -> Engine {
@@ -121,6 +121,17 @@ fn bool_col(row: &uqa_sql::ResultRow, col: &str) -> Option<bool> {
     }
 }
 
+fn dec(value: &str) -> Value {
+    Value::Decimal(DecimalValue::parse(value).unwrap())
+}
+
+fn decimal_col(row: &uqa_sql::ResultRow, col: &str) -> Option<Value> {
+    match row.get(col)? {
+        Value::Decimal(value) => Some(Value::Decimal(value.clone())),
+        _ => None,
+    }
+}
+
 // =====================================================================
 // COUNT(DISTINCT)
 // =====================================================================
@@ -167,6 +178,26 @@ fn count_distinct_with_group_by() {
         .unwrap();
     assert_eq!(int_col(&r.rows[0], "cnt"), Some(2));
     assert_eq!(int_col(&r.rows[1], "cnt"), Some(1));
+}
+
+#[test]
+fn numeric_distinct_collapses_decimal_scale() {
+    let eng = engine();
+    eng.sql("CREATE TABLE amounts (amount NUMERIC)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO amounts (amount) VALUES (1.0), (1.00), (2.0)",
+        &[],
+    )
+    .unwrap();
+    let r = eng
+        .sql(
+            "SELECT COUNT(DISTINCT amount) AS cnt, SUM(DISTINCT amount) AS total FROM amounts",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(int_col(&r.rows[0], "cnt"), Some(2));
+    assert_eq!(decimal_col(&r.rows[0], "total"), Some(dec("3.0")));
 }
 
 #[test]
@@ -856,8 +887,7 @@ fn numeric_insert_rounds_to_scale() {
     eng.sql("INSERT INTO t (id, price) VALUES (1, 19.999)", &[])
         .unwrap();
     let r = eng.sql("SELECT price FROM t WHERE id = 1", &[]).unwrap();
-    let v = float_col(&r.rows[0], "price").unwrap();
-    assert!((v - 20.0).abs() < 0.001);
+    assert_eq!(decimal_col(&r.rows[0], "price"), Some(dec("20.00")));
 }
 
 #[test]
@@ -871,8 +901,7 @@ fn numeric_insert_preserves_scale() {
     eng.sql("INSERT INTO t (id, amount) VALUES (1, 123.456)", &[])
         .unwrap();
     let r = eng.sql("SELECT amount FROM t WHERE id = 1", &[]).unwrap();
-    let v = float_col(&r.rows[0], "amount").unwrap();
-    assert!((v - 123.456).abs() < 0.0001);
+    assert_eq!(decimal_col(&r.rows[0], "amount"), Some(dec("123.456")));
 }
 
 #[test]
@@ -888,8 +917,52 @@ fn numeric_arithmetic() {
     let r = eng
         .sql("SELECT a + b AS total FROM t WHERE id = 1", &[])
         .unwrap();
-    let v = float_col(&r.rows[0], "total").unwrap();
-    assert!((v - 13.75).abs() < 0.001);
+    assert_eq!(decimal_col(&r.rows[0], "total"), Some(dec("13.75")));
+}
+
+#[test]
+fn numeric_round_accepts_negative_scale() {
+    let eng = engine();
+    eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, v NUMERIC)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO t (id, v) VALUES (1, 1234.56), (2, 1250.00), (3, -1250.00)",
+        &[],
+    )
+    .unwrap();
+
+    let r = eng
+        .sql("SELECT round(v, -2) AS rounded FROM t ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(decimal_col(&r.rows[0], "rounded"), Some(dec("1200")));
+    assert_eq!(decimal_col(&r.rows[1], "rounded"), Some(dec("1300")));
+    assert_eq!(decimal_col(&r.rows[2], "rounded"), Some(dec("-1300")));
+}
+
+#[test]
+fn numeric_trunc_preserves_decimal_and_accepts_negative_scale() {
+    let eng = engine();
+    eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, v NUMERIC)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO t (id, v) VALUES (1, 1234.567), (2, -1234.567)",
+        &[],
+    )
+    .unwrap();
+
+    let r = eng
+        .sql(
+            "SELECT trunc(v) AS whole, trunc(v, 2) AS cents, trunc(v, -2) AS hundreds
+             FROM t ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(decimal_col(&r.rows[0], "whole"), Some(dec("1234")));
+    assert_eq!(decimal_col(&r.rows[0], "cents"), Some(dec("1234.56")));
+    assert_eq!(decimal_col(&r.rows[0], "hundreds"), Some(dec("1200")));
+    assert_eq!(decimal_col(&r.rows[1], "whole"), Some(dec("-1234")));
+    assert_eq!(decimal_col(&r.rows[1], "cents"), Some(dec("-1234.56")));
+    assert_eq!(decimal_col(&r.rows[1], "hundreds"), Some(dec("-1200")));
 }
 
 #[test]
@@ -923,8 +996,7 @@ fn numeric_no_scale_specified() {
     eng.sql("INSERT INTO t (id, val) VALUES (1, 42.9)", &[])
         .unwrap();
     let r = eng.sql("SELECT val FROM t WHERE id = 1", &[]).unwrap();
-    let v = float_col(&r.rows[0], "val").unwrap();
-    assert!((v - 43.0).abs() < 0.001);
+    assert_eq!(decimal_col(&r.rows[0], "val"), Some(dec("43")));
 }
 
 #[test]
@@ -935,8 +1007,28 @@ fn plain_numeric_no_precision() {
     eng.sql("INSERT INTO t (id, val) VALUES (1, 3.125)", &[])
         .unwrap();
     let r = eng.sql("SELECT val FROM t WHERE id = 1", &[]).unwrap();
-    let v = float_col(&r.rows[0], "val").unwrap();
-    assert!((v - 3.125).abs() < 0.001);
+    assert_eq!(decimal_col(&r.rows[0], "val"), Some(dec("3.125")));
+}
+
+#[test]
+fn numeric_sum_avg_min_max_return_decimal() {
+    let eng = engine();
+    eng.sql("CREATE TABLE t (amount NUMERIC(10, 2))", &[])
+        .unwrap();
+    eng.sql("INSERT INTO t (amount) VALUES (0.10), (0.20), (0.30)", &[])
+        .unwrap();
+    let r = eng
+        .sql(
+            "SELECT SUM(amount) AS total, AVG(amount) AS average,
+                    MIN(amount) AS smallest, MAX(amount) AS largest
+             FROM t",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(decimal_col(&r.rows[0], "total"), Some(dec("0.60")));
+    assert_eq!(decimal_col(&r.rows[0], "average"), Some(dec("0.20")));
+    assert_eq!(decimal_col(&r.rows[0], "smallest"), Some(dec("0.10")));
+    assert_eq!(decimal_col(&r.rows[0], "largest"), Some(dec("0.30")));
 }
 
 // =====================================================================

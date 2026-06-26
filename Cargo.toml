@@ -63,6 +63,7 @@ parking_lot = "0.12"
 rayon = "1.10"
 regex = "1.11"
 unicode-normalization = "0.1"
+rust_decimal = "1.42"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher", "blob"] }
 pg_query = "6.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

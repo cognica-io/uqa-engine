@@ -18,6 +18,7 @@ pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
 pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::Predicate;
 pub use types::{
-    DocId, Edge, EdgeId, FieldName, GeneralizedPayload, GeneralizedPostingEntry, IndexStats,
-    PathExpr, PathSegment, Payload, PostingEntry, TemporalValue, Value, Vertex, VertexId,
+    DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
+    IndexStats, PathExpr, PathSegment, Payload, PostingEntry, TemporalValue, Value, Vertex,
+    VertexId,
 };

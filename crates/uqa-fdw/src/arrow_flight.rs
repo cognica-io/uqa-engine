@@ -50,6 +50,7 @@ pub fn quote_literal(value: &Value) -> String {
         }
         Value::Int(i) => i.to_string(),
         Value::Float(f) => format!("{f}"),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => {
             let escaped = s.replace('\'', "''");
             format!("'{escaped}'")

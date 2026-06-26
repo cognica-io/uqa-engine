@@ -509,9 +509,13 @@ fn rust_column_type(col: &PythonColumnDef) -> Result<ColumnType, PythonMigration
         "real" | "float" | "float4" | "float8" | "double precision" => Ok(ColumnType::Real),
         "numeric" | "decimal" => Ok(ColumnType::Numeric {
             precision: col.numeric_precision,
-            scale: col.numeric_scale.or(col.numeric_precision.map(|_| 0)),
+            scale: col
+                .numeric_scale
+                .map(|scale| scale as i32)
+                .or(col.numeric_precision.map(|_| 0)),
         }),
-        "json" | "jsonb" => Ok(ColumnType::Json),
+        "json" => Ok(ColumnType::Json),
+        "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
         _ => Ok(ColumnType::Text),
     }

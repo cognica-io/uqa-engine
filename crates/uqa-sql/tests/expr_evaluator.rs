@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_sql::ast::{Expr, Statement};
 use uqa_sql::expr::{eval, EvalContext};
 use uqa_sql::{compile, ResultRow};
@@ -45,6 +45,10 @@ fn row_from(pairs: &[(&str, Value)]) -> ResultRow {
     r
 }
 
+fn dec(value: &str) -> Value {
+    Value::Decimal(DecimalValue::parse(value).unwrap())
+}
+
 #[test]
 fn column_ref() {
     let expr = projection_expr("SELECT x FROM t");
@@ -68,13 +72,10 @@ fn const_string() {
 }
 
 #[test]
-fn const_float() {
+fn const_decimal() {
     let expr = projection_expr("SELECT 3.125 FROM t");
     let ctx = EvalContext::new(None, &[]);
-    assert!(matches!(
-        eval(&expr, &ctx).unwrap(),
-        Value::Float(f) if (f - 3.125).abs() < 1e-9
-    ));
+    assert_eq!(eval(&expr, &ctx).unwrap(), dec("3.125"));
 }
 
 #[test]
@@ -155,6 +156,7 @@ fn typeof_function() {
     for (val, expected) in [
         (Value::Int(42), "integer"),
         (Value::Float(3.125), "double precision"),
+        (dec("3.125"), "numeric"),
         (Value::Str("hello".into()), "text"),
         (Value::Null, "null"),
     ] {

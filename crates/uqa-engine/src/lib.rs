@@ -577,6 +577,9 @@ fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
             .map(|item| match item {
                 Value::Float(value) => Ok(*value),
                 Value::Int(value) => Ok(*value as f64),
+                Value::Decimal(value) => value
+                    .to_f64()
+                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
                 other => Err(format!("expected numeric feature, got {other:?}")),
             })
             .collect(),

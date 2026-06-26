@@ -111,11 +111,27 @@ pub(super) fn compile_pg_type_name(
             let mut typmods_iter = type_name.typmods.iter();
             let precision = typmods_iter
                 .next()
-                .map(|n| expect_integer_const(n).map(|v| v as u32))
+                .map(|n| {
+                    let value = expect_integer_const(n)?;
+                    if !(1..=1000).contains(&value) {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "NUMERIC precision must be between 1 and 1000, got {value}"
+                        )));
+                    }
+                    Ok(value as u32)
+                })
                 .transpose()?;
             let scale = typmods_iter
                 .next()
-                .map(|n| expect_integer_const(n).map(|v| v as u32))
+                .map(|n| {
+                    let value = expect_integer_const(n)?;
+                    if !(-1000..=1000).contains(&value) {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "NUMERIC scale must be between -1000 and 1000, got {value}"
+                        )));
+                    }
+                    Ok(value as i32)
+                })
                 .transpose()?;
             // PostgreSQL semantics: NUMERIC(precision) without an
             // explicit scale defaults to scale=0, rounding to integers.
@@ -127,7 +143,8 @@ pub(super) fn compile_pg_type_name(
         "timetz" | "time with time zone" => Ok(ColumnType::TimeTz),
         "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
         "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
-        "json" | "jsonb" => Ok(ColumnType::Json),
+        "json" => Ok(ColumnType::Json),
+        "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.

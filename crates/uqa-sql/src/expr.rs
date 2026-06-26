@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use uqa_core::{TemporalValue, Value};
+use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
@@ -22,9 +22,10 @@ mod time;
 
 use encoding::{base64_decode, base64_encode, md5_hex};
 use json::{
-    json_build_array, json_build_object, json_contained_by, json_contains, json_extract_path,
-    json_has_key, json_has_keys, json_to_value, json_typeof, jsonb_set, parse_json, strip_nulls,
-    value_to_json,
+    json_build_array, json_build_object, json_concat, json_contained_by, json_contains,
+    json_delete, json_delete_path, json_extract_path, json_has_key, json_has_keys, json_to_value,
+    json_typeof, jsonb_insert, jsonb_set, jsonpath_candidate, jsonpath_exists, jsonpath_match,
+    parse_json, strip_nulls, value_to_json,
 };
 use time::{
     date_trunc, extract_field, format_pg_datetime, format_pg_number, generate_random_uuid,
@@ -154,6 +155,15 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let lower = normalized_function_name(name);
             let lower = lower.as_ref();
             if crate::registry::is_registered(lower) {
+                if lower == "fts_match" {
+                    let evaluated: Vec<Value> = args
+                        .iter()
+                        .map(|a| eval(a, ctx))
+                        .collect::<Result<Vec<_>>>()?;
+                    if jsonpath_candidate(&evaluated) {
+                        return jsonpath_match(&evaluated);
+                    }
+                }
                 return Err(SQLError::Unsupported(format!(
                     "scalar evaluation of `{name}` is not supported (use the function registry)"
                 )));
@@ -456,6 +466,7 @@ pub fn truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
         Value::Float(f) => *f != 0.0,
+        Value::Decimal(d) => !d.is_zero(),
         Value::Str(s) => !s.is_empty(),
         _ => true,
     }
@@ -466,6 +477,16 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Null, _) | (_, Value::Null) => false,
         (Value::Int(x), Value::Float(y)) => (*x as f64) == *y,
         (Value::Float(x), Value::Int(y)) => *x == (*y as f64),
+        (Value::Decimal(x), Value::Decimal(y)) => x == y,
+        (Value::Int(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Int(x)) => {
+            DecimalValue::from_i64(*x) == *y
+        }
+        (Value::Float(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Float(x)) => {
+            DecimalValue::from_f64_lossy(*x).is_some_and(|x| x == *y)
+        }
+        (Value::Bool(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Bool(x)) => {
+            DecimalValue::from_bool(*x) == *y
+        }
         (Value::Temporal(x), Value::Temporal(y)) => x == y,
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => {
             x.parse_same_kind(y).is_some_and(|parsed| parsed == *x)
@@ -486,6 +507,17 @@ fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
         (Value::Float(x), Value::Int(y)) => {
             Ok(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal))
         }
+        (Value::Decimal(x), Value::Decimal(y)) => Ok(x.cmp(y)),
+        (Value::Int(x), Value::Decimal(y)) => Ok(DecimalValue::from_i64(*x).cmp(y)),
+        (Value::Decimal(x), Value::Int(y)) => Ok(x.cmp(&DecimalValue::from_i64(*y))),
+        (Value::Float(x), Value::Decimal(y)) => DecimalValue::from_f64_lossy(*x)
+            .map(|x| x.cmp(y))
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
+        (Value::Decimal(x), Value::Float(y)) => DecimalValue::from_f64_lossy(*y)
+            .map(|y| x.cmp(&y))
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
+        (Value::Bool(x), Value::Decimal(y)) => Ok(DecimalValue::from_bool(*x).cmp(y)),
+        (Value::Decimal(x), Value::Bool(y)) => Ok(x.cmp(&DecimalValue::from_bool(*y))),
         (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
         (Value::Temporal(x), Value::Temporal(y)) => Ok(x.cmp(y)),
         (Value::Temporal(x), Value::Str(y)) => x
@@ -507,6 +539,14 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     // SQL three-valued logic: NULL `op` anything == NULL.
     if matches!(a, Value::Null) || matches!(b, Value::Null) {
         return Ok(Value::Null);
+    }
+    if matches!(op, BinaryOp::Subtract) {
+        if let Some(value) = json_delete(&[a.clone(), b.clone()])? {
+            return Ok(value);
+        }
+    }
+    if matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_)) {
+        return decimal_arith(a, b, op);
     }
     let lf = to_f64(a)?;
     let rf = to_f64(b)?;
@@ -543,6 +583,25 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     } else {
         Ok(Value::Float(result))
     }
+}
+
+fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
+    let left = to_decimal(a)?;
+    let right = to_decimal(b)?;
+    let value = match op {
+        BinaryOp::Add => left.checked_add(&right),
+        BinaryOp::Subtract => left.checked_sub(&right),
+        BinaryOp::Multiply => left.checked_mul(&right),
+        BinaryOp::Divide => {
+            if right.is_zero() {
+                return Ok(Value::Null);
+            }
+            left.checked_div(&right)
+        }
+        _ => unreachable!("non-arith op routed through decimal_arith"),
+    }
+    .ok_or_else(|| SQLError::TypeMismatch("decimal arithmetic overflow".into()))?;
+    Ok(Value::Decimal(value))
 }
 
 // -------------------------------------------------------------------------
@@ -688,6 +747,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     return Ok(Value::Null);
                 }
             }
+            if let Some(value) = json_concat(args)? {
+                return Ok(value);
+            }
             let mut buf = String::new();
             for a in args {
                 buf.push_str(&value_to_string(a));
@@ -775,6 +837,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "abs" => match &args[0] {
             Value::Int(i) => Ok(Value::Int(i.abs())),
             Value::Float(f) => Ok(Value::Float(f.abs())),
+            Value::Decimal(d) => Ok(Value::Decimal(d.abs())),
             Value::Null => Ok(Value::Null),
             other => Err(SQLError::TypeMismatch(format!(
                 "abs() expected number, got {other:?}"
@@ -784,12 +847,23 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             1 => match &args[0] {
                 Value::Int(i) => Ok(Value::Int(*i)),
                 Value::Float(f) => Ok(Value::Float(f.round())),
+                Value::Decimal(d) => Ok(Value::Decimal(d.round_dp(0))),
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!("round({other:?})"))),
             },
             2 => {
                 if args.iter().any(|arg| matches!(arg, Value::Null)) {
                     return Ok(Value::Null);
+                }
+                if matches!(args[0], Value::Decimal(_)) {
+                    let places = to_i64(&args[1])?;
+                    let places = i32::try_from(places).map_err(|_| {
+                        SQLError::TypeMismatch(format!("round scale out of range: {places}"))
+                    })?;
+                    return to_decimal(&args[0])?
+                        .round_to_scale(places)
+                        .map(Value::Decimal)
+                        .ok_or_else(|| SQLError::TypeMismatch("decimal round overflow".into()));
                 }
                 let v = to_f64(&args[0])?;
                 let places = to_i64(&args[1])?;
@@ -801,12 +875,14 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "ceil" | "ceiling" => match &args[0] {
             Value::Int(i) => Ok(Value::Int(*i)),
             Value::Float(f) => Ok(Value::Float(f.ceil())),
+            Value::Decimal(d) => Ok(Value::Decimal(d.ceil())),
             Value::Null => Ok(Value::Null),
             other => Err(SQLError::TypeMismatch(format!("ceil({other:?})"))),
         },
         "floor" => match &args[0] {
             Value::Int(i) => Ok(Value::Int(*i)),
             Value::Float(f) => Ok(Value::Float(f.floor())),
+            Value::Decimal(d) => Ok(Value::Decimal(d.floor())),
             Value::Null => Ok(Value::Null),
             other => Err(SQLError::TypeMismatch(format!("floor({other:?})"))),
         },
@@ -826,6 +902,17 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             match (&args[0], &args[1]) {
                 (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a % b)),
+                (a, b) if matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_)) => {
+                    let divisor = to_decimal(b)?;
+                    if divisor.is_zero() {
+                        Err(SQLError::TypeMismatch("modulo by zero".into()))
+                    } else {
+                        to_decimal(a)?
+                            .checked_rem(&divisor)
+                            .map(Value::Decimal)
+                            .ok_or_else(|| SQLError::TypeMismatch("decimal modulo overflow".into()))
+                    }
+                }
                 (a, b) => {
                     let af = to_f64(a)?;
                     let bf = to_f64(b)?;
@@ -1030,10 +1117,26 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }))
         }
         "trunc" => match args.len() {
-            1 => float1(args, "trunc", f64::trunc),
+            1 => match &args[0] {
+                Value::Int(i) => Ok(Value::Int(*i)),
+                Value::Float(f) => Ok(Value::Float(f.trunc())),
+                Value::Decimal(d) => Ok(Value::Decimal(d.trunc())),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!("trunc({other:?})"))),
+            },
             2 => {
                 if args.iter().any(|arg| matches!(arg, Value::Null)) {
                     return Ok(Value::Null);
+                }
+                if matches!(args[0], Value::Decimal(_)) {
+                    let places = to_i64(&args[1])?;
+                    let places = i32::try_from(places).map_err(|_| {
+                        SQLError::TypeMismatch(format!("trunc scale out of range: {places}"))
+                    })?;
+                    return to_decimal(&args[0])?
+                        .trunc_to_scale(places)
+                        .map(Value::Decimal)
+                        .ok_or_else(|| SQLError::TypeMismatch("decimal trunc overflow".into()));
                 }
                 let v = to_f64(&args[0])?;
                 let p = to_i64(&args[1])?;
@@ -1380,6 +1483,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             match &args[0] {
                 Value::Int(i) => Ok(Value::Str(format_pg_number(*i as f64, &fmt))),
                 Value::Float(f) => Ok(Value::Str(format_pg_number(*f, &fmt))),
+                Value::Decimal(d) => d
+                    .to_f64()
+                    .map(|value| Value::Str(format_pg_number(value, &fmt)))
+                    .ok_or_else(|| SQLError::TypeMismatch("to_char: numeric out of range".into())),
                 Value::Str(s) => {
                     let dt = parse_timestamp(s)?;
                     Ok(Value::Str(format_pg_datetime(&dt, &fmt)))
@@ -1408,10 +1515,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 .chars()
                 .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
                 .collect();
-            cleaned
-                .parse::<f64>()
-                .map(Value::Float)
-                .map_err(|e| SQLError::TypeMismatch(format!("to_number: {e}")))
+            DecimalValue::parse(&cleaned)
+                .map(Value::Decimal)
+                .ok_or_else(|| SQLError::TypeMismatch(format!("to_number: {s:?}")))
         }
         "isfinite" => {
             if args.len() != 1 {
@@ -1419,7 +1525,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             match &args[0] {
                 Value::Float(f) => Ok(Value::Bool(f.is_finite())),
-                Value::Int(_) | Value::Str(_) => Ok(Value::Bool(true)),
+                Value::Int(_) | Value::Decimal(_) | Value::Str(_) => Ok(Value::Bool(true)),
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!(
                     "isfinite: unsupported {other:?}"
@@ -1471,9 +1577,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "json_extract_path_text" | "jsonb_extract_path_text" => json_extract_path(args, true),
         "json_contains" => json_contains(args),
         "json_contained_by" => json_contained_by(args),
+        "json_delete_path" => json_delete_path(args),
         "json_has_key" => json_has_key(args),
         "json_has_any_key" => json_has_keys(args, false),
         "json_has_all_keys" => json_has_keys(args, true),
+        "jsonb_path_exists" | "jsonpath_exists" => jsonpath_exists(args),
+        "jsonb_path_match" | "jsonpath_match" => jsonpath_match(args),
         "to_json" | "to_jsonb" | "row_to_json" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
@@ -1481,7 +1590,17 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let json = value_to_json(&args[0]);
             Ok(json_to_value(&json))
         }
-        "jsonb_set" | "jsonb_insert" => jsonb_set(args),
+        "jsonb_set" => jsonb_set(args),
+        "jsonb_insert" => jsonb_insert(args),
+        "jsonb_pretty" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("jsonb_pretty takes 1 arg".into()));
+            }
+            let parsed = parse_json(&value_to_string(&args[0]))?;
+            Ok(Value::Str(serde_json::to_string_pretty(&parsed).map_err(
+                |err| SQLError::TypeMismatch(format!("jsonb_pretty: {err}")),
+            )?))
+        }
         "json_strip_nulls" | "jsonb_strip_nulls" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch(
@@ -1677,6 +1796,7 @@ fn typeof_value(v: &Value) -> String {
         Value::Bool(_) => "boolean".into(),
         Value::Int(_) => "integer".into(),
         Value::Float(_) => "double precision".into(),
+        Value::Decimal(_) => "numeric".into(),
         Value::Str(_) => "text".into(),
         Value::Bytes(_) => "bytea".into(),
         Value::Temporal(value) => match value {
@@ -1772,9 +1892,10 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
         "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial"
         | "bigserial" | "serial4" | "serial8" | "pg_catalog.int4" | "pg_catalog.int8"
         | "pg_catalog.int2" => Ok(Value::Int(to_i64(v)?)),
-        "real" | "float4" | "float8" | "double" | "double precision" | "numeric" | "decimal" => {
+        "real" | "float4" | "float8" | "double" | "double precision" => {
             Ok(Value::Float(to_f64(v)?))
         }
+        "numeric" | "decimal" => Ok(Value::Decimal(to_decimal(v)?)),
         "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
             Ok(Value::Str(value_to_string(v)))
         }
@@ -1816,6 +1937,7 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => "".into(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
         Value::Temporal(t) => t.to_sql_string(),
@@ -1880,6 +2002,9 @@ fn to_i64(v: &Value) -> Result<i64> {
     match v {
         Value::Int(n) => Ok(*n),
         Value::Float(f) => Ok(*f as i64),
+        Value::Decimal(d) => d
+            .to_i64_trunc()
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to integer"))),
         Value::Bool(b) => Ok(i64::from(*b)),
         Value::Str(s) => s
             .parse()
@@ -1894,7 +2019,25 @@ fn to_f64(v: &Value) -> Result<f64> {
     match v {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
+        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
+            SQLError::TypeMismatch(format!("cannot cast {v:?} to double precision"))
+        }),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        other => Err(SQLError::TypeMismatch(format!(
+            "expected number, got {other:?}"
+        ))),
+    }
+}
+
+fn to_decimal(v: &Value) -> Result<DecimalValue> {
+    match v {
+        Value::Decimal(d) => Ok(d.clone()),
+        Value::Int(n) => Ok(DecimalValue::from_i64(*n)),
+        Value::Float(f) => DecimalValue::from_f64_lossy(*f)
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to numeric"))),
+        Value::Bool(b) => Ok(DecimalValue::from_bool(*b)),
+        Value::Str(s) => DecimalValue::parse(s)
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot parse {s:?} as numeric"))),
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
@@ -1918,6 +2061,7 @@ fn coerce_i64(v: &Value) -> Option<i64> {
     match v {
         Value::Int(n) => Some(*n),
         Value::Float(f) => Some(*f as i64),
+        Value::Decimal(d) => d.to_i64_trunc(),
         Value::Bool(b) => Some(i64::from(*b)),
         Value::Str(s) => s.parse().ok(),
         _ => None,
@@ -1935,6 +2079,9 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
                 let x = match item {
                     Value::Float(f) => *f as f32,
                     Value::Int(i) => *i as f32,
+                    Value::Decimal(d) => d.to_f64().map(|f| f as f32).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
+                    })?,
                     other => {
                         return Err(SQLError::TypeMismatch(format!(
                             "vector element must be numeric, got {other:?}"

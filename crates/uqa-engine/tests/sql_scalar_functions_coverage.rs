@@ -30,6 +30,7 @@ fn as_float(value: &Value) -> f64 {
     match value {
         Value::Float(v) => *v,
         Value::Int(v) => *v as f64,
+        Value::Decimal(v) => v.to_f64().unwrap(),
         other => panic!("expected numeric value, got {other:?}"),
     }
 }

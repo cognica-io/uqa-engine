@@ -77,10 +77,22 @@ fn execute_mixed_where_expr(
             execute_mixed_where_expr(engine, table, inner, params)?,
         )),
         Expr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
-            execute_function(engine, table, name, args, params)
+            if is_jsonpath_fts_match(name, args) {
+                filter_table_rows(engine, table, filter, params)
+            } else {
+                execute_function(engine, table, name, args, params)
+            }
         }
         other => filter_table_rows(engine, table, other, params),
     }
+}
+
+fn is_jsonpath_fts_match(name: &str, args: &[Expr]) -> bool {
+    name.eq_ignore_ascii_case("fts_match")
+        && matches!(
+            args.get(1),
+            Some(Expr::Literal(uqa_core::Value::Str(path))) if path.trim_start().starts_with('$')
+        )
 }
 
 fn all_table_rows(engine: &Engine, table: &str) -> Vec<ScoredEntry> {

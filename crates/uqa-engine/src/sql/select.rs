@@ -2791,6 +2791,28 @@ fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
     }
 }
 
+fn expr_contains_jsonpath_fts_match(expr: &Expr) -> bool {
+    let mut found = false;
+    walk_expr(expr, &mut |part| {
+        if expr_is_jsonpath_fts_match(part) {
+            found = true;
+        }
+    });
+    found
+}
+
+fn expr_is_jsonpath_fts_match(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Func { name, args, .. }
+            if name.eq_ignore_ascii_case("fts_match")
+                && matches!(
+                    args.get(1),
+                    Some(Expr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
+                )
+    )
+}
+
 pub(super) fn materialize_ctes(
     engine: &Engine,
     stmt: &SelectStmt,
@@ -3434,6 +3456,10 @@ fn run_single_table_select(
 ) -> Result<SQLResult, SQLError> {
     let score_top_k = score_order_top_k(stmt, engine, params)?;
     let score_top_k = score_top_k.filter(|_| score_limited_text_filter(stmt.r#where.as_ref()));
+    let has_jsonpath_fts_filter = stmt
+        .r#where
+        .as_ref()
+        .is_some_and(expr_contains_jsonpath_fts_match);
     // Try the operator-tree pipeline first: lower the WHERE clause to
     // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
     // aware / fusion-reordering passes - compatibility), then execute
@@ -3441,13 +3467,27 @@ fn run_single_table_select(
     // returns `None` for shapes the operator IR can't represent
     // (arithmetic across columns, sub-queries, window calls, ...) and
     // we fall back to the legacy direct dispatch in that case.
-    let scored = if let (Some(top_k), Some(Expr::Func { name, args, .. })) =
+    let optimised = if has_jsonpath_fts_filter {
+        None
+    } else if let (Some(top_k), Some(Expr::Func { name, args, .. })) =
         (score_top_k, stmt.r#where.as_ref())
     {
-        execute_function_with_top_k(engine, table, name, args, params, Some(top_k))?
+        Some(execute_function_with_top_k(
+            engine,
+            table,
+            name,
+            args,
+            params,
+            Some(top_k),
+        )?)
     } else if let Some(rows) =
         crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
     {
+        Some(rows)
+    } else {
+        None
+    };
+    let scored = if let Some(rows) = optimised {
         rows
     } else {
         match stmt.r#where.as_ref() {
@@ -3456,7 +3496,10 @@ fn run_single_table_select(
                 .into_iter()
                 .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
                 .collect::<Vec<_>>(),
-            Some(Expr::Func { name, args, .. }) if uqa_sql::registry::is_registered(name) => {
+            Some(filter_expr @ Expr::Func { name, args, .. })
+                if uqa_sql::registry::is_registered(name)
+                    && !expr_is_jsonpath_fts_match(filter_expr) =>
+            {
                 execute_function(engine, table, name, args, params)?
             }
             Some(filter_expr) => execute_mixed_where(engine, table, filter_expr, params)?,

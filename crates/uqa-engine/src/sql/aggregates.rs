@@ -12,7 +12,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_sql::ast::{Expr, OrderBy, Projection, SelectStmt};
 use uqa_sql::expr::EvalContext;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
@@ -478,6 +478,8 @@ fn is_aggregate(engine: &Engine, expr: &Expr) -> bool {
             | "percentile_cont"
             | "percentile_disc"
             | "mode"
+            | "json_agg"
+            | "jsonb_agg"
             | "json_object_agg"
             | "jsonb_object_agg"
     ) || engine.has_registered_aggregate_function(name))
@@ -786,6 +788,10 @@ fn aggregate_input_value(
         ("json_object_agg" | "jsonb_object_agg", _) => Err(SQLError::TypeMismatch(format!(
             "{name} requires 2 arguments"
         ))),
+        ("json_agg" | "jsonb_agg", [arg]) => uqa_sql::expr::eval(arg, ctx),
+        ("json_agg" | "jsonb_agg", _) => Err(SQLError::TypeMismatch(format!(
+            "{name} requires 1 argument"
+        ))),
         (_, args) => {
             let arg = args
                 .first()
@@ -863,7 +869,8 @@ fn observe_aggregate(
     }
 
     let value = aggregate_input_value(name, args, order_by, ctx)?;
-    if distinct && !matches!(value, Value::Null) {
+    let preserves_null_inputs = is_json_array_aggregate(name);
+    if distinct && (preserves_null_inputs || !matches!(value, Value::Null)) {
         let key = distinct_key(&value);
         if !acc.distinct.insert(key) {
             return Ok(());
@@ -874,12 +881,18 @@ fn observe_aggregate(
         let v = uqa_sql::expr::eval(&ob.expr, ctx)?;
         sort_keys.push((v, ob.descending));
     }
-    if order_by.is_empty() {
+    if preserves_null_inputs {
+        acc.observe_including_null(&value, sort_keys)?;
+    } else if order_by.is_empty() {
         acc.observe(&value)?;
     } else {
         acc.observe_with_sort_keys(&value, sort_keys)?;
     }
     Ok(())
+}
+
+fn is_json_array_aggregate(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "json_agg" | "jsonb_agg")
 }
 
 pub(super) struct AggregateAccumulator {
@@ -888,6 +901,9 @@ pub(super) struct AggregateAccumulator {
     registered_ordered: RegisteredAggregateBuffer,
     count: u64,
     sum: f64,
+    decimal_sum: Option<DecimalValue>,
+    has_decimal: bool,
+    has_float: bool,
     min: Option<Value>,
     max: Option<Value>,
     /// Distinct-bookkeeping. Filled by the dispatcher when the
@@ -911,6 +927,9 @@ impl Default for AggregateAccumulator {
             registered_ordered: RegisteredAggregateBuffer::default(),
             count: 0,
             sum: 0.0,
+            decimal_sum: None,
+            has_decimal: false,
+            has_float: false,
             min: None,
             max: None,
             distinct: BTreeSet::new(),
@@ -936,14 +955,38 @@ impl AggregateAccumulator {
         if matches!(value, Value::Null) {
             return Ok(());
         }
-        self.observe_numeric(value);
+        self.observe_numeric(value)?;
         self.values.push(value.clone(), Vec::new())
     }
 
-    fn observe_numeric(&mut self, value: &Value) {
+    fn observe_numeric(&mut self, value: &Value) -> Result<(), SQLError> {
         self.count += 1;
         if !matches!(value, Value::Int(_)) {
             self.all_values_int = false;
+        }
+        match value {
+            Value::Int(n) => {
+                let next = DecimalValue::from_i64(*n);
+                self.decimal_sum = Some(match &self.decimal_sum {
+                    Some(sum) => sum.checked_add(&next).ok_or_else(|| {
+                        SQLError::TypeMismatch("decimal aggregate overflow".into())
+                    })?,
+                    None => next,
+                });
+            }
+            Value::Decimal(d) => {
+                self.has_decimal = true;
+                self.decimal_sum = Some(match &self.decimal_sum {
+                    Some(sum) => sum.checked_add(d).ok_or_else(|| {
+                        SQLError::TypeMismatch("decimal aggregate overflow".into())
+                    })?,
+                    None => d.clone(),
+                });
+            }
+            Value::Float(_) => {
+                self.has_float = true;
+            }
+            _ => {}
         }
         if let Ok(f) = value_as_f64(value) {
             self.sum += f;
@@ -960,6 +1003,7 @@ impl AggregateAccumulator {
             self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
             self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
         }
+        Ok(())
     }
 
     fn observe_with_sort_keys(
@@ -970,7 +1014,15 @@ impl AggregateAccumulator {
         if matches!(value, Value::Null) {
             return Ok(());
         }
-        self.observe_numeric(value);
+        self.observe_numeric(value)?;
+        self.values.push(value.clone(), keys)
+    }
+
+    fn observe_including_null(
+        &mut self,
+        value: &Value,
+        keys: Vec<(Value, bool)>,
+    ) -> Result<(), SQLError> {
         self.values.push(value.clone(), keys)
     }
 
@@ -1329,6 +1381,7 @@ fn distinct_key(v: &Value) -> String {
         Value::Bool(b) => format!("b:{b}"),
         Value::Int(n) => format!("i:{n}"),
         Value::Float(f) => format!("f:{f}"),
+        Value::Decimal(d) => format!("n:{}", d.to_canonical_string()),
         Value::Str(s) => format!("s:{s}"),
         Value::Bytes(b) => format!("y:{}", b.len()),
         Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
@@ -1340,6 +1393,9 @@ fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
     match v {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
+        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
+            SQLError::TypeMismatch(format!("expected number that fits float, got {v:?}"))
+        }),
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
@@ -1352,6 +1408,15 @@ fn value_lt(a: &Value, b: &Value) -> bool {
         (Value::Float(x), Value::Float(y)) => x < y,
         (Value::Int(x), Value::Float(y)) => (*x as f64) < *y,
         (Value::Float(x), Value::Int(y)) => *x < (*y as f64),
+        (Value::Decimal(x), Value::Decimal(y)) => x < y,
+        (Value::Int(x), Value::Decimal(y)) => DecimalValue::from_i64(*x) < *y,
+        (Value::Decimal(x), Value::Int(y)) => *x < DecimalValue::from_i64(*y),
+        (Value::Float(x), Value::Decimal(y)) => {
+            DecimalValue::from_f64_lossy(*x).is_some_and(|x| x < *y)
+        }
+        (Value::Decimal(x), Value::Float(y)) => {
+            DecimalValue::from_f64_lossy(*y).is_some_and(|y| *x < y)
+        }
         (Value::Str(x), Value::Str(y)) => x < y,
         (Value::Temporal(x), Value::Temporal(y)) => x < y,
         _ => false,
@@ -1625,6 +1690,11 @@ fn aggregate_value_with_args(
         "sum" => {
             if acc.count == 0 {
                 Value::Null
+            } else if acc.has_decimal && !acc.has_float {
+                acc.decimal_sum
+                    .clone()
+                    .map(Value::Decimal)
+                    .unwrap_or(Value::Null)
             } else if acc.all_values_int {
                 Value::Int(acc.sum as i64)
             } else {
@@ -1634,6 +1704,13 @@ fn aggregate_value_with_args(
         "avg" => {
             if acc.count == 0 {
                 Value::Null
+            } else if acc.has_decimal && !acc.has_float {
+                let divisor = DecimalValue::from_i64(acc.count as i64);
+                acc.decimal_sum
+                    .as_ref()
+                    .and_then(|sum| sum.checked_div(&divisor))
+                    .map(Value::Decimal)
+                    .unwrap_or(Value::Null)
             } else {
                 Value::Float(acc.sum / acc.count as f64)
             }
@@ -1656,6 +1733,7 @@ fn aggregate_value_with_args(
                     Value::Str(s) => Some(s.clone()),
                     Value::Int(n) => Some(n.to_string()),
                     Value::Float(f) => Some(f.to_string()),
+                    Value::Decimal(d) => Some(d.to_sql_string()),
                     Value::Bool(b) => Some(b.to_string()),
                     Value::Temporal(t) => Some(t.to_sql_string()),
                     _ => None,
@@ -1664,6 +1742,13 @@ fn aggregate_value_with_args(
             Value::Str(parts.join(&sep))
         }
         "array_agg" => {
+            let ordered_values = acc.values.ordered_values()?;
+            if ordered_values.is_empty() {
+                return Ok(Value::Null);
+            }
+            Value::List(ordered_values)
+        }
+        "json_agg" | "jsonb_agg" => {
             let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
@@ -1725,11 +1810,7 @@ fn aggregate_value_with_args(
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
-            let frac = match args.first() {
-                Some(Expr::Literal(Value::Float(f))) => *f,
-                Some(Expr::Literal(Value::Int(n))) => *n as f64,
-                _ => 0.5,
-            };
+            let frac = percentile_fraction(args);
             Value::Float(percentile_cont(&ordered_values, frac))
         }
         "percentile_disc" => {
@@ -1737,11 +1818,7 @@ fn aggregate_value_with_args(
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
-            let frac = match args.first() {
-                Some(Expr::Literal(Value::Float(f))) => *f,
-                Some(Expr::Literal(Value::Int(n))) => *n as f64,
-                _ => 0.5,
-            };
+            let frac = percentile_fraction(args);
             percentile_disc(&ordered_values, frac)
         }
         "mode" => mode_value(&acc.values.ordered_values()?),
@@ -1750,12 +1827,22 @@ fn aggregate_value_with_args(
     Ok(value)
 }
 
+fn percentile_fraction(args: &[Expr]) -> f64 {
+    match args.first() {
+        Some(Expr::Literal(Value::Float(f))) => *f,
+        Some(Expr::Literal(Value::Int(n))) => *n as f64,
+        Some(Expr::Literal(Value::Decimal(d))) => d.to_f64().unwrap_or(0.5),
+        _ => 0.5,
+    }
+}
+
 fn aggregate_json_key(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),

@@ -92,7 +92,11 @@ fn merge_relationship_with_bound_end_creates_distinct_edges() {
         })
         .collect();
     ids.sort();
-    assert_eq!(ids, vec!["gui", "wu", "yi"], "all distinct ends must be linked");
+    assert_eq!(
+        ids,
+        vec!["gui", "wu", "yi"],
+        "all distinct ends must be linked"
+    );
 
     // Re-running the same MERGEs must be idempotent (no duplicate edges).
     for stem in ["wu", "yi", "gui"] {

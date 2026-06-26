@@ -16,7 +16,7 @@ use pyo3::conversion::IntoPyObjectExt;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
-use uqa_core::{TemporalValue, Value};
+use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{
     Engine, HybridSearchParams, SQLAggregateFunction, SQLAggregateState, SQLParam, SQLResult,
@@ -896,6 +896,13 @@ fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_instance_of::<PyFloat>() {
         return Ok(Value::Float(value.extract()?));
     }
+    let decimal_type = value.py().import("decimal")?.getattr("Decimal")?;
+    if value.is_instance(&decimal_type)? {
+        let text = value.str()?.extract::<String>()?;
+        return DecimalValue::parse(&text)
+            .map(Value::Decimal)
+            .ok_or_else(|| PyValueError::new_err(format!("invalid decimal value {text}")));
+    }
     if value.is_instance_of::<PyString>() {
         return Ok(Value::Str(value.extract()?));
     }
@@ -927,6 +934,7 @@ fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
         Value::Bool(value) => value.into_py_any(py),
         Value::Int(value) => value.into_py_any(py),
         Value::Float(value) => value.into_py_any(py),
+        Value::Decimal(value) => decimal_to_py(py, value),
         Value::Str(value) => value.into_py_any(py),
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
@@ -943,6 +951,11 @@ fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
 
 fn temporal_to_string(value: &TemporalValue) -> String {
     value.to_sql_string()
+}
+
+fn decimal_to_py(py: Python<'_>, value: &DecimalValue) -> PyResult<Py<PyAny>> {
+    let decimal_type = py.import("decimal")?.getattr("Decimal")?;
+    Ok(decimal_type.call1((value.to_sql_string(),))?.unbind())
 }
 
 fn map_to_py(py: Python<'_>, values: &BTreeMap<String, Value>) -> PyResult<Py<PyAny>> {

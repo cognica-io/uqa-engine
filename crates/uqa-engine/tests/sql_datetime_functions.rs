@@ -10,7 +10,7 @@
 //! so these tests assert the same observable SQL semantics through that
 //! representation rather than host-language date/datetime object types.
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_engine::{Engine, SQLResult};
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
@@ -43,6 +43,10 @@ fn bool_value(value: &Value) -> bool {
         Value::Bool(b) => *b,
         other => panic!("expected bool, got {other:?}"),
     }
+}
+
+fn dec(value: &str) -> Value {
+    Value::Decimal(DecimalValue::parse(value).unwrap())
 }
 
 fn ts_table() -> Engine {
@@ -309,28 +313,28 @@ fn make_interval_zero_interval() {
 fn to_number_with_currency_and_commas() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT to_number('$1,234.56', '9999.99') AS n");
-    assert!((float_value(&result.rows[0]["n"]) - 1234.56).abs() < 0.01);
+    assert_eq!(result.rows[0]["n"], dec("1234.56"));
 }
 
 #[test]
 fn to_number_plain_integer() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT to_number('42', '99') AS n");
-    assert_eq!(result.rows[0]["n"], Value::Float(42.0));
+    assert_eq!(result.rows[0]["n"], dec("42"));
 }
 
 #[test]
 fn to_number_negative_number() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT to_number('-99.5', '999.9') AS n");
-    assert!((float_value(&result.rows[0]["n"]) - (-99.5)).abs() < 0.01);
+    assert_eq!(result.rows[0]["n"], dec("-99.5"));
 }
 
 #[test]
 fn to_number_with_spaces() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT to_number('  100  ', '999') AS n");
-    assert!((float_value(&result.rows[0]["n"]) - 100.0).abs() < 0.01);
+    assert_eq!(result.rows[0]["n"], dec("100"));
 }
 
 #[test]

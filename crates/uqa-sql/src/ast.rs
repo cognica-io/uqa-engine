@@ -23,10 +23,12 @@ pub enum ColumnType {
     /// the catalog text but is not currently enforced.
     Numeric {
         precision: Option<u32>,
-        scale: Option<u32>,
+        scale: Option<i32>,
     },
     /// `JSON` / `JSONB` columns store typed JSON values.
     Json,
+    /// `JSONB` columns store typed JSON values with PostgreSQL JSONB operators.
+    JsonB,
     /// `BYTEA` columns store opaque bytes.
     Bytea,
     /// `DATE` columns store days since 1970-01-01.

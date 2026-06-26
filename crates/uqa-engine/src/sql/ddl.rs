@@ -8,9 +8,9 @@
 
 use super::{
     eval, index_vectors_for_type, run_select, value_to_tensor, value_to_vector, AlterTableAction,
-    AlterTableStmt, BTreeMap, ColumnType, CreateIndex, CreateTable, Document, DropKind, DropStmt,
-    Engine, EvalContext, IVFIndexParams, RowUpdateVectors, SQLColumnDef, SQLError, SQLParam,
-    SQLResult, TemporalValue, Value,
+    AlterTableStmt, BTreeMap, ColumnType, CreateIndex, CreateTable, DecimalValue, Document,
+    DropKind, DropStmt, Engine, EvalContext, IVFIndexParams, RowUpdateVectors, SQLColumnDef,
+    SQLError, SQLParam, SQLResult, TemporalValue, Value,
 };
 use crate::CatalogIndexRow;
 
@@ -446,18 +446,22 @@ pub(super) fn coerce_to_column_type(
     let Some(def) = cols.iter().find(|c| c.name == column) else {
         return Ok(value);
     };
-    if let ColumnType::Numeric { scale: Some(s), .. } = &def.ty {
-        return Ok(round_numeric(value, *s));
+    if matches!(&def.ty, ColumnType::Numeric { .. }) {
+        return convert_value_to_column_type(value, &def.ty);
     }
     if matches!(&def.ty, ColumnType::Real) {
         return match value {
             Value::Float(_) => Ok(value),
             Value::Int(i) => Ok(Value::Float(i as f64)),
+            Value::Decimal(d) => d
+                .to_f64()
+                .map(Value::Float)
+                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to real".into())),
             Value::Str(s) => Ok(s.parse::<f64>().map(Value::Float).unwrap_or(Value::Str(s))),
             other => Ok(other),
         };
     }
-    if matches!(&def.ty, ColumnType::Json) {
+    if matches!(&def.ty, ColumnType::Json | ColumnType::JsonB) {
         return Ok(coerce_json_value(value));
     }
     if matches!(&def.ty, ColumnType::Bytea) {
@@ -528,9 +532,13 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
             ))),
         },
         ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
-        ColumnType::Real | ColumnType::Numeric { .. } => match value {
+        ColumnType::Real => match value {
             Value::Float(_) => Ok(value),
             Value::Int(i) => Ok(Value::Float(i as f64)),
+            Value::Decimal(d) => d
+                .to_f64()
+                .map(Value::Float)
+                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to real".into())),
             Value::Bool(b) => Ok(Value::Float(if b { 1.0 } else { 0.0 })),
             Value::Str(s) => s
                 .parse::<f64>()
@@ -540,7 +548,41 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
                 "cannot cast {other:?} to real"
             ))),
         },
-        ColumnType::Json => Ok(coerce_json_value(value)),
+        ColumnType::Numeric { precision, scale } => {
+            let decimal = match value {
+                Value::Decimal(d) => d,
+                Value::Int(i) => DecimalValue::from_i64(i),
+                Value::Float(f) => DecimalValue::from_f64_lossy(f).ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("cannot cast {f:?} to numeric"))
+                })?,
+                Value::Bool(b) => DecimalValue::from_bool(b),
+                Value::Str(s) => DecimalValue::parse(&s).ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("cannot cast `{s}` to numeric"))
+                })?,
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "cannot cast {other:?} to numeric"
+                    )));
+                }
+            };
+            let rounded = match scale {
+                Some(s) => decimal.round_to_scale(*s).ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("cannot round numeric to scale {s}"))
+                })?,
+                None => decimal,
+            };
+            if let Some(precision) = precision {
+                let scale = scale.unwrap_or(0);
+                if !rounded.fits_precision(*precision, scale) {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "numeric field overflow: value {} exceeds precision {precision}, scale {scale}",
+                        rounded.to_sql_string()
+                    )));
+                }
+            }
+            Ok(Value::Decimal(rounded))
+        }
+        ColumnType::Json | ColumnType::JsonB => Ok(coerce_json_value(value)),
         ColumnType::Bytea => Ok(match value {
             Value::Bytes(_) => value,
             Value::Str(s) => Value::Bytes(s.into_bytes()),
@@ -554,16 +596,27 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
         ColumnType::Vector(dim) => {
             let vector = value_to_vector(&value)?;
             validate_vector_dimensions(*dim, vector.len())?;
-            Ok(value)
+            Ok(vector_to_value(vector))
         }
         ColumnType::Tensor(dim) => {
             let tensor = value_to_tensor(&value)?;
             for vector in &tensor {
                 validate_vector_dimensions(*dim, vector.len())?;
             }
-            Ok(value)
+            Ok(Value::List(
+                tensor.into_iter().map(vector_to_value).collect(),
+            ))
         }
     }
+}
+
+fn vector_to_value(vector: Vec<f32>) -> Value {
+    Value::List(
+        vector
+            .into_iter()
+            .map(|value| Value::Float(f64::from(value)))
+            .collect(),
+    )
 }
 
 pub(super) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result<(), SQLError> {
@@ -593,6 +646,7 @@ pub(super) fn column_type_name(ty: &ColumnType) -> &'static str {
         ColumnType::Real => "real",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
+        ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
         ColumnType::Date => "date",
         ColumnType::Time => "time",
@@ -663,6 +717,7 @@ pub(super) fn value_to_text(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
@@ -678,6 +733,8 @@ pub(super) fn json_to_core_value(json: serde_json::Value) -> Value {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Int(i)
+            } else if let Some(d) = DecimalValue::parse(&n.to_string()) {
+                Value::Decimal(d)
             } else if let Some(f) = n.as_f64() {
                 Value::Float(f)
             } else {
@@ -710,6 +767,11 @@ pub(super) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f)
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        Value::Decimal(d) => d
+            .to_f64()
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or_else(|| serde_json::Value::String(d.to_sql_string())),
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
@@ -742,18 +804,6 @@ pub(super) fn json_table_arg(value: &Value, name: &str) -> Result<serde_json::Va
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}"))),
         other => Ok(core_value_to_json(other)),
-    }
-}
-
-fn round_numeric(value: Value, scale: u32) -> Value {
-    let factor = 10f64.powi(scale as i32);
-    match value {
-        Value::Float(f) => {
-            let rounded = (f * factor).round() / factor;
-            Value::Float(rounded)
-        }
-        Value::Int(i) => Value::Float(i as f64),
-        other => other,
     }
 }
 

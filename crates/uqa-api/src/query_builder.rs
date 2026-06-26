@@ -692,7 +692,8 @@ fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             Value::Bool(_) => DataType::Boolean,
             Value::Int(_) => DataType::Int64,
             Value::Float(_) => DataType::Float64,
-            Value::Str(_)
+            Value::Decimal(_)
+            | Value::Str(_)
             | Value::Bytes(_)
             | Value::Temporal(_)
             | Value::List(_)
@@ -761,6 +762,7 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Bool(v) => Some(v.to_string()),
         Value::Int(v) => Some(v.to_string()),
         Value::Float(v) => Some(v.to_string()),
+        Value::Decimal(v) => Some(v.to_sql_string()),
         Value::Str(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
@@ -775,6 +777,7 @@ fn render_value(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Float(f) => format!("{f}"),
+        Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => quote_str(s),
         Value::Bytes(b) => quote_str(&format!("<{} bytes>", b.len())),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),

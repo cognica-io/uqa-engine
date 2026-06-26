@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{DocId, TemporalValue, Value};
+use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
     CreateTable, DeleteStmt, DropKind, DropStmt, Expr, ForeignKey, ForeignKeyAction,
