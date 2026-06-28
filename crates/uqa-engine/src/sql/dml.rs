@@ -1511,6 +1511,9 @@ fn run_insert_inner(
                             .get_document(&stmt.table, existing_id)
                             .unwrap_or_default();
                         let mut conflict_ctx_doc = existing_doc.clone();
+                        for (col, value) in &existing_doc {
+                            conflict_ctx_doc.insert(format!("{}.{col}", stmt.table), value.clone());
+                        }
                         for (col, value) in &document {
                             conflict_ctx_doc.insert(format!("excluded.{col}"), value.clone());
                         }

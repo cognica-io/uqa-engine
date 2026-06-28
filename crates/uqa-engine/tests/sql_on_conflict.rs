@@ -154,6 +154,72 @@ fn on_conflict_do_update_reads_excluded_bound_params_after_reopen() {
 }
 
 #[test]
+fn on_conflict_do_update_reads_target_table_qualified_columns() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE usage_daily_rollups (
+            day TEXT NOT NULL,
+            feature TEXT NOT NULL,
+            action TEXT NOT NULL,
+            event_count BIGINT NOT NULL DEFAULT 0,
+            success_count BIGINT NOT NULL DEFAULT 0,
+            failure_count BIGINT NOT NULL DEFAULT 0,
+            cancelled_count BIGINT NOT NULL DEFAULT 0,
+            total_duration_ms BIGINT NOT NULL DEFAULT 0,
+            total_active_ms BIGINT NOT NULL DEFAULT 0,
+            total_size_bytes BIGINT NOT NULL DEFAULT 0,
+            updated_at BIGINT NOT NULL,
+            PRIMARY KEY (day, feature, action)
+        )",
+        &[],
+    )
+    .unwrap();
+
+    let upsert = "INSERT INTO usage_daily_rollups
+        (day, feature, action, event_count, success_count, failure_count,
+         cancelled_count, total_duration_ms, total_active_ms,
+         total_size_bytes, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (day, feature, action) DO UPDATE SET
+          event_count = usage_daily_rollups.event_count + EXCLUDED.event_count,
+          success_count = usage_daily_rollups.success_count + EXCLUDED.success_count,
+          failure_count = usage_daily_rollups.failure_count + EXCLUDED.failure_count,
+          cancelled_count = usage_daily_rollups.cancelled_count + EXCLUDED.cancelled_count,
+          total_duration_ms = usage_daily_rollups.total_duration_ms + EXCLUDED.total_duration_ms,
+          total_active_ms = usage_daily_rollups.total_active_ms + EXCLUDED.total_active_ms,
+          total_size_bytes = usage_daily_rollups.total_size_bytes + EXCLUDED.total_size_bytes,
+          updated_at = EXCLUDED.updated_at";
+    let params = [
+        uqa_sql::SQLParam::scalar(Value::Str("2026-06-28".into())),
+        uqa_sql::SQLParam::scalar(Value::Str("chat".into())),
+        uqa_sql::SQLParam::scalar(Value::Str("send".into())),
+        uqa_sql::SQLParam::scalar(Value::Int(1)),
+        uqa_sql::SQLParam::scalar(Value::Int(1)),
+        uqa_sql::SQLParam::scalar(Value::Int(0)),
+        uqa_sql::SQLParam::scalar(Value::Int(0)),
+        uqa_sql::SQLParam::scalar(Value::Int(123)),
+        uqa_sql::SQLParam::scalar(Value::Int(100)),
+        uqa_sql::SQLParam::scalar(Value::Int(42)),
+        uqa_sql::SQLParam::scalar(Value::Int(1_782_615_734_609)),
+    ];
+
+    eng.sql(upsert, &params).unwrap();
+    eng.sql(upsert, &params).unwrap();
+
+    let res = eng
+        .sql(
+            "SELECT event_count, success_count, total_duration_ms
+             FROM usage_daily_rollups
+             WHERE day = $1 AND feature = $2 AND action = $3",
+            &params[..3],
+        )
+        .unwrap();
+    assert_eq!(res.rows[0].get("event_count"), Some(&Value::Int(2)));
+    assert_eq!(res.rows[0].get("success_count"), Some(&Value::Int(2)));
+    assert_eq!(res.rows[0].get("total_duration_ms"), Some(&Value::Int(246)));
+}
+
+#[test]
 fn on_conflict_falls_through_to_insert_when_no_match() {
     let eng = setup();
     let result = eng
