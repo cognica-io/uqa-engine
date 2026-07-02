@@ -1777,7 +1777,9 @@ fn run_query_block_with_prepared_exists(
     //   TableScan -> [Filter] -> Project -> [Sort] -> [Limit]
     // built on the operators in `uqa-execution` so the planner-driven
     // execution layer is exercised on every projection-only SELECT.
-    let filtered = if let Some(filter) = stmt.r#where.as_ref() {
+    let final_filter =
+        final_filter_after_qualifier_pushdown(stmt, from, qualifier_filters.as_ref());
+    let filtered = if let Some(filter) = final_filter.as_ref() {
         if joined.is_empty() {
             joined
         } else if let Some(exists_filter) = prepared_exists_filter {
@@ -2060,31 +2062,89 @@ fn qualifier_filters_for_stmt(stmt: &SelectStmt, from: &FromClause) -> Option<Qu
         .flatten();
     let mut filters = QualifierFilters::new();
     for part in flatten_and_filter_parts(filter) {
-        if expr_contains_subquery(part) || expr_contains_volatile_function(part) {
-            continue;
-        }
-        let qualifiers = expr_qualifiers(part);
-        let has_unqualified = expr_has_unqualified_column(part);
-        if qualifiers.len() == 1 && (!has_unqualified || from_quals.len() == 1) {
-            let qualifier = qualifiers.iter().next().unwrap();
-            if from_quals.contains(qualifier) {
-                filters
-                    .entry(qualifier.clone())
-                    .or_default()
-                    .push(part.clone());
-            }
-            continue;
-        }
-        if qualifiers.is_empty() && has_unqualified {
-            if let Some(qualifier) = single_qualifier.as_ref() {
-                filters
-                    .entry(qualifier.clone())
-                    .or_default()
-                    .push(qualify_unqualified_columns(part, qualifier));
-            }
+        if let Some((qualifier, filter)) =
+            qualifier_filter_for_part(part, &from_quals, single_qualifier.as_deref())
+        {
+            filters.entry(qualifier).or_default().push(filter);
         }
     }
     (!filters.is_empty()).then_some(filters)
+}
+
+fn qualifier_filter_for_part(
+    part: &Expr,
+    from_quals: &BTreeSet<String>,
+    single_qualifier: Option<&str>,
+) -> Option<(String, Expr)> {
+    if expr_contains_subquery(part) || expr_contains_volatile_function(part) {
+        return None;
+    }
+    let qualifiers = expr_qualifiers(part);
+    let has_unqualified = expr_has_unqualified_column(part);
+    if qualifiers.len() == 1 && (!has_unqualified || from_quals.len() == 1) {
+        let qualifier = qualifiers.iter().next().unwrap();
+        if from_quals.contains(qualifier) {
+            return Some((qualifier.clone(), part.clone()));
+        }
+    }
+    if qualifiers.is_empty() && has_unqualified {
+        if let Some(qualifier) = single_qualifier {
+            return Some((
+                qualifier.to_string(),
+                qualify_unqualified_columns(part, qualifier),
+            ));
+        }
+    }
+    None
+}
+
+fn final_filter_after_qualifier_pushdown(
+    stmt: &SelectStmt,
+    from: &FromClause,
+    filters: Option<&QualifierFilters>,
+) -> Option<Expr> {
+    let filter = stmt.r#where.as_ref()?;
+    if filters.is_none() || !qualifier_filter_elision_safe(from) {
+        return Some(filter.clone());
+    }
+    let from_quals = from_qualifier_set(from);
+    let single_qualifier = (from_quals.len() == 1)
+        .then(|| from_quals.iter().next().cloned())
+        .flatten();
+    let residual: Vec<Expr> = flatten_and_filter_parts(filter)
+        .into_iter()
+        .filter(|part| {
+            qualifier_filter_for_part(part, &from_quals, single_qualifier.as_deref()).is_none()
+        })
+        .cloned()
+        .collect();
+    combine_filter_parts(residual)
+}
+
+fn qualifier_filter_elision_safe(from: &FromClause) -> bool {
+    match from {
+        FromClause::Join {
+            left, right, kind, ..
+        } => {
+            matches!(
+                kind,
+                uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross
+            ) && qualifier_filter_elision_safe(left)
+                && qualifier_filter_elision_safe(right)
+        }
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::Function { .. }
+        | FromClause::Subquery { .. } => true,
+    }
+}
+
+fn combine_filter_parts(mut parts: Vec<Expr>) -> Option<Expr> {
+    match parts.len() {
+        0 => None,
+        1 => parts.pop(),
+        _ => Some(Expr::And(parts)),
+    }
 }
 
 fn flatten_and_filter_parts(expr: &Expr) -> Vec<&Expr> {
@@ -3961,7 +4021,9 @@ fn run_joined_select(
         (None, None) => build_join_rows_with_ctes(engine, from, params, &mut ctes)?,
     };
 
-    if let Some(filter) = stmt.r#where.as_ref() {
+    let final_filter =
+        final_filter_after_qualifier_pushdown(stmt, from, qualifier_filters.as_ref());
+    if let Some(filter) = final_filter.as_ref() {
         if joined.is_empty() {
             // No row means no row-level predicate evaluation.
         } else if let Some(exists_filter) =

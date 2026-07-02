@@ -218,6 +218,119 @@ fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
 }
 
 #[test]
+fn test_log_odds_fusion_inside_join_filter() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE docs (\
+             public_id TEXT PRIMARY KEY, \
+             attached_message_id TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE doc_chunks (\
+             id SERIAL PRIMARY KEY, \
+             doc_id TEXT NOT NULL, \
+             content TEXT, \
+             embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX idx_doc_chunks_gin ON doc_chunks USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO docs (public_id, attached_message_id) VALUES \
+             ('doc-1', 'msg-1'), \
+             ('doc-2', 'msg-2')",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO doc_chunks (doc_id, content, embedding) VALUES \
+             ('doc-1', 'machine learning notes', ARRAY[0.9, 0.1]), \
+             ('doc-2', 'database indexing notes', ARRAY[0.1, 0.9])",
+            &[],
+        )
+        .unwrap();
+
+    let single_table = engine
+        .sql(
+            "SELECT doc_id, _score FROM doc_chunks \
+             WHERE fuse_log_odds(\
+                 bayesian_match(content, 'learning'), \
+                 knn_match(embedding, ARRAY[0.9, 0.1], 3)\
+             ) \
+             ORDER BY _score DESC \
+             LIMIT 3",
+            &[],
+        )
+        .unwrap();
+    assert!(!single_table.rows.is_empty());
+
+    let plain_join = engine
+        .sql(
+            "SELECT c.doc_id AS doc_id, d.public_id AS public_id \
+             FROM doc_chunks c \
+             JOIN docs d ON d.public_id = c.doc_id \
+             ORDER BY c.doc_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(plain_join.rows.len(), 2);
+
+    let derived_join = engine
+        .sql(
+            "SELECT hits.doc_id AS doc_id, d.public_id AS public_id, hits._score AS _score \
+             FROM (\
+               SELECT doc_id, _score FROM doc_chunks \
+               WHERE fuse_log_odds(\
+                   bayesian_match(content, 'learning'), \
+                   knn_match(embedding, ARRAY[0.9, 0.1], 3)\
+               )\
+             ) hits \
+             JOIN docs d ON d.public_id = hits.doc_id \
+             ORDER BY hits._score DESC \
+             LIMIT 3",
+            &[],
+        )
+        .unwrap();
+    assert!(!derived_join.rows.is_empty());
+
+    let result = engine
+        .sql(
+            "SELECT d.attached_message_id AS attached_message_id, _score \
+             FROM doc_chunks c \
+             JOIN docs d ON d.public_id = c.doc_id \
+             WHERE fuse_log_odds(\
+                 bayesian_match(c.content, 'learning'), \
+                 knn_match(c.embedding, ARRAY[0.9, 0.1], 3)\
+             ) \
+             ORDER BY _score DESC \
+             LIMIT 3",
+            &[],
+        )
+        .unwrap();
+
+    assert!(!result.rows.is_empty());
+    assert_eq!(
+        result.rows[0].get("attached_message_id"),
+        Some(&Value::Str("msg-1".into()))
+    );
+    match result.rows[0].get("_score") {
+        Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
+        other => panic!("missing _score: {other:?}"),
+    }
+}
+
+#[test]
 fn test_log_odds_with_gating_relu() {
     let result = engine()
         .sql(

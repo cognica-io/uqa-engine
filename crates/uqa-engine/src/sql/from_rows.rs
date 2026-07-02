@@ -197,6 +197,284 @@ fn apply_qualifier_filters(
     Ok(out)
 }
 
+fn qualifier_filters_require_table_select(filters: Option<&QualifierFilters>, qual: &str) -> bool {
+    filters
+        .and_then(|filters| filters.get(qual))
+        .is_some_and(|filters| filters.iter().any(expr_contains_registered_row_function))
+}
+
+fn expr_contains_registered_row_function(expr: &Expr) -> bool {
+    match expr {
+        Expr::Func {
+            name,
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            let lower = name.to_ascii_lowercase();
+            uqa_sql::registry::is_registered(&lower)
+                || args.iter().any(expr_contains_registered_row_function)
+                || order_by
+                    .iter()
+                    .any(|order| expr_contains_registered_row_function(&order.expr))
+                || filter
+                    .as_ref()
+                    .is_some_and(|filter| expr_contains_registered_row_function(filter))
+        }
+        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            items.iter().any(expr_contains_registered_row_function)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            expr_contains_registered_row_function(lhs) || expr_contains_registered_row_function(rhs)
+        }
+        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+            expr_contains_registered_row_function(inner)
+        }
+        Expr::Between { expr, low, high } => {
+            expr_contains_registered_row_function(expr)
+                || expr_contains_registered_row_function(low)
+                || expr_contains_registered_row_function(high)
+        }
+        Expr::InList { expr, list, .. } => {
+            expr_contains_registered_row_function(expr)
+                || list.iter().any(expr_contains_registered_row_function)
+        }
+        Expr::WindowCall { args, spec, .. } => {
+            args.iter().any(expr_contains_registered_row_function)
+                || spec
+                    .partition_by
+                    .iter()
+                    .any(expr_contains_registered_row_function)
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expr_contains_registered_row_function(&order.expr))
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_ref()
+                .is_some_and(|expr| expr_contains_registered_row_function(expr))
+                || when.iter().any(|(cond, result)| {
+                    expr_contains_registered_row_function(cond)
+                        || expr_contains_registered_row_function(result)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expr_contains_registered_row_function(expr))
+        }
+        Expr::InSubquery { expr, .. } => expr_contains_registered_row_function(expr),
+        Expr::Star
+        | Expr::Column(_)
+        | Expr::QualifiedColumn { .. }
+        | Expr::Literal(_)
+        | Expr::Param(_)
+        | Expr::ScalarSubquery(_)
+        | Expr::Exists { .. } => false,
+    }
+}
+
+fn run_table_select_for_qualifier_filters(
+    engine: &Engine,
+    table: &str,
+    qual: &str,
+    filters: Option<&QualifierFilters>,
+    prune: Option<&ColumnPrune>,
+    params: &[SQLParam],
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
+    if !qualifier_filters_require_table_select(filters, qual) {
+        return Ok(None);
+    }
+    let Some(filters) = filters.and_then(|filters| filters.get(qual)) else {
+        return Ok(None);
+    };
+    if filters.is_empty() {
+        return Ok(None);
+    }
+    let Some(filter) =
+        dequalify_expr_for_qualifier(&combine_filters(filters.iter().cloned()), qual)
+    else {
+        return Ok(None);
+    };
+
+    let mut projections = vec![Projection {
+        expr: Expr::Star,
+        alias: None,
+    }];
+    if prune
+        .and_then(|prune| prune.get(qual))
+        .is_some_and(|columns| columns.contains(SCORE_COLUMN))
+    {
+        projections.push(Projection {
+            expr: Expr::Column(SCORE_COLUMN.to_string()),
+            alias: None,
+        });
+    }
+
+    let stmt = SelectStmt {
+        projections,
+        from: Some(FromClause::Table {
+            name: table.to_string(),
+            alias: None,
+        }),
+        r#where: Some(filter),
+        group_by: Vec::new(),
+        grouping_sets: Vec::new(),
+        having: None,
+        order_by: Vec::new(),
+        limit: None,
+        offset: None,
+        with: Vec::new(),
+        set_op: None,
+        distinct: false,
+        distinct_on: Vec::new(),
+    };
+    let result = run_select(engine, stmt, params)?;
+    Ok(Some(reprefix_rows_pruned(qual, &result.rows, prune)))
+}
+
+fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
+    match expr {
+        Expr::QualifiedColumn {
+            qualifier, column, ..
+        } => (qualifier == qual).then(|| Expr::Column(column.clone())),
+        Expr::Column(_) | Expr::Literal(_) | Expr::Param(_) | Expr::Star => Some(expr.clone()),
+        Expr::Array(items) => Some(Expr::Array(
+            items
+                .iter()
+                .map(|item| dequalify_expr_for_qualifier(item, qual))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::And(items) => Some(Expr::And(
+            items
+                .iter()
+                .map(|item| dequalify_expr_for_qualifier(item, qual))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::Or(items) => Some(Expr::Or(
+            items
+                .iter()
+                .map(|item| dequalify_expr_for_qualifier(item, qual))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        Expr::Binary { op, lhs, rhs } => Some(Expr::Binary {
+            op: *op,
+            lhs: Box::new(dequalify_expr_for_qualifier(lhs, qual)?),
+            rhs: Box::new(dequalify_expr_for_qualifier(rhs, qual)?),
+        }),
+        Expr::Not(inner) => Some(Expr::Not(Box::new(dequalify_expr_for_qualifier(
+            inner, qual,
+        )?))),
+        Expr::IsNull { expr, negated } => Some(Expr::IsNull {
+            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
+            negated: *negated,
+        }),
+        Expr::Between { expr, low, high } => Some(Expr::Between {
+            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
+            low: Box::new(dequalify_expr_for_qualifier(low, qual)?),
+            high: Box::new(dequalify_expr_for_qualifier(high, qual)?),
+        }),
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => Some(Expr::InList {
+            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
+            list: list
+                .iter()
+                .map(|item| dequalify_expr_for_qualifier(item, qual))
+                .collect::<Option<Vec<_>>>()?,
+            negated: *negated,
+        }),
+        Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => Some(Expr::Func {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| dequalify_expr_for_qualifier(arg, qual))
+                .collect::<Option<Vec<_>>>()?,
+            distinct: *distinct,
+            order_by: order_by
+                .iter()
+                .map(|order| {
+                    Some(uqa_sql::ast::OrderBy {
+                        expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
+                        descending: order.descending,
+                        nulls: order.nulls,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+            filter: match filter.as_ref() {
+                Some(filter) => Some(Box::new(dequalify_expr_for_qualifier(filter, qual)?)),
+                None => None,
+            },
+        }),
+        Expr::WindowCall { name, args, spec } => {
+            let mut spec = spec.clone();
+            spec.partition_by = spec
+                .partition_by
+                .iter()
+                .map(|expr| dequalify_expr_for_qualifier(expr, qual))
+                .collect::<Option<Vec<_>>>()?;
+            spec.order_by = spec
+                .order_by
+                .iter()
+                .map(|order| {
+                    Some(uqa_sql::ast::OrderBy {
+                        expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
+                        descending: order.descending,
+                        nulls: order.nulls,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Expr::WindowCall {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| dequalify_expr_for_qualifier(arg, qual))
+                    .collect::<Option<Vec<_>>>()?,
+                spec,
+            })
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => Some(Expr::Case {
+            base: match base.as_ref() {
+                Some(expr) => Some(Box::new(dequalify_expr_for_qualifier(expr, qual)?)),
+                None => None,
+            },
+            when: when
+                .iter()
+                .map(|(cond, result)| {
+                    Some((
+                        dequalify_expr_for_qualifier(cond, qual)?,
+                        dequalify_expr_for_qualifier(result, qual)?,
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?,
+            else_branch: match else_branch.as_ref() {
+                Some(expr) => Some(Box::new(dequalify_expr_for_qualifier(expr, qual)?)),
+                None => None,
+            },
+        }),
+        Expr::Cast { expr, ty } => Some(Expr::Cast {
+            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
+            ty: ty.clone(),
+        }),
+        Expr::InSubquery { .. } | Expr::ScalarSubquery(_) | Expr::Exists { .. } => None,
+    }
+}
+
 fn combine_filters(filters: impl IntoIterator<Item = Expr>) -> Expr {
     let mut filters: Vec<Expr> = filters.into_iter().collect();
     if filters.len() == 1 {
@@ -1251,6 +1529,11 @@ fn build_join_rows_with_ctes_inner(
                 return Err(SQLError::Unsupported(format!(
                     "relation `{name}` does not exist"
                 )));
+            }
+            if let Some(rows) =
+                run_table_select_for_qualifier_filters(engine, name, &qual, filters, prune, params)?
+            {
+                return Ok(rows);
             }
             let prefixed_cache_key = prefixed_table_row_cache_key(name, &qual);
             if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
