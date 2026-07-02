@@ -1670,6 +1670,30 @@ fn run_query_block_with_prepared_exists(
         return run_select_without_from(engine, stmt, params);
     };
 
+    // `execute_select` is used for set-op branches, CTEs, and
+    // derived-table bodies. Those query blocks still need the same
+    // search-aware single-table path as top-level `run_select`;
+    // otherwise registry-backed predicates such as
+    // `fuse_log_odds(bayesian_match(...), knn_match(...))` fall
+    // through to scalar expression evaluation.
+    if prepared_exists_filter.is_none() {
+        if let FromClause::Table { name, alias } = from {
+            if alias.is_none() && engine.foreign_table(name).is_some() {
+                return run_single_foreign_select(engine, name, stmt, params);
+            }
+            let is_virtual = name.contains('.')
+                || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
+            let has_subquery_filter = stmt.r#where.as_ref().is_some_and(expr_contains_subquery);
+            if alias.is_none()
+                && !has_window(&stmt.projections)
+                && !is_virtual
+                && !has_subquery_filter
+            {
+                return run_single_table_select(engine, name, stmt, params);
+            }
+        }
+    }
+
     let column_prune = column_prune_for_stmt(stmt, from);
     let qualifier_filters = qualifier_filters_for_stmt(stmt, from);
     let owned_exists_filter = if prepared_exists_filter.is_none() {
