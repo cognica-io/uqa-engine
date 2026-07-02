@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_sql::SQLParam;
 
 fn engine() -> Engine {
     let engine = Engine::new();
@@ -167,6 +168,42 @@ fn test_log_odds_fusion_inside_union_branch() {
              ORDER BY _score DESC \
              LIMIT 4",
             &[],
+        )
+        .unwrap();
+
+    assert!(!result.rows.is_empty());
+    let sources: Vec<_> = result
+        .rows
+        .iter()
+        .filter_map(|row| row.get("source"))
+        .collect();
+    assert!(sources.contains(&&Value::Str("a".into())));
+    assert!(sources.contains(&&Value::Str("b".into())));
+}
+
+#[test]
+fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
+    let result = hybrid_engine()
+        .sql(
+            "SELECT source, id, _score FROM (\
+               SELECT $1 AS source, id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, 'learning'), \
+                   knn_match(embedding, ARRAY[0.9, 0.1], 3)\
+               ) AND kind = 'chat' \
+               UNION ALL \
+               SELECT $2 AS source, id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, 'indexing'), \
+                   knn_match(embedding, ARRAY[0.1, 0.9], 3)\
+               ) AND kind = 'chat'\
+             ) hits \
+             ORDER BY _score DESC \
+             LIMIT 4",
+            &[
+                SQLParam::scalar(Value::Str("a".into())),
+                SQLParam::scalar(Value::Str("b".into())),
+            ],
         )
         .unwrap();
 
