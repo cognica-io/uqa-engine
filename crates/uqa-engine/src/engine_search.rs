@@ -15,7 +15,12 @@ use super::{
 };
 use uqa_core::IndexStats;
 
-fn search_stats_for_terms(index: &dyn InvertedIndex, field: &str, terms: &[String]) -> IndexStats {
+fn search_stats_for_terms(
+    index: &dyn InvertedIndex,
+    field: &str,
+    terms: &[String],
+    doc_freqs: &[u64],
+) -> IndexStats {
     let mut stats = IndexStats::default();
     let total_docs = index.doc_count();
     stats.total_docs = total_docs;
@@ -31,9 +36,9 @@ fn search_stats_for_terms(index: &dyn InvertedIndex, field: &str, terms: &[Strin
     }
 
     let mut seen = BTreeSet::<&str>::new();
-    for term in terms {
+    for (term, doc_freq) in terms.iter().zip(doc_freqs) {
         if seen.insert(term.as_str()) {
-            stats.set_doc_freq(field.to_string(), term.clone(), index.doc_freq(field, term));
+            stats.set_doc_freq(field.to_string(), term.clone(), *doc_freq);
         }
     }
     stats
@@ -117,19 +122,22 @@ impl Engine {
             return Vec::new();
         }
 
-        let posting_lists: Vec<PostingList> = analyzed_terms
+        let posting_lists = index.get_posting_lists_bulk(field, &analyzed_terms);
+        let term_doc_freqs: Vec<u64> = posting_lists
             .iter()
-            .map(|term| index.get_posting_list(field, term))
+            .map(|posting_list| posting_list.len() as u64)
             .collect();
         let stats_arc = Arc::new(search_stats_for_terms(
             index.as_ref(),
             field,
             &analyzed_terms,
+            &term_doc_freqs,
         ));
         let scorer = Self::build_text_scorer(mode, stats_arc.clone());
         let term_idfs: Vec<f64> = analyzed_terms
             .iter()
-            .map(|term| scorer.idf(stats_arc.doc_freq(field, term)))
+            .zip(&term_doc_freqs)
+            .map(|(_, doc_freq)| scorer.idf(*doc_freq))
             .collect();
 
         let entries = if analyzed_terms.len() == 1 {

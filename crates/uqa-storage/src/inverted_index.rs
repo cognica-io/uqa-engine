@@ -77,6 +77,13 @@ pub trait InvertedIndex: Send + Sync {
 
     fn get_posting_list(&self, field: &str, term: &str) -> PostingList;
 
+    fn get_posting_lists_bulk(&self, field: &str, terms: &[String]) -> Vec<PostingList> {
+        terms
+            .iter()
+            .map(|term| self.get_posting_list(field, term))
+            .collect()
+    }
+
     fn doc_freq(&self, field: &str, term: &str) -> u64;
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> u64;

@@ -560,6 +560,69 @@ impl InvertedIndex for SQLiteInvertedIndex {
             .unwrap_or_default()
     }
 
+    fn get_posting_lists_bulk(&self, field: &str, terms: &[String]) -> Vec<PostingList> {
+        if terms.is_empty() {
+            return Vec::new();
+        }
+        let unique_terms = terms
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let posting_entries = self
+            .conn
+            .with(|c| {
+                let mut by_term = BTreeMap::<String, Vec<PostingEntry>>::new();
+                for chunk in unique_terms.chunks(900) {
+                    let placeholders = std::iter::repeat_n("?", chunk.len())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let sql = format!(
+                        "SELECT term, doc_id, positions FROM _postings
+                         WHERE table_name = ? AND field = ? AND term IN ({placeholders})
+                         ORDER BY term, doc_id"
+                    );
+                    let mut values = Vec::with_capacity(chunk.len() + 2);
+                    values.push(SqlValue::Text(self.table.clone()));
+                    values.push(SqlValue::Text(field.to_string()));
+                    values.extend(chunk.iter().cloned().map(SqlValue::Text));
+                    let mut stmt = c.prepare(&sql)?;
+                    let rows = stmt.query_map(params_from_iter(values), |r| {
+                        let term = r.get::<_, String>(0)?;
+                        let doc_id = r.get::<_, i64>(1)? as DocId;
+                        let blob = r.get::<_, Vec<u8>>(2)?;
+                        Ok((
+                            term,
+                            PostingEntry::new(
+                                doc_id,
+                                Payload {
+                                    positions: blob_to_positions(&blob),
+                                    score: 0.0,
+                                    fields: BTreeMap::new(),
+                                },
+                            ),
+                        ))
+                    })?;
+                    for row in rows {
+                        let (term, entry) = row?;
+                        by_term.entry(term).or_default().push(entry);
+                    }
+                }
+                Ok(by_term)
+            })
+            .unwrap_or_default();
+
+        terms
+            .iter()
+            .map(|term| {
+                PostingList::from_sorted_unchecked(
+                    posting_entries.get(term).cloned().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
     fn doc_freq(&self, field: &str, term: &str) -> u64 {
         self.conn
             .with(|c| {
@@ -884,6 +947,26 @@ mod tests {
         assert_eq!(idx.doc_freq("title", "rust"), 2);
         assert_eq!(idx.get_term_freq(1, "title", "rust"), 3);
         assert_eq!(idx.get_term_freq(2, "title", "rust"), 1);
+    }
+
+    #[test]
+    fn bulk_posting_lists_match_point_lookups() {
+        let mut idx = idx();
+        idx.add_document(1, fields([("title", "rust language")]));
+        idx.add_document(2, fields([("title", "python language")]));
+        idx.add_document(3, fields([("title", "rust search")]));
+
+        let terms = vec![
+            "rust".to_string(),
+            "languag".to_string(),
+            "missing".to_string(),
+            "rust".to_string(),
+        ];
+        let bulk = idx.get_posting_lists_bulk("title", &terms);
+        assert_eq!(bulk.len(), terms.len());
+        for (term, posting_list) in terms.iter().zip(&bulk) {
+            assert_eq!(posting_list, &idx.get_posting_list("title", term));
+        }
     }
 
     #[test]
