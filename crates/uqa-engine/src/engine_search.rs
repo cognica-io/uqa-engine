@@ -20,9 +20,13 @@ fn search_stats_for_terms(index: &dyn InvertedIndex, field: &str, terms: &[Strin
     let total_docs = index.doc_count();
     stats.total_docs = total_docs;
     if total_docs > 0 {
-        let total_field_length = index.total_field_length(field);
-        if total_field_length > 0 {
-            stats.avg_doc_length = total_field_length as f64 / total_docs as f64;
+        let total_length: u64 = index
+            .field_names()
+            .iter()
+            .map(|indexed_field| index.total_field_length(indexed_field))
+            .sum();
+        if total_length > 0 {
+            stats.avg_doc_length = total_length as f64 / total_docs as f64;
         }
     }
 
