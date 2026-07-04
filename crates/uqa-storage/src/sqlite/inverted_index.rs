@@ -9,7 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, OptionalExtension};
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
@@ -589,6 +590,39 @@ impl InvertedIndex for SQLiteInvertedIndex {
             .unwrap_or(0)
     }
 
+    fn get_doc_lengths_bulk(&self, doc_ids: &[DocId], field: &str) -> BTreeMap<DocId, u64> {
+        if doc_ids.is_empty() {
+            return BTreeMap::new();
+        }
+        self.conn
+            .with(|c| {
+                let mut out = BTreeMap::new();
+                for chunk in doc_ids.chunks(900) {
+                    let placeholders = std::iter::repeat_n("?", chunk.len())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let sql = format!(
+                        "SELECT doc_id, length FROM _doc_lengths
+                         WHERE table_name = ? AND field = ? AND doc_id IN ({placeholders})"
+                    );
+                    let mut values = Vec::with_capacity(chunk.len() + 2);
+                    values.push(SqlValue::Text(self.table.clone()));
+                    values.push(SqlValue::Text(field.to_string()));
+                    values.extend(chunk.iter().map(|doc_id| SqlValue::Integer(*doc_id as i64)));
+                    let mut stmt = c.prepare(&sql)?;
+                    let rows = stmt.query_map(params_from_iter(values), |r| {
+                        Ok((r.get::<_, i64>(0)? as DocId, r.get::<_, i64>(1)? as u64))
+                    })?;
+                    for row in rows {
+                        let (doc_id, length) = row?;
+                        out.insert(doc_id, length);
+                    }
+                }
+                Ok(out)
+            })
+            .unwrap_or_default()
+    }
+
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> u64 {
         self.conn
             .with(|c| {
@@ -850,6 +884,20 @@ mod tests {
         assert_eq!(idx.doc_freq("title", "rust"), 2);
         assert_eq!(idx.get_term_freq(1, "title", "rust"), 3);
         assert_eq!(idx.get_term_freq(2, "title", "rust"), 1);
+    }
+
+    #[test]
+    fn bulk_doc_lengths_match_point_lookups() {
+        let mut idx = idx();
+        idx.add_document(1, fields([("title", "rust language")]));
+        idx.add_document(2, fields([("title", "python")]));
+        idx.add_document(3, fields([("title", "sqlite search engine")]));
+
+        let bulk = idx.get_doc_lengths_bulk(&[3, 1, 99, 2], "title");
+        assert_eq!(bulk.get(&1), Some(&idx.get_doc_length(1, "title")));
+        assert_eq!(bulk.get(&2), Some(&idx.get_doc_length(2, "title")));
+        assert_eq!(bulk.get(&3), Some(&idx.get_doc_length(3, "title")));
+        assert_eq!(bulk.get(&99), None);
     }
 
     #[test]
