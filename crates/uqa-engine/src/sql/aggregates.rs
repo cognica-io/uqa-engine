@@ -1691,10 +1691,7 @@ fn aggregate_value_with_args(
             if acc.count == 0 {
                 Value::Null
             } else if acc.has_decimal && !acc.has_float {
-                acc.decimal_sum
-                    .clone()
-                    .map(Value::Decimal)
-                    .unwrap_or(Value::Null)
+                acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
             } else if acc.all_values_int {
                 Value::Int(acc.sum as i64)
             } else {
@@ -1709,8 +1706,7 @@ fn aggregate_value_with_args(
                 acc.decimal_sum
                     .as_ref()
                     .and_then(|sum| sum.checked_div(&divisor))
-                    .map(Value::Decimal)
-                    .unwrap_or(Value::Null)
+                    .map_or(Value::Null, Value::Decimal)
             } else {
                 Value::Float(acc.sum / acc.count as f64)
             }

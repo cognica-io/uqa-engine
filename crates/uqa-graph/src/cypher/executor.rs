@@ -322,8 +322,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     /// end node whose variable was bound earlier in the pattern (e.g. `MERGE (a)-[:R]->(b)` with
     /// `b` already bound), so distinct edges from one start node are not collapsed.
     fn binding_allows_vertex(
-        &self,
-        variable: &Option<String>,
+        variable: Option<&String>,
         vertex_id: VertexId,
         row: &BindingRow,
     ) -> bool {
@@ -436,20 +435,14 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     let Some(end_vertex) = self.store.get_vertex(end_id).cloned() else {
                         continue;
                     };
-                    if !self.node_matches(next, &end_vertex, row)? {
-                        continue;
-                    }
-                    if !self.binding_allows_vertex(&next.variable, end_vertex.vertex_id, row) {
-                        continue;
-                    }
-                    let mut new_row = row.clone();
-                    if let Some(var) = &rp.variable {
-                        new_row.insert(var.clone(), Binding::EdgeList(edges));
-                    }
-                    if let Some(var) = &next.variable {
-                        new_row.insert(var.clone(), Binding::Vertex(end_vertex));
-                    }
-                    out.push(new_row);
+                    self.push_reached_vertex(
+                        &mut out,
+                        rp,
+                        next,
+                        row,
+                        Binding::EdgeList(edges),
+                        end_vertex,
+                    )?;
                 }
             } else {
                 for edge in self.outgoing_edges(start.vertex_id, direction) {
@@ -464,24 +457,43 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     let Some(end_vertex) = self.store.get_vertex(neighbor_id).cloned() else {
                         continue;
                     };
-                    if !self.node_matches(next, &end_vertex, row)? {
-                        continue;
-                    }
-                    if !self.binding_allows_vertex(&next.variable, end_vertex.vertex_id, row) {
-                        continue;
-                    }
-                    let mut new_row = row.clone();
-                    if let Some(var) = &rp.variable {
-                        new_row.insert(var.clone(), Binding::Edge(edge));
-                    }
-                    if let Some(var) = &next.variable {
-                        new_row.insert(var.clone(), Binding::Vertex(end_vertex));
-                    }
-                    out.push(new_row);
+                    self.push_reached_vertex(
+                        &mut out,
+                        rp,
+                        next,
+                        row,
+                        Binding::Edge(edge),
+                        end_vertex,
+                    )?;
                 }
             }
         }
         Ok(out)
+    }
+
+    fn push_reached_vertex(
+        &self,
+        out: &mut Vec<BindingRow>,
+        rp: &RelPattern,
+        next: &NodePattern,
+        row: &BindingRow,
+        edge_binding: Binding,
+        end_vertex: Vertex,
+    ) -> Result<(), CypherError> {
+        if !self.node_matches(next, &end_vertex, row)?
+            || !Self::binding_allows_vertex(next.variable.as_ref(), end_vertex.vertex_id, row)
+        {
+            return Ok(());
+        }
+        let mut new_row = row.clone();
+        if let Some(var) = &rp.variable {
+            new_row.insert(var.clone(), edge_binding);
+        }
+        if let Some(var) = &next.variable {
+            new_row.insert(var.clone(), Binding::Vertex(end_vertex));
+        }
+        out.push(new_row);
+        Ok(())
     }
 
     fn outgoing_edges(&self, vertex_id: VertexId, direction: Direction) -> Vec<Edge> {

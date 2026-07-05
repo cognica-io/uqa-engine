@@ -219,47 +219,7 @@ fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
 
 #[test]
 fn test_log_odds_fusion_inside_join_filter() {
-    let engine = Engine::new();
-    engine
-        .sql(
-            "CREATE TABLE docs (\
-             public_id TEXT PRIMARY KEY, \
-             attached_message_id TEXT NOT NULL)",
-            &[],
-        )
-        .unwrap();
-    engine
-        .sql(
-            "CREATE TABLE doc_chunks (\
-             id SERIAL PRIMARY KEY, \
-             doc_id TEXT NOT NULL, \
-             content TEXT, \
-             embedding VECTOR(2))",
-            &[],
-        )
-        .unwrap();
-    engine
-        .sql(
-            "CREATE INDEX idx_doc_chunks_gin ON doc_chunks USING gin (content)",
-            &[],
-        )
-        .unwrap();
-    engine
-        .sql(
-            "INSERT INTO docs (public_id, attached_message_id) VALUES \
-             ('doc-1', 'msg-1'), \
-             ('doc-2', 'msg-2')",
-            &[],
-        )
-        .unwrap();
-    engine
-        .sql(
-            "INSERT INTO doc_chunks (doc_id, content, embedding) VALUES \
-             ('doc-1', 'machine learning notes', ARRAY[0.9, 0.1]), \
-             ('doc-2', 'database indexing notes', ARRAY[0.1, 0.9])",
-            &[],
-        )
-        .unwrap();
+    let engine = setup_log_odds_join_filter_engine();
 
     let single_table = engine
         .sql(
@@ -328,6 +288,51 @@ fn test_log_odds_fusion_inside_join_filter() {
         Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
         other => panic!("missing _score: {other:?}"),
     }
+}
+
+fn setup_log_odds_join_filter_engine() -> Engine {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE docs (\
+             public_id TEXT PRIMARY KEY, \
+             attached_message_id TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TABLE doc_chunks (\
+             id SERIAL PRIMARY KEY, \
+             doc_id TEXT NOT NULL, \
+             content TEXT, \
+             embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX idx_doc_chunks_gin ON doc_chunks USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO docs (public_id, attached_message_id) VALUES \
+             ('doc-1', 'msg-1'), \
+             ('doc-2', 'msg-2')",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO doc_chunks (doc_id, content, embedding) VALUES \
+             ('doc-1', 'machine learning notes', ARRAY[0.9, 0.1]), \
+             ('doc-2', 'database indexing notes', ARRAY[0.1, 0.9])",
+            &[],
+        )
+        .unwrap();
+    engine
 }
 
 #[test]

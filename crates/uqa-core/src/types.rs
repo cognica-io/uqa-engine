@@ -176,7 +176,7 @@ impl Ord for TemporalValue {
     }
 }
 
-/// Exact base-10 numeric value for PostgreSQL `NUMERIC` / `DECIMAL`.
+/// Exact base-10 numeric value for `PostgreSQL` `NUMERIC` / `DECIMAL`.
 ///
 /// The JSON representation is tagged so persisted document values do not
 /// collide with ordinary JSON strings, numbers, or maps.

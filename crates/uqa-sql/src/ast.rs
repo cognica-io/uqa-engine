@@ -27,7 +27,7 @@ pub enum ColumnType {
     },
     /// `JSON` / `JSONB` columns store typed JSON values.
     Json,
-    /// `JSONB` columns store typed JSON values with PostgreSQL JSONB operators.
+    /// `JSONB` columns store typed JSON values with `PostgreSQL` JSONB operators.
     JsonB,
     /// `BYTEA` columns store opaque bytes.
     Bytea,

@@ -770,8 +770,10 @@ pub(super) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Decimal(d) => d
             .to_f64()
             .and_then(serde_json::Number::from_f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or_else(|| serde_json::Value::String(d.to_sql_string())),
+            .map_or_else(
+                || serde_json::Value::String(d.to_sql_string()),
+                serde_json::Value::Number,
+            ),
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),

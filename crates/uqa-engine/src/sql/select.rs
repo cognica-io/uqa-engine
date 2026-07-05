@@ -3564,12 +3564,8 @@ fn run_single_table_select(
             params,
             Some(top_k),
         )?)
-    } else if let Some(rows) =
-        crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
-    {
-        Some(rows)
     } else {
-        None
+        crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
     };
     let scored = if let Some(rows) = optimised {
         rows
