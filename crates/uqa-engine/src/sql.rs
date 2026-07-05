@@ -359,4 +359,12 @@ impl Engine {
         let ids = t.document_store.read().doc_ids();
         ids
     }
+
+    pub(crate) fn table_doc_count(&self, table: &str) -> u64 {
+        let Some(t) = self.table(table) else {
+            return 0;
+        };
+        let count = t.document_store.read().len() as u64;
+        count
+    }
 }

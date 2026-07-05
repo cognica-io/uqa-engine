@@ -1375,7 +1375,7 @@ pub fn optimised_tree_for(
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     let tree = lower_where(where_expr, params)?;
-    let row_count = engine.table_doc_ids(table).len() as u64;
+    let row_count = engine.table_doc_count(table);
     Some(
         QueryOptimizer::new()
             .with_row_count(row_count)

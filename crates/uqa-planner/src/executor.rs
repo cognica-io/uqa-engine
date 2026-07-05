@@ -10,10 +10,9 @@
 //! optimised [`SelectStmt`] so the engine can hand the bundle to the
 //! execution layer.
 //!
-//! [`PlanExecutor`] is a recursive tree-walking executor over an
-//! [`OperatorTree`] that mirrors `uqa.planner.executor.PlanExecutor`.
-//! It collects per-operator timing statistics and produces an
-//! `EXPLAIN`-style tree string.
+//! [`PlanExecutor`] is the planner-side entry point for executing an
+//! [`OperatorTree`] through a runtime driver. It records root timing
+//! statistics and produces an `EXPLAIN`-style tree string.
 
 use std::time::Instant;
 
@@ -65,14 +64,14 @@ impl ExecutionStats {
 }
 
 /// Driver that knows how to execute an [`OperatorTree`] node. The
-/// engine implements this trait (it owns the per-operator dispatch and
-/// the runtime context); the planner-side `PlanExecutor` only handles
-/// timing, recursion, and stats collection.
+/// engine implements this trait (it owns the per-operator dispatch,
+/// child execution, and the runtime context); the planner-side
+/// `PlanExecutor` only wraps root timing and stats collection.
 pub trait OperatorTreeDriver {
     fn execute_node(&self, op: &OperatorTree) -> PostingList;
 }
 
-/// Recursive tree-walking executor for [`OperatorTree`].
+/// Executor wrapper for [`OperatorTree`].
 pub struct PlanExecutor<'d, D: OperatorTreeDriver> {
     pub driver: &'d D,
     last_stats: Option<ExecutionStats>,
@@ -89,90 +88,17 @@ impl<'d, D: OperatorTreeDriver> PlanExecutor<'d, D> {
     /// Execute `op` and capture stats. The result is the [`PostingList`]
     /// produced by the root node.
     pub fn execute(&mut self, op: &OperatorTree) -> PostingList {
-        let (result, stats) = self.execute_with_stats(op);
+        let start = Instant::now();
+        let result = self.driver.execute_node(op);
+        let mut stats = ExecutionStats::new(operator_name(op));
+        stats.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        stats.result_count = result.len();
         self.last_stats = Some(stats);
         result
     }
 
     pub fn last_stats(&self) -> Option<&ExecutionStats> {
         self.last_stats.as_ref()
-    }
-
-    fn execute_with_stats(&self, op: &OperatorTree) -> (PostingList, ExecutionStats) {
-        let mut stats = ExecutionStats::new(operator_name(op));
-        let mut child_stats: Vec<ExecutionStats> = Vec::new();
-
-        match op {
-            OperatorTree::Intersect(ops) | OperatorTree::Union(ops) => {
-                for child in ops {
-                    let (_, cs) = self.execute_with_stats(child);
-                    child_stats.push(cs);
-                }
-            }
-            OperatorTree::Complement(inner) => {
-                let (_, cs) = self.execute_with_stats(inner);
-                child_stats.push(cs);
-            }
-            OperatorTree::Composed(ops) => {
-                for child in ops {
-                    let (_, cs) = self.execute_with_stats(child);
-                    child_stats.push(cs);
-                }
-            }
-            OperatorTree::AttentionFusion { signals, .. }
-            | OperatorTree::LearnedFusion { signals, .. }
-            | OperatorTree::LogOddsFusion { signals, .. }
-            | OperatorTree::ProbBoolFusion { signals, .. } => {
-                for sig in signals {
-                    let (_, cs) = self.execute_with_stats(sig);
-                    child_stats.push(cs);
-                }
-            }
-            OperatorTree::ProbNot { signal, .. } => {
-                let (_, cs) = self.execute_with_stats(signal);
-                child_stats.push(cs);
-            }
-            OperatorTree::Score { source, .. } => {
-                let (_, cs) = self.execute_with_stats(source);
-                child_stats.push(cs);
-            }
-            OperatorTree::Filter {
-                source: Some(src), ..
-            } => {
-                let (_, cs) = self.execute_with_stats(src);
-                child_stats.push(cs);
-            }
-            OperatorTree::SparseThreshold { source, .. } => {
-                let (_, cs) = self.execute_with_stats(source);
-                child_stats.push(cs);
-            }
-            OperatorTree::MultiStage { stages } => {
-                for entry in stages {
-                    let (_, cs) = self.execute_with_stats(&entry.child);
-                    child_stats.push(cs);
-                }
-            }
-            OperatorTree::DeepFusion { layers, .. } => {
-                for layer in layers {
-                    if let DeepFusionLayer::Signal { signals } = layer {
-                        for sig in signals {
-                            let (_, cs) = self.execute_with_stats(sig);
-                            child_stats.push(cs);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        let start = Instant::now();
-        let result = self.driver.execute_node(op);
-        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-
-        stats.elapsed_ms = elapsed;
-        stats.result_count = result.len();
-        stats.children = child_stats;
-        (result, stats)
     }
 
     pub fn explain(&self, op: &OperatorTree) -> String {
@@ -438,6 +364,7 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct EmptyDriver;
     impl OperatorTreeDriver for EmptyDriver {
@@ -482,5 +409,40 @@ mod tests {
         assert_eq!(stats.operator_name, "TermOp");
         assert_eq!(stats.result_count, 0);
         assert!(stats.elapsed_ms >= 0.0);
+    }
+
+    #[test]
+    fn execute_delegates_to_driver_once() {
+        struct CountingDriver {
+            calls: AtomicUsize,
+        }
+
+        impl OperatorTreeDriver for CountingDriver {
+            fn execute_node(&self, _op: &OperatorTree) -> PostingList {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                PostingList::new()
+            }
+        }
+
+        let op = OperatorTree::Intersect(vec![
+            OperatorTree::Term {
+                query: "rust".into(),
+                field: Some("body".into()),
+                scoring: None,
+            },
+            OperatorTree::Term {
+                query: "search".into(),
+                field: Some("body".into()),
+                scoring: None,
+            },
+        ]);
+        let driver = CountingDriver {
+            calls: AtomicUsize::new(0),
+        };
+        let mut executor = PlanExecutor::new(&driver);
+
+        let _ = executor.execute(&op);
+
+        assert_eq!(driver.calls.load(Ordering::SeqCst), 1);
     }
 }

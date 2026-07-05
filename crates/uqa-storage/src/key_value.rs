@@ -69,6 +69,9 @@ pub trait KeyValueBatch {
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>>;
+    fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
+        self.get(key).map(|value| value.is_some())
+    }
     fn put(&self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&self, key: &[u8]) -> StorageBackendResult<()>;
     fn scan_prefix(&self, prefix: &[u8]) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>>;
@@ -135,6 +138,10 @@ impl MemoryKeyValueStore {
 impl KeyValueStore for MemoryKeyValueStore {
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {
         Ok(self.inner.lock().map.get(key).cloned())
+    }
+
+    fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
+        Ok(self.inner.lock().map.contains_key(key))
     }
 
     fn put(&self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
@@ -549,6 +556,12 @@ impl DocumentStore for KeyValueDocumentStore {
             .ok()
             .flatten()
             .and_then(|bytes| decode_value(&bytes).ok())
+    }
+
+    fn contains_doc_id(&self, doc_id: DocId) -> bool {
+        self.store
+            .contains_key(&document_key(&self.table, doc_id))
+            .unwrap_or(false)
     }
 
     fn delete(&mut self, doc_id: DocId) {

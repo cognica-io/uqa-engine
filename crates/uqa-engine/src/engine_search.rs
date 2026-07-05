@@ -159,7 +159,7 @@ impl Engine {
             let mut candidate_ids = BTreeSet::<DocId>::new();
             let mut present_terms = BTreeMap::<DocId, Vec<(usize, u64)>>::new();
             for (term_index, posting_list) in posting_lists.iter().enumerate() {
-                for entry in posting_list.iter() {
+                for entry in posting_list {
                     candidate_ids.insert(entry.doc_id);
                     present_terms
                         .entry(entry.doc_id)
@@ -297,14 +297,20 @@ impl Engine {
         &self,
         table: &str,
         field: &str,
-        query_vector: Vec<f32>,
+        query_vector: impl AsRef<[f32]>,
         top_k: usize,
     ) -> Vec<ScoredEntry> {
-        let Some((ctx, _)) = self.snapshot_context(table) else {
+        if top_k == 0 {
+            return Vec::new();
+        }
+        let Some(t) = self.table(table) else {
             return Vec::new();
         };
-        let knn = KNNOperator::new(query_vector, top_k, field);
-        let pl = knn.execute(&ctx);
+        let vector_indexes = t.vector_indexes.read();
+        let Some(index) = vector_indexes.get(field) else {
+            return Vec::new();
+        };
+        let pl = index.search_knn(query_vector.as_ref(), top_k);
         Self::rank_top_k(&pl, top_k)
     }
 

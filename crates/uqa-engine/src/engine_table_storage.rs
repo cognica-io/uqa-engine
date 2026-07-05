@@ -827,11 +827,48 @@ impl Engine {
             return None;
         }
         let t = self.table(table)?;
+        if conflict_columns.len() == 1 {
+            if let Some(doc_id) =
+                Self::doc_id_for_primary_key_conflict(&t, &conflict_columns[0], &values[0])
+            {
+                if doc_id >= *t.next_id.lock() {
+                    return None;
+                }
+                return t
+                    .document_store
+                    .read()
+                    .contains_doc_id(doc_id)
+                    .then_some(doc_id);
+            }
+        }
         let found = t
             .document_store
             .read()
             .find_doc_id_by_fields(conflict_columns, values);
         found
+    }
+
+    fn doc_id_for_primary_key_conflict(
+        table: &TableState,
+        column: &str,
+        value: &Value,
+    ) -> Option<DocId> {
+        let Value::Int(id) = value else {
+            return None;
+        };
+        if *id < 0 {
+            return None;
+        }
+        let columns = table.columns.read();
+        let maps_to_doc_id = columns.iter().any(|col| {
+            col.name == column
+                && col.primary_key
+                && matches!(col.ty, uqa_sql::ast::ColumnType::Integer)
+        });
+        if !maps_to_doc_id {
+            return None;
+        }
+        Some(*id as DocId)
     }
 
     /// Apply per-column updates to an existing document. Mirrors the

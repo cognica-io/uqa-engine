@@ -11,6 +11,7 @@
 //! of the ordered byte-key store they require.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rusqlite::{params, OptionalExtension};
@@ -33,6 +34,7 @@ enum SQLiteKeyValueBatchOperation {
 #[derive(Clone)]
 pub struct SQLiteKeyValueStore {
     conn: ManagedConnection,
+    table_ready: Arc<AtomicBool>,
 }
 
 impl SQLiteKeyValueStore {
@@ -45,7 +47,10 @@ impl SQLiteKeyValueStore {
     }
 
     pub fn new(conn: ManagedConnection) -> SQLiteResult<Self> {
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            table_ready: Arc::new(AtomicBool::new(false)),
+        };
         store.ensure_table()?;
         Ok(store)
     }
@@ -55,6 +60,9 @@ impl SQLiteKeyValueStore {
     }
 
     fn ensure_table(&self) -> SQLiteResult<()> {
+        if self.table_ready.load(Ordering::Acquire) {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             conn.execute(
                 &format!(
@@ -66,7 +74,9 @@ impl SQLiteKeyValueStore {
                 [],
             )?;
             Ok(())
-        })
+        })?;
+        self.table_ready.store(true, Ordering::Release);
+        Ok(())
     }
 }
 
@@ -80,6 +90,20 @@ impl KeyValueStore for SQLiteKeyValueStore {
                 |row| row.get::<_, Vec<u8>>(0),
             )
             .optional()
+            .map_err(SQLiteError::from)
+        })?)
+    }
+
+    fn contains_key(&self, key: &[u8]) -> StorageBackendResult<bool> {
+        self.ensure_table()?;
+        Ok(self.conn.with(|conn| {
+            conn.query_row(
+                &format!("SELECT 1 FROM {KEY_VALUE_TABLE} WHERE key = ?1 LIMIT 1"),
+                params![key],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|value| value.is_some())
             .map_err(SQLiteError::from)
         })?)
     }

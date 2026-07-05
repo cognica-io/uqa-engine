@@ -441,6 +441,23 @@ impl DocumentStore for SQLiteDocumentStore {
         self.get_inner(doc_id).ok().flatten()
     }
 
+    fn contains_doc_id(&self, doc_id: DocId) -> bool {
+        self.conn
+            .with(|c| {
+                let found: Option<i64> = c
+                    .query_row(
+                        "SELECT 1 FROM _documents
+                         WHERE table_name = ?1 AND doc_id = ?2
+                         LIMIT 1",
+                        params![self.table, doc_id as i64],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                Ok(found.is_some())
+            })
+            .unwrap_or(false)
+    }
+
     fn get_field(&self, doc_id: DocId, field: &str) -> Option<uqa_core::Value> {
         self.get_field_inner(doc_id, field).ok().flatten()
     }

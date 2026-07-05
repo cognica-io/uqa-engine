@@ -21,6 +21,9 @@ pub type Document = BTreeMap<FieldName, Value>;
 pub trait DocumentStore: Send + Sync {
     fn put(&mut self, doc_id: DocId, document: Document);
     fn get(&self, doc_id: DocId) -> Option<Document>;
+    fn contains_doc_id(&self, doc_id: DocId) -> bool {
+        self.get(doc_id).is_some()
+    }
     fn delete(&mut self, doc_id: DocId);
     fn clear(&mut self);
 
@@ -179,6 +182,10 @@ impl DocumentStore for MemoryDocumentStore {
 
     fn get(&self, doc_id: DocId) -> Option<Document> {
         self.documents.get(&doc_id).cloned()
+    }
+
+    fn contains_doc_id(&self, doc_id: DocId) -> bool {
+        self.documents.contains_key(&doc_id)
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> Option<Value> {
