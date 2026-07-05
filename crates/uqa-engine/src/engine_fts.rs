@@ -58,7 +58,7 @@ impl Engine {
             store.iter_all().collect()
         };
         let mut index = t.inverted_index.write();
-        index.try_clear()?;
+        let mut indexed_docs = Vec::new();
         for (doc_id, document) in docs {
             let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
             for field in &fts_fields {
@@ -67,9 +67,10 @@ impl Engine {
                 }
             }
             if !text_fields.is_empty() {
-                index.try_add_document(doc_id, text_fields)?;
+                indexed_docs.push((doc_id, text_fields));
             }
         }
+        index.try_rebuild_documents(indexed_docs)?;
         Ok(())
     }
 

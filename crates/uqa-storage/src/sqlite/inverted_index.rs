@@ -401,6 +401,92 @@ impl SQLiteInvertedIndex {
         })
     }
 
+    fn rebuild_documents_inner(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> SQLiteResult<()> {
+        let fields = documents
+            .iter()
+            .flat_map(|(_, fields)| fields.keys().cloned())
+            .collect::<BTreeSet<_>>();
+        for field in &fields {
+            self.ensure_aux_tables(field)?;
+        }
+
+        self.conn.with_mut(|conn| {
+            let tx = conn.savepoint()?;
+            tx.execute(
+                "DELETE FROM _postings WHERE table_name = ?1",
+                params![self.table],
+            )?;
+            tx.execute(
+                "DELETE FROM _doc_lengths WHERE table_name = ?1",
+                params![self.table],
+            )?;
+            tx.execute(
+                "DELETE FROM _field_stats WHERE table_name = ?1",
+                params![self.table],
+            )?;
+
+            let mut field_totals = BTreeMap::<FieldName, i64>::new();
+            {
+                let mut insert_length = tx.prepare(
+                    "INSERT OR REPLACE INTO _doc_lengths
+                        (table_name, doc_id, field, length)
+                     VALUES (?1, ?2, ?3, ?4)",
+                )?;
+                let mut insert_posting = tx.prepare(
+                    "INSERT OR REPLACE INTO _postings
+                        (table_name, field, term, doc_id, positions)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )?;
+
+                for (doc_id, fields) in documents {
+                    for (field, text) in fields {
+                        let analyzer = self
+                            .index_field_analyzers
+                            .get(&field)
+                            .unwrap_or(&self.analyzer);
+                        let tokens = analyzer.analyze(&text);
+                        let length = tokens.len() as i64;
+                        insert_length.execute(params![self.table, doc_id as i64, field, length])?;
+                        *field_totals.entry(field.clone()).or_default() += length;
+
+                        let mut term_positions: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+                        for (pos, token) in tokens.into_iter().enumerate() {
+                            term_positions.entry(token).or_default().push(pos as u32);
+                        }
+                        for (term, mut positions) in term_positions {
+                            positions.sort_unstable();
+                            positions.dedup();
+                            let blob = positions_to_blob(&positions);
+                            insert_posting.execute(params![
+                                self.table,
+                                field,
+                                term,
+                                doc_id as i64,
+                                blob
+                            ])?;
+                        }
+                    }
+                }
+            }
+
+            {
+                let mut insert_stats = tx.prepare(
+                    "INSERT INTO _field_stats (table_name, field, total_length)
+                     VALUES (?1, ?2, ?3)",
+                )?;
+                for (field, total_length) in field_totals {
+                    insert_stats.execute(params![self.table, field, total_length])?;
+                }
+            }
+
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     fn remove_document_inner(&self, doc_id: DocId) -> SQLiteResult<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
@@ -528,6 +614,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 )?;
                 Ok(())
             })
+            .map_err(|err| err.to_string())
+    }
+
+    fn try_rebuild_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> Result<(), String> {
+        self.rebuild_documents_inner(documents)
             .map_err(|err| err.to_string())
     }
 
@@ -981,6 +1075,28 @@ mod tests {
         assert_eq!(bulk.get(&2), Some(&idx.get_doc_length(2, "title")));
         assert_eq!(bulk.get(&3), Some(&idx.get_doc_length(3, "title")));
         assert_eq!(bulk.get(&99), None);
+    }
+
+    #[test]
+    fn rebuild_documents_replaces_postings_and_stats() {
+        let mut idx = idx();
+        idx.add_document(1, fields([("title", "old rust")]));
+
+        idx.try_rebuild_documents(vec![
+            (2, fields([("title", "new search")])),
+            (3, fields([("title", "new rust search")])),
+        ])
+        .unwrap();
+
+        assert!(idx.get_posting_list("title", "old").is_empty());
+        assert_eq!(
+            idx.get_posting_list("title", "new")
+                .doc_ids()
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert_eq!(idx.doc_length_count(Some("title")), 2);
+        assert_eq!(idx.total_field_length("title"), 5);
     }
 
     #[test]

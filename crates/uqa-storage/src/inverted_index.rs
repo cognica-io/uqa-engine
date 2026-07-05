@@ -75,6 +75,19 @@ pub trait InvertedIndex: Send + Sync {
         Ok(())
     }
 
+    fn try_rebuild_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> Result<(), String> {
+        self.try_clear()?;
+        for (doc_id, fields) in documents {
+            if !fields.is_empty() {
+                self.try_add_document(doc_id, fields)?;
+            }
+        }
+        Ok(())
+    }
+
     fn get_posting_list(&self, field: &str, term: &str) -> PostingList;
 
     fn get_posting_lists_bulk(&self, field: &str, terms: &[String]) -> Vec<PostingList> {
