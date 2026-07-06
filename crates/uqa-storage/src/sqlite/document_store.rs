@@ -19,6 +19,11 @@ const DOCUMENT_BLOBS_TABLE: &str = "_document_blobs";
 const BLOB_MARKER_TYPE: &str = "$uqa_type";
 const BLOB_MARKER_VALUE: &str = "document_blob";
 const BLOB_MARKER_FIELD: &str = "field";
+const BLOB_MARKER_ENCODING: &str = "encoding";
+const VALUE_BLOB_MARKER_VALUE: &str = "value_blob";
+const VALUE_BLOB_F64_LIST: &str = "f64_list";
+const VALUE_BLOB_F64_TENSOR: &str = "f64_tensor";
+const MIN_NUMERIC_BLOB_VALUES: usize = 32;
 
 #[derive(Clone)]
 pub struct SQLiteDocumentStore {
@@ -233,13 +238,18 @@ impl SQLiteDocumentStore {
                         upsert_document_blob(c, &self.table, doc_id, field, bytes)?;
                     }
                     other => {
-                        delete_document_blob(c, &self.table, doc_id, field)?;
-                        let json = serde_json::to_string(other)?;
+                        let (stored, blob) = encode_stored_value(field, other.clone());
+                        let json = serde_json::to_string(&stored)?;
                         c.execute(
                             "UPDATE _documents SET body = json_set(body, ?3, json(?4))
                              WHERE table_name = ?1 AND doc_id = ?2",
                             params![self.table, doc_id as i64, path, json],
                         )?;
+                        if let Some(bytes) = blob {
+                            upsert_document_blob(c, &self.table, doc_id, field, &bytes)?;
+                        } else {
+                            delete_document_blob(c, &self.table, doc_id, field)?;
+                        }
                     }
                 }
             }
@@ -301,17 +311,83 @@ fn encode_document_blobs(document: Document) -> (Document, Vec<(String, Vec<u8>)
     let mut stored = Document::new();
     let mut blobs = Vec::new();
     for (field, value) in document {
-        match value {
-            Value::Bytes(bytes) => {
-                blobs.push((field.clone(), bytes));
-                stored.insert(field.clone(), blob_marker(field));
-            }
-            other => {
-                stored.insert(field, other);
-            }
+        let (stored_value, blob) = encode_stored_value(&field, value);
+        stored.insert(field.clone(), stored_value);
+        if let Some(bytes) = blob {
+            blobs.push((field, bytes));
         }
     }
     (stored, blobs)
+}
+
+fn encode_stored_value(field: &str, value: Value) -> (Value, Option<Vec<u8>>) {
+    match value {
+        Value::Bytes(bytes) => (blob_marker(field.to_string()), Some(bytes)),
+        Value::List(items) => {
+            if let Some(bytes) = encode_f64_tensor_blob(&items) {
+                (
+                    value_blob_marker(field.to_string(), VALUE_BLOB_F64_TENSOR),
+                    Some(bytes),
+                )
+            } else if let Some(bytes) = encode_f64_list_blob(&items) {
+                (
+                    value_blob_marker(field.to_string(), VALUE_BLOB_F64_LIST),
+                    Some(bytes),
+                )
+            } else {
+                (Value::List(items), None)
+            }
+        }
+        other => (other, None),
+    }
+}
+
+fn encode_f64_list_blob(items: &[Value]) -> Option<Vec<u8>> {
+    if items.len() < MIN_NUMERIC_BLOB_VALUES {
+        return None;
+    }
+    let mut out = Vec::with_capacity(items.len() * std::mem::size_of::<f64>());
+    for item in items {
+        out.extend_from_slice(&value_as_finite_f64(item)?.to_le_bytes());
+    }
+    Some(out)
+}
+
+fn encode_f64_tensor_blob(items: &[Value]) -> Option<Vec<u8>> {
+    let rows = items.len();
+    let Value::List(first) = items.first()? else {
+        return None;
+    };
+    let cols = first.len();
+    if rows == 0 || cols == 0 || rows.saturating_mul(cols) < MIN_NUMERIC_BLOB_VALUES {
+        return None;
+    }
+    let rows_u32 = u32::try_from(rows).ok()?;
+    let cols_u32 = u32::try_from(cols).ok()?;
+    let mut out = Vec::with_capacity(8 + rows * cols * std::mem::size_of::<f64>());
+    out.extend_from_slice(&rows_u32.to_le_bytes());
+    out.extend_from_slice(&cols_u32.to_le_bytes());
+    for row in items {
+        let Value::List(values) = row else {
+            return None;
+        };
+        if values.len() != cols {
+            return None;
+        }
+        for value in values {
+            out.extend_from_slice(&value_as_finite_f64(value)?.to_le_bytes());
+        }
+    }
+    Some(out)
+}
+
+fn value_as_finite_f64(value: &Value) -> Option<f64> {
+    let value = match value {
+        Value::Int(value) => *value as f64,
+        Value::Float(value) => *value,
+        _ => return None,
+    };
+    value.is_finite().then_some(value)
 }
 
 fn decode_json_field_value(
@@ -330,9 +406,9 @@ fn decode_json_field_value(
         "null" => Value::Null,
         _ => serde_json::from_str::<Value>(json_text)?,
     };
-    if let Some(blob_field) = marker_field(&value) {
-        if let Some(bytes) = load_document_blob(conn, table, doc_id, blob_field)? {
-            value = Value::Bytes(bytes);
+    if let Some(marker) = blob_marker_info(&value) {
+        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+            value = decoded;
         }
     }
     Ok(Some(value))
@@ -348,13 +424,45 @@ fn blob_marker(field: String) -> Value {
     ]))
 }
 
-fn marker_field(value: &Value) -> Option<&str> {
+fn value_blob_marker(field: String, encoding: &str) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            BLOB_MARKER_TYPE.to_string(),
+            Value::Str(VALUE_BLOB_MARKER_VALUE.to_string()),
+        ),
+        (BLOB_MARKER_FIELD.to_string(), Value::Str(field)),
+        (
+            BLOB_MARKER_ENCODING.to_string(),
+            Value::Str(encoding.to_string()),
+        ),
+    ]))
+}
+
+#[derive(Debug, Clone)]
+enum BlobMarker {
+    Bytes(String),
+    F64List(String),
+    F64Tensor(String),
+}
+
+fn blob_marker_info(value: &Value) -> Option<BlobMarker> {
     let Value::Map(map) = value else {
         return None;
     };
     match (map.get(BLOB_MARKER_TYPE), map.get(BLOB_MARKER_FIELD)) {
         (Some(Value::Str(kind)), Some(Value::Str(field))) if kind == BLOB_MARKER_VALUE => {
-            Some(field)
+            Some(BlobMarker::Bytes(field.clone()))
+        }
+        (Some(Value::Str(kind)), Some(Value::Str(field))) if kind == VALUE_BLOB_MARKER_VALUE => {
+            match map.get(BLOB_MARKER_ENCODING) {
+                Some(Value::Str(encoding)) if encoding == VALUE_BLOB_F64_LIST => {
+                    Some(BlobMarker::F64List(field.clone()))
+                }
+                Some(Value::Str(encoding)) if encoding == VALUE_BLOB_F64_TENSOR => {
+                    Some(BlobMarker::F64Tensor(field.clone()))
+                }
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -366,28 +474,82 @@ fn hydrate_document_blobs(
     doc_id: DocId,
     document: &mut Document,
 ) -> SQLiteResult<()> {
-    let marker_fields: Vec<(String, String)> = document
+    let marker_fields: Vec<(String, BlobMarker)> = document
         .iter()
-        .filter_map(|(field, value)| {
-            marker_field(value).map(|blob_field| (field.clone(), blob_field.to_string()))
-        })
+        .filter_map(|(field, value)| blob_marker_info(value).map(|marker| (field.clone(), marker)))
         .collect();
-    for (field, blob_field) in marker_fields {
-        let bytes: Option<Vec<u8>> = conn
-            .query_row(
-                &format!(
-                    "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
-                     WHERE table_name = ?1 AND doc_id = ?2 AND field_name = ?3"
-                ),
-                params![table, doc_id as i64, blob_field],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(bytes) = bytes {
-            document.insert(field, Value::Bytes(bytes));
+    for (field, marker) in marker_fields {
+        if let Some(value) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+            document.insert(field, value);
         }
     }
     Ok(())
+}
+
+fn load_marked_document_blob(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    marker: &BlobMarker,
+) -> SQLiteResult<Option<Value>> {
+    let field = match marker {
+        BlobMarker::Bytes(field) | BlobMarker::F64List(field) | BlobMarker::F64Tensor(field) => {
+            field.as_str()
+        }
+    };
+    let Some(bytes) = load_document_blob(conn, table, doc_id, field)? else {
+        return Ok(None);
+    };
+    let value = match marker {
+        BlobMarker::Bytes(_) => Value::Bytes(bytes),
+        BlobMarker::F64List(_) => decode_f64_list_blob(&bytes).unwrap_or(Value::Null),
+        BlobMarker::F64Tensor(_) => decode_f64_tensor_blob(&bytes).unwrap_or(Value::Null),
+    };
+    Ok(Some(value))
+}
+
+fn decode_f64_list_blob(bytes: &[u8]) -> Option<Value> {
+    if bytes.len() % std::mem::size_of::<f64>() != 0 {
+        return None;
+    }
+    let values = bytes
+        .chunks_exact(std::mem::size_of::<f64>())
+        .map(|chunk| {
+            let mut raw = [0_u8; std::mem::size_of::<f64>()];
+            raw.copy_from_slice(chunk);
+            Value::Float(f64::from_le_bytes(raw))
+        })
+        .collect();
+    Some(Value::List(values))
+}
+
+fn decode_f64_tensor_blob(bytes: &[u8]) -> Option<Value> {
+    if bytes.len() < 8 {
+        return None;
+    }
+    let mut rows_raw = [0_u8; 4];
+    rows_raw.copy_from_slice(&bytes[0..4]);
+    let rows = u32::from_le_bytes(rows_raw) as usize;
+    let mut cols_raw = [0_u8; 4];
+    cols_raw.copy_from_slice(&bytes[4..8]);
+    let cols = u32::from_le_bytes(cols_raw) as usize;
+    let payload = &bytes[8..];
+    if rows == 0 || cols == 0 || payload.len() != rows * cols * std::mem::size_of::<f64>() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(rows);
+    for row in payload.chunks_exact(cols * std::mem::size_of::<f64>()) {
+        let values = row
+            .chunks_exact(std::mem::size_of::<f64>())
+            .map(|chunk| {
+                let mut raw = [0_u8; std::mem::size_of::<f64>()];
+                raw.copy_from_slice(chunk);
+                Value::Float(f64::from_le_bytes(raw))
+            })
+            .collect();
+        out.push(Value::List(values));
+    }
+    Some(Value::List(out))
 }
 
 fn load_document_blob(
@@ -801,6 +963,85 @@ mod tests {
         );
         let got = s.get(11).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("asset".into())));
+    }
+
+    #[test]
+    fn large_numeric_values_are_stored_as_sqlite_blobs_not_json_arrays() {
+        let mut s = store();
+        let embedding = Value::List((0..64).map(|i| Value::Float(f64::from(i) / 64.0)).collect());
+        let tensor = Value::List(
+            (0..4)
+                .map(|row| {
+                    Value::List(
+                        (0..16)
+                            .map(|col| Value::Float(f64::from(row * 16 + col)))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        );
+
+        s.put(
+            12,
+            doc([
+                ("embedding", embedding.clone()),
+                ("tensor", tensor.clone()),
+                ("title", Value::Str("vector".into())),
+            ]),
+        );
+
+        s.conn
+            .with(|c| {
+                let body: String = c.query_row(
+                    "SELECT body FROM _documents
+                     WHERE table_name = 'articles' AND doc_id = 12",
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert!(body.contains(VALUE_BLOB_MARKER_VALUE), "{body}");
+                assert!(body.contains(VALUE_BLOB_F64_LIST), "{body}");
+                assert!(body.contains(VALUE_BLOB_F64_TENSOR), "{body}");
+                assert!(!body.contains("0.984375"), "{body}");
+                assert!(!body.contains("63.0"), "{body}");
+
+                let embedding_bytes: Vec<u8> = c.query_row(
+                    &format!(
+                        "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
+                         WHERE table_name = 'articles'
+                           AND doc_id = 12
+                           AND field_name = 'embedding'"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(embedding_bytes.len(), 64 * std::mem::size_of::<f64>());
+
+                let tensor_bytes: Vec<u8> = c.query_row(
+                    &format!(
+                        "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
+                         WHERE table_name = 'articles'
+                           AND doc_id = 12
+                           AND field_name = 'tensor'"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(tensor_bytes.len(), 8 + 64 * std::mem::size_of::<f64>());
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(s.get_field(12, "embedding"), Some(embedding.clone()));
+        assert_eq!(s.get_field(12, "tensor"), Some(tensor.clone()));
+
+        let fields = s.get_fields_bulk(&[12, 99], "embedding");
+        assert_eq!(fields.get(&12), Some(&embedding));
+        assert_eq!(fields.get(&99), Some(&Value::Null));
+
+        let got = s.get(12).unwrap();
+        assert_eq!(got.get("embedding"), Some(&embedding));
+        assert_eq!(got.get("tensor"), Some(&tensor));
+        assert_eq!(got.get("title"), Some(&Value::Str("vector".into())));
     }
 
     #[test]

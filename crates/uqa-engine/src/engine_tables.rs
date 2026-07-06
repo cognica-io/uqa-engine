@@ -221,7 +221,9 @@ impl Engine {
             }
         }
         let mut idx = self.build_vector_index(table, &field, dimensions, params);
-        Self::backfill_vector_index(&t, &field, idx.as_mut());
+        if idx.count() == 0 {
+            Self::backfill_vector_index(&t, &field, idx.as_mut());
+        }
         t.vector_indexes.write().insert(field, idx);
         if persist_schema && self.is_persistent() {
             self.save_table_schema(table, &t);

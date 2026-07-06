@@ -895,6 +895,23 @@ mod tests {
         .unwrap();
     }
 
+    fn stored_vector(conn: &ManagedConnection, doc_id: DocId) -> Vec<f32> {
+        conn.with(|conn| {
+            let blob: Vec<u8> = conn.query_row(
+                "SELECT vector FROM _vectors
+                  WHERE table_name = 'articles'
+                    AND field = 'embedding'
+                    AND doc_id = ?1
+                  ORDER BY vector_ordinal
+                  LIMIT 1",
+                [doc_id as i64],
+                |r| r.get(0),
+            )?;
+            Ok(blob_to_vector(&blob))
+        })
+        .unwrap()
+    }
+
     #[test]
     fn run_analyze_populates_column_stats() {
         let eng = Engine::new();
@@ -1145,6 +1162,53 @@ mod tests {
         );
         let hits = reopened.knn_search("articles", "embedding", vec![1.0, 0.0], 1);
         assert_eq!(hits.first().map(|h| h.doc_id), Some(2));
+    }
+
+    #[test]
+    fn sqlite_ivf_create_index_reuses_existing_persistent_vectors() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vectors.db");
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO articles (id, embedding) VALUES \
+             (1, ARRAY[1.0, 0.0]), \
+             (2, ARRAY[0.0, 1.0])",
+            &[],
+        )
+        .unwrap();
+
+        let conn = ManagedConnection::open(&db).unwrap();
+        conn.with(|conn| {
+            conn.execute(
+                "UPDATE _documents
+                    SET body = json_set(body, '$.embedding', json('[0.0, 1.0]'))
+                  WHERE table_name = 'articles' AND doc_id = 1",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE _documents
+                    SET body = json_set(body, '$.embedding', json('[1.0, 0.0]'))
+                  WHERE table_name = 'articles' AND doc_id = 2",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        eng.sql(
+            "CREATE INDEX articles_embedding_ivf ON articles USING hnsw (embedding) \
+             WITH (lists = 2, probes = 1, train_threshold = 2)",
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(stored_vector(&conn, 1), vec![1.0, 0.0]);
+        assert_eq!(stored_vector(&conn, 2), vec![0.0, 1.0]);
     }
 
     #[test]
