@@ -6,7 +6,7 @@
 
 //! `SQLite`-backed [`DocumentStore`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use rusqlite::{params, OptionalExtension};
@@ -149,21 +149,7 @@ impl SQLiteDocumentStore {
             let Some((json_type, json_text)) = row else {
                 return Ok(None);
             };
-            let Some(json_type) = json_type else {
-                return Ok(None);
-            };
-            let mut value = match json_type.as_str() {
-                "true" => Value::Bool(true),
-                "false" => Value::Bool(false),
-                "null" => Value::Null,
-                _ => serde_json::from_str::<Value>(&json_text)?,
-            };
-            if let Some(blob_field) = marker_field(&value) {
-                if let Some(bytes) = load_document_blob(c, &self.table, doc_id, blob_field)? {
-                    value = Value::Bytes(bytes);
-                }
-            }
-            Ok(Some(value))
+            decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)
         })
     }
 
@@ -328,6 +314,30 @@ fn encode_document_blobs(document: Document) -> (Document, Vec<(String, Vec<u8>)
     (stored, blobs)
 }
 
+fn decode_json_field_value(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    json_type: Option<String>,
+    json_text: &str,
+) -> SQLiteResult<Option<Value>> {
+    let Some(json_type) = json_type else {
+        return Ok(None);
+    };
+    let mut value = match json_type.as_str() {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        "null" => Value::Null,
+        _ => serde_json::from_str::<Value>(json_text)?,
+    };
+    if let Some(blob_field) = marker_field(&value) {
+        if let Some(bytes) = load_document_blob(conn, table, doc_id, blob_field)? {
+            value = Value::Bytes(bytes);
+        }
+    }
+    Ok(Some(value))
+}
+
 fn blob_marker(field: String) -> Value {
     Value::Map(BTreeMap::from([
         (
@@ -466,6 +476,44 @@ impl DocumentStore for SQLiteDocumentStore {
         self.find_doc_id_by_field_inner(field, value).ok().flatten()
     }
 
+    fn get_fields_bulk(&self, doc_ids: &[DocId], field: &str) -> BTreeMap<DocId, Value> {
+        let mut out: BTreeMap<DocId, Value> = doc_ids
+            .iter()
+            .copied()
+            .map(|doc_id| (doc_id, Value::Null))
+            .collect();
+        if doc_ids.is_empty() || self.ensure_blob_table().is_err() {
+            return out;
+        }
+
+        let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
+        let path = sqlite_json_path(field);
+        let _ = self.conn.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT doc_id, json_type(body, ?2), json_quote(json_extract(body, ?2))
+                 FROM _documents
+                 WHERE table_name = ?1
+                 ORDER BY doc_id",
+            )?;
+            let mut rows = stmt.query(params![self.table, path])?;
+            while let Some(row) = rows.next()? {
+                let doc_id = row.get::<_, i64>(0)? as DocId;
+                if !requested.contains(&doc_id) {
+                    continue;
+                }
+                let json_type = row.get::<_, Option<String>>(1)?;
+                let json_text = row.get::<_, String>(2)?;
+                if let Some(value) =
+                    decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)?
+                {
+                    out.insert(doc_id, value);
+                }
+            }
+            Ok(())
+        });
+        out
+    }
+
     fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
         self.patch_fields_inner(doc_id, updates).unwrap_or(false)
     }
@@ -593,6 +641,28 @@ mod tests {
         assert_eq!(s.get_field(7, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(7, "flag"), Some(Value::Bool(true)));
         assert_eq!(s.get_field(7, "missing"), None);
+    }
+
+    #[test]
+    fn get_fields_bulk_reads_values_and_missing_as_null() {
+        let mut s = store();
+        s.put(
+            1,
+            doc([
+                ("title", Value::Str("rust".into())),
+                ("payload", Value::Bytes(vec![1, 2, 3])),
+            ]),
+        );
+        s.put(2, doc([("title", Value::Str("sqlite".into()))]));
+
+        let titles = s.get_fields_bulk(&[1, 2, 99], "title");
+        assert_eq!(titles.get(&1), Some(&Value::Str("rust".into())));
+        assert_eq!(titles.get(&2), Some(&Value::Str("sqlite".into())));
+        assert_eq!(titles.get(&99), Some(&Value::Null));
+
+        let payloads = s.get_fields_bulk(&[1, 2], "payload");
+        assert_eq!(payloads.get(&1), Some(&Value::Bytes(vec![1, 2, 3])));
+        assert_eq!(payloads.get(&2), Some(&Value::Null));
     }
 
     #[test]

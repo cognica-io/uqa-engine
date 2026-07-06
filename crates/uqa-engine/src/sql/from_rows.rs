@@ -66,6 +66,24 @@ fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
         .collect()
 }
 
+fn load_table_rows_pruned(
+    engine: &Engine,
+    table: &str,
+    qual: &str,
+    columns: &BTreeSet<String>,
+) -> Vec<ResultRow> {
+    let doc_ids = engine.table_doc_ids(table);
+    let mut rows = vec![ResultRow::new(); doc_ids.len()];
+    for column in columns {
+        let values = engine.get_document_fields(table, &doc_ids, column);
+        for (idx, doc_id) in doc_ids.iter().enumerate() {
+            let value = values.get(doc_id).cloned().unwrap_or(Value::Null);
+            rows[idx].insert(qualified_key(qual, column), value);
+        }
+    }
+    rows
+}
+
 /// Synthesize rows for `information_schema` / `pg_catalog` virtual
 /// views. Returns `None` for any unknown name so the caller falls back
 /// to the regular table lookup.
@@ -1541,18 +1559,22 @@ fn build_join_rows_with_ctes_inner(
                     return Ok(rows.clone());
                 }
             }
-            let cache_key = table_row_cache_key(name);
-            let rows = if let Some(rows) = ctes.rows.get(&cache_key) {
-                rows.clone()
-            } else {
-                let rows: Vec<ResultRow> = load_table_rows(engine, name);
-                ctes.rows.insert(cache_key, rows.clone());
-                rows
-            };
-            let prefixed: Vec<ResultRow> = rows
-                .iter()
-                .map(|row| prefix_row_pruned(&qual, row, prune))
-                .collect();
+            let prefixed: Vec<ResultRow> =
+                if let Some(columns) = prune.and_then(|prune| prune.get(&qual)) {
+                    load_table_rows_pruned(engine, name, &qual, columns)
+                } else {
+                    let cache_key = table_row_cache_key(name);
+                    let rows = if let Some(rows) = ctes.rows.get(&cache_key) {
+                        rows.clone()
+                    } else {
+                        let rows: Vec<ResultRow> = load_table_rows(engine, name);
+                        ctes.rows.insert(cache_key, rows.clone());
+                        rows
+                    };
+                    rows.iter()
+                        .map(|row| prefix_row_pruned(&qual, row, prune))
+                        .collect()
+                };
             let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
             if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
                 ctes.rows.insert(prefixed_cache_key, prefixed.clone());
