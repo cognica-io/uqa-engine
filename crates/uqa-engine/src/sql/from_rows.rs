@@ -73,16 +73,11 @@ fn load_table_rows_pruned(
     columns: &BTreeSet<String>,
 ) -> Vec<ResultRow> {
     let doc_ids = engine.table_doc_ids(table);
-    let fields: Vec<String> = columns.iter().cloned().collect();
-    let values_by_doc = engine.get_document_fields_multi(table, &doc_ids, &fields);
     let mut rows = vec![ResultRow::new(); doc_ids.len()];
-    for (idx, doc_id) in doc_ids.iter().enumerate() {
-        let values = values_by_doc.get(doc_id);
-        for column in columns {
-            let value = values
-                .and_then(|document| document.get(column))
-                .cloned()
-                .unwrap_or(Value::Null);
+    for column in columns {
+        let values = engine.get_document_fields(table, &doc_ids, column);
+        for (idx, doc_id) in doc_ids.iter().enumerate() {
+            let value = values.get(doc_id).cloned().unwrap_or(Value::Null);
             rows[idx].insert(qualified_key(qual, column), value);
         }
     }
