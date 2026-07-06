@@ -71,6 +71,28 @@ pub trait DocumentStore: Send + Sync {
             .collect()
     }
 
+    /// Bulk variant for several top-level fields. Persistent stores can
+    /// override this to scan each backing row once instead of once per field.
+    fn get_fields_bulk_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[String],
+    ) -> BTreeMap<DocId, Document> {
+        let mut out: BTreeMap<DocId, Document> = doc_ids
+            .iter()
+            .copied()
+            .map(|doc_id| (doc_id, Document::new()))
+            .collect();
+        for field in fields {
+            let values = self.get_fields_bulk(doc_ids, field);
+            for doc_id in doc_ids {
+                let value = values.get(doc_id).cloned().unwrap_or(Value::Null);
+                out.entry(*doc_id).or_default().insert(field.clone(), value);
+            }
+        }
+        out
+    }
+
     /// Return `true` if any document has `field == value`.
     fn has_value(&self, field: &str, value: &Value) -> bool {
         self.doc_ids()
@@ -300,6 +322,45 @@ mod tests {
         assert_eq!(got.get(&1), Some(&Value::Int(2026)));
         assert_eq!(got.get(&2), Some(&Value::Int(2025)));
         assert_eq!(got.get(&99), Some(&Value::Null));
+    }
+
+    #[test]
+    fn get_fields_bulk_multi_returns_requested_fields_per_id() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(
+            1,
+            doc([
+                ("year", Value::Int(2026)),
+                ("title", Value::Str("alpha".into())),
+            ]),
+        );
+        s.put(2, doc([("title", Value::Str("beta".into()))]));
+
+        let got = s.get_fields_bulk_multi(&[1, 2, 99], &["year".into(), "title".into()]);
+        assert_eq!(
+            got.get(&1).and_then(|doc| doc.get("year")),
+            Some(&Value::Int(2026))
+        );
+        assert_eq!(
+            got.get(&1).and_then(|doc| doc.get("title")),
+            Some(&Value::Str("alpha".into()))
+        );
+        assert_eq!(
+            got.get(&2).and_then(|doc| doc.get("year")),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            got.get(&2).and_then(|doc| doc.get("title")),
+            Some(&Value::Str("beta".into()))
+        );
+        assert_eq!(
+            got.get(&99).and_then(|doc| doc.get("year")),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            got.get(&99).and_then(|doc| doc.get("title")),
+            Some(&Value::Null)
+        );
     }
 
     #[test]

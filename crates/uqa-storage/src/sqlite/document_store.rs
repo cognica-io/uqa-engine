@@ -7,9 +7,10 @@
 //! `SQLite`-backed [`DocumentStore`].
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::sync::Arc;
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, OptionalExtension, ToSql};
 use uqa_core::{DocId, Value};
 
 use crate::document_store::{Document, DocumentStore};
@@ -676,6 +677,72 @@ impl DocumentStore for SQLiteDocumentStore {
         out
     }
 
+    fn get_fields_bulk_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[String],
+    ) -> BTreeMap<DocId, Document> {
+        let mut out: BTreeMap<DocId, Document> = doc_ids
+            .iter()
+            .copied()
+            .map(|doc_id| {
+                let document = fields
+                    .iter()
+                    .map(|field| (field.clone(), Value::Null))
+                    .collect();
+                (doc_id, document)
+            })
+            .collect();
+        if doc_ids.is_empty() || fields.is_empty() || self.ensure_blob_table().is_err() {
+            return out;
+        }
+
+        let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
+        let paths: Vec<String> = fields.iter().map(|field| sqlite_json_path(field)).collect();
+        let mut sql = String::from("SELECT doc_id");
+        for idx in 0..paths.len() {
+            let param = idx + 2;
+            let _ = write!(
+                sql,
+                ", json_type(body, ?{param}), json_quote(json_extract(body, ?{param}))"
+            );
+        }
+        sql.push_str(" FROM _documents WHERE table_name = ?1 ORDER BY doc_id");
+
+        let _ = self.conn.with(|c| {
+            let mut params: Vec<&dyn ToSql> = Vec::with_capacity(paths.len() + 1);
+            params.push(&self.table);
+            for path in &paths {
+                params.push(path);
+            }
+            let mut stmt = c.prepare(&sql)?;
+            let mut rows = stmt.query(params.as_slice())?;
+            while let Some(row) = rows.next()? {
+                let doc_id = row.get::<_, i64>(0)? as DocId;
+                if !requested.contains(&doc_id) {
+                    continue;
+                }
+                let document = out.entry(doc_id).or_insert_with(|| {
+                    fields
+                        .iter()
+                        .map(|field| (field.clone(), Value::Null))
+                        .collect()
+                });
+                for (idx, field) in fields.iter().enumerate() {
+                    let json_type = row.get::<_, Option<String>>(1 + idx * 2)?;
+                    let json_text = row.get::<_, String>(2 + idx * 2)?;
+                    if let Some(value) =
+                        decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)?
+                    {
+                        document.insert(field.clone(), value);
+                    }
+                }
+            }
+            Ok(())
+        });
+        out
+    }
+
     fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
         self.patch_fields_inner(doc_id, updates).unwrap_or(false)
     }
@@ -825,6 +892,32 @@ mod tests {
         let payloads = s.get_fields_bulk(&[1, 2], "payload");
         assert_eq!(payloads.get(&1), Some(&Value::Bytes(vec![1, 2, 3])));
         assert_eq!(payloads.get(&2), Some(&Value::Null));
+
+        let multi = s.get_fields_bulk_multi(&[1, 2, 99], &["title".into(), "payload".into()]);
+        assert_eq!(
+            multi.get(&1).and_then(|doc| doc.get("title")),
+            Some(&Value::Str("rust".into()))
+        );
+        assert_eq!(
+            multi.get(&1).and_then(|doc| doc.get("payload")),
+            Some(&Value::Bytes(vec![1, 2, 3]))
+        );
+        assert_eq!(
+            multi.get(&2).and_then(|doc| doc.get("title")),
+            Some(&Value::Str("sqlite".into()))
+        );
+        assert_eq!(
+            multi.get(&2).and_then(|doc| doc.get("payload")),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            multi.get(&99).and_then(|doc| doc.get("title")),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            multi.get(&99).and_then(|doc| doc.get("payload")),
+            Some(&Value::Null)
+        );
     }
 
     #[test]
