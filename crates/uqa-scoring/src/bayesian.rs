@@ -73,6 +73,18 @@ impl BayesianProbabilityTransform {
         (0.7 * p_tf + 0.3 * p_norm).clamp(0.1, 0.9)
     }
 
+    /// Posterior floor for a field with no match evidence: zero term
+    /// frequency and the length-normalisation floor (Eq. 25-27 with
+    /// `tf = 0` and an average-length document). Multi-field fusion
+    /// pads absent fields with this value so that matching a field can
+    /// never rank a document below one that did not match it: with
+    /// `beta <= 0` a BM25 score of at least zero keeps the likelihood
+    /// at or above 0.5, so every matched posterior stays at or above
+    /// its composite prior, which in turn exceeds this floor.
+    pub fn no_match_prior() -> f64 {
+        Self::composite_prior(0.0, 1.0)
+    }
+
     /// Bayesian posterior via two-step update (Eq. 22, Remark 4.4.5).
     ///
     /// Without `base_rate`:
@@ -111,6 +123,37 @@ impl BayesianProbabilityTransform {
     pub fn wand_upper_bound(&self, bm25_upper_bound: f64, p_max: f64) -> f64 {
         let l_max = self.likelihood(bm25_upper_bound);
         Self::posterior(l_max, p_max, self.base_rate)
+    }
+}
+
+#[cfg(test)]
+mod no_match_prior_tests {
+    use super::*;
+
+    #[test]
+    fn no_match_prior_matches_zero_evidence_composite_prior() {
+        let floor = BayesianProbabilityTransform::no_match_prior();
+        assert!((floor - 0.23).abs() < 1e-12, "{floor}");
+    }
+
+    #[test]
+    fn matched_posteriors_stay_above_the_no_match_prior_under_defaults() {
+        let transform = BayesianProbabilityTransform::default();
+        let floor = BayesianProbabilityTransform::no_match_prior();
+        for score_tenths in 0..=100 {
+            let score = f64::from(score_tenths) / 10.0;
+            for tf in 1..=10 {
+                for ratio_tenths in 0..=30 {
+                    let ratio = f64::from(ratio_tenths) / 10.0;
+                    let posterior = transform.score_to_probability(score, f64::from(tf), ratio);
+                    assert!(
+                        posterior >= floor,
+                        "posterior {posterior} fell below floor {floor} \
+                         at score={score} tf={tf} ratio={ratio}",
+                    );
+                }
+            }
+        }
     }
 }
 

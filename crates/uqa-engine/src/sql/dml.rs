@@ -711,8 +711,35 @@ fn rewrite_document_with_referential_actions(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     validate_document_constraints(engine, table, doc_id, &new_doc, params)?;
-    engine.rewrite_document(table, doc_id, new_doc.clone());
+    match integer_primary_key_doc_id(engine, table, &new_doc) {
+        // An integer primary key names the row's doc_id slot; keep that
+        // invariant when the key itself changes, or value -> doc_id
+        // lookups (the unique fast path and FOREIGN KEY validation) read
+        // the stale slot and miss the row.
+        Some(new_id) if new_id != doc_id => {
+            engine.delete_document(table, doc_id);
+            engine.add_document_with_vector_values(
+                table,
+                new_id,
+                new_doc.clone(),
+                document_vectors(engine, table, &new_doc),
+            );
+            engine.advance_next_id(table, new_id);
+        }
+        _ => engine.rewrite_document(table, doc_id, new_doc.clone()),
+    }
     apply_referenced_key_update_actions(engine, table, old_doc, &new_doc, params)
+}
+
+fn integer_primary_key_doc_id(engine: &Engine, table: &str, doc: &Document) -> Option<DocId> {
+    let cols = engine.describe_table(table)?;
+    let pk = cols
+        .iter()
+        .find(|c| c.primary_key && matches!(c.ty, uqa_sql::ast::ColumnType::Integer))?;
+    match doc.get(&pk.name) {
+        Some(Value::Int(v)) if *v >= 0 => Some(*v as DocId),
+        _ => None,
+    }
 }
 
 fn apply_referenced_key_update_actions(

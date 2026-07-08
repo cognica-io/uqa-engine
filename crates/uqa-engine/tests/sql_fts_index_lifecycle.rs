@@ -212,8 +212,11 @@ fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns(
             "SELECT id FROM messages WHERE text_match(content, '호텔') ORDER BY id",
             &[],
         )
-        .unwrap();
-    assert!(before_search.rows.is_empty());
+        .unwrap_err();
+    assert!(
+        before_search.to_string().contains("no text index"),
+        "searching an unindexed column must be rejected, got: {before_search}",
+    );
 
     eng.sql(
         "CREATE INDEX idx_messages_content_gin ON messages USING gin (content) \
@@ -230,13 +233,16 @@ fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns(
         .unwrap();
     assert_eq!(ids(&content_hits), vec![1]);
 
-    let metadata_hits = eng
+    let metadata_search = eng
         .sql(
             "SELECT id FROM messages WHERE text_match(context_json, '대구호텔') ORDER BY id",
             &[],
         )
-        .unwrap();
-    assert!(metadata_hits.rows.is_empty());
+        .unwrap_err();
+    assert!(
+        metadata_search.to_string().contains("no text index"),
+        "a column outside the index must stay unsearchable, got: {metadata_search}",
+    );
 
     let stats = eng
         .sql(

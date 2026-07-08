@@ -3538,6 +3538,9 @@ fn run_single_table_select(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    if let Some(filter) = stmt.r#where.as_ref() {
+        super::validate_expr_text_match_fields(engine, table, filter)?;
+    }
     let score_top_k = score_order_top_k(stmt, engine, params)?;
     let score_top_k = score_top_k.filter(|_| score_limited_text_filter(stmt.r#where.as_ref()));
     let has_jsonpath_fts_filter = stmt
@@ -4001,6 +4004,9 @@ fn run_joined_select(
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    if let Some(filter) = stmt.r#where.as_ref() {
+        super::validate_joined_expr_text_match_fields(engine, from, filter)?;
+    }
     let mut ctes = CteScope::new();
     let column_prune = column_prune_for_stmt(stmt, from);
     let qualifier_filters = qualifier_filters_for_stmt(stmt, from);
@@ -4095,6 +4101,8 @@ pub(super) fn apply_row_order_limit(
     use uqa_execution::relational::{Limit, Sort, SortKey};
     use uqa_execution::scan::TableScan;
 
+    const ORDER_KEY_PREFIX: &str = "__uqa_order_key_";
+
     if rows.is_empty() {
         return Ok(rows);
     }
@@ -4102,6 +4110,28 @@ pub(super) fn apply_row_order_limit(
     let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
     if stmt.order_by.is_empty() && resolved_offset.is_none() && resolved_limit.is_none() {
         return Ok(rows);
+    }
+
+    // Materialise ORDER BY keys before entering the Volcano pipeline:
+    // the Sort operator evaluates expressions without an engine hook,
+    // so registered scalar functions would fail inside it.
+    let mut rows = rows;
+    if !stmt.order_by.is_empty() {
+        let key_values: Vec<Vec<Value>> = rows
+            .iter()
+            .map(|row| {
+                let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+                stmt.order_by
+                    .iter()
+                    .map(|order| eval(&order.expr, &ctx))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+        for (row, keys) in rows.iter_mut().zip(key_values) {
+            for (idx, value) in keys.into_iter().enumerate() {
+                row.insert(format!("{ORDER_KEY_PREFIX}{idx}"), value);
+            }
+        }
     }
 
     let columns: Vec<String> = rows
@@ -4115,8 +4145,9 @@ pub(super) fn apply_row_order_limit(
         let keys: Vec<SortKey> = stmt
             .order_by
             .iter()
-            .map(|o| SortKey {
-                expr: o.expr.clone(),
+            .enumerate()
+            .map(|(idx, o)| SortKey {
+                expr: Expr::Column(format!("{ORDER_KEY_PREFIX}{idx}")),
                 descending: o.descending,
                 nulls_first: o
                     .nulls
@@ -4130,10 +4161,15 @@ pub(super) fn apply_row_order_limit(
         op = Box::new(Limit::new(op, resolved_offset.unwrap_or(0), resolved_limit));
     }
 
-    let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
+    let (_cols, mut rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
         uqa_execution::physical::ExecError::SQL(err) => err,
         uqa_execution::physical::ExecError::Other(msg) => SQLError::Internal(msg),
     })?;
+    if !stmt.order_by.is_empty() {
+        for row in &mut rows {
+            row.retain(|key, _| !key.starts_with(ORDER_KEY_PREFIX));
+        }
+    }
     Ok(rows)
 }
 

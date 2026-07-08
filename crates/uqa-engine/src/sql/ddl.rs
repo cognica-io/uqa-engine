@@ -449,6 +449,19 @@ pub(super) fn coerce_to_column_type(
     if matches!(&def.ty, ColumnType::Numeric { .. }) {
         return convert_value_to_column_type(value, &def.ty);
     }
+    if matches!(&def.ty, ColumnType::Integer) {
+        // Numeric literals arrive as Decimal from the parser while bind
+        // parameters arrive as Int; normalise so an integer column reads
+        // back one Value variant regardless of the write path.
+        return Ok(match value {
+            Value::Decimal(decimal) => decimal
+                .to_i64_trunc()
+                .map(Value::Int)
+                .unwrap_or(Value::Decimal(decimal)),
+            Value::Float(float) if float.is_finite() => Value::Int(float as i64),
+            other => other,
+        });
+    }
     if matches!(&def.ty, ColumnType::Real) {
         return match value {
             Value::Float(_) => Ok(value),
@@ -522,6 +535,10 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
         ColumnType::Integer => match value {
             Value::Int(_) => Ok(value),
             Value::Float(f) => Ok(Value::Int(f as i64)),
+            Value::Decimal(d) => d
+                .to_i64_trunc()
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to integer".into())),
             Value::Bool(b) => Ok(Value::Int(i64::from(b))),
             Value::Str(s) => s
                 .parse::<i64>()

@@ -10,12 +10,16 @@
 //! Each field has independent calibration parameters (`alpha, beta,
 //! base_rate`) plus a fusion weight. Per-field posteriors combine via
 //! a weight-normalized log-odds conjunction; an absent field
-//! contributes the neutral prior (0.5).
+//! contributes the no-match prior floor. Padding with 0.5 instead
+//! would assert a higher belief for unmatched fields than calibrated
+//! matched posteriors reach on small corpora, ranking documents that
+//! match more fields below documents that match fewer.
 
 use std::sync::Arc;
 
 use uqa_core::IndexStats;
 
+use crate::bayesian::BayesianProbabilityTransform;
 use crate::bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
 use crate::prob::log_odds_conjunction_weighted;
 
@@ -53,7 +57,7 @@ impl MultiFieldBayesianScorer {
     /// Score one document. Each `*_per_field` map keys on field name
     /// and yields the term frequency / document length / document
     /// frequency for that field. Missing fields fall back to the
-    /// neutral prior 0.5.
+    /// no-match prior floor.
     pub fn score_document(
         &self,
         term_freq_per_field: &std::collections::BTreeMap<String, u64>,
@@ -66,7 +70,7 @@ impl MultiFieldBayesianScorer {
             let dl = *doc_length_per_field.get(name).unwrap_or(&1);
             let df = *doc_freq_per_field.get(name).unwrap_or(&1);
             if tf == 0 {
-                probs.push(0.5);
+                probs.push(BayesianProbabilityTransform::no_match_prior());
             } else {
                 probs.push(self.scorers[i].score(tf, dl, df));
             }
@@ -133,7 +137,8 @@ mod tests {
             ],
             stats,
         );
-        // Only `title` has frequency data; `body` falls back to 0.5.
+        // Only `title` has frequency data; `body` falls back to the
+        // no-match prior floor.
         let tf = std::collections::BTreeMap::from([("title".into(), 5u64)]);
         let dl = std::collections::BTreeMap::from([("title".into(), 50u64)]);
         let df = std::collections::BTreeMap::from([("title".into(), 10u64)]);

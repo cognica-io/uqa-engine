@@ -33,6 +33,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **CLI storage wording:** `usql \open` and startup messaging describe persistent UQA storage rather than a single concrete backend.
 - **Function registry reuse:** CLI completion and highlighting read UQA function names from `uqa-sql::registry::registered_names` instead of duplicating a hard-coded CLI list.
 - **SQL point updates:** point UPDATE paths now use direct document replacement where possible while keeping FTS, vector, tensor, and KeyValue index state synchronized.
+- **crossbeam-epoch advisory bump:** the lockfile moves `crossbeam-epoch` to 0.9.20 for RUSTSEC-2026-0204; the remaining `cargo deny` advisories require the pyo3 0.29 migration in `uqa-python`.
 
 ### Fixed
 
@@ -44,6 +45,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **PostgreSQL runtime parameter defaults:** `SHOW server_version` now reports `17.0-uqa`, PostgreSQL-compatible defaults are exposed for server/client encoding, `DateStyle`, and `TimeZone`, and runtime parameter lookup honors case-insensitive session overrides.
 - **UPDATE document id handling:** UPDATE paths now skip stale document ids and keep table/index state consistent after row replacement.
 - **Supply-chain license gate:** `deny.toml` now allows `BSL-1.0`, which is required by `rustyline` transitive dependencies and is accepted by the project's license policy.
+- **Registered scalar functions in ORDER BY:** scored-match and row-projection queries materialise ORDER BY keys with the engine hook attached before entering the Volcano sort, so `Engine::register_scalar_function` UDFs work inside ORDER BY expressions instead of failing with `Unsupported`.
+- **Text-match field validation:** `text_match`, `bayesian_match`, `fts_match`, `bayesian_match_with_prior`, and `multi_field_match` now reject unknown columns, columns without a text index, and computed-expression field arguments with actionable errors instead of silently matching zero rows; JSONPath `@@` matches and the `_all` pseudo-field keep their existing behavior.
+- **Multi-field fusion no-match floor:** `multi_field_match` and `MultiFieldBayesianScorer` pad unmatched fields with the zero-evidence composite prior instead of 0.5, so matching an additional field can never rank a document below one that matched fewer fields on small corpora.
+- **Integer column literal normalization:** integer-typed columns coerce parser Decimal literals (and finite floats) to `Value::Int` on INSERT and UPDATE, so literal-written and bind-written rows read back the same variant, in-memory and across persistent reopen.
+- **Integer primary key updates relocate document ids:** updating an integer primary key moves the row to the doc id named by the new key value, keeping the value-to-doc-id fast path honest for unique-conflict checks and FOREIGN KEY validation (fixes the `ON UPDATE CASCADE`, ON CONFLICT update, and MERGE referenced-key failures).
 
 ## [0.1.0] - 2026-05-09
 

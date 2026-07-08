@@ -9,12 +9,204 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DocId, Value};
-use uqa_sql::ast::Expr;
+use uqa_sql::ast::{Expr, FromClause};
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{Engine, ScoredEntry};
+
+const SINGLE_FIELD_TEXT_MATCH_FUNCTIONS: [&str; 4] = [
+    "text_match",
+    "bayesian_match",
+    "fts_match",
+    "bayesian_match_with_prior",
+];
+
+/// Walk an expression tree and hand every text-match field argument to
+/// `validate`. Used by the select runners to reject silently-empty
+/// searches before the WHERE reaches either the operator-tree pipeline
+/// or the legacy dispatch.
+fn walk_text_match_fields(
+    expr: &Expr,
+    validate: &mut dyn FnMut(&Expr, &str) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    match expr {
+        Expr::Func {
+            name, args, filter, ..
+        } => {
+            let lower = name.to_ascii_lowercase();
+            if SINGLE_FIELD_TEXT_MATCH_FUNCTIONS.contains(&lower.as_str()) {
+                if let Some(field_arg) = args.first() {
+                    if !(lower == "fts_match" && fts_query_is_jsonpath(args.get(1))) {
+                        validate(field_arg, &lower)?;
+                    }
+                }
+            } else if lower == "multi_field_match" {
+                match multi_field_match_shape(args)? {
+                    MultiFieldMatchShape::FieldsThenQuery { fields, .. }
+                    | MultiFieldMatchShape::Pairs { fields } => {
+                        for field_arg in fields {
+                            validate(field_arg, "multi_field_match")?;
+                        }
+                    }
+                }
+            }
+            for arg in args {
+                walk_text_match_fields(arg, validate)?;
+            }
+            if let Some(filter) = filter {
+                walk_text_match_fields(filter, validate)?;
+            }
+            Ok(())
+        }
+        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => {
+            for item in items {
+                walk_text_match_fields(item, validate)?;
+            }
+            Ok(())
+        }
+        Expr::Not(inner) => walk_text_match_fields(inner, validate),
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_text_match_fields(lhs, validate)?;
+            walk_text_match_fields(rhs, validate)
+        }
+        Expr::IsNull { expr, .. } => walk_text_match_fields(expr, validate),
+        Expr::Between { expr, low, high } => {
+            walk_text_match_fields(expr, validate)?;
+            walk_text_match_fields(low, validate)?;
+            walk_text_match_fields(high, validate)
+        }
+        Expr::InList { expr, list, .. } => {
+            walk_text_match_fields(expr, validate)?;
+            for item in list {
+                walk_text_match_fields(item, validate)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+pub(super) fn validate_expr_text_match_fields(
+    engine: &Engine,
+    table: &str,
+    expr: &Expr,
+) -> Result<(), SQLError> {
+    walk_text_match_fields(
+        expr,
+        &mut |field_arg, function_name| match text_match_field_name(field_arg) {
+            Some(TextMatchField::All) => {
+                validate_text_match_all_fields(engine, table, function_name)
+            }
+            Some(TextMatchField::Named(field)) => {
+                validate_text_match_field(engine, table, field, function_name)
+            }
+            None => Ok(()),
+        },
+    )
+}
+
+enum TextMatchField<'a> {
+    All,
+    Named(&'a str),
+}
+
+/// The `_all` pseudo-field arrives either as a string literal or as a
+/// bare column reference, depending on how the query was written.
+fn text_match_field_name(field_arg: &Expr) -> Option<TextMatchField<'_>> {
+    match field_arg {
+        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
+            if name.is_empty() || name == "_all" {
+                Some(TextMatchField::All)
+            } else {
+                Some(TextMatchField::Named(name))
+            }
+        }
+        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(TextMatchField::All),
+        _ => None,
+    }
+}
+
+pub(super) fn validate_joined_expr_text_match_fields(
+    engine: &Engine,
+    from: &FromClause,
+    expr: &Expr,
+) -> Result<(), SQLError> {
+    let mut tables: Vec<(Option<String>, String)> = Vec::new();
+    let mut has_opaque_source = false;
+    collect_from_tables(from, &mut tables, &mut has_opaque_source);
+    walk_text_match_fields(expr, &mut |field_arg, function_name| {
+        let (qualifier, column) = match field_arg {
+            Expr::Column(name) => (None, name.as_str()),
+            Expr::QualifiedColumn {
+                qualifier, column, ..
+            } => (Some(qualifier.as_str()), column.as_str()),
+            _ => return Ok(()),
+        };
+        if column.is_empty() || column == "_all" {
+            return Ok(());
+        }
+        if let Some(qualifier) = qualifier {
+            let resolved = tables
+                .iter()
+                .find(|(alias, name)| alias.as_deref() == Some(qualifier) || name == qualifier);
+            return match resolved {
+                Some((_, table)) => validate_text_match_field(engine, table, column, function_name),
+                // Unknown qualifiers can point at subqueries or CTEs the
+                // validator cannot introspect.
+                None => Ok(()),
+            };
+        }
+        let containing: Vec<&String> = tables
+            .iter()
+            .map(|(_, name)| name)
+            .filter(|name| engine.table_has_column(name, column))
+            .collect();
+        if containing.iter().any(|name| {
+            engine
+                .fts_fields_for_table(name)
+                .iter()
+                .any(|f| f == column)
+        }) {
+            return Ok(());
+        }
+        if let Some(table) = containing.first() {
+            return validate_text_match_field(engine, table, column, function_name);
+        }
+        if has_opaque_source {
+            return Ok(());
+        }
+        Err(SQLError::TypeMismatch(format!(
+            "{function_name}: column `{column}` does not exist on any joined table"
+        )))
+    })
+}
+
+/// The `@@` operator doubles as a `JSONPath` match when the right-hand
+/// side is a `$...` path literal; that form evaluates row-level JSON and
+/// needs no text index.
+fn fts_query_is_jsonpath(query_arg: Option<&Expr>) -> bool {
+    matches!(
+        query_arg,
+        Some(Expr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
+    )
+}
+
+fn collect_from_tables(
+    from: &FromClause,
+    out: &mut Vec<(Option<String>, String)>,
+    has_opaque_source: &mut bool,
+) {
+    match from {
+        FromClause::Table { name, alias } => out.push((alias.clone(), name.clone())),
+        FromClause::Join { left, right, .. } => {
+            collect_from_tables(left, out, has_opaque_source);
+            collect_from_tables(right, out, has_opaque_source);
+        }
+        _ => *has_opaque_source = true,
+    }
+}
 
 pub(super) fn execute_function(
     engine: &Engine,
@@ -208,7 +400,15 @@ fn run_multi_field_match(
     }
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let (fields, queries, weights) = parse_multi_field_match_args(args, &ctx)?;
+    for field in &fields {
+        validate_text_match_field(engine, table, field, "multi_field_match")?;
+    }
     let n_fields = fields.len();
+    // Unmatched fields pad with the no-match prior floor rather than
+    // 0.5: calibrated matched posteriors can sit below 0.5 on small
+    // corpora, and a higher pad would rank documents that match more
+    // fields below documents that match fewer.
+    let no_match_pad = uqa_scoring::BayesianProbabilityTransform::no_match_prior();
     let mut per_doc: std::collections::BTreeMap<u64, Vec<f64>> = std::collections::BTreeMap::new();
     for (i, (field, q)) in fields.iter().zip(queries.iter()).enumerate() {
         let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
@@ -216,14 +416,14 @@ fn run_multi_field_match(
         for entry in scored {
             let slot = per_doc
                 .entry(entry.doc_id)
-                .or_insert_with(|| vec![0.5; n_fields]);
+                .or_insert_with(|| vec![no_match_pad; n_fields]);
             slot[i] = entry.score;
         }
     }
     // Pad missing slots so every doc has a full vector.
     for slot in per_doc.values_mut() {
         if slot.len() < n_fields {
-            slot.resize(n_fields, 0.5);
+            slot.resize(n_fields, no_match_pad);
         }
     }
     let mut out: Vec<ScoredEntry> = per_doc
@@ -247,15 +447,62 @@ fn run_multi_field_match(
 
 type MultiFieldMatchArgs = (Vec<String>, Vec<String>, Vec<f64>);
 
+enum MultiFieldMatchShape<'a> {
+    FieldsThenQuery {
+        fields: Vec<&'a Expr>,
+        query_idx: usize,
+    },
+    Pairs {
+        fields: Vec<&'a Expr>,
+    },
+}
+
+fn multi_field_match_shape(args: &[Expr]) -> Result<MultiFieldMatchShape<'_>, SQLError> {
+    let first_non_column = args
+        .iter()
+        .position(|arg| !matches!(arg, Expr::Column(_) | Expr::QualifiedColumn { .. }));
+    if let Some(query_idx) = first_non_column {
+        if query_idx >= 2 {
+            return Ok(MultiFieldMatchShape::FieldsThenQuery {
+                fields: args[..query_idx].iter().collect(),
+                query_idx,
+            });
+        }
+    }
+    if args.len() < 4 || args.len() % 2 != 0 {
+        if let Some(query_idx) = first_non_column {
+            if query_idx < 2 && args.len() >= 3 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "multi_field_match field arguments must be column references, \
+                     but argument {} is an expression; store computed text in an \
+                     indexed column instead of concatenating at query time",
+                    query_idx + 1
+                )));
+            }
+        }
+        return Err(SQLError::BadArity {
+            name: "multi_field_match".into(),
+            expected: ">= 3 (fields..., query[, weights...]) or even >= 4 (field, query pairs)"
+                .into(),
+            actual: args.len(),
+        });
+    }
+    Ok(MultiFieldMatchShape::Pairs {
+        fields: (0..args.len() / 2).map(|i| &args[2 * i]).collect(),
+    })
+}
+
 fn parse_multi_field_match_args(
     args: &[Expr],
     ctx: &EvalContext<'_>,
 ) -> Result<MultiFieldMatchArgs, SQLError> {
-    let first_non_column = args.iter().position(|arg| !matches!(arg, Expr::Column(_)));
-    if let Some(query_idx) = first_non_column {
-        if query_idx >= 2 {
-            let fields = args[..query_idx]
-                .iter()
+    match multi_field_match_shape(args)? {
+        MultiFieldMatchShape::FieldsThenQuery {
+            fields: field_args,
+            query_idx,
+        } => {
+            let fields = field_args
+                .into_iter()
                 .map(|arg| expect_column_name(arg, "multi_field_match.field"))
                 .collect::<Result<Vec<_>, _>>()?;
             let query = expect_string_value(&args[query_idx], "multi_field_match.query", ctx)?;
@@ -278,30 +525,23 @@ fn parse_multi_field_match_args(
                 )
             };
             let queries = vec![query; fields.len()];
-            return Ok((fields, queries, weights));
+            Ok((fields, queries, weights))
+        }
+        MultiFieldMatchShape::Pairs { fields: field_args } => {
+            let n_fields = field_args.len();
+            let mut fields = Vec::with_capacity(n_fields);
+            let mut queries = Vec::with_capacity(n_fields);
+            for (i, field_arg) in field_args.into_iter().enumerate() {
+                fields.push(expect_column_name(field_arg, "multi_field_match.field")?);
+                queries.push(expect_string_value(
+                    &args[2 * i + 1],
+                    "multi_field_match.query",
+                    ctx,
+                )?);
+            }
+            Ok((fields, queries, uniform_weights(n_fields)))
         }
     }
-
-    if args.len() < 4 || args.len() % 2 != 0 {
-        return Err(SQLError::BadArity {
-            name: "multi_field_match".into(),
-            expected: ">= 3 (fields..., query[, weights...]) or even >= 4 (field, query pairs)"
-                .into(),
-            actual: args.len(),
-        });
-    }
-    let n_fields = args.len() / 2;
-    let mut fields = Vec::with_capacity(n_fields);
-    let mut queries = Vec::with_capacity(n_fields);
-    for i in 0..n_fields {
-        fields.push(expect_column_name(&args[2 * i], "multi_field_match.field")?);
-        queries.push(expect_string_value(
-            &args[2 * i + 1],
-            "multi_field_match.query",
-            ctx,
-        )?);
-    }
-    Ok((fields, queries, uniform_weights(n_fields)))
 }
 
 fn expect_string_value(
@@ -959,6 +1199,57 @@ fn run_bayesian_match(
     )
 }
 
+/// Reject silently-empty text searches up front: a match function whose
+/// field is not a real column, or is a column without a text index,
+/// previously returned zero rows with no diagnostic.
+fn validate_text_match_field(
+    engine: &Engine,
+    table: &str,
+    field: &str,
+    function_name: &str,
+) -> Result<(), SQLError> {
+    if engine.table_columns(table).is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}: unknown table `{table}`"
+        )));
+    }
+    if !engine.table_has_column(table, field) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}: column `{field}` does not exist on table `{table}`"
+        )));
+    }
+    if !engine
+        .fts_fields_for_table(table)
+        .iter()
+        .any(|fts| fts == field)
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}: column `{table}.{field}` has no text index; \
+             create one with CREATE INDEX ... ON {table} USING gin ({field})"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_text_match_all_fields(
+    engine: &Engine,
+    table: &str,
+    function_name: &str,
+) -> Result<(), SQLError> {
+    if engine.table_columns(table).is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}: unknown table `{table}`"
+        )));
+    }
+    if engine.fts_fields_for_table(table).is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}: table `{table}` has no text-indexed columns; \
+             create one with CREATE INDEX ... ON {table} USING gin (...)"
+        )));
+    }
+    Ok(())
+}
+
 fn run_text_match_scored(
     engine: &Engine,
     table: &str,
@@ -985,6 +1276,11 @@ fn run_text_match_scored(
             )));
         }
     };
+    if field == "_all" || field.is_empty() {
+        validate_text_match_all_fields(engine, table, function_name)?;
+    } else {
+        validate_text_match_field(engine, table, &field, function_name)?;
+    }
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let query_value = eval(&args[1], &ctx)?;
     let query = match query_value {
@@ -1036,6 +1332,14 @@ fn run_fts_match(
             )));
         }
     };
+    if !fts_query_is_jsonpath(args.get(1)) {
+        match default_field.as_deref() {
+            Some(field) if !field.is_empty() && field != "_all" => {
+                validate_text_match_field(engine, table, field, "fts_match")?;
+            }
+            _ => validate_text_match_all_fields(engine, table, "fts_match")?,
+        }
+    }
     let ctx = EvalContext::new(None, params).with_engine(engine);
     let query = expect_string(&args[1], "fts_match.query", &ctx)?;
     let tokenizer = |_field: Option<&str>, phrase: &str| {

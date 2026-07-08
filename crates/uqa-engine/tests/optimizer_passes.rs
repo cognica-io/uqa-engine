@@ -393,6 +393,11 @@ fn fuse_log_odds_calibrated_scores_lie_in_unit_interval() {
         &[],
     )
     .unwrap();
+    // The text signal needs a real index; without one the text half of
+    // the fusion is rejected up front instead of silently scoring
+    // nothing while knn carries the query.
+    eng.sql("CREATE INDEX notes_body ON notes USING gin (body)", &[])
+        .unwrap();
     eng.sql(
         "INSERT INTO notes (id, body, embedding) VALUES \
          (1, 'tokio runtime', ARRAY[0.9, 0.1]), \
