@@ -545,7 +545,12 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
             return Ok(value);
         }
     }
-    if matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_)) {
+    let has_decimal = matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_));
+    let has_float = matches!(a, Value::Float(_)) || matches!(b, Value::Float(_));
+    // PostgreSQL numeric promotion: double precision wins mixed
+    // float/numeric arithmetic. Exact decimal arithmetic only applies
+    // when no float operand is involved.
+    if has_decimal && !has_float {
         return decimal_arith(a, b, op);
     }
     let lf = to_f64(a)?;

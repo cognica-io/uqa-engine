@@ -105,3 +105,77 @@ fn plain_order_by_uses_registered_scalar_functions() {
         .unwrap();
     assert_eq!(ids(&ordered), vec![2, 1]);
 }
+
+#[test]
+fn decimal_weighted_blend_preserves_relevance_order() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE pages (id INTEGER PRIMARY KEY, status TEXT, body TEXT, updated_at BIGINT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("CREATE INDEX pages_text ON pages USING gin (body)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO pages (id, status, body, updated_at) VALUES \
+         (1, 'accepted', 'fusion fusion fusion ranking in depth', 100), \
+         (2, 'accepted', 'one fusion mention', 900)",
+        &[],
+    )
+    .unwrap();
+    eng.register_scalar_function("micro_boost", |args: &[Value]| {
+        let base = match args.first() {
+            Some(Value::Int(value)) => *value as f64,
+            Some(Value::Float(value)) => *value,
+            Some(Value::Decimal(value)) => value.to_f64().unwrap_or(0.0),
+            other => {
+                return Err(uqa_sql::SQLError::TypeMismatch(format!(
+                    "micro_boost expects a numeric argument, got {other:?}"
+                )))
+            }
+        };
+        Ok(Value::Float(base / 1_000_000.0))
+    })
+    .unwrap();
+    let params = vec![SQLParam::scalar(Value::Str("fusion".into()))];
+
+    let plain = eng
+        .sql(
+            "SELECT id, _score FROM pages \
+              WHERE status IN ('accepted', 'draft') AND bayesian_match(body, $1) \
+              ORDER BY _score DESC LIMIT 10",
+            &params,
+        )
+        .unwrap();
+    assert_eq!(ids(&plain), vec![1, 2]);
+
+    let blended = eng
+        .sql(
+            "SELECT id, _score FROM pages \
+              WHERE status IN ('accepted', 'draft') AND bayesian_match(body, $1) \
+              ORDER BY _score + 0.05 * micro_boost(updated_at) DESC, updated_at DESC \
+              LIMIT 10",
+            &params,
+        )
+        .unwrap();
+    assert_eq!(
+        ids(&blended),
+        vec![1, 2],
+        "a decimal-literal weight must not degrade the primary sort key; \
+         with a tiny boost the relevance order has to survive the tiebreak",
+    );
+}
+
+#[test]
+fn plain_order_by_decimal_arithmetic_key() {
+    let eng = engine_with_indexed_corpus();
+
+    let ordered = eng
+        .sql("SELECT id FROM pages ORDER BY updated_at * 0.5 DESC", &[])
+        .unwrap();
+    assert_eq!(
+        ids(&ordered),
+        vec![2, 1],
+        "decimal-typed sort keys must order rows instead of comparing as equal",
+    );
+}

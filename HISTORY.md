@@ -50,6 +50,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Multi-field fusion no-match floor:** `multi_field_match` and `MultiFieldBayesianScorer` pad unmatched fields with the zero-evidence composite prior instead of 0.5, so matching an additional field can never rank a document below one that matched fewer fields on small corpora.
 - **Integer column literal normalization:** integer-typed columns coerce parser Decimal literals (and finite floats) to `Value::Int` on INSERT and UPDATE, so literal-written and bind-written rows read back the same variant, in-memory and across persistent reopen.
 - **Integer primary key updates relocate document ids:** updating an integer primary key moves the row to the doc id named by the new key value, keeping the value-to-doc-id fast path honest for unique-conflict checks and FOREIGN KEY validation (fixes the `ON UPDATE CASCADE`, ON CONFLICT update, and MERGE referenced-key failures).
+- **Decimal sort keys in the Volcano sort:** mixed float/decimal arithmetic now promotes to `double precision` (PostgreSQL numeric promotion) instead of returning `Value::Decimal`, and the executor's sort comparator gained Decimal comparison arms mirroring the expression evaluator. Previously an ORDER BY expression containing a decimal literal (for example `_score + 0.05 * boost(...)`) produced Decimal sort keys that the comparator treated as equal, so the tiebreak silently decided the row order.
 
 ## [0.1.0] - 2026-05-09
 

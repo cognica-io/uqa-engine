@@ -79,6 +79,30 @@ fn const_decimal() {
 }
 
 #[test]
+fn mixed_float_decimal_arithmetic_promotes_to_float() {
+    // PostgreSQL numeric promotion: double precision wins mixed
+    // float/numeric arithmetic; exact decimal arithmetic applies only
+    // when no float operand is involved.
+    let add = projection_expr("SELECT x + 0.25 FROM t");
+    let mul = projection_expr("SELECT x * 0.5 FROM t");
+
+    let float_row = row_from(&[("x", Value::Float(2.0))]);
+    let float_ctx = EvalContext::new(Some(&float_row), &[]);
+    assert_eq!(eval(&add, &float_ctx).unwrap(), Value::Float(2.25));
+    assert_eq!(eval(&mul, &float_ctx).unwrap(), Value::Float(1.0));
+
+    let int_row = row_from(&[("x", Value::Int(2))]);
+    let int_ctx = EvalContext::new(Some(&int_row), &[]);
+    assert_eq!(eval(&add, &int_ctx).unwrap(), dec("2.25"));
+    assert_eq!(eval(&mul, &int_ctx).unwrap(), dec("1.0"));
+
+    let decimal_row = row_from(&[("x", dec("1.5"))]);
+    let decimal_ctx = EvalContext::new(Some(&decimal_row), &[]);
+    assert_eq!(eval(&add, &decimal_ctx).unwrap(), dec("1.75"));
+    assert_eq!(eval(&mul, &decimal_ctx).unwrap(), dec("0.75"));
+}
+
+#[test]
 fn bool_and() {
     let expr = where_expr("SELECT * FROM t WHERE x > 5 AND y < 10");
     let row1 = row_from(&[("x", Value::Int(10)), ("y", Value::Int(3))]);

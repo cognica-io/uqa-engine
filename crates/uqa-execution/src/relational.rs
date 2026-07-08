@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 use uqa_sql::expr::{eval, truthy, EvalContext};
 use uqa_sql::ResultRow;
 use uqa_sql::{ast::Expr, SQLError, SQLParam};
@@ -220,6 +220,15 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
         (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
         (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
+        (Value::Decimal(x), Value::Decimal(y)) => x.cmp(y),
+        (Value::Decimal(x), Value::Int(y)) => x.cmp(&DecimalValue::from_i64(*y)),
+        (Value::Int(x), Value::Decimal(y)) => DecimalValue::from_i64(*x).cmp(y),
+        (Value::Decimal(x), Value::Float(y)) => DecimalValue::from_f64_lossy(*y)
+            .map(|yd| x.cmp(&yd))
+            .unwrap_or(Equal),
+        (Value::Float(x), Value::Decimal(y)) => DecimalValue::from_f64_lossy(*x)
+            .map(|xd| xd.cmp(y))
+            .unwrap_or(Equal),
         (Value::Str(x), Value::Str(y)) => x.cmp(y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
