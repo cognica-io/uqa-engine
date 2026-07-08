@@ -954,13 +954,25 @@ impl EngineDriver<'_> {
         query: &str,
         weights: Option<&[f64]>,
     ) -> PostingList {
-        use uqa_operators::base::Operator;
-        let op = uqa_operators::MultiFieldSearchOperator::new(
-            fields.to_vec(),
-            query,
-            weights.map(<[f64]>::to_vec),
-        );
-        op.execute(&self.bridge_context())
+        // Delegate to the row-function implementation like the other
+        // leaf nodes, so every lowering of `multi_field_match` shares
+        // one pad, one per-field analyzer choice, and one stats source.
+        let mut args: Vec<Expr> = fields
+            .iter()
+            .map(|field| Expr::Column(field.clone()))
+            .collect();
+        args.push(Expr::Literal(Value::Str(query.to_string())));
+        if let Some(weights) = weights {
+            args.extend(
+                weights
+                    .iter()
+                    .map(|weight| Expr::Literal(Value::Float(*weight))),
+            );
+        }
+        match sql::run_multi_field_match_public(self.engine, self.table, &args, self.params) {
+            Ok(rows) => scored_to_posting_list(&rows),
+            Err(_) => PostingList::new(),
+        }
     }
 
     fn execute_bayesian_match_with_prior(&self, meta: &BTreeMap<String, Value>) -> PostingList {

@@ -179,3 +179,22 @@ fn plain_order_by_decimal_arithmetic_key() {
         "decimal-typed sort keys must order rows instead of comparing as equal",
     );
 }
+
+#[test]
+fn top_k_order_by_decimal_arithmetic_key() {
+    let eng = engine_with_indexed_corpus();
+
+    // LIMIT below the row count routes through the top-k shortcut,
+    // which has its own sort comparator separate from the Volcano sort.
+    let ordered = eng
+        .sql(
+            "SELECT id FROM pages ORDER BY updated_at * 0.5 DESC LIMIT 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        ids(&ordered),
+        vec![2],
+        "the top-k shortcut must compare decimal sort keys instead of treating them as equal",
+    );
+}

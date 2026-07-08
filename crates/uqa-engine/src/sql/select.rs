@@ -2806,6 +2806,15 @@ fn compare_sort_values(left: &Value, right: &Value) -> std::cmp::Ordering {
         (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
         (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
         (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
+        (Value::Decimal(x), Value::Decimal(y)) => x.cmp(y),
+        (Value::Decimal(x), Value::Int(y)) => x.cmp(&uqa_core::DecimalValue::from_i64(*y)),
+        (Value::Int(x), Value::Decimal(y)) => uqa_core::DecimalValue::from_i64(*x).cmp(y),
+        (Value::Decimal(x), Value::Float(y)) => {
+            uqa_core::DecimalValue::from_f64_lossy(*y).map_or(Equal, |yd| x.cmp(&yd))
+        }
+        (Value::Float(x), Value::Decimal(y)) => {
+            uqa_core::DecimalValue::from_f64_lossy(*x).map_or(Equal, |xd| xd.cmp(y))
+        }
         (Value::Str(x), Value::Str(y)) => x.cmp(y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),

@@ -1153,6 +1153,15 @@ pub(crate) fn run_calibrated_vector_match_public(
     run_calibrated_vector_match(engine, table, args, params)
 }
 
+pub(crate) fn run_multi_field_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_multi_field_match(engine, table, args, params)
+}
+
 fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLError> {
     let max_u32_as_i64: i64 = i64::from(u32::MAX);
     match eval(expr, ctx)? {

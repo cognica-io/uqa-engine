@@ -9,10 +9,13 @@
 //! UQA `operators/multi_field`, and UQA `operators/calibrated_vector`.
 //!
 //! Each wrapper folds the per-signal [`PostingList`]s its child
-//! operators emit into a single [`PostingList`]. Unmatched documents
-//! receive a coverage-scaled default probability via
+//! operators emit into a single [`PostingList`]. In the heterogeneous
+//! fusers (attention, learned) unmatched documents receive a
+//! coverage-scaled default probability via
 //! [`crate::hybrid::coverage_based_default`] so they participate in
-//! the fusion with neutral evidence rather than being dropped.
+//! the fusion rather than being dropped; the multi-field text fuser
+//! pads with the calibrated no-match prior floor instead (see
+//! [`MultiFieldSearchOperator`]).
 
 #![allow(
     clippy::needless_pass_by_value,
@@ -199,11 +202,14 @@ impl Operator for MultiFieldSearchOperator {
         let stats = StdArc::new(idx.stats());
 
         // Score each field independently and collect the resulting
-        // probabilities per doc id.
+        // probabilities per doc id. The scoring terms come from the
+        // same per-field search analyzer that [`TermOperator`] uses
+        // for matching, so term-frequency lookups see the tokens that
+        // were actually indexed.
         let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
         let mut all_ids: BTreeSet<u64> = BTreeSet::new();
         for field in &self.fields {
-            let analyzer = idx.analyzer().clone();
+            let analyzer = idx.get_search_analyzer(field);
             let terms = analyzer.analyze(&self.query);
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(&self.query, field));
             let scorer: Arc<dyn Scorer> =
@@ -230,11 +236,16 @@ impl Operator for MultiFieldSearchOperator {
             self.weights.clone()
         };
 
+        // Unmatched fields pad with the no-match prior floor rather
+        // than 0.5: calibrated matched posteriors can sit below 0.5 on
+        // small corpora, and a higher pad would rank documents that
+        // match more fields below documents that match fewer.
+        let no_match_pad = uqa_scoring::BayesianProbabilityTransform::no_match_prior();
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
         for doc_id in all_ids {
             let probs: Vec<f64> = per_field
                 .iter()
-                .map(|m| *m.get(&doc_id).unwrap_or(&0.5))
+                .map(|m| *m.get(&doc_id).unwrap_or(&no_match_pad))
                 .collect();
             let fused = if probs.len() == 1 {
                 probs[0]
