@@ -526,6 +526,14 @@ impl GraphStore for SQLiteGraphStore {
         self.inner.next_edge_id()
     }
 
+    fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> VertexId {
+        self.inner.allocate_vertex_id(label, graph)
+    }
+
+    fn allocate_edge_id(&mut self, label: &str, graph: &str) -> EdgeId {
+        self.inner.allocate_edge_id(label, graph)
+    }
+
     fn clear(&mut self) {
         let v_table = self.vtx_table.clone();
         let e_table = self.edge_table.clone();

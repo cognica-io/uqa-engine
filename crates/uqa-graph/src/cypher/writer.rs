@@ -87,14 +87,17 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                         &bindings,
                     )?;
                     let reader = self.reader();
-                    bindings = projected
-                        .into_iter()
-                        .filter(|row| match &w.r#where {
-                            Some(filter) => reader.where_passes(filter, row).unwrap_or(false),
-                            None => true,
-                        })
-                        .map(|row| CypherExecutor::<G>::row_to_bindings(&cols, &row))
-                        .collect();
+                    let mut next = Vec::with_capacity(projected.len());
+                    for row in projected {
+                        if let Some(filter) = &w.r#where {
+                            if !reader.where_passes(filter, &row)? {
+                                continue;
+                            }
+                        }
+                        next.push(CypherExecutor::<G>::row_to_bindings(&cols, &row));
+                    }
+                    drop(reader);
+                    bindings = next;
                 }
                 CypherClause::Return(r) => {
                     let (cols, ret_rows) = self.reader().exec_return_like(
@@ -138,52 +141,59 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         row: &mut BindingRow,
     ) -> Result<(), CypherError> {
         let elements = &pattern.elements;
-        for (i, element) in elements.iter().enumerate() {
-            match element {
+        // The vertex id the path currently stands on. Anonymous nodes
+        // participate positionally without a variable binding.
+        let mut position: Option<VertexId> = None;
+        let mut idx = 0;
+        while idx < elements.len() {
+            match &elements[idx] {
                 PathElement::Node(np) => {
-                    if let Some(var) = &np.variable {
-                        if row.contains_key(var) {
-                            continue;
-                        }
-                    }
-                    let vertex = self.create_vertex(np, row)?;
-                    if let Some(var) = &np.variable {
-                        row.insert(var.clone(), Binding::Vertex(vertex));
-                    }
+                    position = Some(self.resolve_or_create_vertex(np, row)?);
+                    idx += 1;
                 }
                 PathElement::Rel(rp) => {
-                    let Some(PathElement::Node(prev)) = elements.get(i.saturating_sub(1)) else {
-                        return Err(CypherError::Unsupported(
-                            "relationship without prior node".into(),
-                        ));
-                    };
-                    let Some(PathElement::Node(next_np)) = elements.get(i + 1) else {
+                    let Some(PathElement::Node(next_np)) = elements.get(idx + 1) else {
                         return Err(CypherError::Unsupported("path must end on a node".into()));
                     };
-                    if let Some(var) = &next_np.variable {
-                        if !row.contains_key(var) {
-                            let vertex = self.create_vertex(next_np, row)?;
-                            row.insert(var.clone(), Binding::Vertex(vertex));
-                        }
-                    } else {
-                        // Anonymous next node — always create.
-                        let vertex = self.create_vertex(next_np, row)?;
-                        let _ = vertex; // not bound, but registered in the store
-                    }
-                    let src_var = prev.variable.as_deref().ok_or_else(|| {
-                        CypherError::Unsupported("CREATE source vertex must have a variable".into())
+                    let src_id = position.ok_or_else(|| {
+                        CypherError::Unsupported("relationship without prior node".into())
                     })?;
-                    let tgt_var = next_np.variable.as_deref().ok_or_else(|| {
-                        CypherError::Unsupported("CREATE target vertex must have a variable".into())
-                    })?;
-                    let edge = self.create_edge(rp, row, src_var, tgt_var)?;
+                    let tgt_id = self.resolve_or_create_vertex(next_np, row)?;
+                    let edge = self.create_edge(rp, row, src_id, tgt_id)?;
                     if let Some(var) = &rp.variable {
                         row.insert(var.clone(), Binding::Edge(edge));
                     }
+                    position = Some(tgt_id);
+                    idx += 2;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Vertex id for a CREATE node pattern: reuse the bound vertex when
+    /// the variable already resolves to one, otherwise create a fresh
+    /// vertex (binding it when a variable is present).
+    fn resolve_or_create_vertex(
+        &mut self,
+        np: &NodePattern,
+        row: &mut BindingRow,
+    ) -> Result<VertexId, CypherError> {
+        if let Some(var) = &np.variable {
+            match row.get(var) {
+                Some(Binding::Vertex(v)) => return Ok(v.vertex_id),
+                Some(_) => {
+                    return Err(CypherError::TypeError(format!("{var:?} is not a vertex")));
+                }
+                None => {}
+            }
+        }
+        let vertex = self.create_vertex(np, row)?;
+        let id = vertex.vertex_id;
+        if let Some(var) = &np.variable {
+            row.insert(var.clone(), Binding::Vertex(vertex));
+        }
+        Ok(id)
     }
 
     fn create_vertex(
@@ -191,7 +201,6 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         pat: &NodePattern,
         row: &BindingRow,
     ) -> Result<Vertex, CypherError> {
-        let vid = self.store.next_vertex_id();
         let label = pat.labels.first().cloned().unwrap_or_default();
         let mut props: BTreeMap<String, Value> = BTreeMap::new();
         if let Some(map) = &pat.properties {
@@ -200,6 +209,8 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                 props.insert(k.clone(), reader.eval(expr, row)?);
             }
         }
+        // AGE graphid allocation: (label_id << 48) | per-label sequence.
+        let vid = self.store.allocate_vertex_id(&label, &self.graph);
         let vertex = Vertex {
             vertex_id: vid,
             label,
@@ -213,11 +224,9 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         &mut self,
         pat: &RelPattern,
         row: &BindingRow,
-        src_var: &str,
-        tgt_var: &str,
+        mut src_id: VertexId,
+        mut tgt_id: VertexId,
     ) -> Result<Edge, CypherError> {
-        let mut src_id = vertex_id_of(row, src_var)?;
-        let mut tgt_id = vertex_id_of(row, tgt_var)?;
         if pat.direction == RelDirection::Left {
             std::mem::swap(&mut src_id, &mut tgt_id);
         }
@@ -229,7 +238,8 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                 props.insert(k.clone(), reader.eval(expr, row)?);
             }
         }
-        let eid = self.store.next_edge_id();
+        // AGE graphid allocation: (label_id << 48) | per-label sequence.
+        let eid = self.store.allocate_edge_id(&label, &self.graph);
         let edge = Edge {
             edge_id: eid,
             source_id: src_id,
@@ -437,14 +447,13 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         let mut next = Vec::new();
         for row in bindings {
             let value = self.reader().eval(&clause.expr, &row)?;
+            // AGE semantics: lists spread one row per element, null
+            // yields no rows, any other scalar passes through as a
+            // single row.
             let items = match value {
                 Value::List(items) => items,
                 Value::Null => continue,
-                other => {
-                    return Err(CypherError::TypeError(format!(
-                        "UNWIND requires a list, got {other:?}"
-                    )))
-                }
+                other => vec![other],
             };
             for item in items {
                 let mut new_row = row.clone();
@@ -453,14 +462,6 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
             }
         }
         Ok(next)
-    }
-}
-
-fn vertex_id_of(row: &BindingRow, var: &str) -> Result<VertexId, CypherError> {
-    match row.get(var) {
-        Some(Binding::Vertex(v)) => Ok(v.vertex_id),
-        Some(_) => Err(CypherError::TypeError(format!("{var:?} is not a vertex"))),
-        None => Err(CypherError::UndefinedVariable(var.into())),
     }
 }
 

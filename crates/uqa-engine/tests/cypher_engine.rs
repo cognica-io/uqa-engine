@@ -38,10 +38,10 @@ fn create_then_match_returns_inserted_node() {
 #[test]
 fn apache_age_style_cypher_table_function_round_trips() {
     let eng = Engine::new();
-    eng.sql("SELECT create_graph('g') AS ok", &[]).unwrap();
+    eng.sql("SELECT create_graph('demo') AS ok", &[]).unwrap();
     let created = eng
         .sql(
-            "SELECT * FROM ag_catalog.cypher('g', $$
+            "SELECT * FROM ag_catalog.cypher('demo', $$
                 CREATE (n:Person {name: 'Alice', age: 30})
             $$) AS (ignored agtype)",
             &[],
@@ -50,9 +50,11 @@ fn apache_age_style_cypher_table_function_round_trips() {
     assert_eq!(created.columns, vec!["ignored".to_string()]);
     assert!(created.rows.is_empty());
 
+    // agtype columns carry canonical AGE text: strings render
+    // JSON-quoted, integers bare.
     let result = eng
         .sql(
-            "SELECT * FROM cypher('g', $$
+            "SELECT * FROM cypher('demo', $$
                 MATCH (n:Person {name: 'Alice'})
                 RETURN n.name, n.age
             $$) AS (name agtype, age agtype)",
@@ -63,17 +65,30 @@ fn apache_age_style_cypher_table_function_round_trips() {
     assert_eq!(result.rows.len(), 1);
     assert_eq!(
         result.rows[0].get("name"),
-        Some(&Value::Str("Alice".into()))
+        Some(&Value::Str("\"Alice\"".into()))
     );
-    assert_eq!(result.rows[0].get("age"), Some(&Value::Int(30)));
+    assert_eq!(result.rows[0].get("age"), Some(&Value::Str("30".into())));
+
+    // Scalar column types coerce like AGE casts.
+    let typed = eng
+        .sql(
+            "SELECT * FROM cypher('demo', $$
+                MATCH (n:Person {name: 'Alice'})
+                RETURN n.name, n.age
+            $$) AS (name text, age int)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(typed.rows[0].get("name"), Some(&Value::Str("Alice".into())));
+    assert_eq!(typed.rows[0].get("age"), Some(&Value::Int(30)));
 }
 
 #[test]
 fn apache_age_style_cypher_prepared_parameters() {
     let eng = Engine::new();
-    eng.sql("SELECT create_graph('g') AS ok", &[]).unwrap();
+    eng.sql("SELECT create_graph('demo') AS ok", &[]).unwrap();
     eng.sql(
-        "SELECT * FROM cypher('g', $$
+        "SELECT * FROM cypher('demo', $$
             CREATE (n:Person {name: 'Alice', age: 30})
         $$) AS (ignored agtype)",
         &[],
@@ -81,7 +96,7 @@ fn apache_age_style_cypher_prepared_parameters() {
     .unwrap();
     eng.sql(
         "PREPARE find_person AS
-         SELECT * FROM cypher('g', $$
+         SELECT * FROM cypher('demo', $$
              MATCH (n:Person)
              WHERE n.name = $name
              RETURN n.age
@@ -95,15 +110,15 @@ fn apache_age_style_cypher_prepared_parameters() {
         .unwrap();
     assert_eq!(result.columns, vec!["age".to_string()]);
     assert_eq!(result.rows.len(), 1);
-    assert_eq!(result.rows[0].get("age"), Some(&Value::Int(30)));
+    assert_eq!(result.rows[0].get("age"), Some(&Value::Str("30".into())));
 }
 
 #[test]
 fn apache_age_style_cypher_requires_record_definition() {
     let eng = Engine::new();
-    eng.sql("SELECT create_graph('g') AS ok", &[]).unwrap();
+    eng.sql("SELECT create_graph('demo') AS ok", &[]).unwrap();
     let err = eng
-        .sql("SELECT * FROM cypher('g', $$ RETURN 1 $$)", &[])
+        .sql("SELECT * FROM cypher('demo', $$ RETURN 1 $$)", &[])
         .unwrap_err()
         .to_string();
     assert!(err.contains("record definition"), "{err}");
@@ -125,10 +140,10 @@ fn apache_age_style_cypher_requires_existing_graph() {
 #[test]
 fn apache_age_style_cypher_rejects_literal_parameter_map() {
     let eng = Engine::new();
-    eng.sql("SELECT create_graph('g') AS ok", &[]).unwrap();
+    eng.sql("SELECT create_graph('demo') AS ok", &[]).unwrap();
     let err = eng
         .sql(
-            "SELECT * FROM cypher('g', $$ RETURN $name $$, '{\"name\":\"Alice\"}')
+            "SELECT * FROM cypher('demo', $$ RETURN $name $$, '{\"name\":\"Alice\"}')
              AS (name agtype)",
             &[],
         )
@@ -138,16 +153,40 @@ fn apache_age_style_cypher_rejects_literal_parameter_map() {
 }
 
 #[test]
-fn apache_age_create_graph_aliases_existing_graph_functions() {
+fn apache_age_create_graph_returns_void_and_validates_name() {
     let eng = Engine::new();
+    // AGE returns void (SQL NULL) from create_graph / drop_graph.
     let created = eng.sql("SELECT create_graph('social') AS ok", &[]).unwrap();
-    assert_eq!(created.rows[0].get("ok"), Some(&Value::Bool(true)));
-    let dropped = eng.sql("SELECT drop_graph('social') AS ok", &[]).unwrap();
-    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Bool(true)));
+    assert_eq!(created.rows[0].get("ok"), Some(&Value::Null));
+    // Duplicate names are rejected.
+    let err = eng
+        .sql("SELECT create_graph('social') AS ok", &[])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("already exists"), "{err}");
+    let dropped = eng
+        .sql("SELECT drop_graph('social', true) AS ok", &[])
+        .unwrap();
+    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Null));
+
+    // Name validation: >= 3 chars, first char letter or underscore.
+    for invalid in ["ab", "a1", "1ab"] {
+        let err = eng
+            .sql(&format!("SELECT create_graph('{invalid}')"), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("graph name is invalid"), "{invalid}: {err}");
+    }
+    for valid in ["abc", "ab1", "_ab", "AB2"] {
+        eng.sql(&format!("SELECT create_graph('{valid}')"), &[])
+            .unwrap_or_else(|e| panic!("{valid}: {e}"));
+        eng.sql(&format!("SELECT drop_graph('{valid}', true)"), &[])
+            .unwrap();
+    }
 }
 
 #[test]
-fn apache_age_drop_graph_accepts_cascade_argument() {
+fn apache_age_drop_graph_requires_cascade() {
     let eng = Engine::new();
     eng.sql("SELECT create_graph('social') AS ok", &[]).unwrap();
     eng.sql(
@@ -158,17 +197,34 @@ fn apache_age_drop_graph_accepts_cascade_argument() {
     )
     .unwrap();
 
+    // AGE's drop_graph without cascade maps to DROP SCHEMA RESTRICT,
+    // which always fails because the label tables depend on it.
     let err = eng
         .sql("SELECT drop_graph('social', false) AS ok", &[])
         .unwrap_err()
         .to_string();
-    assert!(err.contains("without cascade"), "{err}");
+    assert!(
+        err.contains("cannot drop schema social because other objects depend on it"),
+        "{err}"
+    );
+    let err = eng
+        .sql("SELECT drop_graph('social') AS ok", &[])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("cannot drop schema"), "{err}");
 
     let dropped = eng
         .sql("SELECT drop_graph('social', true) AS ok", &[])
         .unwrap();
-    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Bool(true)));
+    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Null));
     assert!(!eng.has_graph("social"));
+
+    // Dropping a missing graph reports it does not exist.
+    let err = eng
+        .sql("SELECT drop_graph('social', true) AS ok", &[])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("does not exist"), "{err}");
 }
 
 #[test]

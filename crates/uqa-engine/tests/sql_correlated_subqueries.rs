@@ -156,10 +156,12 @@ fn not_exists_with_composite_key_and_residual_filter() {
             tile TEXT
         )",
     );
+    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // half to even, not truncation) hit the '#' wall for candidate 1.
     exec(
         &engine,
         "INSERT INTO candidates (id, x, y, active) VALUES
-            (1, 1.2, 2.8, 1),
+            (1, 1.2, 2.4, 1),
             (2, 4.1, 5.0, 1),
             (3, 6.0, 7.0, 0)",
     );

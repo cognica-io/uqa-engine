@@ -109,6 +109,20 @@ pub trait GraphStore {
     /// Returns and advances the next available edge id.
     fn next_edge_id(&mut self) -> EdgeId;
 
+    /// Allocate a vertex id for a new entity with `label` inside
+    /// `graph`. Stores that implement the Apache AGE `graphid` scheme
+    /// override this to return `(label_id << 48) | sequence`; the
+    /// default falls back to the store-wide counter.
+    fn allocate_vertex_id(&mut self, _label: &str, _graph: &str) -> VertexId {
+        self.next_vertex_id()
+    }
+
+    /// Allocate an edge id for a new entity with `label` inside
+    /// `graph`. See [`GraphStore::allocate_vertex_id`].
+    fn allocate_edge_id(&mut self, _label: &str, _graph: &str) -> EdgeId {
+        self.next_edge_id()
+    }
+
     fn clear(&mut self);
 
     // --- Bulk accessors ---

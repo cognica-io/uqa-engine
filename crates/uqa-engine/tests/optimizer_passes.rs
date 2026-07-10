@@ -273,12 +273,26 @@ fn in_list_lowers_to_filter_with_inset_predicate() {
 
 #[test]
 fn not_in_list_lowers_to_complement_filter() {
+    // `NOT IN` keeps SQL three-valued semantics: the complement of the
+    // match set intersected with `IS NOT NULL`, so NULL rows never
+    // slip in (PostgreSQL 17 behavior).
     let expr = where_of("SELECT id FROM notes WHERE year NOT IN (2024)");
     let lowered = lower_where(&expr, &[]).expect("lowers");
-    let OperatorTree::Complement(inner) = lowered else {
+    let OperatorTree::Intersect(parts) = lowered else {
+        panic!("expected Intersect");
+    };
+    assert_eq!(parts.len(), 2);
+    let OperatorTree::Complement(inner) = &parts[0] else {
         panic!("expected Complement");
     };
-    assert!(matches!(*inner, OperatorTree::Filter { .. }));
+    assert!(matches!(**inner, OperatorTree::Filter { .. }));
+    assert!(matches!(
+        &parts[1],
+        OperatorTree::Filter {
+            predicate: uqa_core::Predicate::IsNotNull,
+            ..
+        }
+    ));
 }
 
 #[test]

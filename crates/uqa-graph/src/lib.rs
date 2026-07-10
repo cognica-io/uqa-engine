@@ -12,6 +12,7 @@
 //! operations compose with the standard posting-list algebra without
 //! losing structure.
 
+pub mod agtype;
 mod centrality;
 mod cross_paradigm;
 pub mod cypher;
@@ -43,7 +44,10 @@ pub use embedding::GraphEmbedding;
 pub use functor::{GraphToRelationalFunctor, RelationalToGraphFunctor, TextToVectorFunctor};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex};
-pub use memory_store::MemoryGraphStore;
+pub use memory_store::{
+    graphid_label_id, graphid_sequence, make_graphid, GraphLabelRegistry, MemoryGraphStore,
+    EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT, VERTEX_DEFAULT_LABEL_ID,
+};
 pub use message_passing::{AggregationKind, MessagePassing};
 pub use operator_impls::{CypherQueryOperator, WeightedPathQueryOperator};
 pub use operators::{

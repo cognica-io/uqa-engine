@@ -70,9 +70,15 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
             }
             Some(OperatorTree::Union(out))
         }
-        Expr::Not(inner) => Some(OperatorTree::Complement(Box::new(lower_where(
-            inner, params,
-        )?))),
+        // Complement is only sound when the inner predicate cannot be
+        // NULL for any row (search functions, IS NULL tests). Column
+        // comparisons under NOT fall through to the wildcard `None`
+        // and keep three-valued semantics through the row-evaluator
+        // fallback: `NOT (col = 5)` must not match rows whose `col`
+        // is NULL.
+        Expr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => Some(
+            OperatorTree::Complement(Box::new(lower_where(inner, params)?)),
+        ),
         Expr::Func { name, args, .. } => lower_function(name, args, params),
         Expr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, params),
         Expr::IsNull { expr, negated } => {
@@ -105,20 +111,42 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
         } => {
             let field = column_name(expr)?;
             let mut set: BTreeSet<Value> = BTreeSet::new();
+            let mut has_null = false;
             for v in list {
-                set.insert(const_value(v, params)?);
+                let value = const_value(v, params)?;
+                if matches!(value, Value::Null) {
+                    has_null = true;
+                    continue;
+                }
+                set.insert(value);
             }
-            let pred = Predicate::InSet(set);
-            let filter = OperatorTree::Filter {
-                field,
-                predicate: pred,
-                source: None,
-            };
             if *negated {
-                Some(OperatorTree::Complement(Box::new(filter)))
-            } else {
-                Some(filter)
+                // `col NOT IN (...)`: a NULL in the list means no row
+                // can ever satisfy it; otherwise complement the match
+                // set but keep NULL rows excluded (three-valued NOT).
+                if has_null {
+                    return Some(OperatorTree::Empty);
+                }
+                let filter = OperatorTree::Filter {
+                    field: field.clone(),
+                    predicate: Predicate::InSet(set),
+                    source: None,
+                };
+                let not_null = OperatorTree::Filter {
+                    field,
+                    predicate: Predicate::IsNotNull,
+                    source: None,
+                };
+                return Some(OperatorTree::Intersect(vec![
+                    OperatorTree::Complement(Box::new(filter)),
+                    not_null,
+                ]));
             }
+            Some(OperatorTree::Filter {
+                field,
+                predicate: Predicate::InSet(set),
+                source: None,
+            })
         }
         _ => None,
     }
@@ -774,6 +802,15 @@ impl<'a> EngineDriver<'a> {
         predicate: &Predicate,
         source: Option<&OperatorTree>,
     ) -> PostingList {
+        // Indexed columns resolve through the value index in
+        // O(log n + k); the index refuses predicates it cannot answer
+        // with evaluated-scan semantics, so this never changes results.
+        if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate) {
+            return match source {
+                Some(child) => self.execute_node(child).intersect(&indexed),
+                None => indexed,
+            };
+        }
         let candidates: Vec<DocId> = match source {
             Some(child) => {
                 let inner = self.execute_node(child);

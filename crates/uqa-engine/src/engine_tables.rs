@@ -98,6 +98,9 @@ impl Engine {
             column_stats_dirty: AtomicBool::new(true),
             table_checks: RwLock::new(Vec::new()),
             foreign_keys: RwLock::new(Vec::new()),
+            value_indexes: RwLock::new(BTreeMap::new()),
+            doc_count_cache: std::sync::atomic::AtomicU64::new(0),
+            doc_count_dirty: AtomicBool::new(true),
         };
         let table_arc = Arc::new(table);
         self.tables.write().insert(name.clone(), table_arc.clone());

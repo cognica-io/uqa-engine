@@ -62,6 +62,24 @@ pub struct ListIndex {
     pub index: Box<CypherExpr>,
 }
 
+/// `expr[start..end]` slice; either bound may be omitted. Slices are
+/// end-exclusive and support negative offsets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListSlice {
+    pub expr: Box<CypherExpr>,
+    pub start: Option<Box<CypherExpr>>,
+    pub end: Option<Box<CypherExpr>>,
+}
+
+/// `[variable IN list WHERE filter | map]` list comprehension.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListComprehension {
+    pub variable: String,
+    pub list_expr: Box<CypherExpr>,
+    pub filter: Option<Box<CypherExpr>>,
+    pub map_expr: Option<Box<CypherExpr>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InList {
     pub expr: Box<CypherExpr>,
@@ -106,12 +124,16 @@ pub enum CypherExpr {
     BinaryOp(BinaryOp),
     UnaryOp(UnaryOp),
     ListIndex(ListIndex),
+    ListSlice(ListSlice),
+    ListComprehension(ListComprehension),
     InList(InList),
     IsNull(IsNull),
     IsNotNull(IsNotNull),
     CaseExpr(CaseExpr),
     ListLiteral(ListLiteral),
     MapLiteral(MapLiteral),
+    /// `exists((a)-[:R]->(b))` pattern predicate.
+    ExistsPattern(PathPattern),
 }
 
 // -- Patterns ------------------------------------------------------------
@@ -156,6 +178,8 @@ pub enum PathElement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathPattern {
+    /// Path variable when the pattern is `p = (...)-[...]-(...)`.
+    pub variable: Option<String>,
     pub elements: Vec<PathElement>,
 }
 

@@ -581,7 +581,14 @@ fn main() -> ExitCode {
 }
 
 fn run_cli(args: CliArgs) -> ExitCode {
-    let mut session = match Session::new(args.db_path.clone()) {
+    let key = match args.resolve_key() {
+        Ok(key) => key,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut session = match Session::new(args.db_path.clone(), key.as_deref()) {
         Ok(session) => session,
         Err(err) => {
             eprintln!("{err}");
@@ -626,6 +633,33 @@ struct CliArgs {
     db_path: Option<PathBuf>,
     command: Option<String>,
     scripts: Vec<PathBuf>,
+    key: Option<String>,
+    key_file: Option<PathBuf>,
+}
+
+impl CliArgs {
+    /// Resolve the encryption key with `--key` > `--key-file` >
+    /// `UQA_KEY` precedence. Only the final trailing newline of a key
+    /// file is stripped so keys may contain interior whitespace.
+    fn resolve_key(&self) -> Result<Option<String>, String> {
+        if let Some(key) = &self.key {
+            return Ok(Some(key.clone()));
+        }
+        if let Some(path) = &self.key_file {
+            let raw = std::fs::read_to_string(path)
+                .map_err(|err| format!("failed to read key file {}: {err}", path.display()))?;
+            let key = raw.strip_suffix('\n').unwrap_or(&raw);
+            let key = key.strip_suffix('\r').unwrap_or(key);
+            if key.is_empty() {
+                return Err(format!("key file {} is empty", path.display()));
+            }
+            return Ok(Some(key.to_string()));
+        }
+        match std::env::var("UQA_KEY") {
+            Ok(key) if !key.is_empty() => Ok(Some(key)),
+            _ => Ok(None),
+        }
+    }
 }
 
 impl CliAction {
@@ -661,6 +695,26 @@ impl CliAction {
                     parsed.command = Some(command.clone());
                     i += 2;
                 }
+                "--key" => {
+                    let Some(key) = args.get(i + 1) else {
+                        return Err("--key requires an encryption key".into());
+                    };
+                    if parsed.key_file.is_some() {
+                        return Err("--key and --key-file are mutually exclusive".into());
+                    }
+                    parsed.key = Some(key.clone());
+                    i += 2;
+                }
+                "--key-file" => {
+                    let Some(path) = args.get(i + 1) else {
+                        return Err("--key-file requires a path".into());
+                    };
+                    if parsed.key.is_some() {
+                        return Err("--key and --key-file are mutually exclusive".into());
+                    }
+                    parsed.key_file = Some(PathBuf::from(path));
+                    i += 2;
+                }
                 "-h" | "--help" => return Ok(Self::Help),
                 arg if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
                 script => {
@@ -682,7 +736,7 @@ fn print_usage_stderr() {
 }
 
 fn usage_text() -> &'static str {
-    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql migrate-python-db <source> <destination>"
+    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql migrate-python-db <source> <destination>\n\nEncrypted databases:\n    usql --db enc.db --key <key>        Open (or create) an encrypted database\n    usql --db enc.db --key-file <file>  Read the key from a file\n    UQA_KEY=<key> usql --db enc.db      Read the key from the environment\n    Interactive sessions prompt for the key when an encrypted database\n    is opened without one. Compressed containers are detected and\n    opened automatically, including encrypted ones."
 }
 
 impl Session {
@@ -821,6 +875,9 @@ impl Session {
 struct Session {
     engine: Engine,
     db_path: Option<PathBuf>,
+    /// Encryption key of the currently open database, kept so `\reset`
+    /// and re-opens go through the same keyed path.
+    db_key: Option<String>,
     location: String,
     history: Vec<String>,
     history_path: Option<PathBuf>,
@@ -830,7 +887,7 @@ struct Session {
 }
 
 impl Session {
-    fn new(db_path: Option<PathBuf>) -> Result<Self, String> {
+    fn new(db_path: Option<PathBuf>, key: Option<&str>) -> Result<Self, String> {
         let history_path = history_path();
         let history = history_path
             .as_ref()
@@ -842,10 +899,11 @@ impl Session {
                     .collect()
             })
             .unwrap_or_default();
-        let (engine, location) = open_engine(db_path.as_deref())?;
+        let (engine, location, db_key) = open_engine(db_path.as_deref(), key)?;
         Ok(Self {
             engine,
             db_path,
+            db_key,
             location,
             history,
             history_path,
@@ -1033,15 +1091,16 @@ impl Session {
                 if arg.is_empty() {
                     let _ = writeln!(out, "usage: \\open <path>");
                 } else {
-                    match Engine::open(Path::new(arg)) {
-                        Ok(engine) => {
+                    match open_engine_with_key(Path::new(arg), None) {
+                        Ok((engine, location, key)) => {
                             self.engine = engine;
                             self.db_path = Some(PathBuf::from(arg));
-                            self.location = arg.to_string();
+                            self.db_key = key;
+                            self.location = location;
                             let _ = writeln!(out, "opened {arg}");
                         }
-                        Err(e) => {
-                            let _ = writeln!(out, "open failed: {e}");
+                        Err(err) => {
+                            let _ = writeln!(out, "{err}");
                         }
                     }
                 }
@@ -1049,12 +1108,14 @@ impl Session {
             "new" => {
                 self.engine = Engine::new();
                 self.db_path = None;
+                self.db_key = None;
                 self.location = ":memory:".into();
                 let _ = writeln!(out, "fresh in-memory engine");
             }
-            "reset" => match open_engine(self.db_path.as_deref()) {
-                Ok((engine, location)) => {
+            "reset" => match open_engine(self.db_path.as_deref(), self.db_key.as_deref()) {
+                Ok((engine, location, key)) => {
                     self.engine = engine;
+                    self.db_key = key;
                     self.location = location;
                     let _ = writeln!(out, "Engine reset.");
                 }
@@ -1493,12 +1554,59 @@ fn print_migration_report(report: &PythonMigrationReport, out: &mut impl Write) 
     );
 }
 
-fn open_engine(db_path: Option<&Path>) -> Result<(Engine, String), String> {
+/// Open `path` with encryption support. When the file requires a key
+/// (encrypted compressed container, or an unrecognized header that is
+/// most likely `SQLCipher`) and no key was supplied, prompt on the
+/// controlling terminal; without a terminal, fail with instructions.
+/// Returns the engine, the display location, and the key that was
+/// actually used so `\reset` can reopen the same way.
+fn open_engine_with_key(
+    path: &Path,
+    key: Option<&str>,
+) -> Result<(Engine, String, Option<String>), String> {
+    let mut key = key.map(str::to_string);
+    if key.is_none() {
+        let format = Engine::detect_database_file(path)
+            .map_err(|err| format!("open failed: {}: {err}", path.display()))?;
+        if format.requires_key() {
+            if io::stdin().is_terminal() {
+                let prompt = format!("Encryption key for {}: ", path.display());
+                let entered = rpassword::prompt_password(prompt)
+                    .map_err(|err| format!("failed to read encryption key: {err}"))?;
+                if entered.is_empty() {
+                    return Err(format!(
+                        "open failed: {}: database requires an encryption key",
+                        path.display()
+                    ));
+                }
+                key = Some(entered);
+            } else {
+                return Err(format!(
+                    "open failed: {}: database requires an encryption key \
+                     (pass --key / --key-file or set UQA_KEY)",
+                    path.display()
+                ));
+            }
+        }
+    }
+    let engine = Engine::open_auto(path, key.as_deref()).map_err(|err| {
+        let hint = if key.is_some() && matches!(err, uqa_engine::SQLiteError::SQLite(_)) {
+            " (wrong encryption key, or the file is not a database)"
+        } else {
+            ""
+        };
+        format!("open failed: {}: {err}{hint}", path.display())
+    })?;
+    Ok((engine, path.display().to_string(), key))
+}
+
+fn open_engine(
+    db_path: Option<&Path>,
+    key: Option<&str>,
+) -> Result<(Engine, String, Option<String>), String> {
     match db_path {
-        Some(path) => Engine::open(path)
-            .map(|engine| (engine, path.display().to_string()))
-            .map_err(|err| format!("open failed: {}: {err}", path.display())),
-        None => Ok((Engine::new(), ":memory:".into())),
+        Some(path) => open_engine_with_key(path, key),
+        None => Ok((Engine::new(), ":memory:".into(), None)),
     }
 }
 
@@ -1517,7 +1625,10 @@ fn print_backslash_help(out: &mut impl Write) {
     let _ = writeln!(out, "  \\timing         Toggle query timing");
     let _ = writeln!(out, "  \\reset          Reset engine");
     let _ = writeln!(out, "  \\run <file>     Execute SQL from a file");
-    let _ = writeln!(out, "  \\open <path>    Switch to persistent storage");
+    let _ = writeln!(
+        out,
+        "  \\open <path>    Switch to persistent storage (prompts for the key of encrypted databases)"
+    );
     let _ = writeln!(
         out,
         "  \\new            Switch to a fresh in-memory database"
@@ -1654,43 +1765,123 @@ fn foreign_table_options_display(options: &BTreeMap<String, String>) -> String {
     out.join(", ")
 }
 
+/// Byte offsets of statement-terminating semicolons: top-level `;`
+/// outside single-quoted strings, double-quoted identifiers,
+/// `$tag$ ... $tag$` dollar quoting, `--` line comments, and
+/// (nested) `/* ... */` block comments - the same lexical rules psql
+/// applies when splitting input into statements.
+fn statement_terminator_offsets(text: &str) -> Vec<usize> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let (offset, ch) = chars[i];
+        match ch {
+            '\'' => {
+                i += 1;
+                while i < chars.len() {
+                    if chars[i].1 == '\'' {
+                        // '' is an escaped quote inside the string.
+                        if i + 1 < chars.len() && chars[i + 1].1 == '\'' {
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            '"' => {
+                i += 1;
+                while i < chars.len() && chars[i].1 != '"' {
+                    i += 1;
+                }
+            }
+            '-' if i + 1 < chars.len() && chars[i + 1].1 == '-' => {
+                while i < chars.len() && chars[i].1 != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '/' if i + 1 < chars.len() && chars[i + 1].1 == '*' => {
+                let mut depth = 1u32;
+                i += 2;
+                while i < chars.len() && depth > 0 {
+                    if chars[i].1 == '/' && i + 1 < chars.len() && chars[i + 1].1 == '*' {
+                        depth += 1;
+                        i += 2;
+                    } else if chars[i].1 == '*' && i + 1 < chars.len() && chars[i + 1].1 == '/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            '$' => {
+                // Dollar quoting: `$tag$` where tag is empty or an
+                // identifier. `$1` (a parameter) has a digit after the
+                // dollar and is not a quote delimiter.
+                let mut j = i + 1;
+                while j < chars.len()
+                    && (chars[j].1 == '_'
+                        || chars[j].1.is_ascii_alphabetic()
+                        || (j > i + 1 && chars[j].1.is_ascii_digit()))
+                {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j].1 == '$' {
+                    let tag: String = chars[i..=j].iter().map(|(_, c)| *c).collect();
+                    // Scan forward for the identical closing tag; an
+                    // unterminated dollar quote consumes the rest.
+                    let mut k = j + 1;
+                    let tag_chars: Vec<char> = tag.chars().collect();
+                    let mut close = chars.len();
+                    'scan: while k < chars.len() {
+                        if chars[k].1 == '$' && k + tag_chars.len() <= chars.len() {
+                            for (t, tag_ch) in tag_chars.iter().enumerate() {
+                                if chars[k + t].1 != *tag_ch {
+                                    k += 1;
+                                    continue 'scan;
+                                }
+                            }
+                            close = k + tag_chars.len();
+                            break;
+                        }
+                        k += 1;
+                    }
+                    i = close;
+                    continue;
+                }
+            }
+            ';' => out.push(offset),
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
 fn split_statements(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut in_string = false;
-    for ch in text.chars() {
-        if ch == '\'' {
-            in_string = !in_string;
-            current.push(ch);
-            continue;
+    let mut start = 0;
+    for offset in statement_terminator_offsets(text) {
+        let statement = text[start..offset].trim();
+        if !statement.is_empty() {
+            out.push(statement.to_string());
         }
-        if ch == ';' && !in_string {
-            let trimmed = current.trim().to_string();
-            if !trimmed.is_empty() {
-                out.push(trimmed);
-            }
-            current.clear();
-        } else {
-            current.push(ch);
-        }
+        start = offset + 1;
     }
-    let trailing = current.trim().to_string();
+    let trailing = text[start..].trim();
     if !trailing.is_empty() {
-        out.push(trailing);
+        out.push(trailing.to_string());
     }
     out
 }
 
 fn contains_statement_terminator(text: &str) -> bool {
-    let mut in_string = false;
-    for ch in text.chars() {
-        if ch == '\'' {
-            in_string = !in_string;
-        } else if ch == ';' && !in_string {
-            return true;
-        }
-    }
-    false
+    !statement_terminator_offsets(text).is_empty()
 }
 
 fn statement_is_pure_comment(statement: &str) -> bool {
@@ -1821,16 +2012,88 @@ fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Float(f)) => format!("{f}"),
         Some(Value::Decimal(d)) => d.to_sql_string(),
         Some(Value::Str(s)) => s.clone(),
-        Some(Value::Bytes(b)) => format!("<{} bytes>", b.len()),
+        // PostgreSQL bytea hex output form.
+        Some(Value::Bytes(b)) => {
+            let mut out = String::with_capacity(2 + b.len() * 2);
+            out.push_str("\\x");
+            for byte in b {
+                out.push_str(&format!("{byte:02x}"));
+            }
+            out
+        }
         Some(Value::Temporal(t)) => t.to_sql_string(),
+        // Lists are SQL arrays unless they contain JSON objects (the
+        // engine only produces Map elements from JSON values): SQL
+        // arrays print PostgreSQL array-literal syntax `{...}`, JSON
+        // arrays print canonical jsonb text. A jsonb array of plain
+        // scalars is indistinguishable from a SQL array without type
+        // metadata and renders in array syntax - documented divergence.
         Some(Value::List(items)) => {
-            let inner: Vec<String> = items.iter().map(|v| value_to_display(Some(v))).collect();
+            if items.iter().any(|item| matches!(item, Value::Map(_))) {
+                json_value_display(v.expect("list value"))
+            } else {
+                pg_array_display(items)
+            }
+        }
+        // Maps come from JSON/JSONB values: render canonical JSON the
+        // way psql prints jsonb, not a Rust-debug-ish map.
+        Some(Value::Map(_)) => json_value_display(v.expect("map value")),
+    }
+}
+
+/// `PostgreSQL` array-literal output: `{1,2,3}`, strings quoted when
+/// they contain structural characters, `NULL` for nulls, booleans as
+/// `t`/`f`, nested arrays recursive.
+fn pg_array_display(items: &[Value]) -> String {
+    fn element(v: &Value) -> String {
+        match v {
+            Value::Null => "NULL".to_string(),
+            Value::Bool(b) => if *b { "t" } else { "f" }.to_string(),
+            Value::List(items) => pg_array_display(items),
+            Value::Map(_) => json_value_display(v),
+            other => {
+                let s = value_to_display(Some(other));
+                let needs_quotes = s.is_empty()
+                    || s.eq_ignore_ascii_case("null")
+                    || s.chars()
+                        .any(|c| c.is_whitespace() || matches!(c, ',' | '{' | '}' | '"' | '\\'));
+                if needs_quotes {
+                    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+                } else {
+                    s
+                }
+            }
+        }
+    }
+    let inner: Vec<String> = items.iter().map(element).collect();
+    format!("{{{}}}", inner.join(","))
+}
+
+/// Canonical JSON rendering for JSON/JSONB values inside result
+/// tables: quoted keys, `": "` and `", "` separators, JSON literals
+/// for nested nulls - the same shape psql prints for `jsonb`.
+fn json_value_display(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => format!("{f}"),
+        Value::Decimal(d) => d.to_sql_string(),
+        Value::Str(s) => serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\"")),
+        Value::Bytes(_) | Value::Temporal(_) => {
+            serde_json::to_string(&value_to_display(Some(v))).unwrap_or_default()
+        }
+        Value::List(items) => {
+            let inner: Vec<String> = items.iter().map(json_value_display).collect();
             format!("[{}]", inner.join(", "))
         }
-        Some(Value::Map(m)) => {
+        Value::Map(m) => {
             let inner: Vec<String> = m
                 .iter()
-                .map(|(k, v)| format!("{k}: {}", value_to_display(Some(v))))
+                .map(|(k, v)| {
+                    let key = serde_json::to_string(k).unwrap_or_else(|_| format!("\"{k}\""));
+                    format!("{key}: {}", json_value_display(v))
+                })
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
@@ -1911,6 +2174,43 @@ mod tests {
     }
 
     #[test]
+    fn split_statements_respects_dollar_quoting() {
+        let text = "CREATE FUNCTION f() RETURNS int AS $$\nBEGIN\n  RETURN 1;\nEND;\n$$ LANGUAGE plpgsql;\nSELECT f();";
+        let parts = split_statements(text);
+        assert_eq!(parts.len(), 2, "{parts:?}");
+        assert!(parts[0].contains("RETURN 1;"));
+        assert_eq!(parts[1], "SELECT f()");
+    }
+
+    #[test]
+    fn split_statements_respects_tagged_dollar_quoting_and_params() {
+        let text = "DO $body$ BEGIN PERFORM 1; END; $body$; SELECT $1; SELECT 2;";
+        let parts = split_statements(text);
+        assert_eq!(parts.len(), 3, "{parts:?}");
+        assert!(parts[0].starts_with("DO $body$"));
+        assert_eq!(parts[1], "SELECT $1");
+    }
+
+    #[test]
+    fn split_statements_respects_comments_and_identifiers() {
+        let text = "SELECT 1 -- trailing; comment\n; SELECT /* block ; comment */ \"odd;name\", 'a;b'; SELECT 3";
+        let parts = split_statements(text);
+        assert_eq!(parts.len(), 3, "{parts:?}");
+        assert!(parts[1].contains("odd;name"));
+        assert!(parts[1].contains("'a;b'"));
+    }
+
+    #[test]
+    fn terminator_detection_waits_for_dollar_quote_close() {
+        assert!(!contains_statement_terminator(
+            "CREATE FUNCTION f() AS $$ BEGIN RETURN 1;"
+        ));
+        assert!(contains_statement_terminator(
+            "CREATE FUNCTION f() AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql;"
+        ));
+    }
+
+    #[test]
     fn meta_ds_lists_sequences_using_search_path() {
         let engine = Engine::new();
         engine.set_search_path(vec!["app".into(), "public".into()]);
@@ -1919,6 +2219,7 @@ mod tests {
         let mut session = Session {
             engine,
             db_path: None,
+            db_key: None,
             location: ":memory:".into(),
             history: Vec::new(),
             history_path: None,

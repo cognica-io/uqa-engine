@@ -117,10 +117,12 @@ fn inner_join_uses_composite_expression_key() {
         &engine,
         "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
     );
+    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // half to even, not truncation) land on the intended tiles.
     exec(
         &engine,
         "INSERT INTO points (id, x, y) VALUES
-            (1, 1.2, 2.8),
+            (1, 1.2, 2.4),
             (2, 4.1, 5.0),
             (3, 9.9, 9.9)",
     );
@@ -158,10 +160,12 @@ fn left_join_uses_composite_expression_key_and_pads_unmatched() {
         &engine,
         "CREATE TABLE tiles (x INTEGER, y INTEGER, label TEXT)",
     );
+    // Coordinates chosen so PostgreSQL 17 float -> int casts (round
+    // half to even, not truncation) land on the intended tiles.
     exec(
         &engine,
         "INSERT INTO points (id, x, y) VALUES
-            (1, 1.2, 2.8),
+            (1, 1.2, 2.4),
             (2, 4.1, 5.0),
             (3, 9.9, 9.9)",
     );

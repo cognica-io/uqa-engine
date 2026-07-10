@@ -361,16 +361,29 @@ fn run_update_inner(
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
-    for doc_id in engine.table_doc_ids(&stmt.table) {
+    // Without CTEs the WHERE clause resolves through the accelerated
+    // single-table machinery (value indexes, posting lists) up front;
+    // the per-row re-check below is then unnecessary.
+    let preselected = stmt.with.is_empty() && stmt.r#where.is_some();
+    let doc_ids: Vec<uqa_core::DocId> = if preselected {
+        let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
+        super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
+    } else {
+        engine.table_doc_ids(&stmt.table)
+    };
+    for doc_id in doc_ids {
         cancel.check()?;
         let Some(mut doc) = engine.get_document(&stmt.table, doc_id) else {
             continue;
         };
         let original_doc = doc.clone();
-        if let Some(filter) = stmt.r#where.as_ref() {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
-            if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
-                continue;
+        if !preselected {
+            if let Some(filter) = stmt.r#where.as_ref() {
+                let ctx =
+                    uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
+                if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+                    continue;
+                }
             }
         }
         for (col, expr) in &stmt.assignments {
@@ -1009,13 +1022,30 @@ fn run_delete_inner(
         Some(hook) => hook,
         None => engine,
     };
-    for doc_id in engine.table_doc_ids(&stmt.table) {
+    // Plain `DELETE FROM t WHERE ...` resolves the WHERE through the
+    // accelerated single-table machinery instead of materialising the
+    // whole table.
+    let preselected = stmt.with.is_empty() && stmt.using.is_none() && stmt.r#where.is_some();
+    let doc_ids: Vec<uqa_core::DocId> = if preselected {
+        let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
+        super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
+    } else {
+        engine.table_doc_ids(&stmt.table)
+    };
+    for doc_id in doc_ids {
         cancel.check()?;
+        if preselected && stmt.returning.is_empty() {
+            // No RETURNING and the filter already matched: the
+            // document body is not needed at all.
+            to_delete.push(doc_id);
+            continue;
+        }
         let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
             continue;
         };
         let keep = match (stmt.r#where.as_ref(), using_rows.as_ref()) {
             (None, _) => true,
+            (Some(_), None) if preselected => true,
             (Some(filter), None) => {
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);

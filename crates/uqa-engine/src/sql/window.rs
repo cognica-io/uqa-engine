@@ -48,11 +48,43 @@ pub(super) fn compute_window_columns(
         }
         rewritten.push(projection);
     }
+    let output_order_spec = slots
+        .iter()
+        .rev()
+        .find(|slot| !slot.spec.order_by.is_empty() || !slot.spec.partition_by.is_empty())
+        .map(|slot| slot.spec.clone());
     for slot in slots {
         let values = evaluate_window(engine, &slot.name, &slot.args, &slot.spec, &rows, params)?;
         for (row, value) in rows.iter_mut().zip(values) {
             row.insert(slot.key.clone(), value);
         }
+    }
+    // PostgreSQL emits window-query rows in the order of the final
+    // windowing sort (partition keys, then the window ORDER BY) when
+    // no outer ORDER BY overrides it; an outer ORDER BY re-sorts later.
+    if let Some(spec) = output_order_spec {
+        let mut keyed: Vec<(Vec<Value>, Vec<Value>, ResultRow)> = rows
+            .into_iter()
+            .map(|row| -> Result<_, SQLError> {
+                let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+                let partition: Vec<Value> = spec
+                    .partition_by
+                    .iter()
+                    .map(|e| uqa_sql::expr::eval(e, &ctx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let order: Vec<Value> = spec
+                    .order_by
+                    .iter()
+                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((partition, order, row))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        keyed.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| sort_keys(&a.1, &b.1, &spec.order_by))
+        });
+        rows = keyed.into_iter().map(|(_, _, row)| row).collect();
     }
     Ok(WindowProjectionResult {
         rows,

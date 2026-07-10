@@ -10,13 +10,137 @@
 //! Each named graph holds a [`Partition`] of ids and adjacency
 //! indexes; deleting a graph trims membership and reclaims any record
 //! that becomes unreferenced.
+//!
+//! Ids allocated through [`GraphStore::allocate_vertex_id`] /
+//! [`GraphStore::allocate_edge_id`] follow the Apache AGE `graphid`
+//! scheme: `(label_id << 48) | per_label_sequence`, where label ids 1
+//! and 2 are reserved for AGE's internal `_ag_label_vertex` /
+//! `_ag_label_edge` (unlabeled entities) and user labels start at 3,
+//! sharing one per-graph counter across vertex and edge labels in
+//! creation order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
 use uqa_core::{Edge, EdgeId, Vertex, VertexId};
 
 use crate::store::GraphStore;
 use crate::types::Direction;
+
+/// Number of bits reserved for the per-label sequence inside an AGE
+/// `graphid`. The label id occupies the remaining high 16 bits.
+pub const GRAPHID_LABEL_SHIFT: u32 = 48;
+
+/// Reserved AGE label id for unlabeled vertices (`_ag_label_vertex`).
+pub const VERTEX_DEFAULT_LABEL_ID: u32 = 1;
+
+/// Reserved AGE label id for unlabeled edges (`_ag_label_edge`).
+pub const EDGE_DEFAULT_LABEL_ID: u32 = 2;
+
+/// First label id available to user labels.
+pub const FIRST_USER_LABEL_ID: u32 = 3;
+
+/// Compose an AGE `graphid` from a label id and per-label sequence.
+#[must_use]
+pub fn make_graphid(label_id: u32, sequence: u64) -> u64 {
+    (u64::from(label_id) << GRAPHID_LABEL_SHIFT) | (sequence & ((1 << GRAPHID_LABEL_SHIFT) - 1))
+}
+
+/// Label id component of an AGE `graphid`.
+#[must_use]
+pub fn graphid_label_id(id: u64) -> u32 {
+    (id >> GRAPHID_LABEL_SHIFT) as u32
+}
+
+/// Sequence component of an AGE `graphid`.
+#[must_use]
+pub fn graphid_sequence(id: u64) -> u64 {
+    id & ((1 << GRAPHID_LABEL_SHIFT) - 1)
+}
+
+/// Per-graph AGE label registry: label name -> label id plus the
+/// per-label id sequences. Serializable so engines can persist it in
+/// catalog metadata and restore deterministic id allocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphLabelRegistry {
+    /// Label name -> AGE label id. Vertex and edge labels share the
+    /// namespace-wide counter; the reserved names for ids 1 / 2 are
+    /// not stored here (empty labels map onto them implicitly).
+    pub labels: BTreeMap<String, u32>,
+    /// Label id -> last allocated per-label sequence value.
+    pub sequences: BTreeMap<u32, u64>,
+    /// Next label id handed to a previously unseen label.
+    pub next_label_id: u32,
+}
+
+impl Default for GraphLabelRegistry {
+    fn default() -> Self {
+        Self {
+            labels: BTreeMap::new(),
+            sequences: BTreeMap::new(),
+            next_label_id: FIRST_USER_LABEL_ID,
+        }
+    }
+}
+
+impl GraphLabelRegistry {
+    fn label_id(&mut self, label: &str, default_id: u32) -> u32 {
+        if label.is_empty() {
+            return default_id;
+        }
+        if let Some(id) = self.labels.get(label) {
+            return *id;
+        }
+        let id = self.next_label_id;
+        self.next_label_id += 1;
+        self.labels.insert(label.to_string(), id);
+        id
+    }
+
+    fn next_sequence(&mut self, label_id: u32) -> u64 {
+        let seq = self.sequences.entry(label_id).or_insert(0);
+        *seq += 1;
+        *seq
+    }
+
+    /// Fold an existing entity id back into the registry so restored
+    /// graphs never re-issue an id that is already in use.
+    fn observe(&mut self, label: &str, id: u64) {
+        let label_id = graphid_label_id(id);
+        if label_id == 0 {
+            // Pre-AGE id (plain counter) - nothing to learn.
+            return;
+        }
+        if !label.is_empty() && label_id >= FIRST_USER_LABEL_ID {
+            self.labels.entry(label.to_string()).or_insert(label_id);
+        }
+        let seq = graphid_sequence(id);
+        let entry = self.sequences.entry(label_id).or_insert(0);
+        if seq > *entry {
+            *entry = seq;
+        }
+        if label_id >= self.next_label_id {
+            self.next_label_id = label_id + 1;
+        }
+    }
+
+    /// Merge another registry (e.g. persisted metadata) into this one,
+    /// keeping the larger sequence values and label id watermark.
+    pub fn merge(&mut self, other: &GraphLabelRegistry) {
+        for (label, id) in &other.labels {
+            self.labels.entry(label.clone()).or_insert(*id);
+        }
+        for (label_id, seq) in &other.sequences {
+            let entry = self.sequences.entry(*label_id).or_insert(0);
+            if *seq > *entry {
+                *entry = *seq;
+            }
+        }
+        if other.next_label_id > self.next_label_id {
+            self.next_label_id = other.next_label_id;
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct Partition {
@@ -74,6 +198,7 @@ pub struct MemoryGraphStore {
     graphs: BTreeMap<String, Partition>,
     vertex_membership: BTreeMap<VertexId, BTreeSet<String>>,
     edge_membership: BTreeMap<EdgeId, BTreeSet<String>>,
+    label_registries: BTreeMap<String, GraphLabelRegistry>,
     next_vertex_id: VertexId,
     next_edge_id: EdgeId,
 }
@@ -185,6 +310,48 @@ impl MemoryGraphStore {
             None => std::collections::BTreeSet::new(),
         }
     }
+
+    /// Snapshot of the AGE label registry for `graph` (empty registry
+    /// when the graph has never allocated an id).
+    pub fn label_registry(&self, graph: &str) -> GraphLabelRegistry {
+        self.label_registries
+            .get(graph)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Install (merge) a persisted label registry for `graph`. Existing
+    /// in-memory state wins on conflicts except that the larger
+    /// sequence / label-id watermarks are kept.
+    pub fn import_label_registry(&mut self, graph: &str, registry: &GraphLabelRegistry) {
+        self.label_registries
+            .entry(graph.to_string())
+            .or_default()
+            .merge(registry);
+    }
+
+    /// Re-derive the label registry of `graph` from the ids of the
+    /// entities currently attached to it. Self-heals restored graphs
+    /// whose registry metadata is missing: `label_id = id >> 48`.
+    pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) {
+        let mut observations: Vec<(String, u64)> = Vec::new();
+        if let Some(part) = self.graphs.get(graph) {
+            for vid in &part.vertex_ids {
+                if let Some(vertex) = self.vertices.get(vid) {
+                    observations.push((vertex.label.clone(), vertex.vertex_id));
+                }
+            }
+            for eid in &part.edge_ids {
+                if let Some(edge) = self.edges.get(eid) {
+                    observations.push((edge.label.clone(), edge.edge_id));
+                }
+            }
+        }
+        let registry = self.label_registries.entry(graph.to_string()).or_default();
+        for (label, id) in observations {
+            registry.observe(&label, id);
+        }
+    }
 }
 
 impl GraphStore for MemoryGraphStore {
@@ -193,6 +360,9 @@ impl GraphStore for MemoryGraphStore {
     }
 
     fn drop_graph(&mut self, name: &str) {
+        // AGE drops every per-graph label table with the graph, so a
+        // re-created graph starts a fresh label / sequence space.
+        self.label_registries.remove(name);
         let Some(partition) = self.graphs.remove(name) else {
             return;
         };
@@ -616,12 +786,25 @@ impl GraphStore for MemoryGraphStore {
         id
     }
 
+    fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> VertexId {
+        let registry = self.label_registries.entry(graph.to_string()).or_default();
+        let label_id = registry.label_id(label, VERTEX_DEFAULT_LABEL_ID);
+        make_graphid(label_id, registry.next_sequence(label_id))
+    }
+
+    fn allocate_edge_id(&mut self, label: &str, graph: &str) -> EdgeId {
+        let registry = self.label_registries.entry(graph.to_string()).or_default();
+        let label_id = registry.label_id(label, EDGE_DEFAULT_LABEL_ID);
+        make_graphid(label_id, registry.next_sequence(label_id))
+    }
+
     fn clear(&mut self) {
         self.vertices.clear();
         self.edges.clear();
         self.graphs.clear();
         self.vertex_membership.clear();
         self.edge_membership.clear();
+        self.label_registries.clear();
         self.next_vertex_id = 1;
         self.next_edge_id = 1;
     }
@@ -733,5 +916,70 @@ mod tests {
         assert_eq!(store.next_edge_id(), 1);
         store.add_vertex(Vertex::new(99, "v"), "g");
         assert_eq!(store.next_vertex_id(), 100);
+    }
+
+    #[test]
+    fn allocate_ids_follow_age_graphid_scheme() {
+        let mut store = MemoryGraphStore::new();
+        store.create_graph("g");
+        // First user vertex label -> label id 3, sequence 1.
+        assert_eq!(store.allocate_vertex_id("Person", "g"), 844_424_930_131_969);
+        assert_eq!(store.allocate_vertex_id("Person", "g"), 844_424_930_131_970);
+        // Edge labels share the same per-graph label counter -> 4.
+        assert_eq!(store.allocate_edge_id("KNOWS", "g"), 1_125_899_906_842_625);
+        // Next new vertex label continues the shared counter -> 5.
+        assert_eq!(store.allocate_vertex_id("City", "g"), 1_407_374_883_553_281);
+        // Unlabeled entities land in the reserved label ids 1 / 2.
+        assert_eq!(store.allocate_vertex_id("", "g"), make_graphid(1, 1));
+        assert_eq!(store.allocate_edge_id("", "g"), make_graphid(2, 1));
+        // Sequences are per label.
+        assert_eq!(store.allocate_edge_id("KNOWS", "g"), make_graphid(4, 2));
+    }
+
+    #[test]
+    fn label_registry_rebuild_from_ids_self_heals() {
+        let mut store = MemoryGraphStore::new();
+        store.create_graph("g");
+        store.add_vertex(Vertex::new(make_graphid(3, 7), "Person"), "g");
+        store.add_edge(
+            Edge::new(
+                make_graphid(4, 2),
+                make_graphid(3, 7),
+                make_graphid(3, 7),
+                "KNOWS",
+            ),
+            "g",
+        );
+        store.rebuild_label_registry_from_ids("g");
+        // New allocations continue after the observed watermarks.
+        assert_eq!(store.allocate_vertex_id("Person", "g"), make_graphid(3, 8));
+        assert_eq!(store.allocate_edge_id("KNOWS", "g"), make_graphid(4, 3));
+        // A brand-new label picks the next free label id (5).
+        assert_eq!(store.allocate_vertex_id("City", "g"), make_graphid(5, 1));
+    }
+
+    #[test]
+    fn label_registry_survives_round_trip_via_import() {
+        let mut store = MemoryGraphStore::new();
+        store.create_graph("g");
+        let _ = store.allocate_vertex_id("Person", "g");
+        let registry = store.label_registry("g");
+        let json = serde_json::to_string(&registry).unwrap();
+        let restored: GraphLabelRegistry = serde_json::from_str(&json).unwrap();
+
+        let mut fresh = MemoryGraphStore::new();
+        fresh.create_graph("g");
+        fresh.import_label_registry("g", &restored);
+        assert_eq!(fresh.allocate_vertex_id("Person", "g"), make_graphid(3, 2));
+    }
+
+    #[test]
+    fn drop_graph_resets_label_registry() {
+        let mut store = MemoryGraphStore::new();
+        store.create_graph("g");
+        let first = store.allocate_vertex_id("Person", "g");
+        store.drop_graph("g");
+        store.create_graph("g");
+        assert_eq!(store.allocate_vertex_id("Person", "g"), first);
     }
 }

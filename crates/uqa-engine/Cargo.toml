@@ -47,6 +47,10 @@ name = "sql_e2e"
 harness = false
 
 [[bench]]
+name = "sql_sqlite_e2e"
+harness = false
+
+[[bench]]
 name = "knn"
 harness = false
 

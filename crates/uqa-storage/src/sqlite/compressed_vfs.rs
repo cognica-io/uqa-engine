@@ -33,11 +33,15 @@ use rusqlite::ffi;
 pub const VFS_NAME: &str = "uqa_compressed";
 
 const VFS_NAME_C: &[u8] = b"uqa_compressed\0";
-const MAGIC: &[u8; 8] = b"UQACDB1\0";
+pub(crate) const MAGIC: &[u8; 8] = b"UQACDB1\0";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 128;
 const ENTRY_SIZE: usize = 80;
-const FLAG_ENCRYPTED: u32 = 1;
+pub(crate) const FLAG_ENCRYPTED: u32 = 1;
+/// Byte offset of the little-endian `flags` word inside the container
+/// header. Kept next to `build_header` / `parse_header` so every piece
+/// of on-disk layout knowledge stays in this file.
+pub(crate) const HEADER_FLAGS_OFFSET: usize = 12;
 const CHUNK_COMPRESSED: u32 = 1;
 const CHUNK_ENCRYPTED: u32 = 2;
 const CHUNK_COMMIT: u32 = 4;

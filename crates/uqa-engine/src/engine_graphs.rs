@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{BTreeMap, Engine, Value};
+use super::{BTreeMap, Engine, Value, GRAPH_LABELS_METADATA_PREFIX};
 
 impl Engine {
     pub fn create_graph(&self, name: impl Into<String>) {
@@ -26,6 +26,9 @@ impl Engine {
             // every graph has detached them; sweep the orphans now so
             // the catalog stays in sync with the in-memory view.
             let _ = catalog.purge_orphan_graph_entities();
+            // Clear the persisted AGE label registry so a re-created
+            // graph starts from label id 3 / sequence 1 again.
+            let _ = catalog.set_metadata(&format!("{GRAPH_LABELS_METADATA_PREFIX}{name}"), "");
         }
     }
 
@@ -314,5 +317,11 @@ impl Engine {
             }
         }
         let _ = catalog.purge_orphan_graph_entities();
+        // Persist the AGE label registry so id allocation stays
+        // deterministic across engine restarts even when a label's
+        // entities were all deleted.
+        if let Ok(json) = serde_json::to_string(&store.label_registry(graph)) {
+            let _ = catalog.set_metadata(&format!("{GRAPH_LABELS_METADATA_PREFIX}{graph}"), &json);
+        }
     }
 }

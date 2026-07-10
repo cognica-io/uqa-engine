@@ -22,8 +22,33 @@ fn filter_table_rows(
     filter: &Expr,
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    let doc_ids = engine.table_doc_ids(table);
+    // When the predicate reads a known column set, evaluate it against
+    // a per-row field projection fetched in one storage scan instead
+    // of materialising every document.
+    let mut columns = std::collections::BTreeSet::new();
+    if super::aggregates::collect_expr_columns(filter, &mut columns) {
+        let names: Vec<String> = columns.into_iter().collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs);
+        let mut out = Vec::new();
+        let empty: Vec<uqa_core::Value> = Vec::new();
+        for doc_id in doc_ids {
+            let values = field_values.get(&doc_id).unwrap_or(&empty);
+            let mut document = uqa_storage::document_store::Document::new();
+            for (name, value) in names.iter().zip(values) {
+                document.insert(name.clone(), value.clone());
+            }
+            let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
+            let v = uqa_sql::expr::eval(filter, &ctx)?;
+            if uqa_sql::expr::truthy(&v) {
+                out.push(ScoredEntry { doc_id, score: 0.0 });
+            }
+        }
+        return Ok(out);
+    }
     let mut out = Vec::new();
-    for doc_id in engine.table_doc_ids(table) {
+    for doc_id in doc_ids {
         let document = engine.get_document(table, doc_id).unwrap_or_default();
         let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
         let v = uqa_sql::expr::eval(filter, &ctx)?;
@@ -43,6 +68,41 @@ pub(super) fn execute_mixed_where(
     let mut rows = execute_mixed_where_expr(engine, table, filter, params)?;
     rows.sort_by_key(|e| e.doc_id);
     Ok(rows)
+}
+
+/// Resolve a WHERE clause to the matching doc ids with the same
+/// machinery single-table SELECT uses: the operator-tree pipeline
+/// (value indexes, posting lists) first, then registered row
+/// functions, then the evaluated scan. UPDATE / DELETE call this so
+/// point writes stop paying a full table materialisation.
+pub(super) fn collect_where_doc_ids(
+    engine: &Engine,
+    table: &str,
+    filter: &Expr,
+    params: &[SQLParam],
+) -> Result<Vec<DocId>, SQLError> {
+    let scored = if is_jsonpath_fts_match_filter(filter) {
+        execute_mixed_where(engine, table, filter, params)?
+    } else if let Some(entries) =
+        crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
+    {
+        entries
+    } else {
+        match filter {
+            Expr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
+                execute_function(engine, table, name, args, params)?
+            }
+            other => execute_mixed_where(engine, table, other, params)?,
+        }
+    };
+    Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
+}
+
+fn is_jsonpath_fts_match_filter(filter: &Expr) -> bool {
+    match filter {
+        Expr::Func { name, args, .. } => is_jsonpath_fts_match(name, args),
+        _ => false,
+    }
 }
 
 fn execute_mixed_where_expr(
@@ -71,7 +131,12 @@ fn execute_mixed_where_expr(
             }
             Ok(out)
         }
-        Expr::Not(inner) => Ok(complement_scored(
+        // NOT is only a set complement when the inner predicate cannot
+        // evaluate to NULL for any row (search functions produce
+        // definite match sets). Column predicates go through the
+        // row evaluator so `NOT (col = 5)` keeps SQL three-valued
+        // semantics: rows where `col` is NULL match neither side.
+        Expr::Not(inner) if expr_is_null_free(inner) => Ok(complement_scored(
             engine,
             table,
             execute_mixed_where_expr(engine, table, inner, params)?,
@@ -93,6 +158,22 @@ fn is_jsonpath_fts_match(name: &str, args: &[Expr]) -> bool {
             args.get(1),
             Some(Expr::Literal(uqa_core::Value::Str(path))) if path.trim_start().starts_with('$')
         )
+}
+
+/// True when the expression can never evaluate to SQL NULL for any
+/// row: registered search functions, IS NULL tests, and boolean
+/// combinations thereof. Anything referencing column comparisons may
+/// yield NULL, so set-complement `NOT` would be unsound for it.
+pub(crate) fn expr_is_null_free(expr: &Expr) -> bool {
+    match expr {
+        Expr::Func { name, .. } => uqa_sql::registry::is_registered(name),
+        Expr::IsNull { .. } => true,
+        Expr::Exists { .. } => true,
+        Expr::Literal(v) => !matches!(v, uqa_core::Value::Null),
+        Expr::And(parts) | Expr::Or(parts) => parts.iter().all(expr_is_null_free),
+        Expr::Not(inner) => expr_is_null_free(inner),
+        _ => false,
+    }
 }
 
 fn all_table_rows(engine: &Engine, table: &str) -> Vec<ScoredEntry> {

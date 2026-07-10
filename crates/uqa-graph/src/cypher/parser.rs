@@ -13,10 +13,10 @@ use uqa_core::Value;
 
 use crate::cypher::ast::{
     BinaryOp, CaseExpr, CreateClause, CypherClause, CypherExpr, CypherQuery, DeleteClause,
-    FunctionCall, InList, IsNotNull, IsNull, ListIndex, ListLiteral, Literal, MatchClause,
-    MergeClause, NodePattern, OrderByItem, Parameter, PathElement, PathPattern, PropertyAccess,
-    RelDirection, RelPattern, ReturnClause, ReturnItem, SetClause, SetItem, SetOperator, UnaryOp,
-    UnwindClause, Variable, WithClause,
+    FunctionCall, InList, IsNotNull, IsNull, ListComprehension, ListIndex, ListLiteral, ListSlice,
+    Literal, MapLiteral, MatchClause, MergeClause, NodePattern, OrderByItem, Parameter,
+    PathElement, PathPattern, PropertyAccess, RelDirection, RelPattern, ReturnClause, ReturnItem,
+    SetClause, SetItem, SetOperator, UnaryOp, UnwindClause, Variable, WithClause,
 };
 use crate::cypher::lexer::{is_keyword, tokenize, LexError, Token, TokenKind};
 
@@ -430,6 +430,15 @@ impl Parser {
     }
 
     fn parse_path_pattern(&mut self) -> Result<PathPattern, ParseError> {
+        // Optional path variable: `p = (a)-[...]->(b)`.
+        let mut variable = None;
+        if self.peek().kind == TokenKind::Identifier
+            && self.pos + 1 < self.tokens.len()
+            && self.tokens[self.pos + 1].kind == TokenKind::Eq
+        {
+            variable = Some(self.advance().value);
+            self.expect(TokenKind::Eq, "`=`")?;
+        }
         let mut elements = vec![PathElement::Node(self.parse_node_pattern()?)];
         while matches!(
             self.peek().kind,
@@ -439,7 +448,7 @@ impl Parser {
             elements.push(PathElement::Rel(rel));
             elements.push(PathElement::Node(self.parse_node_pattern()?));
         }
-        Ok(PathPattern { elements })
+        Ok(PathPattern { variable, elements })
     }
 
     fn parse_node_pattern(&mut self) -> Result<NodePattern, ParseError> {
@@ -658,74 +667,95 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Result<CypherExpr, ParseError> {
-        let left = self.parse_addition()?;
+        let mut left = self.parse_addition()?;
 
-        if self.match_keyword("IS") {
-            return Ok(if self.match_keyword("NOT") {
-                self.expect_keyword("NULL")?;
-                CypherExpr::IsNotNull(IsNotNull {
+        loop {
+            if self.match_keyword("IS") {
+                left = if self.match_keyword("NOT") {
+                    self.expect_keyword("NULL")?;
+                    CypherExpr::IsNotNull(IsNotNull {
+                        expr: Box::new(left),
+                    })
+                } else {
+                    self.expect_keyword("NULL")?;
+                    CypherExpr::IsNull(IsNull {
+                        expr: Box::new(left),
+                    })
+                };
+                continue;
+            }
+
+            if self.match_keyword("IN") {
+                let right = self.parse_addition()?;
+                left = CypherExpr::InList(InList {
                     expr: Box::new(left),
-                })
-            } else {
-                self.expect_keyword("NULL")?;
-                CypherExpr::IsNull(IsNull {
-                    expr: Box::new(left),
-                })
-            });
-        }
+                    list_expr: Box::new(right),
+                });
+                continue;
+            }
 
-        if self.match_keyword("IN") {
-            let right = self.parse_addition()?;
-            return Ok(CypherExpr::InList(InList {
-                expr: Box::new(left),
-                list_expr: Box::new(right),
-            }));
-        }
+            if self.match_keyword("STARTS") {
+                self.expect_keyword("WITH")?;
+                let right = self.parse_addition()?;
+                left = CypherExpr::BinaryOp(BinaryOp {
+                    op: "STARTS WITH".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+                continue;
+            }
+            if self.match_keyword("ENDS") {
+                self.expect_keyword("WITH")?;
+                let right = self.parse_addition()?;
+                left = CypherExpr::BinaryOp(BinaryOp {
+                    op: "ENDS WITH".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+                continue;
+            }
+            if self.match_keyword("CONTAINS") {
+                let right = self.parse_addition()?;
+                left = CypherExpr::BinaryOp(BinaryOp {
+                    op: "CONTAINS".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+                continue;
+            }
 
-        if self.match_keyword("STARTS") {
-            self.expect_keyword("WITH")?;
-            let right = self.parse_addition()?;
-            return Ok(CypherExpr::BinaryOp(BinaryOp {
-                op: "STARTS WITH".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            }));
-        }
-        if self.match_keyword("ENDS") {
-            self.expect_keyword("WITH")?;
-            let right = self.parse_addition()?;
-            return Ok(CypherExpr::BinaryOp(BinaryOp {
-                op: "ENDS WITH".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            }));
-        }
-        if self.match_keyword("CONTAINS") {
-            let right = self.parse_addition()?;
-            return Ok(CypherExpr::BinaryOp(BinaryOp {
-                op: "CONTAINS".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            }));
-        }
+            // `=~` regular-expression operator.
+            if self.match_kind(TokenKind::RegexMatch).is_some() {
+                let right = self.parse_addition()?;
+                left = CypherExpr::BinaryOp(BinaryOp {
+                    op: "=~".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+                continue;
+            }
 
-        let op = match self.peek().kind {
-            TokenKind::Eq => Some("="),
-            TokenKind::Neq => Some("<>"),
-            TokenKind::Lt => Some("<"),
-            TokenKind::Gt => Some(">"),
-            TokenKind::Lte => Some("<="),
-            TokenKind::Gte => Some(">="),
-            _ => None,
-        };
-        if let Some(op) = op {
+            let op = match self.peek().kind {
+                TokenKind::Eq => Some("="),
+                TokenKind::Neq => Some("<>"),
+                TokenKind::Lt => Some("<"),
+                TokenKind::Gt => Some(">"),
+                TokenKind::Lte => Some("<="),
+                TokenKind::Gte => Some(">="),
+                _ => None,
+            };
+            let Some(op) = op else {
+                break;
+            };
+            // Comparisons chain left-associatively in AGE:
+            // `1 < 2 < 3` evaluates as `(1 < 2) < 3`.
             self.advance();
             let right = self.parse_addition()?;
-            return Ok(CypherExpr::BinaryOp(BinaryOp {
+            left = CypherExpr::BinaryOp(BinaryOp {
                 op: op.into(),
                 left: Box::new(left),
                 right: Box::new(right),
-            }));
+            });
         }
         Ok(left)
     }
@@ -745,15 +775,31 @@ impl Parser {
     }
 
     fn parse_multiplication(&mut self) -> Result<CypherExpr, ParseError> {
-        let mut left = self.parse_unary()?;
+        let mut left = self.parse_power()?;
         while matches!(
             self.peek().kind,
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent
         ) {
             let op = self.advance().value;
-            let right = self.parse_unary()?;
+            let right = self.parse_power()?;
             left = CypherExpr::BinaryOp(BinaryOp {
                 op,
+                left: Box::new(left),
+                right: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
+    fn parse_power(&mut self) -> Result<CypherExpr, ParseError> {
+        // `^` binds tighter than `*` but looser than unary minus and
+        // chains left-associatively (AGE: `-2^2` = 4.0, `2^3^2` = 64.0).
+        let mut left = self.parse_unary()?;
+        while self.peek().kind == TokenKind::Caret {
+            self.advance();
+            let right = self.parse_unary()?;
+            left = CypherExpr::BinaryOp(BinaryOp {
+                op: "^".into(),
                 left: Box::new(left),
                 right: Box::new(right),
             });
@@ -788,17 +834,47 @@ impl Parser {
                         pa.keys.push(key);
                         CypherExpr::PropertyAccess(pa)
                     }
-                    other => CypherExpr::BinaryOp(BinaryOp {
-                        op: ".".into(),
-                        left: Box::new(other),
-                        right: Box::new(CypherExpr::Literal(Literal {
+                    other => CypherExpr::ListIndex(ListIndex {
+                        expr: Box::new(other),
+                        index: Box::new(CypherExpr::Literal(Literal {
                             value: Value::Str(key),
                         })),
                     }),
                 };
             } else if self.peek().kind == TokenKind::LBracket {
                 self.advance();
+                // Slice or index. Forms: `[i]`, `[a..b]`, `[..b]`,
+                // `[a..]`, `[..]`.
+                if self.peek().kind == TokenKind::DotDot {
+                    self.advance();
+                    let end = if self.peek().kind == TokenKind::RBracket {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expression()?))
+                    };
+                    self.expect(TokenKind::RBracket, "`]`")?;
+                    expr = CypherExpr::ListSlice(ListSlice {
+                        expr: Box::new(expr),
+                        start: None,
+                        end,
+                    });
+                    continue;
+                }
                 let index = self.parse_expression()?;
+                if self.match_kind(TokenKind::DotDot).is_some() {
+                    let end = if self.peek().kind == TokenKind::RBracket {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expression()?))
+                    };
+                    self.expect(TokenKind::RBracket, "`]`")?;
+                    expr = CypherExpr::ListSlice(ListSlice {
+                        expr: Box::new(expr),
+                        start: Some(Box::new(index)),
+                        end,
+                    });
+                    continue;
+                }
                 self.expect(TokenKind::RBracket, "`]`")?;
                 expr = CypherExpr::ListIndex(ListIndex {
                     expr: Box::new(expr),
@@ -821,6 +897,7 @@ impl Parser {
                 Ok(expr)
             }
             TokenKind::LBracket => self.parse_list_literal(),
+            TokenKind::LBrace => self.parse_map_literal(),
             TokenKind::Dollar => {
                 self.advance();
                 let name = self.expect(TokenKind::Identifier, "parameter name")?.value;
@@ -882,6 +959,18 @@ impl Parser {
                         if self.pos + 1 < self.tokens.len()
                             && self.tokens[self.pos + 1].kind == TokenKind::LParen
                         {
+                            // `exists((a)-[:R]->(b))` takes a path
+                            // pattern, not an expression list.
+                            if upper == "EXISTS"
+                                && self.pos + 2 < self.tokens.len()
+                                && self.tokens[self.pos + 2].kind == TokenKind::LParen
+                            {
+                                self.advance();
+                                self.expect(TokenKind::LParen, "`(`")?;
+                                let pattern = self.parse_path_pattern()?;
+                                self.expect(TokenKind::RParen, "`)`")?;
+                                return Ok(CypherExpr::ExistsPattern(pattern));
+                            }
                             self.parse_function_call().map(CypherExpr::FunctionCall)
                         } else {
                             self.advance();
@@ -899,6 +988,33 @@ impl Parser {
 
     fn parse_list_literal(&mut self) -> Result<CypherExpr, ParseError> {
         self.expect(TokenKind::LBracket, "`[`")?;
+        // `[x IN list WHERE pred | map]` is a list comprehension.
+        if self.peek().kind == TokenKind::Identifier
+            && !RESERVED_KEYWORDS.contains(&self.peek().value.to_uppercase().as_str())
+            && self.pos + 1 < self.tokens.len()
+            && is_keyword(&self.tokens[self.pos + 1], "IN")
+        {
+            let variable = self.advance().value;
+            self.expect_keyword("IN")?;
+            let list_expr = self.parse_expression()?;
+            let filter = if self.match_keyword("WHERE") {
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                None
+            };
+            let map_expr = if self.match_kind(TokenKind::Pipe).is_some() {
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                None
+            };
+            self.expect(TokenKind::RBracket, "`]`")?;
+            return Ok(CypherExpr::ListComprehension(ListComprehension {
+                variable,
+                list_expr: Box::new(list_expr),
+                filter,
+                map_expr,
+            }));
+        }
         let mut elements = Vec::new();
         if self.peek().kind != TokenKind::RBracket {
             elements.push(self.parse_expression()?);
@@ -908,6 +1024,35 @@ impl Parser {
         }
         self.expect(TokenKind::RBracket, "`]`")?;
         Ok(CypherExpr::ListLiteral(ListLiteral { elements }))
+    }
+
+    fn parse_map_literal(&mut self) -> Result<CypherExpr, ParseError> {
+        self.expect(TokenKind::LBrace, "`{`")?;
+        let mut pairs: Vec<(String, CypherExpr)> = Vec::new();
+        if self.peek().kind != TokenKind::RBrace {
+            loop {
+                let key_tok = self.advance();
+                let key = match key_tok.kind {
+                    TokenKind::Identifier | TokenKind::String => key_tok.value,
+                    _ => {
+                        return Err(ParseError::Expected {
+                            expected: "map key",
+                            got: key_tok.kind,
+                            value: key_tok.value,
+                            position: key_tok.pos,
+                        });
+                    }
+                };
+                self.expect(TokenKind::Colon, "`:`")?;
+                let value = self.parse_expression()?;
+                pairs.push((key, value));
+                if self.match_kind(TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RBrace, "`}`")?;
+        Ok(CypherExpr::MapLiteral(MapLiteral { pairs }))
     }
 
     fn parse_function_call(&mut self) -> Result<FunctionCall, ParseError> {

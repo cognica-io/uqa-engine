@@ -22,8 +22,9 @@ use super::{
     age_cypher, aggregate_join_rows, apply_row_order_limit, build_info_schema_rows, execute_select,
     expect_column_name, expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
     graph_pagerank_entries, has_aggregate, json_table_arg, json_table_value_to_text,
-    materialize_ctes, projected_value_from_row, projection_columns, run_graph_create,
-    run_graph_drop, run_select, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    materialize_ctes, projected_value_from_row, projection_columns, run_age_create_graph,
+    run_age_drop_graph, run_graph_create, run_graph_drop, run_select, MERGE_ACTION_COLUMN,
+    SCORE_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
@@ -59,10 +60,11 @@ fn prefixed_cte_row_cache_key(name: &str, qual: &str) -> String {
 }
 
 fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
-    engine
-        .table_doc_ids(table)
+    let doc_ids = engine.table_doc_ids(table);
+    let mut documents = engine.get_documents_bulk(table, &doc_ids);
+    doc_ids
         .into_iter()
-        .filter_map(|id| engine.get_document(table, id))
+        .filter_map(|id| documents.remove(&id))
         .collect()
 }
 
@@ -73,12 +75,14 @@ fn load_table_rows_pruned(
     columns: &BTreeSet<String>,
 ) -> Vec<ResultRow> {
     let doc_ids = engine.table_doc_ids(table);
+    let names: Vec<&str> = columns.iter().map(String::as_str).collect();
+    let values = engine.get_document_fields_multi(table, &doc_ids, &names);
     let mut rows = vec![ResultRow::new(); doc_ids.len()];
-    for column in columns {
-        let values = engine.get_document_fields(table, &doc_ids, column);
-        for (idx, doc_id) in doc_ids.iter().enumerate() {
-            let value = values.get(doc_id).cloned().unwrap_or(Value::Null);
-            rows[idx].insert(qualified_key(qual, column), value);
+    let empty: Vec<Value> = Vec::new();
+    for (idx, doc_id) in doc_ids.iter().enumerate() {
+        let row_values = values.get(doc_id).unwrap_or(&empty);
+        for (column, value) in columns.iter().zip(row_values) {
+            rows[idx].insert(qualified_key(qual, column), value.clone());
         }
     }
     rows
@@ -216,83 +220,13 @@ fn apply_qualifier_filters(
 }
 
 fn qualifier_filters_require_table_select(filters: Option<&QualifierFilters>, qual: &str) -> bool {
+    // Any pushed-down filter benefits from the single-table SELECT
+    // path: registered row functions need it for posting-list
+    // execution, and plain scalar predicates pick up value-index
+    // acceleration plus bulk row materialisation there.
     filters
         .and_then(|filters| filters.get(qual))
-        .is_some_and(|filters| filters.iter().any(expr_contains_registered_row_function))
-}
-
-fn expr_contains_registered_row_function(expr: &Expr) -> bool {
-    match expr {
-        Expr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            let lower = name.to_ascii_lowercase();
-            uqa_sql::registry::is_registered(&lower)
-                || args.iter().any(expr_contains_registered_row_function)
-                || order_by
-                    .iter()
-                    .any(|order| expr_contains_registered_row_function(&order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|filter| expr_contains_registered_row_function(filter))
-        }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().any(expr_contains_registered_row_function)
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            expr_contains_registered_row_function(lhs) || expr_contains_registered_row_function(rhs)
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_contains_registered_row_function(inner)
-        }
-        Expr::Between { expr, low, high } => {
-            expr_contains_registered_row_function(expr)
-                || expr_contains_registered_row_function(low)
-                || expr_contains_registered_row_function(high)
-        }
-        Expr::InList { expr, list, .. } => {
-            expr_contains_registered_row_function(expr)
-                || list.iter().any(expr_contains_registered_row_function)
-        }
-        Expr::WindowCall { args, spec, .. } => {
-            args.iter().any(expr_contains_registered_row_function)
-                || spec
-                    .partition_by
-                    .iter()
-                    .any(expr_contains_registered_row_function)
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| expr_contains_registered_row_function(&order.expr))
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref()
-                .is_some_and(|expr| expr_contains_registered_row_function(expr))
-                || when.iter().any(|(cond, result)| {
-                    expr_contains_registered_row_function(cond)
-                        || expr_contains_registered_row_function(result)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| expr_contains_registered_row_function(expr))
-        }
-        Expr::InSubquery { expr, .. } => expr_contains_registered_row_function(expr),
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => false,
-    }
+        .is_some_and(|filters| !filters.is_empty())
 }
 
 fn run_table_select_for_qualifier_filters(
@@ -1687,12 +1621,14 @@ fn build_join_rows_with_ctes_inner(
             args,
             alias,
             column_aliases,
+            column_types,
         } => Ok(build_table_function_rows(
             engine,
             name,
             args,
             alias.as_deref(),
             column_aliases,
+            column_types,
             params,
         )?),
         FromClause::Subquery {
@@ -1884,12 +1820,14 @@ fn build_lateral_join_rows(
                 args,
                 alias,
                 column_aliases,
+                column_types,
             } => build_table_function_rows_with_row(
                 engine,
                 name,
                 args,
                 alias.as_deref(),
                 column_aliases,
+                column_types,
                 params,
                 Some(left_row),
             )?,
@@ -1929,6 +1867,17 @@ pub(super) fn execute_lateral_subquery(
     materialize_ctes(engine, stmt, params, &mut scoped_ctes)?;
 
     let Some(from) = stmt.from.as_ref() else {
+        // A FROM-less body still applies its WHERE clause against the
+        // outer scope (`EXISTS (SELECT 1 WHERE false)` has no rows).
+        if let Some(filter) = stmt.r#where.as_ref() {
+            let ctx = EvalContext::new(Some(outer_row), params).with_engine(engine);
+            if !uqa_sql::expr::truthy(&eval(filter, &ctx)?) {
+                return Ok(SQLResult::from_rows(
+                    projection_columns(&stmt.projections),
+                    Vec::new(),
+                ));
+            }
+        }
         let projected =
             project_join_row_with_engine(Some(engine), outer_row, &stmt.projections, params)?;
         return Ok(SQLResult::from_rows(
@@ -1984,34 +1933,44 @@ fn merge_lateral_scope_rows(outer_row: &ResultRow, inner_row: &ResultRow) -> Res
 }
 
 #[allow(clippy::similar_names)]
-fn build_table_function_rows(
+pub(super) fn build_table_function_rows(
     engine: &Engine,
     name: &str,
     args: &[Expr],
     alias: Option<&str>,
     column_aliases: &[String],
+    column_types: &[String],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
-    build_table_function_rows_with_row(engine, name, args, alias, column_aliases, params, None)
+    build_table_function_rows_with_row(
+        engine,
+        name,
+        args,
+        alias,
+        column_aliases,
+        column_types,
+        params,
+        None,
+    )
 }
 
-#[allow(clippy::similar_names)]
+#[allow(clippy::similar_names, clippy::too_many_arguments)]
 fn build_table_function_rows_with_row(
     engine: &Engine,
     name: &str,
     args: &[Expr],
     alias: Option<&str>,
     column_aliases: &[String],
+    column_types: &[String],
     params: &[SQLParam],
     row: Option<&ResultRow>,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_sql::expr::{eval, EvalContext};
+    use uqa_sql::expr::{evaluate_call_args, unknown_function_error, EvalContext};
     let ctx = EvalContext::new(row, params).with_engine(engine);
     let lower = name.to_ascii_lowercase();
-    let evaluated: Vec<Value> = args
-        .iter()
-        .map(|a| eval(a, &ctx))
-        .collect::<Result<Vec<_>, SQLError>>()?;
+    let call_args = evaluate_call_args(args, &ctx)?;
+    let has_named_args = call_args.iter().any(|(name, _)| name.is_some());
+    let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
     let default_col = column_aliases
         .first()
         .cloned()
@@ -2030,8 +1989,18 @@ fn build_table_function_rows_with_row(
         };
         out.push(r);
     };
-    if let Some(result) = engine.call_registered_table_function(&lower, &evaluated) {
+    if !has_named_args {
+        if let Some(result) = engine.call_registered_table_function(&lower, &evaluated) {
+            return registered_table_function_rows(name, result?, qual, column_aliases);
+        }
+    }
+    if let Some(result) =
+        crate::sql::plpgsql_exec::call_user_table_function(engine, &lower, &call_args)
+    {
         return registered_table_function_rows(name, result?, qual, column_aliases);
+    }
+    if has_named_args {
+        return Err(unknown_function_error(&lower, &call_args));
     }
     match lower.as_str() {
         "generate_series" => {
@@ -2377,7 +2346,9 @@ fn build_table_function_rows_with_row(
             }
             Ok(out)
         }
-        "cypher" => age_cypher::build_rows(engine, args, &evaluated, qual, column_aliases),
+        "cypher" => {
+            age_cypher::build_rows(engine, args, &evaluated, qual, column_aliases, column_types)
+        }
         "rpq" => {
             if !(2..=3).contains(&evaluated.len()) {
                 return Err(SQLError::TypeMismatch(
@@ -2981,18 +2952,29 @@ pub(super) fn engine_func_intercept(
             })?;
             Ok(Some(action))
         }
-        "graph_create" | "create_graph" => {
+        // UQA-native helpers keep their lenient semantics.
+        "graph_create" => {
             if let Some(eng) = engine {
                 let _ = run_graph_create(eng, args, params)?;
             }
             Ok(Some(Value::Bool(true)))
         }
-        "graph_drop" | "drop_graph" => {
+        "graph_drop" => {
             if let Some(eng) = engine {
                 let _ = run_graph_drop(eng, args, params)?;
             }
             Ok(Some(Value::Bool(true)))
         }
+        // Apache AGE-compatible functions: strict name validation and
+        // a void (SQL NULL) return value.
+        "create_graph" => match engine {
+            Some(eng) => Ok(Some(run_age_create_graph(eng, args, params)?)),
+            None => Ok(Some(Value::Null)),
+        },
+        "drop_graph" => match engine {
+            Some(eng) => Ok(Some(run_age_drop_graph(eng, args, params)?)),
+            None => Ok(Some(Value::Null)),
+        },
         _ => Ok(None),
     }
 }

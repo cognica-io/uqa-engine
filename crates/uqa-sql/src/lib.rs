@@ -35,6 +35,7 @@ pub mod error;
 pub mod expr;
 pub mod fts_query;
 pub mod params;
+pub mod plpgsql;
 pub mod registry;
 pub mod result;
 

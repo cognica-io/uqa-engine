@@ -96,6 +96,9 @@ fn float_col(row: &uqa_sql::ResultRow, col: &str) -> Option<f64> {
     match row.get(col)? {
         Value::Float(f) => Some(*f),
         Value::Int(n) => Some(*n as f64),
+        // Statistical aggregates over integer columns return numeric
+        // (PostgreSQL 17), so accept exact decimals here too.
+        Value::Decimal(d) => d.to_f64(),
         _ => None,
     }
 }
@@ -738,10 +741,12 @@ fn group_by_alias_for_cast_expression() {
         )
         .unwrap();
     assert_eq!(r.rows.len(), 2);
+    // PostgreSQL 17: float8 -> int casts round half to even, so
+    // 1.2 -> 1 and 1.8 / 2.1 -> 2 (verified: CAST(1.8::float8 AS int) = 2).
     assert_eq!(r.rows[0]["tile_x"], Value::Int(1));
-    assert_eq!(r.rows[0]["cnt"], Value::Int(2));
+    assert_eq!(r.rows[0]["cnt"], Value::Int(1));
     assert_eq!(r.rows[1]["tile_x"], Value::Int(2));
-    assert_eq!(r.rows[1]["cnt"], Value::Int(1));
+    assert_eq!(r.rows[1]["cnt"], Value::Int(2));
 }
 
 // =====================================================================

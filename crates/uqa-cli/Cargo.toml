@@ -20,6 +20,8 @@ uqa-fdw = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-sql = { workspace = true }
 rustyline = "18.0.0"
+rpassword = "7.4"
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"

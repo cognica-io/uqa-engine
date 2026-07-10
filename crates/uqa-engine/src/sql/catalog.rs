@@ -28,7 +28,7 @@ pub(super) fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<
         (true, _, "tables") => Some(build_info_tables(engine)),
         (true, _, "columns") => Some(build_info_columns(engine)),
         (true, _, "views") => Some(build_info_views(engine)),
-        (true, _, "routines") => Some(build_info_routines()),
+        (true, _, "routines") => Some(build_info_routines(engine)),
         (true, _, "sequences") => Some(build_info_sequences(engine)),
         (true, _, "table_constraints") => Some(build_info_table_constraints(engine)),
         (true, _, "key_column_usage") => Some(build_info_key_column_usage(engine)),
@@ -48,7 +48,7 @@ pub(super) fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<
         (_, true, "pg_views") | (false, false, "pg_views") => Some(build_pg_views(engine)),
         (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(build_pg_indexes(engine)),
         (_, true, "pg_type") | (false, false, "pg_type") => Some(build_pg_type()),
-        (_, true, "pg_proc") | (false, false, "pg_proc") => Some(build_pg_proc()),
+        (_, true, "pg_proc") | (false, false, "pg_proc") => Some(build_pg_proc(engine)),
         (_, true, "pg_database") | (false, false, "pg_database") => Some(build_pg_database()),
         (_, true, "pg_roles") | (false, false, "pg_roles") => Some(build_pg_roles()),
         (_, true, "pg_user") | (false, false, "pg_user") => Some(build_pg_user()),
@@ -465,8 +465,8 @@ fn build_info_views(engine: &Engine) -> Vec<ResultRow> {
         .collect()
 }
 
-fn build_info_routines() -> Vec<ResultRow> {
-    registered_names()
+fn build_info_routines(engine: &Engine) -> Vec<ResultRow> {
+    let mut rows: Vec<ResultRow> = registered_names()
         .into_iter()
         .map(|name| {
             row([
@@ -497,7 +497,73 @@ fn build_info_routines() -> Vec<ResultRow> {
                 ("result_cast_from_null", str_value("NO")),
             ])
         })
-        .collect()
+        .collect();
+    for function in engine.list_sql_functions() {
+        let def = &function.def;
+        let routine_type = if def.is_procedure {
+            "PROCEDURE"
+        } else {
+            "FUNCTION"
+        };
+        let (routine_body, external_language) = if def.language == "sql" {
+            ("SQL", "SQL".to_string())
+        } else {
+            ("EXTERNAL", def.language.to_ascii_uppercase())
+        };
+        let definition = match &def.body {
+            uqa_sql::ast::FunctionBody::Source(source) => str_value(source.clone()),
+            uqa_sql::ast::FunctionBody::Statements(_) => Value::Null,
+        };
+        let data_type = match &def.returns {
+            uqa_sql::ast::FunctionReturns::Scalar { type_name }
+            | uqa_sql::ast::FunctionReturns::SetOf { type_name } => str_value(type_name.clone()),
+            uqa_sql::ast::FunctionReturns::Table => str_value("record"),
+            uqa_sql::ast::FunctionReturns::None => Value::Null,
+        };
+        rows.push(row([
+            ("specific_catalog", catalog_name()),
+            ("specific_schema", str_value("public")),
+            (
+                "specific_name",
+                str_value(format!("{}_{}", def.name, def.signature_arity())),
+            ),
+            ("routine_catalog", catalog_name()),
+            ("routine_schema", str_value("public")),
+            ("routine_name", str_value(def.name.clone())),
+            ("routine_type", str_value(routine_type)),
+            ("module_catalog", Value::Null),
+            ("module_schema", Value::Null),
+            ("module_name", Value::Null),
+            ("udt_catalog", catalog_name()),
+            ("udt_schema", str_value("pg_catalog")),
+            ("udt_name", data_type.clone()),
+            ("data_type", data_type),
+            ("routine_body", str_value(routine_body)),
+            ("routine_definition", definition),
+            ("external_name", Value::Null),
+            ("external_language", str_value(external_language)),
+            (
+                "is_deterministic",
+                str_value(
+                    if matches!(def.volatility, uqa_sql::ast::FunctionVolatility::Immutable) {
+                        "YES"
+                    } else {
+                        "NO"
+                    },
+                ),
+            ),
+            ("sql_data_access", str_value("MODIFIES SQL DATA")),
+            (
+                "is_null_call",
+                str_value(if def.strict { "YES" } else { "NO" }),
+            ),
+            ("schema_level_routine", str_value("YES")),
+            ("max_dynamic_result_sets", Value::Int(0)),
+            ("is_udt_dependent", str_value("NO")),
+            ("result_cast_from_null", Value::Null),
+        ]));
+    }
+    rows
 }
 
 fn build_info_sequences(engine: &Engine) -> Vec<ResultRow> {
@@ -1019,8 +1085,8 @@ fn build_pg_type() -> Vec<ResultRow> {
         .collect()
 }
 
-fn build_pg_proc() -> Vec<ResultRow> {
-    registered_names()
+fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
+    let mut rows: Vec<ResultRow> = registered_names()
         .into_iter()
         .map(|name| {
             row([
@@ -1056,7 +1122,82 @@ fn build_pg_proc() -> Vec<ResultRow> {
                 ("proacl", Value::Null),
             ])
         })
-        .collect()
+        .collect();
+    for function in engine.list_sql_functions() {
+        let def = &function.def;
+        let source = match &def.body {
+            uqa_sql::ast::FunctionBody::Source(source) => source.clone(),
+            uqa_sql::ast::FunctionBody::Statements(_) => String::new(),
+        };
+        let volatile = match def.volatility {
+            uqa_sql::ast::FunctionVolatility::Immutable => "i",
+            uqa_sql::ast::FunctionVolatility::Stable => "s",
+            uqa_sql::ast::FunctionVolatility::Volatile => "v",
+        };
+        let arg_names: Vec<Value> = def
+            .params
+            .iter()
+            .map(|p| str_value(p.name.clone()))
+            .collect();
+        let arg_modes: Vec<Value> = def
+            .params
+            .iter()
+            .map(|p| {
+                str_value(match p.mode {
+                    uqa_sql::ast::FunctionParamMode::In => "i",
+                    uqa_sql::ast::FunctionParamMode::Out => "o",
+                    uqa_sql::ast::FunctionParamMode::InOut => "b",
+                    uqa_sql::ast::FunctionParamMode::Table => "t",
+                })
+            })
+            .collect();
+        let defaults = def.params.iter().filter(|p| p.default.is_some()).count();
+        rows.push(row([
+            (
+                "oid",
+                int_value(stable_oid(
+                    "proc",
+                    &format!("{}_{}", def.name, def.signature_arity()),
+                )),
+            ),
+            ("proname", str_value(def.name.clone())),
+            ("pronamespace", int_value(schema_oid("public"))),
+            ("proowner", int_value(current_user_oid())),
+            ("prolang", int_value(0)),
+            ("procost", Value::Float(100.0)),
+            (
+                "prorows",
+                Value::Float(if def.returns_set() { 1000.0 } else { 0.0 }),
+            ),
+            ("provariadic", int_value(0)),
+            ("prosupport", str_value("-")),
+            (
+                "prokind",
+                str_value(if def.is_procedure { "p" } else { "f" }),
+            ),
+            ("prosecdef", bool_value(false)),
+            ("proleakproof", bool_value(false)),
+            ("proisstrict", bool_value(def.strict)),
+            ("proretset", bool_value(def.returns_set())),
+            ("provolatile", str_value(volatile)),
+            ("proparallel", str_value("u")),
+            ("pronargs", int_value(def.signature_arity() as i64)),
+            ("pronargdefaults", int_value(defaults as i64)),
+            ("prorettype", int_value(25)),
+            ("proargtypes", Value::List(Vec::new())),
+            ("proallargtypes", Value::Null),
+            ("proargmodes", Value::List(arg_modes)),
+            ("proargnames", Value::List(arg_names)),
+            ("proargdefaults", Value::Null),
+            ("protrftypes", Value::Null),
+            ("prosrc", str_value(source)),
+            ("probin", Value::Null),
+            ("prosqlbody", Value::Null),
+            ("proconfig", Value::Null),
+            ("proacl", Value::Null),
+        ]));
+    }
+    rows
 }
 
 fn build_pg_database() -> Vec<ResultRow> {

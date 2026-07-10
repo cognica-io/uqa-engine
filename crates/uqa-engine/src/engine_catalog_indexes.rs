@@ -65,13 +65,19 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         let existing = self.catalog_indexes.read().get(name).cloned();
-        if existing.is_none() {
+        let Some(existing_row) = existing else {
             return Ok(None);
-        }
+        };
         if let Some(catalog) = self.catalog.as_ref() {
             catalog.drop_catalog_index(name)?;
         }
-        Ok(self.catalog_indexes.write().remove(name))
+        let removed = self.catalog_indexes.write().remove(name);
+        // Built value indexes for the table are dropped so the lazy
+        // rebuild re-derives them from the updated index policy.
+        if let Some(t) = self.table(&existing_row.table_name) {
+            Self::value_indexes_clear(&t);
+        }
+        Ok(removed)
     }
 
     pub fn catalog_index(&self, name: &str) -> Option<CatalogIndexRow> {

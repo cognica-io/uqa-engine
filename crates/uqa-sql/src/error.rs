@@ -32,6 +32,12 @@ pub enum SQLError {
     VectorDimMismatch { expected: usize, actual: usize },
     #[error("{0}")]
     Cancelled(#[from] uqa_core::QueryCancelled),
+    /// Error raised by (or on behalf of) a user-defined SQL /
+    /// `PL/pgSQL` routine. Carries an explicit `SQLSTATE` so
+    /// `EXCEPTION WHEN <condition>` handlers and `SQLSTATE` /
+    /// `SQLERRM` report the same code `PostgreSQL` would.
+    #[error("{message}")]
+    Routine { sqlstate: String, message: String },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -40,7 +46,7 @@ impl SQLError {
     /// `PostgreSQL` `SQLSTATE` code for the error, mirroring the
     /// canonical UQA behavior's exception-to-state mapping. `None` for
     /// errors that do not carry a defined `SQLSTATE`.
-    pub fn sqlstate(&self) -> Option<&'static str> {
+    pub fn sqlstate(&self) -> Option<&str> {
         match self {
             SQLError::Cancelled(_) => Some(uqa_core::SQLSTATE_QUERY_CANCELED),
             SQLError::Parse(_) => Some("42601"), // syntax_error
@@ -52,6 +58,7 @@ impl SQLError {
             SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)
             SQLError::MissingParam(_) => Some("S1002"), // ERRCODE_INVALID_PARAMETER_VALUE
             SQLError::VectorDimMismatch { .. } => Some("22023"), // invalid_parameter_value
+            SQLError::Routine { sqlstate, .. } => Some(sqlstate),
             SQLError::Internal(_) => Some("XX000"), // internal_error
         }
     }

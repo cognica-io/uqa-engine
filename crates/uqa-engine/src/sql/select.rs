@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use uqa_core::DocId;
 use uqa_joins::row_join::JoinKey;
 
 use super::{
@@ -180,13 +181,110 @@ fn run_select_without_from(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let row = ResultRow::new();
-    let projected = build_projection_row(Some(engine), &row, &stmt.projections, params)?;
     let columns = projection_columns(&stmt.projections);
+    // `SELECT 1 WHERE false` must produce zero rows: the WHERE clause
+    // applies even without a FROM (three-valued: NULL filters too).
+    if let Some(filter) = stmt.r#where.as_ref() {
+        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
+        let keep = eval(filter, &ctx)?;
+        if !uqa_sql::expr::truthy(&keep) {
+            return Ok(SQLResult {
+                columns,
+                rows: Vec::new(),
+                affected_rows: 0,
+            });
+        }
+    }
+    // Set-returning functions in the projection list expand to rows
+    // (`SELECT generate_series(1, 3)`).
+    if let Some(result) = expand_projection_srf(engine, stmt, &row, params)? {
+        return Ok(result);
+    }
+    let projected = build_projection_row(Some(engine), &row, &stmt.projections, params)?;
     Ok(SQLResult {
         columns,
         rows: vec![projected],
         affected_rows: 0,
     })
+}
+
+/// Expand a projection list that consists of exactly one set-returning
+/// function call (`generate_series`, `unnest`, `jsonb_object_keys`,
+/// ...) into one result row per element, mirroring `PostgreSQL`'s
+/// SRF-in-select-list behavior for the single-SRF case.
+fn expand_projection_srf(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    row: &ResultRow,
+    params: &[SQLParam],
+) -> Result<Option<SQLResult>, SQLError> {
+    if stmt.projections.len() != 1 {
+        return Ok(None);
+    }
+    let projection = &stmt.projections[0];
+    let Expr::Func { name, args, .. } = &projection.expr else {
+        return Ok(None);
+    };
+    let lower = name.to_ascii_lowercase();
+    let columns = projection_columns(&stmt.projections);
+    let label = &columns[0];
+    // Object-key extractors return a set of rows in PostgreSQL; the
+    // scalar evaluator produces the key list, unpacked here.
+    if matches!(lower.as_str(), "json_object_keys" | "jsonb_object_keys") {
+        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+        let value = eval(&projection.expr, &ctx)?;
+        let Value::List(items) = value else {
+            return Ok(None);
+        };
+        let rows: Vec<ResultRow> = items
+            .into_iter()
+            .map(|item| {
+                let mut projected = ResultRow::new();
+                projected.insert(label.clone(), item);
+                projected
+            })
+            .collect();
+        return Ok(Some(SQLResult {
+            columns,
+            rows,
+            affected_rows: 0,
+        }));
+    }
+    let is_srf = matches!(
+        lower.as_str(),
+        "generate_series"
+            | "unnest"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "regexp_split_to_table"
+            | "string_to_table"
+    );
+    if !is_srf {
+        return Ok(None);
+    }
+    let produced =
+        super::from_rows::build_table_function_rows(engine, &lower, args, None, &[], &[], params)?;
+    let out: Vec<ResultRow> = produced
+        .into_iter()
+        .map(|produced_row| {
+            let mut projected = ResultRow::new();
+            // Table functions emit a single column; relabel it with the
+            // projection's alias / function name.
+            let value = produced_row
+                .iter()
+                .next()
+                .map_or(Value::Null, |(_, v)| v.clone());
+            projected.insert(label.clone(), value);
+            projected
+        })
+        .collect();
+    Ok(Some(SQLResult {
+        columns,
+        rows: out,
+        affected_rows: 0,
+    }))
 }
 
 /// Execute a SELECT that may carry CTEs and/or set ops, returning the
@@ -497,6 +595,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
 
     fn has_scalar_functions(&self) -> bool {
         self.engine.has_registered_scalar_functions()
+    }
+
+    fn call_user_function(
+        &self,
+        name: &str,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_user_scalar_function(self.engine, name, args)
     }
 
     fn run_subquery(
@@ -1847,6 +1953,7 @@ fn run_query_block_with_prepared_exists(
     };
     let projected = volcano_project_sort_limit(engine, &filtered, stmt, params, &scoped_hook)?;
     let columns = expand_from_star_columns(
+        engine,
         projection_columns(&stmt.projections),
         &stmt.projections,
         from,
@@ -2429,6 +2536,7 @@ fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
 }
 
 fn expand_from_star_columns(
+    engine: &Engine,
     columns: Vec<String>,
     projections: &[Projection],
     from: &FromClause,
@@ -2437,7 +2545,7 @@ fn expand_from_star_columns(
     if !has_star {
         return columns;
     }
-    let source_cols = from_clause_output_columns(from);
+    let source_cols = from_clause_output_columns(engine, from);
     if source_cols.is_empty() {
         return columns;
     }
@@ -2452,7 +2560,7 @@ fn expand_from_star_columns(
     out
 }
 
-fn from_clause_output_columns(from: &FromClause) -> Vec<String> {
+fn from_clause_output_columns(engine: &Engine, from: &FromClause) -> Vec<String> {
     match from {
         FromClause::Function {
             name,
@@ -2461,7 +2569,7 @@ fn from_clause_output_columns(from: &FromClause) -> Vec<String> {
             ..
         } => {
             let cols = if column_aliases.is_empty() {
-                vec![name.clone()]
+                user_function_output_columns(engine, name).unwrap_or_else(|| vec![name.clone()])
             } else {
                 column_aliases.clone()
             };
@@ -2486,12 +2594,38 @@ fn from_clause_output_columns(from: &FromClause) -> Vec<String> {
             ..
         } => qualify_output_columns(alias.as_deref(), column_aliases.clone()),
         FromClause::Join { left, right, .. } => {
-            let mut cols = from_clause_output_columns(left);
-            cols.extend(from_clause_output_columns(right));
+            let mut cols = from_clause_output_columns(engine, left);
+            cols.extend(from_clause_output_columns(engine, right));
             cols
         }
         FromClause::Table { .. } => Vec::new(),
     }
+}
+
+/// Output column names of a user-defined routine used as a FROM
+/// source: OUT / INOUT / `RETURNS TABLE` parameter names. `None` when
+/// the name is not a user routine or its result is a single unnamed
+/// column (which keeps the function-name default).
+fn user_function_output_columns(engine: &Engine, name: &str) -> Option<Vec<String>> {
+    let overloads = engine.lookup_sql_functions(name)?;
+    for function in &overloads {
+        let outs = function.def.output_params();
+        if !outs.is_empty() {
+            return Some(
+                outs.iter()
+                    .enumerate()
+                    .map(|(idx, p)| {
+                        if p.name.is_empty() {
+                            format!("column{}", idx + 1)
+                        } else {
+                            p.name.clone()
+                        }
+                    })
+                    .collect(),
+            );
+        }
+    }
+    None
 }
 
 fn qualify_output_columns(alias: Option<&str>, columns: Vec<String>) -> Vec<String> {
@@ -3550,6 +3684,42 @@ fn run_single_table_select(
     if let Some(filter) = stmt.r#where.as_ref() {
         super::validate_expr_text_match_fields(engine, table, filter)?;
     }
+    // `SELECT count(*) FROM t` with no WHERE: answer from the doc
+    // count without touching doc ids or documents.
+    if stmt.r#where.is_none()
+        && stmt.group_by.is_empty()
+        && stmt.grouping_sets.is_empty()
+        && stmt.having.is_none()
+        && stmt.order_by.is_empty()
+        && stmt.limit.is_none()
+        && stmt.offset.is_none()
+        && !stmt.distinct
+        && stmt.projections.len() == 1
+    {
+        if let Expr::Func {
+            name,
+            args,
+            distinct,
+            filter,
+            ..
+        } = &stmt.projections[0].expr
+        {
+            if name.eq_ignore_ascii_case("count")
+                && matches!(args.as_slice(), [Expr::Star])
+                && !*distinct
+                && filter.is_none()
+            {
+                let columns = projection_columns(&stmt.projections);
+                let mut row = ResultRow::new();
+                row.insert(
+                    columns[0].clone(),
+                    Value::Int(engine.table_doc_count(table) as i64),
+                );
+                return Ok(SQLResult::from_rows(columns, vec![row]));
+            }
+        }
+    }
+
     let score_top_k = score_order_top_k(stmt, engine, params)?;
     let score_top_k = score_top_k.filter(|_| score_limited_text_filter(stmt.r#where.as_ref()));
     let has_jsonpath_fts_filter = stmt
@@ -3613,21 +3783,35 @@ fn run_single_table_select(
     }
 
     if order_by_references_field(stmt) {
-        // ORDER BY references something other than `_score`; defer
-        // ordering / skip / limit to the row-level evaluator that can
-        // resolve arbitrary expressions against the projected
-        // document.
+        // ORDER BY references something other than `_score`. When the
+        // order keys resolve against stored document fields alone
+        // (no projection aliases, no window/aggregate output), order
+        // doc ids first and project only the surviving rows - with a
+        // LIMIT this turns a full projection pass into a top-K
+        // selection.
+        if let Some(result) = run_doc_ordered_select(engine, table, &scored, stmt, params)? {
+            return Ok(result);
+        }
+        // Fallback: ORDER BY needs projected values (aliases,
+        // computed columns). Project every row, merge the underlying
+        // document fields in the same pass so the row evaluator can
+        // read columns the projection dropped, then order and strip.
         let columns = projection_columns(&stmt.projections);
-        let mut all_rows = build_rows(engine, table, &scored, &stmt.projections, params)?;
-        // Bring the underlying document fields into each row so the
-        // row evaluator can read columns like `qty` even when the
-        // SELECT projection drops them.
-        for (entry, row) in scored.iter().zip(all_rows.iter_mut()) {
-            if let Some(doc) = engine.get_document(table, entry.doc_id) {
-                for (k, v) in doc {
-                    row.entry(k).or_insert(v);
+        let doc_ids: Vec<DocId> = scored.iter().map(|entry| entry.doc_id).collect();
+        let documents = engine.get_documents_bulk(table, &doc_ids);
+        let mut all_rows = Vec::with_capacity(scored.len());
+        for entry in &scored {
+            let mut document = documents.get(&entry.doc_id).cloned().unwrap_or_default();
+            document.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
+            document.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
+            let mut row = build_projection_row(Some(engine), &document, &stmt.projections, params)?;
+            for (k, v) in document {
+                if k.as_str() == DOC_ID_COLUMN || k.as_str() == SCORE_COLUMN {
+                    continue;
                 }
+                row.entry(k).or_insert(v);
             }
+            all_rows.push(row);
         }
         let rows = apply_row_order_limit(all_rows, stmt, engine, params)?;
         // Strip the helper fields to keep the projection honest.
@@ -3968,6 +4152,204 @@ fn order_by_references_field(stmt: &SelectStmt) -> bool {
     })
 }
 
+/// Collect bare column names referenced by an ORDER BY expression.
+/// Returns `false` (ineligible) when the expression contains anything
+/// that cannot be resolved against a stored document alone: function
+/// calls, subqueries, window calls, `*`, or a bare literal (which
+/// `PostgreSQL` would treat as an output-ordinal reference).
+fn collect_order_key_columns(expr: &Expr, out: &mut Vec<String>) -> bool {
+    match expr {
+        Expr::Column(name) => {
+            out.push(name.clone());
+            true
+        }
+        Expr::QualifiedColumn { column, .. } => {
+            out.push(column.clone());
+            true
+        }
+        Expr::Literal(_) | Expr::Param(_) => true,
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_order_key_columns(lhs, out) && collect_order_key_columns(rhs, out)
+        }
+        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => collect_order_key_columns(inner, out),
+        Expr::IsNull { expr, .. } => collect_order_key_columns(expr, out),
+        Expr::Between { expr, low, high } => {
+            collect_order_key_columns(expr, out)
+                && collect_order_key_columns(low, out)
+                && collect_order_key_columns(high, out)
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_order_key_columns(expr, out)
+                && list.iter().all(|item| collect_order_key_columns(item, out))
+        }
+        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => items
+            .iter()
+            .all(|item| collect_order_key_columns(item, out)),
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref()
+                .is_none_or(|b| collect_order_key_columns(b, out))
+                && when.iter().all(|(condition, result)| {
+                    collect_order_key_columns(condition, out)
+                        && collect_order_key_columns(result, out)
+                })
+                && else_branch
+                    .as_deref()
+                    .is_none_or(|e| collect_order_key_columns(e, out))
+        }
+        _ => false,
+    }
+}
+
+/// Fast path for `ORDER BY <document fields> [LIMIT k]`: evaluate the
+/// order keys straight off the stored documents, keep only the rows
+/// that survive OFFSET/LIMIT, and run the projection on those rows
+/// alone. Returns `Ok(None)` when an order key needs projected values
+/// (aliases, ordinals, functions, subqueries) so the caller can use
+/// the project-first fallback.
+fn run_doc_ordered_select(
+    engine: &Engine,
+    table: &str,
+    scored: &[ScoredEntry],
+    stmt: &SelectStmt,
+    params: &[SQLParam],
+) -> Result<Option<SQLResult>, SQLError> {
+    use uqa_execution::relational::{compare_sort_key_values, SortKey};
+
+    let columns = projection_columns(&stmt.projections);
+    // Ordinal ORDER BY (bare integer literal) refers to the projected
+    // output; leave it to the fallback.
+    if stmt
+        .order_by
+        .iter()
+        .any(|o| matches!(o.expr, Expr::Literal(_)))
+    {
+        return Ok(None);
+    }
+    let mut referenced = Vec::new();
+    for order in &stmt.order_by {
+        if !collect_order_key_columns(&order.expr, &mut referenced) {
+            return Ok(None);
+        }
+    }
+    // A referenced name that matches a projection alias must resolve
+    // to the projected value under PostgreSQL scoping rules - only
+    // safe here when the alias is the same bare column.
+    for name in &referenced {
+        if name == SCORE_COLUMN || name == DOC_ID_COLUMN {
+            continue;
+        }
+        for (idx, label) in columns.iter().enumerate() {
+            if label == name && !matches!(&stmt.projections[idx].expr, Expr::Column(c) if c == name)
+            {
+                return Ok(None);
+            }
+        }
+    }
+    let needs_score = referenced
+        .iter()
+        .any(|name| name == SCORE_COLUMN || name == DOC_ID_COLUMN);
+
+    let resolved_offset =
+        resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?.unwrap_or(0) as usize;
+    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?
+        .map(|limit| limit as usize);
+
+    let keys: Vec<SortKey> = stmt
+        .order_by
+        .iter()
+        .map(|o| SortKey {
+            expr: o.expr.clone(),
+            descending: o.descending,
+            nulls_first: o
+                .nulls
+                .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
+        })
+        .collect();
+
+    // Order keys read a known column set: fetch just those fields in
+    // one storage scan instead of materialising whole documents.
+    let doc_ids: Vec<DocId> = scored.iter().map(|entry| entry.doc_id).collect();
+    let mut key_fields: Vec<String> = referenced
+        .iter()
+        .filter(|name| name.as_str() != SCORE_COLUMN && name.as_str() != DOC_ID_COLUMN)
+        .cloned()
+        .collect();
+    key_fields.sort();
+    key_fields.dedup();
+    let field_refs: Vec<&str> = key_fields.iter().map(String::as_str).collect();
+    let field_values = engine.get_document_fields_multi(table, &doc_ids, &field_refs);
+    let mut decorated: Vec<(Vec<Value>, usize)> = Vec::with_capacity(scored.len());
+    for (idx, entry) in scored.iter().enumerate() {
+        let mut doc = Document::new();
+        if let Some(values) = field_values.get(&entry.doc_id) {
+            for (name, value) in key_fields.iter().zip(values) {
+                doc.insert(name.clone(), value.clone());
+            }
+        }
+        if needs_score {
+            doc.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
+            doc.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
+        }
+        let ctx = EvalContext::new(Some(&doc), params).with_engine(engine);
+        let mut key_vals = Vec::with_capacity(keys.len());
+        for key in &keys {
+            key_vals.push(eval(&key.expr, &ctx)?);
+        }
+        decorated.push((key_vals, idx));
+    }
+
+    // Partial selection when a LIMIT bounds the survivors, then a
+    // stable sort so equal keys keep their incoming doc-id order.
+    if let Some(limit) = resolved_limit {
+        let keep = resolved_offset.saturating_add(limit);
+        if keep < decorated.len() {
+            if keep == 0 {
+                decorated.clear();
+            } else {
+                decorated.select_nth_unstable_by(keep - 1, |(av, ai), (bv, bi)| {
+                    compare_sort_key_values(&keys, av, bv).then_with(|| ai.cmp(bi))
+                });
+                decorated.truncate(keep);
+            }
+        }
+    }
+    decorated.sort_by(|(av, ai), (bv, bi)| {
+        compare_sort_key_values(&keys, av, bv).then_with(|| ai.cmp(bi))
+    });
+    if resolved_offset > 0 {
+        let off = resolved_offset.min(decorated.len());
+        decorated.drain(0..off);
+    }
+    if let Some(limit) = resolved_limit {
+        decorated.truncate(limit);
+    }
+
+    // Materialise full documents only for the surviving rows.
+    let survivor_ids: Vec<DocId> = decorated
+        .iter()
+        .map(|(_, idx)| scored[*idx].doc_id)
+        .collect();
+    let documents = engine.get_documents_bulk(table, &survivor_ids);
+    let mut rows = Vec::with_capacity(decorated.len());
+    for (_, idx) in decorated {
+        let entry = &scored[idx];
+        let mut document = documents.get(&entry.doc_id).cloned().unwrap_or_default();
+        document.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
+        document.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
+        rows.push(build_projection_row(
+            Some(engine),
+            &document,
+            &stmt.projections,
+            params,
+        )?);
+    }
+    Ok(Some(SQLResult::from_rows(columns, rows)))
+}
+
 fn score_limited_text_filter(expr: Option<&Expr>) -> bool {
     let Some(Expr::Func { name, .. }) = expr else {
         return false;
@@ -4091,6 +4473,7 @@ fn run_joined_select(
         .collect::<Result<_, _>>()?;
     rows = apply_row_order_limit(rows, stmt, engine, params)?;
     let columns = expand_from_star_columns(
+        engine,
         projection_columns(&stmt.projections),
         &stmt.projections,
         from,
@@ -4163,7 +4546,16 @@ pub(super) fn apply_row_order_limit(
                     .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
             })
             .collect();
-        op = Box::new(Sort::new(op, keys, params.to_vec()));
+        // With a LIMIT the sort only has to surface the first
+        // OFFSET + LIMIT rows; the partial selection keeps the cost at
+        // O(n + k log k) instead of a full sort.
+        op = match resolved_limit {
+            Some(limit) => {
+                let keep = resolved_offset.unwrap_or(0).saturating_add(limit) as usize;
+                Box::new(Sort::with_keep(op, keys, params.to_vec(), keep))
+            }
+            None => Box::new(Sort::new(op, keys, params.to_vec())),
+        };
     }
 
     if resolved_offset.is_some() || resolved_limit.is_some() {
@@ -4273,9 +4665,11 @@ fn build_rows(
     projections: &[Projection],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let doc_ids: Vec<DocId> = scored.iter().map(|entry| entry.doc_id).collect();
+    let documents = engine.get_documents_bulk(table, &doc_ids);
     let mut rows = Vec::with_capacity(scored.len());
     for entry in scored {
-        let mut document = engine.get_document(table, entry.doc_id).unwrap_or_default();
+        let mut document = documents.get(&entry.doc_id).cloned().unwrap_or_default();
         document.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
         document.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
         let row = build_projection_row(Some(engine), &document, projections, params)?;

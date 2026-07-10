@@ -17,6 +17,66 @@ impl Engine {
         Self::open_with_connection(&conn)
     }
 
+    /// Classify the on-disk format of `path` without opening it: plain
+    /// `SQLite`, UQA compressed container (with its encryption flag), a
+    /// missing/empty file, or an unrecognized header (`SQLCipher`
+    /// databases fall here because `SQLCipher` encrypts the whole file).
+    pub fn detect_database_file(path: &Path) -> std::io::Result<uqa_storage::DatabaseFileFormat> {
+        uqa_storage::detect_database_file_format(path)
+    }
+
+    /// Open `path` with the variant its on-disk format calls for.
+    ///
+    /// - Missing/empty file: creates a new database, `SQLCipher`
+    ///   encrypted when `key` is provided, plaintext otherwise.
+    /// - Plain `SQLite`: opens plaintext; providing a key is an error
+    ///   ([`SQLiteError::NotEncrypted`]) rather than a silent no-op so
+    ///   callers never believe an unencrypted database is protected.
+    /// - Compressed container: opens with the codec recorded in the
+    ///   container header; the encryption flag decides whether `key`
+    ///   is required ([`SQLiteError::EncryptionKeyRequired`]) or
+    ///   rejected ([`SQLiteError::NotEncrypted`]).
+    /// - Unrecognized header: treated as `SQLCipher` when `key` is
+    ///   provided; without a key this fails with
+    ///   [`SQLiteError::EncryptionKeyRequired`] because an encrypted
+    ///   database cannot be told apart from a foreign file.
+    ///
+    /// New compressed containers are not created through this entry
+    /// point; use [`Engine::open_compressed`] or
+    /// [`Engine::open_compressed_encrypted`] to choose compression for
+    /// a new database.
+    pub fn open_auto(path: &Path, key: Option<&str>) -> Result<Self, SQLiteError> {
+        use uqa_storage::DatabaseFileFormat;
+        let key = match key {
+            Some("") => return Err(SQLiteError::EmptyEncryptionKey),
+            other => other,
+        };
+        match uqa_storage::detect_database_file_format(path)? {
+            DatabaseFileFormat::Missing => match key {
+                Some(key) => Self::open_encrypted(path, key),
+                None => Self::open(path),
+            },
+            DatabaseFileFormat::PlainSQLite => match key {
+                Some(_) => Err(SQLiteError::NotEncrypted),
+                None => Self::open(path),
+            },
+            DatabaseFileFormat::CompressedContainer { encrypted: true } => match key {
+                Some(key) => {
+                    Self::open_compressed_encrypted(path, key, SQLiteCompressionOptions::default())
+                }
+                None => Err(SQLiteError::EncryptionKeyRequired),
+            },
+            DatabaseFileFormat::CompressedContainer { encrypted: false } => match key {
+                Some(_) => Err(SQLiteError::NotEncrypted),
+                None => Self::open_compressed(path, SQLiteCompressionOptions::default()),
+            },
+            DatabaseFileFormat::Unrecognized => match key {
+                Some(key) => Self::open_encrypted(path, key),
+                None => Err(SQLiteError::EncryptionKeyRequired),
+            },
+        }
+    }
+
     /// SQLCipher-backed engine. Applies `key` before any catalog
     /// access, runs migrations, and rebuilds the in-memory table
     /// registry from the encrypted catalog.
@@ -89,6 +149,11 @@ impl Engine {
             sql_scalar_functions: RwLock::new(BTreeMap::new()),
             sql_table_functions: RwLock::new(BTreeMap::new()),
             sql_aggregate_functions: RwLock::new(BTreeMap::new()),
+            sql_user_functions: RwLock::new(BTreeMap::new()),
+            sql_notices: parking_lot::Mutex::new(Vec::new()),
+            sql_function_depth_limit: std::sync::atomic::AtomicUsize::new(
+                super::SQL_FUNCTION_DEPTH_LIMIT,
+            ),
         };
         let catalog = engine.catalog.as_ref().expect("persistent catalog").clone();
         let backend = engine.backend.as_ref().expect("persistent backend").clone();
@@ -152,6 +217,9 @@ impl Engine {
                 column_stats_dirty: AtomicBool::new(false),
                 table_checks: RwLock::new(Vec::new()),
                 foreign_keys: RwLock::new(Vec::new()),
+                value_indexes: RwLock::new(BTreeMap::new()),
+                doc_count_cache: std::sync::atomic::AtomicU64::new(0),
+                doc_count_dirty: AtomicBool::new(true),
             };
             self.tables.write().insert(schema.name, Arc::new(table));
         }
@@ -204,6 +272,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_metadata(catalog)?;
         self.restore_views_from_metadata(catalog)?;
+        self.restore_sql_functions_from_metadata(catalog)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
@@ -429,6 +498,23 @@ impl Engine {
                 }
                 _ => {}
             }
+        }
+        // Step 4: restore the per-graph AGE label registries. The
+        // persisted metadata is authoritative (it survives deletion of
+        // every entity of a label); deriving label ids from existing
+        // entity ids (`id >> 48`) self-heals missing metadata.
+        for (graph_name, store) in graphs.iter_mut() {
+            let key = format!("{}{graph_name}", super::GRAPH_LABELS_METADATA_PREFIX);
+            if let Ok(Some(json)) = catalog.get_metadata(&key) {
+                if !json.is_empty() {
+                    if let Ok(registry) =
+                        serde_json::from_str::<uqa_graph::GraphLabelRegistry>(&json)
+                    {
+                        store.import_label_registry(graph_name, &registry);
+                    }
+                }
+            }
+            store.rebuild_label_registry_from_ids(graph_name);
         }
         Ok(())
     }

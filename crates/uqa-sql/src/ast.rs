@@ -188,6 +188,170 @@ pub enum DropKind {
     Schema,
 }
 
+/// Parameter mode of a `CREATE FUNCTION` / `CREATE PROCEDURE`
+/// argument. Mirrors `PostgreSQL`'s `FunctionParameterMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FunctionParamMode {
+    /// `IN` (also the default when no mode is written).
+    In,
+    /// `OUT` - shapes the result row, not part of a function's call
+    /// signature (but part of a procedure's).
+    Out,
+    /// `INOUT` - accepted as input and returned in the result row.
+    InOut,
+    /// `RETURNS TABLE (col type, ...)` column. Behaves like an `OUT`
+    /// parameter of a set-returning function.
+    Table,
+}
+
+/// One declared parameter of a user-defined function or procedure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionParam {
+    /// Parameter name. Empty for unnamed parameters (`f(integer)`),
+    /// which are only addressable as `$n`.
+    pub name: String,
+    /// Raw type name as written (last segment, lower-cased by the
+    /// compiler; e.g. `int4`, `text`, `numeric`).
+    pub type_name: String,
+    pub mode: FunctionParamMode,
+    /// `DEFAULT <expr>` for trailing input parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Expr>,
+}
+
+/// Declared result shape of a user-defined function.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionReturns {
+    /// Procedures and functions whose result is shaped purely by
+    /// `OUT` parameters carry no explicit `RETURNS` clause.
+    None,
+    /// `RETURNS <type>` - includes `RETURNS void` and `RETURNS record`.
+    Scalar { type_name: String },
+    /// `RETURNS SETOF <type>`.
+    SetOf { type_name: String },
+    /// `RETURNS TABLE (...)`. The column list lives in
+    /// [`CreateFunction::params`] as [`FunctionParamMode::Table`]
+    /// entries; this variant just records the set-returning shape.
+    Table,
+}
+
+/// `IMMUTABLE` / `STABLE` / `VOLATILE` marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FunctionVolatility {
+    Immutable,
+    Stable,
+    #[default]
+    Volatile,
+}
+
+/// Body of a user-defined routine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionBody {
+    /// `AS $$ ... $$` - raw source text, parsed per language at
+    /// registration time.
+    Source(String),
+    /// SQL-standard body (`BEGIN ATOMIC ... END` / `RETURN expr`)
+    /// compiled straight to statements.
+    Statements(Vec<Statement>),
+}
+
+/// `CREATE [OR REPLACE] FUNCTION | PROCEDURE`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateFunction {
+    pub name: String,
+    pub or_replace: bool,
+    pub is_procedure: bool,
+    pub params: Vec<FunctionParam>,
+    pub returns: FunctionReturns,
+    /// Lower-cased language name (`plpgsql`, `sql`).
+    pub language: String,
+    pub body: FunctionBody,
+    pub volatility: FunctionVolatility,
+    /// `STRICT` / `RETURNS NULL ON NULL INPUT` - the function is not
+    /// invoked when any input argument is NULL; the result is NULL.
+    pub strict: bool,
+}
+
+impl CreateFunction {
+    /// Number of call-signature parameters: `IN` + `INOUT` for
+    /// functions; every non-TABLE parameter for procedures (callers
+    /// pass placeholder arguments for procedure `OUT` parameters,
+    /// matching `PostgreSQL` 14+).
+    pub fn signature_arity(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|p| self.is_signature_param(p))
+            .count()
+    }
+
+    /// Number of signature parameters without a `DEFAULT`.
+    pub fn required_arity(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|p| self.is_signature_param(p) && p.default.is_none())
+            .count()
+    }
+
+    fn is_signature_param(&self, p: &FunctionParam) -> bool {
+        match p.mode {
+            FunctionParamMode::In | FunctionParamMode::InOut => true,
+            FunctionParamMode::Out => self.is_procedure,
+            FunctionParamMode::Table => false,
+        }
+    }
+
+    /// Signature parameters in declaration order.
+    pub fn signature_params(&self) -> Vec<&FunctionParam> {
+        self.params
+            .iter()
+            .filter(|p| self.is_signature_param(p))
+            .collect()
+    }
+
+    /// Parameters that shape the result row: `OUT` + `INOUT` +
+    /// `RETURNS TABLE` columns, in declaration order.
+    pub fn output_params(&self) -> Vec<&FunctionParam> {
+        self.params
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.mode,
+                    FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
+                )
+            })
+            .collect()
+    }
+
+    /// True when the routine produces a row set (`RETURNS SETOF` /
+    /// `RETURNS TABLE`).
+    pub fn returns_set(&self) -> bool {
+        matches!(
+            self.returns,
+            FunctionReturns::SetOf { .. } | FunctionReturns::Table
+        )
+    }
+}
+
+/// One `DROP FUNCTION` / `DROP PROCEDURE` target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DropFunctionItem {
+    pub name: String,
+    /// `Some(types)` when the statement spelled an argument list
+    /// (`DROP FUNCTION f(int, int)` - matched by arity, the type
+    /// names feed error messages); `None` for the bare-name form
+    /// (`DROP FUNCTION f`).
+    pub arg_types: Option<Vec<String>>,
+}
+
+/// `DROP FUNCTION [IF EXISTS] name[(argtypes)] [, ...]` and the
+/// `DROP PROCEDURE` equivalent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DropFunctionStmt {
+    pub is_procedure: bool,
+    pub if_exists: bool,
+    pub items: Vec<DropFunctionItem>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTableStmt {
     pub table: String,
@@ -365,12 +529,19 @@ pub enum FromClause {
     },
     /// `FROM <fn>(<args>) [AS <alias>(<col_aliases>)]` -- e.g.
     /// `generate_series(1, 5)`, `unnest(arr)`, `regexp_split_to_table`,
-    /// `json_each(...)`. The engine dispatches by name.
+    /// `json_each(...)`, `cypher(...) AS (col agtype, ...)`. The engine
+    /// dispatches by name.
     Function {
         name: String,
         args: Vec<Expr>,
         alias: Option<String>,
         column_aliases: Vec<String>,
+        /// Declared column types when the alias used a column
+        /// definition list (`AS (col agtype, n int)`); empty when the
+        /// alias only renamed columns. Type names are lowercased
+        /// `PostgreSQL` internal names (`agtype`, `int4`, `text`, ...).
+        #[serde(default)]
+        column_types: Vec<String>,
     },
     /// `FROM (SELECT ...) AS <alias>` -- subquery as a relation.
     /// The body re-runs as if a CTE; the alias renames the result
@@ -739,6 +910,22 @@ pub enum Statement {
     /// `MERGE INTO target USING source ON cond WHEN MATCHED THEN ...
     /// WHEN NOT MATCHED THEN ...`. SQL:2003 conditional UPSERT.
     Merge(MergeStmt),
+    /// `CREATE [OR REPLACE] FUNCTION | PROCEDURE ...`. Boxed: the
+    /// definition (parameters + body source) dwarfs other variants.
+    CreateFunction(Box<CreateFunction>),
+    /// `DROP FUNCTION | PROCEDURE [IF EXISTS] name[(args)] [, ...]`.
+    DropFunction(DropFunctionStmt),
+    /// `DO [LANGUAGE lang] $$ ... $$` - anonymous code block.
+    DoBlock {
+        language: String,
+        body: String,
+    },
+    /// `CALL proc(args)` - procedure invocation. `OUT` / `INOUT`
+    /// parameters shape the result row.
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

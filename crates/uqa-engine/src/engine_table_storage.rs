@@ -99,6 +99,10 @@ impl Engine {
         };
         let analyzer = table.analyzer.read().clone();
         *table.document_store.write() = backend.document_store(table_name);
+        table
+            .doc_count_dirty
+            .store(true, std::sync::atomic::Ordering::Release);
+        Self::value_indexes_clear(table);
         *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
 
         let analyzer_rows: Vec<(String, String, String)> = self
@@ -511,6 +515,7 @@ impl Engine {
         let Some(t) = self.table(table) else {
             return Ok(false);
         };
+        Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
             cols.retain(|c| c.name != column);
@@ -613,6 +618,7 @@ impl Engine {
         let Some(t) = self.table(table) else {
             return Ok(false);
         };
+        Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
             for c in cols.iter_mut() {
@@ -790,6 +796,38 @@ impl Engine {
         got
     }
 
+    /// Fetch many documents in one storage round trip. Ids without a
+    /// stored document are absent from the result. Persistent backends
+    /// batch the reads; the memory backend falls back to per-id gets.
+    pub(crate) fn get_documents_bulk(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+    ) -> BTreeMap<DocId, Document> {
+        let Some(t) = self.table(table) else {
+            return BTreeMap::new();
+        };
+        let got = t.document_store.read().get_many(doc_ids);
+        got
+    }
+
+    /// Fetch a column projection for many documents in one round trip.
+    /// The value vector aligns with `fields`; missing fields are Null.
+    /// Persistent backends extract the fields inside the storage scan
+    /// so whole documents never materialise.
+    pub(crate) fn get_document_fields_multi(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+        fields: &[&str],
+    ) -> BTreeMap<DocId, Vec<Value>> {
+        let Some(t) = self.table(table) else {
+            return BTreeMap::new();
+        };
+        let got = t.document_store.read().get_fields_multi(doc_ids, fields);
+        got
+    }
+
     pub(crate) fn get_document_fields(
         &self,
         table: &str,
@@ -906,8 +944,13 @@ impl Engine {
             doc.insert(k, v);
         }
         // Re-add the document so the inverted index picks up the new
-        // text fields.
+        // text fields. Unindex the old field values first; the re-add
+        // path indexes the new ones.
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         t.document_store.write().delete(doc_id);
+        if let Some(old) = old_indexed.as_ref() {
+            Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
+        }
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
@@ -962,8 +1005,21 @@ impl Engine {
             }
         }
 
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         if !t.document_store.write().patch_fields(doc_id, updates) {
             return false;
+        }
+        if let Some(old) = old_indexed.as_ref() {
+            // New values for the indexed fields: the update wins,
+            // untouched fields keep their old value.
+            let new: BTreeMap<String, Value> = old
+                .iter()
+                .map(|(field, old_value)| {
+                    let value = updates.get(field).cloned().unwrap_or(old_value.clone());
+                    (field.clone(), value)
+                })
+                .collect();
+            Self::value_indexes_apply_write(&t, doc_id, Some(old), Some(&new));
         }
 
         if touches_fts {
@@ -1008,7 +1064,11 @@ impl Engine {
                 vectors.insert(field, values);
             }
         }
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         t.document_store.write().delete(doc_id);
+        if let Some(old) = old_indexed.as_ref() {
+            Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
+        }
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
@@ -1023,7 +1083,11 @@ impl Engine {
         let Some(t) = self.table(table) else {
             return;
         };
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         t.document_store.write().delete(doc_id);
+        if let Some(old) = old_indexed.as_ref() {
+            Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
+        }
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);

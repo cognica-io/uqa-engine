@@ -11,6 +11,7 @@ pub mod catalog;
 mod catalog_lifecycle;
 pub mod compressed_vfs;
 pub mod connection;
+pub mod detect;
 pub mod document_store;
 pub mod inverted_index;
 pub mod vector_index;
@@ -22,6 +23,7 @@ pub use crate::catalog::{
 pub use catalog::{Catalog, CURRENT_SCHEMA_VERSION};
 pub use compressed_vfs::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 pub use connection::{ManagedConnection, Result, SQLiteError};
+pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
 pub use vector_index::{SQLiteIVFIndex, SQLiteVectorIndex};

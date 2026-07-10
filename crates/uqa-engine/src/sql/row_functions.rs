@@ -862,6 +862,104 @@ pub(super) fn run_graph_drop(
     Ok(Vec::new())
 }
 
+/// Apache AGE graph name validation: at least 3 characters and the
+/// first character must be a letter or underscore.
+fn age_graph_name_is_valid(name: &str) -> bool {
+    name.len() >= 3
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+}
+
+fn eval_age_graph_name(
+    engine: &Engine,
+    expr: &Expr,
+    params: &[SQLParam],
+) -> Result<String, SQLError> {
+    let ctx = EvalContext::new(None, params).with_engine(engine);
+    match eval(expr, &ctx)? {
+        Value::Null => Err(SQLError::Unsupported("graph name can not be NULL".into())),
+        Value::Str(s) => Ok(s),
+        other => Err(SQLError::TypeMismatch(format!(
+            "graph name must be a string, got {other:?}"
+        ))),
+    }
+}
+
+/// `SELECT create_graph('name')` with AGE 1.6.0 semantics: validates
+/// the name, rejects duplicates, and returns void (SQL NULL).
+pub(super) fn run_age_create_graph(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    if args.len() != 1 {
+        return Err(SQLError::BadArity {
+            name: "create_graph".into(),
+            expected: "1".into(),
+            actual: args.len(),
+        });
+    }
+    let name = eval_age_graph_name(engine, &args[0], params)?;
+    if !age_graph_name_is_valid(&name) {
+        return Err(SQLError::Unsupported("graph name is invalid".into()));
+    }
+    if engine.has_graph(&name) {
+        return Err(SQLError::Unsupported(format!(
+            "graph \"{name}\" already exists"
+        )));
+    }
+    engine.create_graph(name);
+    Ok(Value::Null)
+}
+
+/// `SELECT drop_graph('name'[, cascade])` with AGE 1.6.0 semantics:
+/// without `cascade => true` the drop always fails (the graph schema
+/// always contains its label tables), and success returns void.
+pub(super) fn run_age_drop_graph(
+    engine: &Engine,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(SQLError::BadArity {
+            name: "drop_graph".into(),
+            expected: "1 or 2".into(),
+            actual: args.len(),
+        });
+    }
+    let name = eval_age_graph_name(engine, &args[0], params)?;
+    if !engine.has_graph(&name) {
+        return Err(SQLError::Unsupported(format!(
+            "graph \"{name}\" does not exist"
+        )));
+    }
+    let cascade = match args.get(1) {
+        Some(expr) => {
+            let ctx = EvalContext::new(None, params).with_engine(engine);
+            match eval(expr, &ctx)? {
+                Value::Bool(b) => b,
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "drop_graph.cascade must be a boolean, got {other:?}"
+                    )));
+                }
+            }
+        }
+        None => false,
+    };
+    if !cascade {
+        // AGE maps this onto `DROP SCHEMA <name> RESTRICT`, which
+        // always fails because the label tables live in the schema.
+        return Err(SQLError::Unsupported(format!(
+            "cannot drop schema {name} because other objects depend on it"
+        )));
+    }
+    engine.drop_graph(&name);
+    Ok(Value::Null)
+}
+
 /// `graph_edges(graph [, label])` -- emit one entry per edge in the
 /// named graph. The `doc_id` carries the edge id; the score is the
 /// raw edge weight (`1.0` when no `weight` property is present).

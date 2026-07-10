@@ -26,6 +26,32 @@ Hardware: Apple silicon macOS workstation, default `cargo bench` release profile
 
 The hash-join path on `sql_inner_join_10k_x_1k` came down from ~3.46 s (nested-loop fallback) to ~10 ms (~340x speedup) once the engine detects the equijoin shape. That single rewrite is the biggest single performance win in this implementation; if you regress past 50 ms here the hash detector probably stopped firing.
 
+## Persistent (SQLite-backed) baselines
+
+`sql_sqlite_e2e` measures end-to-end SQL through `Engine::open` on a
+temp file, 10k rows, release profile, warm value indexes. These are the
+numbers that regressed unnoticed while every engine bench ran in-memory.
+
+| Workload | Bench member | Result |
+| --- | --- | --- |
+| count(*) (cached doc count) | `sqlite_e2e/count_star_10k` | ~0.7 us |
+| PK point select | `sqlite_e2e/pk_point_select_10k` | ~38 us |
+| Indexed equality filter | `sqlite_e2e/indexed_eq_filter_10k` | ~82 us |
+| Indexed filter + ORDER BY + LIMIT | `sqlite_e2e/indexed_filter_order_limit_10k` | ~400 us |
+| ORDER BY + LIMIT, unindexed column | `sqlite_e2e/order_limit_unindexed_10k` | ~19 ms |
+| GROUP BY (50 groups) | `sqlite_e2e/group_by_10k` | ~26 ms |
+| Filtered join (10k x 50) | `sqlite_e2e/filtered_join_10k_x_50` | ~280 us |
+| INSERT batch of 500 | `sqlite_e2e_write/insert_batch_500` | ~7 ms |
+| Point UPDATE via PK index | `sqlite_e2e_write/point_update_indexed` | ~250 us |
+
+At 300k rows the same paths went from `count(*)` 3.5 s / PK select
+346 ms / filtered join 1.24 s / `ORDER BY LIMIT` 6.9 s / point UPDATE
+1.47 s before the value-index + bulk-read work to 0.06 ms / under 2 ms /
+12 ms / 590 ms / 2-7 ms respectively (usql `\timing`, release). Lazy
+per-column index builds cost one bulk field scan (~0.4-0.5 s per column
+at 300k rows) on first use after open and are maintained incrementally
+afterwards.
+
 ## How to refresh
 
 1. `cargo bench --workspace --no-run` — confirms every bench compiles.

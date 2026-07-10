@@ -25,6 +25,10 @@ pub enum SQLiteError {
     SQLite(#[from] rusqlite::Error),
     #[error("encryption key must not be empty")]
     EmptyEncryptionKey,
+    #[error("database requires an encryption key")]
+    EncryptionKeyRequired,
+    #[error("database is not encrypted but an encryption key was provided")]
+    NotEncrypted,
     #[error("compressed sqlite container error: {0}")]
     CompressedContainer(String),
     #[error("io error: {0}")]

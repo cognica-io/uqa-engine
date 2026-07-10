@@ -87,6 +87,8 @@ mod engine_table_storage;
 mod engine_tables;
 mod engine_transactions;
 mod engine_truncate;
+mod engine_user_functions;
+mod value_index;
 
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::path::Path;
@@ -113,11 +115,12 @@ use uqa_storage::{
     document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
-    PersistentVectorIndexParams, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
-    StorageBackendError, StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
+    PersistentVectorIndexParams, SQLiteStorageBackend, StorageBackendError, StorageBackendResult,
+    TableSchema, VectorFieldSchema, VectorIndex,
 };
 
 pub use uqa_sql::{SQLParam, SQLResult};
+pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
 pub use functions::{
     SQLAggregateFunction, SQLAggregateState, SQLScalarFunction, SQLTableFunction,
@@ -126,7 +129,15 @@ pub use functions::{
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const VIEWS_METADATA_KEY: &str = "sql_views_json";
+/// Metadata key prefix for per-graph AGE label registries
+/// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
+const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
+const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
+/// Default nesting cap for user-defined function calls. Exceeding it
+/// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
+/// `max_stack_depth` guard.
+const SQL_FUNCTION_DEPTH_LIMIT: usize = 128;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -257,6 +268,16 @@ pub struct Engine {
     sql_table_functions: RwLock<BTreeMap<String, Arc<dyn SQLTableFunction>>>,
     /// Engine-local Rust aggregate SQL functions.
     sql_aggregate_functions: RwLock<BTreeMap<String, Arc<dyn SQLAggregateFunction>>>,
+    /// User-defined SQL / PL/pgSQL routines from `CREATE FUNCTION` /
+    /// `CREATE PROCEDURE`, keyed by lower-cased name. Each entry
+    /// holds the overload set for that name. Definitions persist to
+    /// catalog metadata; compiled bodies are rebuilt on restore.
+    sql_user_functions: RwLock<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>,
+    /// `RAISE NOTICE` / `WARNING` / ... sink: `(level, message)`
+    /// pairs in emission order, drained by [`Engine::take_sql_notices`].
+    sql_notices: parking_lot::Mutex<Vec<(String, String)>>,
+    /// Nesting cap for user-defined routine calls.
+    sql_function_depth_limit: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Default)]
@@ -349,6 +370,16 @@ struct TableState {
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
     foreign_keys: RwLock<Vec<uqa_sql::ast::ForeignKey>>,
+    /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
+    /// / `CREATE INDEX` btree columns. Maintained incrementally by the
+    /// document write paths; cleared on bulk reloads.
+    value_indexes: RwLock<BTreeMap<FieldName, value_index::ColumnValueIndex>>,
+    /// Cached `document_store.len()`. Persistent stores answer `len`
+    /// with a `COUNT(*)` query, which used to run once per SQL
+    /// statement for planner row estimates; the cache is invalidated
+    /// by every write and recomputed on demand.
+    doc_count_cache: std::sync::atomic::AtomicU64,
+    doc_count_dirty: AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -477,6 +508,9 @@ impl Engine {
             sql_scalar_functions: RwLock::new(BTreeMap::new()),
             sql_table_functions: RwLock::new(BTreeMap::new()),
             sql_aggregate_functions: RwLock::new(BTreeMap::new()),
+            sql_user_functions: RwLock::new(BTreeMap::new()),
+            sql_notices: parking_lot::Mutex::new(Vec::new()),
+            sql_function_depth_limit: std::sync::atomic::AtomicUsize::new(SQL_FUNCTION_DEPTH_LIMIT),
         }
     }
 
@@ -538,6 +572,13 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
     fn has_scalar_functions(&self) -> bool {
         self.has_registered_scalar_functions()
+    }
+    fn call_user_function(
+        &self,
+        name: &str,
+        args: &[(Option<String>, Value)],
+    ) -> Option<std::result::Result<Value, SQLError>> {
+        crate::sql::call_user_scalar_function(self, name, args)
     }
     fn run_subquery(
         &self,

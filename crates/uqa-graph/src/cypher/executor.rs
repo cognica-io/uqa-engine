@@ -7,26 +7,29 @@
 //! Read-only Cypher executor: walks a `CypherQuery` AST and lowers it
 //! onto graph operators against a [`GraphStore`].
 //!
-//! Supported clauses: `MATCH` (node, 1-hop rel, variable-length rel),
-//! `OPTIONAL MATCH`, `WHERE`, `RETURN` (with `DISTINCT`, `ORDER BY`,
-//! `SKIP`, `LIMIT`), and `WITH` as a RETURN-as-pipeline step. Function
-//! calls cover the basic aggregates (`count`, `sum`, `avg`, `min`,
-//! `max`, `collect`) and a small set of scalar helpers (`length`,
-//! `id`, `labels`, `type`, `keys`, `toUpper`, `toLower`).
+//! Semantics follow Apache AGE 1.6.0 (verified against a live
+//! container): agtype total ordering for `ORDER BY` and comparisons,
+//! three-valued boolean logic with strict boolean inputs, C-style
+//! integer division / modulo (`n % 0` returns `n`, matching AGE),
+//! float `^` power, end-exclusive list slices, end-inclusive
+//! `range()`, byte-length `size()` on strings, unanchored `=~`, and
+//! graph entities that render as `::vertex` / `::edge` / `::path`.
 //!
-//! Mutation clauses (`CREATE`, `SET`, `MERGE`, `DELETE`, `UNWIND`)
-//! land in a follow-up slice; the executor returns
-//! `CypherError::Unsupported` for those.
+//! Supported clauses: `MATCH` (node, 1-hop rel, variable-length rel,
+//! path variables), `OPTIONAL MATCH`, `WHERE`, `RETURN` (with
+//! `DISTINCT`, `ORDER BY`, `SKIP`, `LIMIT`), and `WITH`. Mutation
+//! clauses live in [`crate::cypher::writer::CypherWriter`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{Edge, EdgeId, Value, Vertex, VertexId};
 
+use crate::agtype;
 use crate::cypher::ast::{
     BinaryOp, CaseExpr, CypherClause, CypherExpr, CypherQuery, FunctionCall, InList, IsNotNull,
-    IsNull, ListIndex, ListLiteral, Literal, MatchClause, NodePattern, OrderByItem, Parameter,
-    PathElement, PathPattern, PropertyAccess, RelDirection, RelPattern, ReturnItem, UnaryOp,
-    Variable,
+    IsNull, ListComprehension, ListIndex, ListLiteral, ListSlice, Literal, MapLiteral, MatchClause,
+    NodePattern, OrderByItem, Parameter, PathElement, PathPattern, PropertyAccess, RelDirection,
+    RelPattern, ReturnItem, UnaryOp, Variable,
 };
 use crate::store::GraphStore;
 use crate::types::Direction;
@@ -47,37 +50,34 @@ impl Binding {
         match self {
             Binding::Vertex(v) => v.properties.get(key).cloned().unwrap_or(Value::Null),
             Binding::Edge(e) => e.properties.get(key).cloned().unwrap_or(Value::Null),
-            Binding::Value(Value::Map(m)) => m.get(key).cloned().unwrap_or(Value::Null),
-            _ => Value::Null,
+            Binding::Value(v) => value_property(v, key).unwrap_or(Value::Null),
+            Binding::EdgeList(_) => Value::Null,
         }
     }
 
     fn to_value(&self) -> Value {
         match self {
-            Binding::Vertex(v) => {
-                let mut m = v.properties.clone();
-                m.insert("_id".into(), Value::Int(v.vertex_id as i64));
-                m.insert("_label".into(), Value::Str(v.label.clone()));
-                m.insert("_kind".into(), Value::Str("vertex".into()));
-                Value::Map(m)
-            }
-            Binding::Edge(e) => {
-                let mut m = e.properties.clone();
-                m.insert("_id".into(), Value::Int(e.edge_id as i64));
-                m.insert("_label".into(), Value::Str(e.label.clone()));
-                m.insert("_source".into(), Value::Int(e.source_id as i64));
-                m.insert("_target".into(), Value::Int(e.target_id as i64));
-                m.insert("_kind".into(), Value::Str("edge".into()));
-                Value::Map(m)
-            }
+            Binding::Vertex(v) => agtype::vertex_to_value(v),
+            Binding::Edge(e) => agtype::edge_to_value(e),
             Binding::Value(v) => v.clone(),
-            Binding::EdgeList(edges) => Value::List(
-                edges
-                    .iter()
-                    .map(|e| Binding::Edge(e.clone()).to_value())
-                    .collect(),
-            ),
+            Binding::EdgeList(edges) => {
+                Value::List(edges.iter().map(agtype::edge_to_value).collect())
+            }
         }
+    }
+}
+
+/// Property lookup on an evaluated value (map, entity envelope, or
+/// null). `None` signals "not addressable" so callers can raise AGE's
+/// `scalar object must be a vertex or edge` error.
+fn value_property(value: &Value, key: &str) -> Option<Value> {
+    if let Some(props) = agtype::entity_properties(value) {
+        return Some(props.get(key).cloned().unwrap_or(Value::Null));
+    }
+    match value {
+        Value::Map(map) => Some(map.get(key).cloned().unwrap_or(Value::Null)),
+        Value::Null => Some(Value::Null),
+        _ => None,
     }
 }
 
@@ -95,7 +95,7 @@ pub enum CypherError {
     UndefinedParameter(String),
     #[error("unsupported clause: {0}")]
     Unsupported(String),
-    #[error("type error: {0}")]
+    #[error("{0}")]
     TypeError(String),
     #[error("parse error: {0}")]
     Parse(String),
@@ -107,11 +107,39 @@ impl From<crate::cypher::parser::ParseError> for CypherError {
     }
 }
 
+fn boolean_cast_error(value: &Value) -> CypherError {
+    CypherError::TypeError(format!(
+        "cannot cast agtype {} to type boolean",
+        agtype::agtype_type_name(value)
+    ))
+}
+
+/// Strict boolean coercion (AGE): booleans pass through, null is
+/// three-valued unknown, anything else raises a cast error.
+fn strict_bool(value: &Value) -> Result<Option<bool>, CypherError> {
+    match value {
+        Value::Bool(b) => Ok(Some(*b)),
+        Value::Null => Ok(None),
+        other => Err(boolean_cast_error(other)),
+    }
+}
+
 /// Read-only execution context.
 pub struct CypherExecutor<'a, G: GraphStore> {
     pub store: &'a G,
     pub graph: &'a str,
     pub params: BTreeMap<String, Value>,
+}
+
+/// Intermediate state while a path pattern binds: the row so far, the
+/// vertex the pattern currently stands on (anonymous nodes have no
+/// variable to look up), and the ordered vertex / edge trail (for
+/// `p = (...)` path variables).
+#[derive(Debug, Clone)]
+struct MatchState {
+    row: BindingRow,
+    position: Option<Vertex>,
+    trail: Vec<Value>,
 }
 
 impl<'a, G: GraphStore> CypherExecutor<'a, G> {
@@ -149,18 +177,16 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                         w.limit.as_ref(),
                         &bindings,
                     )?;
-                    if let Some(filter) = &w.r#where {
-                        bindings = projected
-                            .into_iter()
-                            .filter(|row| self.where_passes(filter, row).unwrap_or(false))
-                            .map(|row| Self::row_to_bindings(&cols, &row))
-                            .collect();
-                    } else {
-                        bindings = projected
-                            .into_iter()
-                            .map(|row| Self::row_to_bindings(&cols, &row))
-                            .collect();
+                    let mut next = Vec::with_capacity(projected.len());
+                    for row in projected {
+                        if let Some(filter) = &w.r#where {
+                            if !self.where_passes(filter, &row)? {
+                                continue;
+                            }
+                        }
+                        next.push(Self::row_to_bindings(&cols, &row));
                     }
+                    bindings = next;
                 }
                 CypherClause::Return(r) => {
                     let (cols, ret_rows) = self.exec_return_like(
@@ -222,14 +248,26 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     break;
                 }
             }
+            if let Some(filter) = &clause.r#where {
+                let mut filtered = Vec::with_capacity(current.len());
+                for candidate in current {
+                    if self.eval_predicate(filter, &candidate)? {
+                        filtered.push(candidate);
+                    }
+                }
+                current = filtered;
+            }
             if current.is_empty() && clause.optional {
-                next.push(row.clone());
+                // OPTIONAL MATCH pads unmatched rows with explicit null
+                // bindings for every variable the patterns declare.
+                let mut padded = row.clone();
+                for var in pattern_variables(&clause.patterns) {
+                    padded.entry(var).or_insert(Binding::Value(Value::Null));
+                }
+                next.push(padded);
             } else {
                 next.extend(current);
             }
-        }
-        if let Some(filter) = &clause.r#where {
-            next.retain(|row| self.eval_predicate(filter, row).unwrap_or(false));
         }
         Ok(next)
     }
@@ -239,39 +277,46 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         pattern: &PathPattern,
         seed: &BindingRow,
     ) -> Result<Vec<BindingRow>, CypherError> {
-        let mut frontier: Vec<BindingRow> = vec![seed.clone()];
-        let mut last_var: Option<String> = None;
+        let mut frontier: Vec<MatchState> = vec![MatchState {
+            row: seed.clone(),
+            position: None,
+            trail: Vec::new(),
+        }];
         let mut idx = 0;
         while idx < pattern.elements.len() {
             match &pattern.elements[idx] {
                 PathElement::Node(np) => {
-                    frontier = self.bind_node(np, &frontier, last_var.as_deref())?;
-                    last_var.clone_from(&np.variable);
+                    frontier = self.bind_node(np, &frontier)?;
                     idx += 1;
                 }
                 PathElement::Rel(rp) => {
                     let Some(PathElement::Node(next_node)) = pattern.elements.get(idx + 1) else {
                         return Err(CypherError::Unsupported("path must end on a node".into()));
                     };
-                    let prev = last_var.as_deref().ok_or_else(|| {
-                        CypherError::Unsupported("relationship without prior node".into())
-                    })?;
-                    frontier = self.traverse_rel(rp, next_node, &frontier, prev)?;
-                    last_var.clone_from(&next_node.variable);
+                    frontier = self.traverse_rel(rp, next_node, frontier)?;
                     idx += 2;
                 }
             }
         }
-        Ok(frontier)
+        let mut out = Vec::with_capacity(frontier.len());
+        for state in frontier {
+            let mut row = state.row;
+            if let Some(path_var) = &pattern.variable {
+                row.insert(
+                    path_var.clone(),
+                    Binding::Value(agtype::path_to_value(state.trail)),
+                );
+            }
+            out.push(row);
+        }
+        Ok(out)
     }
 
     fn bind_node(
         &self,
         np: &NodePattern,
-        rows: &[BindingRow],
-        prior_var: Option<&str>,
-    ) -> Result<Vec<BindingRow>, CypherError> {
-        let mut out = Vec::new();
+        states: &[MatchState],
+    ) -> Result<Vec<MatchState>, CypherError> {
         // Candidate vertex set: by label if specified, else everything in the graph.
         let candidate_ids: Vec<VertexId> = if let Some(label) = np.labels.first() {
             self.store
@@ -286,31 +331,43 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 .collect()
         };
 
-        for row in rows {
+        let mut out = Vec::new();
+        for state in states {
+            // A variable already bound to a vertex pins the candidate.
+            if let Some(var) = &np.variable {
+                if let Some(Binding::Vertex(prev)) = state.row.get(var) {
+                    let vertex = prev.clone();
+                    if self.node_matches(np, &vertex, &state.row)? {
+                        let mut new_state = state.clone();
+                        new_state.trail.push(agtype::vertex_to_value(&vertex));
+                        new_state.position = Some(vertex);
+                        out.push(new_state);
+                    }
+                    continue;
+                }
+                if state.row.contains_key(var)
+                    && !matches!(state.row.get(var), Some(Binding::Vertex(_)))
+                {
+                    // Bound to a non-vertex - the pattern cannot match.
+                    continue;
+                }
+            }
             for vid in &candidate_ids {
                 let Some(vertex) = self.store.get_vertex(*vid).cloned() else {
                     continue;
                 };
-                if !self.node_matches(np, &vertex, row)? {
+                if !self.node_matches(np, &vertex, &state.row)? {
                     continue;
                 }
-                let _ = prior_var; // kept for future cross-checks
-                let mut new_row = row.clone();
+                let mut new_state = state.clone();
+                new_state.trail.push(agtype::vertex_to_value(&vertex));
                 if let Some(var) = &np.variable {
-                    if let Some(prior) = new_row.get(var) {
-                        // Variable already bound - must refer to the same vertex.
-                        if let Binding::Vertex(prev) = prior {
-                            if prev.vertex_id != vertex.vertex_id {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        new_row.insert(var.clone(), Binding::Vertex(vertex));
-                    }
+                    new_state
+                        .row
+                        .insert(var.clone(), Binding::Vertex(vertex.clone()));
                 }
-                out.push(new_row);
+                new_state.position = Some(vertex);
+                out.push(new_state);
             }
         }
         Ok(out)
@@ -351,7 +408,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             for (key, expr) in props {
                 let want = self.eval(expr, row)?;
                 let got = vertex.properties.get(key).cloned().unwrap_or(Value::Null);
-                if got != want {
+                if got == Value::Null || !agtype::eq(&got, &want) {
                     return Ok(false);
                 }
             }
@@ -372,7 +429,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             for (key, expr) in props {
                 let want = self.eval(expr, row)?;
                 let got = edge.properties.get(key).cloned().unwrap_or(Value::Null);
-                if got != want {
+                if got == Value::Null || !agtype::eq(&got, &want) {
                     return Ok(false);
                 }
             }
@@ -384,9 +441,8 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         &self,
         rp: &RelPattern,
         next: &NodePattern,
-        rows: &[BindingRow],
-        prev_var: &str,
-    ) -> Result<Vec<BindingRow>, CypherError> {
+        states: Vec<MatchState>,
+    ) -> Result<Vec<MatchState>, CypherError> {
         let direction = match rp.direction {
             RelDirection::Right => Direction::Out,
             RelDirection::Left => Direction::In,
@@ -394,23 +450,25 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         };
         let is_var_length = rp.min_hops.is_some() || rp.max_hops.is_some();
         let mut out = Vec::new();
-        for row in rows {
-            let Some(Binding::Vertex(start)) = row.get(prev_var).cloned() else {
+        for state in states {
+            let Some(start) = state.position.clone() else {
                 continue;
             };
             if is_var_length {
                 let min_hops = rp.min_hops.unwrap_or(1);
                 let max_hops = rp.max_hops.unwrap_or(min_hops.max(1));
-                let mut buffer: Vec<(VertexId, Vec<Edge>)> = vec![(start.vertex_id, Vec::new())];
-                let mut all_paths: Vec<(VertexId, Vec<Edge>)> = Vec::new();
+                // (reached vertex, edges so far, trail extension)
+                let mut buffer: Vec<(VertexId, Vec<Edge>, Vec<Value>)> =
+                    vec![(start.vertex_id, Vec::new(), Vec::new())];
+                let mut all_paths: Vec<(VertexId, Vec<Edge>, Vec<Value>)> = Vec::new();
                 if min_hops == 0 {
-                    all_paths.push((start.vertex_id, Vec::new()));
+                    all_paths.push((start.vertex_id, Vec::new(), Vec::new()));
                 }
                 for hop in 1..=max_hops {
                     let mut next_buffer = Vec::new();
-                    for (vertex_id, edges_so_far) in &buffer {
+                    for (vertex_id, edges_so_far, trail_so_far) in &buffer {
                         for edge in self.outgoing_edges(*vertex_id, direction) {
-                            if !self.rel_matches(rp, &edge, row)? {
+                            if !self.rel_matches(rp, &edge, &state.row)? {
                                 continue;
                             }
                             let neighbor = if edge.source_id == *vertex_id {
@@ -418,12 +476,18 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                             } else {
                                 edge.source_id
                             };
+                            let Some(neighbor_vertex) = self.store.get_vertex(neighbor) else {
+                                continue;
+                            };
                             let mut new_edges = edges_so_far.clone();
-                            new_edges.push(edge);
+                            new_edges.push(edge.clone());
+                            let mut new_trail = trail_so_far.clone();
+                            new_trail.push(agtype::edge_to_value(&edge));
+                            new_trail.push(agtype::vertex_to_value(neighbor_vertex));
                             if hop >= min_hops {
-                                all_paths.push((neighbor, new_edges.clone()));
+                                all_paths.push((neighbor, new_edges.clone(), new_trail.clone()));
                             }
-                            next_buffer.push((neighbor, new_edges));
+                            next_buffer.push((neighbor, new_edges, new_trail));
                         }
                     }
                     buffer = next_buffer;
@@ -431,22 +495,28 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                         break;
                     }
                 }
-                for (end_id, edges) in all_paths {
+                for (end_id, edges, mut trail_ext) in all_paths {
                     let Some(end_vertex) = self.store.get_vertex(end_id).cloned() else {
                         continue;
                     };
+                    // The trail extension already ends with the reached
+                    // vertex except for zero-hop paths.
+                    if trail_ext.is_empty() {
+                        trail_ext.push(agtype::vertex_to_value(&end_vertex));
+                    }
                     self.push_reached_vertex(
                         &mut out,
                         rp,
                         next,
-                        row,
+                        &state,
                         Binding::EdgeList(edges),
                         end_vertex,
+                        trail_ext,
                     )?;
                 }
             } else {
                 for edge in self.outgoing_edges(start.vertex_id, direction) {
-                    if !self.rel_matches(rp, &edge, row)? {
+                    if !self.rel_matches(rp, &edge, &state.row)? {
                         continue;
                     }
                     let neighbor_id = if edge.source_id == start.vertex_id {
@@ -457,13 +527,18 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     let Some(end_vertex) = self.store.get_vertex(neighbor_id).cloned() else {
                         continue;
                     };
+                    let trail_ext = vec![
+                        agtype::edge_to_value(&edge),
+                        agtype::vertex_to_value(&end_vertex),
+                    ];
                     self.push_reached_vertex(
                         &mut out,
                         rp,
                         next,
-                        row,
+                        &state,
                         Binding::Edge(edge),
                         end_vertex,
+                        trail_ext,
                     )?;
                 }
             }
@@ -471,28 +546,38 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         Ok(out)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn push_reached_vertex(
         &self,
-        out: &mut Vec<BindingRow>,
+        out: &mut Vec<MatchState>,
         rp: &RelPattern,
         next: &NodePattern,
-        row: &BindingRow,
+        state: &MatchState,
         edge_binding: Binding,
         end_vertex: Vertex,
+        trail_ext: Vec<Value>,
     ) -> Result<(), CypherError> {
-        if !self.node_matches(next, &end_vertex, row)?
-            || !Self::binding_allows_vertex(next.variable.as_ref(), end_vertex.vertex_id, row)
+        if !self.node_matches(next, &end_vertex, &state.row)?
+            || !Self::binding_allows_vertex(
+                next.variable.as_ref(),
+                end_vertex.vertex_id,
+                &state.row,
+            )
         {
             return Ok(());
         }
-        let mut new_row = row.clone();
+        let mut new_state = state.clone();
+        new_state.trail.extend(trail_ext);
         if let Some(var) = &rp.variable {
-            new_row.insert(var.clone(), edge_binding);
+            new_state.row.insert(var.clone(), edge_binding);
         }
         if let Some(var) = &next.variable {
-            new_row.insert(var.clone(), Binding::Vertex(end_vertex));
+            new_state
+                .row
+                .insert(var.clone(), Binding::Vertex(end_vertex.clone()));
         }
-        out.push(new_row);
+        new_state.position = Some(end_vertex);
+        out.push(new_state);
         Ok(())
     }
 
@@ -516,7 +601,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     }
 
     fn eval_predicate(&self, expr: &CypherExpr, row: &BindingRow) -> Result<bool, CypherError> {
-        Ok(value_truthy(&self.eval(expr, row)?))
+        Ok(strict_bool(&self.eval(expr, row)?)? == Some(true))
     }
 
     pub(crate) fn where_passes(
@@ -528,7 +613,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             .iter()
             .map(|(k, v)| (k.clone(), Binding::Value(v.clone())))
             .collect();
-        Ok(value_truthy(&self.eval(expr, &bindings)?))
+        self.eval_predicate(expr, &bindings)
     }
 
     // ------------------------------------------------------------------
@@ -544,11 +629,24 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         limit: Option<&CypherExpr>,
         bindings: &[BindingRow],
     ) -> Result<(Vec<String>, Vec<ResultRow>), CypherError> {
-        let columns: Vec<String> = items
+        let mut columns: Vec<String> = items
             .iter()
             .enumerate()
             .map(|(i, item)| return_label(item, i))
             .collect();
+        // Result rows are keyed by column name; repeated unaliased
+        // labels (e.g. `RETURN size(a), size(b)`) must stay distinct
+        // so later columns do not clobber earlier ones.
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for (i, column) in columns.iter_mut().enumerate() {
+            if !seen.insert(column.clone()) {
+                let mut candidate = format!("{column}_{i}");
+                while !seen.insert(candidate.clone()) {
+                    candidate.push('_');
+                }
+                *column = candidate;
+            }
+        }
 
         let has_aggregate = items.iter().any(|i| is_aggregate(&i.expr));
         let mut rows: Vec<ResultRow> = if has_aggregate {
@@ -634,6 +732,11 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             .collect();
 
         let mut groups: BTreeMap<Vec<Value>, Vec<BindingRow>> = BTreeMap::new();
+        if group_by_idx.is_empty() && bindings.is_empty() {
+            // Aggregates over zero rows still produce one output row
+            // (count(*) = 0, sum(...) = null, collect(...) = []).
+            groups.insert(Vec::new(), Vec::new());
+        }
         for row in bindings {
             let key: Vec<Value> = group_by_idx
                 .iter()
@@ -672,64 +775,53 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             )));
         };
         let name = fc.name.to_lowercase();
-        match name.as_str() {
-            "count" => {
-                if fc.args.iter().any(|a| {
-                    matches!(a,
-                    CypherExpr::Variable(v) if v.name == "*")
-                }) {
-                    return Ok(Value::Int(members.len() as i64));
+        if name == "count" {
+            let is_star = fc.args.is_empty()
+                || fc
+                    .args
+                    .iter()
+                    .any(|a| matches!(a, CypherExpr::Variable(v) if v.name == "*"));
+            if is_star {
+                return Ok(Value::Int(members.len() as i64));
+            }
+            let mut count = 0i64;
+            let mut seen: BTreeSet<Value> = BTreeSet::new();
+            for row in members {
+                let v = self.eval(&fc.args[0], row)?;
+                if v == Value::Null {
+                    continue;
                 }
-                if fc.args.is_empty() {
-                    return Ok(Value::Int(members.len() as i64));
-                }
-                let mut count = 0i64;
-                let mut seen: BTreeSet<Value> = BTreeSet::new();
-                for row in members {
-                    let v = self.eval(&fc.args[0], row)?;
-                    if v == Value::Null {
-                        continue;
-                    }
-                    if fc.distinct {
-                        if seen.insert(v) {
-                            count += 1;
-                        }
-                    } else {
+                if fc.distinct {
+                    if seen.insert(v) {
                         count += 1;
                     }
+                } else {
+                    count += 1;
                 }
-                Ok(Value::Int(count))
             }
-            "sum" | "avg" | "min" | "max" => {
-                let mut nums: Vec<f64> = Vec::new();
-                for row in members {
-                    let v = self.eval(&fc.args[0], row)?;
-                    if let Some(n) = value_as_f64(&v) {
-                        nums.push(n);
-                    }
-                }
-                if nums.is_empty() {
-                    return Ok(Value::Null);
-                }
-                let result = match name.as_str() {
-                    "sum" => nums.iter().sum::<f64>(),
-                    "avg" => nums.iter().sum::<f64>() / nums.len() as f64,
-                    "min" => nums.iter().copied().fold(f64::INFINITY, f64::min),
-                    "max" => nums.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-                    _ => unreachable!(),
-                };
-                Ok(Value::Float(result))
+            return Ok(Value::Int(count));
+        }
+
+        // Evaluate the argument across members, skipping nulls, with
+        // optional DISTINCT dedup.
+        let mut values: Vec<Value> = Vec::new();
+        let mut seen: BTreeSet<Value> = BTreeSet::new();
+        for row in members {
+            let v = self.eval(&fc.args[0], row)?;
+            if v == Value::Null {
+                continue;
             }
-            "collect" => {
-                let mut list = Vec::new();
-                for row in members {
-                    let v = self.eval(&fc.args[0], row)?;
-                    if v != Value::Null {
-                        list.push(v);
-                    }
-                }
-                Ok(Value::List(list))
+            if fc.distinct && !seen.insert(v.clone()) {
+                continue;
             }
+            values.push(v);
+        }
+
+        match name.as_str() {
+            "collect" => Ok(Value::List(values)),
+            "min" | "max" => Ok(aggregate_extreme(&values, name == "min")),
+            "sum" => aggregate_sum(&values),
+            "avg" => aggregate_avg(&values),
             other => Err(CypherError::Unsupported(format!("aggregate {other}"))),
         }
     }
@@ -820,22 +912,33 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 None => Err(CypherError::UndefinedVariable(name.clone())),
             },
             CypherExpr::PropertyAccess(PropertyAccess { variable, keys }) => {
-                let mut value = match row.get(variable) {
-                    Some(b) => b.property(&keys[0]),
-                    None => return Err(CypherError::UndefinedVariable(variable.clone())),
+                let Some(binding) = row.get(variable) else {
+                    return Err(CypherError::UndefinedVariable(variable.clone()));
+                };
+                let mut value = match binding {
+                    Binding::Vertex(_) | Binding::Edge(_) => binding.property(&keys[0]),
+                    Binding::EdgeList(_) => {
+                        return Err(CypherError::TypeError(
+                            "scalar object must be a vertex or edge".into(),
+                        ));
+                    }
+                    Binding::Value(v) => value_property(v, &keys[0]).ok_or_else(|| {
+                        CypherError::TypeError("scalar object must be a vertex or edge".into())
+                    })?,
                 };
                 for key in &keys[1..] {
-                    value = match value {
-                        Value::Map(m) => m.get(key).cloned().unwrap_or(Value::Null),
-                        _ => Value::Null,
-                    };
+                    value = value_property(&value, key).ok_or_else(|| {
+                        CypherError::TypeError("scalar object must be a vertex or edge".into())
+                    })?;
                 }
                 Ok(value)
             }
             CypherExpr::BinaryOp(b) => self.eval_binary(b, row),
             CypherExpr::UnaryOp(u) => self.eval_unary(u, row),
             CypherExpr::ListIndex(li) => self.eval_list_index(li, row),
+            CypherExpr::ListSlice(ls) => self.eval_list_slice(ls, row),
             CypherExpr::ListLiteral(ll) => self.eval_list_literal(ll, row),
+            CypherExpr::ListComprehension(lc) => self.eval_list_comprehension(lc, row),
             CypherExpr::InList(il) => self.eval_in_list(il, row),
             CypherExpr::IsNull(IsNull { expr }) => {
                 Ok(Value::Bool(matches!(self.eval(expr, row)?, Value::Null)))
@@ -845,31 +948,76 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             }
             CypherExpr::CaseExpr(c) => self.eval_case(c, row),
             CypherExpr::FunctionCall(fc) => self.eval_function(fc, row),
-            CypherExpr::MapLiteral(_) => Err(CypherError::Unsupported("map literal".into())),
+            CypherExpr::MapLiteral(ml) => self.eval_map_literal(ml, row),
+            CypherExpr::ExistsPattern(pattern) => {
+                let matches = self.match_path_pattern(pattern, row)?;
+                Ok(Value::Bool(!matches.is_empty()))
+            }
         }
     }
 
-    fn eval_binary(&self, b: &BinaryOp, row: &BindingRow) -> Result<Value, CypherError> {
-        let lhs = self.eval(&b.left, row)?;
-        let rhs = self.eval(&b.right, row)?;
-        match b.op.as_str() {
-            "AND" => Ok(Value::Bool(value_truthy(&lhs) && value_truthy(&rhs))),
-            "OR" => Ok(Value::Bool(value_truthy(&lhs) || value_truthy(&rhs))),
-            "XOR" => Ok(Value::Bool(value_truthy(&lhs) ^ value_truthy(&rhs))),
-            "=" => Ok(Value::Bool(lhs == rhs)),
-            "<>" => Ok(Value::Bool(lhs != rhs)),
-            "<" => Ok(Value::Bool(lhs < rhs)),
-            ">" => Ok(Value::Bool(lhs > rhs)),
-            "<=" => Ok(Value::Bool(lhs <= rhs)),
-            ">=" => Ok(Value::Bool(lhs >= rhs)),
-            "+" => arith(&lhs, &rhs, |a, b| a + b, |a, b| a + b, true),
-            "-" => arith(&lhs, &rhs, |a, b| a - b, |a, b| a - b, false),
-            "*" => arith(&lhs, &rhs, |a, b| a * b, |a, b| a * b, false),
-            "/" => arith(&lhs, &rhs, |a, b| a / b, |a, b| a / b, false),
-            "%" => arith(&lhs, &rhs, |a, b| a % b, |a, b| a % b, false),
-            "STARTS WITH" => str_pred(&lhs, &rhs, |a, b| a.starts_with(b)),
-            "ENDS WITH" => str_pred(&lhs, &rhs, |a, b| a.ends_with(b)),
-            "CONTAINS" => str_pred(&lhs, &rhs, |a, b| a.contains(b)),
+    fn eval_binary(&self, expr: &BinaryOp, row: &BindingRow) -> Result<Value, CypherError> {
+        let lhs = self.eval(&expr.left, row)?;
+        let rhs = self.eval(&expr.right, row)?;
+        match expr.op.as_str() {
+            "AND" => {
+                let left_bool = strict_bool(&lhs)?;
+                let right_bool = strict_bool(&rhs)?;
+                Ok(match (left_bool, right_bool) {
+                    (Some(false), _) | (_, Some(false)) => Value::Bool(false),
+                    (Some(true), Some(true)) => Value::Bool(true),
+                    _ => Value::Null,
+                })
+            }
+            "OR" => {
+                let left_bool = strict_bool(&lhs)?;
+                let right_bool = strict_bool(&rhs)?;
+                Ok(match (left_bool, right_bool) {
+                    (Some(true), _) | (_, Some(true)) => Value::Bool(true),
+                    (Some(false), Some(false)) => Value::Bool(false),
+                    _ => Value::Null,
+                })
+            }
+            "XOR" => {
+                let left_bool = strict_bool(&lhs)?;
+                let right_bool = strict_bool(&rhs)?;
+                Ok(match (left_bool, right_bool) {
+                    (Some(x), Some(y)) => Value::Bool(x ^ y),
+                    _ => Value::Null,
+                })
+            }
+            "=" => Ok(null_or_bool(&lhs, &rhs, agtype::eq(&lhs, &rhs))),
+            "<>" => Ok(null_or_bool(&lhs, &rhs, !agtype::eq(&lhs, &rhs))),
+            "<" => Ok(null_or_bool(
+                &lhs,
+                &rhs,
+                agtype::cmp(&lhs, &rhs) == std::cmp::Ordering::Less,
+            )),
+            ">" => Ok(null_or_bool(
+                &lhs,
+                &rhs,
+                agtype::cmp(&lhs, &rhs) == std::cmp::Ordering::Greater,
+            )),
+            "<=" => Ok(null_or_bool(
+                &lhs,
+                &rhs,
+                agtype::cmp(&lhs, &rhs) != std::cmp::Ordering::Greater,
+            )),
+            ">=" => Ok(null_or_bool(
+                &lhs,
+                &rhs,
+                agtype::cmp(&lhs, &rhs) != std::cmp::Ordering::Less,
+            )),
+            "+" => agtype_add(&lhs, &rhs),
+            "-" => numeric_op(&lhs, &rhs, "agtype_sub", i64::wrapping_sub, |a, b| a - b),
+            "*" => numeric_op(&lhs, &rhs, "agtype_mul", i64::wrapping_mul, |a, b| a * b),
+            "/" => agtype_div(&lhs, &rhs),
+            "%" => agtype_mod(&lhs, &rhs),
+            "^" => agtype_pow(&lhs, &rhs),
+            "STARTS WITH" => Ok(str_predicate(&lhs, &rhs, |a, b| a.starts_with(b))),
+            "ENDS WITH" => Ok(str_predicate(&lhs, &rhs, |a, b| a.ends_with(b))),
+            "CONTAINS" => Ok(str_predicate(&lhs, &rhs, |a, b| a.contains(b))),
+            "=~" => regex_match(&lhs, &rhs),
             other => Err(CypherError::Unsupported(format!("binary op {other}"))),
         }
     }
@@ -877,11 +1025,17 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     fn eval_unary(&self, u: &UnaryOp, row: &BindingRow) -> Result<Value, CypherError> {
         let operand = self.eval(&u.operand, row)?;
         match u.op.as_str() {
-            "NOT" => Ok(Value::Bool(!value_truthy(&operand))),
+            "NOT" => Ok(match strict_bool(&operand)? {
+                Some(b) => Value::Bool(!b),
+                None => Value::Null,
+            }),
             "-" => match operand {
-                Value::Int(n) => Ok(Value::Int(-n)),
+                Value::Int(n) => Ok(Value::Int(n.wrapping_neg())),
                 Value::Float(f) => Ok(Value::Float(-f)),
-                _ => Err(CypherError::TypeError("unary - on non-numeric".into())),
+                Value::Null => Ok(Value::Null),
+                _ => Err(CypherError::TypeError(
+                    "Invalid input parameter type for agtype_neg".into(),
+                )),
             },
             other => Err(CypherError::Unsupported(format!("unary op {other}"))),
         }
@@ -895,30 +1049,146 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         Ok(Value::List(out))
     }
 
+    fn eval_map_literal(&self, ml: &MapLiteral, row: &BindingRow) -> Result<Value, CypherError> {
+        let mut out = BTreeMap::new();
+        for (key, expr) in &ml.pairs {
+            out.insert(key.clone(), self.eval(expr, row)?);
+        }
+        Ok(Value::Map(out))
+    }
+
+    fn eval_list_comprehension(
+        &self,
+        lc: &ListComprehension,
+        row: &BindingRow,
+    ) -> Result<Value, CypherError> {
+        let source = self.eval(&lc.list_expr, row)?;
+        let items = match source {
+            Value::List(items) => items,
+            Value::Null => return Ok(Value::Null),
+            other => {
+                return Err(CypherError::TypeError(format!(
+                    "list comprehension requires a list, got agtype {}",
+                    agtype::agtype_type_name(&other)
+                )));
+            }
+        };
+        let mut out = Vec::new();
+        for item in items {
+            let mut scoped = row.clone();
+            scoped.insert(lc.variable.clone(), Binding::Value(item.clone()));
+            if let Some(filter) = &lc.filter {
+                if !self.eval_predicate(filter, &scoped)? {
+                    continue;
+                }
+            }
+            match &lc.map_expr {
+                Some(map_expr) => out.push(self.eval(map_expr, &scoped)?),
+                None => out.push(item),
+            }
+        }
+        Ok(Value::List(out))
+    }
+
     fn eval_in_list(&self, il: &InList, row: &BindingRow) -> Result<Value, CypherError> {
         let needle = self.eval(&il.expr, row)?;
         let haystack = self.eval(&il.list_expr, row)?;
-        Ok(match haystack {
-            Value::List(items) => Value::Bool(items.contains(&needle)),
-            _ => Value::Bool(false),
-        })
+        let items = match haystack {
+            Value::List(items) => items,
+            Value::Null => return Ok(Value::Null),
+            _ => {
+                return Err(CypherError::TypeError("object of IN must be a list".into()));
+            }
+        };
+        if items.is_empty() {
+            return Ok(Value::Bool(false));
+        }
+        if needle == Value::Null {
+            return Ok(Value::Null);
+        }
+        let mut saw_null = false;
+        for item in &items {
+            if *item == Value::Null {
+                saw_null = true;
+            } else if agtype::eq(item, &needle) {
+                return Ok(Value::Bool(true));
+            }
+        }
+        if saw_null {
+            Ok(Value::Null)
+        } else {
+            Ok(Value::Bool(false))
+        }
     }
 
     fn eval_list_index(&self, li: &ListIndex, row: &BindingRow) -> Result<Value, CypherError> {
         let target = self.eval(&li.expr, row)?;
         let index = self.eval(&li.index, row)?;
-        match (target, index) {
+        if target == Value::Null || index == Value::Null {
+            return Ok(Value::Null);
+        }
+        if let Some(props) = agtype::entity_properties(&target) {
+            return match index {
+                Value::Str(key) => Ok(props.get(&key).cloned().unwrap_or(Value::Null)),
+                _ => Err(CypherError::TypeError(
+                    "object index must resolve to a string value".into(),
+                )),
+            };
+        }
+        match (&target, &index) {
             (Value::List(items), Value::Int(n)) => {
-                let idx = if n < 0 {
-                    (items.len() as i64 + n) as usize
+                let idx = if *n < 0 {
+                    let adjusted = items.len() as i64 + n;
+                    if adjusted < 0 {
+                        return Ok(Value::Null);
+                    }
+                    adjusted as usize
                 } else {
-                    n as usize
+                    *n as usize
                 };
                 Ok(items.get(idx).cloned().unwrap_or(Value::Null))
             }
-            (Value::Map(m), Value::Str(k)) => Ok(m.get(&k).cloned().unwrap_or(Value::Null)),
-            _ => Ok(Value::Null),
+            (Value::List(_), _) => Err(CypherError::TypeError(
+                "array index must resolve to an integer value".into(),
+            )),
+            (Value::Map(m), Value::Str(k)) => Ok(m.get(k).cloned().unwrap_or(Value::Null)),
+            (Value::Map(_), _) => Err(CypherError::TypeError(
+                "object index must resolve to a string value".into(),
+            )),
+            _ => Err(CypherError::TypeError(
+                "scalar object must be a vertex or edge".into(),
+            )),
         }
+    }
+
+    fn eval_list_slice(&self, ls: &ListSlice, row: &BindingRow) -> Result<Value, CypherError> {
+        let target = self.eval(&ls.expr, row)?;
+        let items = match target {
+            Value::List(items) => items,
+            Value::Null => return Ok(Value::Null),
+            _ => {
+                return Err(CypherError::TypeError("slice must access a list".into()));
+            }
+        };
+        let len = items.len() as i64;
+        let resolve = |expr: &Option<Box<CypherExpr>>, default: i64| -> Result<i64, CypherError> {
+            match expr {
+                Some(e) => match self.eval(e, row)? {
+                    Value::Int(n) => Ok(if n < 0 { (len + n).max(0) } else { n.min(len) }),
+                    Value::Null => Ok(default),
+                    _ => Err(CypherError::TypeError(
+                        "slice bound must resolve to an integer value".into(),
+                    )),
+                },
+                None => Ok(default),
+            }
+        };
+        let start = resolve(&ls.start, 0)?;
+        let end = resolve(&ls.end, len)?;
+        if start >= end {
+            return Ok(Value::List(Vec::new()));
+        }
+        Ok(Value::List(items[start as usize..end as usize].to_vec()))
     }
 
     fn eval_case(&self, c: &CaseExpr, row: &BindingRow) -> Result<Value, CypherError> {
@@ -928,9 +1198,12 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         };
         for (cond, result) in &c.whens {
             let matched = if let Some(operand) = &operand_value {
-                self.eval(cond, row)? == *operand
+                let candidate = self.eval(cond, row)?;
+                *operand != Value::Null
+                    && candidate != Value::Null
+                    && agtype::eq(&candidate, operand)
             } else {
-                value_truthy(&self.eval(cond, row)?)
+                self.eval_predicate(cond, row)?
             };
             if matched {
                 return self.eval(result, row);
@@ -942,6 +1215,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         Ok(Value::Null)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn eval_function(&self, fc: &FunctionCall, row: &BindingRow) -> Result<Value, CypherError> {
         // Aggregates are handled in the RETURN/WITH path.
         if is_aggregate_name(&fc.name) {
@@ -951,60 +1225,385 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             )));
         }
         let name = fc.name.to_lowercase();
+        // `exists(n.prop)` needs the unevaluated property expression.
+        if name == "exists" {
+            let value = match fc.args.first() {
+                Some(arg) => self.eval(arg, row)?,
+                None => Value::Null,
+            };
+            return Ok(Value::Bool(value != Value::Null));
+        }
         let args: Vec<Value> = fc
             .args
             .iter()
             .map(|a| self.eval(a, row))
             .collect::<Result<_, _>>()?;
+        let arg = args.first();
         match name.as_str() {
-            "length" | "size" => Ok(match args.first() {
-                Some(Value::List(l)) => Value::Int(l.len() as i64),
-                Some(Value::Str(s)) => Value::Int(s.chars().count() as i64),
-                _ => Value::Null,
-            }),
-            "id" => match fc.args.first() {
-                Some(CypherExpr::Variable(v)) => match row.get(&v.name) {
-                    Some(Binding::Vertex(vertex)) => Ok(Value::Int(vertex.vertex_id as i64)),
-                    Some(Binding::Edge(edge)) => Ok(Value::Int(edge.edge_id as i64)),
-                    _ => Ok(Value::Null),
-                },
-                _ => Ok(Value::Null),
+            "id" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) => agtype::entity_id(v).map(Value::Int).ok_or_else(|| {
+                    CypherError::TypeError("id() argument must be a vertex, edge or null".into())
+                }),
             },
-            "labels" => match fc.args.first() {
-                Some(CypherExpr::Variable(v)) => match row.get(&v.name) {
-                    Some(Binding::Vertex(vertex)) => {
-                        Ok(Value::List(vec![Value::Str(vertex.label.clone())]))
+            "label" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) => agtype::entity_label(v)
+                    .map(|label| Value::Str(label.to_string()))
+                    .ok_or_else(|| {
+                        CypherError::TypeError(
+                            "label() argument must resolve to an edge or vertex".into(),
+                        )
+                    }),
+            },
+            "labels" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Vertex) => {
+                    Ok(Value::List(vec![Value::Str(
+                        agtype::entity_label(v).unwrap_or_default().to_string(),
+                    )]))
+                }
+                Some(_) => Err(CypherError::TypeError(
+                    "labels() argument must be a vertex".into(),
+                )),
+            },
+            "type" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Edge) => Ok(
+                    Value::Str(agtype::entity_label(v).unwrap_or_default().to_string()),
+                ),
+                Some(_) => Err(CypherError::TypeError(
+                    "type() argument must be an edge or null".into(),
+                )),
+            },
+            "keys" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) => {
+                    let map = agtype::entity_properties(v).cloned().or_else(|| match v {
+                        Value::Map(m) => Some(m.clone()),
+                        _ => None,
+                    });
+                    match map {
+                        Some(map) => {
+                            let mut keys: Vec<&String> = map.keys().collect();
+                            keys.sort_by(|a, b| agtype::jsonb_key_cmp(a, b));
+                            Ok(Value::List(
+                                keys.into_iter().map(|k| Value::Str(k.clone())).collect(),
+                            ))
+                        }
+                        None => Err(CypherError::TypeError(
+                            "keys() argument must be a vertex, edge, map, or null".into(),
+                        )),
                     }
-                    _ => Ok(Value::List(Vec::new())),
-                },
-                _ => Ok(Value::List(Vec::new())),
+                }
             },
-            "type" => match fc.args.first() {
-                Some(CypherExpr::Variable(v)) => match row.get(&v.name) {
-                    Some(Binding::Edge(edge)) => Ok(Value::Str(edge.label.clone())),
-                    _ => Ok(Value::Null),
+            "properties" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) => match agtype::entity_properties(v) {
+                    Some(props) => Ok(Value::Map(props.clone())),
+                    None => match v {
+                        Value::Map(m) => Ok(Value::Map(m.clone())),
+                        _ => Err(CypherError::TypeError(
+                            "properties() argument must be a vertex, an edge or null".into(),
+                        )),
+                    },
                 },
-                _ => Ok(Value::Null),
             },
-            "keys" => match fc.args.first() {
-                Some(CypherExpr::Variable(v)) => match row.get(&v.name) {
-                    Some(Binding::Vertex(vertex)) => Ok(Value::List(
-                        vertex.properties.keys().cloned().map(Value::Str).collect(),
-                    )),
-                    Some(Binding::Edge(edge)) => Ok(Value::List(
-                        edge.properties.keys().cloned().map(Value::Str).collect(),
-                    )),
-                    _ => Ok(Value::List(Vec::new())),
-                },
-                _ => Ok(Value::List(Vec::new())),
+            "startnode" | "endnode" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Edge) => {
+                    let id = if name == "startnode" {
+                        agtype::edge_start_id(v)
+                    } else {
+                        agtype::edge_end_id(v)
+                    };
+                    Ok(id
+                        .and_then(|id| self.store.get_vertex(id as u64))
+                        .map_or(Value::Null, agtype::vertex_to_value))
+                }
+                Some(_) => Err(CypherError::TypeError(format!(
+                    "{}() argument must be an edge or null",
+                    if name == "startnode" {
+                        "startNode"
+                    } else {
+                        "endNode"
+                    }
+                ))),
             },
-            "toupper" => Ok(string_op(args.first(), str::to_uppercase)),
-            "tolower" => Ok(string_op(args.first(), str::to_lowercase)),
-            "abs" => Ok(match args.first() {
-                Some(Value::Int(n)) => Value::Int(n.abs()),
-                Some(Value::Float(f)) => Value::Float(f.abs()),
-                _ => Value::Null,
-            }),
+            "length" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
+                    let elements = agtype::path_elements(v).map_or(0, <[Value]>::len);
+                    Ok(Value::Int((elements.saturating_sub(1) / 2) as i64))
+                }
+                Some(Value::List(_) | Value::Map(_)) => Err(CypherError::TypeError(
+                    "length() argument must resolve to a scalar".into(),
+                )),
+                Some(_) => Err(CypherError::TypeError(
+                    "length() argument must resolve to a path or null".into(),
+                )),
+            },
+            "size" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::List(items)) => Ok(Value::Int(items.len() as i64)),
+                // AGE's size() counts string BYTES, not characters.
+                Some(Value::Str(s)) => Ok(Value::Int(s.len() as i64)),
+                Some(_) => Err(CypherError::TypeError("size() unsupported argument".into())),
+            },
+            "coalesce" => {
+                for v in &args {
+                    if *v != Value::Null {
+                        return Ok(v.clone());
+                    }
+                }
+                Ok(Value::Null)
+            }
+            "head" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::List(items)) => Ok(items.first().cloned().unwrap_or(Value::Null)),
+                Some(_) => Err(CypherError::TypeError(
+                    "head() argument must resolve to a list or null".into(),
+                )),
+            },
+            "last" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::List(items)) => Ok(items.last().cloned().unwrap_or(Value::Null)),
+                Some(_) => Err(CypherError::TypeError(
+                    "last() argument must resolve to a list or null".into(),
+                )),
+            },
+            "tail" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::List(items)) => {
+                    Ok(Value::List(items.iter().skip(1).cloned().collect()))
+                }
+                Some(_) => Err(CypherError::TypeError(
+                    "tail() argument must resolve to a list or null".into(),
+                )),
+            },
+            "reverse" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Str(s)) => Ok(Value::Str(s.chars().rev().collect())),
+                Some(Value::List(items)) => Ok(Value::List(items.iter().rev().cloned().collect())),
+                Some(v) => Err(unsupported_argument("reverse", v)),
+            },
+            "toupper" => string_fn(arg, "toUpper", str::to_uppercase),
+            "tolower" => string_fn(arg, "toLower", str::to_lowercase),
+            "trim" => string_fn(arg, "trim", |s| s.trim().to_string()),
+            "ltrim" => string_fn(arg, "lTrim", |s| s.trim_start().to_string()),
+            "rtrim" => string_fn(arg, "rTrim", |s| s.trim_end().to_string()),
+            "left" | "right" => {
+                let (Some(first), second) = (args.first(), args.get(1)) else {
+                    return Err(unsupported_argument(&name, &Value::Null));
+                };
+                match (first, second) {
+                    (Value::Null, _) => Ok(Value::Null),
+                    (Value::Str(s), Some(Value::Int(n))) => {
+                        if *n < 0 {
+                            return Err(CypherError::TypeError(format!(
+                                "{name}() negative values are not supported for length"
+                            )));
+                        }
+                        let n = *n as usize;
+                        let chars: Vec<char> = s.chars().collect();
+                        let taken: String = if name == "left" {
+                            chars.iter().take(n).collect()
+                        } else {
+                            let skip = chars.len().saturating_sub(n);
+                            chars.iter().skip(skip).collect()
+                        };
+                        Ok(Value::Str(taken))
+                    }
+                    (v, _) => Err(unsupported_argument(&name, v)),
+                }
+            }
+            "substring" => {
+                let Some(first) = args.first() else {
+                    return Err(unsupported_argument("substring", &Value::Null));
+                };
+                match first {
+                    Value::Null => Ok(Value::Null),
+                    Value::Str(s) => {
+                        let start = match args.get(1) {
+                            Some(Value::Int(n)) => *n,
+                            Some(Value::Null) | None => return Ok(Value::Null),
+                            Some(v) => return Err(unsupported_argument("substring", v)),
+                        };
+                        let count = match args.get(2) {
+                            Some(Value::Int(n)) => Some(*n),
+                            None => None,
+                            Some(Value::Null) => return Ok(Value::Null),
+                            Some(v) => return Err(unsupported_argument("substring", v)),
+                        };
+                        if start < 0 || count.is_some_and(|c| c < 0) {
+                            return Err(CypherError::TypeError(
+                                "substring() negative values are not supported for offset or length"
+                                    .into(),
+                            ));
+                        }
+                        let chars: Vec<char> = s.chars().collect();
+                        let start = start as usize;
+                        let out: String = match count {
+                            Some(c) => chars.iter().skip(start).take(c as usize).collect(),
+                            None => chars.iter().skip(start).collect(),
+                        };
+                        Ok(Value::Str(out))
+                    }
+                    v => Err(unsupported_argument("substring", v)),
+                }
+            }
+            "split" => match (args.first(), args.get(1)) {
+                (Some(Value::Null) | None, _) | (_, Some(Value::Null) | None) => Ok(Value::Null),
+                (Some(Value::Str(s)), Some(Value::Str(sep))) => Ok(Value::List(
+                    s.split(sep.as_str())
+                        .map(|part| Value::Str(part.to_string()))
+                        .collect(),
+                )),
+                (Some(v), _) => Err(unsupported_argument("split", v)),
+            },
+            "replace" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::Null) | None, _, _)
+                | (_, Some(Value::Null), _)
+                | (_, _, Some(Value::Null)) => Ok(Value::Null),
+                (Some(Value::Str(s)), Some(Value::Str(from)), Some(Value::Str(to))) => {
+                    Ok(Value::Str(s.replace(from.as_str(), to.as_str())))
+                }
+                (Some(v), _, _) => Err(unsupported_argument("replace", v)),
+            },
+            "tostring" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Str(s)) => Ok(Value::Str(s.clone())),
+                Some(Value::Int(n)) => Ok(Value::Str(n.to_string())),
+                // AGE's toString uses raw float8out (no `.0` suffix).
+                Some(Value::Float(f)) => Ok(Value::Str(agtype::format_float_pg(*f))),
+                Some(Value::Bool(b)) => Ok(Value::Str(b.to_string())),
+                Some(Value::Decimal(d)) => Ok(Value::Str(d.to_sql_string())),
+                Some(v) => Err(unsupported_argument("toString", v)),
+            },
+            "tointeger" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Int(n)) => Ok(Value::Int(*n)),
+                // toInteger truncates toward zero (AGE: toInteger(-4.9) = -4).
+                Some(Value::Float(f)) => Ok(Value::Int(f.trunc() as i64)),
+                Some(Value::Str(s)) => Ok(s
+                    .trim()
+                    .parse::<i64>()
+                    .map(Value::Int)
+                    .or_else(|_| {
+                        s.trim()
+                            .parse::<f64>()
+                            .map(|f| Value::Int(f.trunc() as i64))
+                    })
+                    .unwrap_or(Value::Null)),
+                Some(v) => Err(unsupported_argument("toInteger", v)),
+            },
+            "tofloat" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Int(n)) => Ok(Value::Float(*n as f64)),
+                Some(Value::Float(f)) => Ok(Value::Float(*f)),
+                Some(Value::Str(s)) => {
+                    Ok(s.trim().parse::<f64>().map_or(Value::Null, Value::Float))
+                }
+                Some(v) => Err(unsupported_argument("toFloat", v)),
+            },
+            "toboolean" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Bool(b)) => Ok(Value::Bool(*b)),
+                Some(Value::Int(n)) => Ok(Value::Bool(*n != 0)),
+                Some(Value::Str(s)) => Ok(match s.to_lowercase().as_str() {
+                    "true" => Value::Bool(true),
+                    "false" => Value::Bool(false),
+                    _ => Value::Null,
+                }),
+                Some(v) => Err(unsupported_argument("toBoolean", v)),
+            },
+            "abs" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Int(n)) => Ok(Value::Int(n.wrapping_abs())),
+                Some(Value::Float(f)) => Ok(Value::Float(f.abs())),
+                Some(v) => Err(unsupported_argument("abs", v)),
+            },
+            "sign" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(Value::Int(n)) => Ok(Value::Int(n.signum())),
+                Some(Value::Float(f)) => Ok(Value::Int(if *f > 0.0 {
+                    1
+                } else if *f < 0.0 {
+                    -1
+                } else {
+                    0
+                })),
+                Some(v) => Err(unsupported_argument("sign", v)),
+            },
+            "ceil" => float_fn(arg, "ceil", f64::ceil),
+            "floor" => float_fn(arg, "floor", f64::floor),
+            "round" => float_fn(arg, "round", f64::round),
+            "sqrt" => domain_float_fn(arg, "sqrt", |f| (f >= 0.0).then(|| f.sqrt())),
+            "log" => domain_float_fn(arg, "log", |f| (f > 0.0).then(|| f.ln())),
+            "log10" => domain_float_fn(arg, "log10", |f| (f > 0.0).then(|| f.log10())),
+            "exp" => float_fn(arg, "exp", f64::exp),
+            "e" => Ok(Value::Float(std::f64::consts::E)),
+            "pi" => Ok(Value::Float(std::f64::consts::PI)),
+            "range" => {
+                let (start, end) = match (args.first(), args.get(1)) {
+                    (Some(Value::Int(a)), Some(Value::Int(b))) => (*a, *b),
+                    _ => {
+                        return Err(CypherError::TypeError(
+                            "range() unsupported argument type".into(),
+                        ));
+                    }
+                };
+                let step = match args.get(2) {
+                    Some(Value::Int(s)) => *s,
+                    None => 1,
+                    Some(_) => {
+                        return Err(CypherError::TypeError(
+                            "range() unsupported argument type".into(),
+                        ));
+                    }
+                };
+                if step == 0 {
+                    return Err(CypherError::TypeError(
+                        "range(): step cannot be zero".into(),
+                    ));
+                }
+                let mut out = Vec::new();
+                let mut current = start;
+                // range() is end-INCLUSIVE in AGE.
+                while (step > 0 && current <= end) || (step < 0 && current >= end) {
+                    out.push(Value::Int(current));
+                    current += step;
+                }
+                Ok(Value::List(out))
+            }
+            "timestamp" => {
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as i64);
+                Ok(Value::Int(ms))
+            }
+            "nodes" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
+                    let elements = agtype::path_elements(v).unwrap_or(&[]);
+                    Ok(Value::List(elements.iter().step_by(2).cloned().collect()))
+                }
+                Some(_) => Err(CypherError::TypeError(
+                    "nodes() argument must be a path".into(),
+                )),
+            },
+            "relationships" => match arg {
+                Some(Value::Null) | None => Ok(Value::Null),
+                Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
+                    let elements = agtype::path_elements(v).unwrap_or(&[]);
+                    Ok(Value::List(
+                        elements.iter().skip(1).step_by(2).cloned().collect(),
+                    ))
+                }
+                Some(_) => Err(CypherError::TypeError(
+                    "relationships() argument must be a path".into(),
+                )),
+            },
             other => Err(CypherError::Unsupported(format!("function {other}"))),
         }
     }
@@ -1014,10 +1613,44 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
 // Helpers
 // ------------------------------------------------------------------
 
+/// Variables declared by a set of path patterns (node, relationship,
+/// and path variables), used to pad OPTIONAL MATCH misses with nulls.
+fn pattern_variables(patterns: &[PathPattern]) -> Vec<String> {
+    let mut vars = Vec::new();
+    for pattern in patterns {
+        if let Some(v) = &pattern.variable {
+            vars.push(v.clone());
+        }
+        for element in &pattern.elements {
+            match element {
+                PathElement::Node(np) => {
+                    if let Some(v) = &np.variable {
+                        vars.push(v.clone());
+                    }
+                }
+                PathElement::Rel(rp) => {
+                    if let Some(v) = &rp.variable {
+                        vars.push(v.clone());
+                    }
+                }
+            }
+        }
+    }
+    vars
+}
+
+fn null_or_bool(lhs: &Value, rhs: &Value, result: bool) -> Value {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        Value::Null
+    } else {
+        Value::Bool(result)
+    }
+}
+
 fn sort_keyed<R>(keyed: &mut [(Vec<Value>, R)], order: &[OrderByItem]) {
     keyed.sort_by(|a, b| {
         for (i, (av, bv)) in a.0.iter().zip(b.0.iter()).enumerate() {
-            let cmp = av.cmp(bv);
+            let cmp = agtype::cmp(av, bv);
             let cmp = if order.get(i).is_some_and(|o| !o.ascending) {
                 cmp.reverse()
             } else {
@@ -1058,70 +1691,290 @@ fn is_aggregate_name(name: &str) -> bool {
     )
 }
 
-fn value_truthy(v: &Value) -> bool {
-    match v {
-        Value::Bool(b) => *b,
-        Value::Null => false,
-        Value::Int(n) => *n != 0,
-        Value::Float(f) => *f != 0.0,
-        Value::Decimal(d) => !d.is_zero(),
-        Value::Str(s) => !s.is_empty(),
-        Value::List(l) => !l.is_empty(),
-        Value::Map(m) => !m.is_empty(),
-        Value::Bytes(b) => !b.is_empty(),
-        Value::Temporal(_) => true,
-    }
-}
-
-fn value_as_f64(v: &Value) -> Option<f64> {
+fn number_as_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Int(n) => Some(*n as f64),
         Value::Float(f) => Some(*f),
         Value::Decimal(d) => d.to_f64(),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }
 }
 
-fn arith(
+/// min / max over non-null values in agtype order, preserving the
+/// original value type. Empty input yields null.
+fn aggregate_extreme(values: &[Value], want_min: bool) -> Value {
+    let mut best: Option<&Value> = None;
+    for v in values {
+        let replace = match best {
+            None => true,
+            Some(current) => {
+                let cmp = agtype::cmp(v, current);
+                if want_min {
+                    cmp == std::cmp::Ordering::Less
+                } else {
+                    cmp == std::cmp::Ordering::Greater
+                }
+            }
+        };
+        if replace {
+            best = Some(v);
+        }
+    }
+    best.cloned().unwrap_or(Value::Null)
+}
+
+/// sum keeps integer typing while every input is an integer (AGE:
+/// `sum([1,2,3])` = 6, `sum([1,2.5])` = 3.5); empty input yields null.
+fn aggregate_sum(values: &[Value]) -> Result<Value, CypherError> {
+    if values.is_empty() {
+        return Ok(Value::Null);
+    }
+    let mut int_sum: i64 = 0;
+    let mut float_sum: f64 = 0.0;
+    let mut all_ints = true;
+    for v in values {
+        match v {
+            Value::Int(n) => {
+                int_sum = int_sum.wrapping_add(*n);
+                float_sum += *n as f64;
+            }
+            Value::Float(f) => {
+                all_ints = false;
+                float_sum += f;
+            }
+            Value::Decimal(d) => {
+                all_ints = false;
+                float_sum += d.to_f64().unwrap_or(0.0);
+            }
+            _ => {
+                return Err(CypherError::TypeError(
+                    "arguments must resolve to a number".into(),
+                ));
+            }
+        }
+    }
+    if all_ints {
+        Ok(Value::Int(int_sum))
+    } else {
+        Ok(Value::Float(float_sum))
+    }
+}
+
+fn aggregate_avg(values: &[Value]) -> Result<Value, CypherError> {
+    if values.is_empty() {
+        return Ok(Value::Null);
+    }
+    let mut total = 0.0;
+    for v in values {
+        total += number_as_f64(v)
+            .ok_or_else(|| CypherError::TypeError("arguments must resolve to a number".into()))?;
+    }
+    Ok(Value::Float(total / values.len() as f64))
+}
+
+/// Concatenation contribution of a scalar joined to a string with `+`.
+/// AGE quirk (verified): booleans contribute an empty string.
+fn concat_fragment(v: &Value) -> Option<String> {
+    match v {
+        Value::Str(s) => Some(s.clone()),
+        Value::Int(n) => Some(n.to_string()),
+        Value::Float(f) => Some(agtype::format_float_pg(*f)),
+        Value::Bool(_) => Some(String::new()),
+        _ => None,
+    }
+}
+
+fn agtype_add(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        return Ok(Value::Null);
+    }
+    match (lhs, rhs) {
+        (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
+        (Value::List(a), Value::List(b)) => {
+            let mut out = a.clone();
+            out.extend(b.iter().cloned());
+            Ok(Value::List(out))
+        }
+        // `[1, 2] + 3` appends, `3 + [1, 2]` prepends.
+        (Value::List(a), b) => {
+            let mut out = a.clone();
+            out.push(b.clone());
+            Ok(Value::List(out))
+        }
+        (a, Value::List(b)) => {
+            let mut out = vec![a.clone()];
+            out.extend(b.iter().cloned());
+            Ok(Value::List(out))
+        }
+        (Value::Map(a), Value::Map(b)) => {
+            let mut out = a.clone();
+            for (k, v) in b {
+                out.insert(k.clone(), v.clone());
+            }
+            Ok(Value::Map(out))
+        }
+        (Value::Str(_), _) | (_, Value::Str(_)) => {
+            match (concat_fragment(lhs), concat_fragment(rhs)) {
+                (Some(a), Some(b)) => Ok(Value::Str(format!("{a}{b}"))),
+                _ => Err(CypherError::TypeError(
+                    "Invalid input parameter types for agtype_add".into(),
+                )),
+            }
+        }
+        _ => match (number_as_f64(lhs), number_as_f64(rhs)) {
+            (Some(a), Some(b)) => Ok(Value::Float(a + b)),
+            _ => Err(CypherError::TypeError(
+                "Invalid input parameter types for agtype_add".into(),
+            )),
+        },
+    }
+}
+
+fn numeric_op(
     lhs: &Value,
     rhs: &Value,
+    age_name: &str,
     f_int: impl Fn(i64, i64) -> i64,
     f_float: impl Fn(f64, f64) -> f64,
-    allow_string_concat: bool,
 ) -> Result<Value, CypherError> {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        return Ok(Value::Null);
+    }
     if let (Value::Int(a), Value::Int(b)) = (lhs, rhs) {
         return Ok(Value::Int(f_int(*a, *b)));
     }
-    if let (Some(a), Some(b)) = (value_as_f64(lhs), value_as_f64(rhs)) {
-        return Ok(Value::Float(f_float(a, b)));
+    match (number_as_f64(lhs), number_as_f64(rhs)) {
+        (Some(a), Some(b)) => Ok(Value::Float(f_float(a, b))),
+        _ => Err(CypherError::TypeError(format!(
+            "Invalid input parameter types for {age_name}"
+        ))),
     }
-    if allow_string_concat {
-        if let (Value::Str(a), Value::Str(b)) = (lhs, rhs) {
-            return Ok(Value::Str(format!("{a}{b}")));
-        }
-    }
-    Err(CypherError::TypeError(format!(
-        "arithmetic between {lhs:?} and {rhs:?}"
-    )))
 }
 
-fn str_pred(
-    lhs: &Value,
-    rhs: &Value,
-    f: impl Fn(&str, &str) -> bool,
-) -> Result<Value, CypherError> {
-    match (lhs, rhs) {
-        (Value::Str(a), Value::Str(b)) => Ok(Value::Bool(f(a, b))),
+fn agtype_div(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        return Ok(Value::Null);
+    }
+    if let (Value::Int(a), Value::Int(b)) = (lhs, rhs) {
+        if *b == 0 {
+            return Err(CypherError::TypeError("division by zero".into()));
+        }
+        // i64::MIN / -1 overflows; AGE wraps.
+        return Ok(Value::Int(a.wrapping_div(*b)));
+    }
+    match (number_as_f64(lhs), number_as_f64(rhs)) {
+        (Some(a), Some(b)) => {
+            if b == 0.0 {
+                return Err(CypherError::TypeError("division by zero".into()));
+            }
+            Ok(Value::Float(a / b))
+        }
         _ => Err(CypherError::TypeError(
-            "string predicate on non-string".into(),
+            "Invalid input parameter types for agtype_div".into(),
         )),
     }
 }
 
-fn string_op(value: Option<&Value>, op: fn(&str) -> String) -> Value {
-    match value {
-        Some(Value::Str(s)) => Value::Str(op(s)),
-        _ => Value::Null,
+fn agtype_mod(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        return Ok(Value::Null);
+    }
+    if let (Value::Int(a), Value::Int(b)) = (lhs, rhs) {
+        // AGE quirk (verified on 1.6.0): integer modulo by zero
+        // returns the dividend instead of raising.
+        if *b == 0 {
+            return Ok(Value::Int(*a));
+        }
+        return Ok(Value::Int(a.wrapping_rem(*b)));
+    }
+    match (number_as_f64(lhs), number_as_f64(rhs)) {
+        // fmod semantics: sign follows the dividend; x % 0.0 = NaN.
+        (Some(a), Some(b)) => Ok(Value::Float(a % b)),
+        _ => Err(CypherError::TypeError(
+            "Invalid input parameter types for agtype_mod".into(),
+        )),
+    }
+}
+
+fn agtype_pow(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
+    if *lhs == Value::Null || *rhs == Value::Null {
+        return Ok(Value::Null);
+    }
+    match (number_as_f64(lhs), number_as_f64(rhs)) {
+        // `^` ALWAYS yields a float in AGE (2^2 = 4.0).
+        (Some(a), Some(b)) => Ok(Value::Float(a.powf(b))),
+        _ => Err(CypherError::TypeError(
+            "Invalid input parameter types for agtype_pow".into(),
+        )),
+    }
+}
+
+/// STARTS WITH / ENDS WITH / CONTAINS: null propagates, non-string
+/// operands compare false (verified: `'abc' STARTS WITH 1` = false).
+fn str_predicate(lhs: &Value, rhs: &Value, f: impl Fn(&str, &str) -> bool) -> Value {
+    match (lhs, rhs) {
+        (Value::Null, _) | (_, Value::Null) => Value::Null,
+        (Value::Str(a), Value::Str(b)) => Value::Bool(f(a, b)),
+        _ => Value::Bool(false),
+    }
+}
+
+/// `=~` is an UNANCHORED regular-expression search in AGE
+/// (`PostgreSQL` `~` semantics): `'abc' =~ 'b'` is true. Non-string
+/// operands (including null) yield null.
+fn regex_match(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
+    match (lhs, rhs) {
+        (Value::Str(a), Value::Str(pattern)) => {
+            let re = regex::Regex::new(pattern)
+                .map_err(|e| CypherError::TypeError(format!("invalid regular expression: {e}")))?;
+            Ok(Value::Bool(re.is_match(a)))
+        }
+        _ => Ok(Value::Null),
+    }
+}
+
+fn unsupported_argument(function: &str, value: &Value) -> CypherError {
+    CypherError::TypeError(format!(
+        "{function}() unsupported argument agtype {}",
+        agtype::agtype_type_ordinal(value)
+    ))
+}
+
+fn string_fn(
+    arg: Option<&Value>,
+    name: &str,
+    f: impl Fn(&str) -> String,
+) -> Result<Value, CypherError> {
+    match arg {
+        Some(Value::Null) | None => Ok(Value::Null),
+        Some(Value::Str(s)) => Ok(Value::Str(f(s))),
+        Some(v) => Err(unsupported_argument(name, v)),
+    }
+}
+
+/// Numeric function that always yields a float (AGE: `ceil(2)` = 2.0).
+fn float_fn(arg: Option<&Value>, name: &str, f: impl Fn(f64) -> f64) -> Result<Value, CypherError> {
+    match arg {
+        Some(Value::Null) | None => Ok(Value::Null),
+        Some(v) => match number_as_f64(v) {
+            Some(x) => Ok(Value::Float(f(x))),
+            None => Err(unsupported_argument(name, v)),
+        },
+    }
+}
+
+/// Numeric function with a restricted domain; out-of-domain inputs
+/// return null (AGE: `sqrt(-1)` = null, `log(0)` = null).
+fn domain_float_fn(
+    arg: Option<&Value>,
+    name: &str,
+    f: impl Fn(f64) -> Option<f64>,
+) -> Result<Value, CypherError> {
+    match arg {
+        Some(Value::Null) | None => Ok(Value::Null),
+        Some(v) => match number_as_f64(v) {
+            Some(x) => Ok(f(x).map_or(Value::Null, Value::Float)),
+            None => Err(unsupported_argument(name, v)),
+        },
     }
 }

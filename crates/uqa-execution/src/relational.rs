@@ -190,6 +190,10 @@ pub struct Sort {
     keys: Vec<SortKey>,
     params: Vec<SQLParam>,
     schema: RowSchema,
+    /// When set, only the first `keep` rows of the sorted output are
+    /// retained (top-K selection instead of a full sort). Callers pass
+    /// `OFFSET + LIMIT` so a downstream [`Limit`] can still skip.
+    keep: Option<usize>,
     materialised: Option<std::vec::IntoIter<Batch>>,
 }
 
@@ -205,9 +209,66 @@ impl Sort {
             keys,
             params,
             schema,
+            keep: None,
             materialised: None,
         }
     }
+
+    /// Top-K variant: retain only the first `keep` rows of the sorted
+    /// order. Uses a partial selection, so the cost is `O(n + k log k)`
+    /// instead of `O(n log n)`.
+    pub fn with_keep(
+        child: Box<dyn PhysicalOperator>,
+        keys: Vec<SortKey>,
+        params: Vec<SQLParam>,
+        keep: usize,
+    ) -> Self {
+        let mut sort = Self::new(child, keys, params);
+        sort.keep = Some(keep);
+        sort
+    }
+}
+
+/// Compare two pre-computed sort-key vectors under `keys` semantics:
+/// per-key direction plus `PostgreSQL` NULLS placement (default NULLS
+/// LAST for ascending, NULLS FIRST for descending).
+pub fn compare_sort_key_values(keys: &[SortKey], av: &[Value], bv: &[Value]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    for (i, k) in keys.iter().enumerate() {
+        let a_null = matches!(av[i], Value::Null);
+        let b_null = matches!(bv[i], Value::Null);
+        let nulls_first = k.nulls_first.unwrap_or(k.descending);
+        if a_null || b_null {
+            let null_cmp = match (a_null, b_null) {
+                (true, true) => Ordering::Equal,
+                (true, false) => {
+                    if nulls_first {
+                        Ordering::Less
+                    } else {
+                        Ordering::Greater
+                    }
+                }
+                (false, true) => {
+                    if nulls_first {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Less
+                    }
+                }
+                (false, false) => unreachable!(),
+            };
+            if null_cmp != Ordering::Equal {
+                return null_cmp;
+            }
+            continue;
+        }
+        let ord = compare_values(&av[i], &bv[i]);
+        let ord = if k.descending { ord.reverse() } else { ord };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    Ordering::Equal
 }
 
 fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
@@ -263,44 +324,17 @@ impl PhysicalOperator for Sort {
             }
             decorated.push((key_vals, row));
         }
-        decorated.sort_by(|(av, _), (bv, _)| {
-            use std::cmp::Ordering;
-            for (i, k) in self.keys.iter().enumerate() {
-                let a_null = matches!(av[i], Value::Null);
-                let b_null = matches!(bv[i], Value::Null);
-                let nulls_first = k.nulls_first.unwrap_or(k.descending);
-                if a_null || b_null {
-                    let null_cmp = match (a_null, b_null) {
-                        (true, true) => Ordering::Equal,
-                        (true, false) => {
-                            if nulls_first {
-                                Ordering::Less
-                            } else {
-                                Ordering::Greater
-                            }
-                        }
-                        (false, true) => {
-                            if nulls_first {
-                                Ordering::Greater
-                            } else {
-                                Ordering::Less
-                            }
-                        }
-                        (false, false) => unreachable!(),
-                    };
-                    if null_cmp != Ordering::Equal {
-                        return null_cmp;
-                    }
-                    continue;
-                }
-                let ord = compare_values(&av[i], &bv[i]);
-                let ord = if k.descending { ord.reverse() } else { ord };
-                if ord != Ordering::Equal {
-                    return ord;
-                }
+        if let Some(keep) = self.keep.filter(|keep| *keep < decorated.len()) {
+            if keep == 0 {
+                decorated.clear();
+            } else {
+                decorated.select_nth_unstable_by(keep - 1, |(av, _), (bv, _)| {
+                    compare_sort_key_values(&self.keys, av, bv)
+                });
+                decorated.truncate(keep);
             }
-            Ordering::Equal
-        });
+        }
+        decorated.sort_by(|(av, _), (bv, _)| compare_sort_key_values(&self.keys, av, bv));
         let sorted: Vec<ResultRow> = decorated.into_iter().map(|(_, r)| r).collect();
         let batches = Batch::chunked(self.schema.clone(), sorted);
         self.materialised = Some(batches.into_iter());

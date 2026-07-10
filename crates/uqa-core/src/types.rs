@@ -45,11 +45,30 @@ const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "$uqa_type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TemporalValue {
-    Date { days: i32 },
-    Time { micros: i64 },
-    TimeTz { micros: i64, offset_minutes: i32 },
-    Timestamp { micros: i64 },
-    TimestampTz { micros: i64 },
+    Date {
+        days: i32,
+    },
+    Time {
+        micros: i64,
+    },
+    TimeTz {
+        micros: i64,
+        offset_minutes: i32,
+    },
+    Timestamp {
+        micros: i64,
+    },
+    TimestampTz {
+        micros: i64,
+    },
+    /// `INTERVAL` values use `PostgreSQL`'s exact three-field model:
+    /// months and days stay symbolic (a month is not a fixed number of
+    /// days) while sub-day amounts collapse into microseconds.
+    Interval {
+        months: i32,
+        days: i32,
+        micros: i64,
+    },
 }
 
 impl TemporalValue {
@@ -104,6 +123,9 @@ impl TemporalValue {
             "%Y-%m-%d %H:%M:%S%.f%z",
             "%Y-%m-%d %H:%M:%S%.f %z",
             "%Y-%m-%dT%H:%M:%S%.f%z",
+            // PostgreSQL text output uses a bare-hour offset (`+00`).
+            "%Y-%m-%d %H:%M:%S%.f%#z",
+            "%Y-%m-%dT%H:%M:%S%.f%#z",
         ] {
             if let Ok(dt) = DateTime::parse_from_str(input, fmt) {
                 return Some(Self::TimestampTz {
@@ -124,7 +146,16 @@ impl TemporalValue {
             Self::TimeTz { .. } => Self::parse_time_tz(input),
             Self::Timestamp { .. } => Self::parse_timestamp(input),
             Self::TimestampTz { .. } => Self::parse_timestamp_tz(input),
+            Self::Interval { .. } => Self::parse_interval(input),
         }
+    }
+
+    /// Parse a `PostgreSQL` interval literal (`'1 day'`, `'90 minutes'`,
+    /// `'1 day 3 hours'`, `'1-2'`, `'3 4:05:06'`, bare seconds, `ago`).
+    /// Fractional quantities cascade into the next-smaller unit exactly
+    /// like `PostgreSQL` (`'1.5 mons'` -> `1 mon 15 days`).
+    pub fn parse_interval(input: &str) -> Option<Self> {
+        parse_interval_literal(input)
     }
 
     pub fn to_sql_string(&self) -> String {
@@ -143,6 +174,11 @@ impl TemporalValue {
             ),
             Self::Timestamp { micros } => format_timestamp_micros(*micros, false),
             Self::TimestampTz { micros } => format_timestamp_micros(*micros, true),
+            Self::Interval {
+                months,
+                days,
+                micros,
+            } => format_interval(*months, *days, *micros),
         }
     }
 
@@ -160,6 +196,16 @@ impl TemporalValue {
             ),
             Self::Timestamp { micros } => (3, *micros),
             Self::TimestampTz { micros } => (4, *micros),
+            // PostgreSQL's interval_cmp flattens to microseconds with
+            // 30-day months for ordering purposes.
+            Self::Interval {
+                months,
+                days,
+                micros,
+            } => (
+                5,
+                (i64::from(*months) * 30 + i64::from(*days)) * MICROS_PER_DAY + micros,
+            ),
         }
     }
 }
@@ -496,10 +542,238 @@ fn format_timestamp_micros(micros: i64, utc: bool) -> String {
         out.push_str(&text);
     }
     if utc {
-        out = out.replace(' ', "T");
-        out.push('Z');
+        // PostgreSQL renders timestamptz in the session time zone; the
+        // engine pins UTC, which psql shows as a `+00` suffix.
+        out.push_str("+00");
     }
     out
+}
+
+/// Render an interval the way `PostgreSQL`'s default (`postgres`)
+/// `IntervalStyle` does: `1 year 2 mons 3 days 04:05:06`, per-field
+/// signs, and an explicit `+` on a positive field that follows a
+/// negative one (`-1 days +03:00:00`).
+fn format_interval(months: i32, days: i32, micros: i64) -> String {
+    use std::fmt::Write as _;
+    let years = months / 12;
+    let months = months % 12;
+    let mut out = String::new();
+    let mut is_before = false;
+    let push_unit = |out: &mut String, value: i32, unit: &str, is_before: &mut bool| {
+        if value == 0 {
+            return;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        if *is_before && value > 0 {
+            out.push('+');
+        }
+        out.push_str(&value.to_string());
+        out.push(' ');
+        out.push_str(unit);
+        if value != 1 {
+            out.push('s');
+        }
+        *is_before = *is_before || value < 0;
+    };
+    push_unit(&mut out, years, "year", &mut is_before);
+    push_unit(&mut out, months, "mon", &mut is_before);
+    push_unit(&mut out, days, "day", &mut is_before);
+    if micros != 0 || out.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        if micros < 0 {
+            out.push('-');
+        } else if is_before {
+            out.push('+');
+        }
+        let abs = micros.unsigned_abs();
+        let hours = abs / 3_600_000_000;
+        let minutes = (abs % 3_600_000_000) / 60_000_000;
+        let seconds = (abs % 60_000_000) / 1_000_000;
+        let frac = abs % 1_000_000;
+        let _ = write!(out, "{hours:02}:{minutes:02}:{seconds:02}");
+        if frac != 0 {
+            let mut text = format!("{frac:06}");
+            while text.ends_with('0') {
+                text.pop();
+            }
+            out.push('.');
+            out.push_str(&text);
+        }
+    }
+    out
+}
+
+/// Parse a `PostgreSQL` interval literal into `(months, days, micros)`.
+#[allow(clippy::too_many_lines)]
+fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
+    #[derive(Default)]
+    struct Acc {
+        months: i64,
+        days: i64,
+        micros: i64,
+    }
+    impl Acc {
+        // Carry a fractional remainder downward exactly like
+        // PostgreSQL: month fractions become days (x30), day/week
+        // fractions become microseconds (x86400s).
+        fn add_unit(&mut self, unit: &str, quantity: f64) -> bool {
+            const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
+            const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
+            let whole = quantity.trunc();
+            let frac = quantity - whole;
+            match unit {
+                "microsecond" | "microseconds" | "us" => {
+                    self.micros += quantity.round() as i64;
+                }
+                "millisecond" | "milliseconds" | "ms" => {
+                    self.micros += (quantity * 1_000.0).round() as i64;
+                }
+                "second" | "seconds" | "sec" | "secs" | "s" => {
+                    self.micros += (quantity * MICROS_PER_SECOND as f64).round() as i64;
+                }
+                "minute" | "minutes" | "min" | "mins" | "m" => {
+                    self.micros += (quantity * MICROS_PER_MINUTE as f64).round() as i64;
+                }
+                "hour" | "hours" | "hr" | "hrs" | "h" => {
+                    self.micros += (quantity * MICROS_PER_HOUR as f64).round() as i64;
+                }
+                "day" | "days" | "d" => {
+                    self.days += whole as i64;
+                    self.micros += (frac * MICROS_PER_DAY as f64).round() as i64;
+                }
+                "week" | "weeks" | "w" => {
+                    let total_days = quantity * 7.0;
+                    self.days += total_days.trunc() as i64;
+                    self.micros +=
+                        ((total_days - total_days.trunc()) * MICROS_PER_DAY as f64).round() as i64;
+                }
+                "month" | "months" | "mon" | "mons" => {
+                    self.months += whole as i64;
+                    self.days += (frac * 30.0).round() as i64;
+                }
+                "year" | "years" | "yr" | "yrs" | "y" => {
+                    self.months += (quantity * 12.0).round() as i64;
+                }
+                "decade" | "decades" => self.months += (quantity * 120.0).round() as i64,
+                "century" | "centuries" => self.months += (quantity * 1_200.0).round() as i64,
+                "millennium" | "millenniums" | "millennia" => {
+                    self.months += (quantity * 12_000.0).round() as i64;
+                }
+                _ => return false,
+            }
+            true
+        }
+    }
+
+    let mut text = input.trim().to_ascii_lowercase();
+    let mut negate_all = false;
+    if let Some(stripped) = text.strip_suffix("ago") {
+        negate_all = true;
+        text = stripped.trim_end().to_string();
+    }
+    if text.is_empty() {
+        return None;
+    }
+    let mut acc = Acc::default();
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let mut pending: Option<f64> = None;
+    for token in &tokens {
+        if let Some(rest) = parse_interval_time_token(token) {
+            // `HH:MM[:SS[.frac]]` (or `[+-]HH:MM...`) time-of-day part.
+            // A bare number right before it is a day count
+            // (`'3 4:05:06'` = 3 days 04:05:06).
+            if let Some(days) = pending.take() {
+                acc.days += days.trunc() as i64;
+                acc.micros += ((days - days.trunc()) * MICROS_PER_DAY as f64).round() as i64;
+            }
+            acc.micros += rest;
+            continue;
+        }
+        if let Some((y, m)) = parse_interval_year_month_token(token) {
+            acc.months += y * 12 + m;
+            continue;
+        }
+        if let Ok(number) = token.parse::<f64>() {
+            if let Some(prev) = pending.take() {
+                // Two bare numbers in a row: the first was seconds.
+                acc.micros += (prev * MICROS_PER_SECOND as f64).round() as i64;
+            }
+            pending = Some(number);
+            continue;
+        }
+        let quantity = pending.take().unwrap_or(1.0);
+        if !acc.add_unit(token, quantity) {
+            return None;
+        }
+    }
+    if let Some(number) = pending {
+        // Trailing bare number: PostgreSQL reads it as seconds.
+        acc.micros += (number * MICROS_PER_SECOND as f64).round() as i64;
+    }
+    if negate_all {
+        acc.months = -acc.months;
+        acc.days = -acc.days;
+        acc.micros = -acc.micros;
+    }
+    Some(TemporalValue::Interval {
+        months: i32::try_from(acc.months).ok()?,
+        days: i32::try_from(acc.days).ok()?,
+        micros: acc.micros,
+    })
+}
+
+/// `[+-]HH:MM[:SS[.frac]]` -> signed microseconds. Rejects minute or
+/// second fields of 60 or more, mirroring `PostgreSQL`.
+fn parse_interval_time_token(token: &str) -> Option<i64> {
+    if !token.contains(':') {
+        return None;
+    }
+    let (sign, body) = match token.as_bytes().first()? {
+        b'-' => (-1i64, &token[1..]),
+        b'+' => (1, &token[1..]),
+        _ => (1, token),
+    };
+    let parts: Vec<&str> = body.split(':').collect();
+    if !(2..=3).contains(&parts.len()) {
+        return None;
+    }
+    let hours: i64 = parts[0].parse().ok()?;
+    let minutes: i64 = parts[1].parse().ok()?;
+    if !(0..60).contains(&minutes) {
+        return None;
+    }
+    let mut micros = hours * 3_600 * MICROS_PER_SECOND + minutes * 60 * MICROS_PER_SECOND;
+    if parts.len() == 3 {
+        let seconds: f64 = parts[2].parse().ok()?;
+        if !(0.0..60.0).contains(&seconds) {
+            return None;
+        }
+        micros += (seconds * MICROS_PER_SECOND as f64).round() as i64;
+    }
+    Some(sign * micros)
+}
+
+/// SQL-standard year-month literal `[+-]Y-M` -> `(years, months)`.
+fn parse_interval_year_month_token(token: &str) -> Option<(i64, i64)> {
+    let (sign, body) = match token.as_bytes().first()? {
+        b'-' => (-1i64, &token[1..]),
+        b'+' => (1, &token[1..]),
+        _ => (1, token),
+    };
+    let (y, m) = body.split_once('-')?;
+    if y.is_empty() || m.is_empty() || !y.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let years: i64 = y.parse().ok()?;
+    let months: i64 = m.parse().ok()?;
+    if !(0..12).contains(&months) {
+        return None;
+    }
+    Some((sign * years, sign * months))
 }
 
 /// Dynamic value type for document fields and posting payload extras.

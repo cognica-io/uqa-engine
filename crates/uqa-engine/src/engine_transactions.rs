@@ -326,6 +326,10 @@ impl Engine {
                 continue;
             };
             table.document_store.write().clear();
+            table
+                .doc_count_dirty
+                .store(true, std::sync::atomic::Ordering::Release);
+            Self::value_indexes_clear(&table);
             table.inverted_index.write().clear();
             for index in table.vector_indexes.write().values_mut() {
                 index.clear();

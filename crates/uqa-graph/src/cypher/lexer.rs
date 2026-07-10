@@ -40,6 +40,8 @@ pub enum TokenKind {
     Lte,
     Gte,
     PlusEq,
+    /// `=~` regular-expression match operator.
+    RegexMatch,
     ArrowRight,
     ArrowLeft,
     Eof,
@@ -163,6 +165,7 @@ fn scan_two_char_symbol(source: &str, i: usize) -> Option<(Token, usize)> {
         (b'-', b'>') => TokenKind::ArrowRight,
         (b'<', b'-') => TokenKind::ArrowLeft,
         (b'+', b'=') => TokenKind::PlusEq,
+        (b'=', b'~') => TokenKind::RegexMatch,
         (b'.', b'.') => TokenKind::DotDot,
         _ => return None,
     };

@@ -218,10 +218,14 @@ fn arithmetic_compound_expression() {
 }
 
 #[test]
-fn arithmetic_division_by_zero_returns_null() {
+fn arithmetic_division_by_zero_errors() {
+    // PostgreSQL 17 raises `division by zero` (SQLSTATE 22012) instead
+    // of yielding NULL.
     let eng = engine();
-    let r = rows(&eng, "SELECT name, price / 0 AS bad FROM products LIMIT 1");
-    assert!(is_null(&r[0], "bad"));
+    let err = eng
+        .sql("SELECT name, price / 0 AS bad FROM products LIMIT 1", &[])
+        .unwrap_err();
+    assert!(err.to_string().contains("division by zero"));
 }
 
 // =====================================================================

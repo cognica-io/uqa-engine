@@ -260,7 +260,9 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
         Value::Temporal(
             TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
         ) => DuckValue::Timestamp(TimeUnit::Microsecond, *micros),
-        Value::Temporal(TemporalValue::TimeTz { .. }) => DuckValue::Text(value_to_string(value)),
+        Value::Temporal(TemporalValue::TimeTz { .. } | TemporalValue::Interval { .. }) => {
+            DuckValue::Text(value_to_string(value))
+        }
         Value::List(items) => DuckValue::List(
             items
                 .iter()

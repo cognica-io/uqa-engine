@@ -16,10 +16,10 @@ pub mod writer;
 
 pub use ast::{
     BinaryOp, CaseExpr, CreateClause, CypherClause, CypherExpr, CypherQuery, DeleteClause,
-    FunctionCall, InList, IsNotNull, IsNull, ListIndex, ListLiteral, Literal, MapLiteral,
-    MatchClause, MergeClause, NodePattern, OrderByItem, Parameter, PathElement, PathPattern,
-    PropertyAccess, RelDirection, RelPattern, ReturnClause, ReturnItem, SetClause, SetItem,
-    SetOperator, UnaryOp, UnwindClause, Variable, WithClause,
+    FunctionCall, InList, IsNotNull, IsNull, ListComprehension, ListIndex, ListLiteral, ListSlice,
+    Literal, MapLiteral, MatchClause, MergeClause, NodePattern, OrderByItem, Parameter,
+    PathElement, PathPattern, PropertyAccess, RelDirection, RelPattern, ReturnClause, ReturnItem,
+    SetClause, SetItem, SetOperator, UnaryOp, UnwindClause, Variable, WithClause,
 };
 pub use executor::{Binding, BindingRow, CypherError, CypherExecutor, ResultRow};
 pub use lexer::{tokenize, LexError, Token, TokenKind};

@@ -16,6 +16,7 @@ use uqa_core::{DecimalValue, Value};
 use uqa_sql::ast::{Expr, OrderBy, Projection, SelectStmt};
 use uqa_sql::expr::EvalContext;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
+use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLAggregateFunction, SQLAggregateState, ScoredEntry};
 
@@ -563,6 +564,175 @@ fn contains_aggregate(engine: &Engine, expr: &Expr) -> bool {
     let mut found = Vec::new();
     collect_aggregate_exprs(engine, expr, &mut found);
     !found.is_empty()
+}
+
+/// Collect the top-level column names an expression reads. Returns
+/// `false` when the expression can reach arbitrary fields (`*`,
+/// subqueries, window calls), in which case callers must materialise
+/// whole documents.
+pub(super) fn collect_expr_columns(expr: &Expr, out: &mut BTreeSet<String>) -> bool {
+    match expr {
+        Expr::Column(name) => {
+            out.insert(name.clone());
+            true
+        }
+        Expr::QualifiedColumn { column, .. } => {
+            out.insert(column.clone());
+            true
+        }
+        Expr::Literal(_) | Expr::Param(_) => true,
+        Expr::Func {
+            args,
+            filter,
+            order_by,
+            ..
+        } => {
+            args.iter().all(|a| collect_expr_columns(a, out))
+                && filter
+                    .as_deref()
+                    .is_none_or(|f| collect_expr_columns(f, out))
+                && order_by.iter().all(|o| collect_expr_columns(&o.expr, out))
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_expr_columns(lhs, out) && collect_expr_columns(rhs, out)
+        }
+        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => collect_expr_columns(inner, out),
+        Expr::IsNull { expr, .. } => collect_expr_columns(expr, out),
+        Expr::Between { expr, low, high } => {
+            collect_expr_columns(expr, out)
+                && collect_expr_columns(low, out)
+                && collect_expr_columns(high, out)
+        }
+        Expr::InList { expr, list, .. } => {
+            collect_expr_columns(expr, out) && list.iter().all(|i| collect_expr_columns(i, out))
+        }
+        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => {
+            items.iter().all(|i| collect_expr_columns(i, out))
+        }
+        Expr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref().is_none_or(|b| collect_expr_columns(b, out))
+                && when.iter().all(|(condition, result)| {
+                    collect_expr_columns(condition, out) && collect_expr_columns(result, out)
+                })
+                && else_branch
+                    .as_deref()
+                    .is_none_or(|e| collect_expr_columns(e, out))
+        }
+        _ => false,
+    }
+}
+
+/// The column set the aggregation pass reads, or `None` when whole
+/// documents are required (`*` expansion, subqueries, ...). `count(*)`
+/// contributes no columns.
+fn aggregation_column_projection(
+    stmt: &SelectStmt,
+    agg_targets: &[&Expr],
+) -> Option<BTreeSet<String>> {
+    let mut columns = BTreeSet::new();
+    for group in &stmt.group_by {
+        if !collect_expr_columns(group, &mut columns) {
+            return None;
+        }
+    }
+    for expr in agg_targets {
+        let Expr::Func {
+            name,
+            args,
+            filter,
+            order_by,
+            ..
+        } = expr
+        else {
+            if !collect_expr_columns(expr, &mut columns) {
+                return None;
+            }
+            continue;
+        };
+        let count_star =
+            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [Expr::Star]);
+        if !count_star {
+            for arg in args {
+                if !collect_expr_columns(arg, &mut columns) {
+                    return None;
+                }
+            }
+        }
+        if let Some(filter_expr) = filter.as_deref() {
+            if !collect_expr_columns(filter_expr, &mut columns) {
+                return None;
+            }
+        }
+        for order in order_by {
+            if !collect_expr_columns(&order.expr, &mut columns) {
+                return None;
+            }
+        }
+    }
+    Some(columns)
+}
+
+/// Materialise the documents an aggregation pass needs: nothing for
+/// count-only aggregates, a column projection when the referenced
+/// column set is known, whole documents otherwise.
+fn aggregation_documents(
+    engine: &Engine,
+    table: &str,
+    scored: &[ScoredEntry],
+    stmt: &SelectStmt,
+    agg_targets: &[&Expr],
+) -> BTreeMap<uqa_core::DocId, Document> {
+    if !aggregation_needs_documents(stmt, agg_targets) {
+        return BTreeMap::new();
+    }
+    let doc_ids: Vec<uqa_core::DocId> = scored.iter().map(|entry| entry.doc_id).collect();
+    match aggregation_column_projection(stmt, agg_targets) {
+        Some(columns) if !columns.is_empty() => {
+            let names: Vec<String> = columns.into_iter().collect();
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            engine
+                .get_document_fields_multi(table, &doc_ids, &refs)
+                .into_iter()
+                .map(|(doc_id, values)| {
+                    let document: Document = names.iter().cloned().zip(values).collect();
+                    (doc_id, document)
+                })
+                .collect()
+        }
+        Some(_) => BTreeMap::new(),
+        None => engine.get_documents_bulk(table, &doc_ids),
+    }
+}
+
+/// Whether the aggregation pass has to materialise stored documents.
+/// `count(*)` (with no column-referencing FILTER) and literal-argument
+/// aggregates can run on doc ids alone, which turns `SELECT count(*)
+/// FROM t` into a no-fetch pass over the match list.
+fn aggregation_needs_documents(stmt: &SelectStmt, agg_targets: &[&Expr]) -> bool {
+    if stmt.group_by.iter().any(expr_references_columns) {
+        return true;
+    }
+    agg_targets.iter().any(|expr| {
+        let Expr::Func {
+            name,
+            args,
+            filter,
+            order_by,
+            ..
+        } = expr
+        else {
+            return expr_references_columns(expr);
+        };
+        let count_star =
+            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [Expr::Star]);
+        (!count_star && args.iter().any(expr_references_columns))
+            || filter.as_deref().is_some_and(expr_references_columns)
+            || order_by.iter().any(|o| expr_references_columns(&o.expr))
+    })
 }
 
 fn expr_references_columns(expr: &Expr) -> bool {
@@ -1465,9 +1635,11 @@ pub(super) fn build_aggregate_rows(
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
 
+    let documents = aggregation_documents(engine, table, scored, stmt, &agg_targets);
+    let empty_document = Document::new();
     for entry in scored {
-        let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
+        let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
@@ -1589,9 +1761,11 @@ fn build_aggregate_rows_relaxed(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
+    let documents = aggregation_documents(engine, table, scored, stmt, &agg_targets);
+    let empty_document = Document::new();
     for entry in scored {
-        let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
+        let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
+        let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
@@ -1781,25 +1955,29 @@ fn aggregate_value_with_args(
             if acc.count < 2 {
                 return Ok(Value::Null);
             }
-            Value::Float(stddev_samp(&acc.values.values()?))
+            let values = acc.values.values()?;
+            statistical_aggregate_value(&values, stddev_samp(&values))
         }
         "stddev_pop" => {
             if acc.count == 0 {
                 return Ok(Value::Null);
             }
-            Value::Float(stddev_pop(&acc.values.values()?))
+            let values = acc.values.values()?;
+            statistical_aggregate_value(&values, stddev_pop(&values))
         }
         "variance" | "var_samp" => {
             if acc.count < 2 {
                 return Ok(Value::Null);
             }
-            Value::Float(variance_samp(&acc.values.values()?))
+            let values = acc.values.values()?;
+            statistical_aggregate_value(&values, variance_samp(&values))
         }
         "var_pop" => {
             if acc.count == 0 {
                 return Ok(Value::Null);
             }
-            Value::Float(variance_pop(&acc.values.values()?))
+            let values = acc.values.values()?;
+            statistical_aggregate_value(&values, variance_pop(&values))
         }
         "percentile_cont" => {
             let ordered_values = acc.values.ordered_values()?;
@@ -1854,6 +2032,19 @@ fn mean(values: &[Value]) -> f64 {
     } else {
         nums.iter().sum::<f64>() / nums.len() as f64
     }
+}
+
+/// Statistical aggregates (`variance`, `stddev_*`) return `numeric`
+/// for integer / numeric inputs in `PostgreSQL` (rendering with a
+/// decimal point, e.g. `1.00000...`), and `double precision` only for
+/// float inputs.
+fn statistical_aggregate_value(values: &[Value], computed: f64) -> Value {
+    let float_input = values.iter().any(|v| matches!(v, Value::Float(_)));
+    if float_input || !computed.is_finite() {
+        return Value::Float(computed);
+    }
+    uqa_core::DecimalValue::parse(&format!("{computed:.16}"))
+        .map_or(Value::Float(computed), Value::Decimal)
 }
 
 fn variance_samp(values: &[Value]) -> f64 {

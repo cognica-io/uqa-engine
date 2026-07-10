@@ -28,8 +28,9 @@ use json::{
     parse_json, strip_nulls, value_to_json,
 };
 use time::{
-    date_trunc, extract_field, format_pg_datetime, format_pg_number, generate_random_uuid,
-    hex_encode, make_timestamp, parse_timestamp, pg_to_chrono_fmt,
+    age_between, coerce_temporal, date_trunc_value, extract_from_value, format_pg_number,
+    format_temporal, generate_random_uuid, hex_encode, make_timestamp, parse_timestamp,
+    pg_to_chrono_fmt,
 };
 
 /// Engine-side hook that the expression evaluator calls into for
@@ -62,6 +63,18 @@ pub trait EngineHook {
 
     fn has_scalar_functions(&self) -> bool {
         true
+    }
+
+    /// Invoke a user-defined SQL / `PL/pgSQL` function. Consulted
+    /// after built-in dispatch misses (and immediately for calls with
+    /// named arguments, which built-ins never accept). `None` means
+    /// no user-defined function with this name exists.
+    fn call_user_function(
+        &self,
+        _name: &str,
+        _args: &[(Option<String>, Value)],
+    ) -> Option<Result<Value>> {
+        None
     }
 }
 
@@ -133,12 +146,22 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let row = ctx
                 .row
                 .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
-            if key.is_empty() {
+            let value = if key.is_empty() {
                 let key = format!("{qualifier}.{column}");
-                Ok(row.get(&key).cloned().unwrap_or(Value::Null))
+                row.get(&key)
             } else {
-                Ok(row.get(key).cloned().unwrap_or(Value::Null))
+                row.get(key)
+            };
+            if let Some(value) = value {
+                return Ok(value.clone());
             }
+            // Single-relation rows carry unqualified keys, so
+            // `SELECT items.id FROM items` must fall back to the bare
+            // column - but only when no other qualifier claims that
+            // column (join rows keep qualified keys for both sides).
+            Ok(unqualified_fallback(row, column)
+                .cloned()
+                .unwrap_or(Value::Null))
         }
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());
@@ -168,10 +191,26 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     "scalar evaluation of `{name}` is not supported (use the function registry)"
                 )));
             }
-            let evaluated: Vec<Value> = args
-                .iter()
-                .map(|a| eval(a, ctx))
-                .collect::<Result<Vec<_>>>()?;
+            let call_args = evaluate_call_args(args, ctx)?;
+            if call_args.iter().any(|(name, _)| name.is_some()) {
+                // `make_interval` is the one built-in the engine
+                // accepts with named arguments (PostgreSQL declares
+                // defaults for every parameter).
+                if lower == "make_interval" {
+                    if let Some(positional) = make_interval_named_args(&call_args) {
+                        return eval_scalar_function(lower, &positional);
+                    }
+                }
+                // Other named-argument calls only reach user-defined
+                // routines; built-ins are positional.
+                if let Some(engine) = ctx.engine {
+                    if let Some(result) = engine.call_user_function(lower, &call_args) {
+                        return result;
+                    }
+                }
+                return Err(unknown_function_error(lower, &call_args));
+            }
+            let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
             // Sequence functions need the engine hook because they
             // mutate per-engine state (`_engine._sequences` in the
             // canonical UQA behavior). Routed before the pure-scalar
@@ -185,7 +224,22 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
                     return result;
                 }
             }
-            eval_scalar_function(lower, &evaluated)
+            match eval_scalar_function(lower, &evaluated) {
+                // Unknown built-in: fall through to user-defined
+                // functions, mirroring PostgreSQL's search-path order
+                // (pg_catalog wins over user schemas).
+                Err(SQLError::UnknownFunction(_)) => {
+                    let call_args: Vec<(Option<String>, Value)> =
+                        evaluated.into_iter().map(|value| (None, value)).collect();
+                    if let Some(engine) = ctx.engine {
+                        if let Some(result) = engine.call_user_function(lower, &call_args) {
+                            return result;
+                        }
+                    }
+                    Err(unknown_function_error(lower, &call_args))
+                }
+                other => other,
+            }
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
@@ -275,24 +329,42 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
         Expr::Not(inner) => {
+            // SQL three-valued logic: NOT NULL -> NULL.
             let v = eval(inner, ctx)?;
+            if matches!(v, Value::Null) {
+                return Ok(Value::Null);
+            }
             Ok(Value::Bool(!truthy(&v)))
         }
         Expr::And(items) => {
+            // Kleene AND: FALSE dominates, otherwise NULL taints.
+            let mut saw_null = false;
             for item in items {
                 let v = eval(item, ctx)?;
-                if !truthy(&v) {
+                if matches!(v, Value::Null) {
+                    saw_null = true;
+                } else if !truthy(&v) {
                     return Ok(Value::Bool(false));
                 }
+            }
+            if saw_null {
+                return Ok(Value::Null);
             }
             Ok(Value::Bool(true))
         }
         Expr::Or(items) => {
+            // Kleene OR: TRUE dominates, otherwise NULL taints.
+            let mut saw_null = false;
             for item in items {
                 let v = eval(item, ctx)?;
-                if truthy(&v) {
+                if matches!(v, Value::Null) {
+                    saw_null = true;
+                } else if truthy(&v) {
                     return Ok(Value::Bool(true));
                 }
+            }
+            if saw_null {
+                return Ok(Value::Null);
             }
             Ok(Value::Bool(false))
         }
@@ -305,25 +377,58 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let v = eval(expr, ctx)?;
             let lo = eval(low, ctx)?;
             let hi = eval(high, ctx)?;
-            let ge = compare(&v, &lo)?.is_ge();
-            let le = compare(&v, &hi)?.is_le();
-            Ok(Value::Bool(ge && le))
+            eval_between(&v, &lo, &hi)
         }
         Expr::InList {
             expr,
             list,
             negated,
         } => {
+            // Three-valued IN: found -> TRUE, a NULL comparand (or a
+            // NULL needle) downgrades a miss to NULL.
             let v = eval(expr, ctx)?;
+            let mut saw_null = matches!(v, Value::Null);
             for item in list {
                 let candidate = eval(item, ctx)?;
-                if values_equal(&v, &candidate) {
-                    return Ok(Value::Bool(!*negated));
+                match values_equal_nullable(&v, &candidate) {
+                    Some(true) => return Ok(Value::Bool(!*negated)),
+                    Some(false) => {}
+                    None => saw_null = true,
                 }
+            }
+            if saw_null {
+                return Ok(Value::Null);
             }
             Ok(Value::Bool(*negated))
         }
     }
+}
+
+/// `expr BETWEEN low AND high` under three-valued logic: a definite
+/// FALSE on either bound wins over a NULL on the other.
+fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
+    let ge = compare_nullable(v, lo)?.map(|ord| ord.is_ge());
+    let le = compare_nullable(v, hi)?.map(|ord| ord.is_le());
+    Ok(match (ge, le) {
+        (Some(false), _) | (_, Some(false)) => Value::Bool(false),
+        (Some(true), Some(true)) => Value::Bool(true),
+        _ => Value::Null,
+    })
+}
+
+/// Fallback for a qualified column reference against a row keyed by
+/// bare column names (single-relation result rows). Declines when a
+/// different qualifier owns the column so join rows never
+/// mis-resolve.
+pub fn unqualified_fallback<'a>(row: &'a ResultRow, column: &str) -> Option<&'a Value> {
+    let claimed_by_other = row.keys().any(|key| {
+        key.rsplit_once('.')
+            .is_some_and(|(_, suffix)| suffix == column)
+    });
+    if claimed_by_other {
+        return None;
+    }
+    row.get(column)
 }
 
 fn normalized_function_name(name: &str) -> Cow<'_, str> {
@@ -335,6 +440,84 @@ fn normalized_function_name(name: &str) -> Cow<'_, str> {
     }
 }
 
+/// Marker function the compiler wraps `name => value` call arguments
+/// in (`NamedArgExpr` has no dedicated AST node).
+pub const NAMED_ARG_FUNCTION: &str = "__named_arg";
+
+/// Evaluate a call's argument list, unwrapping `name => value`
+/// markers into `(Some(name), value)` pairs.
+pub fn evaluate_call_args(
+    args: &[Expr],
+    ctx: &EvalContext<'_>,
+) -> Result<Vec<(Option<String>, Value)>> {
+    args.iter()
+        .map(|arg| match arg {
+            Expr::Func {
+                name, args: inner, ..
+            } if name == NAMED_ARG_FUNCTION => {
+                let Some(Expr::Literal(Value::Str(arg_name))) = inner.first() else {
+                    return Err(SQLError::Internal("named argument without a name".into()));
+                };
+                let value_expr = inner
+                    .get(1)
+                    .ok_or_else(|| SQLError::Internal("named argument without a value".into()))?;
+                Ok((Some(arg_name.to_ascii_lowercase()), eval(value_expr, ctx)?))
+            }
+            other => Ok((None, eval(other, ctx)?)),
+        })
+        .collect()
+}
+
+/// Map `make_interval(name => value, ...)` onto the positional
+/// `(years, months, weeks, days, hours, mins, secs)` argument list.
+/// Returns `None` when an unknown parameter name appears.
+fn make_interval_named_args(call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
+    const NAMES: [&str; 7] = ["years", "months", "weeks", "days", "hours", "mins", "secs"];
+    let mut positional = vec![Value::Int(0); NAMES.len()];
+    for (idx, (name, value)) in call_args.iter().enumerate() {
+        let slot = match name {
+            Some(name) => NAMES.iter().position(|n| n == name)?,
+            None => idx,
+        };
+        positional[slot] = value.clone();
+    }
+    Some(positional)
+}
+
+/// `PostgreSQL`-style type name used in function-resolution errors.
+pub fn value_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "unknown",
+        Value::Bool(_) => "boolean",
+        Value::Int(_) => "integer",
+        Value::Float(_) => "double precision",
+        Value::Str(_) => "text",
+        Value::Bytes(_) => "bytea",
+        Value::Temporal(TemporalValue::Interval { .. }) => "interval",
+        Value::Temporal(_) => "timestamp",
+        Value::Decimal(_) => "numeric",
+        Value::List(_) => "anyarray",
+        Value::Map(_) => "record",
+    }
+}
+
+/// `function name(arg types) does not exist` - the error `PostgreSQL`
+/// raises when call resolution fails (SQLSTATE 42883).
+pub fn unknown_function_error(name: &str, args: &[(Option<String>, Value)]) -> SQLError {
+    let types = args
+        .iter()
+        .map(|(arg_name, value)| match arg_name {
+            Some(arg_name) => format!("{arg_name} => {}", value_type_name(value)),
+            None => value_type_name(value).to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!("function {name}({types}) does not exist"),
+    }
+}
+
 fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     if let Some(value) = eval_binary_borrowed(op, lhs, rhs, ctx)? {
         return Ok(value);
@@ -342,17 +525,32 @@ fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> R
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
     match op {
-        BinaryOp::Equal => Ok(Value::Bool(values_equal(&l, &r))),
-        BinaryOp::NotEqual => Ok(Value::Bool(!values_equal(&l, &r))),
-        BinaryOp::Less => Ok(Value::Bool(compare(&l, &r)?.is_lt())),
-        BinaryOp::LessEqual => Ok(Value::Bool(compare(&l, &r)?.is_le())),
-        BinaryOp::Greater => Ok(Value::Bool(compare(&l, &r)?.is_gt())),
-        BinaryOp::GreaterEqual => Ok(Value::Bool(compare(&l, &r)?.is_ge())),
+        BinaryOp::Equal
+        | BinaryOp::NotEqual
+        | BinaryOp::Less
+        | BinaryOp::LessEqual
+        | BinaryOp::Greater
+        | BinaryOp::GreaterEqual => eval_comparison_op(op, &l, &r),
         BinaryOp::Add => arith(&l, &r, op),
         BinaryOp::Subtract => arith(&l, &r, op),
         BinaryOp::Multiply => arith(&l, &r, op),
         BinaryOp::Divide => arith(&l, &r, op),
     }
+}
+
+/// Comparison operators under SQL three-valued logic: any NULL operand
+/// makes the result NULL.
+fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
+    let out = match op {
+        BinaryOp::Equal => values_equal_nullable(l, r).map(Value::Bool),
+        BinaryOp::NotEqual => values_equal_nullable(l, r).map(|eq| Value::Bool(!eq)),
+        BinaryOp::Less => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_lt())),
+        BinaryOp::LessEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_le())),
+        BinaryOp::Greater => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_gt())),
+        BinaryOp::GreaterEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_ge())),
+        _ => unreachable!("non-comparison op routed through eval_comparison_op"),
+    };
+    Ok(out.unwrap_or(Value::Null))
 }
 
 enum EvalOperand<'a> {
@@ -394,16 +592,7 @@ fn eval_binary_borrowed(
     };
     let l = l.as_value();
     let r = r.as_value();
-    let out = match op {
-        BinaryOp::Equal => Value::Bool(values_equal(l, r)),
-        BinaryOp::NotEqual => Value::Bool(!values_equal(l, r)),
-        BinaryOp::Less => Value::Bool(compare(l, r)?.is_lt()),
-        BinaryOp::LessEqual => Value::Bool(compare(l, r)?.is_le()),
-        BinaryOp::Greater => Value::Bool(compare(l, r)?.is_gt()),
-        BinaryOp::GreaterEqual => Value::Bool(compare(l, r)?.is_ge()),
-        _ => unreachable!("non-comparison op filtered above"),
-    };
-    Ok(Some(out))
+    Ok(Some(eval_comparison_op(op, l, r)?))
 }
 
 fn eval_operand_borrowed<'a>(
@@ -472,66 +661,133 @@ pub fn truthy(v: &Value) -> bool {
     }
 }
 
+/// Two-valued equality used where SQL treats a NULL comparison as
+/// simply "no match" (CASE base matching, NULLIF, IN-subquery probes).
 fn values_equal(a: &Value, b: &Value) -> bool {
+    values_equal_nullable(a, b) == Some(true)
+}
+
+/// Three-valued equality: `None` when either side is NULL (or, for row
+/// values, when element NULLs leave the outcome undecided).
+fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
     match (a, b) {
-        (Value::Null, _) | (_, Value::Null) => false,
-        (Value::Int(x), Value::Float(y)) => (*x as f64) == *y,
-        (Value::Float(x), Value::Int(y)) => *x == (*y as f64),
-        (Value::Decimal(x), Value::Decimal(y)) => x == y,
+        (Value::Null, _) | (_, Value::Null) => None,
+        (Value::Int(x), Value::Float(y)) => Some((*x as f64) == *y),
+        (Value::Float(x), Value::Int(y)) => Some(*x == (*y as f64)),
+        (Value::Decimal(x), Value::Decimal(y)) => Some(x == y),
         (Value::Int(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Int(x)) => {
-            DecimalValue::from_i64(*x) == *y
+            Some(DecimalValue::from_i64(*x) == *y)
         }
         (Value::Float(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Float(x)) => {
-            DecimalValue::from_f64_lossy(*x).is_some_and(|x| x == *y)
+            Some(DecimalValue::from_f64_lossy(*x).is_some_and(|x| x == *y))
         }
         (Value::Bool(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Bool(x)) => {
-            DecimalValue::from_bool(*x) == *y
+            Some(DecimalValue::from_bool(*x) == *y)
         }
-        (Value::Temporal(x), Value::Temporal(y)) => x == y,
-        (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => {
-            x.parse_same_kind(y).is_some_and(|parsed| parsed == *x)
+        // Temporal equality goes through the ordering key so
+        // `interval '1 mon' = interval '30 days'` holds like in
+        // PostgreSQL (30-day months for comparison purposes).
+        (Value::Temporal(x), Value::Temporal(y)) => Some(x.cmp(y) == std::cmp::Ordering::Equal),
+        (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
+            x.parse_same_kind(y)
+                .is_some_and(|parsed| x.cmp(&parsed) == std::cmp::Ordering::Equal),
+        ),
+        // Row / array equality: any definite mismatch wins, otherwise a
+        // NULL element makes the whole comparison unknown (PostgreSQL
+        // row comparison semantics).
+        (Value::List(xs), Value::List(ys)) => {
+            if xs.len() != ys.len() {
+                return Some(false);
+            }
+            let mut unknown = false;
+            for (x, y) in xs.iter().zip(ys) {
+                match values_equal_nullable(x, y) {
+                    Some(false) => return Some(false),
+                    Some(true) => {}
+                    None => unknown = true,
+                }
+            }
+            if unknown {
+                None
+            } else {
+                Some(true)
+            }
         }
-        _ => a == b,
+        _ => Some(a == b),
     }
 }
 
 fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
+    Ok(compare_nullable(a, b)?.unwrap_or(std::cmp::Ordering::Equal))
+}
+
+/// Three-valued ordering: `None` when a NULL operand (or an undecided
+/// NULL row element) leaves the comparison unknown.
+fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::Ordering>> {
     use std::cmp::Ordering;
     match (a, b) {
-        (Value::Null, _) | (_, Value::Null) => Ok(Ordering::Equal),
-        (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
-        (Value::Float(x), Value::Float(y)) => Ok(x.partial_cmp(y).unwrap_or(Ordering::Equal)),
+        (Value::Null, _) | (_, Value::Null) => Ok(None),
+        (Value::Int(x), Value::Int(y)) => Ok(Some(x.cmp(y))),
+        (Value::Float(x), Value::Float(y)) => Ok(Some(x.partial_cmp(y).unwrap_or(Ordering::Equal))),
         (Value::Int(x), Value::Float(y)) => {
-            Ok((*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal))
+            Ok(Some((*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal)))
         }
         (Value::Float(x), Value::Int(y)) => {
-            Ok(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal))
+            Ok(Some(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal)))
         }
-        (Value::Decimal(x), Value::Decimal(y)) => Ok(x.cmp(y)),
-        (Value::Int(x), Value::Decimal(y)) => Ok(DecimalValue::from_i64(*x).cmp(y)),
-        (Value::Decimal(x), Value::Int(y)) => Ok(x.cmp(&DecimalValue::from_i64(*y))),
+        (Value::Decimal(x), Value::Decimal(y)) => Ok(Some(x.cmp(y))),
+        (Value::Int(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_i64(*x).cmp(y))),
+        (Value::Decimal(x), Value::Int(y)) => Ok(Some(x.cmp(&DecimalValue::from_i64(*y)))),
         (Value::Float(x), Value::Decimal(y)) => DecimalValue::from_f64_lossy(*x)
-            .map(|x| x.cmp(y))
+            .map(|x| Some(x.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         (Value::Decimal(x), Value::Float(y)) => DecimalValue::from_f64_lossy(*y)
-            .map(|y| x.cmp(&y))
+            .map(|y| Some(x.cmp(&y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
-        (Value::Bool(x), Value::Decimal(y)) => Ok(DecimalValue::from_bool(*x).cmp(y)),
-        (Value::Decimal(x), Value::Bool(y)) => Ok(x.cmp(&DecimalValue::from_bool(*y))),
-        (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
-        (Value::Temporal(x), Value::Temporal(y)) => Ok(x.cmp(y)),
+        (Value::Bool(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_bool(*x).cmp(y))),
+        (Value::Decimal(x), Value::Bool(y)) => Ok(Some(x.cmp(&DecimalValue::from_bool(*y)))),
+        (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
+        (Value::Temporal(x), Value::Temporal(y)) => Ok(Some(x.cmp(y))),
         (Value::Temporal(x), Value::Str(y)) => x
             .parse_same_kind(y)
-            .map(|parsed| x.cmp(&parsed))
+            .map(|parsed| Some(x.cmp(&parsed)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         (Value::Str(x), Value::Temporal(y)) => y
             .parse_same_kind(x)
-            .map(|parsed| parsed.cmp(y))
+            .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
-        (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
+        (Value::Bool(x), Value::Bool(y)) => Ok(Some(x.cmp(y))),
+        // Row / array ordering: lexicographic, with NULL elements
+        // making the comparison unknown once reached before a decision.
+        (Value::List(xs), Value::List(ys)) => {
+            for (x, y) in xs.iter().zip(ys) {
+                match compare_nullable(x, y)? {
+                    Some(Ordering::Equal) => {}
+                    Some(other) => return Ok(Some(other)),
+                    None => return Ok(None),
+                }
+            }
+            Ok(Some(xs.len().cmp(&ys.len())))
+        }
         (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
+    }
+}
+
+/// `PostgreSQL` `division by zero` error (SQLSTATE 22012).
+pub(crate) fn division_by_zero() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22012".into(),
+        message: "division by zero".into(),
+    }
+}
+
+/// `PostgreSQL` numeric overflow error (SQLSTATE 22003).
+pub(crate) fn out_of_range(type_name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22003".into(),
+        message: format!("{type_name} out of range"),
     }
 }
 
@@ -545,6 +801,9 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
             return Ok(value);
         }
     }
+    if matches!(a, Value::Temporal(_)) || matches!(b, Value::Temporal(_)) {
+        return time::temporal_arith(a, b, op);
+    }
     let has_decimal = matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_));
     let has_float = matches!(a, Value::Float(_)) || matches!(b, Value::Float(_));
     // PostgreSQL numeric promotion: double precision wins mixed
@@ -553,6 +812,27 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     if has_decimal && !has_float {
         return decimal_arith(a, b, op);
     }
+    // Integer x integer arithmetic stays exact and errors on overflow
+    // the way PostgreSQL does. Note: integer literals are compiled to
+    // i64 (bigint), so `2147483647 + 1` promotes to bigint here instead
+    // of raising `integer out of range` - a deliberate typed-literal
+    // divergence from PostgreSQL, which types small literals as int4.
+    if let (Value::Int(li), Value::Int(ri)) = (a, b) {
+        let out = match op {
+            BinaryOp::Add => li.checked_add(*ri),
+            BinaryOp::Subtract => li.checked_sub(*ri),
+            BinaryOp::Multiply => li.checked_mul(*ri),
+            BinaryOp::Divide => {
+                if *ri == 0 {
+                    return Err(division_by_zero());
+                }
+                // Integer / integer in SQL truncates toward zero.
+                li.checked_div(*ri)
+            }
+            _ => unreachable!("non-arith op routed through arith"),
+        };
+        return out.map(Value::Int).ok_or_else(|| out_of_range("bigint"));
+    }
     let lf = to_f64(a)?;
     let rf = to_f64(b)?;
     let result = match op {
@@ -560,34 +840,14 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
         BinaryOp::Subtract => lf - rf,
         BinaryOp::Multiply => lf * rf,
         BinaryOp::Divide => {
-            // UQA expression evaluation surfaces division by zero as NULL
-            // so SQL row evaluation does not fail mid-projection.
             if rf == 0.0 {
-                return Ok(Value::Null);
-            }
-            // Integer / Integer in SQL truncates toward zero.
-            if matches!((a, b), (Value::Int(_), Value::Int(_))) {
-                let li = match a {
-                    Value::Int(n) => *n,
-                    _ => unreachable!(),
-                };
-                let ri = match b {
-                    Value::Int(n) => *n,
-                    _ => unreachable!(),
-                };
-                return Ok(Value::Int(li / ri));
+                return Err(division_by_zero());
             }
             lf / rf
         }
         _ => unreachable!("non-arith op routed through arith"),
     };
-    // Preserve integer-ness when both operands were ints and the result
-    // is whole.
-    if matches!((a, b), (Value::Int(_), Value::Int(_))) && result.fract() == 0.0 {
-        Ok(Value::Int(result as i64))
-    } else {
-        Ok(Value::Float(result))
-    }
+    Ok(Value::Float(result))
 }
 
 fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
@@ -599,13 +859,13 @@ fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
         BinaryOp::Multiply => left.checked_mul(&right),
         BinaryOp::Divide => {
             if right.is_zero() {
-                return Ok(Value::Null);
+                return Err(division_by_zero());
             }
             left.checked_div(&right)
         }
         _ => unreachable!("non-arith op routed through decimal_arith"),
     }
-    .ok_or_else(|| SQLError::TypeMismatch("decimal arithmetic overflow".into()))?;
+    .ok_or_else(|| out_of_range("numeric"))?;
     Ok(Value::Decimal(value))
 }
 
@@ -727,9 +987,11 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let s = expect_str(args, 0)?;
             Ok(Value::Int(s.len() as i64))
         }
-        "trim" | "btrim" => string1(args, |s| s.trim().to_string()),
-        "ltrim" => string1(args, |s| s.trim_start().to_string()),
-        "rtrim" => string1(args, |s| s.trim_end().to_string()),
+        // trim family: the optional second argument is a SET of
+        // characters to strip (PostgreSQL semantics), not a substring.
+        "trim" | "btrim" => trim_chars(args, true, true),
+        "ltrim" => trim_chars(args, true, false),
+        "rtrim" => trim_chars(args, false, true),
         "initcap" => string1(args, initcap_str),
         "reverse" => string1(args, |s| s.chars().rev().collect()),
         "concat" => {
@@ -791,7 +1053,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             Ok(Value::Str(s.replace(&from, &to)))
         }
         "substring" | "substr" => {
-            // SUBSTRING(string, start [, length]). 1-indexed per SQL.
+            // SUBSTRING(string, start [, length]). 1-indexed; a start
+            // before 1 clips the window against the string
+            // (`substring('hello', -1, 3)` = 'h') and a negative
+            // length errors, per PostgreSQL.
             if args.len() < 2 || args.len() > 3 {
                 return Err(SQLError::TypeMismatch("substring takes 2-3 args".into()));
             }
@@ -802,17 +1067,30 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let start = to_i64(&args[1])?;
             let chars: Vec<char> = s.chars().collect();
             let n = chars.len() as i64;
-            let begin = (start.max(1) - 1).min(n);
-            let take = if args.len() == 3 {
-                to_i64(&args[2])?.max(0)
+            let end_exclusive = if args.len() == 3 {
+                let len = to_i64(&args[2])?;
+                if len < 0 {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22011".into(),
+                        message: "negative substring length not allowed".into(),
+                    });
+                }
+                start.saturating_add(len)
             } else {
-                n - begin
+                i64::MAX
             };
-            let end = (begin + take).min(n);
-            let slice: String = chars[(begin as usize)..(end as usize)].iter().collect();
+            let begin = start.max(1).min(n + 1);
+            let end = end_exclusive.clamp(1, n + 1);
+            if end <= begin {
+                return Ok(Value::Str(String::new()));
+            }
+            let slice: String = chars[(begin - 1) as usize..(end - 1) as usize]
+                .iter()
+                .collect();
             Ok(Value::Str(slice))
         }
         "left" => {
+            // left(s, -n) drops the last n characters (PostgreSQL).
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("left takes 2 args".into()));
             }
@@ -822,10 +1100,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
             let chars: Vec<char> = s.chars().collect();
-            let take = n.clamp(0, chars.len() as i64) as usize;
+            let len = chars.len() as i64;
+            let take = if n >= 0 { n.min(len) } else { (len + n).max(0) } as usize;
             Ok(Value::Str(chars[..take].iter().collect()))
         }
         "right" => {
+            // right(s, -n) drops the first n characters (PostgreSQL).
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("right takes 2 args".into()));
             }
@@ -835,7 +1115,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let s = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
             let chars: Vec<char> = s.chars().collect();
-            let take = n.clamp(0, chars.len() as i64) as usize;
+            let len = chars.len() as i64;
+            let take = if n >= 0 { n.min(len) } else { (len + n).max(0) } as usize;
             let start = chars.len() - take;
             Ok(Value::Str(chars[start..].iter().collect()))
         }
@@ -851,7 +1132,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "round" => match args.len() {
             1 => match &args[0] {
                 Value::Int(i) => Ok(Value::Int(*i)),
-                Value::Float(f) => Ok(Value::Float(f.round())),
+                // float8 rounding is round-half-to-even (rint);
+                // numeric rounding is half-away-from-zero.
+                Value::Float(f) => Ok(Value::Float(f.round_ties_even())),
                 Value::Decimal(d) => Ok(Value::Decimal(d.round_dp(0))),
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!("round({other:?})"))),
@@ -905,24 +1188,28 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("mod takes 2 args".into()));
             }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
             match (&args[0], &args[1]) {
-                (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a % b)),
+                (Value::Int(_), Value::Int(0)) => Err(division_by_zero()),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
                 (a, b) if matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_)) => {
                     let divisor = to_decimal(b)?;
                     if divisor.is_zero() {
-                        Err(SQLError::TypeMismatch("modulo by zero".into()))
+                        Err(division_by_zero())
                     } else {
                         to_decimal(a)?
                             .checked_rem(&divisor)
                             .map(Value::Decimal)
-                            .ok_or_else(|| SQLError::TypeMismatch("decimal modulo overflow".into()))
+                            .ok_or_else(|| out_of_range("numeric"))
                     }
                 }
                 (a, b) => {
                     let af = to_f64(a)?;
                     let bf = to_f64(b)?;
                     if bf == 0.0 {
-                        Err(SQLError::TypeMismatch("modulo by zero".into()))
+                        Err(division_by_zero())
                     } else {
                         Ok(Value::Float(af % bf))
                     }
@@ -935,7 +1222,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             let divisor = to_i64(&args[1])?;
             if divisor == 0 {
-                return Err(SQLError::TypeMismatch("division by zero".into()));
+                return Err(division_by_zero());
             }
             let dividend = to_i64(&args[0])?;
             Ok(Value::Int((dividend as f64 / divisor as f64).floor() as i64))
@@ -1032,6 +1319,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             match re.captures(&s) {
                 None => Ok(Value::Null),
                 Some(caps) => {
+                    // regexp_match returns text[]: the capture groups,
+                    // or the whole match as a one-element array when
+                    // the pattern has no groups (PostgreSQL).
                     let groups: Vec<Value> = caps
                         .iter()
                         .skip(1)
@@ -1041,7 +1331,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         })
                         .collect();
                     if groups.is_empty() {
-                        Ok(Value::Str(caps.get(0).unwrap().as_str().into()))
+                        Ok(Value::List(vec![Value::Str(
+                            caps.get(0).unwrap().as_str().into(),
+                        )]))
                     } else {
                         Ok(Value::List(groups))
                     }
@@ -1102,12 +1394,31 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 }
                 let base = to_f64(&args[0])?;
                 let v = to_f64(&args[1])?;
-                Ok(Value::Float(v.log(base)))
+                let result = v.log(base);
+                // log(numeric, numeric) is numeric in PostgreSQL and
+                // renders with 16-17 significant digits.
+                let float_input = args.iter().any(|arg| matches!(arg, Value::Float(_)));
+                if float_input {
+                    Ok(Value::Float(result))
+                } else {
+                    Ok(DecimalValue::parse(&format!("{result:.16}"))
+                        .map_or(Value::Float(result), Value::Decimal))
+                }
             }
             _ => Err(SQLError::TypeMismatch("log takes 1 or 2 args".into())),
         },
         "log2" => float1(args, "log2", f64::log2),
-        "cbrt" => float1(args, "cbrt", f64::cbrt),
+        // Route cbrt through exp(ln(x)/3): this reproduces glibc's
+        // last-ulp behavior (`cbrt(27)` = 3.0000000000000004), which is
+        // what PostgreSQL emits on Linux builds; platform `cbrt` on
+        // macOS is correctly rounded and would diverge.
+        "cbrt" => float1(args, "cbrt", |x| {
+            if x == 0.0 {
+                0.0
+            } else {
+                x.signum() * (x.abs().ln() / 3.0).exp()
+            }
+        }),
         "sign" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("sign takes 1 arg".into()));
@@ -1316,20 +1627,29 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("encode takes 2 args".into()));
             }
-            let bytes = value_to_string(&args[0]);
+            let owned;
+            let bytes: &[u8] = match &args[0] {
+                Value::Bytes(b) => b,
+                other => {
+                    owned = value_to_string(other).into_bytes();
+                    &owned
+                }
+            };
             let encoding = value_to_string(&args[1]);
             match encoding.as_str() {
-                "hex" => Ok(Value::Str(
-                    bytes.bytes().map(|b| format!("{b:02x}")).collect(),
+                "hex" => Ok(Value::Str(hex_encode(bytes))),
+                "escape" => Ok(Value::Str(
+                    String::from_utf8_lossy(bytes).escape_default().collect(),
                 )),
-                "escape" => Ok(Value::Str(bytes.escape_default().collect())),
-                "base64" => Ok(Value::Str(base64_encode(bytes.as_bytes()))),
+                "base64" => Ok(Value::Str(base64_encode(bytes))),
                 other => Err(SQLError::TypeMismatch(format!(
                     "unknown encoding {other:?}"
                 ))),
             }
         }
         "decode" => {
+            // decode() produces bytea; the result renders as
+            // PostgreSQL hex output (`\x616263`) at the SQL boundary.
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("decode takes 2 args".into()));
             }
@@ -1337,32 +1657,54 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let encoding = value_to_string(&args[1]);
             match encoding.as_str() {
                 "hex" => {
-                    let mut out = Vec::with_capacity(s.len() / 2);
-                    let bytes = s.as_bytes();
+                    let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+                    if cleaned.len() % 2 != 0 {
+                        return Err(SQLError::TypeMismatch(
+                            "invalid hexadecimal data: odd number of digits".into(),
+                        ));
+                    }
+                    let mut out = Vec::with_capacity(cleaned.len() / 2);
+                    let bytes = cleaned.as_bytes();
                     let mut i = 0;
                     while i + 1 < bytes.len() {
-                        let hi = (bytes[i] as char).to_digit(16).unwrap_or(0) as u8;
-                        let lo = (bytes[i + 1] as char).to_digit(16).unwrap_or(0) as u8;
+                        let hi = (bytes[i] as char).to_digit(16).ok_or_else(|| {
+                            SQLError::TypeMismatch("invalid hexadecimal digit".into())
+                        })? as u8;
+                        let lo = (bytes[i + 1] as char).to_digit(16).ok_or_else(|| {
+                            SQLError::TypeMismatch("invalid hexadecimal digit".into())
+                        })? as u8;
                         out.push(hi * 16 + lo);
                         i += 2;
                     }
-                    Ok(Value::Str(String::from_utf8_lossy(&out).to_string()))
+                    Ok(Value::Bytes(out))
                 }
                 "base64" => base64_decode(&s)
-                    .map(|b| Value::Str(String::from_utf8_lossy(&b).to_string()))
+                    .map(Value::Bytes)
                     .map_err(|e| SQLError::TypeMismatch(format!("base64 decode: {e}"))),
+                "escape" => Ok(Value::Bytes(s.into_bytes())),
                 other => Err(SQLError::TypeMismatch(format!(
                     "unknown encoding {other:?}"
                 ))),
             }
         }
         "split_part" => {
+            // Negative positions count from the end; zero errors
+            // (PostgreSQL `field position must not be zero`).
             if args.len() != 3 {
                 return Err(SQLError::TypeMismatch("split_part takes 3 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
             }
             let s = value_to_string(&args[0]);
             let sep = value_to_string(&args[1]);
             let idx = to_i64(&args[2])?;
+            if idx == 0 {
+                return Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: "field position must not be zero".into(),
+                });
+            }
             let parts: Vec<&str> = if sep.is_empty() {
                 vec![s.as_str()]
             } else {
@@ -1371,66 +1713,74 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let idx_usize = if idx >= 1 {
                 (idx - 1) as usize
             } else {
-                return Ok(Value::Str(String::new()));
+                let from_end = idx.unsigned_abs() as usize;
+                if from_end > parts.len() {
+                    return Ok(Value::Str(String::new()));
+                }
+                parts.len() - from_end
             };
             Ok(Value::Str(
                 parts.get(idx_usize).copied().unwrap_or("").to_string(),
             ))
         }
-        "now" | "current_timestamp" => {
-            use chrono::Utc;
-            Ok(Value::Str(
-                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-            ))
-        }
+        "now" | "current_timestamp" => Ok(Value::Temporal(TemporalValue::TimestampTz {
+            micros: chrono::Utc::now().timestamp_micros(),
+        })),
         "current_date" => {
-            use chrono::Utc;
-            Ok(Value::Str(Utc::now().format("%Y-%m-%d").to_string()))
+            let micros = chrono::Utc::now().timestamp_micros();
+            Ok(Value::Temporal(TemporalValue::Date {
+                days: (micros.div_euclid(86_400_000_000)) as i32,
+            }))
         }
         "to_timestamp" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("to_timestamp takes 1 arg".into()));
             }
             let secs = to_f64(&args[0])?;
-            let ns = ((secs.fract() * 1e9).round() as i64).rem_euclid(1_000_000_000);
-            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, ns as u32)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("to_timestamp out of range {secs}"))
-                })?;
-            Ok(Value::Str(
-                dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-            ))
+            Ok(Value::Temporal(TemporalValue::TimestampTz {
+                micros: (secs * 1e6).round() as i64,
+            }))
         }
-        "extract" | "date_part" => {
+        "extract" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch(
                     "extract takes 2 args (field, ts)".into(),
                 ));
             }
             let field = value_to_string(&args[0]).to_ascii_lowercase();
-            let ts_str = value_to_string(&args[1]);
-            let dt = parse_timestamp(&ts_str)?;
-            extract_field(&field, &dt)
+            extract_from_value(&field, &args[1], true)
+        }
+        "date_part" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch(
+                    "date_part takes 2 args (field, ts)".into(),
+                ));
+            }
+            let field = value_to_string(&args[0]).to_ascii_lowercase();
+            extract_from_value(&field, &args[1], false)
         }
         "age" => {
-            let now = chrono::Utc::now();
             let (a, b) = match args.len() {
-                1 => (parse_timestamp(&value_to_string(&args[0]))?, now),
-                2 => (
-                    parse_timestamp(&value_to_string(&args[0]))?,
-                    parse_timestamp(&value_to_string(&args[1]))?,
-                ),
+                // One-argument age() measures against today's midnight.
+                1 => {
+                    let micros = chrono::Utc::now().timestamp_micros();
+                    let midnight = micros.div_euclid(86_400_000_000) * 86_400_000_000;
+                    (
+                        coerce_temporal(&args[0])?,
+                        TemporalValue::Timestamp { micros: midnight },
+                    )
+                }
+                2 => (coerce_temporal(&args[0])?, coerce_temporal(&args[1])?),
                 _ => return Err(SQLError::TypeMismatch("age takes 1-2 args".into())),
             };
-            Ok(Value::Float((a - b).num_milliseconds() as f64 / 1000.0))
+            age_between(&a, &b)
         }
         "date_trunc" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("date_trunc takes 2 args".into()));
             }
             let unit = value_to_string(&args[0]).to_ascii_lowercase();
-            let dt = parse_timestamp(&value_to_string(&args[1]))?;
-            date_trunc(&unit, &dt)
+            date_trunc_value(&unit, &args[1])
         }
         "make_timestamp" => {
             if !(6..=7).contains(&args.len()) {
@@ -1453,8 +1803,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let year = to_i64(&args[0])? as i32;
             let month = to_i64(&args[1])? as u32;
             let day = to_i64(&args[2])? as u32;
+            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
             chrono::NaiveDate::from_ymd_opt(year, month, day)
-                .map(|d| Value::Str(d.format("%Y-%m-%d").to_string()))
+                .map(|d| {
+                    Value::Temporal(TemporalValue::Date {
+                        days: d.signed_duration_since(epoch).num_days() as i32,
+                    })
+                })
                 .ok_or_else(|| {
                     SQLError::TypeMismatch(format!(
                         "make_date: invalid date {year:04}-{month:02}-{day:02}"
@@ -1462,9 +1817,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 })
         }
         "make_interval" => {
-            // make_interval(years, months, weeks, days, hours, mins, secs).
-            // Mirrors the canonical UQA behavior's compact HH:MM:SS interval
-            // representation, with years/months normalized to days.
+            // make_interval(years, months, weeks, days, hours, mins,
+            // secs) -> PostgreSQL's months/days/micros interval model.
             let years = args.first().map(to_i64).transpose()?.unwrap_or(0);
             let months = args.get(1).map(to_i64).transpose()?.unwrap_or(0);
             let weeks = args.get(2).map(to_i64).transpose()?.unwrap_or(0);
@@ -1472,17 +1826,41 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let hours = args.get(4).map(to_i64).transpose()?.unwrap_or(0);
             let mins = args.get(5).map(to_i64).transpose()?.unwrap_or(0);
             let secs = args.get(6).map(to_f64).transpose()?.unwrap_or(0.0);
-            let total_days = years * 365 + months * 30 + weeks * 7 + days;
-            let total_seconds =
-                total_days * 86_400 + hours * 3_600 + mins * 60 + secs.trunc() as i64;
-            let h_part = total_seconds / 3_600;
-            let m_part = (total_seconds % 3_600) / 60;
-            let s_part = total_seconds % 60;
-            Ok(Value::Str(format!("{h_part:02}:{m_part:02}:{s_part:02}")))
+            let total_months =
+                i32::try_from(years * 12 + months).map_err(|_| out_of_range("interval"))?;
+            let total_days =
+                i32::try_from(weeks * 7 + days).map_err(|_| out_of_range("interval"))?;
+            let micros = (hours * 3_600 + mins * 60) * 1_000_000 + (secs * 1e6).round() as i64;
+            Ok(Value::Temporal(TemporalValue::Interval {
+                months: total_months,
+                days: total_days,
+                micros,
+            }))
+        }
+        "justify_hours" => {
+            if let Some(Value::Temporal(TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            })) = args.first()
+            {
+                let extra_days = micros.div_euclid(86_400_000_000);
+                return Ok(Value::Temporal(TemporalValue::Interval {
+                    months: *months,
+                    days: days + extra_days as i32,
+                    micros: micros.rem_euclid(86_400_000_000),
+                }));
+            }
+            Err(SQLError::TypeMismatch(
+                "justify_hours takes an interval".into(),
+            ))
         }
         "to_char" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("to_char takes 2 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
             }
             let fmt = value_to_string(&args[1]);
             match &args[0] {
@@ -1492,9 +1870,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     .to_f64()
                     .map(|value| Value::Str(format_pg_number(value, &fmt)))
                     .ok_or_else(|| SQLError::TypeMismatch("to_char: numeric out of range".into())),
+                Value::Temporal(t) => Ok(Value::Str(format_temporal(t, &fmt)?)),
                 Value::Str(s) => {
-                    let dt = parse_timestamp(s)?;
-                    Ok(Value::Str(format_pg_datetime(&dt, &fmt)))
+                    let temporal = coerce_temporal(&Value::Str(s.clone()))?;
+                    Ok(Value::Str(format_temporal(&temporal, &fmt)?))
                 }
                 other => Err(SQLError::TypeMismatch(format!(
                     "to_char: unsupported source {other:?}"
@@ -1509,7 +1888,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let fmt = pg_to_chrono_fmt(&value_to_string(&args[1]));
             let date = chrono::NaiveDate::parse_from_str(&s, &fmt)
                 .map_err(|e| SQLError::TypeMismatch(format!("to_date: {e}")))?;
-            Ok(Value::Str(date.format("%Y-%m-%d").to_string()))
+            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
+            Ok(Value::Temporal(TemporalValue::Date {
+                days: date.signed_duration_since(epoch).num_days() as i32,
+            }))
         }
         "to_number" => {
             if args.len() != 2 {
@@ -1530,16 +1912,22 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             match &args[0] {
                 Value::Float(f) => Ok(Value::Bool(f.is_finite())),
-                Value::Int(_) | Value::Decimal(_) | Value::Str(_) => Ok(Value::Bool(true)),
+                // The temporal model has no infinity values, so every
+                // date / timestamp / interval is finite.
+                Value::Int(_) | Value::Decimal(_) | Value::Str(_) | Value::Temporal(_) => {
+                    Ok(Value::Bool(true))
+                }
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!(
                     "isfinite: unsupported {other:?}"
                 ))),
             }
         }
-        "clock_timestamp" | "statement_timestamp" => Ok(Value::Str(
-            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-        )),
+        "clock_timestamp" | "statement_timestamp" => {
+            Ok(Value::Temporal(TemporalValue::TimestampTz {
+                micros: chrono::Utc::now().timestamp_micros(),
+            }))
+        }
         "timeofday" => Ok(Value::Str(
             chrono::Utc::now()
                 .format("%a %b %d %H:%M:%S%.6f %Y UTC")
@@ -1561,8 +1949,26 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("json_typeof takes 1 arg".into()));
             }
-            let parsed = parse_json(&value_to_string(&args[0]))?;
-            Ok(Value::Str(json_typeof(&parsed).to_string()))
+            // Casts materialize jsonb scalars as engine values, so type
+            // the value directly; only bare strings re-parse (and an
+            // unparsable string IS a JSON string).
+            let type_name = match &args[0] {
+                Value::Null => "null",
+                Value::Bool(_) => "boolean",
+                Value::Int(_) | Value::Float(_) | Value::Decimal(_) => "number",
+                Value::List(_) => "array",
+                Value::Map(_) => "object",
+                Value::Str(s) => match parse_json(s) {
+                    Ok(parsed) => json_typeof(&parsed),
+                    Err(_) => "string",
+                },
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "json_typeof: unsupported {other:?}"
+                    )));
+                }
+            };
+            Ok(Value::Str(type_name.to_string()))
         }
         "json_array_length" | "jsonb_array_length" => {
             if args.len() != 1 {
@@ -1588,6 +1994,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         "json_has_all_keys" => json_has_keys(args, true),
         "jsonb_path_exists" | "jsonpath_exists" => jsonpath_exists(args),
         "jsonb_path_match" | "jsonpath_match" => jsonpath_match(args),
+        // Documented divergence: `to_jsonb('text')` produces the JSON
+        // string as a plain engine string, which renders unquoted at
+        // the SQL boundary (PostgreSQL shows `"text"`). The Value model
+        // has no jsonb-scalar tag to preserve the distinction.
         "to_json" | "to_jsonb" | "row_to_json" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
@@ -1640,7 +2050,17 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 return Err(SQLError::TypeMismatch("array_length takes >= 1 arg".into()));
             }
             match &args[0] {
-                Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                // Empty arrays have no dimensions in PostgreSQL, so
+                // `array_length('{}', 1)` is NULL (not 0). Dimensions
+                // other than 1 are NULL for the 1-D arrays the engine
+                // stores.
+                Value::List(items) => {
+                    let dim = args.get(1).map(to_i64).transpose()?.unwrap_or(1);
+                    if items.is_empty() || dim != 1 {
+                        return Ok(Value::Null);
+                    }
+                    Ok(Value::Int(items.len() as i64))
+                }
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!(
                     "array_length: not an array {other:?}"
@@ -1740,6 +2160,471 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             ))),
         },
         // -------------------------------------------------------------
+        // PostgreSQL scalar surface: math, strings, arrays, operators
+        // lowered to internal functions.
+        // -------------------------------------------------------------
+        "factorial" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("factorial takes 1 arg".into()));
+            }
+            if matches!(args[0], Value::Null) {
+                return Ok(Value::Null);
+            }
+            let n = to_i64(&args[0])?;
+            if n < 0 {
+                return Err(SQLError::Routine {
+                    sqlstate: "2201F".into(),
+                    message: "factorial of a negative number is undefined".into(),
+                });
+            }
+            let mut acc: i128 = 1;
+            for k in 2..=n as i128 {
+                acc = acc.checked_mul(k).ok_or_else(|| out_of_range("numeric"))?;
+            }
+            if let Ok(small) = i64::try_from(acc) {
+                return Ok(Value::Int(small));
+            }
+            DecimalValue::parse(&acc.to_string())
+                .map(Value::Decimal)
+                .ok_or_else(|| out_of_range("numeric"))
+        }
+        "bit_length" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
+            match args.first() {
+                Some(Value::Bytes(b)) => Ok(Value::Int(b.len() as i64 * 8)),
+                Some(other) => Ok(Value::Int(value_to_string(other).len() as i64 * 8)),
+                None => Err(SQLError::TypeMismatch("bit_length takes 1 arg".into())),
+            }
+        }
+        "to_hex" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
+            let n = to_i64(&args[0])?;
+            // int4 arguments format as 32-bit two's complement
+            // (`to_hex(-1)` = 'ffffffff'), wider values as 64-bit.
+            if let Ok(small) = i32::try_from(n) {
+                Ok(Value::Str(format!("{:x}", small as u32)))
+            } else {
+                Ok(Value::Str(format!("{:x}", n as u64)))
+            }
+        }
+        "string_to_array" | "string_to_table" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(SQLError::TypeMismatch(
+                    "string_to_array takes 2-3 args".into(),
+                ));
+            }
+            if matches!(args[0], Value::Null) {
+                return Ok(Value::Null);
+            }
+            let s = value_to_string(&args[0]);
+            let null_marker = args.get(2).filter(|v| !matches!(v, Value::Null));
+            let mark = |part: &str| -> Value {
+                if let Some(marker) = null_marker {
+                    if part == value_to_string(marker) {
+                        return Value::Null;
+                    }
+                }
+                Value::Str(part.to_string())
+            };
+            let items: Vec<Value> = match &args[1] {
+                // NULL separator: split into individual characters.
+                Value::Null => s.chars().map(|c| mark(&c.to_string())).collect(),
+                sep => {
+                    let sep = value_to_string(sep);
+                    if s.is_empty() {
+                        Vec::new()
+                    } else if sep.is_empty() {
+                        vec![mark(&s)]
+                    } else {
+                        s.split(sep.as_str()).map(mark).collect()
+                    }
+                }
+            };
+            Ok(Value::List(items))
+        }
+        "quote_ident" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Str(quote_ident(&expect_str(args, 0)?)))
+        }
+        "quote_literal" => {
+            if matches!(args.first(), Some(Value::Null)) {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Str(quote_literal(&expect_str(args, 0)?)))
+        }
+        "quote_nullable" => match args.first() {
+            Some(Value::Null) | None => Ok(Value::Str("NULL".into())),
+            Some(other) => Ok(Value::Str(quote_literal(&value_to_string(other)))),
+        },
+        "regexp_count" => {
+            if args.len() < 2 || args.len() > 4 {
+                return Err(SQLError::TypeMismatch("regexp_count takes 2-4 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
+            let s = value_to_string(&args[0]);
+            let pat = value_to_string(&args[1]);
+            let start = args.get(2).map(to_i64).transpose()?.unwrap_or(1).max(1) as usize;
+            let flags = args.get(3).map(value_to_string).unwrap_or_default();
+            let re = compile_pg_regex(&pat, &flags)?;
+            let chars: Vec<char> = s.chars().collect();
+            let tail: String = chars[(start - 1).min(chars.len())..].iter().collect();
+            Ok(Value::Int(re.find_iter(&tail).count() as i64))
+        }
+        "regexp_like" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(SQLError::TypeMismatch("regexp_like takes 2-3 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
+            let s = value_to_string(&args[0]);
+            let pat = value_to_string(&args[1]);
+            let flags = args.get(2).map(value_to_string).unwrap_or_default();
+            let re = compile_pg_regex(&pat, &flags)?;
+            Ok(Value::Bool(re.is_match(&s)))
+        }
+        "similar_to" => {
+            // SIMILAR TO: SQL regex anchored over the whole string.
+            if args.len() < 2 {
+                return Err(SQLError::TypeMismatch("similar_to takes 2 args".into()));
+            }
+            if args.iter().any(|arg| matches!(arg, Value::Null)) {
+                return Ok(Value::Null);
+            }
+            let s = value_to_string(&args[0]);
+            let pat = similar_to_regex(&value_to_string(&args[1]));
+            let re = regex::Regex::new(&pat)
+                .map_err(|e| SQLError::TypeMismatch(format!("SIMILAR TO pattern: {e}")))?;
+            Ok(Value::Bool(re.is_match(&s)))
+        }
+        // setseed() reseeds PostgreSQL's per-session random() state.
+        // The engine's random() is time-derived and non-seedable, so
+        // this accepts the call for compatibility and returns void
+        // (rendered as an empty string, like psql shows void);
+        // random() reproducibility is a documented divergence.
+        "setseed" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("setseed takes 1 arg".into()));
+            }
+            let seed = to_f64(&args[0])?;
+            if !(-1.0..=1.0).contains(&seed) {
+                return Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: format!("setseed parameter {seed} is out of allowed range [-1,1]"),
+                });
+            }
+            Ok(Value::Str(String::new()))
+        }
+        "num_nulls" => Ok(Value::Int(
+            args.iter().filter(|v| matches!(v, Value::Null)).count() as i64,
+        )),
+        "num_nonnulls" => Ok(Value::Int(
+            args.iter().filter(|v| !matches!(v, Value::Null)).count() as i64,
+        )),
+        // The engine has a single database and a single flat namespace;
+        // these identifiers exist for PostgreSQL client compatibility.
+        "current_database" | "current_catalog" => Ok(Value::Str("uqa".into())),
+        "current_user" | "session_user" => Ok(Value::Str("uqa".into())),
+        "current_schema" => Ok(Value::Str("public".into())),
+        "current_schemas" => Ok(Value::List(vec![
+            Value::Str("pg_catalog".into()),
+            Value::Str("public".into()),
+        ])),
+        "array_positions" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch(
+                    "array_positions takes 2 args".into(),
+                ));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(Value::List(
+                    items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, v)| *v == &args[1])
+                        .map(|(i, _)| Value::Int((i + 1) as i64))
+                        .collect(),
+                )),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_positions: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_replace" => {
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch("array_replace takes 3 args".into()));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(Value::List(
+                    items
+                        .iter()
+                        .map(|v| {
+                            if *v == args[1] {
+                                args[2].clone()
+                            } else {
+                                v.clone()
+                            }
+                        })
+                        .collect(),
+                )),
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_replace: not an array {other:?}"
+                ))),
+            }
+        }
+        "array_to_string" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(SQLError::TypeMismatch(
+                    "array_to_string takes 2-3 args".into(),
+                ));
+            }
+            let Value::List(items) = &args[0] else {
+                if matches!(args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                return Err(SQLError::TypeMismatch(format!(
+                    "array_to_string: not an array {:?}",
+                    args[0]
+                )));
+            };
+            if matches!(args[1], Value::Null) {
+                return Ok(Value::Null);
+            }
+            let sep = value_to_string(&args[1]);
+            let null_text = args.get(2).filter(|v| !matches!(v, Value::Null));
+            let mut parts: Vec<String> = Vec::with_capacity(items.len());
+            for item in items {
+                if matches!(item, Value::Null) {
+                    if let Some(marker) = null_text {
+                        parts.push(value_to_string(marker));
+                    }
+                    continue;
+                }
+                parts.push(value_to_string(item));
+            }
+            Ok(Value::Str(parts.join(&sep)))
+        }
+        "array_fill" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_fill takes 2 args".into()));
+            }
+            let Value::List(dims) = &args[1] else {
+                return Err(SQLError::TypeMismatch(
+                    "array_fill: dimensions must be an integer array".into(),
+                ));
+            };
+            if dims.len() != 1 {
+                return Err(SQLError::Unsupported(
+                    "array_fill supports one dimension".into(),
+                ));
+            }
+            let n = to_i64(&dims[0])?.max(0) as usize;
+            Ok(Value::List(vec![args[0].clone(); n]))
+        }
+        "trim_array" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("trim_array takes 2 args".into()));
+            }
+            let Value::List(items) = &args[0] else {
+                if matches!(args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                return Err(SQLError::TypeMismatch("trim_array: not an array".into()));
+            };
+            let n = to_i64(&args[1])?;
+            if n < 0 || n as usize > items.len() {
+                return Err(SQLError::Routine {
+                    sqlstate: "2202E".into(),
+                    message: format!(
+                        "number of elements to trim must be between 0 and {}",
+                        items.len()
+                    ),
+                });
+            }
+            Ok(Value::List(items[..items.len() - n as usize].to_vec()))
+        }
+        "array_sample" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_sample takes 2 args".into()));
+            }
+            let Value::List(items) = &args[0] else {
+                if matches!(args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                return Err(SQLError::TypeMismatch("array_sample: not an array".into()));
+            };
+            let n = to_i64(&args[1])?;
+            if n < 0 || n as usize > items.len() {
+                return Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: format!("sample size must be between 0 and {}", items.len()),
+                });
+            }
+            let mut pool = items.clone();
+            let mut out = Vec::with_capacity(n as usize);
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64 | 1)
+                .unwrap_or(1);
+            for _ in 0..n {
+                seed = seed
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let idx = (seed >> 33) as usize % pool.len();
+                out.push(pool.swap_remove(idx));
+            }
+            Ok(Value::List(out))
+        }
+        "array_overlap" => {
+            // `&&` operator: true when the arrays share any non-null
+            // element.
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array overlap takes 2 args".into()));
+            }
+            match (&args[0], &args[1]) {
+                (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+                (Value::List(a), Value::List(b)) => {
+                    Ok(Value::Bool(a.iter().any(|x| {
+                        !matches!(x, Value::Null) && b.iter().any(|y| values_equal(x, y))
+                    })))
+                }
+                _ => Err(SQLError::TypeMismatch(
+                    "array overlap: both args must be arrays".into(),
+                )),
+            }
+        }
+        "__subscript" => {
+            // 1-based array subscripting; out-of-range yields NULL.
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("subscript takes 2 args".into()));
+            }
+            match (&args[0], &args[1]) {
+                (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+                (Value::List(items), idx) => {
+                    let idx = to_i64(idx)?;
+                    if idx < 1 || idx as usize > items.len() {
+                        return Ok(Value::Null);
+                    }
+                    Ok(items[(idx - 1) as usize].clone())
+                }
+                (Value::Map(map), key) => Ok(map
+                    .get(&value_to_string(key))
+                    .cloned()
+                    .unwrap_or(Value::Null)),
+                (other, _) => Err(SQLError::TypeMismatch(format!(
+                    "cannot subscript {other:?}"
+                ))),
+            }
+        }
+        "__slice" => {
+            // Array slice `arr[lo:hi]`; open bounds arrive as NULL and
+            // clamp to the array, PostgreSQL-style.
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch("slice takes 3 args".into()));
+            }
+            match &args[0] {
+                Value::Null => Ok(Value::Null),
+                Value::List(items) => {
+                    let lo = match &args[1] {
+                        Value::Null => 1,
+                        other => to_i64(other)?,
+                    }
+                    .max(1) as usize;
+                    let hi = match &args[2] {
+                        Value::Null => items.len() as i64,
+                        other => to_i64(other)?,
+                    }
+                    .min(items.len() as i64);
+                    if hi < lo as i64 {
+                        return Ok(Value::List(Vec::new()));
+                    }
+                    Ok(Value::List(items[lo - 1..hi as usize].to_vec()))
+                }
+                other => Err(SQLError::TypeMismatch(format!("cannot slice {other:?}"))),
+            }
+        }
+        "__any_op" | "__all_op" => {
+            // `expr op ANY(array)` / `expr op ALL(array)` with Kleene
+            // aggregation over the element comparisons.
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch("ANY/ALL takes 3 args".into()));
+            }
+            let op = match value_to_string(&args[2]).as_str() {
+                "=" => BinaryOp::Equal,
+                "<>" | "!=" => BinaryOp::NotEqual,
+                "<" => BinaryOp::Less,
+                "<=" => BinaryOp::LessEqual,
+                ">" => BinaryOp::Greater,
+                ">=" => BinaryOp::GreaterEqual,
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "operator `{other}` with ANY/ALL"
+                    )));
+                }
+            };
+            let Value::List(items) = &args[1] else {
+                if matches!(args[1], Value::Null) {
+                    return Ok(Value::Null);
+                }
+                return Err(SQLError::TypeMismatch("ANY/ALL requires an array".into()));
+            };
+            let is_any = name == "__any_op";
+            let mut saw_null = false;
+            for item in items {
+                match eval_comparison_op(op, &args[0], item)? {
+                    Value::Bool(true) if is_any => return Ok(Value::Bool(true)),
+                    Value::Bool(false) if !is_any => return Ok(Value::Bool(false)),
+                    Value::Null => saw_null = true,
+                    _ => {}
+                }
+            }
+            if saw_null {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Bool(!is_any))
+        }
+        "__is_distinct" => {
+            // IS DISTINCT FROM: null-safe inequality (never NULL).
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch(
+                    "IS DISTINCT FROM takes 2 args".into(),
+                ));
+            }
+            let distinct = match (&args[0], &args[1]) {
+                (Value::Null, Value::Null) => false,
+                (Value::Null, _) | (_, Value::Null) => true,
+                (a, b) => !values_equal(a, b),
+            };
+            Ok(Value::Bool(distinct))
+        }
+        "__between_symmetric" => {
+            // BETWEEN SYMMETRIC: PostgreSQL rewrites to
+            // `(a >= x AND a <= y) OR (a >= y AND a <= x)` and the
+            // three-valued OR of the two window tests.
+            if args.len() != 3 {
+                return Err(SQLError::TypeMismatch(
+                    "BETWEEN SYMMETRIC takes 3 args".into(),
+                ));
+            }
+            let forward = eval_between(&args[0], &args[1], &args[2])?;
+            let backward = eval_between(&args[0], &args[2], &args[1])?;
+            Ok(match (&forward, &backward) {
+                (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
+                (Value::Null, _) | (_, Value::Null) => Value::Null,
+                _ => Value::Bool(false),
+            })
+        }
+        // -------------------------------------------------------------
         // Geospatial primitives (point, distance, within, dwithin)
         // -------------------------------------------------------------
         "point" => {
@@ -1787,7 +2672,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let e2 = parse_timestamp(&value_to_string(&args[3]))?;
             Ok(Value::Bool(s1 < e2 && s2 < e1))
         }
-        other => Err(SQLError::Unsupported(format!("scalar function `{other}`"))),
+        other => Err(SQLError::UnknownFunction(other.to_string())),
     }
 }
 
@@ -1810,6 +2695,7 @@ fn typeof_value(v: &Value) -> String {
             TemporalValue::TimeTz { .. } => "time with time zone".into(),
             TemporalValue::Timestamp { .. } => "timestamp without time zone".into(),
             TemporalValue::TimestampTz { .. } => "timestamp with time zone".into(),
+            TemporalValue::Interval { .. } => "interval".into(),
         },
         Value::List(_) => "array".into(),
         Value::Map(_) => "jsonb".into(),
@@ -1877,15 +2763,314 @@ fn like_match(haystack: &str, pattern: &str, case_insensitive: bool) -> bool {
     rec(&h, &p)
 }
 
-fn cast_value(v: &Value, ty: &str) -> Result<Value> {
+/// `trim` / `ltrim` / `rtrim` / `btrim` with the optional
+/// character-SET second argument (defaults to whitespace).
+fn trim_chars(args: &[Value], start: bool, end: bool) -> Result<Value> {
+    if args.is_empty() || args.len() > 2 {
+        return Err(SQLError::TypeMismatch("trim takes 1-2 args".into()));
+    }
+    if args.iter().any(|arg| matches!(arg, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let s = value_to_string(&args[0]);
+    let out = match args.get(1) {
+        None => match (start, end) {
+            (true, true) => s.trim(),
+            (true, false) => s.trim_start(),
+            (false, true) => s.trim_end(),
+            (false, false) => s.as_str(),
+        }
+        .to_string(),
+        Some(set) => {
+            let set: Vec<char> = value_to_string(set).chars().collect();
+            let matches_set = |c: char| set.contains(&c);
+            let mut out = s.as_str();
+            if start {
+                out = out.trim_start_matches(matches_set);
+            }
+            if end {
+                out = out.trim_end_matches(matches_set);
+            }
+            out.to_string()
+        }
+    };
+    Ok(Value::Str(out))
+}
+
+/// Compile a POSIX-ish regex with `PostgreSQL` match flags (`i`, `n`).
+fn compile_pg_regex(pattern: &str, flags: &str) -> Result<regex::Regex> {
+    let mut prefix = String::new();
+    if flags.contains('i') {
+        prefix.push_str("(?i)");
+    }
+    if flags.contains('n') || flags.contains('m') {
+        prefix.push_str("(?m)");
+    }
+    if flags.contains('s') {
+        prefix.push_str("(?s)");
+    }
+    regex::Regex::new(&format!("{prefix}{pattern}"))
+        .map_err(|e| SQLError::TypeMismatch(format!("regex: {e}")))
+}
+
+/// Reserved / type / column-name keywords `PostgreSQL`'s
+/// `quote_ident` quotes even when the identifier is otherwise safe.
+fn is_quoted_keyword(word: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "all",
+        "analyse",
+        "analyze",
+        "and",
+        "any",
+        "array",
+        "as",
+        "asc",
+        "asymmetric",
+        "authorization",
+        "between",
+        "bigint",
+        "binary",
+        "bit",
+        "boolean",
+        "both",
+        "case",
+        "cast",
+        "char",
+        "character",
+        "check",
+        "coalesce",
+        "collate",
+        "collation",
+        "column",
+        "concurrently",
+        "constraint",
+        "create",
+        "cross",
+        "current_catalog",
+        "current_date",
+        "current_role",
+        "current_schema",
+        "current_time",
+        "current_timestamp",
+        "current_user",
+        "dec",
+        "decimal",
+        "default",
+        "deferrable",
+        "desc",
+        "distinct",
+        "do",
+        "else",
+        "end",
+        "except",
+        "exists",
+        "extract",
+        "false",
+        "fetch",
+        "float",
+        "for",
+        "foreign",
+        "freeze",
+        "from",
+        "full",
+        "grant",
+        "greatest",
+        "group",
+        "grouping",
+        "having",
+        "ilike",
+        "in",
+        "initially",
+        "inner",
+        "inout",
+        "int",
+        "integer",
+        "intersect",
+        "interval",
+        "into",
+        "is",
+        "isnull",
+        "join",
+        "json",
+        "json_array",
+        "json_arrayagg",
+        "json_exists",
+        "json_object",
+        "json_objectagg",
+        "json_query",
+        "json_scalar",
+        "json_serialize",
+        "json_table",
+        "json_value",
+        "lateral",
+        "leading",
+        "least",
+        "left",
+        "like",
+        "limit",
+        "localtime",
+        "localtimestamp",
+        "merge_action",
+        "national",
+        "natural",
+        "nchar",
+        "none",
+        "normalize",
+        "not",
+        "notnull",
+        "null",
+        "nullif",
+        "numeric",
+        "offset",
+        "on",
+        "only",
+        "or",
+        "order",
+        "out",
+        "outer",
+        "overlaps",
+        "overlay",
+        "placing",
+        "position",
+        "precision",
+        "primary",
+        "real",
+        "references",
+        "returning",
+        "right",
+        "row",
+        "select",
+        "session_user",
+        "setof",
+        "similar",
+        "smallint",
+        "some",
+        "substring",
+        "symmetric",
+        "system_user",
+        "table",
+        "tablesample",
+        "then",
+        "time",
+        "timestamp",
+        "to",
+        "trailing",
+        "treat",
+        "trim",
+        "true",
+        "union",
+        "unique",
+        "user",
+        "using",
+        "values",
+        "varchar",
+        "variadic",
+        "verbose",
+        "when",
+        "where",
+        "window",
+        "with",
+        "xmlattributes",
+        "xmlconcat",
+        "xmlelement",
+        "xmlexists",
+        "xmlforest",
+        "xmlnamespaces",
+        "xmlparse",
+        "xmlpi",
+        "xmlroot",
+        "xmlserialize",
+        "xmltable",
+    ];
+    KEYWORDS.binary_search(&word).is_ok()
+}
+
+/// `quote_ident`: double-quote unless the identifier is a safe
+/// lower-case name that is not a keyword.
+fn quote_ident(ident: &str) -> String {
+    let safe = !ident.is_empty()
+        && ident.chars().enumerate().all(|(i, c)| {
+            c.is_ascii_lowercase() || c == '_' || (i > 0 && (c.is_ascii_digit() || c == '$'))
+        });
+    if safe && !is_quoted_keyword(ident) {
+        return ident.to_string();
+    }
+    format!("\"{}\"", ident.replace('"', "\"\""))
+}
+
+/// `quote_literal`: single-quote with doubled quotes; backslashes
+/// switch to the `E'...'` form with doubled backslashes.
+fn quote_literal(text: &str) -> String {
+    let escaped = text.replace('\'', "''");
+    if escaped.contains('\\') {
+        format!("E'{}'", escaped.replace('\\', "\\\\"))
+    } else {
+        format!("'{escaped}'")
+    }
+}
+
+/// Translate a SQL `SIMILAR TO` pattern into an anchored regex:
+/// `%` -> `.*`, `_` -> `.`, regex metacharacters that SQL regexes
+/// treat literally get escaped, and `(|)*+?{}[]` pass through.
+fn similar_to_regex(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len() + 8);
+    out.push_str("^(?:");
+    let mut chars = pattern.chars().peekable();
+    let mut in_brackets = false;
+    while let Some(c) = chars.next() {
+        if in_brackets {
+            out.push(c);
+            if c == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+        match c {
+            '%' => out.push_str(".*"),
+            '_' => out.push('.'),
+            '[' => {
+                in_brackets = true;
+                out.push('[');
+            }
+            '\\' => {
+                // Default SIMILAR TO escape: the next character is
+                // literal.
+                if let Some(next) = chars.next() {
+                    for e in regex::escape(&next.to_string()).chars() {
+                        out.push(e);
+                    }
+                }
+            }
+            '.' | '^' | '$' => {
+                out.push('\\');
+                out.push(c);
+            }
+            other => out.push(other),
+        }
+    }
+    out.push_str(")$");
+    out
+}
+
+/// Cast a value to the named SQL type, mirroring `CAST(expr AS ty)`.
+/// Types outside the engine's coercion surface return
+/// [`SQLError::Unsupported`]; callers doing best-effort typing (the
+/// `PL/pgSQL` interpreter) treat that as "leave the value as-is".
+pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
     if matches!(v, Value::Null) {
         return Ok(Value::Null);
     }
     if let Some(elem_ty) = ty.strip_suffix("[]") {
-        let Value::List(items) = v else {
-            return Err(SQLError::TypeMismatch(format!(
-                "CAST AS {ty}: expected array, got {v:?}"
-            )));
+        // `'{1,2,3}'::int[]` parses the PostgreSQL array literal
+        // before casting each element.
+        let items: Vec<Value> = match v {
+            Value::List(items) => items.clone(),
+            Value::Str(s) => parse_pg_array_literal(s)?,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "CAST AS {ty}: expected array, got {other:?}"
+                )));
+            }
         };
         return items
             .iter()
@@ -1893,16 +3078,56 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
             .collect::<Result<Vec<_>>>()
             .map(Value::List);
     }
-    match ty {
-        "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial"
-        | "bigserial" | "serial4" | "serial8" | "pg_catalog.int4" | "pg_catalog.int8"
-        | "pg_catalog.int2" => Ok(Value::Int(to_i64(v)?)),
+    let (base, modifier) = split_type_modifier(ty);
+    match base {
+        "smallint" | "int2" | "pg_catalog.int2" => cast_integer(v, "smallint"),
+        "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
+            cast_integer(v, "integer")
+        }
+        "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
+            cast_integer(v, "bigint")
+        }
         "real" | "float4" | "float8" | "double" | "double precision" => {
             Ok(Value::Float(to_f64(v)?))
         }
-        "numeric" | "decimal" => Ok(Value::Decimal(to_decimal(v)?)),
-        "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
-            Ok(Value::Str(value_to_string(v)))
+        "numeric" | "decimal" => {
+            let value = to_decimal(v)?;
+            if let Some(modifier) = modifier {
+                let mut parts = modifier.split(',').map(str::trim);
+                let precision: u32 = parts
+                    .next()
+                    .and_then(|p| p.parse().ok())
+                    .ok_or_else(|| SQLError::TypeMismatch("bad numeric precision".into()))?;
+                let scale: i32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let rounded = value
+                    .round_to_scale(scale)
+                    .ok_or_else(|| out_of_range("numeric"))?;
+                if !rounded.fits_precision(precision, scale) {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22003".into(),
+                        message: format!(
+                            "numeric field overflow: A field with precision {precision}, scale {scale} cannot hold value {}",
+                            value.to_sql_string()
+                        ),
+                    });
+                }
+                return Ok(Value::Decimal(rounded));
+            }
+            Ok(Value::Decimal(value))
+        }
+        "text" | "name" | "uuid" => Ok(Value::Str(value_to_string(v))),
+        // char(n) / varchar(n): the explicit cast TRUNCATES to the
+        // declared length (PostgreSQL `'abc'::char(2)` = 'ab').
+        "varchar" | "character varying" | "character" | "char" | "bpchar" => {
+            let text = value_to_string(v);
+            let Some(modifier) = modifier else {
+                return Ok(Value::Str(text));
+            };
+            let limit: usize = modifier
+                .trim()
+                .parse()
+                .map_err(|_| SQLError::TypeMismatch(format!("bad length modifier {modifier}")))?;
+            Ok(Value::Str(text.chars().take(limit).collect()))
         }
         "date" => cast_temporal(v, TemporalValue::parse_date, "date"),
         "time" | "time without time zone" => cast_temporal(v, TemporalValue::parse_time, "time"),
@@ -1917,15 +3142,178 @@ fn cast_value(v: &Value, ty: &str) -> Result<Value> {
             TemporalValue::parse_timestamp_tz,
             "timestamp with time zone",
         ),
+        "interval" => cast_temporal(v, TemporalValue::parse_interval, "interval"),
+        // Documented divergences from PostgreSQL: (1) `json` (non-b)
+        // does not preserve the source text - objects land in the same
+        // key-sorted Map representation as `jsonb`; (2) top-level jsonb
+        // scalars materialize as plain engine values, so a jsonb string
+        // renders without JSON quotes.
         "json" | "jsonb" => Ok(json_to_value(&parse_json(&value_to_string(v))?)),
         "bytea" => match v {
             Value::Bytes(bytes) => Ok(Value::Bytes(bytes.clone())),
+            // PostgreSQL reads `\x...` hex input for bytea.
+            Value::Str(s) if s.starts_with("\\x") => {
+                let hex = &s[2..];
+                let mut out = Vec::with_capacity(hex.len() / 2);
+                let bytes = hex.as_bytes();
+                let mut i = 0;
+                while i + 1 < bytes.len() {
+                    let hi = (bytes[i] as char)
+                        .to_digit(16)
+                        .ok_or_else(|| SQLError::TypeMismatch("invalid hex in bytea".into()))?;
+                    let lo = (bytes[i + 1] as char)
+                        .to_digit(16)
+                        .ok_or_else(|| SQLError::TypeMismatch("invalid hex in bytea".into()))?;
+                    out.push((hi * 16 + lo) as u8);
+                    i += 2;
+                }
+                Ok(Value::Bytes(out))
+            }
             Value::Str(s) => Ok(Value::Bytes(s.as_bytes().to_vec())),
             other => Ok(Value::Bytes(value_to_string(other).into_bytes())),
         },
-        "boolean" | "bool" => Ok(Value::Bool(truthy(v))),
+        "boolean" | "bool" => cast_boolean(v),
         other => Err(SQLError::Unsupported(format!("CAST AS {other}"))),
     }
+}
+
+/// Split `varchar(10)` / `numeric(10,2)` into `("varchar", Some("10"))`.
+fn split_type_modifier(ty: &str) -> (&str, Option<&str>) {
+    match (ty.find('('), ty.rfind(')')) {
+        (Some(open), Some(close)) if close > open => {
+            (ty[..open].trim_end(), Some(&ty[open + 1..close]))
+        }
+        _ => (ty, None),
+    }
+}
+
+/// CAST to the integer family with `PostgreSQL` conversion rules:
+/// float8 rounds half-to-even, numeric rounds half-away-from-zero,
+/// strings must be integral text, and the result must fit the target
+/// width.
+fn cast_integer(v: &Value, target: &str) -> Result<Value> {
+    let n: i64 = match v {
+        Value::Int(n) => *n,
+        Value::Bool(b) => i64::from(*b),
+        Value::Float(f) => {
+            if !f.is_finite() {
+                return Err(out_of_range(target));
+            }
+            let rounded = f.round_ties_even();
+            if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+                return Err(out_of_range(target));
+            }
+            rounded as i64
+        }
+        Value::Decimal(d) => d
+            .round_dp(0)
+            .to_i64_trunc()
+            .ok_or_else(|| out_of_range(target))?,
+        Value::Str(s) => s.trim().parse::<i64>().map_err(|_| SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("invalid input syntax for type {target}: \"{s}\""),
+        })?,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to {target}"
+            )));
+        }
+    };
+    let in_range = match target {
+        "smallint" => i16::try_from(n).is_ok(),
+        "integer" => i32::try_from(n).is_ok(),
+        _ => true,
+    };
+    if !in_range {
+        return Err(out_of_range(target));
+    }
+    Ok(Value::Int(n))
+}
+
+/// CAST to boolean: strings follow `PostgreSQL`'s `parse_bool`
+/// (prefixes of true/false/yes/no, on/off, 1/0); numbers are non-zero
+/// tests.
+fn cast_boolean(v: &Value) -> Result<Value> {
+    match v {
+        Value::Bool(b) => Ok(Value::Bool(*b)),
+        Value::Int(n) => Ok(Value::Bool(*n != 0)),
+        Value::Float(f) => Ok(Value::Bool(*f != 0.0)),
+        Value::Decimal(d) => Ok(Value::Bool(!d.is_zero())),
+        Value::Str(s) => {
+            let text = s.trim().to_ascii_lowercase();
+            let matches_prefix = |word: &str| !text.is_empty() && word.starts_with(&text);
+            let value = if matches_prefix("true") || matches_prefix("yes") || text == "1" {
+                Some(true)
+            } else if matches_prefix("false") || matches_prefix("no") || text == "0" {
+                Some(false)
+            } else if "on" == text {
+                Some(true)
+            } else if matches_prefix("off") && text.len() >= 2 {
+                Some(false)
+            } else {
+                None
+            };
+            value.map(Value::Bool).ok_or_else(|| SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: format!("invalid input syntax for type boolean: \"{s}\""),
+            })
+        }
+        other => Err(SQLError::TypeMismatch(format!(
+            "cannot cast {other:?} to boolean"
+        ))),
+    }
+}
+
+/// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`)
+/// into a list of string/NULL values; the caller casts elements.
+fn parse_pg_array_literal(text: &str) -> Result<Vec<Value>> {
+    let trimmed = text.trim();
+    let inner = trimmed
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'))
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("malformed array literal: \"{text}\""),
+        })?;
+    let mut items: Vec<Value> = Vec::new();
+    let mut current = String::new();
+    let mut chars = inner.chars().peekable();
+    let mut in_quotes = false;
+    let mut was_quoted = false;
+    let push_item = |raw: &str, quoted: bool, items: &mut Vec<Value>| {
+        let value = raw.trim();
+        if value.is_empty() && !quoted {
+            return;
+        }
+        if !quoted && value.eq_ignore_ascii_case("null") {
+            items.push(Value::Null);
+        } else {
+            items.push(Value::Str(value.to_string()));
+        }
+    };
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                was_quoted = true;
+            }
+            '\\' if in_quotes => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            ',' if !in_quotes => {
+                push_item(&current, was_quoted, &mut items);
+                current.clear();
+                was_quoted = false;
+            }
+            other => current.push(other),
+        }
+    }
+    if !current.is_empty() || was_quoted {
+        push_item(&current, was_quoted, &mut items);
+    }
+    Ok(items)
 }
 
 fn cast_temporal(v: &Value, parse: fn(&str) -> Option<TemporalValue>, ty: &str) -> Result<Value> {
@@ -1949,7 +3337,8 @@ fn value_to_string(v: &Value) -> String {
         Value::List(_) | Value::Map(_) => {
             serde_json::to_string(&value_to_json(v)).unwrap_or_default()
         }
-        Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
+        // bytea renders as PostgreSQL hex output in text contexts.
+        Value::Bytes(b) => format!("\\x{}", hex_encode(b)),
     }
 }
 
@@ -2012,6 +3401,7 @@ fn to_i64(v: &Value) -> Result<i64> {
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to integer"))),
         Value::Bool(b) => Ok(i64::from(*b)),
         Value::Str(s) => s
+            .trim()
             .parse()
             .map_err(|_| SQLError::TypeMismatch(format!("cannot parse {s:?} as integer"))),
         other => Err(SQLError::TypeMismatch(format!(
@@ -2020,7 +3410,7 @@ fn to_i64(v: &Value) -> Result<i64> {
     }
 }
 
-fn to_f64(v: &Value) -> Result<f64> {
+pub(crate) fn to_f64(v: &Value) -> Result<f64> {
     match v {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
@@ -2028,6 +3418,21 @@ fn to_f64(v: &Value) -> Result<f64> {
             SQLError::TypeMismatch(format!("cannot cast {v:?} to double precision"))
         }),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        // float8 casts accept PostgreSQL's textual forms, including
+        // Infinity / NaN spellings.
+        Value::Str(s) => {
+            let text = s.trim();
+            let lowered = text.to_ascii_lowercase();
+            match lowered.as_str() {
+                "infinity" | "inf" | "+infinity" | "+inf" => Ok(f64::INFINITY),
+                "-infinity" | "-inf" => Ok(f64::NEG_INFINITY),
+                "nan" => Ok(f64::NAN),
+                _ => text.parse().map_err(|_| SQLError::Routine {
+                    sqlstate: "22P02".into(),
+                    message: format!("invalid input syntax for type double precision: \"{s}\""),
+                }),
+            }
+        }
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),

@@ -568,7 +568,9 @@ pub(super) fn compile_from_node(node: &Node) -> Result<FromClause> {
                 }
             };
             let (alias, column_aliases) = compile_alias(rf.alias.as_ref());
-            let coldef_aliases = compile_column_definition_aliases(&rf.coldeflist)?;
+            let coldefs = compile_column_definitions(&rf.coldeflist)?;
+            let column_types: Vec<String> = coldefs.iter().map(|(_, ty)| ty.clone()).collect();
+            let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
                 name,
                 args,
@@ -578,6 +580,7 @@ pub(super) fn compile_from_node(node: &Node) -> Result<FromClause> {
                 } else {
                     coldef_aliases
                 },
+                column_types,
             })
         }
         other => Err(SQLError::Unsupported(format!("FROM form: {other:?}"))),
@@ -609,11 +612,24 @@ fn compile_alias(alias: Option<&pg_query::protobuf::Alias>) -> (Option<String>, 
     (name, cols)
 }
 
-fn compile_column_definition_aliases(nodes: &[Node]) -> Result<Vec<String>> {
+/// Column definition list entries as `(name, lowercased type name)`.
+/// The type name is the last component of the `TypeName` path
+/// (`pg_catalog.int4` -> `int4`, `agtype` -> `agtype`); empty when the
+/// definition omitted a type.
+fn compile_column_definitions(nodes: &[Node]) -> Result<Vec<(String, String)>> {
     nodes
         .iter()
         .map(|node| match node.node.as_ref() {
-            Some(NodeEnum::ColumnDef(col)) => Ok(col.colname.clone()),
+            Some(NodeEnum::ColumnDef(col)) => {
+                let type_name = col
+                    .type_name
+                    .as_ref()
+                    .and_then(|t| t.names.last())
+                    .and_then(|n| extract_string(n).ok())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                Ok((col.colname.clone(), type_name))
+            }
             other => Err(SQLError::Unsupported(format!(
                 "function column definition: {other:?}"
             ))),
@@ -1101,8 +1117,89 @@ pub(super) fn compile_expr(node: &Node) -> Result<Expr> {
             })
         }
         NodeEnum::SubLink(sl) => compile_sublink(sl),
+        // ROW(a, b) constructors compare element-wise; the evaluator
+        // reuses the list comparison rules for them.
+        NodeEnum::RowExpr(row) => {
+            let elements: Vec<Expr> = row
+                .args
+                .iter()
+                .map(compile_expr)
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Expr::Array(elements))
+        }
+        NodeEnum::AIndirection(ind) => compile_indirection(ind),
         other => Err(SQLError::Unsupported(format!("expression form: {other:?}"))),
     }
+}
+
+/// `expr[i]`, `expr[lo:hi]`, and chains thereof. Subscripts are
+/// 1-based; slices clamp to the array, both per `PostgreSQL`.
+fn compile_indirection(ind: &pg_query::protobuf::AIndirection) -> Result<Expr> {
+    let base = ind
+        .arg
+        .as_deref()
+        .ok_or_else(|| SQLError::Internal("AIndirection without base".into()))?;
+    let mut current = compile_expr(base)?;
+    for step in &ind.indirection {
+        let Some(inner) = step.node.as_ref() else {
+            continue;
+        };
+        match inner {
+            NodeEnum::AIndices(idx) => {
+                if idx.is_slice {
+                    let lower = idx
+                        .lidx
+                        .as_deref()
+                        .map(compile_expr)
+                        .transpose()?
+                        .unwrap_or(Expr::Literal(Value::Null));
+                    let upper = idx
+                        .uidx
+                        .as_deref()
+                        .map(compile_expr)
+                        .transpose()?
+                        .unwrap_or(Expr::Literal(Value::Null));
+                    current = Expr::Func {
+                        name: "__slice".into(),
+                        args: vec![current, lower, upper],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    };
+                } else {
+                    let index = idx
+                        .uidx
+                        .as_deref()
+                        .map(compile_expr)
+                        .transpose()?
+                        .ok_or_else(|| SQLError::Internal("subscript without index".into()))?;
+                    current = Expr::Func {
+                        name: "__subscript".into(),
+                        args: vec![current, index],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    };
+                }
+            }
+            NodeEnum::String(field) => {
+                // `(composite).field` access on map values.
+                current = Expr::Func {
+                    name: "__subscript".into(),
+                    args: vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
+                    distinct: false,
+                    order_by: Vec::new(),
+                    filter: None,
+                };
+            }
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "indirection step: {other:?}"
+                )));
+            }
+        }
+    }
+    Ok(current)
 }
 
 fn compile_sql_value_function(svf: &pg_query::protobuf::SqlValueFunction) -> Result<Expr> {
@@ -1117,6 +1214,12 @@ fn compile_sql_value_function(svf: &pg_query::protobuf::SqlValueFunction) -> Res
         | SqlValueFunctionOp::SvfopCurrentTimeN
         | SqlValueFunctionOp::SvfopLocaltime
         | SqlValueFunctionOp::SvfopLocaltimeN => "current_timestamp",
+        SqlValueFunctionOp::SvfopCurrentSchema => "current_schema",
+        SqlValueFunctionOp::SvfopCurrentCatalog => "current_database",
+        SqlValueFunctionOp::SvfopCurrentUser
+        | SqlValueFunctionOp::SvfopCurrentRole
+        | SqlValueFunctionOp::SvfopSessionUser
+        | SqlValueFunctionOp::SvfopUser => "current_user",
         other => {
             return Err(SQLError::Unsupported(format!(
                 "SQL value function {other:?}"
@@ -1238,6 +1341,13 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                     .as_ref()
                     .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
                 let rhs = compile_expr(rhs)?;
+                let unary_func = |name: &str, arg: Expr| Expr::Func {
+                    name: name.into(),
+                    args: vec![arg],
+                    distinct: false,
+                    order_by: Vec::new(),
+                    filter: None,
+                };
                 return match op_name.as_str() {
                     "+" => Ok(rhs),
                     "-" => Ok(Expr::Binary {
@@ -1245,6 +1355,10 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                         lhs: Box::new(Expr::Literal(Value::Int(0))),
                         rhs: Box::new(rhs),
                     }),
+                    // |/ square root, ||/ cube root, @ absolute value.
+                    "|/" => Ok(unary_func("sqrt", rhs)),
+                    "||/" => Ok(unary_func("cbrt", rhs)),
+                    "@" => Ok(unary_func("abs", rhs)),
                     other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
                 };
             }
@@ -1302,6 +1416,45 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 "%" => {
                     return Ok(Expr::Func {
                         name: "mod".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                "^" => {
+                    return Ok(Expr::Func {
+                        name: "power".into(),
+                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                // POSIX regex operators: `~` match, `~*` case-insensitive
+                // match, `!~` / `!~*` their negations.
+                "~" | "~*" | "!~" | "!~*" => {
+                    let mut args = vec![compile_expr(lhs)?, compile_expr(rhs)?];
+                    if op_name.ends_with('*') {
+                        args.push(Expr::Literal(Value::Str("i".into())));
+                    }
+                    let call = Expr::Func {
+                        name: "regexp_like".into(),
+                        args,
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    };
+                    return Ok(if op_name.starts_with('!') {
+                        Expr::Not(Box::new(call))
+                    } else {
+                        call
+                    });
+                }
+                // Array overlap.
+                "&&" => {
+                    return Ok(Expr::Func {
+                        name: "array_overlap".into(),
                         args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
                         distinct: false,
                         order_by: Vec::new(),
@@ -1466,6 +1619,133 @@ fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
                 between
             })
         }
+        AExprKind::AexprBetweenSym | AExprKind::AexprNotBetweenSym => {
+            let expr = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("BETWEEN without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("BETWEEN without rhs".into()))?;
+            let bounds = match rhs.node.as_ref() {
+                Some(NodeEnum::List(l)) if l.items.len() == 2 => l.items.clone(),
+                _ => return Err(SQLError::Internal("BETWEEN expects 2 bounds".into())),
+            };
+            let call = Expr::Func {
+                name: "__between_symmetric".into(),
+                args: vec![
+                    compile_expr(expr)?,
+                    compile_expr(&bounds[0])?,
+                    compile_expr(&bounds[1])?,
+                ],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            Ok(if matches!(kind, AExprKind::AexprNotBetweenSym) {
+                Expr::Not(Box::new(call))
+            } else {
+                call
+            })
+        }
+        AExprKind::AexprDistinct | AExprKind::AexprNotDistinct => {
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("IS DISTINCT FROM without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("IS DISTINCT FROM without rhs".into()))?;
+            let call = Expr::Func {
+                name: "__is_distinct".into(),
+                args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            Ok(if matches!(kind, AExprKind::AexprNotDistinct) {
+                Expr::Not(Box::new(call))
+            } else {
+                call
+            })
+        }
+        AExprKind::AexprSimilar => {
+            // `expr SIMILAR TO pattern` arrives with the pattern
+            // wrapped in `similar_to_escape(pattern[, escape])`.
+            let op_name = a
+                .name
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect::<Vec<_>>()
+                .join("");
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("SIMILAR TO without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("SIMILAR TO without rhs".into()))?;
+            let pattern = match rhs.node.as_ref() {
+                Some(NodeEnum::FuncCall(f))
+                    if f.funcname.iter().any(|n| {
+                        matches!(n.node.as_ref(), Some(NodeEnum::String(s)) if s.sval == "similar_to_escape")
+                    }) =>
+                {
+                    let first = f.args.first().ok_or_else(|| {
+                        SQLError::Internal("similar_to_escape without pattern".into())
+                    })?;
+                    compile_expr(first)?
+                }
+                _ => compile_expr(rhs)?,
+            };
+            let call = Expr::Func {
+                name: "similar_to".into(),
+                args: vec![compile_expr(lhs)?, pattern],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            Ok(if op_name == "!~" {
+                Expr::Not(Box::new(call))
+            } else {
+                call
+            })
+        }
+        AExprKind::AexprOpAny | AExprKind::AexprOpAll => {
+            let op_name = a
+                .name
+                .iter()
+                .filter_map(|n| extract_string(n).ok())
+                .collect::<Vec<_>>()
+                .join("");
+            let lhs = a
+                .lexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("ANY/ALL without lhs".into()))?;
+            let rhs = a
+                .rexpr
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("ANY/ALL without rhs".into()))?;
+            let name = if matches!(kind, AExprKind::AexprOpAny) {
+                "__any_op"
+            } else {
+                "__all_op"
+            };
+            Ok(Expr::Func {
+                name: name.into(),
+                args: vec![
+                    compile_expr(lhs)?,
+                    compile_expr(rhs)?,
+                    Expr::Literal(Value::Str(op_name)),
+                ],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            })
+        }
         AExprKind::AexprNullif => {
             let lhs = a
                 .lexpr
@@ -1622,6 +1902,23 @@ fn compile_const(c: &pg_query::protobuf::AConst) -> Result<Expr> {
     };
     let value = match val {
         Val::Ival(i) => Value::Int(i64::from(i.ival)),
+        // Integer literals wider than int4 arrive as Fval strings (the
+        // parser also folds a unary minus into the literal); ones that
+        // fit i64 stay integers (PostgreSQL types them int8), the rest
+        // become numeric.
+        Val::Fval(f)
+            if f.fval
+                .strip_prefix('-')
+                .unwrap_or(&f.fval)
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            f.fval.parse::<i64>().map(Value::Int).or_else(|_| {
+                DecimalValue::parse(&f.fval)
+                    .map(Value::Decimal)
+                    .ok_or_else(|| SQLError::Internal(format!("bad numeric literal {}", f.fval)))
+            })?
+        }
         Val::Fval(f) => DecimalValue::parse(&f.fval).map_or_else(
             || {
                 f.fval
@@ -1890,6 +2187,34 @@ fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) -> Result<Expr> {
         "float8" => "double precision".to_string(),
         _ => ty,
     };
+    // Carry length / precision modifiers (`varchar(1)`, `numeric(10,2)`)
+    // so the evaluator can truncate / rescale like PostgreSQL.
+    if matches!(
+        ty.as_str(),
+        "varchar" | "bpchar" | "char" | "character" | "character varying" | "numeric" | "decimal"
+    ) {
+        let mods: Vec<String> = tc
+            .type_name
+            .as_ref()
+            .map(|t| {
+                t.typmods
+                    .iter()
+                    .filter_map(|node| match node.node.as_ref() {
+                        Some(NodeEnum::AConst(c)) => match c.val.as_ref() {
+                            Some(pg_query::protobuf::a_const::Val::Ival(i)) => {
+                                Some(i.ival.to_string())
+                            }
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !mods.is_empty() {
+            ty = format!("{ty}({})", mods.join(","));
+        }
+    }
     if tc
         .type_name
         .as_ref()

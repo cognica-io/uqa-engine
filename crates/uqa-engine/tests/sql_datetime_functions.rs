@@ -17,13 +17,6 @@ fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
 }
 
-fn str_value(value: &Value) -> &str {
-    match value {
-        Value::Str(s) => s,
-        other => panic!("expected string, got {other:?}"),
-    }
-}
-
 fn int_value(value: &Value) -> i64 {
     match value {
         Value::Int(n) => *n,
@@ -31,17 +24,20 @@ fn int_value(value: &Value) -> i64 {
     }
 }
 
-fn float_value(value: &Value) -> f64 {
-    match value {
-        Value::Float(n) => *n,
-        other => panic!("expected float, got {other:?}"),
-    }
-}
-
 fn bool_value(value: &Value) -> bool {
     match value {
         Value::Bool(b) => *b,
         other => panic!("expected bool, got {other:?}"),
+    }
+}
+
+/// PG-text rendering for typed temporal results (dates, timestamps,
+/// intervals), matching what psql displays.
+fn temporal_text(value: &Value) -> String {
+    match value {
+        Value::Temporal(t) => t.to_sql_string(),
+        Value::Str(s) => s.clone(),
+        other => panic!("expected temporal, got {other:?}"),
     }
 }
 
@@ -146,21 +142,26 @@ fn date_ordering() {
 fn now_returns_timestamp_string() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT NOW() AS ts");
-    assert!(str_value(&result.rows[0]["ts"]).contains('T'));
+    // PostgreSQL 17 renders timestamptz as `YYYY-MM-DD HH:MM:SS.ffffff+00`.
+    let text = temporal_text(&result.rows[0]["ts"]);
+    assert!(text.contains(' '), "expected PG text form, got {text}");
+    assert!(text.ends_with("+00"), "expected +00 suffix, got {text}");
 }
 
 #[test]
 fn current_date_returns_date_string() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT CURRENT_DATE AS d");
-    assert_eq!(str_value(&result.rows[0]["d"]).len(), 10);
+    assert_eq!(temporal_text(&result.rows[0]["d"]).len(), 10);
 }
 
 #[test]
 fn current_timestamp_returns_timestamp_string() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT CURRENT_TIMESTAMP AS ts");
-    assert!(str_value(&result.rows[0]["ts"]).contains('T'));
+    let text = temporal_text(&result.rows[0]["ts"]);
+    assert!(text.contains(' '), "expected PG text form, got {text}");
+    assert!(text.ends_with("+00"), "expected +00 suffix, got {text}");
 }
 
 #[test]
@@ -202,7 +203,14 @@ fn extract_dow() {
 fn extract_epoch() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT EXTRACT(epoch FROM ts) AS e FROM log");
-    assert!(float_value(&result.rows[0]["e"]) > 0.0);
+    // extract(epoch ...) returns numeric with 6 decimals in PostgreSQL 17.
+    match &result.rows[0]["e"] {
+        Value::Decimal(d) => {
+            assert!(d.to_f64().unwrap() > 0.0);
+            assert!(d.to_sql_string().ends_with(".000000"));
+        }
+        other => panic!("expected numeric epoch, got {other:?}"),
+    }
 }
 
 #[test]
@@ -216,21 +224,22 @@ fn date_part() {
 fn date_trunc_year() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT DATE_TRUNC('year', ts) AS t FROM log");
-    assert!(str_value(&result.rows[0]["t"]).starts_with("2024-01-01T00:00:00"));
+    // PostgreSQL 17 date_trunc renders `2024-01-01 00:00:00`.
+    assert_eq!(temporal_text(&result.rows[0]["t"]), "2024-01-01 00:00:00");
 }
 
 #[test]
 fn date_trunc_month() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT DATE_TRUNC('month', ts) AS t FROM log");
-    assert!(str_value(&result.rows[0]["t"]).starts_with("2024-06-01T00:00:00"));
+    assert_eq!(temporal_text(&result.rows[0]["t"]), "2024-06-01 00:00:00");
 }
 
 #[test]
 fn date_trunc_day() {
     let engine = ts_table();
     let result = exec(&engine, "SELECT DATE_TRUNC('day', ts) AS t FROM log");
-    assert!(str_value(&result.rows[0]["t"]).starts_with("2024-06-15T00:00:00"));
+    assert_eq!(temporal_text(&result.rows[0]["t"]), "2024-06-15 00:00:00");
 }
 
 #[test]
@@ -255,7 +264,7 @@ fn make_timestamp_basic() {
         &engine,
         "SELECT make_timestamp(2024, 3, 15, 10, 30, 0) AS ts",
     );
-    assert!(str_value(&result.rows[0]["ts"]).starts_with("2024-03-15T10:30:00"));
+    assert_eq!(temporal_text(&result.rows[0]["ts"]), "2024-03-15 10:30:00");
 }
 
 #[test]
@@ -265,7 +274,10 @@ fn make_timestamp_with_fractional_seconds() {
         &engine,
         "SELECT make_timestamp(2024, 1, 1, 0, 0, 30.5) AS ts",
     );
-    assert!(str_value(&result.rows[0]["ts"]).starts_with("2024-01-01T00:00:30"));
+    assert_eq!(
+        temporal_text(&result.rows[0]["ts"]),
+        "2024-01-01 00:00:30.5"
+    );
 }
 
 #[test]
@@ -275,7 +287,7 @@ fn make_timestamp_midnight() {
         &engine,
         "SELECT make_timestamp(2024, 12, 31, 0, 0, 0) AS ts",
     );
-    assert!(str_value(&result.rows[0]["ts"]).starts_with("2024-12-31T00:00:00"));
+    assert_eq!(temporal_text(&result.rows[0]["ts"]), "2024-12-31 00:00:00");
 }
 
 #[test]
@@ -285,28 +297,29 @@ fn make_timestamp_end_of_day() {
         &engine,
         "SELECT make_timestamp(2024, 6, 15, 23, 59, 59) AS ts",
     );
-    assert!(str_value(&result.rows[0]["ts"]).starts_with("2024-06-15T23:59:59"));
+    assert_eq!(temporal_text(&result.rows[0]["ts"]), "2024-06-15 23:59:59");
 }
 
 #[test]
 fn make_interval_days_hours_minutes() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT make_interval(0, 0, 0, 1, 2, 30, 0) AS iv");
-    assert!(str_value(&result.rows[0]["iv"]).contains("26:30:00"));
+    // PostgreSQL 17 renders this interval as `1 day 02:30:00`.
+    assert_eq!(temporal_text(&result.rows[0]["iv"]), "1 day 02:30:00");
 }
 
 #[test]
 fn make_interval_hours_minutes_only() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT make_interval(0, 0, 0, 0, 1, 30, 0) AS iv");
-    assert!(str_value(&result.rows[0]["iv"]).contains("01:30:00"));
+    assert_eq!(temporal_text(&result.rows[0]["iv"]), "01:30:00");
 }
 
 #[test]
 fn make_interval_zero_interval() {
     let engine = Engine::new();
     let result = exec(&engine, "SELECT make_interval(0, 0, 0, 0, 0, 0, 0) AS iv");
-    assert!(str_value(&result.rows[0]["iv"]).contains("00:00:00"));
+    assert_eq!(temporal_text(&result.rows[0]["iv"]), "00:00:00");
 }
 
 #[test]

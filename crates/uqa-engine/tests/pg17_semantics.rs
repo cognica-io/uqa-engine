@@ -1,0 +1,814 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! `PostgreSQL` 17 semantics encoded as engine tests.
+//!
+//! Every expectation in this file was verified against a live
+//! `PostgreSQL` 17.7 instance (the `uqa-pg17-age` differential-testing
+//! container driven by `tests/parity/pg17/run_diff.py`); the tests
+//! themselves run without docker.
+
+use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_engine::Engine;
+
+fn engine() -> Engine {
+    Engine::new()
+}
+
+fn scalar(engine: &Engine, sql: &str) -> Value {
+    let result = engine.sql(sql, &[]).unwrap();
+    let column = result.columns.first().expect("one column").clone();
+    result.rows[0].get(&column).cloned().unwrap_or(Value::Null)
+}
+
+fn scalar_err(engine: &Engine, sql: &str) -> String {
+    engine.sql(sql, &[]).unwrap_err().to_string()
+}
+
+fn text(engine: &Engine, sql: &str) -> String {
+    match scalar(engine, sql) {
+        Value::Str(s) => s,
+        Value::Temporal(t) => t.to_sql_string(),
+        Value::Decimal(d) => d.to_sql_string(),
+        other => panic!("expected text-like value for {sql}, got {other:?}"),
+    }
+}
+
+fn dec(text: &str) -> Value {
+    Value::Decimal(DecimalValue::parse(text).unwrap())
+}
+
+// ---------------------------------------------------------------------
+// Three-valued logic
+// ---------------------------------------------------------------------
+
+#[test]
+fn null_comparisons_yield_null() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT NULL = NULL"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT 1 = NULL"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT NULL <> 1"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT NULL < 1"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT NOT NULL"), Value::Null);
+}
+
+#[test]
+fn in_list_three_valued() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT 3 IN (1, 2, NULL)"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT 3 NOT IN (1, 2, NULL)"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT 1 IN (1, NULL)"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT 3 NOT IN (1, 2)"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT NULL IN (1, 2)"), Value::Null);
+}
+
+#[test]
+fn kleene_and_or() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT NULL AND false"), Value::Bool(false));
+    assert_eq!(scalar(&eng, "SELECT NULL AND true"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT NULL OR true"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT NULL OR false"), Value::Null);
+}
+
+#[test]
+fn between_three_valued() {
+    let eng = engine();
+    // A definite FALSE bound wins over the NULL bound.
+    assert_eq!(
+        scalar(&eng, "SELECT 2 BETWEEN 3 AND NULL"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 2 BETWEEN NULL AND 1"),
+        Value::Bool(false)
+    );
+    assert_eq!(scalar(&eng, "SELECT 2 BETWEEN NULL AND 3"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT NULL BETWEEN 1 AND 2"), Value::Null);
+}
+
+#[test]
+fn case_when_null_not_taken() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT CASE WHEN NULL THEN 1 ELSE 2 END"),
+        Value::Int(2)
+    );
+}
+
+#[test]
+fn where_treats_null_as_no_match() {
+    let eng = engine();
+    eng.sql("CREATE TABLE t3vl (id INTEGER, v INTEGER)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO t3vl (id, v) VALUES (1, 5), (2, 7), (3, NULL)",
+        &[],
+    )
+    .unwrap();
+    let ids = |sql: &str| -> Vec<i64> {
+        let mut out: Vec<i64> = eng
+            .sql(sql, &[])
+            .unwrap()
+            .rows
+            .iter()
+            .filter_map(|row| match row.get("id") {
+                Some(Value::Int(n)) => Some(*n),
+                _ => None,
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    };
+    assert_eq!(ids("SELECT id FROM t3vl WHERE v = 5"), vec![1]);
+    // NOT (v = 5) must NOT match the NULL row (PostgreSQL 3VL).
+    assert_eq!(ids("SELECT id FROM t3vl WHERE NOT (v = 5)"), vec![2]);
+    assert_eq!(ids("SELECT id FROM t3vl WHERE v <> 5"), vec![2]);
+    assert_eq!(ids("SELECT id FROM t3vl WHERE v NOT IN (5)"), vec![2]);
+    assert_eq!(ids("SELECT id FROM t3vl WHERE v IS NULL"), vec![3]);
+    assert_eq!(ids("SELECT id FROM t3vl WHERE v IS NOT NULL"), vec![1, 2]);
+}
+
+#[test]
+fn select_without_from_honors_where() {
+    let eng = engine();
+    assert_eq!(eng.sql("SELECT 1 WHERE false", &[]).unwrap().rows.len(), 0);
+    assert_eq!(eng.sql("SELECT 1 WHERE NULL", &[]).unwrap().rows.len(), 0);
+    assert_eq!(eng.sql("SELECT 1 WHERE true", &[]).unwrap().rows.len(), 1);
+    assert_eq!(
+        scalar(&eng, "SELECT EXISTS (SELECT 1 WHERE false)"),
+        Value::Bool(false)
+    );
+}
+
+// ---------------------------------------------------------------------
+// Arithmetic guards
+// ---------------------------------------------------------------------
+
+#[test]
+fn division_by_zero_errors() {
+    let eng = engine();
+    assert!(scalar_err(&eng, "SELECT 1 / 0").contains("division by zero"));
+    assert!(scalar_err(&eng, "SELECT 1.0 / 0").contains("division by zero"));
+    assert!(scalar_err(&eng, "SELECT 1.5::float8 / 0").contains("division by zero"));
+    assert!(scalar_err(&eng, "SELECT mod(5, 0)").contains("division by zero"));
+    assert!(scalar_err(&eng, "SELECT 5 % 0").contains("division by zero"));
+}
+
+#[test]
+fn bigint_overflow_errors() {
+    let eng = engine();
+    assert!(scalar_err(&eng, "SELECT 9223372036854775807 + 1").contains("bigint out of range"));
+    assert!(scalar_err(&eng, "SELECT -9223372036854775807 - 2").contains("bigint out of range"));
+    assert!(scalar_err(&eng, "SELECT 9223372036854775807 * 2").contains("bigint out of range"));
+}
+
+// ---------------------------------------------------------------------
+// Casts
+// ---------------------------------------------------------------------
+
+#[test]
+fn numeric_to_int_rounds_half_away_from_zero() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT 5.5::int"), Value::Int(6));
+    assert_eq!(scalar(&eng, "SELECT 5.9::int"), Value::Int(6));
+    assert_eq!(scalar(&eng, "SELECT 6.5::int"), Value::Int(7));
+    // -5.5::int parses as -(5.5::int) = -6.
+    assert_eq!(scalar(&eng, "SELECT -5.5::int"), Value::Int(-6));
+}
+
+#[test]
+fn float_to_int_rounds_half_to_even() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT 2.5::float8::int"), Value::Int(2));
+    assert_eq!(scalar(&eng, "SELECT 3.5::float8::int"), Value::Int(4));
+    assert_eq!(scalar(&eng, "SELECT round(2.5::float8)"), Value::Float(2.0));
+    assert_eq!(scalar(&eng, "SELECT round(3.5::float8)"), Value::Float(4.0));
+    // numeric round stays half-away-from-zero.
+    assert_eq!(scalar(&eng, "SELECT round(2.5)"), dec("3"));
+}
+
+#[test]
+fn string_to_number_casts() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT '  5 '::int"), Value::Int(5));
+    assert_eq!(scalar(&eng, "SELECT '5.9'::float8"), Value::Float(5.9));
+    assert!(scalar_err(&eng, "SELECT '5.9'::int").contains("invalid input syntax"));
+    assert!(scalar_err(&eng, "SELECT ''::int").contains("invalid input syntax"));
+    assert!(scalar_err(&eng, "SELECT 'abc'::int").contains("invalid input syntax"));
+}
+
+#[test]
+fn boolean_cast_follows_parse_bool() {
+    let eng = engine();
+    for (input, expected) in [
+        ("'off'", false),
+        ("'of'", false),
+        ("'no'", false),
+        ("'n'", false),
+        ("'0'", false),
+        ("'f'", false),
+        ("'yes'", true),
+        ("'ye'", true),
+        ("'on'", true),
+        ("'1'", true),
+        ("'tr'", true),
+        ("' t '", true),
+    ] {
+        assert_eq!(
+            scalar(&eng, &format!("SELECT {input}::boolean")),
+            Value::Bool(expected),
+            "cast {input}"
+        );
+    }
+    assert!(scalar_err(&eng, "SELECT 'o'::boolean").contains("invalid input syntax"));
+}
+
+#[test]
+fn char_and_varchar_casts_truncate() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc'::char(2)"),
+        Value::Str("ab".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'ab'::varchar(1)"),
+        Value::Str("a".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 123::varchar(2)"),
+        Value::Str("12".into())
+    );
+}
+
+#[test]
+fn array_literal_cast() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT '{1,2,3}'::int[]"),
+        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT '{a,\"b c\",NULL}'::text[]"),
+        Value::List(vec![
+            Value::Str("a".into()),
+            Value::Str("b c".into()),
+            Value::Null
+        ])
+    );
+}
+
+#[test]
+fn integer_range_checks() {
+    let eng = engine();
+    assert!(scalar_err(&eng, "SELECT 40000::smallint").contains("smallint out of range"));
+    assert!(scalar_err(&eng, "SELECT 3000000000::integer").contains("integer out of range"));
+    assert_eq!(
+        scalar(&eng, "SELECT 3000000000::bigint"),
+        Value::Int(3_000_000_000)
+    );
+}
+
+// ---------------------------------------------------------------------
+// String functions
+// ---------------------------------------------------------------------
+
+#[test]
+fn trim_family_with_character_set() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT trim(both 'x' from 'xxpadxx')"), "pad");
+    assert_eq!(text(&eng, "SELECT ltrim('xxpad', 'x')"), "pad");
+    assert_eq!(text(&eng, "SELECT rtrim('padxx', 'x')"), "pad");
+    assert_eq!(text(&eng, "SELECT btrim('xxpadxx', 'x')"), "pad");
+    // The second argument is a character SET, not a substring.
+    assert_eq!(text(&eng, "SELECT ltrim('xyxpad', 'xy')"), "pad");
+    assert_eq!(text(&eng, "SELECT trim('  pad  ')"), "pad");
+}
+
+#[test]
+fn left_right_negative_lengths() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT left('hello', -2)"), "hel");
+    assert_eq!(text(&eng, "SELECT right('hello', -2)"), "llo");
+    assert_eq!(text(&eng, "SELECT left('hello', -7)"), "");
+    assert_eq!(text(&eng, "SELECT right('hello', -7)"), "");
+}
+
+#[test]
+fn split_part_negative_index() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT split_part('a,b,c', ',', -1)"), "c");
+    assert_eq!(text(&eng, "SELECT split_part('a,b,c', ',', -2)"), "b");
+    assert_eq!(text(&eng, "SELECT split_part('a,b,c', ',', -4)"), "");
+    assert!(scalar_err(&eng, "SELECT split_part('a,b,c', ',', 0)")
+        .contains("field position must not be zero"));
+}
+
+#[test]
+fn substring_clamps_window() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT substring('hello', -1, 3)"), "h");
+    assert_eq!(text(&eng, "SELECT substr('hello', 0, 3)"), "he");
+    assert_eq!(text(&eng, "SELECT substring('hello', 2, 3)"), "ell");
+    assert_eq!(text(&eng, "SELECT substring('hello', 2)"), "ello");
+    assert!(scalar_err(&eng, "SELECT substring('hello', 2, -1)")
+        .contains("negative substring length not allowed"));
+}
+
+#[test]
+fn new_scalar_functions() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT factorial(5)"), Value::Int(120));
+    assert_eq!(scalar(&eng, "SELECT bit_length('abc')"), Value::Int(24));
+    assert_eq!(text(&eng, "SELECT to_hex(255)"), "ff");
+    assert_eq!(text(&eng, "SELECT to_hex(-1)"), "ffffffff");
+    assert_eq!(text(&eng, "SELECT quote_ident('select')"), "\"select\"");
+    assert_eq!(text(&eng, "SELECT quote_ident('hello')"), "hello");
+    assert_eq!(text(&eng, "SELECT quote_ident('Hello')"), "\"Hello\"");
+    assert_eq!(
+        text(&eng, "SELECT quote_literal('O''Reilly')"),
+        "'O''Reilly'"
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_count('a1b2c3', '[0-9]')"),
+        Value::Int(3)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT regexp_like('hello', 'ell')"),
+        Value::Bool(true)
+    );
+    assert_eq!(scalar(&eng, "SELECT num_nulls(1, NULL, 2)"), Value::Int(1));
+    assert_eq!(
+        scalar(&eng, "SELECT num_nonnulls(1, NULL, 2)"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT isfinite(date '2024-01-01')"),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn string_to_array_pg_semantics() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT string_to_array('a,b,c', ',')"),
+        Value::List(vec![
+            Value::Str("a".into()),
+            Value::Str("b".into()),
+            Value::Str("c".into())
+        ])
+    );
+    // NULL separator: one element per character.
+    assert_eq!(
+        scalar(&eng, "SELECT string_to_array('ab', NULL)"),
+        Value::List(vec![Value::Str("a".into()), Value::Str("b".into())])
+    );
+    // Empty separator: whole string; empty input: empty array.
+    assert_eq!(
+        scalar(&eng, "SELECT string_to_array('abc', '')"),
+        Value::List(vec![Value::Str("abc".into())])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT string_to_array('', ',')"),
+        Value::List(vec![])
+    );
+    // Third argument marks NULL elements.
+    assert_eq!(
+        scalar(&eng, "SELECT string_to_array('a,b,c', ',', 'b')"),
+        Value::List(vec![
+            Value::Str("a".into()),
+            Value::Null,
+            Value::Str("c".into())
+        ])
+    );
+}
+
+// ---------------------------------------------------------------------
+// bytea
+// ---------------------------------------------------------------------
+
+#[test]
+fn decode_produces_bytes() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT decode('YWJj', 'base64')"),
+        Value::Bytes(b"abc".to_vec())
+    );
+    assert_eq!(
+        text(&eng, "SELECT encode(decode('YWJj', 'base64'), 'hex')"),
+        "616263"
+    );
+    assert_eq!(text(&eng, "SELECT encode('abc'::bytea, 'base64')"), "YWJj");
+}
+
+// ---------------------------------------------------------------------
+// INTERVAL
+// ---------------------------------------------------------------------
+
+#[test]
+fn interval_literals_render_like_pg() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT interval '25 hours'"), "25:00:00");
+    assert_eq!(text(&eng, "SELECT interval '1.5 days'"), "1 day 12:00:00");
+    assert_eq!(text(&eng, "SELECT interval '90 minutes'"), "01:30:00");
+    assert_eq!(
+        text(&eng, "SELECT interval '1 day 3 hours'"),
+        "1 day 03:00:00"
+    );
+    assert_eq!(text(&eng, "SELECT interval '-1 day'"), "-1 days");
+    assert_eq!(
+        text(&eng, "SELECT interval '-1 day 3 hours'"),
+        "-1 days +03:00:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT interval '1 day -3 hours'"),
+        "1 day -03:00:00"
+    );
+    assert_eq!(text(&eng, "SELECT interval '1.5 mons'"), "1 mon 15 days");
+    assert_eq!(text(&eng, "SELECT interval '1-2'"), "1 year 2 mons");
+    assert_eq!(text(&eng, "SELECT interval '3 4:05:06'"), "3 days 04:05:06");
+    assert_eq!(text(&eng, "SELECT interval '90'"), "00:01:30");
+    assert_eq!(
+        text(&eng, "SELECT interval '2 years -1 mons'"),
+        "1 year 11 mons"
+    );
+    assert_eq!(text(&eng, "SELECT interval '0'"), "00:00:00");
+}
+
+#[test]
+fn interval_arithmetic() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT date '2024-01-31' + 1"), "2024-02-01");
+    assert_eq!(
+        scalar(&eng, "SELECT date '2024-03-01' - date '2024-02-01'"),
+        Value::Int(29)
+    );
+    // Month-aware addition clamps to the end of the month.
+    assert_eq!(
+        text(&eng, "SELECT date '2024-01-31' + interval '1 month'"),
+        "2024-02-29 00:00:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT date '2024-01-31' + interval '1 day'"),
+        "2024-02-01 00:00:00"
+    );
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT timestamp '2024-01-15 10:30:00' + interval '90 minutes'"
+        ),
+        "2024-01-15 12:00:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT interval '1 day' + interval '3 hours'"),
+        "1 day 03:00:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT date '2024-01-15' - interval '1 week'"),
+        "2024-01-08 00:00:00"
+    );
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT timestamp '2024-03-01 00:00:00' - timestamp '2024-01-30 12:30:00'"
+        ),
+        "30 days 11:30:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT time '13:45:00' + interval '30 minutes'"),
+        "14:15:00"
+    );
+}
+
+#[test]
+fn age_symbolic_decomposition() {
+    let eng = engine();
+    assert_eq!(
+        text(&eng, "SELECT age(date '2024-06-15', date '2023-01-10')"),
+        "1 year 5 mons 5 days"
+    );
+    assert_eq!(
+        text(&eng, "SELECT age(date '2024-03-31', date '2024-01-30')"),
+        "2 mons 1 day"
+    );
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT age(timestamp '2024-03-01 10:00:00', timestamp '2024-03-31 08:00:00')"
+        ),
+        "-29 days -22:00:00"
+    );
+}
+
+#[test]
+fn make_interval_named_arguments() {
+    let eng = engine();
+    assert_eq!(text(&eng, "SELECT make_interval(days => 10)"), "10 days");
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT make_interval(years => 1, days => 10, secs => 30.5)"
+        ),
+        "1 year 10 days 00:00:30.5"
+    );
+    // Third positional argument is weeks.
+    assert_eq!(text(&eng, "SELECT make_interval(0, 0, 1)"), "7 days");
+}
+
+#[test]
+fn extract_returns_pg_numeric_shapes() {
+    let eng = engine();
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT extract(epoch from timestamp '1970-01-01 00:01:00')"
+        ),
+        dec("60.000000")
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(epoch from interval '1 minute')"),
+        dec("60.000000")
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(hour from time '13:45:00')"),
+        Value::Int(13)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(month from interval '14 months')"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(year from interval '14 months')"),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT extract(days from interval '40 days')"),
+        Value::Int(40)
+    );
+    // date_part keeps float8 semantics (integral values collapse).
+    assert_eq!(
+        scalar(&eng, "SELECT date_part('year', date '2024-06-15')"),
+        Value::Int(2024)
+    );
+}
+
+#[test]
+fn timestamp_text_uses_pg_format() {
+    let eng = engine();
+    assert_eq!(
+        text(&eng, "SELECT make_timestamp(2024, 1, 15, 10, 30, 0)"),
+        "2024-01-15 10:30:00"
+    );
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT date_trunc('month', timestamp '2024-06-15 10:30:00')"
+        ),
+        "2024-06-01 00:00:00"
+    );
+    assert_eq!(
+        text(&eng, "SELECT to_char(date '2024-06-15', 'YYYY-MM-DD')"),
+        "2024-06-15"
+    );
+    assert_eq!(
+        text(
+            &eng,
+            "SELECT to_char(timestamp '2024-06-15 13:05:00', 'HH24:MI')"
+        ),
+        "13:05"
+    );
+}
+
+// ---------------------------------------------------------------------
+// IS DISTINCT FROM / row comparisons / SIMILAR TO / regex operators
+// ---------------------------------------------------------------------
+
+#[test]
+fn is_distinct_from_is_null_safe() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT NULL IS DISTINCT FROM NULL"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IS DISTINCT FROM NULL"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IS DISTINCT FROM 2"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IS DISTINCT FROM 1"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT NULL IS NOT DISTINCT FROM NULL"),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn row_comparisons_are_lexicographic() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT (1, 2) < (1, 3)"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT (1, 2) = (1, 2)"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT (1, NULL) = (1, 2)"), Value::Null);
+    assert_eq!(
+        scalar(&eng, "SELECT (1, NULL) = (2, 2)"),
+        Value::Bool(false)
+    );
+    assert_eq!(scalar(&eng, "SELECT (1, 2) < (1, NULL)"), Value::Null);
+    // The first element decides before the NULL is reached.
+    assert_eq!(
+        scalar(&eng, "SELECT (2, 2) < (1, NULL)"),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn similar_to_translates_sql_regex() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc' SIMILAR TO 'a(b|c)c'"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc' SIMILAR TO '%(b|d)%'"),
+        Value::Bool(true)
+    );
+    // Anchored over the whole string.
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc' SIMILAR TO '(b|c)%'"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc' SIMILAR TO 'a_c'"),
+        Value::Bool(true)
+    );
+    // Dot is a literal character in SQL regexes.
+    assert_eq!(
+        scalar(&eng, "SELECT 'a.c' SIMILAR TO 'a.c'"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'axc' SIMILAR TO 'a.c'"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'abc' NOT SIMILAR TO 'a_c'"),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn posix_regex_operators() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT 'abc' ~ 'a.c'"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT 'abc' ~ 'B'"), Value::Bool(false));
+    assert_eq!(scalar(&eng, "SELECT 'abc' ~* 'A.C'"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT 'abc' !~ 'x'"), Value::Bool(true));
+    assert_eq!(scalar(&eng, "SELECT 'abc' !~* 'A.C'"), Value::Bool(false));
+    assert_eq!(scalar(&eng, "SELECT NULL ~ 'x'"), Value::Null);
+}
+
+#[test]
+fn between_symmetric_swaps_bounds() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT 2 BETWEEN SYMMETRIC 3 AND 1"),
+        Value::Bool(true)
+    );
+    assert_eq!(scalar(&eng, "SELECT 2 BETWEEN 3 AND 1"), Value::Bool(false));
+    assert_eq!(
+        scalar(&eng, "SELECT 4 BETWEEN SYMMETRIC 3 AND 1"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 2 BETWEEN SYMMETRIC NULL AND 1"),
+        Value::Null
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 2 NOT BETWEEN SYMMETRIC 3 AND 1"),
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn any_all_over_arrays_are_three_valued() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT 2 = ANY(ARRAY[1,2,3])"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 5 = ANY(ARRAY[1,2,3])"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 5 <> ALL(ARRAY[1,2,3])"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 = ANY(ARRAY[1, NULL])"),
+        Value::Bool(true)
+    );
+    assert_eq!(scalar(&eng, "SELECT 3 = ANY(ARRAY[1, NULL])"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT 3 <> ALL(ARRAY[1, NULL])"), Value::Null);
+    assert_eq!(
+        scalar(&eng, "SELECT 3 <> ALL(ARRAY[3, NULL])"),
+        Value::Bool(false)
+    );
+    assert_eq!(scalar(&eng, "SELECT NULL = ANY(ARRAY[1, 2])"), Value::Null);
+}
+
+#[test]
+fn array_subscripts_and_slices() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[1, 2, 3])[2]"), Value::Int(2));
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[1, 2, 3])[0]"), Value::Null);
+    assert_eq!(scalar(&eng, "SELECT (ARRAY[1, 2, 3])[4]"), Value::Null);
+    assert_eq!(
+        scalar(&eng, "SELECT (ARRAY[1, 2, 3])[1:2]"),
+        Value::List(vec![Value::Int(1), Value::Int(2)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (ARRAY[1, 2, 3])[2:]"),
+        Value::List(vec![Value::Int(2), Value::Int(3)])
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT (regexp_match('foo123', '[0-9]+'))[1]"),
+        Value::Str("123".into())
+    );
+}
+
+#[test]
+fn array_length_of_empty_array_is_null() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT array_length(ARRAY[]::int[], 1)"),
+        Value::Null
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT array_length(ARRAY[1,2,3], 1)"),
+        Value::Int(3)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT cardinality(ARRAY[]::int[])"),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn power_and_root_operators() {
+    let eng = engine();
+    assert_eq!(scalar(&eng, "SELECT 2 ^ 10"), Value::Float(1024.0));
+    assert_eq!(scalar(&eng, "SELECT |/ 16.0"), Value::Float(4.0));
+    // glibc-compatible cbrt (PostgreSQL on Linux): last-ulp artifact.
+    assert_eq!(
+        scalar(&eng, "SELECT cbrt(27)"),
+        Value::Float(3.000_000_000_000_000_4)
+    );
+}
+
+#[test]
+fn srf_in_select_list_expands_rows() {
+    let eng = engine();
+    let result = eng.sql("SELECT generate_series(1, 3)", &[]).unwrap();
+    assert_eq!(result.rows.len(), 3);
+    let result = eng
+        .sql("SELECT jsonb_object_keys('{\"b\":1,\"a\":2}'::jsonb)", &[])
+        .unwrap();
+    assert_eq!(result.rows.len(), 2);
+}
+
+#[test]
+fn interval_comparison_and_ordering() {
+    let eng = engine();
+    assert_eq!(
+        scalar(&eng, "SELECT interval '1 day' < interval '25 hours'"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT interval '1 mon' = interval '30 days'"),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn interval_column_round_trip() {
+    let eng = engine();
+    // Interval values survive projection through expressions.
+    assert_eq!(
+        scalar(&eng, "SELECT (interval '1 day' + interval '1 hour') * 2"),
+        Value::Temporal(TemporalValue::Interval {
+            months: 0,
+            days: 2,
+            micros: 2 * 3_600 * 1_000_000,
+        })
+    );
+}

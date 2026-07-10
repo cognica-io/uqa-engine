@@ -219,6 +219,7 @@ impl Engine {
     }
 
     pub(crate) fn mark_column_stats_dirty(&self, table_name: &str, table: &Arc<TableState>) {
+        table.doc_count_dirty.store(true, Ordering::Release);
         if !table.column_stats_dirty.swap(true, Ordering::AcqRel) {
             if let Some(catalog) = self.catalog.as_ref() {
                 let _ = catalog.delete_column_stats(table_name);

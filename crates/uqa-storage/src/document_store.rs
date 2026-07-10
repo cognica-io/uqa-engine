@@ -61,6 +61,36 @@ pub trait DocumentStore: Send + Sync {
         true
     }
 
+    /// Bulk variant of [`DocumentStore::get`]. Ids without a stored
+    /// document are absent from the result. The default implementation
+    /// walks each id one at a time; persistent backends should
+    /// override to batch the reads into few queries.
+    fn get_many(&self, doc_ids: &[DocId]) -> BTreeMap<DocId, Document> {
+        doc_ids
+            .iter()
+            .filter_map(|id| self.get(*id).map(|document| (*id, document)))
+            .collect()
+    }
+
+    /// Fetch several top-level fields for many documents. The result
+    /// vector is aligned with `fields`; missing fields come back as
+    /// [`Value::Null`], ids without a document are absent. Persistent
+    /// backends override this to extract all fields in one scan
+    /// instead of materialising whole documents.
+    fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
+        doc_ids
+            .iter()
+            .filter_map(|id| {
+                let document = self.get(*id)?;
+                let values = fields
+                    .iter()
+                    .map(|f| document.get(*f).cloned().unwrap_or(Value::Null))
+                    .collect();
+                Some((*id, values))
+            })
+            .collect()
+    }
+
     /// Bulk variant of [`DocumentStore::get_field`]. The default
     /// implementation walks each id one at a time; persistent backends
     /// should override to run a single batched query.

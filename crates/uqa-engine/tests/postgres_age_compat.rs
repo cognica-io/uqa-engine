@@ -748,8 +748,9 @@ fn apache_age_cypher_compatibility_matrix() {
 }
 
 fn apache_age_setup_graph(eng: &Engine) {
+    // AGE's create_graph returns void: one row with a SQL NULL value.
     let created = query(eng, "SELECT create_graph('compat_age') AS ok");
-    assert_eq!(created.rows[0].get("ok"), Some(&Value::Bool(true)));
+    assert_eq!(created.rows[0].get("ok"), Some(&Value::Null));
 
     exec(
         eng,
@@ -835,7 +836,7 @@ fn apache_age_read_query_matrix(eng: &Engine) {
              ORDER BY n.age DESC
              SKIP 1
              LIMIT 1
-         $$) AS (ok agtype)
+         $$) AS (ok boolean)
          WHERE ok = true",
     );
     assert_check(
@@ -876,7 +877,7 @@ fn apache_age_read_query_matrix(eng: &Engine) {
              MATCH (a:Person)-[r:KNOWS]->(b:Person)
              WHERE a.name = 'Alice'
              RETURN labels(a) = ['Person'] AND type(r) = 'KNOWS' AS ok
-         $$) AS (ok agtype)
+         $$) AS (ok boolean)
          WHERE ok = true",
     );
 }
@@ -959,6 +960,6 @@ fn apache_age_mutation_parameter_and_drop_matrix(eng: &Engine) {
     );
 
     let dropped = query(eng, "SELECT drop_graph('compat_age', true) AS ok");
-    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Bool(true)));
+    assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Null));
     assert!(!eng.has_graph("compat_age"));
 }

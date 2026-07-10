@@ -47,10 +47,13 @@ mod catalog;
 mod ddl;
 mod dml;
 mod from_rows;
+mod plpgsql_exec;
 mod row_functions;
 mod select;
 mod where_eval;
 mod window;
+
+pub(crate) use plpgsql_exec::call_user_scalar_function;
 
 use aggregates::{
     aggregate_join_rows, aggregate_value, build_aggregate_rows, has_aggregate, projection_label_at,
@@ -77,8 +80,9 @@ use from_rows::{
 };
 use row_functions::{
     execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,
-    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries, run_graph_create,
-    run_graph_drop, validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
+    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries, run_age_create_graph,
+    run_age_drop_graph, run_graph_create, run_graph_drop, validate_expr_text_match_fields,
+    validate_joined_expr_text_match_fields,
 };
 pub(crate) use row_functions::{
     run_bayesian_match_public, run_bayesian_match_with_prior_public,
@@ -92,6 +96,7 @@ use select::{
 };
 pub(crate) use select::{run_correlated_subquery, CteScope};
 use where_eval::execute_mixed_where;
+pub(crate) use where_eval::expr_is_null_free as expr_is_null_free_public;
 use window::{compute_window_columns, has_window};
 
 type RowUpdateValues = BTreeMap<String, Value>;
@@ -116,6 +121,7 @@ fn projected_value_from_row(expr: &Expr, row: &ResultRow) -> Option<Value> {
             } else {
                 row.get(key)
             };
+            let value = value.or_else(|| uqa_sql::expr::unqualified_fallback(row, column));
             Some(value.cloned().unwrap_or(Value::Null))
         }
         _ => None,
@@ -286,6 +292,12 @@ fn run_optimized_stmt(
             Ok(SQLResult::empty())
         }
         Statement::Merge(m) => run_merge(engine, m, params),
+        Statement::CreateFunction(def) => plpgsql_exec::run_create_function(engine, *def),
+        Statement::DropFunction(stmt) => plpgsql_exec::run_drop_function(engine, &stmt),
+        Statement::DoBlock { language, body } => {
+            plpgsql_exec::run_do_block(engine, &language, &body)
+        }
+        Statement::Call { name, args } => plpgsql_exec::run_call(engine, &name, &args, params),
     }
 }
 
@@ -362,10 +374,16 @@ impl Engine {
     }
 
     pub(crate) fn table_doc_count(&self, table: &str) -> u64 {
+        use std::sync::atomic::Ordering;
         let Some(t) = self.table(table) else {
             return 0;
         };
+        if !t.doc_count_dirty.load(Ordering::Acquire) {
+            return t.doc_count_cache.load(Ordering::Acquire);
+        }
         let count = t.document_store.read().len() as u64;
+        t.doc_count_cache.store(count, Ordering::Release);
+        t.doc_count_dirty.store(false, Ordering::Release);
         count
     }
 }
