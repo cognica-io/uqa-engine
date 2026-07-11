@@ -85,12 +85,14 @@ fn direct_add_rows(engine: &Engine, rows: usize) {
     engine
         .transaction(|engine| {
             for id in 1..=rows {
-                engine.add_document_with_vector_values(
-                    "direct_messages",
-                    id as u64,
-                    direct_document(id),
-                    BTreeMap::new(),
-                ).unwrap();
+                engine
+                    .add_document_with_vector_values(
+                        "direct_messages",
+                        id as u64,
+                        direct_document(id),
+                        BTreeMap::new(),
+                    )
+                    .unwrap();
             }
             Ok(())
         })

@@ -308,7 +308,8 @@ mod tests {
     #[test]
     fn put_get_round_trip() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("title", Value::Str("rust".into()))])).unwrap();
+        s.put(1, doc([("title", Value::Str("rust".into()))]))
+            .unwrap();
         let got = s.get(1).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
     }
@@ -354,8 +355,10 @@ mod tests {
     #[test]
     fn has_value_returns_true_when_any_doc_matches() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("color", Value::Str("red".into()))])).unwrap();
-        s.put(2, doc([("color", Value::Str("blue".into()))])).unwrap();
+        s.put(1, doc([("color", Value::Str("red".into()))]))
+            .unwrap();
+        s.put(2, doc([("color", Value::Str("blue".into()))]))
+            .unwrap();
         assert!(s.has_value("color", &Value::Str("red".into())));
         assert!(!s.has_value("color", &Value::Str("green".into())));
     }
@@ -363,8 +366,10 @@ mod tests {
     #[test]
     fn find_doc_id_by_field_returns_first_match() {
         let mut s = MemoryDocumentStore::new();
-        s.put(3, doc([("public_id", Value::Str("m-3".into()))])).unwrap();
-        s.put(7, doc([("public_id", Value::Str("m-7".into()))])).unwrap();
+        s.put(3, doc([("public_id", Value::Str("m-3".into()))]))
+            .unwrap();
+        s.put(7, doc([("public_id", Value::Str("m-7".into()))]))
+            .unwrap();
 
         assert_eq!(
             s.find_doc_id_by_field("public_id", &Value::Str("m-7".into())),
@@ -386,7 +391,8 @@ mod tests {
                 ("content", Value::Str("old".into())),
                 ("token_count", Value::Int(4)),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         let updates = BTreeMap::from([
             ("content".to_string(), Value::Str("new".into())),

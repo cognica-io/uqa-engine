@@ -41,14 +41,16 @@ fn main() {
     for (id, body, vec) in corpus {
         let mut doc = Document::new();
         doc.insert("body".into(), Value::Str(body.to_string()));
-        engine.add_document_with_vectors(
-            "articles",
-            id,
-            doc,
-            [("embedding".to_string(), vec.to_vec())]
-                .into_iter()
-                .collect(),
-        ).unwrap();
+        engine
+            .add_document_with_vectors(
+                "articles",
+                id,
+                doc,
+                [("embedding".to_string(), vec.to_vec())]
+                    .into_iter()
+                    .collect(),
+            )
+            .unwrap();
     }
 
     let hits = engine.hybrid_search(&HybridSearchParams {

@@ -49,7 +49,9 @@ fn build_engine() -> Engine {
         let vec = deterministic_vec(i);
         let mut vectors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
         vectors.insert("emb".into(), vec);
-        engine.add_document_with_vectors("docs", i, doc, vectors).unwrap();
+        engine
+            .add_document_with_vectors("docs", i, doc, vectors)
+            .unwrap();
     }
     engine
 }

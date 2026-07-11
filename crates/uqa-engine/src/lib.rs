@@ -963,7 +963,8 @@ mod tests {
         {
             let eng = Engine::from_persistent_backends(catalog.clone(), backend.clone()).unwrap();
             eng.create_default_table("docs", vec!["title".into()]);
-            eng.add_document("docs", 1, doc([("title", s("hello facade"))])).unwrap();
+            eng.add_document("docs", 1, doc([("title", s("hello facade"))]))
+                .unwrap();
         }
 
         let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
@@ -1094,9 +1095,12 @@ mod tests {
                 references: None,
             }];
         }
-        eng.add_document("docs", 1, doc([("title", s("alpha"))])).unwrap();
-        eng.add_document("docs", 2, doc([("title", s("alpha"))])).unwrap();
-        eng.add_document("docs", 3, doc([("title", s("beta"))])).unwrap();
+        eng.add_document("docs", 1, doc([("title", s("alpha"))]))
+            .unwrap();
+        eng.add_document("docs", 2, doc([("title", s("alpha"))]))
+            .unwrap();
+        eng.add_document("docs", 3, doc([("title", s("beta"))]))
+            .unwrap();
         eng.run_analyze(Some("docs"));
         let stats = eng.column_stats("docs");
         let title_stats = stats.get("title").expect("title stats");
@@ -1111,7 +1115,8 @@ mod tests {
     fn add_get_delete_round_trip() {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);
-        eng.add_document("articles", 1, doc([("title", s("rust language"))])).unwrap();
+        eng.add_document("articles", 1, doc([("title", s("rust language"))]))
+            .unwrap();
         let got = eng.get_document("articles", 1).unwrap();
         assert_eq!(got.get("title"), Some(&s("rust language")));
         eng.delete_document("articles", 1).unwrap();
@@ -1126,9 +1131,12 @@ mod tests {
             "articles",
             1,
             doc([("title", s("the rust programming language"))]),
-        ).unwrap();
-        eng.add_document("articles", 2, doc([("title", s("python language guide"))])).unwrap();
-        eng.add_document("articles", 3, doc([("title", s("rust rust rust"))])).unwrap();
+        )
+        .unwrap();
+        eng.add_document("articles", 2, doc([("title", s("python language guide"))]))
+            .unwrap();
+        eng.add_document("articles", 3, doc([("title", s("rust rust rust"))]))
+            .unwrap();
 
         let hits = eng.search(
             "articles",
@@ -1151,7 +1159,8 @@ mod tests {
             let body = std::iter::repeat_n("rust", doc_id as usize)
                 .collect::<Vec<_>>()
                 .join(" ");
-            eng.add_document("articles", doc_id, doc([("title", s(&body))])).unwrap();
+            eng.add_document("articles", doc_id, doc([("title", s(&body))]))
+                .unwrap();
         }
 
         let full = eng.search(
@@ -1187,8 +1196,10 @@ mod tests {
             "articles",
             1,
             doc([("title", s("the rust programming language"))]),
-        ).unwrap();
-        eng.add_document("articles", 2, doc([("title", s("python is dynamic"))])).unwrap();
+        )
+        .unwrap();
+        eng.add_document("articles", 2, doc([("title", s("python is dynamic"))]))
+            .unwrap();
 
         let hits = eng.search(
             "articles",
@@ -1219,19 +1230,22 @@ mod tests {
             1,
             doc([("title", s("a"))]),
             BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
         eng.add_document_with_vectors(
             "articles",
             2,
             doc([("title", s("b"))]),
             BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
         eng.add_document_with_vectors(
             "articles",
             3,
             doc([("title", s("c"))]),
             BTreeMap::from([("embedding".into(), vec![0.7, 0.7, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
 
         let hits = eng.knn_search("articles", "embedding", vec![1.0, 0.0, 0.0], 2);
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
@@ -1378,9 +1392,12 @@ mod tests {
     fn create_vector_field_backfills_existing_documents() {
         let eng = Engine::new();
         eng.create_default_table("docs", vec![]);
-        eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))])).unwrap();
-        eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))])).unwrap();
-        eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))])).unwrap();
+        eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))]))
+            .unwrap();
+        eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))]))
+            .unwrap();
+        eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))]))
+            .unwrap();
 
         assert!(eng.create_vector_field("docs", "embedding", 2));
         let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 2);
@@ -1402,21 +1419,24 @@ mod tests {
             1,
             doc([("title", s("rust language"))]),
             BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
         // Doc 2: title matches "rust", embedding orthogonal to query.
         eng.add_document_with_vectors(
             "articles",
             2,
             doc([("title", s("rust ecosystem"))]),
             BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
         // Doc 3: no text match, embedding near query.
         eng.add_document_with_vectors(
             "articles",
             3,
             doc([("title", s("python programming"))]),
             BTreeMap::from([("embedding".into(), vec![0.95, 0.1, 0.0])]),
-        ).unwrap();
+        )
+        .unwrap();
 
         let hits = eng.hybrid_search(&HybridSearchParams {
             table: "articles",
@@ -1442,7 +1462,8 @@ mod tests {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);
         for i in 0..5 {
-            eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))])).unwrap();
+            eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))]))
+                .unwrap();
         }
         assert_eq!(eng.document_count("articles"), 5);
     }

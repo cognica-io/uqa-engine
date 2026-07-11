@@ -414,7 +414,8 @@ impl PyEngine {
 
     fn add_document(&self, table: &str, doc_id: u64, document: &Bound<'_, PyAny>) -> PyResult<()> {
         self.inner
-            .add_document(table, doc_id, document_from_py(document)?).unwrap();
+            .add_document(table, doc_id, document_from_py(document)?)
+            .unwrap();
         Ok(())
     }
 
@@ -425,12 +426,14 @@ impl PyEngine {
         document: &Bound<'_, PyAny>,
         vectors: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        self.inner.add_document_with_vector_values(
-            table,
-            doc_id,
-            document_from_py(document)?,
-            vector_values_from_py(vectors)?,
-        ).unwrap();
+        self.inner
+            .add_document_with_vector_values(
+                table,
+                doc_id,
+                document_from_py(document)?,
+                vector_values_from_py(vectors)?,
+            )
+            .unwrap();
         Ok(())
     }
 

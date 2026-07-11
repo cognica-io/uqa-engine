@@ -204,17 +204,21 @@ fn multiple_tables_round_trip() {
 fn document_save_and_load() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut store = document_store(conn, "t1");
-    store.put(
-        1,
-        doc([
-            ("name", Value::Str("alice".into())),
-            ("age", Value::Int(30)),
-        ]),
-    ).unwrap();
-    store.put(
-        2,
-        doc([("name", Value::Str("bob".into())), ("age", Value::Int(25))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("name", Value::Str("alice".into())),
+                ("age", Value::Int(30)),
+            ]),
+        )
+        .unwrap();
+    store
+        .put(
+            2,
+            doc([("name", Value::Str("bob".into())), ("age", Value::Int(25))]),
+        )
+        .unwrap();
     let d1 = store.get(1).unwrap();
     let d2 = store.get(2).unwrap();
     assert_eq!(d1.get("name"), Some(&Value::Str("alice".into())));
@@ -250,7 +254,9 @@ fn document_delete_cascades_postings() {
     cat.save_table(&schema("t1", &["x"])).unwrap();
     let mut store = document_store(conn.clone(), "t1");
     let mut idx = inverted_index(conn, "t1");
-    store.put(1, doc([("x", Value::Str("hello".into()))])).unwrap();
+    store
+        .put(1, doc([("x", Value::Str("hello".into()))]))
+        .unwrap();
     idx.add_document(1, fields(&[("x", "hello")]));
     store.delete(1).unwrap();
     idx.remove_document(1);
@@ -263,8 +269,12 @@ fn document_delete_cascades_postings() {
 fn document_upsert_overwrites() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut store = document_store(conn, "t1");
-    store.put(1, doc([("v", Value::Str("old".into()))])).unwrap();
-    store.put(1, doc([("v", Value::Str("new".into()))])).unwrap();
+    store
+        .put(1, doc([("v", Value::Str("old".into()))]))
+        .unwrap();
+    store
+        .put(1, doc([("v", Value::Str("new".into()))]))
+        .unwrap();
     assert_eq!(store.len(), 1);
     assert_eq!(
         store.get(1).unwrap().get("v"),
@@ -593,7 +603,9 @@ fn transaction_batch_commit() {
     let mut store = document_store(conn.clone(), "t1");
     conn.begin_transaction().unwrap();
     for i in 1..=3u64 {
-        store.put(i as DocId, doc([("x", Value::Int(i as i64))])).unwrap();
+        store
+            .put(i as DocId, doc([("x", Value::Int(i as i64))]))
+            .unwrap();
     }
     conn.commit_transaction().unwrap();
     assert_eq!(store.len(), 3);

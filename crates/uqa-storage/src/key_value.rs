@@ -1275,7 +1275,8 @@ mod tests {
                 ("title".to_string(), Value::Str("Rust".into())),
                 ("body".to_string(), Value::Bytes(vec![1, 2, 3])),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(docs.doc_ids(), vec![7]);
         assert_eq!(docs.get_field(7, "title"), Some(Value::Str("Rust".into())));
         assert_eq!(docs.get_field(7, "body"), Some(Value::Bytes(vec![1, 2, 3])));

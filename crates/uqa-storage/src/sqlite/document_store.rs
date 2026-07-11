@@ -973,7 +973,8 @@ mod tests {
     #[test]
     fn put_get_round_trip() {
         let mut s = store();
-        s.put(1, doc([("title", Value::Str("rust".into()))])).unwrap();
+        s.put(1, doc([("title", Value::Str("rust".into()))]))
+            .unwrap();
         let got = s.get(1).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
     }
@@ -984,7 +985,8 @@ mod tests {
     #[test]
     fn put_failure_is_reported_not_swallowed() {
         let mut s = store();
-        s.put(1, doc([("title", Value::Str("small".into()))])).unwrap();
+        s.put(1, doc([("title", Value::Str("small".into()))]))
+            .unwrap();
         s.conn
             .with(|c| {
                 let pages: i64 = c.query_row("PRAGMA page_count", [], |r| r.get(0))?;
@@ -994,7 +996,10 @@ mod tests {
             .unwrap();
         let huge = "x".repeat(8 * 1024 * 1024);
         let err = s.put(2, doc([("body", Value::Str(huge))]));
-        assert!(err.is_err(), "oversized put must fail once the page budget is exhausted");
+        assert!(
+            err.is_err(),
+            "oversized put must fail once the page budget is exhausted"
+        );
         // The failure must not have corrupted existing data.
         let got = s.get(1).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("small".into())));
@@ -1024,7 +1029,8 @@ mod tests {
         s.put(
             7,
             doc([("year", Value::Int(2026)), ("flag", Value::Bool(true))]),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(s.get_field(7, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(7, "flag"), Some(Value::Bool(true)));
         assert_eq!(s.get_field(7, "missing"), None);
@@ -1039,8 +1045,10 @@ mod tests {
                 ("title", Value::Str("rust".into())),
                 ("payload", Value::Bytes(vec![1, 2, 3])),
             ]),
-        ).unwrap();
-        s.put(2, doc([("title", Value::Str("sqlite".into()))])).unwrap();
+        )
+        .unwrap();
+        s.put(2, doc([("title", Value::Str("sqlite".into()))]))
+            .unwrap();
 
         let titles = s.get_fields_bulk(&[1, 2, 99], "title");
         assert_eq!(titles.get(&1), Some(&Value::Str("rust".into())));
@@ -1061,14 +1069,16 @@ mod tests {
                 ("public_id", Value::Str("m-5".into())),
                 ("content", Value::Str("old".into())),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
         s.put(
             9,
             doc([
                 ("public_id", Value::Str("m-9".into())),
                 ("content", Value::Str("target".into())),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
             s.find_doc_id_by_field("public_id", &Value::Str("m-9".into())),
@@ -1094,7 +1104,8 @@ mod tests {
                 ),
                 ("token_count", Value::Int(2)),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         let updates = BTreeMap::from([
             ("content".to_string(), Value::Str("new".into())),
@@ -1121,7 +1132,8 @@ mod tests {
                 ("public_id", Value::Str("m-41".into())),
                 ("bytes", Value::Bytes(vec![1, 2, 3])),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         let updates = BTreeMap::from([("bytes".to_string(), Value::Bytes(vec![4, 5]))]);
         assert!(s.patch_fields(41, &updates).unwrap());
@@ -1154,7 +1166,8 @@ mod tests {
                 ("bytes", Value::Bytes(vec![1, 2, 3, 4])),
                 ("title", Value::Str("asset".into())),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         s.conn
             .with(|c| {
@@ -1213,7 +1226,8 @@ mod tests {
                 ("tensor", tensor.clone()),
                 ("title", Value::Str("vector".into())),
             ]),
-        ).unwrap();
+        )
+        .unwrap();
 
         s.conn
             .with(|c| {

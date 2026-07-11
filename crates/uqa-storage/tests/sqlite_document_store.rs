@@ -47,15 +47,17 @@ fn doc<const N: usize>(pairs: [(&str, Value); N]) -> Document {
 #[test]
 fn put_and_get() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([
-            ("id", Value::Int(1)),
-            ("name", Value::Str("alice".into())),
-            ("score", Value::Float(9.5)),
-            ("active", Value::Int(1)),
-        ]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("id", Value::Int(1)),
+                ("name", Value::Str("alice".into())),
+                ("score", Value::Float(9.5)),
+                ("active", Value::Int(1)),
+            ]),
+        )
+        .unwrap();
     let got = store.get(1).unwrap();
     assert_eq!(got["id"], Value::Int(1));
     assert_eq!(got["name"], Value::Str("alice".into()));
@@ -72,10 +74,12 @@ fn get_missing_returns_none() {
 #[test]
 fn delete() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
+        )
+        .unwrap();
     store.delete(1).unwrap();
     assert!(store.get(1).is_none());
 }
@@ -89,22 +93,26 @@ fn delete_nonexistent_is_noop() {
 #[test]
 fn overwrite_same_doc_id() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([
-            ("id", Value::Int(1)),
-            ("name", Value::Str("alice".into())),
-            ("score", Value::Float(5.0)),
-        ]),
-    ).unwrap();
-    store.put(
-        1,
-        doc([
-            ("id", Value::Int(1)),
-            ("name", Value::Str("bob".into())),
-            ("score", Value::Float(8.0)),
-        ]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("id", Value::Int(1)),
+                ("name", Value::Str("alice".into())),
+                ("score", Value::Float(5.0)),
+            ]),
+        )
+        .unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("id", Value::Int(1)),
+                ("name", Value::Str("bob".into())),
+                ("score", Value::Float(8.0)),
+            ]),
+        )
+        .unwrap();
     let got = store.get(1).unwrap();
     assert_eq!(got["name"], Value::Str("bob".into()));
     assert_eq!(got["score"], Value::Float(8.0));
@@ -120,14 +128,18 @@ fn integer_column() {
 #[test]
 fn text_column() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(1, doc([("val", Value::Str("hello".into()))])).unwrap();
+    store
+        .put(1, doc([("val", Value::Str("hello".into()))]))
+        .unwrap();
     assert_eq!(store.get_field(1, "val"), Some(Value::Str("hello".into())));
 }
 
 #[test]
 fn real_column() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(1, doc([("val", Value::Float(TEST_FLOAT))])).unwrap();
+    store
+        .put(1, doc([("val", Value::Float(TEST_FLOAT))]))
+        .unwrap();
     assert_eq!(store.get_field(1, "val"), Some(Value::Float(TEST_FLOAT)));
 }
 
@@ -144,27 +156,33 @@ fn boolean_stored_as_integer() {
 fn blob_column() {
     let (_dir, _conn, mut store) = make_store("t1");
     let data = vec![0, 1, 2, 3];
-    store.put(1, doc([("val", Value::Bytes(data.clone()))])).unwrap();
+    store
+        .put(1, doc([("val", Value::Bytes(data.clone()))]))
+        .unwrap();
     assert_eq!(store.get_field(1, "val"), Some(Value::Bytes(data)));
 }
 
 #[test]
 fn serial_maps_to_integer() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([("pk", Value::Int(1)), ("name", Value::Str("row1".into()))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([("pk", Value::Int(1)), ("name", Value::Str("row1".into()))]),
+        )
+        .unwrap();
     assert_eq!(store.get_field(1, "pk"), Some(Value::Int(1)));
 }
 
 #[test]
 fn missing_field_stored_as_null() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
+        )
+        .unwrap();
     let got = store.get(1).unwrap();
     assert!(!got.contains_key("score"));
     assert!(!got.contains_key("active"));
@@ -173,15 +191,17 @@ fn missing_field_stored_as_null() {
 #[test]
 fn explicit_none_stored_as_null() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([
-            ("id", Value::Int(1)),
-            ("name", Value::Null),
-            ("score", Value::Null),
-            ("active", Value::Null),
-        ]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("id", Value::Int(1)),
+                ("name", Value::Null),
+                ("score", Value::Null),
+                ("active", Value::Null),
+            ]),
+        )
+        .unwrap();
     let got = store.get(1).unwrap();
     assert!(!got.contains_key("name"));
     assert!(!got.contains_key("score"));
@@ -203,18 +223,24 @@ fn doc_ids_empty_store() {
 #[test]
 fn doc_ids_after_inserts() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        10,
-        doc([("id", Value::Int(10)), ("name", Value::Str("a".into()))]),
-    ).unwrap();
-    store.put(
-        20,
-        doc([("id", Value::Int(20)), ("name", Value::Str("b".into()))]),
-    ).unwrap();
-    store.put(
-        30,
-        doc([("id", Value::Int(30)), ("name", Value::Str("c".into()))]),
-    ).unwrap();
+    store
+        .put(
+            10,
+            doc([("id", Value::Int(10)), ("name", Value::Str("a".into()))]),
+        )
+        .unwrap();
+    store
+        .put(
+            20,
+            doc([("id", Value::Int(20)), ("name", Value::Str("b".into()))]),
+        )
+        .unwrap();
+    store
+        .put(
+            30,
+            doc([("id", Value::Int(30)), ("name", Value::Str("c".into()))]),
+        )
+        .unwrap();
     assert_eq!(store.doc_ids(), vec![10, 20, 30]);
 }
 
@@ -284,14 +310,16 @@ fn max_doc_id_after_deleting_max() {
 #[test]
 fn get_field_existing_field() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([
-            ("id", Value::Int(1)),
-            ("name", Value::Str("alice".into())),
-            ("score", Value::Float(8.0)),
-        ]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([
+                ("id", Value::Int(1)),
+                ("name", Value::Str("alice".into())),
+                ("score", Value::Float(8.0)),
+            ]),
+        )
+        .unwrap();
     assert_eq!(store.get_field(1, "name"), Some(Value::Str("alice".into())));
     assert_eq!(store.get_field(1, "score"), Some(Value::Float(8.0)));
 }
@@ -312,10 +340,12 @@ fn get_field_unknown_column_returns_none() {
 #[test]
 fn eval_path_flat_single_key() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
+        )
+        .unwrap();
     assert_eq!(
         store.eval_path(1, &[PathSegment::Key("name".into())]),
         Some(Value::Str("alice".into()))
@@ -334,7 +364,9 @@ fn eval_path_flat_missing_doc() {
 #[test]
 fn eval_path_nested_path_falls_back_to_dict_traversal() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(1, doc([("name", Value::Str("alice".into()))])).unwrap();
+    store
+        .put(1, doc([("name", Value::Str("alice".into()))]))
+        .unwrap();
     assert_eq!(
         store.eval_path(
             1,
@@ -350,10 +382,12 @@ fn eval_path_nested_path_falls_back_to_dict_traversal() {
 #[test]
 fn eval_path_single_element_path_uses_get_field() {
     let (_dir, _conn, mut store) = make_store("t1");
-    store.put(
-        1,
-        doc([("id", Value::Int(1)), ("score", Value::Float(7.5))]),
-    ).unwrap();
+    store
+        .put(
+            1,
+            doc([("id", Value::Int(1)), ("score", Value::Float(7.5))]),
+        )
+        .unwrap();
     assert_eq!(
         store.eval_path(1, &[PathSegment::Key("score".into())]),
         Some(Value::Float(7.5))
@@ -366,17 +400,21 @@ fn two_tables_independent() {
     let (conn, mut store_a) = make_store_in_dir(&dir, "alpha");
     let mut store_b = SQLiteDocumentStore::new(conn, "beta");
 
-    store_a.put(
-        1,
-        doc([("x", Value::Int(10)), ("y", Value::Str("a".into()))]),
-    ).unwrap();
-    store_b.put(
-        1,
-        doc([
-            ("p", Value::Float(TEST_FLOAT)),
-            ("q", Value::Str("pi".into())),
-        ]),
-    ).unwrap();
+    store_a
+        .put(
+            1,
+            doc([("x", Value::Int(10)), ("y", Value::Str("a".into()))]),
+        )
+        .unwrap();
+    store_b
+        .put(
+            1,
+            doc([
+                ("p", Value::Float(TEST_FLOAT)),
+                ("q", Value::Str("pi".into())),
+            ]),
+        )
+        .unwrap();
 
     assert_eq!(store_a.len(), 1);
     assert_eq!(store_b.len(), 1);
@@ -394,15 +432,17 @@ fn different_schemas() {
     let mut store_2 = SQLiteDocumentStore::new(conn, "wide");
 
     store_1.put(1, doc([("val", Value::Int(100))])).unwrap();
-    store_2.put(
-        1,
-        doc([
-            ("a", Value::Str("x".into())),
-            ("b", Value::Str("y".into())),
-            ("c", Value::Float(1.0)),
-            ("d", Value::Int(0)),
-        ]),
-    ).unwrap();
+    store_2
+        .put(
+            1,
+            doc([
+                ("a", Value::Str("x".into())),
+                ("b", Value::Str("y".into())),
+                ("c", Value::Float(1.0)),
+                ("d", Value::Int(0)),
+            ]),
+        )
+        .unwrap();
 
     assert_eq!(store_1.get_field(1, "val"), Some(Value::Int(100)));
     assert_eq!(store_2.get_field(1, "c"), Some(Value::Float(1.0)));
@@ -421,13 +461,15 @@ fn empty_document() {
 fn large_doc_id() {
     let (_dir, _conn, mut store) = make_store("t1");
     let big_id = 1_u64 << 40;
-    store.put(
-        big_id,
-        doc([
-            ("id", Value::Int(big_id as i64)),
-            ("name", Value::Str("big".into())),
-        ]),
-    ).unwrap();
+    store
+        .put(
+            big_id,
+            doc([
+                ("id", Value::Int(big_id as i64)),
+                ("name", Value::Str("big".into())),
+            ]),
+        )
+        .unwrap();
     let got = store.get(big_id).unwrap();
     assert_eq!(got["id"], Value::Int(big_id as i64));
     assert_eq!(got["name"], Value::Str("big".into()));

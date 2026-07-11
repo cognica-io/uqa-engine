@@ -151,7 +151,8 @@ fn sqlite_engine_matches_hybrid_search_fixture() {
         d.insert("title".into(), Value::Str(c.title.clone()));
         let mut vectors: BTreeMap<FieldName, Vec<f32>> = BTreeMap::new();
         vectors.insert("embedding".into(), c.embedding.clone());
-        eng.add_document_with_vectors("articles", c.id, d, vectors).unwrap();
+        eng.add_document_with_vectors("articles", c.id, d, vectors)
+            .unwrap();
     }
 
     for case in &fx.queries {
@@ -196,7 +197,8 @@ fn engine_state_survives_close_and_reopen() {
         d.insert("title".into(), Value::Str("rust language".into()));
         let mut vectors = BTreeMap::new();
         vectors.insert("embedding".into(), vec![1.0f32, 0.0, 0.0]);
-        eng.add_document_with_vectors("articles", 42, d, vectors).unwrap();
+        eng.add_document_with_vectors("articles", 42, d, vectors)
+            .unwrap();
     } // engine drops; SQLite connection closes; WAL is checkpointed on next open.
 
     let eng = Engine::open(&db_path).unwrap();

@@ -246,7 +246,8 @@ mod tests {
         docs.put(
             1,
             BTreeMap::from([("title".to_string(), Value::Str("rollback".into()))]),
-        ).unwrap();
+        )
+        .unwrap();
         inv.add_document(
             1,
             BTreeMap::from([("title".to_string(), "rollback".to_string())]),
