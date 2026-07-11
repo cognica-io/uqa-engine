@@ -2014,10 +2014,11 @@ fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Str(s)) => s.clone(),
         // PostgreSQL bytea hex output form.
         Some(Value::Bytes(b)) => {
+            use std::fmt::Write as _;
             let mut out = String::with_capacity(2 + b.len() * 2);
             out.push_str("\\x");
             for byte in b {
-                out.push_str(&format!("{byte:02x}"));
+                let _ = write!(out, "{byte:02x}");
             }
             out
         }

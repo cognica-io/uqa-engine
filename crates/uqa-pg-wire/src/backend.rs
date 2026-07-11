@@ -27,8 +27,8 @@ pub enum SSLResponse {
 impl SSLResponse {
     pub const fn encode(self) -> [u8; 1] {
         match self {
-            Self::Accept => [b'S'],
-            Self::Reject => [b'N'],
+            Self::Accept => *b"S",
+            Self::Reject => *b"N",
         }
     }
 }
@@ -42,8 +42,8 @@ pub enum GSSEncResponse {
 impl GSSEncResponse {
     pub const fn encode(self) -> [u8; 1] {
         match self {
-            Self::Accept => [b'G'],
-            Self::Reject => [b'N'],
+            Self::Accept => *b"G",
+            Self::Reject => *b"N",
         }
     }
 }

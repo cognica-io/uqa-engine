@@ -106,7 +106,7 @@ fn split_index_name(index_name: &str, table_schema: &str) -> (String, String) {
 
 fn stable_oid(kind: &str, name: &str) -> i64 {
     let mut hash = 14_695_981_039_346_656_037_u64;
-    for byte in kind.bytes().chain([b':']).chain(name.bytes()) {
+    for byte in kind.bytes().chain(*b":").chain(name.bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(1_099_511_628_211);
     }
