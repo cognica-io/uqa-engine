@@ -49,7 +49,7 @@ fn build_engine() -> Engine {
         );
         doc.insert("qty".into(), Value::Int((i % 1000) as i64));
         let _: BTreeMap<String, Vec<f32>> = BTreeMap::new();
-        engine.add_document("docs", i, doc);
+        engine.add_document("docs", i, doc).unwrap();
     }
     engine
 }

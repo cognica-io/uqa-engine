@@ -12,6 +12,7 @@ use std::sync::Arc;
 use rusqlite::{params, OptionalExtension};
 use uqa_core::{DocId, Value};
 
+use crate::backend::StorageBackendResult;
 use crate::document_store::{Document, DocumentStore};
 use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
 
@@ -628,8 +629,9 @@ fn upsert_document_blob(
 }
 
 impl DocumentStore for SQLiteDocumentStore {
-    fn put(&mut self, doc_id: DocId, document: Document) {
-        let _ = self.put_inner(doc_id, &document);
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        self.put_inner(doc_id, &document)?;
+        Ok(())
     }
 
     fn get(&self, doc_id: DocId) -> Option<Document> {
@@ -877,12 +879,17 @@ impl DocumentStore for SQLiteDocumentStore {
         out
     }
 
-    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
-        self.patch_fields_inner(doc_id, updates).unwrap_or(false)
+    fn patch_fields(
+        &mut self,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+    ) -> StorageBackendResult<bool> {
+        Ok(self.patch_fields_inner(doc_id, updates)?)
     }
 
-    fn delete(&mut self, doc_id: DocId) {
-        let _ = self.conn.with(|c| {
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+        self.ensure_blob_table()?;
+        self.conn.with(|c| {
             c.prepare_cached(&format!(
                 "DELETE FROM {DOCUMENT_BLOBS_TABLE}
                  WHERE table_name = ?1 AND doc_id = ?2"
@@ -891,12 +898,13 @@ impl DocumentStore for SQLiteDocumentStore {
             c.prepare_cached("DELETE FROM _documents WHERE table_name = ?1 AND doc_id = ?2")?
                 .execute(params![self.table, doc_id as i64])?;
             Ok(())
-        });
+        })?;
+        Ok(())
     }
 
-    fn clear(&mut self) {
-        let _ = self.ensure_blob_table();
-        let _ = self.conn.with(|c| {
+    fn clear(&mut self) -> StorageBackendResult<()> {
+        self.ensure_blob_table()?;
+        self.conn.with(|c| {
             c.execute(
                 &format!("DELETE FROM {DOCUMENT_BLOBS_TABLE} WHERE table_name = ?1"),
                 params![self.table],
@@ -906,7 +914,8 @@ impl DocumentStore for SQLiteDocumentStore {
                 params![self.table],
             )?;
             Ok(())
-        });
+        })?;
+        Ok(())
     }
 
     fn doc_ids(&self) -> Vec<DocId> {
@@ -964,16 +973,38 @@ mod tests {
     #[test]
     fn put_get_round_trip() {
         let mut s = store();
-        s.put(1, doc([("title", Value::Str("rust".into()))]));
+        s.put(1, doc([("title", Value::Str("rust".into()))])).unwrap();
         let got = s.get(1).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
+    }
+
+    /// A real storage write failure (`SQLITE_FULL` via `max_page_count`)
+    /// must surface as `Err`, never as a silently-dropped write: callers
+    /// use this signal to abort the enclosing statement or transaction.
+    #[test]
+    fn put_failure_is_reported_not_swallowed() {
+        let mut s = store();
+        s.put(1, doc([("title", Value::Str("small".into()))])).unwrap();
+        s.conn
+            .with(|c| {
+                let pages: i64 = c.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+                c.pragma_update(None, "max_page_count", pages)?;
+                Ok(())
+            })
+            .unwrap();
+        let huge = "x".repeat(8 * 1024 * 1024);
+        let err = s.put(2, doc([("body", Value::Str(huge))]));
+        assert!(err.is_err(), "oversized put must fail once the page budget is exhausted");
+        // The failure must not have corrupted existing data.
+        let got = s.get(1).unwrap();
+        assert_eq!(got.get("title"), Some(&Value::Str("small".into())));
     }
 
     #[test]
     fn delete_removes_row() {
         let mut s = store();
-        s.put(1, doc([("a", Value::Int(1))]));
-        s.delete(1);
+        s.put(1, doc([("a", Value::Int(1))])).unwrap();
+        s.delete(1).unwrap();
         assert!(s.get(1).is_none());
         assert_eq!(s.len(), 0);
     }
@@ -981,9 +1012,9 @@ mod tests {
     #[test]
     fn doc_ids_sorted_ascending() {
         let mut s = store();
-        s.put(3, Document::new());
-        s.put(1, Document::new());
-        s.put(2, Document::new());
+        s.put(3, Document::new()).unwrap();
+        s.put(1, Document::new()).unwrap();
+        s.put(2, Document::new()).unwrap();
         assert_eq!(s.doc_ids(), vec![1, 2, 3]);
     }
 
@@ -993,7 +1024,7 @@ mod tests {
         s.put(
             7,
             doc([("year", Value::Int(2026)), ("flag", Value::Bool(true))]),
-        );
+        ).unwrap();
         assert_eq!(s.get_field(7, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(7, "flag"), Some(Value::Bool(true)));
         assert_eq!(s.get_field(7, "missing"), None);
@@ -1008,8 +1039,8 @@ mod tests {
                 ("title", Value::Str("rust".into())),
                 ("payload", Value::Bytes(vec![1, 2, 3])),
             ]),
-        );
-        s.put(2, doc([("title", Value::Str("sqlite".into()))]));
+        ).unwrap();
+        s.put(2, doc([("title", Value::Str("sqlite".into()))])).unwrap();
 
         let titles = s.get_fields_bulk(&[1, 2, 99], "title");
         assert_eq!(titles.get(&1), Some(&Value::Str("rust".into())));
@@ -1030,14 +1061,14 @@ mod tests {
                 ("public_id", Value::Str("m-5".into())),
                 ("content", Value::Str("old".into())),
             ]),
-        );
+        ).unwrap();
         s.put(
             9,
             doc([
                 ("public_id", Value::Str("m-9".into())),
                 ("content", Value::Str("target".into())),
             ]),
-        );
+        ).unwrap();
 
         assert_eq!(
             s.find_doc_id_by_field("public_id", &Value::Str("m-9".into())),
@@ -1063,13 +1094,13 @@ mod tests {
                 ),
                 ("token_count", Value::Int(2)),
             ]),
-        );
+        ).unwrap();
 
         let updates = BTreeMap::from([
             ("content".to_string(), Value::Str("new".into())),
             ("token_count".to_string(), Value::Null),
         ]);
-        assert!(s.patch_fields(31, &updates));
+        assert!(s.patch_fields(31, &updates).unwrap());
 
         let got = s.get(31).unwrap();
         assert_eq!(got.get("public_id"), Some(&Value::Str("m-31".into())));
@@ -1090,10 +1121,10 @@ mod tests {
                 ("public_id", Value::Str("m-41".into())),
                 ("bytes", Value::Bytes(vec![1, 2, 3])),
             ]),
-        );
+        ).unwrap();
 
         let updates = BTreeMap::from([("bytes".to_string(), Value::Bytes(vec![4, 5]))]);
-        assert!(s.patch_fields(41, &updates));
+        assert!(s.patch_fields(41, &updates).unwrap());
         assert_eq!(s.get_field(41, "bytes"), Some(Value::Bytes(vec![4, 5])));
 
         s.conn
@@ -1123,7 +1154,7 @@ mod tests {
                 ("bytes", Value::Bytes(vec![1, 2, 3, 4])),
                 ("title", Value::Str("asset".into())),
             ]),
-        );
+        ).unwrap();
 
         s.conn
             .with(|c| {
@@ -1182,7 +1213,7 @@ mod tests {
                 ("tensor", tensor.clone()),
                 ("title", Value::Str("vector".into())),
             ]),
-        );
+        ).unwrap();
 
         s.conn
             .with(|c| {
@@ -1286,10 +1317,10 @@ mod tests {
     #[test]
     fn delete_and_clear_remove_blob_rows() {
         let mut s = store();
-        s.put(1, doc([("bytes", Value::Bytes(vec![1]))]));
-        s.put(2, doc([("bytes", Value::Bytes(vec![2]))]));
+        s.put(1, doc([("bytes", Value::Bytes(vec![1]))])).unwrap();
+        s.put(2, doc([("bytes", Value::Bytes(vec![2]))])).unwrap();
 
-        s.delete(1);
+        s.delete(1).unwrap();
         let remaining = s
             .conn
             .with(|c| {
@@ -1305,7 +1336,7 @@ mod tests {
             .unwrap();
         assert_eq!(remaining, 1);
 
-        s.clear();
+        s.clear().unwrap();
         let remaining = s
             .conn
             .with(|c| {

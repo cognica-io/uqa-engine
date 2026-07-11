@@ -98,7 +98,7 @@ fn engine_for(fx: &Fixture) -> Engine {
     for c in &fx.corpus {
         let mut d = Document::new();
         d.insert(fx.field.clone(), Value::Str(c.body.clone()));
-        engine.add_document("docs", c.id, d);
+        engine.add_document("docs", c.id, d).unwrap();
     }
     engine
 }

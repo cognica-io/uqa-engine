@@ -540,14 +540,13 @@ impl KeyValueDocumentStore {
 }
 
 impl DocumentStore for KeyValueDocumentStore {
-    fn put(&mut self, doc_id: DocId, document: Document) {
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         let document: Document = document
             .into_iter()
             .filter(|(_, value)| !matches!(value, Value::Null))
             .collect();
-        if let Ok(value) = encode_value(&document) {
-            let _ = self.store.put(&document_key(&self.table, doc_id), &value);
-        }
+        let value = encode_value(&document)?;
+        self.store.put(&document_key(&self.table, doc_id), &value)
     }
 
     fn get(&self, doc_id: DocId) -> Option<Document> {
@@ -564,12 +563,14 @@ impl DocumentStore for KeyValueDocumentStore {
             .unwrap_or(false)
     }
 
-    fn delete(&mut self, doc_id: DocId) {
-        let _ = self.store.delete(&document_key(&self.table, doc_id));
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+        self.store.delete(&document_key(&self.table, doc_id))
     }
 
-    fn clear(&mut self) {
-        let _ = self.store.delete_prefix(&document_key_prefix(&self.table));
+    fn clear(&mut self) -> StorageBackendResult<()> {
+        self.store
+            .delete_prefix(&document_key_prefix(&self.table))
+            .map(|_| ())
     }
 
     fn doc_ids(&self) -> Vec<DocId> {
@@ -1274,7 +1275,7 @@ mod tests {
                 ("title".to_string(), Value::Str("Rust".into())),
                 ("body".to_string(), Value::Bytes(vec![1, 2, 3])),
             ]),
-        );
+        ).unwrap();
         assert_eq!(docs.doc_ids(), vec![7]);
         assert_eq!(docs.get_field(7, "title"), Some(Value::Str("Rust".into())));
         assert_eq!(docs.get_field(7, "body"), Some(Value::Bytes(vec![1, 2, 3])));

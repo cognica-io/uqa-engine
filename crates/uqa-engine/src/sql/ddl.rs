@@ -80,7 +80,7 @@ pub(super) fn run_create_table_as(
         for (k, v) in row {
             document.insert(k.clone(), v.clone());
         }
-        engine.add_document(&name, doc_id, document);
+        engine.add_document(&name, doc_id, document)?;
         affected += 1;
     }
     Ok(SQLResult::from_affected(affected))
@@ -522,7 +522,7 @@ fn rewrite_column_values_to_type(
         if let Ok(values) = index_vectors_for_type(&converted, ty) {
             vectors.insert(column.to_string(), values);
         }
-        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors);
+        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
     Ok(())
 }
@@ -865,7 +865,7 @@ fn backfill_added_column(
         if let Some(v) = vector_value.as_ref() {
             vectors.insert(column.to_string(), v.clone());
         }
-        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors);
+        engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
     Ok(())
 }

@@ -5,8 +5,8 @@
 //
 
 use super::{
-    analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, TableState,
-    Value,
+    analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, SQLError,
+    TableState, Value,
 };
 
 impl Engine {
@@ -74,12 +74,17 @@ impl Engine {
         Ok(())
     }
 
-    pub fn add_document(&self, table: &str, doc_id: DocId, document: Document) {
+    pub fn add_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(());
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(());
         };
         // Index the FTS fields whose values are strings.
         let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
@@ -94,14 +99,18 @@ impl Engine {
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so
-        // the common path costs one read-lock check.
+        // the common path costs one read-lock check. A failed put must
+        // leave the value indexes untouched.
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         let new_indexed: Option<BTreeMap<String, Value>> = old_indexed.as_ref().map(|old| {
             old.keys()
                 .map(|k| (k.clone(), document.get(k).cloned().unwrap_or(Value::Null)))
                 .collect()
         });
-        t.document_store.write().put(doc_id, document);
+        t.document_store
+            .write()
+            .put(doc_id, document)
+            .map_err(|err| crate::engine_table_storage::document_store_write_error(&err))?;
         if let (Some(old), Some(new)) = (old_indexed.as_ref(), new_indexed.as_ref()) {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), Some(new));
         }
@@ -111,5 +120,6 @@ impl Engine {
         if doc_id >= *nx {
             *nx = doc_id + 1;
         }
+        Ok(())
     }
 }

@@ -218,7 +218,7 @@ impl Engine {
             }
         }
         if let Some(snapshot) = stack.last().and_then(|frame| frame.data_snapshot.clone()) {
-            self.restore_transaction_data(&snapshot);
+            self.restore_transaction_data(&snapshot)?;
         }
         stack.pop();
         Ok(())
@@ -279,7 +279,7 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
         }
         if let Some(snapshot) = frame.data_savepoints.get(name).cloned() {
-            self.restore_transaction_data(&snapshot);
+            self.restore_transaction_data(&snapshot)?;
         }
         Ok(())
     }
@@ -311,7 +311,12 @@ impl Engine {
         })
     }
 
-    fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) {
+    /// Memory-engine rollback path: snapshots only exist when no
+    /// persistent backend is attached, so these store operations run
+    /// against in-memory stores. They are still fallible by signature;
+    /// propagating keeps a (logic-bug) failure loud instead of leaving
+    /// a half-restored engine behind a successful-looking rollback.
+    fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) -> Result<(), SQLError> {
         {
             let mut tables = self.tables.write();
             tables.retain(|name, _| snapshot.tables.contains_key(name));
@@ -325,7 +330,11 @@ impl Engine {
             let Some(table) = self.table(name) else {
                 continue;
             };
-            table.document_store.write().clear();
+            table
+                .document_store
+                .write()
+                .clear()
+                .map_err(|err| Self::storage_tx_error("ROLLBACK data restore", &err))?;
             table
                 .doc_count_dirty
                 .store(true, std::sync::atomic::Ordering::Release);
@@ -336,10 +345,11 @@ impl Engine {
             }
             for (doc_id, document) in &table_snapshot.documents {
                 let vectors = Self::document_vector_values(&table, document);
-                self.add_document_with_vector_values(name, *doc_id, document.clone(), vectors);
+                self.add_document_with_vector_values(name, *doc_id, document.clone(), vectors)?;
             }
             *table.next_id.lock() = table_snapshot.next_id;
         }
         *self.sequences.write() = snapshot.sequences.clone();
+        Ok(())
     }
 }

@@ -48,7 +48,7 @@ fn main() {
             [("embedding".to_string(), vec.to_vec())]
                 .into_iter()
                 .collect(),
-        );
+        ).unwrap();
     }
 
     let hits = engine.hybrid_search(&HybridSearchParams {

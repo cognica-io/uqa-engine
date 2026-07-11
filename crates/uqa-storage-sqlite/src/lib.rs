@@ -406,7 +406,7 @@ mod tests {
         docs.put(
             1,
             BTreeMap::from([("title".to_string(), Value::Str("rust search".into()))]),
-        );
+        ).unwrap();
         assert_eq!(
             docs.get_field(1, "title"),
             Some(Value::Str("rust search".into()))

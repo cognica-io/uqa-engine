@@ -89,7 +89,7 @@ fn engine_matches_text_search_fixture() {
     let eng = Engine::new();
     eng.create_default_table("articles", vec!["title".into(), "body".into()]);
     for c in &fx.corpus {
-        eng.add_document("articles", c.id, into_doc(c));
+        eng.add_document("articles", c.id, into_doc(c)).unwrap();
     }
 
     for case in &fx.queries {

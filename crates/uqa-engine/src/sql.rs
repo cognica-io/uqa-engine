@@ -236,7 +236,7 @@ fn run_optimized_stmt(
                         "TRUNCATE TABLE: relation `{t}` does not exist"
                     )));
                 }
-                engine.truncate_table(t);
+                engine.truncate_table(t)?;
             }
             Ok(SQLResult::empty())
         }

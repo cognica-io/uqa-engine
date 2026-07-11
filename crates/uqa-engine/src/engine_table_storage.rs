@@ -542,7 +542,8 @@ impl Engine {
                 continue;
             };
             if doc.remove(column).is_some() {
-                self.rewrite_document(&table_name, doc_id, doc);
+                self.rewrite_document(&table_name, doc_id, doc)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
         }
         if self.is_persistent() {
@@ -650,7 +651,8 @@ impl Engine {
             };
             if let Some(value) = doc.remove(from) {
                 doc.insert(to.to_string(), value);
-                self.rewrite_document(&table_name, doc_id, doc);
+                self.rewrite_document(&table_name, doc_id, doc)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
         }
         if let Some(dimensions) = vector_dimensions {
@@ -911,15 +913,17 @@ impl Engine {
 
     /// Apply per-column updates to an existing document. Mirrors the
     /// `DO UPDATE SET col = expr` branch of an ON CONFLICT clause.
-    /// Returns whether the row was updated; `false` when the document
-    /// no longer exists.
+    /// Returns whether the row was updated; `Ok(false)` when the
+    /// document no longer exists. Storage write failures surface as
+    /// `Err` so the enclosing transaction rolls back instead of
+    /// committing a delete whose re-insert never happened.
     pub fn update_document_fields(
         &self,
         table: &str,
         doc_id: DocId,
         updates: BTreeMap<String, Value>,
         vectors: BTreeMap<String, Vec<f32>>,
-    ) -> bool {
+    ) -> Result<bool, SQLError> {
         let vector_values = vectors
             .into_iter()
             .map(|(field, vector)| (field, vec![vector]))
@@ -933,21 +937,26 @@ impl Engine {
         doc_id: DocId,
         updates: BTreeMap<String, Value>,
         vectors: BTreeMap<String, Vec<Vec<f32>>>,
-    ) -> bool {
+    ) -> Result<bool, SQLError> {
         let Some(t) = self.table(table) else {
-            return false;
+            return Ok(false);
         };
         let Some(mut doc) = t.document_store.read().get(doc_id) else {
-            return false;
+            return Ok(false);
         };
         for (k, v) in updates {
             doc.insert(k, v);
         }
         // Re-add the document so the inverted index picks up the new
         // text fields. Unindex the old field values first; the re-add
-        // path indexes the new ones.
+        // path indexes the new ones. The delete must not proceed to
+        // index surgery when it fails, and a failed re-add must abort
+        // the statement.
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store.write().delete(doc_id);
+        t.document_store
+            .write()
+            .delete(doc_id)
+            .map_err(|err| document_store_write_error(&err))?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
@@ -955,8 +964,8 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.add_document_with_vector_values(table, doc_id, doc, vectors);
-        true
+        self.add_document_with_vector_values(table, doc_id, doc, vectors)?;
+        Ok(true)
     }
 
     /// Apply field-level updates without materialising the whole
@@ -968,7 +977,7 @@ impl Engine {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
         vectors: &BTreeMap<String, Vec<f32>>,
-    ) -> bool {
+    ) -> Result<bool, SQLError> {
         let vector_values: BTreeMap<String, Vec<Vec<f32>>> = vectors
             .iter()
             .map(|(field, vector)| (field.clone(), vec![vector.clone()]))
@@ -982,9 +991,9 @@ impl Engine {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
         vectors: &BTreeMap<String, Vec<Vec<f32>>>,
-    ) -> bool {
+    ) -> Result<bool, SQLError> {
         let Some(t) = self.table(table) else {
-            return false;
+            return Ok(false);
         };
 
         let fts_fields = t.fts_fields();
@@ -1006,8 +1015,13 @@ impl Engine {
         }
 
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        if !t.document_store.write().patch_fields(doc_id, updates) {
-            return false;
+        if !t
+            .document_store
+            .write()
+            .patch_fields(doc_id, updates)
+            .map_err(|err| document_store_write_error(&err))?
+        {
+            return Ok(false);
         }
         if let Some(old) = old_indexed.as_ref() {
             // New values for the indexed fields: the update wins,
@@ -1044,15 +1058,20 @@ impl Engine {
         }
 
         self.mark_column_stats_dirty(table, &t);
-        true
+        Ok(true)
     }
 
-    pub(crate) fn rewrite_document(&self, table: &str, doc_id: DocId, document: Document) {
+    pub(crate) fn rewrite_document(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(());
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(());
         };
         let vector_fields: Vec<FieldName> = t.vector_indexes.read().keys().cloned().collect();
         let mut vectors: BTreeMap<FieldName, Vec<Vec<f32>>> = BTreeMap::new();
@@ -1065,7 +1084,10 @@ impl Engine {
             }
         }
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store.write().delete(doc_id);
+        t.document_store
+            .write()
+            .delete(doc_id)
+            .map_err(|err| document_store_write_error(&err))?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
@@ -1073,18 +1095,21 @@ impl Engine {
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
-        self.add_document_with_vector_values(&table_name, doc_id, document, vectors);
+        self.add_document_with_vector_values(&table_name, doc_id, document, vectors)
     }
 
-    pub fn delete_document(&self, table: &str, doc_id: DocId) {
+    pub fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(());
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(());
         };
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store.write().delete(doc_id);
+        t.document_store
+            .write()
+            .delete(doc_id)
+            .map_err(|err| document_store_write_error(&err))?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
@@ -1093,10 +1118,18 @@ impl Engine {
             idx.as_mut().delete(doc_id);
         }
         self.mark_column_stats_dirty(&table_name, &t);
+        Ok(())
     }
 
     pub fn document_count(&self, table: &str) -> u64 {
         self.table(table)
             .map_or(0, |t| t.inverted_index.read().doc_count())
     }
+}
+
+/// A persistent document-store write failed. Surfacing this as a
+/// statement error makes the enclosing transaction roll back, so the
+/// on-disk state never keeps a half-applied rewrite.
+pub(crate) fn document_store_write_error(err: &StorageBackendError) -> SQLError {
+    SQLError::Internal(format!("document store write failed: {err}"))
 }

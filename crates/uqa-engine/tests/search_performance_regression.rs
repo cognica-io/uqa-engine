@@ -90,7 +90,7 @@ fn direct_add_rows(engine: &Engine, rows: usize) {
                     id as u64,
                     direct_document(id),
                     BTreeMap::new(),
-                );
+                ).unwrap();
             }
             Ok(())
         })

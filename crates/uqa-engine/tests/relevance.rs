@@ -99,7 +99,7 @@ fn engine_with_corpus() -> Engine {
         let mut d = Document::new();
         d.insert("title".into(), Value::Str(doc.title.into()));
         d.insert("body".into(), Value::Str(doc.body.into()));
-        engine.add_document("docs", doc.id, d);
+        engine.add_document("docs", doc.id, d).unwrap();
     }
     engine
 }

@@ -47,7 +47,7 @@ fn vector(seed: u64, dim: usize) -> Vec<f32> {
 fn populated_docs(n: u64) -> MemoryDocumentStore {
     let mut store = MemoryDocumentStore::new();
     for id in 0..n {
-        store.put(id, doc(id));
+        store.put(id, doc(id)).unwrap();
     }
     store
 }
@@ -88,7 +88,7 @@ fn bench_document_store(c: &mut Criterion) {
         let mut store = MemoryDocumentStore::new();
         let mut next_id = 0_u64;
         bencher.iter(|| {
-            store.put(next_id, doc(next_id));
+            store.put(next_id, doc(next_id)).unwrap();
             next_id += 1;
             black_box(store.len())
         });
@@ -103,7 +103,7 @@ fn bench_document_store(c: &mut Criterion) {
                 bencher.iter(|| {
                     let mut store = MemoryDocumentStore::new();
                     for id in 0..*batch_size {
-                        store.put(id, doc(id));
+                        store.put(id, doc(id)).unwrap();
                     }
                     black_box(store.len())
                 });

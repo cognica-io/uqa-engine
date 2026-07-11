@@ -660,7 +660,7 @@ fn migrate_documents(
                         .or_insert_with(|| vector_value(value));
                 }
             }
-            engine.add_document_with_vectors(&spec.name, doc_id, document, vectors);
+            engine.add_document_with_vectors(&spec.name, doc_id, document, vectors)?;
             report.documents += 1;
         }
     }

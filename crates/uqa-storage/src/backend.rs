@@ -204,7 +204,7 @@ mod tests {
         let mut doc = BTreeMap::new();
         doc.insert("title".to_string(), Value::Str("rust storage".into()));
         let mut docs = backend.document_store("articles");
-        docs.put(1, doc);
+        docs.put(1, doc).unwrap();
         assert_eq!(
             docs.get_field(1, "title"),
             Some(Value::Str("rust storage".into()))
@@ -246,7 +246,7 @@ mod tests {
         docs.put(
             1,
             BTreeMap::from([("title".to_string(), Value::Str("rollback".into()))]),
-        );
+        ).unwrap();
         inv.add_document(
             1,
             BTreeMap::from([("title".to_string(), "rollback".to_string())]),

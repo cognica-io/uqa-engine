@@ -454,7 +454,7 @@ fn try_run_point_update(
         return Ok(Some(SQLResult::from_affected(0)));
     };
     let affected =
-        engine.patch_document_fields_with_vector_values(&stmt.table, doc_id, &updates, &vectors);
+        engine.patch_document_fields_with_vector_values(&stmt.table, doc_id, &updates, &vectors)?;
     Ok(Some(SQLResult::from_affected(u64::from(affected))))
 }
 
@@ -730,16 +730,16 @@ fn rewrite_document_with_referential_actions(
         // lookups (the unique fast path and FOREIGN KEY validation) read
         // the stale slot and miss the row.
         Some(new_id) if new_id != doc_id => {
-            engine.delete_document(table, doc_id);
+            engine.delete_document(table, doc_id)?;
             engine.add_document_with_vector_values(
                 table,
                 new_id,
                 new_doc.clone(),
                 document_vectors(engine, table, &new_doc),
-            );
+            )?;
             engine.advance_next_id(table, new_id);
         }
-        _ => engine.rewrite_document(table, doc_id, new_doc.clone()),
+        _ => engine.rewrite_document(table, doc_id, new_doc.clone())?,
     }
     apply_referenced_key_update_actions(engine, table, old_doc, &new_doc, params)
 }
@@ -1144,7 +1144,7 @@ fn delete_document_with_referential_actions(
         delete_stack,
     )?;
     delete_stack.pop();
-    engine.delete_document(table, doc_id);
+    engine.delete_document(table, doc_id)?;
     Ok(())
 }
 
@@ -1672,7 +1672,7 @@ fn insert_document_with_constraints(
         doc_id,
         document.clone(),
         document_vectors(engine, table, &document),
-    );
+    )?;
     Ok(document)
 }
 

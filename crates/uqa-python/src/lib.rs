@@ -414,7 +414,7 @@ impl PyEngine {
 
     fn add_document(&self, table: &str, doc_id: u64, document: &Bound<'_, PyAny>) -> PyResult<()> {
         self.inner
-            .add_document(table, doc_id, document_from_py(document)?);
+            .add_document(table, doc_id, document_from_py(document)?).unwrap();
         Ok(())
     }
 
@@ -430,7 +430,7 @@ impl PyEngine {
             doc_id,
             document_from_py(document)?,
             vector_values_from_py(vectors)?,
-        );
+        ).unwrap();
         Ok(())
     }
 
@@ -456,7 +456,7 @@ impl PyEngine {
     }
 
     fn delete_document(&self, table: &str, doc_id: u64) {
-        self.inner.delete_document(table, doc_id);
+        self.inner.delete_document(table, doc_id).unwrap();
     }
 
     fn document_count(&self, table: &str) -> u64 {

@@ -7,7 +7,7 @@
 use super::{
     standard_analyzer, Analyzer, AnalyzerPhase, Arc, AtomicBool, BTreeMap, DocId, Document,
     DocumentStore, Engine, FieldName, IVFIndex, IVFIndexParams, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, PersistentVectorIndexParams, RwLock,
+    MemoryInvertedIndex, MemoryVectorIndex, PersistentVectorIndexParams, RwLock, SQLError,
     StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorFieldSchema,
     VectorIndex,
 };
@@ -334,12 +334,12 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<f32>>,
-    ) {
+    ) -> Result<(), SQLError> {
         let vector_values = vectors
             .into_iter()
             .map(|(field, vector)| (field, vec![vector]))
             .collect();
-        self.add_document_with_vector_values(table, doc_id, document, vector_values);
+        self.add_document_with_vector_values(table, doc_id, document, vector_values)
     }
 
     pub fn add_document_with_vector_values(
@@ -348,11 +348,12 @@ impl Engine {
         doc_id: DocId,
         document: Document,
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
-    ) {
-        self.add_document(table, doc_id, document);
+    ) -> Result<(), SQLError> {
+        self.add_document(table, doc_id, document)?;
         for (field, vectors) in vectors {
             self.add_vector_values(table, doc_id, &field, vectors);
         }
+        Ok(())
     }
 
     pub fn create_default_table(&self, name: impl Into<String>, fts_fields: Vec<FieldName>) {

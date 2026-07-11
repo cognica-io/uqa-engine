@@ -751,20 +751,23 @@ mod tests {
     }
 
     impl DocumentStore for StoreWithMissingDocId {
-        fn put(&mut self, doc_id: DocId, document: Document) {
+        fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
             self.docs.insert(doc_id, document);
+            Ok(())
         }
 
         fn get(&self, doc_id: DocId) -> Option<Document> {
             self.docs.get(&doc_id).cloned()
         }
 
-        fn delete(&mut self, doc_id: DocId) {
+        fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
             self.docs.remove(&doc_id);
+            Ok(())
         }
 
-        fn clear(&mut self) {
+        fn clear(&mut self) -> StorageBackendResult<()> {
             self.docs.clear();
+            Ok(())
         }
 
         fn doc_ids(&self) -> Vec<DocId> {
@@ -829,6 +832,125 @@ mod tests {
         assert_eq!(doc.get("status"), Some(&s("indexed")));
     }
 
+    /// Document store whose next `fail_budget` put calls fail. Used to
+    /// prove that an ON CONFLICT DO UPDATE whose delete succeeded but
+    /// whose re-insert failed surfaces the error and rolls back instead
+    /// of committing the row away (the Maek `global_config` loss shape).
+    #[derive(Clone)]
+    struct FailingPutStore {
+        docs: BTreeMap<DocId, Document>,
+        fail_budget: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl FailingPutStore {
+        fn from_table(engine: &Engine, table: &str, fail_budget: usize) -> Self {
+            let table = engine.table(table).expect("table");
+            let docs = table.document_store.read().iter_all().collect();
+            Self {
+                docs,
+                fail_budget: Arc::new(std::sync::atomic::AtomicUsize::new(fail_budget)),
+            }
+        }
+    }
+
+    impl DocumentStore for FailingPutStore {
+        fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+            let remaining = self.fail_budget.load(Ordering::SeqCst);
+            if remaining > 0 {
+                self.fail_budget.store(remaining - 1, Ordering::SeqCst);
+                return Err(StorageBackendError::Other(
+                    "injected put failure".to_string(),
+                ));
+            }
+            self.docs.insert(doc_id, document);
+            Ok(())
+        }
+
+        fn get(&self, doc_id: DocId) -> Option<Document> {
+            self.docs.get(&doc_id).cloned()
+        }
+
+        fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+            self.docs.remove(&doc_id);
+            Ok(())
+        }
+
+        fn clear(&mut self) -> StorageBackendResult<()> {
+            self.docs.clear();
+            Ok(())
+        }
+
+        fn doc_ids(&self) -> Vec<DocId> {
+            self.docs.keys().copied().collect()
+        }
+
+        fn len(&self) -> usize {
+            self.docs.len()
+        }
+
+        fn snapshot(&self) -> Arc<dyn DocumentStore> {
+            Arc::new(self.clone())
+        }
+    }
+
+    #[test]
+    fn upsert_reinsert_failure_rolls_back_instead_of_losing_the_row() {
+        let eng = Engine::new();
+        eng.sql(
+            "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO engine_meta (key, value) VALUES ('global_config', 'v1')",
+            &[],
+        )
+        .unwrap();
+        {
+            let table = eng.table("engine_meta").expect("table");
+            *table.document_store.write() =
+                Box::new(FailingPutStore::from_table(&eng, "engine_meta", 1));
+        }
+
+        let err = eng
+            .sql(
+                "INSERT INTO engine_meta (key, value) VALUES ('global_config', 'v2') \
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                &[],
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("document store write failed"),
+            "unexpected error: {err}"
+        );
+
+        // The row must survive with its previous value: the failed
+        // rewrite has to roll back, not commit its delete half.
+        let result = eng
+            .sql(
+                "SELECT value FROM engine_meta WHERE key = 'global_config'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0].get("value"), Some(&s("v1")));
+
+        // With the fault budget exhausted the same upsert succeeds.
+        eng.sql(
+            "INSERT INTO engine_meta (key, value) VALUES ('global_config', 'v2') \
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            &[],
+        )
+        .unwrap();
+        let result = eng
+            .sql(
+                "SELECT value FROM engine_meta WHERE key = 'global_config'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(result.rows[0].get("value"), Some(&s("v2")));
+    }
+
     #[test]
     fn persistent_engine_restores_through_facade_traits() {
         let dir = tempfile::tempdir().unwrap();
@@ -841,7 +963,7 @@ mod tests {
         {
             let eng = Engine::from_persistent_backends(catalog.clone(), backend.clone()).unwrap();
             eng.create_default_table("docs", vec!["title".into()]);
-            eng.add_document("docs", 1, doc([("title", s("hello facade"))]));
+            eng.add_document("docs", 1, doc([("title", s("hello facade"))])).unwrap();
         }
 
         let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
@@ -972,9 +1094,9 @@ mod tests {
                 references: None,
             }];
         }
-        eng.add_document("docs", 1, doc([("title", s("alpha"))]));
-        eng.add_document("docs", 2, doc([("title", s("alpha"))]));
-        eng.add_document("docs", 3, doc([("title", s("beta"))]));
+        eng.add_document("docs", 1, doc([("title", s("alpha"))])).unwrap();
+        eng.add_document("docs", 2, doc([("title", s("alpha"))])).unwrap();
+        eng.add_document("docs", 3, doc([("title", s("beta"))])).unwrap();
         eng.run_analyze(Some("docs"));
         let stats = eng.column_stats("docs");
         let title_stats = stats.get("title").expect("title stats");
@@ -989,10 +1111,10 @@ mod tests {
     fn add_get_delete_round_trip() {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);
-        eng.add_document("articles", 1, doc([("title", s("rust language"))]));
+        eng.add_document("articles", 1, doc([("title", s("rust language"))])).unwrap();
         let got = eng.get_document("articles", 1).unwrap();
         assert_eq!(got.get("title"), Some(&s("rust language")));
-        eng.delete_document("articles", 1);
+        eng.delete_document("articles", 1).unwrap();
         assert!(eng.get_document("articles", 1).is_none());
     }
 
@@ -1004,9 +1126,9 @@ mod tests {
             "articles",
             1,
             doc([("title", s("the rust programming language"))]),
-        );
-        eng.add_document("articles", 2, doc([("title", s("python language guide"))]));
-        eng.add_document("articles", 3, doc([("title", s("rust rust rust"))]));
+        ).unwrap();
+        eng.add_document("articles", 2, doc([("title", s("python language guide"))])).unwrap();
+        eng.add_document("articles", 3, doc([("title", s("rust rust rust"))])).unwrap();
 
         let hits = eng.search(
             "articles",
@@ -1029,7 +1151,7 @@ mod tests {
             let body = std::iter::repeat_n("rust", doc_id as usize)
                 .collect::<Vec<_>>()
                 .join(" ");
-            eng.add_document("articles", doc_id, doc([("title", s(&body))]));
+            eng.add_document("articles", doc_id, doc([("title", s(&body))])).unwrap();
         }
 
         let full = eng.search(
@@ -1065,8 +1187,8 @@ mod tests {
             "articles",
             1,
             doc([("title", s("the rust programming language"))]),
-        );
-        eng.add_document("articles", 2, doc([("title", s("python is dynamic"))]));
+        ).unwrap();
+        eng.add_document("articles", 2, doc([("title", s("python is dynamic"))])).unwrap();
 
         let hits = eng.search(
             "articles",
@@ -1097,19 +1219,19 @@ mod tests {
             1,
             doc([("title", s("a"))]),
             BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
-        );
+        ).unwrap();
         eng.add_document_with_vectors(
             "articles",
             2,
             doc([("title", s("b"))]),
             BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
-        );
+        ).unwrap();
         eng.add_document_with_vectors(
             "articles",
             3,
             doc([("title", s("c"))]),
             BTreeMap::from([("embedding".into(), vec![0.7, 0.7, 0.0])]),
-        );
+        ).unwrap();
 
         let hits = eng.knn_search("articles", "embedding", vec![1.0, 0.0, 0.0], 2);
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
@@ -1256,9 +1378,9 @@ mod tests {
     fn create_vector_field_backfills_existing_documents() {
         let eng = Engine::new();
         eng.create_default_table("docs", vec![]);
-        eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))]));
-        eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))]));
-        eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))]));
+        eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))])).unwrap();
+        eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))])).unwrap();
+        eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))])).unwrap();
 
         assert!(eng.create_vector_field("docs", "embedding", 2));
         let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 2);
@@ -1280,21 +1402,21 @@ mod tests {
             1,
             doc([("title", s("rust language"))]),
             BTreeMap::from([("embedding".into(), vec![1.0, 0.0, 0.0])]),
-        );
+        ).unwrap();
         // Doc 2: title matches "rust", embedding orthogonal to query.
         eng.add_document_with_vectors(
             "articles",
             2,
             doc([("title", s("rust ecosystem"))]),
             BTreeMap::from([("embedding".into(), vec![0.0, 1.0, 0.0])]),
-        );
+        ).unwrap();
         // Doc 3: no text match, embedding near query.
         eng.add_document_with_vectors(
             "articles",
             3,
             doc([("title", s("python programming"))]),
             BTreeMap::from([("embedding".into(), vec![0.95, 0.1, 0.0])]),
-        );
+        ).unwrap();
 
         let hits = eng.hybrid_search(&HybridSearchParams {
             table: "articles",
@@ -1320,7 +1442,7 @@ mod tests {
         let eng = Engine::new();
         eng.create_default_table("articles", vec!["title".into()]);
         for i in 0..5 {
-            eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))]));
+            eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))])).unwrap();
         }
         assert_eq!(eng.document_count("articles"), 5);
     }

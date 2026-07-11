@@ -78,7 +78,7 @@ fn hybrid_search_matches_fixture() {
         d.insert("title".into(), Value::Str(c.title.clone()));
         let mut vectors: BTreeMap<FieldName, Vec<f32>> = BTreeMap::new();
         vectors.insert("embedding".into(), c.embedding.clone());
-        eng.add_document_with_vectors("articles", c.id, d, vectors);
+        eng.add_document_with_vectors("articles", c.id, d, vectors).unwrap();
     }
 
     for case in &fx.queries {

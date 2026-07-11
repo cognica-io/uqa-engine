@@ -15,17 +15,24 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, FieldName, PathSegment, Value};
 
+use crate::backend::StorageBackendResult;
+
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
 
+/// Mutating methods are fallible: persistent backends surface their
+/// write failures so callers (engine DML, upserts, referential
+/// rewrites) can abort the enclosing transaction instead of silently
+/// committing a partially-applied statement. A rewrite that deletes a
+/// row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
-    fn put(&mut self, doc_id: DocId, document: Document);
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()>;
     fn get(&self, doc_id: DocId) -> Option<Document>;
     fn contains_doc_id(&self, doc_id: DocId) -> bool {
         self.get(doc_id).is_some()
     }
-    fn delete(&mut self, doc_id: DocId);
-    fn clear(&mut self);
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
+    fn clear(&mut self) -> StorageBackendResult<()>;
 
     /// Read a single field. Returns an owned [`Value`] so persistent
     /// backends (`SQLite`, ...) can decode on demand without reaching
@@ -45,10 +52,15 @@ pub trait DocumentStore: Send + Sync {
 
     /// Apply top-level field updates without requiring callers to
     /// materialise the whole document. `Value::Null` matches `put` by
-    /// removing the stored field.
-    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
+    /// removing the stored field. `Ok(false)` means the document does
+    /// not exist; write failures surface as `Err`.
+    fn patch_fields(
+        &mut self,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+    ) -> StorageBackendResult<bool> {
         let Some(mut document) = self.get(doc_id) else {
-            return false;
+            return Ok(false);
         };
         for (field, value) in updates {
             if matches!(value, Value::Null) {
@@ -57,8 +69,8 @@ pub trait DocumentStore: Send + Sync {
                 document.insert(field.clone(), value.clone());
             }
         }
-        self.put(doc_id, document);
-        true
+        self.put(doc_id, document)?;
+        Ok(true)
     }
 
     /// Bulk variant of [`DocumentStore::get`]. Ids without a stored
@@ -206,8 +218,9 @@ impl MemoryDocumentStore {
 }
 
 impl DocumentStore for MemoryDocumentStore {
-    fn put(&mut self, doc_id: DocId, document: Document) {
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         self.documents.insert(doc_id, document);
+        Ok(())
     }
 
     fn get(&self, doc_id: DocId) -> Option<Document> {
@@ -243,9 +256,13 @@ impl DocumentStore for MemoryDocumentStore {
         })
     }
 
-    fn patch_fields(&mut self, doc_id: DocId, updates: &BTreeMap<String, Value>) -> bool {
+    fn patch_fields(
+        &mut self,
+        doc_id: DocId,
+        updates: &BTreeMap<String, Value>,
+    ) -> StorageBackendResult<bool> {
         let Some(document) = self.documents.get_mut(&doc_id) else {
-            return false;
+            return Ok(false);
         };
         for (field, value) in updates {
             if matches!(value, Value::Null) {
@@ -254,15 +271,17 @@ impl DocumentStore for MemoryDocumentStore {
                 document.insert(field.clone(), value.clone());
             }
         }
-        true
+        Ok(true)
     }
 
-    fn delete(&mut self, doc_id: DocId) {
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         self.documents.remove(&doc_id);
+        Ok(())
     }
 
-    fn clear(&mut self) {
+    fn clear(&mut self) -> StorageBackendResult<()> {
         self.documents.clear();
+        Ok(())
     }
 
     fn doc_ids(&self) -> Vec<DocId> {
@@ -289,7 +308,7 @@ mod tests {
     #[test]
     fn put_get_round_trip() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("title", Value::Str("rust".into()))]));
+        s.put(1, doc([("title", Value::Str("rust".into()))])).unwrap();
         let got = s.get(1).unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
     }
@@ -297,7 +316,7 @@ mod tests {
     #[test]
     fn get_field_returns_value() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("year", Value::Int(2026))]));
+        s.put(1, doc([("year", Value::Int(2026))])).unwrap();
         assert_eq!(s.get_field(1, "year"), Some(Value::Int(2026)));
         assert_eq!(s.get_field(1, "missing"), None);
         assert_eq!(s.get_field(99, "year"), None);
@@ -306,8 +325,8 @@ mod tests {
     #[test]
     fn delete_removes_doc() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("a", Value::Int(1))]));
-        s.delete(1);
+        s.put(1, doc([("a", Value::Int(1))])).unwrap();
+        s.delete(1).unwrap();
         assert!(s.get(1).is_none());
         assert_eq!(s.len(), 0);
     }
@@ -315,17 +334,17 @@ mod tests {
     #[test]
     fn doc_ids_returns_all() {
         let mut s = MemoryDocumentStore::new();
-        s.put(2, Document::new());
-        s.put(1, Document::new());
-        s.put(3, Document::new());
+        s.put(2, Document::new()).unwrap();
+        s.put(1, Document::new()).unwrap();
+        s.put(3, Document::new()).unwrap();
         assert_eq!(s.doc_ids(), vec![1, 2, 3]);
     }
 
     #[test]
     fn get_fields_bulk_returns_value_per_id_with_null_for_missing() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("year", Value::Int(2026))]));
-        s.put(2, doc([("year", Value::Int(2025))]));
+        s.put(1, doc([("year", Value::Int(2026))])).unwrap();
+        s.put(2, doc([("year", Value::Int(2025))])).unwrap();
         let got = s.get_fields_bulk(&[1, 2, 99], "year");
         assert_eq!(got.get(&1), Some(&Value::Int(2026)));
         assert_eq!(got.get(&2), Some(&Value::Int(2025)));
@@ -335,8 +354,8 @@ mod tests {
     #[test]
     fn has_value_returns_true_when_any_doc_matches() {
         let mut s = MemoryDocumentStore::new();
-        s.put(1, doc([("color", Value::Str("red".into()))]));
-        s.put(2, doc([("color", Value::Str("blue".into()))]));
+        s.put(1, doc([("color", Value::Str("red".into()))])).unwrap();
+        s.put(2, doc([("color", Value::Str("blue".into()))])).unwrap();
         assert!(s.has_value("color", &Value::Str("red".into())));
         assert!(!s.has_value("color", &Value::Str("green".into())));
     }
@@ -344,8 +363,8 @@ mod tests {
     #[test]
     fn find_doc_id_by_field_returns_first_match() {
         let mut s = MemoryDocumentStore::new();
-        s.put(3, doc([("public_id", Value::Str("m-3".into()))]));
-        s.put(7, doc([("public_id", Value::Str("m-7".into()))]));
+        s.put(3, doc([("public_id", Value::Str("m-3".into()))])).unwrap();
+        s.put(7, doc([("public_id", Value::Str("m-7".into()))])).unwrap();
 
         assert_eq!(
             s.find_doc_id_by_field("public_id", &Value::Str("m-7".into())),
@@ -367,13 +386,13 @@ mod tests {
                 ("content", Value::Str("old".into())),
                 ("token_count", Value::Int(4)),
             ]),
-        );
+        ).unwrap();
 
         let updates = BTreeMap::from([
             ("content".to_string(), Value::Str("new".into())),
             ("token_count".to_string(), Value::Null),
         ]);
-        assert!(s.patch_fields(1, &updates));
+        assert!(s.patch_fields(1, &updates).unwrap());
 
         let got = s.get(1).unwrap();
         assert_eq!(got.get("public_id"), Some(&Value::Str("m-1".into())));
@@ -386,7 +405,7 @@ mod tests {
         let mut s = MemoryDocumentStore::new();
         let mut nested = BTreeMap::new();
         nested.insert("name".to_string(), Value::Str("alice".into()));
-        s.put(1, doc([("user", Value::Map(nested))]));
+        s.put(1, doc([("user", Value::Map(nested))])).unwrap();
         let path = vec![
             uqa_core::PathSegment::Key("user".into()),
             uqa_core::PathSegment::Key("name".into()),
@@ -397,9 +416,9 @@ mod tests {
     #[test]
     fn iter_all_yields_in_id_order() {
         let mut s = MemoryDocumentStore::new();
-        s.put(3, doc([("k", Value::Int(3))]));
-        s.put(1, doc([("k", Value::Int(1))]));
-        s.put(2, doc([("k", Value::Int(2))]));
+        s.put(3, doc([("k", Value::Int(3))])).unwrap();
+        s.put(1, doc([("k", Value::Int(1))])).unwrap();
+        s.put(2, doc([("k", Value::Int(2))])).unwrap();
         let collected: Vec<u64> = s.iter_all().map(|(id, _)| id).collect();
         assert_eq!(collected, vec![1, 2, 3]);
     }

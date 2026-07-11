@@ -153,8 +153,8 @@ fn drop_table_removes_schema_and_documents() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&schema("t1", &[])).unwrap();
     let mut store = document_store(conn.clone(), "t1");
-    store.put(1, doc([("a", Value::Int(10))]));
-    store.put(2, doc([("a", Value::Int(20))]));
+    store.put(1, doc([("a", Value::Int(10))])).unwrap();
+    store.put(2, doc([("a", Value::Int(20))])).unwrap();
     cat.drop_table("t1").unwrap();
     cat.purge_table_data("t1").unwrap();
     assert!(cat.load_tables().unwrap().is_empty());
@@ -210,11 +210,11 @@ fn document_save_and_load() {
             ("name", Value::Str("alice".into())),
             ("age", Value::Int(30)),
         ]),
-    );
+    ).unwrap();
     store.put(
         2,
         doc([("name", Value::Str("bob".into())), ("age", Value::Int(25))]),
-    );
+    ).unwrap();
     let d1 = store.get(1).unwrap();
     let d2 = store.get(2).unwrap();
     assert_eq!(d1.get("name"), Some(&Value::Str("alice".into())));
@@ -226,8 +226,8 @@ fn documents_tables_isolated() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut s1 = document_store(conn.clone(), "t1");
     let mut s2 = document_store(conn, "t2");
-    s1.put(1, doc([("x", Value::Int(1))]));
-    s2.put(1, doc([("x", Value::Int(2))]));
+    s1.put(1, doc([("x", Value::Int(1))])).unwrap();
+    s2.put(1, doc([("x", Value::Int(2))])).unwrap();
     assert_eq!(s1.get(1).unwrap().get("x"), Some(&Value::Int(1)));
     assert_eq!(s2.get(1).unwrap().get("x"), Some(&Value::Int(2)));
 }
@@ -236,9 +236,9 @@ fn documents_tables_isolated() {
 fn document_delete_removes_row() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut store = document_store(conn, "t1");
-    store.put(1, doc([("x", Value::Int(1))]));
-    store.put(2, doc([("x", Value::Int(2))]));
-    store.delete(1);
+    store.put(1, doc([("x", Value::Int(1))])).unwrap();
+    store.put(2, doc([("x", Value::Int(2))])).unwrap();
+    store.delete(1).unwrap();
     let mut ids = store.doc_ids();
     ids.sort_unstable();
     assert_eq!(ids, vec![2u64 as DocId]);
@@ -250,9 +250,9 @@ fn document_delete_cascades_postings() {
     cat.save_table(&schema("t1", &["x"])).unwrap();
     let mut store = document_store(conn.clone(), "t1");
     let mut idx = inverted_index(conn, "t1");
-    store.put(1, doc([("x", Value::Str("hello".into()))]));
+    store.put(1, doc([("x", Value::Str("hello".into()))])).unwrap();
     idx.add_document(1, fields(&[("x", "hello")]));
-    store.delete(1);
+    store.delete(1).unwrap();
     idx.remove_document(1);
     assert!(store.get(1).is_none());
     assert_eq!(idx.get_posting_list("x", "hello").len(), 0);
@@ -263,8 +263,8 @@ fn document_delete_cascades_postings() {
 fn document_upsert_overwrites() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut store = document_store(conn, "t1");
-    store.put(1, doc([("v", Value::Str("old".into()))]));
-    store.put(1, doc([("v", Value::Str("new".into()))]));
+    store.put(1, doc([("v", Value::Str("old".into()))])).unwrap();
+    store.put(1, doc([("v", Value::Str("new".into()))])).unwrap();
     assert_eq!(store.len(), 1);
     assert_eq!(
         store.get(1).unwrap().get("v"),
@@ -593,7 +593,7 @@ fn transaction_batch_commit() {
     let mut store = document_store(conn.clone(), "t1");
     conn.begin_transaction().unwrap();
     for i in 1..=3u64 {
-        store.put(i as DocId, doc([("x", Value::Int(i as i64))]));
+        store.put(i as DocId, doc([("x", Value::Int(i as i64))])).unwrap();
     }
     conn.commit_transaction().unwrap();
     assert_eq!(store.len(), 3);
@@ -603,9 +603,9 @@ fn transaction_batch_commit() {
 fn transaction_rollback_drops_uncommitted_writes() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut store = document_store(conn.clone(), "t1");
-    store.put(1, doc([("x", Value::Int(1))]));
+    store.put(1, doc([("x", Value::Int(1))])).unwrap();
     conn.begin_transaction().unwrap();
-    store.put(2, doc([("x", Value::Int(2))]));
+    store.put(2, doc([("x", Value::Int(2))])).unwrap();
     conn.rollback_transaction().unwrap();
     let mut ids = store.doc_ids();
     ids.sort_unstable();
@@ -619,7 +619,7 @@ fn auto_commit_outside_transaction_persists() {
     {
         let (conn, _cat) = open_catalog(&path);
         let mut store = document_store(conn, "t1");
-        store.put(1, doc([("x", Value::Int(1))]));
+        store.put(1, doc([("x", Value::Int(1))])).unwrap();
     }
     let (conn2, _cat2) = open_catalog(&path);
     let store2 = document_store(conn2, "t1");
@@ -644,7 +644,7 @@ fn close_and_reopen_restores_every_store() {
         let mut idx = inverted_index(conn.clone(), "t");
         let mut vec_idx = vector_index(conn.clone(), "t", "emb", 2);
 
-        store.put(1, doc([("x", Value::Int(42))]));
+        store.put(1, doc([("x", Value::Int(42))])).unwrap();
         idx.add_document(1, fields(&[("x", "hello")]));
         cat.save_vertex(1, "", r#"{"label":"A"}"#).unwrap();
         cat.save_edge(1, 1, 2, "link", "{}").unwrap();
