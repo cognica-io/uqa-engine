@@ -548,7 +548,7 @@ fn create_tables(
     for spec in specs {
         engine.create_table(&spec.name, standard_analyzer("english"), Vec::new());
         for col in &spec.rust_columns {
-            engine.register_column(&spec.name, col.clone());
+            engine.try_register_column(&spec.name, col.clone())?;
         }
         for vector in &spec.vector_fields {
             if vector.dimensions == 0 {

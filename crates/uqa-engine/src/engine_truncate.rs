@@ -26,7 +26,7 @@ impl Engine {
             }
         }
         *t.next_id.lock() = 1;
-        Self::value_indexes_clear(&t);
+        self.value_indexes_truncate(name, &t)?;
         self.mark_column_stats_dirty(name, &t);
         Ok(())
     }

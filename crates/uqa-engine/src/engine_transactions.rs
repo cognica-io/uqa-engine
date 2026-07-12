@@ -220,6 +220,8 @@ impl Engine {
         if let Some(snapshot) = stack.last().and_then(|frame| frame.data_snapshot.clone()) {
             self.restore_transaction_data(&snapshot)?;
         }
+        self.reload_persistent_value_indexes()
+            .map_err(|err| Self::storage_tx_error("ROLLBACK btree restore", &err))?;
         stack.pop();
         Ok(())
     }
@@ -281,6 +283,8 @@ impl Engine {
         if let Some(snapshot) = frame.data_savepoints.get(name).cloned() {
             self.restore_transaction_data(&snapshot)?;
         }
+        self.reload_persistent_value_indexes()
+            .map_err(|err| Self::storage_tx_error("ROLLBACK TO btree restore", &err))?;
         Ok(())
     }
 

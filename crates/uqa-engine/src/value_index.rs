@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_storage::BTreeIndex;
 
-use crate::TableState;
+use crate::{SQLError, StorageBackendResult, TableState};
 
 /// Per-column index: non-null scalar keys in a B-tree plus the doc ids
 /// whose field is missing or SQL NULL.
@@ -118,6 +118,12 @@ impl ColumnValueIndex {
         }
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.index.clear();
+        self.nulls.clear();
+        self.has_temporal = false;
+    }
+
     /// Resolve `predicate` to a posting list, or `None` when this
     /// index cannot reproduce evaluated-scan semantics for it.
     pub(crate) fn scan(&self, predicate: &Predicate) -> Option<PostingList> {
@@ -198,27 +204,217 @@ impl crate::Engine {
                 return index.scan(predicate);
             }
         }
+        self.ensure_value_index(table, field)
+            .ok()
+            .filter(|built| *built)?;
+        let result = t.value_indexes.read().get(field)?.scan(predicate);
+        result
+    }
+
+    /// Install one value index from durable postings when available, or
+    /// backfill it once from the document store and persist that compact
+    /// posting set. Holding the document-store read guard through publish
+    /// prevents a write from landing between the snapshot and index install.
+    fn ensure_value_index(&self, table: &str, field: &str) -> StorageBackendResult<bool> {
+        let Some(t) = self.table(table) else {
+            return Ok(false);
+        };
+        if t.value_indexes.read().contains_key(field) {
+            return Ok(true);
+        }
         if !self
             .value_indexable_fields(table)
             .iter()
             .any(|name| name == field)
         {
+            return Ok(false);
+        }
+
+        let store = t.document_store.read();
+        let persisted = match self.backend.as_ref() {
+            Some(backend) if backend.persists_btree_indexes() => {
+                backend.load_btree_index(table, field)?
+            }
+            _ => None,
+        };
+        let values = if let Some(values) = persisted {
+            values
+        } else {
+            let doc_ids = store.doc_ids();
+            let fields = store.get_fields_bulk(&doc_ids, field);
+            let values: Vec<(DocId, Value)> = doc_ids
+                .into_iter()
+                .map(|doc_id| {
+                    let value = fields.get(&doc_id).cloned().unwrap_or(Value::Null);
+                    (doc_id, value)
+                })
+                .collect();
+            if let Some(backend) = self
+                .backend
+                .as_ref()
+                .filter(|backend| backend.persists_btree_indexes())
+            {
+                backend.replace_btree_index(table, field, &values)?;
+            }
+            values
+        };
+        let built = ColumnValueIndex::build(field, values.into_iter());
+        let mut indexes = t.value_indexes.write();
+        indexes.entry(field.to_string()).or_insert(built);
+        Ok(true)
+    }
+
+    /// Reconcile one table's in-memory and durable indexes with its current
+    /// PRIMARY KEY / UNIQUE / catalog-btree policy.
+    pub(crate) fn refresh_value_indexes_for_table(&self, table: &str) -> StorageBackendResult<()> {
+        let Some(t) = self.table(table) else {
+            return Ok(());
+        };
+        let desired = self.value_indexable_fields(table);
+        let mut stale: Vec<String> = t
+            .value_indexes
+            .read()
+            .keys()
+            .filter(|field| !desired.contains(field))
+            .cloned()
+            .collect();
+        if let Some(backend) = self
+            .backend
+            .as_ref()
+            .filter(|backend| backend.persists_btree_indexes())
+        {
+            for field in backend.btree_index_fields(table)? {
+                if !desired.contains(&field) && !stale.contains(&field) {
+                    stale.push(field);
+                }
+            }
+            for field in &stale {
+                backend.drop_btree_index(table, field)?;
+            }
+        }
+        t.value_indexes
+            .write()
+            .retain(|field, _| desired.contains(field));
+        for field in desired {
+            self.ensure_value_index(table, &field)?;
+        }
+        Ok(())
+    }
+
+    /// A persistent rollback reverts `SQLite` postings but not the in-memory
+    /// B-tree. Rehydrate only indexes that were already hot, preserving the
+    /// lazy-load contract for every other indexed column.
+    pub(crate) fn reload_persistent_value_indexes(&self) -> StorageBackendResult<()> {
+        if !self
+            .backend
+            .as_ref()
+            .is_some_and(|backend| backend.persists_btree_indexes())
+        {
+            return Ok(());
+        }
+        for table in self.table_names() {
+            let Some(t) = self.table(&table) else {
+                continue;
+            };
+            let fields: Vec<String> = t.value_indexes.read().keys().cloned().collect();
+            t.value_indexes.write().clear();
+            for field in fields {
+                self.ensure_value_index(&table, &field)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Values of every logical btree field in a complete document. Persistent
+    /// storage ignores fields whose durable posting set has not been built yet;
+    /// the first lookup will backfill that set from the current documents.
+    pub(crate) fn persistent_value_index_document_values(
+        &self,
+        table: &str,
+        document: &BTreeMap<String, Value>,
+    ) -> Option<BTreeMap<String, Value>> {
+        self.backend
+            .as_ref()
+            .is_some_and(|backend| backend.persists_btree_indexes())
+            .then(|| {
+                self.value_indexable_fields(table)
+                    .into_iter()
+                    .map(|field| {
+                        let value = document.get(&field).cloned().unwrap_or(Value::Null);
+                        (field, value)
+                    })
+                    .collect()
+            })
+    }
+
+    /// Read the current values of every logical btree field without
+    /// materialising a large document body. Used by partial updates so durable
+    /// postings stay current even when the in-memory B-tree is still cold.
+    pub(crate) fn persistent_value_indexes_old_values(
+        &self,
+        table: &str,
+        t: &TableState,
+        doc_id: DocId,
+    ) -> Option<BTreeMap<String, Value>> {
+        if !self
+            .backend
+            .as_ref()
+            .is_some_and(|backend| backend.persists_btree_indexes())
+        {
             return None;
         }
-        // Build outside the write lock from one bulk field scan, then
-        // publish. A concurrent builder doing the same work is
-        // harmless: last write wins with identical content.
-        let doc_ids = self.table_doc_ids(table);
-        let values = self.get_document_fields(table, &doc_ids, field);
-        let built = ColumnValueIndex::build(
-            field,
-            doc_ids
-                .iter()
-                .map(|doc_id| (*doc_id, values.get(doc_id).cloned().unwrap_or(Value::Null))),
-        );
-        let mut indexes = t.value_indexes.write();
-        let index = indexes.entry(field.to_string()).or_insert(built);
-        index.scan(predicate)
+        let fields = self.value_indexable_fields(table);
+        if fields.is_empty() {
+            return Some(BTreeMap::new());
+        }
+        let field_refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        let mut rows = t
+            .document_store
+            .read()
+            .get_fields_multi(&[doc_id], &field_refs);
+        let values = rows
+            .remove(&doc_id)
+            .unwrap_or_else(|| vec![Value::Null; fields.len()]);
+        Some(fields.into_iter().zip(values).collect())
+    }
+
+    pub(crate) fn persist_value_indexes_apply_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        new: Option<&BTreeMap<String, Value>>,
+    ) -> Result<(), SQLError> {
+        let Some(backend) = self
+            .backend
+            .as_ref()
+            .filter(|backend| backend.persists_btree_indexes())
+        else {
+            return Ok(());
+        };
+        backend
+            .apply_btree_index_write(table, doc_id, new)
+            .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
+    }
+
+    /// TRUNCATE keeps index definitions installed but removes all postings.
+    pub(crate) fn value_indexes_truncate(
+        &self,
+        table: &str,
+        t: &TableState,
+    ) -> Result<(), SQLError> {
+        if let Some(backend) = self
+            .backend
+            .as_ref()
+            .filter(|backend| backend.persists_btree_indexes())
+        {
+            backend
+                .clear_btree_indexes(table)
+                .map_err(|err| SQLError::Internal(format!("btree truncate failed: {err}")))?;
+        }
+        for index in t.value_indexes.write().values_mut() {
+            index.clear();
+        }
+        Ok(())
     }
 
     /// Incremental maintenance for built indexes. `old` carries the
@@ -257,18 +453,15 @@ impl crate::Engine {
             }
             indexes.keys().cloned().collect()
         };
-        // One point read of the whole document beats per-field JSON
-        // extraction on the write path.
-        let document = t.document_store.read().get(doc_id).unwrap_or_default();
-        Some(
-            fields
-                .into_iter()
-                .map(|field| {
-                    let value = document.get(&field).cloned().unwrap_or(Value::Null);
-                    (field, value)
-                })
-                .collect(),
-        )
+        let field_refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+        let mut rows = t
+            .document_store
+            .read()
+            .get_fields_multi(&[doc_id], &field_refs);
+        let values = rows
+            .remove(&doc_id)
+            .unwrap_or_else(|| vec![Value::Null; fields.len()]);
+        Some(fields.into_iter().zip(values).collect())
     }
 
     /// Drop every built index for the table (TRUNCATE, bulk reloads,

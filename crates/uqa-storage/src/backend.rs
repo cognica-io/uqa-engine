@@ -10,13 +10,16 @@
 //! directly. Alternative persistent backends can implement the same factory
 //! without changing query execution code.
 
+use std::collections::BTreeMap;
+
 use uqa_analysis::Analyzer;
+use uqa_core::{DocId, Value};
 
 use crate::document_store::DocumentStore;
 use crate::inverted_index::InvertedIndex;
 use crate::sqlite::{
-    ManagedConnection, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex,
-    SQLiteVectorIndex,
+    ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
+    SQLiteInvertedIndex, SQLiteVectorIndex,
 };
 use crate::vector_index::VectorIndex;
 
@@ -69,6 +72,51 @@ pub trait PersistentStorageBackend: Send + Sync {
     ) -> Box<dyn VectorIndex>;
 
     fn drop_vector_index_metadata(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    /// Whether this backend maps logical `btree` indexes to durable postings.
+    fn persists_btree_indexes(&self) -> bool {
+        false
+    }
+
+    /// `Some(entries)` is a complete persisted index; `None` means it has not
+    /// been built yet and the engine must backfill it from documents once.
+    fn load_btree_index(
+        &self,
+        _table: &str,
+        _field: &str,
+    ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
+        Ok(None)
+    }
+
+    fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    fn replace_btree_index(
+        &self,
+        _table: &str,
+        _field: &str,
+        _values: &[(DocId, Value)],
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    fn apply_btree_index_write(
+        &self,
+        _table: &str,
+        _doc_id: DocId,
+        _values: Option<&BTreeMap<String, Value>>,
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    fn drop_btree_index(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    fn clear_btree_indexes(&self, _table: &str) -> StorageBackendResult<()> {
         Ok(())
     }
 
@@ -151,6 +199,52 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
 
     fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {
         SQLiteIVFIndex::drop_metadata(&self.conn, table, field)?;
+        Ok(())
+    }
+
+    fn persists_btree_indexes(&self) -> bool {
+        true
+    }
+
+    fn load_btree_index(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
+        Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).load(table, field)?)
+    }
+
+    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).fields(table)?)
+    }
+
+    fn replace_btree_index(
+        &self,
+        table: &str,
+        field: &str,
+        values: &[(DocId, Value)],
+    ) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone()).replace(table, field, values)?;
+        Ok(())
+    }
+
+    fn apply_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: Option<&BTreeMap<String, Value>>,
+    ) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone()).apply_write(table, doc_id, values)?;
+        Ok(())
+    }
+
+    fn drop_btree_index(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone()).drop_index(table, field)?;
+        Ok(())
+    }
+
+    fn clear_btree_indexes(&self, table: &str) -> StorageBackendResult<()> {
+        SQLiteBTreeIndexStore::new(self.conn.clone()).clear_table(table)?;
         Ok(())
     }
 

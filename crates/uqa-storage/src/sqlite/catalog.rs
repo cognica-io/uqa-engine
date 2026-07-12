@@ -29,7 +29,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 pub struct Catalog {
     conn: ManagedConnection,
@@ -324,6 +324,7 @@ impl Catalog {
                 "_ivf_centroids",
                 "_ivf_assignments",
                 "_column_stats",
+                "_btree_indexes",
             ] {
                 delete_table_rows_if_exists(c, table, name)?;
             }
@@ -351,6 +352,7 @@ impl Catalog {
                 "_column_stats",
                 "_table_field_analyzers",
                 "_catalog_indexes",
+                "_btree_indexes",
             ] {
                 update_table_name_rows_if_exists(c, table, from, to)?;
             }
@@ -376,6 +378,7 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_btree_indexes",
             ] {
                 c.execute(
                     &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
@@ -420,6 +423,7 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_btree_indexes",
             ] {
                 rename_field_rows_or_keep_existing(c, table, "field", table_name, from, to)?;
             }
@@ -1825,6 +1829,34 @@ const MIGRATIONS: &[(u32, &str)] = &[
     ALTER TABLE _ivf_assignments_v10 RENAME TO _ivf_assignments;
     CREATE INDEX IF NOT EXISTS _ivf_assignments_centroid_idx
         ON _ivf_assignments (table_name, field, centroid_id, doc_id, vector_ordinal);
+    ",
+    ),
+    // Map logical btree indexes to compact durable postings. The engine
+    // hydrates its in-memory B-tree from these rows on reopen instead of
+    // reparsing every full document on the first indexed predicate.
+    (
+        11,
+        r"
+    CREATE TABLE IF NOT EXISTS _btree_indexes (
+        table_name TEXT NOT NULL,
+        field      TEXT NOT NULL,
+        PRIMARY KEY (table_name, field)
+    );
+
+    CREATE TABLE IF NOT EXISTS _btree_index_entries (
+        table_name TEXT NOT NULL,
+        field      TEXT NOT NULL,
+        doc_id     INTEGER NOT NULL,
+        value_json TEXT NOT NULL,
+        PRIMARY KEY (table_name, field, doc_id),
+        FOREIGN KEY (table_name, field)
+            REFERENCES _btree_indexes (table_name, field)
+            ON UPDATE CASCADE ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS _btree_index_value_idx
+        ON _btree_index_entries (table_name, field, value_json, doc_id);
+    CREATE INDEX IF NOT EXISTS _btree_index_doc_idx
+        ON _btree_index_entries (table_name, doc_id);
     ",
     ),
 ];

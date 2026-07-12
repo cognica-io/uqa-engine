@@ -499,20 +499,30 @@ impl Engine {
     /// the document store is sparse; rows missing the column read back as
     /// `Value::Null`.
     pub fn register_column(&self, table: &str, column: uqa_sql::ast::ColumnDef) {
+        let _ = self.try_register_column(table, column);
+    }
+
+    pub(crate) fn try_register_column(
+        &self,
+        table: &str,
+        column: uqa_sql::ast::ColumnDef,
+    ) -> StorageBackendResult<()> {
         let Some(table_name) = self.resolve_table_name(table) else {
-            return;
+            return Ok(());
         };
         let Some(t) = self.table(table) else {
-            return;
+            return Ok(());
         };
         if t.columns.read().iter().any(|c| c.name == column.name) {
-            return;
+            return Ok(());
         }
         t.columns.write().push(column);
         self.mark_column_stats_dirty(&table_name, &t);
         if self.is_persistent() {
-            self.save_table_schema(&table_name, &t);
+            self.try_save_table_schema(&table_name, &t)?;
         }
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
     }
 
     pub fn drop_column(&self, table: &str, column: &str) {
@@ -553,7 +563,7 @@ impl Engine {
                 continue;
             };
             if doc.remove(column).is_some() {
-                self.rewrite_document(&table_name, doc_id, doc)
+                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
                     .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
         }
@@ -564,6 +574,7 @@ impl Engine {
             self.try_save_table_schema(&table_name, &t)?;
         }
         self.mark_column_stats_dirty(&table_name, &t);
+        self.refresh_value_indexes_for_table(&table_name)?;
         Ok(true)
     }
 
@@ -662,7 +673,7 @@ impl Engine {
             };
             if let Some(value) = doc.remove(from) {
                 doc.insert(to.to_string(), value);
-                self.rewrite_document(&table_name, doc_id, doc)
+                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
                     .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
         }
@@ -699,6 +710,7 @@ impl Engine {
             self.try_save_table_schema(&table_name, &t)?;
         }
         self.mark_column_stats_dirty(&table_name, &t);
+        self.refresh_value_indexes_for_table(&table_name)?;
         Ok(true)
     }
 
@@ -750,6 +762,7 @@ impl Engine {
             self.try_save_table_schema(&to, &state)?;
         }
         self.mark_column_stats_dirty(&to, &state);
+        self.refresh_value_indexes_for_table(&to)?;
         Ok(true)
     }
 
@@ -1020,13 +1033,15 @@ impl Engine {
         // index surgery when it fails, and a failed re-add must abort
         // the statement.
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store
-            .write()
+        let mut store = t.document_store.write();
+        store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
+        self.persist_value_indexes_apply_write(table, doc_id, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
+        drop(store);
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
@@ -1082,13 +1097,23 @@ impl Engine {
         }
 
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        if !t
-            .document_store
-            .write()
+        let persistent_old = self.persistent_value_indexes_old_values(table, &t, doc_id);
+        let mut store = t.document_store.write();
+        if !store
             .patch_fields(doc_id, updates)
             .map_err(|err| document_store_write_error(&err))?
         {
             return Ok(false);
+        }
+        if let Some(old) = persistent_old.as_ref() {
+            let new: BTreeMap<String, Value> = old
+                .iter()
+                .map(|(field, old_value)| {
+                    let value = updates.get(field).cloned().unwrap_or(old_value.clone());
+                    (field.clone(), value)
+                })
+                .collect();
+            self.persist_value_indexes_apply_write(table, doc_id, Some(&new))?;
         }
         if let Some(old) = old_indexed.as_ref() {
             // New values for the indexed fields: the update wins,
@@ -1102,6 +1127,7 @@ impl Engine {
                 .collect();
             Self::value_indexes_apply_write(&t, doc_id, Some(old), Some(&new));
         }
+        drop(store);
 
         if touches_fts {
             let mut index = t.inverted_index.write();
@@ -1151,18 +1177,74 @@ impl Engine {
             }
         }
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store
-            .write()
+        let mut store = t.document_store.write();
+        store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
+        self.persist_value_indexes_apply_write(&table_name, doc_id, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
+        drop(store);
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);
         }
         self.add_document_with_vector_values(&table_name, doc_id, document, vectors)
+    }
+
+    /// Rewrite a row while a column is being dropped or renamed. The
+    /// operation changes field names, not the indexed values: catalog
+    /// lifecycle code drops or renames the durable postings afterward.
+    /// Maintaining them against the half-updated schema here would replace a
+    /// renamed field with NULL before its metadata has moved.
+    fn rewrite_document_for_schema_change(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        let Some(table_name) = self.resolve_table_name(table) else {
+            return Ok(());
+        };
+        let Some(t) = self.table(table) else {
+            return Ok(());
+        };
+        let vector_fields: Vec<FieldName> = t.vector_indexes.read().keys().cloned().collect();
+        let mut vectors: BTreeMap<FieldName, Vec<Vec<f32>>> = BTreeMap::new();
+        for field in vector_fields {
+            let Some(value) = document.get(&field) else {
+                continue;
+            };
+            if let Some(values) = Self::field_index_vectors(&t, &field, value) {
+                vectors.insert(field, values);
+            }
+        }
+        let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
+        for field in t.fts_fields() {
+            if let Some(Value::Str(value)) = document.get(&field) {
+                text_fields.insert(field, value.clone());
+            }
+        }
+        t.document_store
+            .write()
+            .put(doc_id, document)
+            .map_err(|err| document_store_write_error(&err))?;
+        {
+            let mut index = t.inverted_index.write();
+            index.remove_document(doc_id);
+            if !text_fields.is_empty() {
+                index.add_document(doc_id, text_fields);
+            }
+        }
+        for (field, index) in t.vector_indexes.write().iter_mut() {
+            index.delete(doc_id);
+            if let Some(values) = vectors.remove(field) {
+                index.add_many(doc_id, values);
+            }
+        }
+        self.mark_column_stats_dirty(&table_name, &t);
+        Ok(())
     }
 
     pub fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
@@ -1173,13 +1255,15 @@ impl Engine {
             return Ok(());
         };
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        t.document_store
-            .write()
+        let mut store = t.document_store.write();
+        store
             .delete(doc_id)
             .map_err(|err| document_store_write_error(&err))?;
+        self.persist_value_indexes_apply_write(&table_name, doc_id, None)?;
         if let Some(old) = old_indexed.as_ref() {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
+        drop(store);
         t.inverted_index.write().remove_document(doc_id);
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut().delete(doc_id);

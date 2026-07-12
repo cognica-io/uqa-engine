@@ -53,6 +53,9 @@ impl Engine {
                 parameters_json: parameters_json.clone(),
             },
         );
+        if index_type.eq_ignore_ascii_case("btree") {
+            self.refresh_value_indexes_for_table(&table)?;
+        }
         Ok(())
     }
 
@@ -72,10 +75,8 @@ impl Engine {
             catalog.drop_catalog_index(name)?;
         }
         let removed = self.catalog_indexes.write().remove(name);
-        // Built value indexes for the table are dropped so the lazy
-        // rebuild re-derives them from the updated index policy.
-        if let Some(t) = self.table(&existing_row.table_name) {
-            Self::value_indexes_clear(&t);
+        if existing_row.index_type.eq_ignore_ascii_case("btree") {
+            self.refresh_value_indexes_for_table(&existing_row.table_name)?;
         }
         Ok(removed)
     }

@@ -14,6 +14,30 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::SQLResult;
 
+fn persisted_index_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM _btree_index_entries
+             WHERE table_name = ?1 AND field = ?2",
+            [table, field],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn persisted_index_definition_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM _btree_indexes
+             WHERE table_name = ?1 AND field = ?2",
+            [table, field],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
 fn ids(result: &SQLResult) -> Vec<i64> {
     result
         .rows
@@ -195,9 +219,38 @@ fn persistent_reopen_keeps_index_semantics() {
             .sql("UPDATE shadow SET qty = 999 WHERE id = 250", &[])
             .unwrap();
     }
+
+    // PRIMARY KEY plus both explicit btree indexes are complete durable
+    // posting sets. The scan-only shadow table has no durable value index.
+    assert_eq!(persisted_index_count(&path, "indexed", "id"), 500);
+    assert_eq!(persisted_index_count(&path, "indexed", "qty"), 500);
+    assert_eq!(persisted_index_count(&path, "indexed", "owner"), 500);
+    assert_eq!(persisted_index_definition_count(&path, "shadow", "id"), 0);
+
+    // Reopen and indexed reads must only hydrate the compact postings. A
+    // rebuild would insert all 1,500 rows again and fire this audit trigger.
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE _btree_rebuild_audit (writes INTEGER NOT NULL);
+             CREATE TRIGGER _btree_rebuild_audit_insert
+             AFTER INSERT ON _btree_index_entries
+             BEGIN
+                 INSERT INTO _btree_rebuild_audit (writes) VALUES (1);
+             END;",
+        )
+        .unwrap();
+    }
     let engine = Engine::open(&path).unwrap();
     assert_same(&engine, "qty = 999");
     assert_all_predicates(&engine);
+    let rebuild_writes: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM _btree_rebuild_audit", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rebuild_writes, 0, "reopen rebuilt durable btree postings");
 
     // Writes after reopen keep the rebuilt indexes in sync.
     for table in ["indexed", "shadow"] {
@@ -207,4 +260,189 @@ fn persistent_reopen_keeps_index_semantics() {
     }
     assert_same(&engine, "qty = 25");
     assert_all_predicates(&engine);
+}
+
+#[test]
+fn persistent_btree_tracks_rollback_savepoint_and_truncate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("value-index-transactions.db");
+    let engine = Engine::open(&path).unwrap();
+    setup(&engine);
+
+    engine.begin().unwrap();
+    engine
+        .sql("UPDATE indexed SET qty = 999 WHERE id = 250", &[])
+        .unwrap();
+    engine
+        .sql("UPDATE shadow SET qty = 999 WHERE id = 250", &[])
+        .unwrap();
+    assert_same(&engine, "qty = 999");
+    engine.rollback().unwrap();
+    assert_same(&engine, "qty = 999");
+    assert!(ids(&engine
+        .sql("SELECT id FROM indexed WHERE qty = 999", &[])
+        .unwrap())
+    .is_empty());
+
+    engine.begin().unwrap();
+    engine.savepoint("before_update").unwrap();
+    engine
+        .sql("UPDATE indexed SET owner = 'rolled-back' WHERE id = 1", &[])
+        .unwrap();
+    engine
+        .sql("UPDATE shadow SET owner = 'rolled-back' WHERE id = 1", &[])
+        .unwrap();
+    assert_same(&engine, "owner = 'rolled-back'");
+    engine.rollback_to_savepoint("before_update").unwrap();
+    assert_same(&engine, "owner = 'rolled-back'");
+    engine.commit().unwrap();
+
+    engine.sql("TRUNCATE indexed", &[]).unwrap();
+    assert_eq!(persisted_index_definition_count(&path, "indexed", "qty"), 1);
+    assert_eq!(persisted_index_count(&path, "indexed", "id"), 0);
+    assert_eq!(persisted_index_count(&path, "indexed", "qty"), 0);
+    assert_eq!(persisted_index_count(&path, "indexed", "owner"), 0);
+}
+
+#[test]
+fn persistent_btree_maintains_an_index_while_its_memory_copy_is_cold() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("value-index-cold-write.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        setup(&engine);
+    }
+
+    // A reopen starts with lazy in-memory indexes. Updating by primary key
+    // heats `id`, but `owner` remains cold; its durable posting still has to
+    // change before this engine is dropped.
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "UPDATE indexed SET owner = 'after-reopen' WHERE id = 1",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql("UPDATE shadow SET owner = 'after-reopen' WHERE id = 1", &[])
+            .unwrap();
+    }
+
+    let engine = Engine::open(&path).unwrap();
+    assert_same(&engine, "owner = 'after-reopen'");
+    assert_same(&engine, "owner = 'owner1'");
+}
+
+#[test]
+fn persistent_btree_metadata_follows_ddl_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("value-index-ddl.db");
+    let engine = Engine::open(&path).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, public_id TEXT, body TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX messages_public_id_idx ON messages USING btree (public_id)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO messages (id, public_id, body) VALUES
+             (1, 'm1', 'one'), (2, 'm2', 'two')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(persisted_index_count(&path, "messages", "public_id"), 2);
+
+    engine
+        .sql("ALTER TABLE messages RENAME TO archived_messages", &[])
+        .unwrap();
+    assert_eq!(
+        persisted_index_definition_count(&path, "messages", "public_id"),
+        0
+    );
+    assert_eq!(
+        persisted_index_count(&path, "archived_messages", "public_id"),
+        2
+    );
+
+    engine
+        .sql(
+            "ALTER TABLE archived_messages RENAME COLUMN public_id TO message_id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        persisted_index_definition_count(&path, "archived_messages", "public_id"),
+        0
+    );
+    assert_eq!(
+        persisted_index_count(&path, "archived_messages", "message_id"),
+        2
+    );
+    let result = engine
+        .sql(
+            "SELECT id FROM archived_messages WHERE message_id IN ('m1', 'm2') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(ids(&result), vec![1, 2]);
+
+    engine
+        .sql("DROP INDEX messages_public_id_idx", &[])
+        .unwrap();
+    assert_eq!(
+        persisted_index_definition_count(&path, "archived_messages", "message_id"),
+        0
+    );
+    assert_eq!(persisted_index_count(&path, "archived_messages", "id"), 2);
+
+    engine.sql("DROP TABLE archived_messages", &[]).unwrap();
+    let remaining: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM _btree_indexes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[test]
+fn schema_v10_database_backfills_btree_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("value-index-upgrade.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        setup(&engine);
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "DROP TABLE _btree_index_entries;
+             DROP TABLE _btree_indexes;
+             UPDATE _metadata SET value = '10' WHERE key = 'schema_version';",
+        )
+        .unwrap();
+    }
+
+    let engine = Engine::open(&path).unwrap();
+    assert_same(&engine, "owner = 'owner3'");
+    assert_same(&engine, "qty IN (1, 2, 3)");
+    assert_same(&engine, "id BETWEEN 1 AND 500");
+    assert_eq!(persisted_index_count(&path, "indexed", "id"), 500);
+    assert_eq!(persisted_index_count(&path, "indexed", "qty"), 500);
+    assert_eq!(persisted_index_count(&path, "indexed", "owner"), 500);
+    let version: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM _metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 11);
 }

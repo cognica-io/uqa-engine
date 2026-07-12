@@ -107,13 +107,19 @@ impl Engine {
                 .map(|k| (k.clone(), document.get(k).cloned().unwrap_or(Value::Null)))
                 .collect()
         });
-        t.document_store
-            .write()
+        let persistent_indexed =
+            self.persistent_value_index_document_values(&table_name, &document);
+        let mut store = t.document_store.write();
+        store
             .put(doc_id, document)
             .map_err(|err| crate::engine_table_storage::document_store_write_error(&err))?;
+        if let Some(new) = persistent_indexed.as_ref() {
+            self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new))?;
+        }
         if let (Some(old), Some(new)) = (old_indexed.as_ref(), new_indexed.as_ref()) {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), Some(new));
         }
+        drop(store);
         self.mark_column_stats_dirty(&table_name, &t);
         // Keep the auto-id watermark monotonic over manual inserts as well.
         let mut nx = t.next_id.lock();

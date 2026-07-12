@@ -7,6 +7,7 @@
 //! SQLite-backed persistence: connection, catalog, document store,
 //! inverted index, vector index.
 
+pub mod btree_index;
 pub mod catalog;
 mod catalog_lifecycle;
 pub mod compressed_vfs;
@@ -20,6 +21,7 @@ pub use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     TableSchema, VectorFieldSchema,
 };
+pub use btree_index::SQLiteBTreeIndexStore;
 pub use catalog::{Catalog, CURRENT_SCHEMA_VERSION};
 pub use compressed_vfs::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 pub use connection::{ManagedConnection, Result, SQLiteError};

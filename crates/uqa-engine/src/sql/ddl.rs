@@ -264,7 +264,9 @@ pub(super) fn run_alter_table(
             // constraints satisfiable for non-empty tables.
             let default_expr = column.default.clone();
             let column_not_null = column.not_null;
-            engine.register_column(&stmt.table, column);
+            engine
+                .try_register_column(&stmt.table, column)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
             backfill_added_column(
                 engine,
                 &stmt.table,
@@ -897,12 +899,17 @@ pub(super) fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLRes
         engine.create_vector_field(&c.name, field, dim);
     }
     for col in &c.columns {
-        engine.register_column(&c.name, col.clone());
+        engine
+            .try_register_column(&c.name, col.clone())
+            .map_err(|e| ddl_storage_error("CREATE TABLE column", e))?;
     }
     engine.register_table_constraints(&c.name, c.checks.clone(), c.foreign_keys.clone());
     engine
         .try_persist_table_schema(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;
+    engine
+        .refresh_value_indexes_for_table(&c.name)
+        .map_err(|e| ddl_storage_error("CREATE TABLE btree indexes", e))?;
     let _ = column_names(&c.columns);
     Ok(SQLResult::empty())
 }
