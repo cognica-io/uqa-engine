@@ -1268,6 +1268,11 @@ pub fn bind_select(stmt: &SelectStmt, r: &mut dyn VariableResolver) -> Result<Se
             Some(op) => Some(Box::new(crate::ast::SetOp {
                 kind: op.kind,
                 all: op.all,
+                left: op
+                    .left
+                    .as_ref()
+                    .map(|left| bind_select(left, r).map(Box::new))
+                    .transpose()?,
                 right: bind_select(&op.right, r)?,
                 combined_order_by: bind_order_by(&op.combined_order_by, r)?,
                 combined_limit: bind_opt_expr(op.combined_limit.as_ref(), r)?,

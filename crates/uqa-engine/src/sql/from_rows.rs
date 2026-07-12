@@ -496,6 +496,14 @@ fn push_output_filter_into_select_inner(
             filter,
             output_columns,
         )?;
+        if let Some(left) = set_op.left.take() {
+            let left =
+                push_output_filter_into_select_inner(engine, *left, qual, filter, output_columns)?;
+            set_op.left = Some(Box::new(left));
+            set_op.right = right;
+            stmt.set_op = Some(set_op);
+            return Some(stmt);
+        }
         let lhs = push_output_filter_into_select_inner(engine, stmt, qual, filter, output_columns)?;
         let mut out = lhs;
         set_op.right = right;
@@ -1711,6 +1719,9 @@ fn collect_select_cte_names(stmt: &SelectStmt, names: &mut BTreeSet<String>) {
         collect_select_cte_names(&cte.query, names);
     }
     if let Some(set_op) = &stmt.set_op {
+        if let Some(left) = set_op.left.as_deref() {
+            collect_select_cte_names(left, names);
+        }
         collect_select_cte_names(&set_op.right, names);
     }
 }

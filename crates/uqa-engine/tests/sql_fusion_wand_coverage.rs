@@ -218,6 +218,66 @@ fn test_log_odds_fusion_preserves_parameter_projection_inside_union_branch() {
 }
 
 #[test]
+fn test_log_odds_fusion_preserves_every_multi_union_batch_branch() {
+    let result = hybrid_engine()
+        .sql(
+            "SELECT 0 AS query_index, id, _score FROM (\
+               SELECT id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, $1), \
+                   knn_match(embedding, $2, 3)\
+               ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
+             ) q0 \
+             UNION ALL \
+             SELECT 1 AS query_index, id, _score FROM (\
+               SELECT id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, $3), \
+                   knn_match(embedding, $4, 3)\
+               ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
+             ) q1 \
+             UNION ALL \
+             SELECT 2 AS query_index, id, _score FROM (\
+               SELECT id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, $5), \
+                   knn_match(embedding, $6, 3)\
+               ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
+             ) q2 \
+             UNION ALL \
+             SELECT 3 AS query_index, id, _score FROM (\
+               SELECT id, _score FROM messages WHERE \
+               fuse_log_odds(\
+                   bayesian_match(content, $7), \
+                   knn_match(embedding, $8, 3)\
+               ) AND kind = 'chat' ORDER BY _score DESC LIMIT 1\
+             ) q3",
+            &[
+                SQLParam::scalar(Value::Str("learning".into())),
+                SQLParam::vector(vec![0.9, 0.1]),
+                SQLParam::scalar(Value::Str("indexing".into())),
+                SQLParam::vector(vec![0.1, 0.9]),
+                SQLParam::scalar(Value::Str("learning".into())),
+                SQLParam::vector(vec![0.9, 0.1]),
+                SQLParam::scalar(Value::Str("indexing".into())),
+                SQLParam::vector(vec![0.1, 0.9]),
+            ],
+        )
+        .unwrap();
+
+    let mut query_indices = result
+        .rows
+        .iter()
+        .map(|row| match row.get("query_index") {
+            Some(Value::Int(value)) => *value,
+            other => panic!("unexpected query_index: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    query_indices.sort_unstable();
+    assert_eq!(query_indices, vec![0, 1, 2, 3]);
+}
+
+#[test]
 fn test_log_odds_fusion_inside_join_filter() {
     let engine = setup_log_odds_join_filter_engine();
 

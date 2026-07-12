@@ -465,8 +465,9 @@ pub struct SelectStmt {
     pub offset: Option<Expr>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
-    /// Optional set operation: `Some` for UNION / INTERSECT / EXCEPT,
-    /// with the right-hand operand as a sub-select.
+    /// Optional set operation: `Some` for UNION / INTERSECT / EXCEPT.
+    /// Parsed statements carry both operands in [`SetOp`]; `left` remains
+    /// optional only for backward-compatible deserialization.
     pub set_op: Option<Box<SetOp>>,
     /// `SELECT DISTINCT` -- de-duplicate the final result rows. Set by
     /// the compiler whenever the parsed `distinct_clause` is non-empty.
@@ -488,6 +489,11 @@ pub struct CTE {
 pub struct SetOp {
     pub kind: SetOpKind,
     pub all: bool,
+    /// Explicit left-hand subtree. Parsed set operations are left-associative,
+    /// so a chain such as `a UNION b UNION c` carries `(a UNION b)` here
+    /// instead of flattening it back to only `a`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<Box<SelectStmt>>,
     pub right: SelectStmt,
     /// `ORDER BY` applied to the combined `lhs <op> rhs` result.
     /// Distinct from the LHS / RHS branches' own `ORDER BY`.

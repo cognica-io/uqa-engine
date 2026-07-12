@@ -304,11 +304,16 @@ pub(super) fn execute_select(
     // `set_op.combined_*`. The LHS branch executes with its own
     // clauses applied; the merged result then takes the combined
     // clauses below.
-    let mut lhs = run_query_block(engine, stmt, params, ctes)?;
-    lhs = apply_select_distinct(engine, stmt, lhs, params)?;
-
     let Some(set_op) = stmt.set_op.as_ref() else {
+        let lhs = run_query_block(engine, stmt, params, ctes)?;
+        let lhs = apply_select_distinct(engine, stmt, lhs, params)?;
         return Ok(lhs);
+    };
+    let lhs = if let Some(left) = set_op.left.as_deref() {
+        execute_select(engine, left, params, ctes)?
+    } else {
+        let lhs = run_query_block(engine, stmt, params, ctes)?;
+        apply_select_distinct(engine, stmt, lhs, params)?
     };
     let rhs = execute_select(engine, &set_op.right, params, ctes)?;
     let mut combined = match (set_op.kind, set_op.all) {
@@ -696,6 +701,10 @@ fn select_references_outer(stmt: &SelectStmt) -> bool {
             .distinct_on
             .iter()
             .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
+        || stmt.set_op.as_ref().is_some_and(|set_op| {
+            set_op.left.as_deref().is_some_and(select_references_outer)
+                || select_references_outer(&set_op.right)
+        })
 }
 
 fn correlated_subquery_cache_key(stmt: &SelectStmt, outer_row: &ResultRow) -> Option<String> {
@@ -753,6 +762,12 @@ fn select_outer_references(stmt: &SelectStmt) -> Vec<(String, String)> {
     }
     for expr in &stmt.distinct_on {
         collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
+    }
+    if let Some(set_op) = stmt.set_op.as_ref() {
+        if let Some(left) = set_op.left.as_deref() {
+            refs.extend(select_outer_references(left));
+        }
+        refs.extend(select_outer_references(&set_op.right));
     }
     refs.into_iter().collect()
 }
@@ -1637,6 +1652,25 @@ pub(super) fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
             .as_ref()
             .is_some_and(expr_contains_volatile_function)
         || stmt.distinct_on.iter().any(expr_contains_volatile_function)
+        || stmt.set_op.as_ref().is_some_and(|set_op| {
+            set_op
+                .left
+                .as_deref()
+                .is_some_and(select_contains_volatile_function)
+                || select_contains_volatile_function(&set_op.right)
+                || set_op
+                    .combined_order_by
+                    .iter()
+                    .any(|order| expr_contains_volatile_function(&order.expr))
+                || set_op
+                    .combined_limit
+                    .as_ref()
+                    .is_some_and(expr_contains_volatile_function)
+                || set_op
+                    .combined_offset
+                    .as_ref()
+                    .is_some_and(expr_contains_volatile_function)
+        })
 }
 
 fn expr_contains_volatile_function(expr: &Expr) -> bool {
@@ -3203,6 +3237,26 @@ fn collect_select_cte_references(
             collect_select_cte_references(&cte.query, names, stats, inside_subquery, true);
         }
     }
+    if let Some(set_op) = stmt.set_op.as_ref().filter(|set_op| set_op.left.is_some()) {
+        collect_select_cte_references(
+            set_op.left.as_deref().unwrap(),
+            names,
+            stats,
+            inside_subquery,
+            true,
+        );
+        collect_select_cte_references(&set_op.right, names, stats, inside_subquery, true);
+        for order in &set_op.combined_order_by {
+            collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
+        }
+        if let Some(limit) = set_op.combined_limit.as_ref() {
+            collect_expr_cte_references(limit, names, stats, inside_subquery);
+        }
+        if let Some(offset) = set_op.combined_offset.as_ref() {
+            collect_expr_cte_references(offset, names, stats, inside_subquery);
+        }
+        return;
+    }
     if let Some(from) = stmt.from.as_ref() {
         collect_from_cte_references(from, names, stats, inside_subquery);
     }
@@ -3236,6 +3290,9 @@ fn collect_select_cte_references(
         collect_expr_cte_references(expr, names, stats, inside_subquery);
     }
     if let Some(set_op) = stmt.set_op.as_ref() {
+        if let Some(left) = set_op.left.as_deref() {
+            collect_select_cte_references(left, names, stats, inside_subquery, true);
+        }
         collect_select_cte_references(&set_op.right, names, stats, inside_subquery, true);
         for order in &set_op.combined_order_by {
             collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
@@ -3506,9 +3563,15 @@ fn materialize_recursive_cte(
         ));
     }
 
-    // Anchor: the LHS - the same SelectStmt with set_op stripped.
-    let mut anchor_stmt = cte.query.as_ref().clone();
-    anchor_stmt.set_op = None;
+    // Anchor: the explicit LHS subtree. Older serialized statements may not
+    // carry it, so retain the historical implicit-LHS fallback.
+    let mut anchor_stmt = if let Some(left) = set_op.left.as_deref() {
+        left.clone()
+    } else {
+        let mut anchor = cte.query.as_ref().clone();
+        anchor.set_op = None;
+        anchor
+    };
     anchor_stmt.with.clear();
     let source_anchor_columns = projection_columns(&anchor_stmt.projections);
     let anchor_columns = if cte.columns.is_empty() {

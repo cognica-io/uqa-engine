@@ -197,6 +197,51 @@ fn union_without_all_removes_non_adjacent_duplicates() {
 }
 
 #[test]
+fn multi_branch_union_all_preserves_every_branch() {
+    let eng = engine();
+    let result = eng
+        .sql(
+            "SELECT 1 AS branch \
+             UNION ALL SELECT 2 AS branch \
+             UNION ALL SELECT 3 AS branch \
+             UNION ALL SELECT 4 AS branch",
+            &[],
+        )
+        .unwrap();
+    let branches = result
+        .rows
+        .iter()
+        .map(|row| match row.get("branch") {
+            Some(Value::Int(value)) => *value,
+            other => panic!("unexpected branch: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(branches, vec![1, 2, 3, 4]);
+}
+
+#[test]
+fn mixed_left_associative_set_operations_preserve_the_lhs_subtree() {
+    let eng = engine();
+    let result = eng
+        .sql(
+            "SELECT 1 AS value \
+             EXCEPT SELECT 1 AS value \
+             UNION ALL SELECT 2 AS value",
+            &[],
+        )
+        .unwrap();
+    let values = result
+        .rows
+        .iter()
+        .map(|row| match row.get("value") {
+            Some(Value::Int(value)) => *value,
+            other => panic!("unexpected value: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(values, vec![2]);
+}
+
+#[test]
 fn limit_inside_cte_is_honoured() {
     let eng = engine();
     let r = ids(

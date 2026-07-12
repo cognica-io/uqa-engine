@@ -677,8 +677,9 @@ pub(super) fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<Se
     //     (those land on `set_op.combined_*`).
     //   * empty `targetList` / `fromClause`; the LHS branch (with its
     //     own clauses, including its own optional `ORDER BY` / `LIMIT`)
-    //     lives in `stmt.larg`. We pull the LHS into the parent so the
-    //     executor sees `SelectStmt { ..lhs.., set_op: Some(..) }`.
+    //     lives in `stmt.larg`. We preserve that full subtree on `SetOp::left`
+    //     and mirror its basic clauses on the parent for output-column
+    //     discovery and backward compatibility with serialized AST users.
     let (projections, from, r#where, group_by, order_by, limit, offset) =
         if set_op.is_some() && stmt.larg.is_some() {
             // Promote the outer (combined) clauses onto the SetOp and
@@ -689,6 +690,9 @@ pub(super) fn compile_select(stmt: &pg_query::protobuf::SelectStmt) -> Result<Se
                 so.combined_offset = offset;
             }
             let lhs = compile_select(stmt.larg.as_deref().unwrap())?;
+            if let Some(so) = set_op.as_mut() {
+                so.left = Some(Box::new(lhs.clone()));
+            }
             (
                 lhs.projections,
                 lhs.from,
@@ -954,6 +958,7 @@ fn compile_set_op(stmt: &pg_query::protobuf::SelectStmt) -> Result<Option<Box<Se
     Ok(Some(Box::new(SetOp {
         kind,
         all: stmt.all,
+        left: None,
         right,
         // The outer SelectStmt's ORDER BY / LIMIT / OFFSET land here
         // when `compile_select` finishes - the caller fills these in
