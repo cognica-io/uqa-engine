@@ -10,6 +10,17 @@ use super::{
 };
 use crate::CatalogIndexRow;
 
+/// Answer of the value-index conflict probe in [`Engine::find_conflict`].
+enum IndexConflictProbe {
+    /// No conflict column has a usable value index; fall back to the
+    /// evaluated document scan.
+    Unanswerable,
+    /// The index answered: no existing row matches the conflict target.
+    NoConflict,
+    /// The index answered: this existing row matches the conflict target.
+    Conflict(DocId),
+}
+
 impl Engine {
     fn catalog_index_columns(row: &CatalogIndexRow) -> Vec<String> {
         serde_json::from_str(&row.columns_json).unwrap_or_default()
@@ -853,10 +864,17 @@ impl Engine {
     /// given values. Returns the existing doc id when a conflict
     /// exists, `None` when the row would be a fresh insert. Mirrors
     /// `PostgreSQL`'s `ON CONFLICT (col, ...)` lookup; the conflict
-    /// columns map to the unique-constraint target. The lookup scans
-    /// document ids and compares only the requested fields, so it does
-    /// not materialize whole rows for primary key, unique, or foreign
-    /// key validation.
+    /// columns map to the unique-constraint target.
+    ///
+    /// Lookup order: the integer-primary-key slot mapping, then a
+    /// value-index equality probe on the first index-answerable
+    /// conflict column (conflict targets are PRIMARY KEY / UNIQUE
+    /// columns, exactly the columns [`Self::value_indexable_fields`]
+    /// admits), and only then the evaluated document scan. The index
+    /// probe is what keeps per-row UNIQUE and FOREIGN KEY validation
+    /// `O(log n)` during bulk inserts -- previously every insert into a
+    /// table with a non-integer unique column re-scanned all documents,
+    /// making an n-row load `O(n^2)`.
     pub fn find_conflict(
         &self,
         table: &str,
@@ -881,11 +899,60 @@ impl Engine {
                     .then_some(doc_id);
             }
         }
+        match self.find_conflict_via_value_index(&t, table, conflict_columns, values) {
+            IndexConflictProbe::Conflict(doc_id) => return Some(doc_id),
+            IndexConflictProbe::NoConflict => return None,
+            IndexConflictProbe::Unanswerable => {}
+        }
         let found = t
             .document_store
             .read()
             .find_doc_id_by_fields(conflict_columns, values);
         found
+    }
+
+    /// Index-backed conflict lookup. `Unanswerable` means no conflict
+    /// column could be answered by a value index (unindexed columns, or
+    /// the temporal/NaN semantics guard refused) and the caller must
+    /// fall back to the evaluated scan. Otherwise the answer is
+    /// authoritative: candidates narrow through the pivot column's
+    /// posting list in `O(log n + k)` and the remaining columns verify
+    /// against stored fields on those candidates only, with the same
+    /// `Value` equality the evaluated scan uses. An empty posting list
+    /// is an authoritative `NoConflict`, which is the common case on
+    /// insert and must not degrade into a scan.
+    fn find_conflict_via_value_index(
+        &self,
+        t: &TableState,
+        table: &str,
+        conflict_columns: &[String],
+        values: &[Value],
+    ) -> IndexConflictProbe {
+        for (pivot, (column, value)) in conflict_columns.iter().zip(values.iter()).enumerate() {
+            let Some(candidates) =
+                self.value_index_scan(table, column, &uqa_core::Predicate::Equals(value.clone()))
+            else {
+                continue;
+            };
+            let store = t.document_store.read();
+            let found = candidates
+                .entries()
+                .iter()
+                .map(|entry| entry.doc_id)
+                .find(|doc_id| {
+                    conflict_columns.iter().zip(values.iter()).enumerate().all(
+                        |(index, (col, val))| {
+                            index == pivot
+                                || store.get_field(*doc_id, col).unwrap_or(Value::Null) == *val
+                        },
+                    )
+                });
+            return match found {
+                Some(doc_id) => IndexConflictProbe::Conflict(doc_id),
+                None => IndexConflictProbe::NoConflict,
+            };
+        }
+        IndexConflictProbe::Unanswerable
     }
 
     fn doc_id_for_primary_key_conflict(
