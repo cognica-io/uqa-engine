@@ -5,9 +5,9 @@
 //
 
 //! Multi-field fusion monotonicity: matching an additional field must
-//! never rank a document below one that matched fewer fields. With the
-//! old 0.5 neutral padding, calibrated matched posteriors on small
-//! corpora sat below the pad and inverted the field weights.
+//! never rank a document below one that matched fewer fields. An absent
+//! field contributes zero while every matching field contributes a
+//! positive softplus-gated value.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

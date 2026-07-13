@@ -5,17 +5,15 @@
 //
 
 //! BEIR-style relevance gate: score a small graded-judgment corpus
-//! through the engine's Bayesian BM25 path and assert NDCG@5 stays
-//! above an empirical floor. This is the smallest possible IR-quality
-//! tripwire — full BEIR datasets land in a follow-up benchmark, but
-//! this one will catch any regression that flips the ranking on
-//! controlled inputs.
+//! through both BM25 and the query-level Bayesian calibration path.
+//! The Bayesian transform must preserve the BM25 ranking and NDCG@5,
+//! while the shared ranking stays above an empirical quality floor.
 
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoringMode};
-use uqa_scoring::{ndcg_at_k, BayesianBM25Params};
+use uqa_scoring::{ndcg_at_k, BM25Params, BayesianBM25Params};
 use uqa_storage::document_store::Document;
 
 #[derive(Clone)]
@@ -47,7 +45,7 @@ fn corpus() -> Vec<CorpusDoc> {
         CorpusDoc {
             id: 3,
             title: "python web frameworks",
-            body: "flask and django and python tooling",
+            body: "flask and django and python web tooling",
         },
         CorpusDoc {
             id: 4,
@@ -106,7 +104,7 @@ fn engine_with_corpus() -> Engine {
 
 // Empirical floor: anchored to the current Bayesian BM25 baseline
 // on this synthetic corpus. The intent is a regression tripwire,
-// not a quality target — we set the bar a few points below the
+// not a quality target - we set the bar a few points below the
 // worst observed NDCG@5 (~0.794 for the bare "rust" query, where
 // a partial-match doc ranks above a fully-on-topic one).
 const NDCG_K: usize = 5;
@@ -115,21 +113,40 @@ const MAP_K: usize = 5;
 const MIN_MAP: f64 = 0.7;
 
 #[test]
-fn bayesian_bm25_clears_ndcg_floor() {
+fn bayesian_bm25_preserves_bm25_ranking_and_ndcg() {
     let engine = engine_with_corpus();
-    let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+    let bm25_mode = ScoringMode::BM25(BM25Params::default());
+    let bayesian_mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
     for q in queries() {
-        let hits = engine.search("docs", "body", q.text, &mode, NDCG_K);
-        let relevances: Vec<f64> = hits
+        let bm25_hits = engine.search("docs", "body", q.text, &bm25_mode, NDCG_K);
+        let bayesian_hits = engine.search("docs", "body", q.text, &bayesian_mode, NDCG_K);
+        assert_eq!(
+            bm25_hits.iter().map(|hit| hit.doc_id).collect::<Vec<_>>(),
+            bayesian_hits
+                .iter()
+                .map(|hit| hit.doc_id)
+                .collect::<Vec<_>>(),
+            "query {:?} changed ranking after monotone calibration",
+            q.text,
+        );
+
+        let bm25_relevances: Vec<f64> = bm25_hits
             .iter()
             .map(|h| q.judgments.get(&h.doc_id).copied().unwrap_or(0.0))
             .collect();
-        let n = ndcg_at_k(&relevances, NDCG_K);
+        let bayesian_relevances: Vec<f64> = bayesian_hits
+            .iter()
+            .map(|h| q.judgments.get(&h.doc_id).copied().unwrap_or(0.0))
+            .collect();
+        let bm25_ndcg = ndcg_at_k(&bm25_relevances, NDCG_K);
+        let bayesian_ndcg = ndcg_at_k(&bayesian_relevances, NDCG_K);
+        assert!((bayesian_ndcg - bm25_ndcg).abs() < 1e-12);
         assert!(
-            n >= MIN_NDCG,
-            "query {:?} produced NDCG@{NDCG_K} {n:.4} (< {MIN_NDCG}); top hits: {:?}",
+            bayesian_ndcg >= MIN_NDCG,
+            "query {:?} produced NDCG@{NDCG_K} {bayesian_ndcg:.4} (< {MIN_NDCG}); top hits: {:?}",
             q.text,
-            hits.iter()
+            bayesian_hits
+                .iter()
                 .take(NDCG_K)
                 .map(|h| h.doc_id)
                 .collect::<Vec<_>>(),

@@ -4,11 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Relevance scoring: BM25, Bayesian BM25 with three-term posterior, and
-//! probabilistic Boolean / log-odds combinators (Paper 3, Paper 4).
+//! Relevance scoring: BM25, Lucene-style query-level Bayesian BM25, and
+//! probabilistic Boolean and log-odds combinators.
 
 pub mod bayesian;
 pub mod bayesian_bm25;
+pub mod bayesian_estimator;
 pub mod bm25;
 pub mod calibration;
 pub mod external_prior;
@@ -23,6 +24,7 @@ pub mod wand;
 
 pub use bayesian::BayesianProbabilityTransform;
 pub use bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
+pub use bayesian_estimator::BayesianScoreEstimator;
 pub use bm25::{BM25Params, BM25Scorer};
 pub use calibration::{
     CalibrationMetrics, CalibrationReport, ReliabilityBin, VectorProbabilityTransform,

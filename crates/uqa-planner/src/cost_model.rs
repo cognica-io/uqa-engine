@@ -299,6 +299,9 @@ impl CostModel {
             OperatorTree::Score { source, .. } => {
                 self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
             }
+            OperatorTree::BayesianScore { source, .. } => {
+                self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
+            }
             OperatorTree::Filter { source, .. } => {
                 let mut base = n;
                 if let Some(src) = source.as_deref() {

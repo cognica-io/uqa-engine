@@ -373,6 +373,7 @@ impl CardinalityEstimator {
                 field, predicate, ..
             } => n * self.filter_selectivity(field, predicate, n),
             OperatorTree::Score { source, .. } => self.estimate(source, stats),
+            OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
             OperatorTree::Intersect(ops) => self.estimate_intersect(ops, stats, n),
             OperatorTree::Union(ops) => {
                 let child_cards: f64 = ops.iter().map(|o| self.estimate(o, stats)).sum();
@@ -641,6 +642,7 @@ impl CardinalityEstimator {
             OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
 
             OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
+            OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
 
             OperatorTree::Composed(ops) => {
                 ops.last().map(|o| self.estimate(o, stats)).unwrap_or(0.0)

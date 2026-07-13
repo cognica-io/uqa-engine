@@ -10,8 +10,8 @@
 //! - score in `[0, 1]` for any valid input,
 //! - single-field configuration returns the underlying Bayesian
 //!   BM25 score unchanged,
-//! - all-zero `tf` across every configured field collapses to the
-//!   no-match prior floor (missing-field fallback),
+//! - all-zero `tf` across every configured field is neutral sparse
+//!   absence,
 //! - weights are scale-invariant: doubling every `weight` does not
 //!   change the fused score.
 
@@ -20,9 +20,7 @@ use std::sync::Arc;
 
 use proptest::prelude::*;
 use uqa_core::IndexStats;
-use uqa_scoring::{
-    BayesianBM25Params, BayesianProbabilityTransform, FieldConfig, MultiFieldBayesianScorer,
-};
+use uqa_scoring::{BayesianBM25Params, FieldConfig, MultiFieldBayesianScorer};
 
 fn stats(total: u64, avgdl: f64) -> Arc<IndexStats> {
     let mut s = IndexStats::default();
@@ -64,10 +62,10 @@ proptest! {
         prop_assert!((0.0..=1.0).contains(&s), "score = {s}");
     }
 
-    /// All-zero `tf` across every configured field collapses to the
-    /// neutral prior `0.5`.
+    /// All-zero `tf` across every configured field produces neutral
+    /// sparse absence at `0.5`.
     #[test]
-    fn all_zero_tf_collapses_to_prior(
+    fn all_zero_tf_produces_neutral_absence(
         weight_a in 0.1f64..5.0,
         weight_b in 0.1f64..5.0,
     ) {
@@ -87,16 +85,12 @@ proptest! {
             ],
             &stats,
         );
-        // Empty maps -> tf is 0 for every field -> every per-field
-        // probability is the no-match prior floor, and the weight-
-        // normalised log-odds conjunction of identical values returns
-        // that same value.
-        let floor = BayesianProbabilityTransform::no_match_prior();
+        // Empty maps mean every field is absent and contributes zero.
         let empty: BTreeMap<String, u64> = BTreeMap::new();
         let s = scorer.score_document(&empty, &empty, &empty);
         prop_assert!(
-            (s - floor).abs() < 1e-9,
-            "all-zero tf gave score {s}, expected the no-match floor {floor}",
+            (s - 0.5).abs() < 1e-9,
+            "all-zero tf gave score {s}, expected neutral absence",
         );
     }
 

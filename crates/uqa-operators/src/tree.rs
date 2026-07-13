@@ -124,12 +124,18 @@ pub enum ProbBoolMode {
 
 #[derive(Clone, Debug)]
 pub enum GatingSpec {
+    /// Lucene-compatible softplus gating.
+    Softplus,
     /// Raw signal score scales the fused logit.
     Pass,
     /// Sigmoid gating with the named feature.
     Sigmoid { feature: String },
     /// `ReLU` gate.
     ReLU,
+    /// Swish gate.
+    Swish,
+    /// GELU gate.
+    Gelu,
 }
 
 /// Text scoring algorithm used by [`OperatorTree::Term`].
@@ -173,6 +179,13 @@ pub enum OperatorTree {
         query_terms: Vec<String>,
         field: String,
     },
+    /// Lucene-style `BayesianScoreQuery(source)`. The source produces one
+    /// complete raw BM25 query score per matching document, and the wrapper
+    /// applies the persisted field calibration exactly once.
+    BayesianScore {
+        source: Box<OperatorTree>,
+        field: Option<String>,
+    },
 
     /// `IntersectOperator([...])`.
     Intersect(Vec<OperatorTree>),
@@ -199,11 +212,14 @@ pub enum OperatorTree {
     /// calibrated probability projection.
     CosineProbability(Box<OperatorTree>),
 
-    /// `LogOddsFusionOperator(signals, alpha, gating)`.
+    /// `LogOddsFusionOperator` with optional Lucene weights and logit bounds.
     LogOddsFusion {
         signals: Vec<OperatorTree>,
         alpha: f64,
         gating: GatingSpec,
+        weights: Option<Vec<f64>>,
+        logit_min: Option<Vec<f64>>,
+        logit_max: Option<Vec<f64>>,
     },
     /// `ProbBoolFusionOperator(signals, mode)`.
     ProbBoolFusion {

@@ -6,13 +6,8 @@
 
 //! Log-odds fusion algebraic property tests (Paper 4, Section 4).
 //!
-//! Pins the five invariants Theorem 4.2.2 / Proposition 4.3.2 promise:
-//! n=1 identity, sign preservation, irrelevance preservation,
-//! relevance preservation, and symmetric disagreement collapsing to
-//! 0.5. We property-test the scale-neutral `fuse_mean` form (which is
-//! the algebraic definition); the confidence-scaled `fuse` form
-//! intentionally amplifies agreement and so does not satisfy the
-//! "scale neutrality" invariant.
+//! Pins both the raw mean-logit helper's algebraic properties and the
+//! Lucene fusion scorer's sparse softplus behavior.
 
 use proptest::prelude::*;
 use uqa_fusion::LogOddsFusion;
@@ -44,8 +39,7 @@ proptest! {
         );
     }
 
-    /// Theorem 4.2.2: when every signal is on the same side of 0.5,
-    /// the fused score is on that side too.
+    /// Softplus-gated matching signals always contribute positively.
     #[test]
     fn sign_preserved_when_all_above_half(probs in proptest::collection::vec(0.5001f64..0.999, 1..6)) {
         let f = LogOddsFusion::default();
@@ -54,10 +48,10 @@ proptest! {
     }
 
     #[test]
-    fn sign_preserved_when_all_below_half(probs in proptest::collection::vec(0.001f64..0.4999, 1..6)) {
+    fn weak_matches_score_above_absence(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
         let f = LogOddsFusion::default();
         let fused = f.fuse(&probs);
-        prop_assert!(fused <= 0.5, "fuse {probs:?} -> {fused} should be <= 0.5");
+        prop_assert!(fused > 0.5, "fuse {probs:?} -> {fused} should be > 0.5");
     }
 
     /// Irrelevance preservation: in the scale-neutral mean form,

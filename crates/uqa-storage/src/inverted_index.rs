@@ -107,6 +107,37 @@ pub trait InvertedIndex: Send + Sync {
 
     fn total_field_length(&self, field: &str) -> u64;
 
+    /// Number of documents that have indexed content for `field`.
+    fn field_doc_count(&self, field: &str) -> u64 {
+        self.doc_length_count(Some(field))
+    }
+
+    /// Field-specific statistics for BM25 scoring.
+    ///
+    /// BM25 length normalization and IDF collection size are defined for
+    /// one field. Reusing table-wide totals mixes unrelated field lengths
+    /// and produces scores that cannot match a field-scoped BM25 scorer.
+    fn field_stats(&self, field: &str) -> IndexStats {
+        let mut stats = self.stats();
+        let field_docs = self.field_doc_count(field);
+        stats.total_docs = field_docs;
+        stats.avg_doc_length = if field_docs > 0 {
+            self.total_field_length(field) as f64 / field_docs as f64
+        } else {
+            0.0
+        };
+        stats
+    }
+
+    /// Sorted unique indexed terms for `field`.
+    ///
+    /// Backends implement this from their term dictionary rather than by
+    /// re-analyzing stored documents. This is the source used by Bayesian
+    /// calibration reservoir sampling.
+    fn vocabulary_terms(&self, _field: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Fully-populated [`IndexStats`] snapshot for the cost model and
     /// scoring layer. Implementations may cache this between mutations.
     fn stats(&self) -> IndexStats;
@@ -389,6 +420,14 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn total_field_length(&self, field: &str) -> u64 {
         self.total_length.get(field).copied().unwrap_or(0)
+    }
+
+    fn vocabulary_terms(&self, field: &str) -> Vec<String> {
+        self.index
+            .keys()
+            .filter(|(indexed_field, _)| indexed_field == field)
+            .map(|(_, term)| term.clone())
+            .collect()
     }
 
     fn stats(&self) -> IndexStats {

@@ -827,6 +827,10 @@ impl InvertedIndex for SQLiteInvertedIndex {
             .unwrap_or(0)
     }
 
+    fn vocabulary_terms(&self, field: &str) -> Vec<String> {
+        self.terms_for_field(field)
+    }
+
     fn stats(&self) -> IndexStats {
         let doc_count = self.doc_count();
         let mut s = IndexStats::default();

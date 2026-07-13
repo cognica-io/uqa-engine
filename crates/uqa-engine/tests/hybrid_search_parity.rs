@@ -5,8 +5,8 @@
 //
 
 //! Golden-fixture test: hybrid (text + KNN, log-odds fused) output.
-//! Refresh the fixture with
-//! `python3 tests/parity/build_hybrid_fixture.py`.
+//! Refresh the fixtures with
+//! `cargo run -p uqa-engine --example build_parity_fixtures`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -27,12 +27,7 @@ fn init_custom_params() {
 #[test]
 fn fit_returns_params() {
     let mut learner = ParameterLearner::default();
-    let result = learner.fit_with_options(
-        &[0.1, 0.3, 0.5, 0.7, 0.9],
-        &[0.0, 0.0, 0.0, 1.0, 1.0],
-        None,
-        None,
-    );
+    let result = learner.fit_with_options(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0.0, 0.0, 0.0, 1.0, 1.0]);
     assert!(result.contains_key("alpha"));
     assert!(result.contains_key("beta"));
     assert!(result.contains_key("base_rate"));
@@ -42,8 +37,7 @@ fn fit_returns_params() {
 fn fit_changes_params() {
     let mut learner = ParameterLearner::default();
     let initial = learner.params();
-    let fitted_params =
-        learner.fit_with_options(&[0.1, 0.2, 0.8, 0.9], &[0.0, 0.0, 1.0, 1.0], None, None);
+    let fitted_params = learner.fit_with_options(&[0.1, 0.2, 0.8, 0.9], &[0.0, 0.0, 1.0, 1.0]);
     assert!(
         (fitted_params["alpha"] - initial["alpha"]).abs() > 1e-6
             || (fitted_params["beta"] - initial["beta"]).abs() > 1e-6
@@ -54,21 +48,14 @@ fn fit_changes_params() {
 #[test]
 fn fit_with_mode_shape() {
     let mut learner = ParameterLearner::default();
-    let result = learner.fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0], None, None);
+    let result = learner.fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0]);
     assert!(result.contains_key("alpha"));
 }
 
 #[test]
-fn fit_with_tfs_and_doc_len_ratios() {
+fn fit_uses_complete_raw_query_scores() {
     let mut learner = ParameterLearner::default();
-    let tfs = [1.0, 2.0, 3.0, 4.0];
-    let ratios = [0.8, 1.0, 1.2, 0.9];
-    let result = learner.fit_with_options(
-        &[0.1, 0.3, 0.7, 0.9],
-        &[0.0, 0.0, 1.0, 1.0],
-        Some(&tfs),
-        Some(&ratios),
-    );
+    let result = learner.fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0]);
     assert!(result.contains_key("alpha"));
 }
 
@@ -77,8 +64,8 @@ fn update_modifies_params() {
     let mut learner = ParameterLearner::default();
     let initial = learner.params();
     for _ in 0..100 {
-        learner.update(0.9, 1.0, 1.0, 1.0, 0.1);
-        learner.update(0.1, 0.0, 1.0, 1.0, 0.1);
+        learner.update(0.9, 1.0, 0.1);
+        learner.update(0.1, 0.0, 0.1);
     }
     let updated = learner.params();
     assert!(
@@ -88,9 +75,9 @@ fn update_modifies_params() {
 }
 
 #[test]
-fn update_with_tf_and_doc_len() {
+fn update_accepts_a_raw_query_score() {
     let mut learner = ParameterLearner::default();
-    learner.update(0.5, 1.0, 3.0, 1.2, 0.1);
+    learner.update(0.5, 1.0, 0.1);
     assert!(learner.params().contains_key("alpha"));
 }
 

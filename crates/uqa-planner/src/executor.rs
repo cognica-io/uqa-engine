@@ -115,6 +115,7 @@ fn operator_name(op: &OperatorTree) -> String {
         OperatorTree::Filter { .. } => "FilterOp",
         OperatorTree::Facet { .. } => "FacetOp",
         OperatorTree::Score { .. } => "ScoreOp",
+        OperatorTree::BayesianScore { .. } => "BayesianScoreQuery",
         OperatorTree::Intersect(_) => "IntersectOp",
         OperatorTree::Union(_) => "UnionOp",
         OperatorTree::Complement(_) => "ComplementOp",
@@ -199,6 +200,10 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
             lines.push(format!(
                 "{prefix}ScoreOp(scorer=Scorer, terms={query_terms:?}, field={field:?})"
             ));
+            explain_recursive(source, lines, indent + 1);
+        }
+        OperatorTree::BayesianScore { source, field } => {
+            lines.push(format!("{prefix}BayesianScoreQuery(field={field:?})"));
             explain_recursive(source, lines, indent + 1);
         }
         OperatorTree::Filter { field, source, .. } => {

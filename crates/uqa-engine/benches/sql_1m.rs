@@ -27,9 +27,17 @@ const N: u64 = 1_000_000;
 
 fn build_engine() -> Engine {
     let engine = Engine::new();
-    engine.create_default_table("docs", vec!["body".into()]);
+    engine
+        .sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT, qty INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
+        .unwrap();
     // Avoid the SQL `INSERT` path (which builds a parser AST per
-    // statement) — bulk-load the documents directly through the
+    // statement) - bulk-load the documents directly through the
     // engine's API for far lower setup overhead at 1M rows.
     for i in 0..N {
         let token = match i % 7 {

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoredEntry, ScoringMode};
-use uqa_scoring::{BM25Params, BayesianBM25Params};
+use uqa_scoring::{logit, sigmoid, BM25Params, BayesianBM25Params};
 
 fn engine() -> Engine {
     let eng = Engine::new();
@@ -171,4 +171,111 @@ fn probabilistic_fusion_rejects_raw_text_match_scores() {
     assert!(err.contains("probability-valued"), "{err}");
     assert!(err.contains("text_match"), "{err}");
     assert!(err.contains("bayesian_match"), "{err}");
+}
+
+#[test]
+fn multi_term_bayesian_calibration_preserves_bm25_ranking() {
+    let eng = engine();
+    let params = BayesianBM25Params {
+        alpha: 1.7,
+        beta: 0.8,
+        base_rate: 0.08,
+        ..BayesianBM25Params::default()
+    };
+    let bm25 = eng.search(
+        "docs",
+        "body",
+        "rust language",
+        &ScoringMode::BM25(params.bm25),
+        usize::MAX,
+    );
+    let bayesian = eng.search(
+        "docs",
+        "body",
+        "rust language",
+        &ScoringMode::BayesianBM25(params),
+        usize::MAX,
+    );
+
+    assert_eq!(
+        bm25.iter().map(|entry| entry.doc_id).collect::<Vec<_>>(),
+        bayesian
+            .iter()
+            .map(|entry| entry.doc_id)
+            .collect::<Vec<_>>()
+    );
+    for (raw, calibrated) in bm25.iter().zip(&bayesian) {
+        let expected = sigmoid(params.alpha * (raw.score - params.beta) + logit(params.base_rate));
+        assert!(
+            (calibrated.score - expected).abs() < 1e-12,
+            "doc {}: {} != {}",
+            raw.doc_id,
+            calibrated.score,
+            expected
+        );
+    }
+}
+
+#[test]
+fn fts_match_calibrates_the_complete_boolean_query_once() {
+    let eng = engine();
+    let params = BayesianBM25Params {
+        alpha: 1.7,
+        beta: 0.8,
+        base_rate: 0.08,
+        ..BayesianBM25Params::default()
+    };
+    eng.save_scoring_params(
+        "docs.body",
+        &serde_json::json!({
+            "alpha": params.alpha,
+            "beta": params.beta,
+            "base_rate": params.base_rate,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let raw = score_map(eng.search(
+        "docs",
+        "body",
+        "rust language",
+        &ScoringMode::BM25(params.bm25),
+        usize::MAX,
+    ));
+    let raw_doc_2 = raw.get(&2).copied().expect("doc 2 matches both terms");
+    let expected = BTreeMap::from([(
+        2,
+        sigmoid(params.alpha * (raw_doc_2 - params.beta) + logit(params.base_rate)),
+    )]);
+    let sql = sql_score_map(&eng, "fts_match(body, 'rust AND language')");
+
+    assert_scores_match(&sql, &expected);
+}
+
+#[test]
+fn estimated_parameters_are_persisted_and_used_by_sql_search() {
+    let eng = engine();
+    let estimated = eng
+        .estimate_scoring_params("docs", "body", 4, 2, 42)
+        .unwrap();
+    let saved = eng.load_scoring_params("docs.body").unwrap();
+    let saved: BTreeMap<String, f64> = serde_json::from_str(&saved).unwrap();
+    assert_eq!(estimated, saved);
+
+    let params = BayesianBM25Params {
+        alpha: estimated["alpha"],
+        beta: estimated["beta"],
+        base_rate: estimated["base_rate"],
+        ..BayesianBM25Params::default()
+    };
+    let direct = score_map(eng.search(
+        "docs",
+        "body",
+        "rust language",
+        &ScoringMode::BayesianBM25(params),
+        usize::MAX,
+    ));
+    let sql = sql_score_map(&eng, "bayesian_match(body, 'rust language')");
+    assert_scores_match(&sql, &direct);
 }

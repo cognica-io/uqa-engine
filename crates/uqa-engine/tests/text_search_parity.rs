@@ -8,8 +8,8 @@
 //! and verify that the engine produces the same top-k doc id order
 //! and matching BM25 / Bayesian BM25 scores within a small epsilon.
 //!
-//! Refresh the fixture with
-//! `python3 tests/parity/build_text_search_fixture.py`.
+//! Refresh the fixtures with
+//! `cargo run -p uqa-engine --example build_parity_fixtures`.
 
 use std::path::PathBuf;
 

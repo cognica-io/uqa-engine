@@ -8,10 +8,11 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Arc, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport,
-    CosineProbabilityOperator, DocId, Engine, ExecutionContext, HybridSearchParams, InvertedIndex,
-    KNNOperator, LogOddsFusionOperator, Operator, ParameterLearner, PostingList, SQLError,
-    ScoreOperator, ScoredEntry, Scorer, ScoringMode, TermOperator, VectorSimilarityOperator,
+    Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
+    CalibrationMetrics, CalibrationReport, CosineProbabilityOperator, DocId, Engine,
+    ExecutionContext, HybridSearchParams, InvertedIndex, KNNOperator, LogOddsFusionOperator,
+    Operator, ParameterLearner, PostingList, SQLError, ScoreOperator, ScoredEntry, Scorer,
+    ScoringMode, TermOperator, VectorSimilarityOperator,
 };
 use uqa_core::IndexStats;
 
@@ -21,19 +22,7 @@ fn search_stats_for_terms(
     terms: &[String],
     doc_freqs: &[u64],
 ) -> IndexStats {
-    let mut stats = IndexStats::default();
-    let total_docs = index.doc_count();
-    stats.total_docs = total_docs;
-    if total_docs > 0 {
-        let total_length: u64 = index
-            .field_names()
-            .iter()
-            .map(|indexed_field| index.total_field_length(indexed_field))
-            .sum();
-        if total_length > 0 {
-            stats.avg_doc_length = total_length as f64 / total_docs as f64;
-        }
-    }
+    let mut stats = index.field_stats(field);
 
     let mut seen = BTreeSet::<&str>::new();
     for (term, doc_freq) in terms.iter().zip(doc_freqs) {
@@ -45,6 +34,38 @@ fn search_stats_for_terms(
 }
 
 impl Engine {
+    pub(crate) fn bayesian_params_for(&self, table: &str, field: &str) -> BayesianBM25Params {
+        let mut resolved = BayesianBM25Params::default();
+        let Some(json) = self.load_scoring_params(&format!("{table}.{field}")) else {
+            return resolved;
+        };
+        let Ok(params) = serde_json::from_str::<BTreeMap<String, f64>>(&json) else {
+            return resolved;
+        };
+        if let Some(alpha) = params
+            .get("alpha")
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+        {
+            resolved.alpha = alpha;
+        }
+        if let Some(beta) = params
+            .get("beta")
+            .copied()
+            .filter(|value| value.is_finite())
+        {
+            resolved.beta = beta;
+        }
+        if let Some(base_rate) = params
+            .get("base_rate")
+            .copied()
+            .filter(|value| value.is_finite() && (0.0..1.0).contains(value))
+        {
+            resolved.base_rate = base_rate;
+        }
+        resolved
+    }
+
     pub(crate) fn snapshot_context(
         &self,
         table: &str,
@@ -151,7 +172,9 @@ impl Engine {
                     let doc_length = doc_lengths.get(&entry.doc_id).copied().unwrap_or(0);
                     ScoredEntry {
                         doc_id: entry.doc_id,
-                        score: scorer.score_with_idf(term_freq, doc_length, idf),
+                        score: scorer.finalize_score(&[
+                            scorer.term_score_with_idf(term_freq, doc_length, idf)
+                        ]),
                     }
                 })
                 .collect()
@@ -176,17 +199,20 @@ impl Engine {
                     let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
                     per_term.clear();
                     for idf in &term_idfs {
-                        per_term.push(scorer.score_with_idf(0, doc_length, *idf));
+                        per_term.push(scorer.term_score_with_idf(0, doc_length, *idf));
                     }
                     if let Some(terms) = present_terms.get(&doc_id) {
                         for &(term_index, term_freq) in terms {
-                            per_term[term_index] =
-                                scorer.score_with_idf(term_freq, doc_length, term_idfs[term_index]);
+                            per_term[term_index] = scorer.term_score_with_idf(
+                                term_freq,
+                                doc_length,
+                                term_idfs[term_index],
+                            );
                         }
                     }
                     ScoredEntry {
                         doc_id,
-                        score: scorer.combine_scores(&per_term),
+                        score: scorer.finalize_score(&per_term),
                     }
                 })
                 .collect()
@@ -215,8 +241,13 @@ impl Engine {
                 doc_ids.len()
             )));
         }
+        if labels.iter().any(|label| *label > 1) {
+            return Err(SQLError::TypeMismatch(
+                "labels must contain only 0 or 1".into(),
+            ));
+        }
 
-        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let mode = ScoringMode::BayesianBM25(self.bayesian_params_for(table, field));
         let score_map: std::collections::BTreeMap<DocId, f64> = self
             .search(table, field, query, &mode, usize::MAX)
             .into_iter()
@@ -247,8 +278,13 @@ impl Engine {
                 doc_ids.len()
             )));
         }
+        if labels.iter().any(|label| *label > 1) {
+            return Err(SQLError::TypeMismatch(
+                "labels must contain only 0 or 1".into(),
+            ));
+        }
 
-        let mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
+        let mode = ScoringMode::BM25(BM25Params::default());
         let score_map: std::collections::BTreeMap<DocId, f64> = self
             .search(table, field, query, &mode, usize::MAX)
             .into_iter()
@@ -260,11 +296,54 @@ impl Engine {
             .collect();
         let labels_f: Vec<f64> = labels.iter().map(|label| f64::from(*label)).collect();
         let mut learner = ParameterLearner::default();
-        let params = learner.fit_with_options(&scores, &labels_f, None, None);
+        let params = learner.fit_with_options(&scores, &labels_f);
         let json = serde_json::to_string(&params)
             .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
         self.save_scoring_params(&format!("{table}.{field}"), &json)?;
         Ok(params)
+    }
+
+    /// Estimate and persist Lucene-style Bayesian BM25 calibration
+    /// parameters from a field's indexed vocabulary and raw score
+    /// distribution.
+    pub fn estimate_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        n_samples: usize,
+        tokens_per_query: usize,
+        seed: i64,
+    ) -> Result<BTreeMap<String, f64>, SQLError> {
+        if n_samples == 0 || tokens_per_query == 0 {
+            return Err(SQLError::TypeMismatch(
+                "n_samples and tokens_per_query must be positive".into(),
+            ));
+        }
+        if n_samples.checked_mul(tokens_per_query).is_none() {
+            return Err(SQLError::TypeMismatch(
+                "n_samples * tokens_per_query exceeds usize".into(),
+            ));
+        }
+        let Some(table_state) = self.table(table) else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let params = {
+            let index = table_state.inverted_index.read();
+            BayesianScoreEstimator::new(n_samples, tokens_per_query, seed).estimate(
+                index.as_ref(),
+                field,
+                BM25Params::default(),
+            )
+        };
+        let values = BTreeMap::from([
+            ("alpha".to_string(), params.alpha),
+            ("beta".to_string(), params.beta),
+            ("base_rate".to_string(), params.base_rate),
+        ]);
+        let json = serde_json::to_string(&values)
+            .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
+        self.save_scoring_params(&format!("{table}.{field}"), &json)?;
+        Ok(values)
     }
 
     pub fn update_scoring_params(
@@ -274,19 +353,30 @@ impl Engine {
         score: f64,
         label: u8,
     ) -> Result<(), SQLError> {
+        if self.table(table).is_none() {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        }
+        if !score.is_finite() {
+            return Err(SQLError::TypeMismatch(
+                "score must be a finite raw BM25 score".into(),
+            ));
+        }
+        if label > 1 {
+            return Err(SQLError::TypeMismatch("label must be 0 or 1".into()));
+        }
         let key = format!("{table}.{field}");
-        let mut learner = if let Some(json) = self.load_scoring_params(&key) {
-            let params: std::collections::BTreeMap<String, f64> =
-                serde_json::from_str(&json).unwrap_or_default();
-            ParameterLearner::new(
-                params.get("alpha").copied().unwrap_or(1.0),
-                params.get("beta").copied().unwrap_or(0.0),
-                Some(params.get("base_rate").copied().unwrap_or(0.5)),
-            )
+        let saved_params_are_valid = self
+            .load_scoring_params(&key)
+            .and_then(|json| serde_json::from_str::<BTreeMap<String, f64>>(&json).ok())
+            .is_some();
+        let mut learner = if saved_params_are_valid {
+            let current = self.bayesian_params_for(table, field);
+            let base_rate = (current.base_rate > 0.0).then_some(current.base_rate);
+            ParameterLearner::new(current.alpha, current.beta, base_rate)
         } else {
             ParameterLearner::default()
         };
-        learner.update(score, f64::from(label), 1.0, 1.0, 0.1);
+        learner.update(score, f64::from(label), 0.1);
         let json = serde_json::to_string(&learner.params())
             .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
         self.save_scoring_params(&key, &json)
@@ -338,14 +428,14 @@ impl Engine {
         out
     }
 
-    /// Hybrid search: Bayesian BM25 over `text_field` AND KNN over
-    /// `vector_field`, combined via log-odds conjunction (Section 4,
-    /// Paper 4). Both signals are pre-calibrated to (0, 1) before
-    /// fusion: BM25 via the three-term posterior, vector via
-    /// `cosine_to_probability`. Returns top-`top_k` by fused score
-    /// descending.
+    /// Hybrid search: query-level Bayesian BM25 over `text_field` and
+    /// KNN over `vector_field`, combined with sparse softplus-gated
+    /// log-odds fusion. Both signals are calibrated to `(0, 1)` before
+    /// fusion: BM25 by one sigmoid over the complete raw query score,
+    /// and cosine similarity by `cosine_to_probability`. Returns the
+    /// top-`top_k` entries by descending fused score.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
-        let Some((ctx, stats_arc)) = self.snapshot_context(params.table) else {
+        let Some((ctx, _)) = self.snapshot_context(params.table) else {
             return Vec::new();
         };
         let analyzer = ctx
@@ -361,10 +451,16 @@ impl Engine {
         let mut signals: Vec<Arc<dyn Operator>> = Vec::new();
 
         if !analyzed_terms.is_empty() {
+            let stats_arc = Arc::new(
+                ctx.inverted_index
+                    .as_ref()
+                    .expect("snapshot_context populates the inverted index")
+                    .field_stats(params.text_field),
+            );
             let term_op: Arc<dyn Operator> =
                 Arc::new(TermOperator::new(params.text_query, params.text_field));
             let bayes = Arc::new(BayesianBM25Scorer::new(
-                BayesianBM25Params::default(),
+                self.bayesian_params_for(params.table, params.text_field),
                 stats_arc,
             )) as Arc<dyn Scorer>;
             let scored: Arc<dyn Operator> = Arc::new(ScoreOperator::new(

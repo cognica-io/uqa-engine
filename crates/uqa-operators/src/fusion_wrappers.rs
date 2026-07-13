@@ -10,12 +10,11 @@
 //!
 //! Each wrapper folds the per-signal [`PostingList`]s its child
 //! operators emit into a single [`PostingList`]. In the heterogeneous
-//! fusers (attention, learned) unmatched documents receive a
+//! fusers (attention, learned), unmatched documents receive a
 //! coverage-scaled default probability via
 //! [`crate::hybrid::coverage_based_default`] so they participate in
-//! the fusion rather than being dropped; the multi-field text fuser
-//! pads with the calibrated no-match prior floor instead (see
-//! [`MultiFieldSearchOperator`]).
+//! the fusion rather than being dropped. The multi-field text fuser uses
+//! Lucene-style sparse absence: an unmatched field contributes zero.
 
 #![allow(
     clippy::needless_pass_by_value,
@@ -168,8 +167,8 @@ impl Operator for LearnedFusionOperator {
 /// Multi-field Bayesian BM25 search (Section 12.2 #1, Paper 3).
 /// Searches every `field` for the same `query`, scores each field
 /// through the supplied [`uqa_scoring::BayesianBM25Scorer`], and
-/// fuses the per-field probabilities through weighted log-odds
-/// conjunction (`uqa_fusion::log_odds`).
+/// fuses the per-field probabilities through weighted sparse softplus
+/// log-odds fusion (`uqa_fusion::log_odds`).
 pub struct MultiFieldSearchOperator {
     pub fields: Vec<String>,
     pub query: String,
@@ -186,7 +185,7 @@ impl MultiFieldSearchOperator {
             query: query.into(),
             weights: weights.unwrap_or_else(|| vec![1.0; n]),
             bayesian_params: uqa_scoring::BayesianBM25Params::default(),
-            fusion_alpha: 0.0,
+            fusion_alpha: 0.5,
         }
     }
 }
@@ -199,8 +198,6 @@ impl Operator for MultiFieldSearchOperator {
         let Some(idx) = ctx.inverted_index.as_ref() else {
             return PostingList::default();
         };
-        let stats = StdArc::new(idx.stats());
-
         // Score each field independently and collect the resulting
         // probabilities per doc id. The scoring terms come from the
         // same per-field search analyzer that [`TermOperator`] uses
@@ -212,8 +209,10 @@ impl Operator for MultiFieldSearchOperator {
             let analyzer = idx.get_search_analyzer(field);
             let terms = analyzer.analyze(&self.query);
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(&self.query, field));
-            let scorer: Arc<dyn Scorer> =
-                Arc::new(BayesianBM25Scorer::new(self.bayesian_params, stats.clone()));
+            let scorer: Arc<dyn Scorer> = Arc::new(BayesianBM25Scorer::new(
+                self.bayesian_params,
+                StdArc::new(idx.field_stats(field)),
+            ));
             let score_op = ScoreOperator::new(scorer, term_op, terms, field);
             let pl = score_op.execute(ctx);
             let mut m: BTreeMap<u64, f64> = BTreeMap::new();
@@ -230,32 +229,31 @@ impl Operator for MultiFieldSearchOperator {
         }
 
         let weight_sum: f64 = self.weights.iter().sum();
-        let normalised: Vec<f64> = if weight_sum > 0.0 {
+        let normalized: Vec<f64> = if weight_sum > 0.0
+            && self
+                .weights
+                .iter()
+                .all(|weight| weight.is_finite() && *weight >= 0.0)
+        {
             self.weights.iter().map(|w| w / weight_sum).collect()
         } else {
-            self.weights.clone()
+            panic!("multi-field weights must be non-negative and have a positive finite sum")
         };
 
-        // Unmatched fields pad with the no-match prior floor rather
-        // than 0.5: calibrated matched posteriors can sit below 0.5 on
-        // small corpora, and a higher pad would rank documents that
-        // match more fields below documents that match fewer.
-        let no_match_pad = uqa_scoring::BayesianProbabilityTransform::no_match_prior();
+        let active_field_count = per_field.iter().filter(|scores| !scores.is_empty()).count();
+        let fusion = uqa_fusion::LogOddsFusion::new(self.fusion_alpha);
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
         for doc_id in all_ids {
-            let probs: Vec<f64> = per_field
+            let probabilities: Vec<Option<f64>> = per_field
                 .iter()
-                .map(|m| *m.get(&doc_id).unwrap_or(&no_match_pad))
+                .map(|scores| scores.get(&doc_id).copied())
                 .collect();
-            let fused = if probs.len() == 1 {
-                probs[0]
+            let fused = if active_field_count == 1 {
+                probabilities.into_iter().flatten().next().unwrap_or(0.5)
             } else {
-                uqa_scoring::prob::log_odds_conjunction_weighted(
-                    &probs,
-                    &normalised,
-                    self.fusion_alpha,
-                )
-                .unwrap_or(0.5)
+                fusion
+                    .fuse_weighted_sparse(&probabilities, &normalized)
+                    .expect("normalized multi-field weights are valid")
             };
             entries.push(PostingEntry::new(
                 doc_id,

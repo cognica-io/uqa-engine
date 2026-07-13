@@ -472,8 +472,11 @@ pub fn compile(
             if mixed {
                 OperatorTree::LogOddsFusion {
                     signals: vec![l, r],
-                    alpha: 1.0,
-                    gating: GatingSpec::Pass,
+                    alpha: 0.5,
+                    gating: GatingSpec::Softplus,
+                    weights: None,
+                    logit_min: None,
+                    logit_max: None,
                 }
             } else {
                 OperatorTree::Intersect(vec![l, r])
@@ -605,7 +608,14 @@ mod tests {
             }),
         );
         let op = compile(&ast, Some("body"), &whitespace_tokenizer);
-        assert!(matches!(op, OperatorTree::LogOddsFusion { .. }));
+        assert!(matches!(
+            op,
+            OperatorTree::LogOddsFusion {
+                alpha: 0.5,
+                gating: GatingSpec::Softplus,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -4,23 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bayesian BM25 scorer (Section 4, Paper 3).
+//! Query-level Bayesian calibration for BM25 scores.
 
 use std::sync::Arc;
 
 use uqa_core::IndexStats;
 
-use crate::bayesian::BayesianProbabilityTransform;
 use crate::bm25::{BM25Params, BM25Scorer};
-use crate::prob::log_odds_conjunction;
+use crate::prob::{logit, sigmoid};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BayesianBM25Params {
     pub bm25: BM25Params,
     pub alpha: f64,
     pub beta: f64,
-    /// Corpus base rate. `0.5` is treated as no base-rate correction
-    /// (matches an omitted API value).
+    /// Corpus base rate in `[0, 1)`. Zero disables the base-rate shift.
     pub base_rate: f64,
 }
 
@@ -30,7 +28,7 @@ impl Default for BayesianBM25Params {
             bm25: BM25Params::default(),
             alpha: 1.0,
             beta: 0.0,
-            base_rate: 0.5,
+            base_rate: 0.0,
         }
     }
 }
@@ -39,21 +37,35 @@ impl Default for BayesianBM25Params {
 pub struct BayesianBM25Scorer {
     pub params: BayesianBM25Params,
     pub bm25: BM25Scorer,
-    transform: BayesianProbabilityTransform,
+    logit_base_rate: f64,
 }
 
 impl BayesianBM25Scorer {
     pub fn new(params: BayesianBM25Params, stats: Arc<IndexStats>) -> Self {
-        let base_rate = if (params.base_rate - 0.5).abs() < f64::EPSILON {
-            None
+        assert!(
+            params.alpha.is_finite() && params.alpha > 0.0,
+            "alpha must be a positive finite value, got {}",
+            params.alpha
+        );
+        assert!(
+            params.beta.is_finite(),
+            "beta must be a finite value, got {}",
+            params.beta
+        );
+        assert!(
+            params.base_rate.is_finite() && params.base_rate >= 0.0 && params.base_rate < 1.0,
+            "base_rate must be in [0, 1), got {}",
+            params.base_rate
+        );
+        let logit_base_rate = if params.base_rate > 0.0 {
+            logit(params.base_rate)
         } else {
-            Some(params.base_rate)
+            0.0
         };
-        let transform = BayesianProbabilityTransform::new(params.alpha, params.beta, base_rate);
         Self {
             params,
             bm25: BM25Scorer::new(params.bm25, stats),
-            transform,
+            logit_base_rate,
         }
     }
 
@@ -61,7 +73,7 @@ impl BayesianBM25Scorer {
         self.bm25.idf(doc_freq)
     }
 
-    /// Full Bayesian BM25 posterior with three-term decomposition.
+    /// Score a one-term query and calibrate the complete BM25 score once.
     pub fn score(&self, term_freq: u64, doc_length: u64, doc_freq: u64) -> f64 {
         let idf_val = self.bm25.idf(doc_freq);
         self.score_with_idf(term_freq, doc_length, idf_val)
@@ -69,33 +81,27 @@ impl BayesianBM25Scorer {
 
     pub fn score_with_idf(&self, term_freq: u64, doc_length: u64, idf_val: f64) -> f64 {
         let raw = self.bm25.score_with_idf(term_freq, doc_length, idf_val);
-        let avg_dl = self.bm25.stats.avg_doc_length;
-        let doc_len_ratio = if avg_dl > 0.0 {
-            doc_length as f64 / avg_dl
-        } else {
-            1.0
-        };
-        self.transform
-            .score_to_probability(raw, term_freq as f64, doc_len_ratio)
+        self.calibrate_raw_score(raw)
     }
 
-    /// Combine per-term Bayesian probabilities via log-odds conjunction
-    /// (Paper 4 Section 4) with `alpha = 0` so the combined value is the
-    /// plain mean log-odds put back through sigmoid (no `n^alpha`
-    /// confidence amplification at this stage).
-    pub fn combine_scores(scores: &[f64]) -> f64 {
-        match scores.len() {
-            0 => 0.5,
-            1 => scores[0],
-            _ => log_odds_conjunction(scores, 0.0),
-        }
+    /// Calibrate the complete raw BM25 query score.
+    ///
+    /// `P = sigmoid(alpha * (score - beta) + logit(base_rate))`.
+    /// The base-rate term is zero when `base_rate` is disabled.
+    pub fn calibrate_raw_score(&self, raw_score: f64) -> f64 {
+        sigmoid(self.params.alpha * (raw_score - self.params.beta) + self.logit_base_rate)
+    }
+
+    /// Combine raw BM25 term contributions, then calibrate exactly once.
+    pub fn combine_scores(&self, raw_term_scores: &[f64]) -> f64 {
+        self.calibrate_raw_score(BM25Scorer::combine_scores(raw_term_scores))
     }
 
     /// Bayesian WAND upper bound (Theorem 6.1.2): tightest safe pruning
     /// bound derived from the BM25 supremum and the maximum prior.
     pub fn upper_bound(&self, doc_freq: u64) -> f64 {
         let bm25_ub = self.bm25.upper_bound(doc_freq);
-        self.transform.wand_upper_bound(bm25_ub, 0.9)
+        self.calibrate_raw_score(bm25_ub)
     }
 }
 
@@ -144,14 +150,31 @@ mod tests {
     }
 
     #[test]
-    fn combine_scores_n1_is_identity() {
-        let combined = BayesianBM25Scorer::combine_scores(&[0.7]);
-        assert!((combined - 0.7).abs() < 1e-12);
+    fn query_level_calibration_uses_the_bm25_sum() {
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+        let combined = scorer.combine_scores(&[0.7, 0.4]);
+        assert!((combined - sigmoid(1.1)).abs() < 1e-12);
     }
 
     #[test]
-    fn combine_scores_idempotent_for_equal_inputs() {
-        let combined = BayesianBM25Scorer::combine_scores(&[0.6, 0.6, 0.6]);
-        assert!((combined - 0.6).abs() < 1e-9, "got {combined}");
+    fn query_level_calibration_preserves_raw_ranking() {
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+        let lower = scorer.combine_scores(&[0.7, 0.4]);
+        let higher = scorer.combine_scores(&[0.8, 0.5]);
+        assert!(higher > lower, "{higher} must exceed {lower}");
+    }
+
+    #[test]
+    fn base_rate_is_added_once_at_query_level() {
+        let scorer = BayesianBM25Scorer::new(
+            BayesianBM25Params {
+                base_rate: 0.1,
+                ..BayesianBM25Params::default()
+            },
+            stats(1000, 10.0),
+        );
+        let combined = scorer.combine_scores(&[0.7, 0.4]);
+        let expected = sigmoid(1.1 + logit(0.1));
+        assert!((combined - expected).abs() < 1e-12);
     }
 }

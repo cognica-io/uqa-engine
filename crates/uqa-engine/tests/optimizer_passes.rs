@@ -67,7 +67,11 @@ fn lower_where_preserves_bayesian_match_scoring_mode() {
 fn lower_where_binds_fts_query_text_terms_after_parsing() {
     let expr = where_of("SELECT id FROM notes WHERE body @@ 'tokio'");
     let lowered = lower_where(&expr, &[]).expect("lowers");
-    assert_term_scoring(&lowered, TextScoringMode::BayesianBM25);
+    let OperatorTree::BayesianScore { source, field } = lowered else {
+        panic!("expected BayesianScoreQuery");
+    };
+    assert_eq!(field.as_deref(), Some("body"));
+    assert_term_scoring(&source, TextScoringMode::BM25);
 }
 
 #[test]

@@ -13,26 +13,30 @@ fn approx_eq(a: f64, b: f64, tol: f64) {
 }
 
 #[test]
-fn scale_neutrality() {
+fn softplus_gating_treats_every_match_as_positive_evidence() {
     let fusion = LogOddsFusion::new(0.0);
     for p in [0.1, 0.3, 0.5, 0.7, 0.9] {
         for n in [2, 3, 5, 10] {
-            approx_eq(fusion.fuse(&vec![p; n]), p, 1e-9);
+            assert!(fusion.fuse(&vec![p; n]) > 0.5);
         }
     }
 }
 
 #[test]
-fn sign_preservation() {
+fn softplus_gating_preserves_weak_match_ordering() {
     let fusion = LogOddsFusion::new(0.5);
     assert!(fusion.fuse(&[0.8, 0.7, 0.6, 0.9]) > 0.5);
-    assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) < 0.5);
+    assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) > 0.5);
+    assert!(fusion.fuse(&[0.4, 0.3]) > fusion.fuse(&[0.2, 0.1]));
 }
 
 #[test]
-fn irrelevance_preservation() {
+fn sparse_absence_is_weaker_than_a_low_probability_match() {
     let fusion = LogOddsFusion::new(0.5);
-    assert!(fusion.fuse(&[0.1, 0.2, 0.3, 0.4, 0.49]) < 0.5);
+    let absent = fusion.fuse_sparse(&[None, None]);
+    let weak_match = fusion.fuse_sparse(&[Some(0.1), None]);
+    assert_eq!(absent, 0.5);
+    assert!(weak_match > absent);
 }
 
 #[test]
@@ -69,11 +73,10 @@ fn weighted_fusion_basic() {
 }
 
 #[test]
-fn weighted_fusion_empty() {
-    approx_eq(
-        LogOddsFusion::new(0.5).fuse_weighted(&[], &[]).unwrap(),
-        0.5,
-        1e-12,
+fn weighted_fusion_empty_rejects_zero_sum_weights() {
+    assert_eq!(
+        LogOddsFusion::new(0.5).fuse_weighted(&[], &[]),
+        Err("weights must sum to 1")
     );
 }
 

@@ -8,9 +8,8 @@
 //! the operator-tree pipeline (bare and mixed-predicate shapes) and the
 //! legacy dispatch fallback all delegate to one implementation, so a
 //! pass-all ordinary predicate can never change how a match ranks.
-//! Previously the operator-tree path padded unmatched fields with 0.5
-//! instead of the calibrated no-match prior, which re-introduced the
-//! small-corpus field-weight inversion for mixed-predicate queries.
+//! Sparse absence must remain consistent across every execution path so
+//! mixed predicates cannot change field-fusion ranking.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

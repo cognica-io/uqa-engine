@@ -10,9 +10,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::IndexStats;
-use uqa_scoring::{
-    BayesianBM25Params, BayesianProbabilityTransform, FieldConfig, MultiFieldBayesianScorer,
-};
+use uqa_scoring::{BayesianBM25Params, FieldConfig, MultiFieldBayesianScorer};
 
 fn stats() -> Arc<IndexStats> {
     let mut stats = IndexStats::default();
@@ -77,7 +75,7 @@ fn two_fields_score_higher_than_one() {
 }
 
 #[test]
-fn zero_tf_gives_no_match_prior_floor() {
+fn zero_tf_gives_neutral_sparse_absence() {
     let scorer = MultiFieldBayesianScorer::new(
         vec![FieldConfig {
             field: "title".into(),
@@ -91,6 +89,5 @@ fn zero_tf_gives_no_match_prior_floor() {
         &map(&[("title", 10)]),
         &map(&[("title", 10)]),
     );
-    let floor = BayesianProbabilityTransform::no_match_prior();
-    assert!((score - floor).abs() < 0.01, "{score} vs floor {floor}");
+    assert!((score - 0.5).abs() < 1e-12, "{score} vs neutral absence");
 }

@@ -21,19 +21,19 @@ impl Scorer for MockScorer {
         self.score
     }
 
-    fn score(&self, _term_freq: u64, _doc_length: u64, _doc_freq: u64) -> f64 {
+    fn term_score(&self, _term_freq: u64, _doc_length: u64, _doc_freq: u64) -> f64 {
         self.score
     }
 
-    fn score_with_idf(&self, _term_freq: u64, _doc_length: u64, _idf_val: f64) -> f64 {
+    fn term_score_with_idf(&self, _term_freq: u64, _doc_length: u64, _idf_val: f64) -> f64 {
         self.score
     }
 
-    fn combine_scores(&self, scores: &[f64]) -> f64 {
+    fn finalize_score(&self, scores: &[f64]) -> f64 {
         scores.iter().sum()
     }
 
-    fn upper_bound(&self, _doc_freq: u64) -> f64 {
+    fn term_upper_bound(&self, _doc_freq: u64) -> f64 {
         self.score * 2.0
     }
 }

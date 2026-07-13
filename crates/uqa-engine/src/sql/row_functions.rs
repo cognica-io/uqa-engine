@@ -404,36 +404,31 @@ fn run_multi_field_match(
         validate_text_match_field(engine, table, field, "multi_field_match")?;
     }
     let n_fields = fields.len();
-    // Unmatched fields pad with the no-match prior floor rather than
-    // 0.5: calibrated matched posteriors can sit below 0.5 on small
-    // corpora, and a higher pad would rank documents that match more
-    // fields below documents that match fewer.
-    let no_match_pad = uqa_scoring::BayesianProbabilityTransform::no_match_prior();
-    let mut per_doc: std::collections::BTreeMap<u64, Vec<f64>> = std::collections::BTreeMap::new();
+    let mut active_fields = vec![false; n_fields];
+    let mut per_doc: std::collections::BTreeMap<u64, Vec<Option<f64>>> =
+        std::collections::BTreeMap::new();
     for (i, (field, q)) in fields.iter().zip(queries.iter()).enumerate() {
-        let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default());
+        let mode = crate::ScoringMode::BayesianBM25(engine.bayesian_params_for(table, field));
         let scored = engine.search(table, field, q, &mode, usize::MAX);
         for entry in scored {
+            active_fields[i] = true;
             let slot = per_doc
                 .entry(entry.doc_id)
-                .or_insert_with(|| vec![no_match_pad; n_fields]);
-            slot[i] = entry.score;
+                .or_insert_with(|| vec![None; n_fields]);
+            slot[i] = Some(entry.score);
         }
     }
-    // Pad missing slots so every doc has a full vector.
-    for slot in per_doc.values_mut() {
-        if slot.len() < n_fields {
-            slot.resize(n_fields, no_match_pad);
-        }
-    }
+    let active_field_count = active_fields.iter().filter(|active| **active).count();
+    let fusion = uqa_fusion::LogOddsFusion::new(0.5);
     let mut out: Vec<ScoredEntry> = per_doc
         .into_iter()
-        .map(|(doc_id, probs)| {
-            let fused = if probs.len() == 1 {
-                probs[0]
+        .map(|(doc_id, probabilities)| {
+            let fused = if active_field_count == 1 {
+                probabilities.into_iter().flatten().next().unwrap_or(0.5)
             } else {
-                uqa_scoring::prob::log_odds_conjunction_weighted(&probs, &weights, 0.0)
-                    .unwrap_or(0.5)
+                fusion
+                    .fuse_weighted_sparse(&probabilities, &weights)
+                    .expect("multi-field weights are normalized")
             };
             ScoredEntry {
                 doc_id,
@@ -522,7 +517,7 @@ fn parse_multi_field_match_args(
                         .iter()
                         .map(|arg| expect_f64_value(arg, "multi_field_match.weight", ctx))
                         .collect::<Result<Vec<_>, _>>()?,
-                )
+                )?
             };
             let queries = vec![query; fields.len()];
             Ok((fields, queries, weights))
@@ -570,16 +565,47 @@ fn expect_f64_value(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<f
     }
 }
 
+fn expect_f64_array(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<Vec<f64>, SQLError> {
+    let Value::List(items) = eval(expr, ctx)? else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{label} must be a numeric array"
+        )));
+    };
+    items
+        .into_iter()
+        .map(|item| match item {
+            Value::Float(value) => Ok(value),
+            Value::Int(value) => Ok(value as f64),
+            Value::Decimal(value) => value.to_f64().ok_or_else(|| {
+                SQLError::TypeMismatch(format!("{label} decimal is outside f64 range"))
+            }),
+            other => Err(SQLError::TypeMismatch(format!(
+                "{label} must contain only numbers, got {other:?}"
+            ))),
+        })
+        .collect()
+}
+
 fn uniform_weights(n: usize) -> Vec<f64> {
     vec![1.0 / n.max(1) as f64; n]
 }
 
-fn normalize_weights(weights: Vec<f64>) -> Vec<f64> {
+fn normalize_weights(weights: Vec<f64>) -> Result<Vec<f64>, SQLError> {
+    if weights
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return Err(SQLError::TypeMismatch(
+            "multi_field_match weights must be non-negative and finite".into(),
+        ));
+    }
     let total: f64 = weights.iter().sum();
     if total > 0.0 {
-        weights.into_iter().map(|w| w / total).collect()
+        Ok(weights.into_iter().map(|weight| weight / total).collect())
     } else {
-        uniform_weights(weights.len())
+        Err(SQLError::TypeMismatch(
+            "multi_field_match weights must have a positive sum".into(),
+        ))
     }
 }
 
@@ -1277,13 +1303,14 @@ fn run_text_match(
     params: &[SQLParam],
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    let mode = crate::ScoringMode::BM25(uqa_scoring::BM25Params::default());
     run_text_match_scored(
         engine,
         table,
         args,
         params,
         "text_match",
-        crate::ScoringMode::BM25(uqa_scoring::BM25Params::default()),
+        &|_| mode.clone(),
         top_k,
     )
 }
@@ -1301,7 +1328,7 @@ fn run_bayesian_match(
         args,
         params,
         "bayesian_match",
-        crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params::default()),
+        &|field| crate::ScoringMode::BayesianBM25(engine.bayesian_params_for(table, field)),
         top_k,
     )
 }
@@ -1363,7 +1390,7 @@ fn run_text_match_scored(
     args: &[Expr],
     params: &[SQLParam],
     function_name: &str,
-    mode: crate::ScoringMode,
+    mode_for_field: &dyn Fn(&str) -> crate::ScoringMode,
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
@@ -1401,6 +1428,7 @@ fn run_text_match_scored(
     if field == "_all" || field.is_empty() {
         let mut by_doc: BTreeMap<DocId, f64> = BTreeMap::new();
         for field_name in engine.fts_fields_for_table(table) {
+            let mode = mode_for_field(&field_name);
             for entry in engine.search(table, &field_name, &query, &mode, usize::MAX) {
                 by_doc
                     .entry(entry.doc_id)
@@ -1413,6 +1441,7 @@ fn run_text_match_scored(
             .map(|(doc_id, score)| ScoredEntry { doc_id, score })
             .collect());
     }
+    let mode = mode_for_field(&field);
     Ok(engine.search(table, &field, &query, &mode, top_k.unwrap_or(usize::MAX)))
 }
 
@@ -1807,6 +1836,10 @@ fn run_fuse_log_odds(
         });
     }
     let mut alpha = 0.5;
+    let mut gating = uqa_fusion::LogitGating::Softplus;
+    let mut weights = None;
+    let mut logit_min = None;
+    let mut logit_max = None;
     let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
         Vec::with_capacity(args.len());
     let mut all_doc_ids = std::collections::BTreeSet::new();
@@ -1815,6 +1848,31 @@ fn run_fuse_log_odds(
         if let Some((name, value_expr)) = named_arg_expr(arg) {
             if name.eq_ignore_ascii_case("alpha") {
                 alpha = expect_f64_value(value_expr, "fuse_log_odds.alpha", &ctx)?;
+            } else if name.eq_ignore_ascii_case("gating") {
+                let gating_name = expect_string_value(value_expr, "fuse_log_odds.gating", &ctx)?;
+                gating = uqa_fusion::LogitGating::parse(&gating_name).ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "fuse_log_odds.gating has unknown value `{gating_name}`"
+                    ))
+                })?;
+            } else if name.eq_ignore_ascii_case("weights") {
+                weights = Some(expect_f64_array(value_expr, "fuse_log_odds.weights", &ctx)?);
+            } else if name.eq_ignore_ascii_case("logit_min") {
+                logit_min = Some(expect_f64_array(
+                    value_expr,
+                    "fuse_log_odds.logit_min",
+                    &ctx,
+                )?);
+            } else if name.eq_ignore_ascii_case("logit_max") {
+                logit_max = Some(expect_f64_array(
+                    value_expr,
+                    "fuse_log_odds.logit_max",
+                    &ctx,
+                )?);
+            } else {
+                return Err(SQLError::TypeMismatch(format!(
+                    "fuse_log_odds has unknown option `{name}`"
+                )));
             }
             continue;
         }
@@ -1901,7 +1959,7 @@ fn run_fuse_log_odds(
                 let mut map = std::collections::BTreeMap::new();
                 for row in rows {
                     all_doc_ids.insert(row.doc_id);
-                    map.insert(row.doc_id, row.score.clamp(1e-10, 1.0 - 1e-10));
+                    map.insert(row.doc_id, row.score);
                 }
                 score_maps.push(map);
             }
@@ -1918,10 +1976,12 @@ fn run_fuse_log_odds(
                     )
                 })?;
             }
-            Expr::Literal(Value::Str(_)) => {
-                // Compatibility with the canonical UQA implementation's optional gating string
-                // argument. Gating is a fusion-layer concern; the SQL
-                // engine keeps the same calibrated score semantics.
+            Expr::Literal(Value::Str(name)) => {
+                gating = uqa_fusion::LogitGating::parse(name).ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "fuse_log_odds.gating has unknown value `{name}`"
+                    ))
+                })?;
             }
             other => {
                 return Err(SQLError::Unsupported(format!(
@@ -1938,18 +1998,51 @@ fn run_fuse_log_odds(
         });
     }
     let n = score_maps.len();
+    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+        return Err(SQLError::TypeMismatch(format!(
+            "fuse_log_odds.alpha must be in [0, 1], got {alpha}"
+        )));
+    }
+    let mut fuser = uqa_fusion::LogOddsFusion::new(alpha);
+    fuser.gating = gating;
+    fuser
+        .fuse_configured(
+            &vec![None; n],
+            weights.as_deref(),
+            logit_min.as_deref(),
+            logit_max.as_deref(),
+        )
+        .map_err(|message| SQLError::TypeMismatch(format!("fuse_log_odds: {message}")))?;
+
+    let active_signal_count = score_maps
+        .iter()
+        .filter(|scores| !scores.is_empty())
+        .count();
+    if active_signal_count == 1 {
+        return Ok(score_maps
+            .into_iter()
+            .find(|scores| !scores.is_empty())
+            .expect("one active signal has scores")
+            .into_iter()
+            .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+            .collect());
+    }
+
     Ok(all_doc_ids
         .into_iter()
         .map(|doc_id| {
-            let probs: Vec<f64> = score_maps
+            let probabilities: Vec<Option<f64>> = score_maps
                 .iter()
-                .map(|map| map.get(&doc_id).copied().unwrap_or(0.5))
+                .map(|map| map.get(&doc_id).copied())
                 .collect();
-            let score = if n == 1 {
-                probs[0]
-            } else {
-                uqa_scoring::log_odds_conjunction(&probs, alpha)
-            };
+            let score = fuser
+                .fuse_configured(
+                    &probabilities,
+                    weights.as_deref(),
+                    logit_min.as_deref(),
+                    logit_max.as_deref(),
+                )
+                .expect("validated log-odds fusion configuration");
             ScoredEntry { doc_id, score }
         })
         .collect())

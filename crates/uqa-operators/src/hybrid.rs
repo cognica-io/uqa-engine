@@ -13,9 +13,9 @@ use uqa_core::{
     DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Predicate, Value,
 };
 use uqa_fusion::{
-    AdaptiveLogOddsFusion as AdaptiveLogOddsFuser, ProbabilisticBoolean, SignalQuality,
+    AdaptiveLogOddsFusion as AdaptiveLogOddsFuser, LogOddsFusion, LogitGating,
+    ProbabilisticBoolean, SignalQuality,
 };
-use uqa_scoring::log_odds_conjunction;
 
 use crate::base::{ExecutionContext, Operator};
 use crate::primitive::TermOperator;
@@ -101,21 +101,61 @@ impl Operator for SemanticFilterOperator {
 /// Multi-signal fusion via log-odds conjunction (Section 4, Paper 4).
 ///
 /// Each signal must produce calibrated probabilities in `(0, 1)`. Missing
-/// documents fall back to a coverage-based default (see the private
-/// `coverage_based_default` helper).
+/// documents contribute zero gated logit, matching Lucene's sparse scorer.
 pub struct LogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,
+    pub gating: LogitGating,
+    pub weights: Option<Vec<f64>>,
+    pub logit_min: Option<Vec<f64>>,
+    pub logit_max: Option<Vec<f64>>,
     pub top_k: Option<usize>,
 }
 
 impl LogOddsFusionOperator {
     pub fn new(signals: Vec<Arc<dyn Operator>>, alpha: f64) -> Self {
+        LogOddsFusion::new(alpha);
         Self {
             signals,
             alpha,
+            gating: LogitGating::Softplus,
+            weights: None,
+            logit_min: None,
+            logit_max: None,
             top_k: None,
         }
+    }
+
+    pub fn with_gating(mut self, gating: LogitGating) -> Self {
+        self.gating = gating;
+        self
+    }
+
+    pub fn with_weights(mut self, weights: Vec<f64>) -> Self {
+        LogOddsFusion::new(self.alpha)
+            .validate_configuration(
+                self.signals.len(),
+                Some(&weights),
+                self.logit_min.as_deref(),
+                self.logit_max.as_deref(),
+            )
+            .expect("log-odds fusion weights must be valid");
+        self.weights = Some(weights);
+        self
+    }
+
+    pub fn with_logit_normalization(mut self, logit_min: Vec<f64>, logit_max: Vec<f64>) -> Self {
+        LogOddsFusion::new(self.alpha)
+            .validate_configuration(
+                self.signals.len(),
+                self.weights.as_deref(),
+                Some(&logit_min),
+                Some(&logit_max),
+            )
+            .expect("log-odds fusion bounds must be valid");
+        self.logit_min = Some(logit_min);
+        self.logit_max = Some(logit_max);
+        self
     }
 
     pub fn with_top_k(mut self, top_k: usize) -> Self {
@@ -126,6 +166,16 @@ impl LogOddsFusionOperator {
 
 impl Operator for LogOddsFusionOperator {
     fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+        let mut fuser = LogOddsFusion::new(self.alpha);
+        fuser.gating = self.gating;
+        fuser
+            .validate_configuration(
+                self.signals.len(),
+                self.weights.as_deref(),
+                self.logit_min.as_deref(),
+                self.logit_max.as_deref(),
+            )
+            .expect("log-odds fusion configuration must be valid");
         let posting_lists: Vec<PostingList> =
             self.signals.iter().map(|sig| sig.execute(ctx)).collect();
 
@@ -147,26 +197,36 @@ impl Operator for LogOddsFusionOperator {
             return PostingList::new();
         }
 
-        let num_docs = all_doc_ids.len();
-        let defaults: Vec<f64> = score_maps
+        let active_signal_count = score_maps
             .iter()
-            .map(|m| coverage_based_default(m.len(), num_docs, 0.01))
-            .collect();
-
-        let mut entries = Vec::with_capacity(num_docs);
-        let n_signals = self.signals.len();
-        for doc_id in &all_doc_ids {
-            let probs: Vec<f64> = score_maps
-                .iter()
-                .zip(&defaults)
-                .map(|(m, def)| m.get(doc_id).copied().unwrap_or(*def))
-                .collect();
-            let fused = if n_signals == 1 {
-                probs[0]
-            } else {
-                log_odds_conjunction(&probs, self.alpha)
+            .filter(|scores| !scores.is_empty())
+            .count();
+        if active_signal_count == 1 {
+            let result = posting_lists
+                .into_iter()
+                .find(|posting_list| !posting_list.is_empty())
+                .expect("one active signal has a posting list");
+            return match self.top_k {
+                Some(k) => result.top_k(k),
+                None => result,
             };
-            entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused)));
+        }
+
+        let mut entries = Vec::with_capacity(all_doc_ids.len());
+        for doc_id in &all_doc_ids {
+            let probabilities: Vec<Option<f64>> = score_maps
+                .iter()
+                .map(|scores| scores.get(doc_id).copied())
+                .collect();
+            let fused_score = fuser
+                .fuse_configured(
+                    &probabilities,
+                    self.weights.as_deref(),
+                    self.logit_min.as_deref(),
+                    self.logit_max.as_deref(),
+                )
+                .expect("log-odds fusion configuration must be valid");
+            entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused_score)));
         }
         let result = PostingList::from_sorted_unchecked(entries);
         match self.top_k {

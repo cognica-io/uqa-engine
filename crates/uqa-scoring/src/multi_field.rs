@@ -9,19 +9,15 @@
 //!
 //! Each field has independent calibration parameters (`alpha, beta,
 //! base_rate`) plus a fusion weight. Per-field posteriors combine via
-//! a weight-normalized log-odds conjunction; an absent field
-//! contributes the no-match prior floor. Padding with 0.5 instead
-//! would assert a higher belief for unmatched fields than calibrated
-//! matched posteriors reach on small corpora, ranking documents that
-//! match more fields below documents that match fewer.
+//! Lucene-compatible sparse log-odds fusion. An absent field contributes
+//! zero, while a matching field contributes a softplus-gated logit.
 
 use std::sync::Arc;
 
 use uqa_core::IndexStats;
 
-use crate::bayesian::BayesianProbabilityTransform;
 use crate::bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
-use crate::prob::log_odds_conjunction_weighted;
+use crate::prob::sigmoid;
 
 /// One scored field configuration.
 #[derive(Debug, Clone)]
@@ -56,35 +52,63 @@ impl MultiFieldBayesianScorer {
 
     /// Score one document. Each `*_per_field` map keys on field name
     /// and yields the term frequency / document length / document
-    /// frequency for that field. Missing fields fall back to the
-    /// no-match prior floor.
+    /// frequency for that field. Missing fields contribute sparse
+    /// absence rather than a synthetic probability.
     pub fn score_document(
         &self,
         term_freq_per_field: &std::collections::BTreeMap<String, u64>,
         doc_length_per_field: &std::collections::BTreeMap<String, u64>,
         doc_freq_per_field: &std::collections::BTreeMap<String, u64>,
     ) -> f64 {
-        let mut probs: Vec<f64> = Vec::with_capacity(self.fields.len());
+        if self.fields.is_empty() {
+            return 0.5;
+        }
+        let mut probabilities: Vec<Option<f64>> = Vec::with_capacity(self.fields.len());
         for (i, name) in self.fields.iter().enumerate() {
             let tf = *term_freq_per_field.get(name).unwrap_or(&0);
             let dl = *doc_length_per_field.get(name).unwrap_or(&1);
             let df = *doc_freq_per_field.get(name).unwrap_or(&1);
             if tf == 0 {
-                probs.push(BayesianProbabilityTransform::no_match_prior());
+                probabilities.push(None);
             } else {
-                probs.push(self.scorers[i].score(tf, dl, df));
+                probabilities.push(Some(self.scorers[i].score(tf, dl, df)));
             }
         }
-        if probs.len() == 1 {
-            return probs[0];
+        if probabilities.len() == 1 {
+            return probabilities[0].unwrap_or(0.5);
         }
         let total: f64 = self.weights.iter().sum();
-        let normalized: Vec<f64> = if total > 0.0 {
+        let normalized: Vec<f64> = if total > 0.0
+            && self
+                .weights
+                .iter()
+                .all(|weight| weight.is_finite() && *weight >= 0.0)
+        {
             self.weights.iter().map(|w| w / total).collect()
         } else {
-            self.weights.clone()
+            panic!("multi-field weights must be non-negative and have a positive finite sum")
         };
-        log_odds_conjunction_weighted(&probs, &normalized, 0.0).unwrap_or(0.5)
+        let gated_sum: f64 = probabilities
+            .iter()
+            .zip(&normalized)
+            .filter_map(|(probability, weight)| {
+                probability.map(|probability| weight * softplus(lucene_logit(probability)))
+            })
+            .sum();
+        sigmoid(gated_sum * (probabilities.len() as f64).sqrt())
+    }
+}
+
+fn lucene_logit(probability: f64) -> f64 {
+    let clamped = probability.clamp(1e-7, 1.0 - 1e-7);
+    (clamped / (1.0 - clamped)).ln()
+}
+
+fn softplus(value: f64) -> f64 {
+    if value > 20.0 {
+        value
+    } else {
+        value.exp().ln_1p()
     }
 }
 
@@ -116,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_field_uses_prior() {
+    fn missing_field_contributes_sparse_absence() {
         let mut base = IndexStats::default();
         base.total_docs = 100;
         base.avg_doc_length = 50.0;
@@ -137,8 +161,7 @@ mod tests {
             ],
             stats,
         );
-        // Only `title` has frequency data; `body` falls back to the
-        // no-match prior floor.
+        // Only `title` has frequency data; `body` contributes zero.
         let tf = std::collections::BTreeMap::from([("title".into(), 5u64)]);
         let dl = std::collections::BTreeMap::from([("title".into(), 50u64)]);
         let df = std::collections::BTreeMap::from([("title".into(), 10u64)]);

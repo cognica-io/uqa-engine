@@ -39,7 +39,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value};
-use uqa_operators::{GatingSpec, MultiStageCutoff, MultiStageEntry, OperatorTree, TextScoringMode};
+use uqa_operators::{
+    GatingSpec, LogOddsFusionOperator, MultiStageCutoff, MultiStageEntry, OperatorTree,
+    TextScoringMode,
+};
 use uqa_planner::executor::{OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::QueryOptimizer;
@@ -366,8 +369,8 @@ fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<Operator
 /// learned fusion can combine them.
 ///
 /// - `bayesian_match` --> [`OperatorTree::Term`] with Bayesian BM25 scoring.
-/// - `fts_match` text terms --> [`OperatorTree::Term`] with Bayesian BM25
-///   scoring because `@@` participates in probabilistic fusion.
+/// - `fts_match` text trees --> [`OperatorTree::BayesianScore`] around the
+///   complete raw BM25 Boolean query.
 /// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
 ///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
 ///   rescaled to `(0, 1)` via `(1 + s) / 2`.
@@ -428,7 +431,10 @@ fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTre
     }
 
     let mut alpha = 0.5;
-    let mut gating = GatingSpec::Pass;
+    let mut gating = GatingSpec::Softplus;
+    let mut weights = None;
+    let mut logit_min = None;
+    let mut logit_max = None;
     let mut signal_end = args.len();
     while signal_end > 0 {
         let option = &args[signal_end - 1];
@@ -437,6 +443,14 @@ fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTre
                 alpha = const_f64(value_expr, params)?;
             } else if name.eq_ignore_ascii_case("gating") {
                 gating = const_gating(value_expr, params)?;
+            } else if name.eq_ignore_ascii_case("weights") {
+                weights = Some(const_f64_vector(value_expr, params)?);
+            } else if name.eq_ignore_ascii_case("logit_min") {
+                logit_min = Some(const_f64_vector(value_expr, params)?);
+            } else if name.eq_ignore_ascii_case("logit_max") {
+                logit_max = Some(const_f64_vector(value_expr, params)?);
+            } else {
+                return None;
             }
             signal_end -= 1;
             continue;
@@ -456,6 +470,29 @@ fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTre
     if signal_end < 2 {
         return None;
     }
+    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+        return None;
+    }
+    if let Some(signal_weights) = &weights {
+        let sum = signal_weights.iter().sum::<f64>();
+        if signal_weights.len() != signal_end
+            || signal_weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight < 0.0)
+            || (sum - 1.0).abs() > 1e-3
+        {
+            return None;
+        }
+    }
+    match (&logit_min, &logit_max) {
+        (Some(minimums), Some(maximums))
+            if minimums.len() == signal_end && maximums.len() == signal_end => {}
+        (Some(_), Some(_)) => return None,
+        _ => {
+            logit_min = None;
+            logit_max = None;
+        }
+    }
 
     let mut signals: Vec<OperatorTree> = Vec::with_capacity(signal_end);
     for a in &args[..signal_end] {
@@ -465,6 +502,9 @@ fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTre
         signals,
         alpha,
         gating,
+        weights,
+        logit_min,
+        logit_max,
     })
 }
 
@@ -589,16 +629,15 @@ fn compile_fts_query(query: &str, default_field: Option<&str>) -> Option<Operato
 }
 
 fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
+    if is_text_query_tree(&tree) {
+        let field = common_text_field(&tree);
+        return OperatorTree::BayesianScore {
+            source: Box::new(bind_fts_bm25_tree(tree)),
+            field,
+        };
+    }
+
     match tree {
-        OperatorTree::Term {
-            query,
-            field,
-            scoring,
-        } => OperatorTree::Term {
-            query,
-            field,
-            scoring: scoring.or(Some(TextScoringMode::BayesianBM25)),
-        },
         OperatorTree::KNN {
             query_vector,
             k,
@@ -627,6 +666,9 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             signals,
             alpha,
             gating,
+            weights,
+            logit_min,
+            logit_max,
         } => OperatorTree::LogOddsFusion {
             signals: signals
                 .into_iter()
@@ -634,9 +676,73 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
                 .collect(),
             alpha,
             gating,
+            weights,
+            logit_min,
+            logit_max,
         },
         OperatorTree::CosineProbability(child) => OperatorTree::CosineProbability(child),
         other => other,
+    }
+}
+
+fn is_text_query_tree(tree: &OperatorTree) -> bool {
+    match tree {
+        OperatorTree::Empty | OperatorTree::Term { .. } => true,
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().all(is_text_query_tree),
+        OperatorTree::Complement(child) => is_text_query_tree(child),
+        _ => false,
+    }
+}
+
+fn bind_fts_bm25_tree(tree: OperatorTree) -> OperatorTree {
+    match tree {
+        OperatorTree::Term { query, field, .. } => OperatorTree::Term {
+            query,
+            field,
+            scoring: Some(TextScoringMode::BM25),
+        },
+        OperatorTree::Intersect(children) => {
+            OperatorTree::Intersect(children.into_iter().map(bind_fts_bm25_tree).collect())
+        }
+        OperatorTree::Union(children) => {
+            OperatorTree::Union(children.into_iter().map(bind_fts_bm25_tree).collect())
+        }
+        OperatorTree::Composed(children) => {
+            OperatorTree::Composed(children.into_iter().map(bind_fts_bm25_tree).collect())
+        }
+        OperatorTree::Complement(child) => {
+            OperatorTree::Complement(Box::new(bind_fts_bm25_tree(*child)))
+        }
+        other => other,
+    }
+}
+
+fn common_text_field(tree: &OperatorTree) -> Option<String> {
+    fn collect_fields(tree: &OperatorTree, fields: &mut BTreeSet<Option<String>>) {
+        match tree {
+            OperatorTree::Term { field, .. } => {
+                fields.insert(field.clone());
+            }
+            OperatorTree::Intersect(children)
+            | OperatorTree::Union(children)
+            | OperatorTree::Composed(children) => {
+                for child in children {
+                    collect_fields(child, fields);
+                }
+            }
+            OperatorTree::Complement(child) => collect_fields(child, fields),
+            _ => {}
+        }
+    }
+
+    let mut fields = BTreeSet::new();
+    collect_fields(tree, &mut fields);
+    if fields.len() == 1 {
+        fields.into_iter().next().flatten()
+    } else {
+        None
     }
 }
 
@@ -694,10 +800,36 @@ fn const_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f32>> {
     }
 }
 
+fn const_f64_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f64>> {
+    match expr {
+        Expr::Array(items) => items.iter().map(|value| const_f64(value, params)).collect(),
+        other => match const_value(other, params)? {
+            Value::List(items) => items
+                .into_iter()
+                .map(|value| match value {
+                    Value::Int(number) => Some(number as f64),
+                    Value::Float(number) => Some(number),
+                    Value::Decimal(number) => number.to_f64(),
+                    _ => None,
+                })
+                .collect(),
+            _ => None,
+        },
+    }
+}
+
 fn const_gating(expr: &Expr, params: &[SQLParam]) -> Option<GatingSpec> {
     match const_value(expr, params)? {
+        Value::Str(s) if s.eq_ignore_ascii_case("softplus") => Some(GatingSpec::Softplus),
+        Value::Str(s) if s.eq_ignore_ascii_case("pass") || s.eq_ignore_ascii_case("none") => {
+            Some(GatingSpec::Pass)
+        }
+        Value::Str(s) if s.eq_ignore_ascii_case("sigmoid") => Some(GatingSpec::Sigmoid {
+            feature: String::new(),
+        }),
         Value::Str(s) if s.eq_ignore_ascii_case("relu") => Some(GatingSpec::ReLU),
-        Value::Str(_) => Some(GatingSpec::Pass),
+        Value::Str(s) if s.eq_ignore_ascii_case("swish") => Some(GatingSpec::Swish),
+        Value::Str(s) if s.eq_ignore_ascii_case("gelu") => Some(GatingSpec::Gelu),
         _ => None,
     }
 }
@@ -842,6 +974,9 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 field,
                 scoring,
             } => self.execute_term(query, field.as_deref(), *scoring),
+            OperatorTree::BayesianScore { source, field } => {
+                self.execute_bayesian_score(source, field.as_deref())
+            }
             OperatorTree::KNN {
                 query_vector,
                 k,
@@ -856,9 +991,21 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             OperatorTree::Union(parts) => self.execute_union(parts),
             OperatorTree::Complement(inner) => self.execute_complement(inner),
             OperatorTree::Composed(parts) => self.execute_composed(parts),
-            OperatorTree::LogOddsFusion { signals, alpha, .. } => {
-                self.execute_log_odds_fusion(signals, *alpha)
-            }
+            OperatorTree::LogOddsFusion {
+                signals,
+                alpha,
+                gating,
+                weights,
+                logit_min,
+                logit_max,
+            } => self.execute_log_odds_fusion(
+                signals,
+                *alpha,
+                gating,
+                weights.as_deref(),
+                logit_min.as_deref(),
+                logit_max.as_deref(),
+            ),
             OperatorTree::ProbBoolFusion { signals, mode } => {
                 self.execute_prob_bool_fusion(signals, *mode)
             }
@@ -1104,13 +1251,43 @@ impl EngineDriver<'_> {
         PostingList::from_sorted_unchecked(entries)
     }
 
-    fn execute_log_odds_fusion(&self, signals: &[OperatorTree], alpha: f64) -> PostingList {
+    fn execute_log_odds_fusion(
+        &self,
+        signals: &[OperatorTree],
+        alpha: f64,
+        gating: &GatingSpec,
+        weights: Option<&[f64]>,
+        logit_min: Option<&[f64]>,
+        logit_max: Option<&[f64]>,
+    ) -> PostingList {
+        use uqa_operators::base::Operator;
+
         if signals.is_empty() {
             return PostingList::new();
         }
-        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
-        let fuser = uqa_fusion::LogOddsFusion::new(alpha);
-        fuse_signals_with(&posting_lists, |probs| fuser.fuse(probs))
+        let signal_ops: Vec<std::sync::Arc<dyn Operator>> = self
+            .execute_branches(signals)
+            .into_iter()
+            .map(|pl| -> std::sync::Arc<dyn Operator> {
+                std::sync::Arc::new(StaticPostingList { pl })
+            })
+            .collect();
+        let logit_gating = match gating {
+            GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
+            GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
+            GatingSpec::Sigmoid { .. } => uqa_fusion::LogitGating::Sigmoid,
+            GatingSpec::ReLU => uqa_fusion::LogitGating::ReLU,
+            GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
+            GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
+        };
+        let mut operator = LogOddsFusionOperator::new(signal_ops, alpha).with_gating(logit_gating);
+        if let Some(weights) = weights {
+            operator = operator.with_weights(weights.to_vec());
+        }
+        if let (Some(logit_min), Some(logit_max)) = (logit_min, logit_max) {
+            operator = operator.with_logit_normalization(logit_min.to_vec(), logit_max.to_vec());
+        }
+        operator.execute(&self.bridge_context())
     }
 
     fn execute_cosine_probability(&self, source: &OperatorTree) -> PostingList {
@@ -1122,6 +1299,23 @@ impl EngineDriver<'_> {
         use uqa_scoring::cosine_to_probability;
         let pl = self.execute_node(source);
         pl.with_scores(|e| cosine_to_probability(e.payload.score))
+    }
+
+    fn execute_bayesian_score(&self, source: &OperatorTree, field: Option<&str>) -> PostingList {
+        let raw = self.execute_node(source);
+        let params = field.map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
+            self.engine.bayesian_params_for(self.table, field)
+        });
+        let base_rate_logit = if params.base_rate > 0.0 {
+            uqa_scoring::logit(params.base_rate)
+        } else {
+            0.0
+        };
+        raw.with_scores(|entry| {
+            uqa_scoring::sigmoid(
+                params.alpha * (entry.payload.score - params.beta) + base_rate_logit,
+            )
+        })
     }
 
     fn execute_attention_fusion(
@@ -1317,9 +1511,9 @@ fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
         OperatorTree::Composed(parts)
         | OperatorTree::Intersect(parts)
         | OperatorTree::Union(parts) => parts.iter().find_map(find_text_in_tree),
-        OperatorTree::Complement(inner) | OperatorTree::CosineProbability(inner) => {
-            find_text_in_tree(inner)
-        }
+        OperatorTree::Complement(inner)
+        | OperatorTree::CosineProbability(inner)
+        | OperatorTree::BayesianScore { source: inner, .. } => find_text_in_tree(inner),
         _ => None,
     }
 }

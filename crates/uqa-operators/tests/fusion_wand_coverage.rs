@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
+use uqa_fusion::LogOddsFusion;
 use uqa_operators::{ExecutionContext, LogOddsFusionOperator, Operator};
 
 struct FixedOperator(Vec<(u64, f64)>);
@@ -99,4 +100,33 @@ fn test_top_k_results_match_full_results() {
         let full_entry = full.get_entry(entry.doc_id).unwrap();
         assert!((entry.payload.score - full_entry.payload.score).abs() < 1e-6);
     }
+}
+
+#[test]
+fn sparse_operator_matches_lucene_formula() {
+    let result = LogOddsFusionOperator::new(
+        vec![signal(&[(1, 0.8), (2, 0.6)]), signal(&[(1, 0.7)])],
+        0.5,
+    )
+    .execute(&ExecutionContext::new());
+    let fusion = LogOddsFusion::new(0.5);
+    let doc_one = result.get_entry(1).unwrap().payload.score;
+    let doc_two = result.get_entry(2).unwrap().payload.score;
+    assert!((doc_one - fusion.fuse_sparse(&[Some(0.8), Some(0.7)])).abs() < 1e-12);
+    assert!((doc_two - fusion.fuse_sparse(&[Some(0.6), None])).abs() < 1e-12);
+}
+
+#[test]
+fn one_active_signal_rewrites_to_identity() {
+    let result = LogOddsFusionOperator::new(vec![signal(&[(1, 0.8), (2, 0.2)]), signal(&[])], 0.5)
+        .execute(&ExecutionContext::new());
+    assert_eq!(result.get_entry(1).unwrap().payload.score, 0.8);
+    assert_eq!(result.get_entry(2).unwrap().payload.score, 0.2);
+}
+
+#[test]
+#[should_panic(expected = "log-odds fusion weights must be valid")]
+fn invalid_weights_are_rejected_before_execution() {
+    let _ = LogOddsFusionOperator::new(vec![signal(&[]), signal(&[])], 0.5)
+        .with_weights(vec![0.8, 0.8]);
 }

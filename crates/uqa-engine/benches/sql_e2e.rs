@@ -7,8 +7,8 @@
 //! End-to-end SQL benchmarks.
 //!
 //! `text_match_10k` measures the full search pipeline (parse SQL,
-//! tokenize the query, walk the inverted index, score with Bayesian
-//! BM25, build the result rows) over a 10k-document in-memory corpus.
+//! tokenize the query, walk the inverted index, score with BM25, and
+//! build the result rows) over a 10k-document in-memory corpus.
 //! `select_filter_10k` covers a non-text path: a numeric range scan
 //! with ORDER BY + LIMIT.
 //!
@@ -29,6 +29,9 @@ fn build_engine() -> Engine {
             &[],
         )
         .expect("create");
+    engine
+        .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
+        .expect("create text index");
     let mut buffer = String::with_capacity(64 * N as usize);
     buffer.push_str("INSERT INTO docs (id, title, body, qty) VALUES ");
     for i in 0..N {
@@ -93,7 +96,7 @@ fn bench_multi_term_text_match(c: &mut Criterion) {
     c.bench_function("sql_text_match_multi_term_10k", |bencher| {
         bencher.iter(|| {
             // Two-term query against the body field. The shared
-            // tokenizer fans this into a multi-term posting walk —
+            // tokenizer fans this into a multi-term posting walk -
             // i.e. WAND territory.
             let r = engine
                 .sql(

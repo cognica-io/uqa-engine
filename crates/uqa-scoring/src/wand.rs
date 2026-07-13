@@ -8,7 +8,7 @@
 //!
 //! Both implementations advance posting-list cursors through pivot
 //! resolution. Pruning is *exact* under their respective upper-bound
-//! contracts: for WAND the per-term `upper_bound(df)`; for BMW the
+//! contracts: for WAND the per-term `term_upper_bound(df)`; for BMW the
 //! tighter per-block max stored in [`BlockMaxIndex`]. The output top-k
 //! is identical to exhaustive scoring.
 
@@ -160,7 +160,7 @@ pub struct WANDResult {
     pub stats: WANDStats,
 }
 
-/// Standard WAND with per-term `upper_bound(df)` pruning.
+/// Standard WAND with per-term `term_upper_bound(df)` pruning.
 pub struct WANDScorer<'a> {
     query: &'a WANDQuery,
     inverted_index: Option<&'a dyn InvertedIndex>,
@@ -235,7 +235,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
                             bm = v;
                         }
                     }
-                    // Fall back to the per-term `upper_bound(df)` if no
+                    // Fall back to the per-term `term_upper_bound(df)` if no
                     // block was recorded; an unindexed term must not get
                     // pruned more aggressively than plain WAND.
                     let bound = if bm > 0.0 {
@@ -256,7 +256,7 @@ fn build_cursors(query: &WANDQuery) -> Vec<TermCursor<'_>> {
     for i in 0..query.posting_lists.len() {
         let entries = query.posting_lists[i].entries();
         let df = entries.len() as u64;
-        let upper_bound = query.scorers[i].upper_bound(df);
+        let upper_bound = query.scorers[i].term_upper_bound(df);
         cursors.push(TermCursor {
             entries,
             position: 0,
@@ -317,13 +317,14 @@ where
                 .collect()
         });
 
-        let mut cumulative = 0.0_f64;
+        let mut cumulative_bounds = Vec::with_capacity(bounds.len());
         let mut pivot: Option<usize> = None;
         for (idx, &(doc_val, _)) in sorted_terms.iter().enumerate() {
             if doc_val == INF_DOC {
                 break;
             }
-            cumulative += bounds[idx];
+            cumulative_bounds.push(bounds[idx]);
+            let cumulative = query.scorers[0].finalize_upper_bound(&cumulative_bounds);
             if cumulative >= threshold {
                 pivot = Some(idx);
                 break;
@@ -402,14 +403,15 @@ fn candidate_union(posting_lists: &[PostingList]) -> u64 {
 
 /// Score a single document against every term cursor. Cursors that
 /// point at a different `doc_id` contribute nothing; cursors that point
-/// at `target` contribute `scorer.score(tf, doc_length, df)`.
+/// at `target` contribute a raw term score. The query score is finalized
+/// once after all term contributions have been collected.
 fn score_document(
     query: &WANDQuery,
     cursors: &[TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     target: DocId,
 ) -> f64 {
-    let mut total = 0.0_f64;
+    let mut term_scores = Vec::with_capacity(cursors.len());
     for (i, cursor) in cursors.iter().enumerate() {
         let Some(entry) = cursor.current() else {
             continue;
@@ -427,9 +429,9 @@ fn score_document(
             Some(idx) => idx.get_doc_length(target, &query.fields[i]).max(tf),
             None => tf,
         };
-        total += query.scorers[i].score(tf, doc_length, df);
+        term_scores.push(query.scorers[i].term_score(tf, doc_length, df));
     }
-    total
+    query.scorers[0].finalize_score(&term_scores)
 }
 
 /// Track upper-bound tightness: ratio of `actual_max / upper_bound` per
@@ -516,14 +518,14 @@ impl AdaptiveWANDScorer {
         self.scorers
             .iter()
             .zip(&self.posting_lists)
-            .map(|(scorer, pl)| scorer.upper_bound(pl.len() as u64) * self.tightening_factor)
+            .map(|(scorer, pl)| scorer.term_upper_bound(pl.len() as u64) * self.tightening_factor)
             .collect()
     }
 
     pub fn score_top_k(&mut self) -> PostingList {
         self.analyzer.clear();
         for (scorer, pl) in self.scorers.iter().zip(&self.posting_lists) {
-            let upper = scorer.upper_bound(pl.len() as u64);
+            let upper = scorer.term_upper_bound(pl.len() as u64);
             let actual = pl.iter().map(|e| e.payload.score).fold(0.0_f64, f64::max);
             self.analyzer.record(upper, actual);
         }
@@ -555,6 +557,7 @@ mod tests {
     use super::*;
     use uqa_core::IndexStats;
 
+    use crate::bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
     use crate::bm25::{BM25Params, BM25Scorer};
 
     fn pl_from_tfs(tfs: &[(DocId, u64)]) -> PostingList {
@@ -610,7 +613,7 @@ mod tests {
             }
         }
         for &doc_id in &seen {
-            let mut s = 0.0;
+            let mut term_scores = Vec::new();
             for (pl, scorer) in [&pl_rust, &pl_lang].iter().zip(scorers.iter()) {
                 if let Some(e) = pl.get_entry(doc_id) {
                     let tf = if e.payload.positions.is_empty() {
@@ -618,9 +621,10 @@ mod tests {
                     } else {
                         e.payload.positions.len() as u64
                     };
-                    s += scorer.score(tf, tf, pl.len() as u64);
+                    term_scores.push(scorer.term_score(tf, tf, pl.len() as u64));
                 }
             }
+            let s = scorers[0].finalize_score(&term_scores);
             expected.push((doc_id, s));
         }
         expected.sort_by(|a, b| {
@@ -644,6 +648,83 @@ mod tests {
         for ((d1, s1), (d2, s2)) in got.iter().zip(&expected) {
             assert_eq!(d1, d2);
             assert!((s1 - s2).abs() < 1e-9, "{s1} vs {s2}");
+        }
+    }
+
+    #[test]
+    fn bayesian_wand_finalizes_the_complete_query_once() {
+        let mut stats = IndexStats::default();
+        stats.total_docs = 10;
+        stats.avg_doc_length = 5.0;
+        let stats = Arc::new(stats);
+        let params = BayesianBM25Params {
+            alpha: 1.4,
+            beta: 0.7,
+            base_rate: 0.1,
+            ..BayesianBM25Params::default()
+        };
+        let posting_lists = vec![
+            pl_from_tfs(&[(1, 3), (2, 1), (4, 2), (5, 5), (8, 1)]),
+            pl_from_tfs(&[(1, 1), (3, 4), (4, 1), (6, 2), (8, 3)]),
+        ];
+        let scorers: Vec<Arc<dyn Scorer>> = (0..2)
+            .map(|_| Arc::new(BayesianBM25Scorer::new(params, stats.clone())) as Arc<dyn Scorer>)
+            .collect();
+        let query = WANDQuery::new(
+            posting_lists.clone(),
+            scorers.clone(),
+            vec!["title".into(), "title".into()],
+            vec!["rust".into(), "language".into()],
+            3,
+        );
+        let result = WANDScorer::new(&query, None).score_top_k();
+
+        let mut candidate_ids = std::collections::BTreeSet::new();
+        for posting_list in &posting_lists {
+            candidate_ids.extend(posting_list.iter().map(|entry| entry.doc_id));
+        }
+        let mut expected = Vec::new();
+        for doc_id in candidate_ids {
+            let mut term_scores = Vec::new();
+            for (posting_list, scorer) in posting_lists.iter().zip(&scorers) {
+                if let Some(entry) = posting_list.get_entry(doc_id) {
+                    let term_frequency = entry.payload.positions.len() as u64;
+                    term_scores.push(scorer.term_score(
+                        term_frequency,
+                        term_frequency,
+                        posting_list.len() as u64,
+                    ));
+                }
+            }
+            expected.push((doc_id, scorers[0].finalize_score(&term_scores)));
+        }
+        expected.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        expected.truncate(3);
+
+        let mut actual: Vec<(DocId, f64)> = result
+            .top_k
+            .iter()
+            .map(|entry| (entry.doc_id, entry.payload.score))
+            .collect();
+        actual.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        assert_eq!(actual.len(), expected.len());
+        for ((actual_doc, actual_score), (expected_doc, expected_score)) in
+            actual.iter().zip(&expected)
+        {
+            assert_eq!(actual_doc, expected_doc);
+            assert!((actual_score - expected_score).abs() < 1e-12);
         }
     }
 

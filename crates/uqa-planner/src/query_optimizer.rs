@@ -277,6 +277,10 @@ impl QueryOptimizer {
             OperatorTree::Composed(ops) => {
                 OperatorTree::Composed(ops.into_iter().map(|o| self.simplify_algebra(o)).collect())
             }
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.simplify_algebra(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -473,6 +477,10 @@ impl QueryOptimizer {
                     .map(|o| self.push_graph_pattern_filters(o))
                     .collect(),
             ),
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.push_graph_pattern_filters(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -551,6 +559,10 @@ impl QueryOptimizer {
                     .map(|o| self.push_filter_into_traverse(o))
                     .collect(),
             ),
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.push_filter_into_traverse(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -623,6 +635,10 @@ impl QueryOptimizer {
                     .map(|o| self.push_filter_below_graph_join(o))
                     .collect(),
             ),
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.push_filter_below_graph_join(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -684,6 +700,10 @@ impl QueryOptimizer {
             OperatorTree::Composed(ops) => {
                 OperatorTree::Composed(ops.into_iter().map(Self::fuse_join_pattern).collect())
             }
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(Self::fuse_join_pattern(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -844,20 +864,40 @@ impl QueryOptimizer {
                 signals,
                 alpha,
                 gating,
+                weights,
+                logit_min,
+                logit_max,
             } => {
-                let mut sigs: Vec<OperatorTree> = signals
+                let mut indexed_signals: Vec<(usize, OperatorTree)> = signals
                     .into_iter()
-                    .map(|s| self.reorder_fusion_signals(s))
+                    .enumerate()
+                    .map(|(index, signal)| (index, self.reorder_fusion_signals(signal)))
                     .collect();
-                sigs.sort_by(|a, b| {
-                    let ca = self.graph_aware_signal_cost(a);
-                    let cb = self.graph_aware_signal_cost(b);
+                indexed_signals.sort_by(|(_, left), (_, right)| {
+                    let ca = self.graph_aware_signal_cost(left);
+                    let cb = self.graph_aware_signal_cost(right);
                     ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
                 });
+                let order: Vec<usize> = indexed_signals
+                    .iter()
+                    .map(|(original_index, _)| *original_index)
+                    .collect();
+                let reordered_weights =
+                    weights.map(|values| order.iter().map(|index| values[*index]).collect());
+                let reordered_logit_min =
+                    logit_min.map(|values| order.iter().map(|index| values[*index]).collect());
+                let reordered_logit_max =
+                    logit_max.map(|values| order.iter().map(|index| values[*index]).collect());
                 OperatorTree::LogOddsFusion {
-                    signals: sigs,
+                    signals: indexed_signals
+                        .into_iter()
+                        .map(|(_, signal)| signal)
+                        .collect(),
                     alpha,
                     gating,
+                    weights: reordered_weights,
+                    logit_min: reordered_logit_min,
+                    logit_max: reordered_logit_max,
                 }
             }
             OperatorTree::ProbBoolFusion { signals, mode } => {
@@ -924,6 +964,10 @@ impl QueryOptimizer {
                     .map(|o| self.reorder_fusion_signals(o))
                     .collect(),
             ),
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.reorder_fusion_signals(*source)),
+                field,
+            },
             other => other,
         }
     }
@@ -985,6 +1029,10 @@ impl QueryOptimizer {
             OperatorTree::Complement(inner) => {
                 OperatorTree::Complement(Box::new(self.apply_index_scan(*inner)))
             }
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.apply_index_scan(*source)),
+                field,
+            },
             OperatorTree::Composed(ops) => {
                 OperatorTree::Composed(ops.into_iter().map(|o| self.apply_index_scan(o)).collect())
             }
@@ -1030,14 +1078,24 @@ impl QueryOptimizer {
                 query_terms,
                 field,
             },
+            OperatorTree::BayesianScore { source, field } => OperatorTree::BayesianScore {
+                source: Box::new(self.optimize(*source)),
+                field,
+            },
             OperatorTree::LogOddsFusion {
                 signals,
                 alpha,
                 gating,
+                weights,
+                logit_min,
+                logit_max,
             } => OperatorTree::LogOddsFusion {
                 signals: signals.into_iter().map(|s| self.optimize(s)).collect(),
                 alpha,
                 gating,
+                weights,
+                logit_min,
+                logit_max,
             },
             OperatorTree::ProbBoolFusion { signals, mode } => OperatorTree::ProbBoolFusion {
                 signals: signals.into_iter().map(|s| self.optimize(s)).collect(),

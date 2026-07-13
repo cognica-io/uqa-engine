@@ -312,10 +312,10 @@ impl Operator for ScoreOperator {
                     .zip(&term_idfs)
                     .map(|(term, idf)| {
                         let tf = idx.get_term_freq(entry.doc_id, &self.field, term);
-                        self.scorer.score_with_idf(tf, dl, *idf)
+                        self.scorer.term_score_with_idf(tf, dl, *idf)
                     })
                     .collect();
-                let total = self.scorer.combine_scores(&per_term);
+                let total = self.scorer.finalize_score(&per_term);
                 PostingEntry {
                     doc_id: entry.doc_id,
                     payload: Payload {

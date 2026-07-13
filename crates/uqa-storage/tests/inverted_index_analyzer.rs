@@ -264,3 +264,50 @@ fn sqlite_backward_compat_no_phase_arg_uses_both() {
     assert!(i.analyze("the").is_empty());
     assert!(s.analyze("the").is_empty());
 }
+
+#[test]
+fn memory_field_stats_and_vocabulary_are_field_scoped() {
+    let mut index = MemoryInvertedIndex::new(standard_analyzer("english"));
+    index.add_document(
+        1,
+        fields(&[("title", "rust search"), ("body", "long body text here")]),
+    );
+    index.add_document(2, fields(&[("title", "sqlite")]));
+
+    let title_stats = index.field_stats("title");
+    assert_eq!(title_stats.total_docs, 2);
+    assert_eq!(title_stats.avg_doc_length, 1.5);
+    assert_eq!(
+        index.vocabulary_terms("title"),
+        vec![
+            "rust".to_string(),
+            "search".to_string(),
+            "sqlite".to_string()
+        ]
+    );
+    assert_eq!(index.field_stats("body").total_docs, 1);
+}
+
+#[test]
+fn sqlite_field_stats_and_vocabulary_are_field_scoped() {
+    let conn = sqlite_with_catalog();
+    let mut index = SQLiteInvertedIndex::new(conn, "stats", standard_analyzer("english"));
+    index.add_document(
+        1,
+        fields(&[("title", "rust search"), ("body", "long body text here")]),
+    );
+    index.add_document(2, fields(&[("title", "sqlite")]));
+
+    let title_stats = index.field_stats("title");
+    assert_eq!(title_stats.total_docs, 2);
+    assert_eq!(title_stats.avg_doc_length, 1.5);
+    assert_eq!(
+        index.vocabulary_terms("title"),
+        vec![
+            "rust".to_string(),
+            "search".to_string(),
+            "sqlite".to_string()
+        ]
+    );
+    assert_eq!(index.field_stats("body").total_docs, 1);
+}

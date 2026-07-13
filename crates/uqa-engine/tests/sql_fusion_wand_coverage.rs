@@ -6,8 +6,12 @@
 
 //! SQL coverage for `test_fusion_wand`.
 
+use std::collections::BTreeMap;
+
 use uqa_core::Value;
-use uqa_engine::Engine;
+use uqa_engine::{Engine, ScoringMode};
+use uqa_fusion::LogOddsFusion;
+use uqa_scoring::BayesianBM25Params;
 use uqa_sql::SQLParam;
 
 fn engine() -> Engine {
@@ -419,4 +423,122 @@ fn test_log_odds_with_gating_swish() {
         )
         .unwrap();
     assert!(!result.rows.is_empty());
+}
+
+#[test]
+fn test_log_odds_matches_lucene_sparse_softplus_formula() {
+    let engine = engine();
+    let learning: BTreeMap<u64, f64> = engine
+        .search(
+            "docs",
+            "content",
+            "learning",
+            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+            usize::MAX,
+        )
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let algorithms: BTreeMap<u64, f64> = engine
+        .search(
+            "docs",
+            "content",
+            "algorithms",
+            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+            usize::MAX,
+        )
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM docs WHERE \
+             fuse_log_odds(bayesian_match(content, 'learning'), \
+             bayesian_match(content, 'algorithms'))",
+            &[],
+        )
+        .unwrap();
+    let fusion = LogOddsFusion::new(0.5);
+
+    for row in result.rows {
+        let doc_id = match row.get("id") {
+            Some(Value::Int(value)) => *value as u64,
+            other => panic!("expected integer id, got {other:?}"),
+        };
+        let score = match row.get("_score") {
+            Some(Value::Float(value)) => *value,
+            other => panic!("expected float score, got {other:?}"),
+        };
+        let expected = fusion.fuse_sparse(&[
+            learning.get(&doc_id).copied(),
+            algorithms.get(&doc_id).copied(),
+        ]);
+        assert!((score - expected).abs() < 1e-12, "doc {doc_id}");
+    }
+}
+
+#[test]
+fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
+    let engine = engine();
+    let learning: BTreeMap<u64, f64> = engine
+        .search(
+            "docs",
+            "content",
+            "learning",
+            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+            usize::MAX,
+        )
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let algorithms: BTreeMap<u64, f64> = engine
+        .search(
+            "docs",
+            "content",
+            "algorithms",
+            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+            usize::MAX,
+        )
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM docs WHERE \
+             fuse_log_odds(bayesian_match(content, 'learning'), \
+             bayesian_match(content, 'algorithms'), \
+             weights => ARRAY[0.8, 0.2], \
+             logit_min => ARRAY[-4.0, -1.0], \
+             logit_max => ARRAY[4.0, 3.0])",
+            &[],
+        )
+        .unwrap();
+    let fusion = LogOddsFusion::new(0.5);
+    let weights = [0.8, 0.2];
+    let minimums = [-4.0, -1.0];
+    let maximums = [4.0, 3.0];
+
+    for row in result.rows {
+        let doc_id = match row.get("id") {
+            Some(Value::Int(value)) => *value as u64,
+            other => panic!("expected integer id, got {other:?}"),
+        };
+        let score = match row.get("_score") {
+            Some(Value::Float(value)) => *value,
+            other => panic!("expected float score, got {other:?}"),
+        };
+        let probabilities = [
+            learning.get(&doc_id).copied(),
+            algorithms.get(&doc_id).copied(),
+        ];
+        let expected = fusion
+            .fuse_configured(
+                &probabilities,
+                Some(&weights),
+                Some(&minimums),
+                Some(&maximums),
+            )
+            .unwrap();
+        assert!((score - expected).abs() < 1e-12, "doc {doc_id}");
+    }
 }

@@ -107,8 +107,8 @@ use uqa_operators::{
     ScoreOperator, TermOperator, VectorSimilarityOperator,
 };
 use uqa_scoring::{
-    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
-    CalibrationReport, ParameterLearner, Scorer,
+    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
+    CalibrationMetrics, CalibrationReport, ParameterLearner, Scorer,
 };
 use uqa_sql::SQLError;
 use uqa_storage::{

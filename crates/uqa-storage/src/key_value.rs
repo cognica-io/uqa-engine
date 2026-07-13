@@ -851,6 +851,23 @@ impl InvertedIndex for KeyValueInvertedIndex {
             .unwrap_or(0)
     }
 
+    fn vocabulary_terms(&self, field: &str) -> Vec<String> {
+        self.store
+            .scan_prefix(&posting_key_prefix(&self.table))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(key, _)| {
+                let mut offset = 1;
+                let _table = read_str(&key, &mut offset).ok()?;
+                let indexed_field = read_str(&key, &mut offset).ok()?;
+                let term = read_str(&key, &mut offset).ok()?;
+                (indexed_field == field).then_some(term)
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     fn stats(&self) -> IndexStats {
         let doc_count = self.doc_count();
         let mut stats = IndexStats::default();
@@ -1301,6 +1318,33 @@ mod tests {
         assert_eq!(index.doc_count(), 1);
         assert_eq!(index.doc_freq("title", "rust"), 0);
         assert_eq!(index.total_field_length("title"), 1);
+    }
+
+    #[test]
+    fn key_value_field_stats_and_vocabulary_are_field_scoped() {
+        let mut index =
+            KeyValueInvertedIndex::new(store(), "articles", standard_analyzer("english"));
+        index.add_document(
+            1,
+            BTreeMap::from([
+                ("title".into(), "rust search".into()),
+                ("body".into(), "long body text here".into()),
+            ]),
+        );
+        index.add_document(2, BTreeMap::from([("title".into(), "sqlite".into())]));
+
+        let title_stats = index.field_stats("title");
+        assert_eq!(title_stats.total_docs, 2);
+        assert_eq!(title_stats.avg_doc_length, 1.5);
+        assert_eq!(
+            index.vocabulary_terms("title"),
+            vec![
+                "rust".to_string(),
+                "search".to_string(),
+                "sqlite".to_string()
+            ]
+        );
+        assert_eq!(index.field_stats("body").total_docs, 1);
     }
 
     #[test]

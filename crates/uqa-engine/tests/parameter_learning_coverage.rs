@@ -54,6 +54,16 @@ fn learn_wrong_label_count() {
 }
 
 #[test]
+fn learn_rejects_non_binary_labels() {
+    let engine = engine_with_docs();
+    let err = engine
+        .learn_scoring_params("docs", "content", "learning", &[1, 2, 0, 0])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("only 0 or 1"));
+}
+
+#[test]
 fn learn_nonexistent_table() {
     let engine = engine_with_docs();
     let err = engine
@@ -69,4 +79,32 @@ fn update_scoring_params() {
     engine
         .update_scoring_params("docs", "content", 0.8, 1)
         .unwrap();
+    let saved = engine.load_scoring_params("docs.content").unwrap();
+    let saved: std::collections::BTreeMap<String, f64> = serde_json::from_str(&saved).unwrap();
+    assert!(saved["base_rate"] > 0.0);
+}
+
+#[test]
+fn update_rejects_invalid_observation() {
+    let engine = engine_with_docs();
+    assert!(engine
+        .update_scoring_params("docs", "content", f64::NAN, 1)
+        .unwrap_err()
+        .to_string()
+        .contains("finite raw BM25"));
+    assert!(engine
+        .update_scoring_params("docs", "content", 0.8, 2)
+        .unwrap_err()
+        .to_string()
+        .contains("0 or 1"));
+}
+
+#[test]
+fn update_rejects_unknown_table() {
+    let engine = engine_with_docs();
+    let err = engine
+        .update_scoring_params("missing", "content", 0.8, 1)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown table") || err.contains("does not exist"));
 }

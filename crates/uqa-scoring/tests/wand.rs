@@ -67,7 +67,7 @@ fn exhaustive_top_k(
     let mut scored: Vec<(DocId, f64)> = all
         .into_iter()
         .map(|doc_id| {
-            let mut s = 0.0;
+            let mut term_scores = Vec::new();
             for (pl, scorer) in posting_lists.iter().zip(scorers.iter()) {
                 if let Some(e) = pl.get_entry(doc_id) {
                     let tf = if e.payload.positions.is_empty() {
@@ -75,10 +75,10 @@ fn exhaustive_top_k(
                     } else {
                         e.payload.positions.len() as u64
                     };
-                    s += scorer.score(tf, tf, pl.len() as u64);
+                    term_scores.push(scorer.term_score(tf, tf, pl.len() as u64));
                 }
             }
-            (doc_id, s)
+            (doc_id, scorers[0].finalize_score(&term_scores))
         })
         .collect();
     scored.sort_by(|a, b| {

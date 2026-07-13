@@ -97,8 +97,7 @@ fn bench_bayesian_bm25(c: &mut Criterion) {
             BenchmarkId::from_parameter(num_terms),
             &term_scores,
             |bencher, term_scores| {
-                bencher
-                    .iter(|| black_box(BayesianBM25Scorer::combine_scores(black_box(term_scores))));
+                bencher.iter(|| black_box(bayesian_scorer.combine_scores(black_box(term_scores))));
             },
         );
     }

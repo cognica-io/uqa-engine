@@ -72,7 +72,7 @@ fn exhaustive_top_k(
     }
     let mut scored: Vec<(DocId, f64)> = Vec::new();
     for doc_id in all_ids {
-        let mut total = 0.0;
+        let mut term_scores = Vec::new();
         for (i, term) in terms.iter().enumerate() {
             let tf = idx.get_term_freq(doc_id, &fields[i], term);
             if tf == 0 {
@@ -80,8 +80,9 @@ fn exhaustive_top_k(
             }
             let df = idx.doc_freq(&fields[i], term);
             let dl = idx.get_doc_length(doc_id, &fields[i]).max(tf);
-            total += scorers[i].score(tf, dl, df);
+            term_scores.push(scorers[i].term_score(tf, dl, df));
         }
+        let total = scorers[0].finalize_score(&term_scores);
         if total > 0.0 {
             scored.push((doc_id, total));
         }
