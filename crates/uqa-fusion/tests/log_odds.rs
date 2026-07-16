@@ -6,8 +6,9 @@
 
 //! Log-odds fusion algebraic property tests (Paper 4, Section 4).
 //!
-//! Pins both the raw mean-logit helper's algebraic properties and the
-//! Lucene fusion scorer's sparse softplus behavior.
+//! Pins the raw mean-logit helper's algebraic properties, the default
+//! sign-preserving probability contract, and the Lucene-parity softplus
+//! opt-in behavior.
 
 use proptest::prelude::*;
 use uqa_fusion::LogOddsFusion;
@@ -39,7 +40,8 @@ proptest! {
         );
     }
 
-    /// Softplus-gated matching signals always contribute positively.
+    /// Theorem 4.2.2 (sign preservation), upward direction: unanimous
+    /// positive evidence keeps the fused probability at or above 0.5.
     #[test]
     fn sign_preserved_when_all_above_half(probs in proptest::collection::vec(0.5001f64..0.999, 1..6)) {
         let f = LogOddsFusion::default();
@@ -47,8 +49,20 @@ proptest! {
         prop_assert!(fused >= 0.5, "fuse {probs:?} -> {fused} should be >= 0.5");
     }
 
+    /// Theorem 4.2.2, downward direction: with signed pass gating,
+    /// unanimous negative evidence keeps the fused probability below
+    /// 0.5.
     #[test]
-    fn weak_matches_score_above_absence(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
+    fn pass_gating_sign_preserved_when_all_below_half(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
+        let f = LogOddsFusion::with_gating(0.5, Some("pass"));
+        let fused = f.fuse(&probs);
+        prop_assert!(fused < 0.5, "fuse {probs:?} -> {fused} should be < 0.5");
+    }
+
+    /// Default softplus floor: every match counts as non-negative
+    /// evidence, so even weak matches score above absence.
+    #[test]
+    fn softplus_weak_matches_score_above_absence(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
         let f = LogOddsFusion::default();
         let fused = f.fuse(&probs);
         prop_assert!(fused > 0.5, "fuse {probs:?} -> {fused} should be > 0.5");

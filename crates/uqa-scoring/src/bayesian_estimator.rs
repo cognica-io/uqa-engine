@@ -6,10 +6,14 @@
 
 //! Corpus-driven parameter estimation for query-level Bayesian BM25.
 //!
-//! The estimator mirrors Lucene's `BayesianScoreEstimator`: it reservoir
-//! samples a field's indexed vocabulary, builds OR pseudo-queries, gathers
-//! their raw BM25 score distributions, and derives the sigmoid midpoint,
-//! scale, and relevance base rate.
+//! The sampling loop mirrors Lucene's `BayesianScoreEstimator`: it
+//! reservoir samples a field's indexed vocabulary, builds OR
+//! pseudo-queries, and gathers their raw BM25 score distributions.
+//! The sigmoid midpoint deliberately deviates from Lucene's median:
+//! `beta` anchors at the same 95th-percentile relevance boundary that
+//! defines the base rate, so `P(relevant | raw = beta) = base_rate`
+//! and a real query's top-ranked scores fall in the sigmoid's linear
+//! region instead of its saturated tail.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -27,6 +31,17 @@ const MAX_COLLECTED_DOCS: usize = 10_000;
 const BASE_RATE_MIN: f64 = 1e-6;
 const BASE_RATE_MAX: f64 = 0.5;
 const FALLBACK_BASE_RATE: f64 = 0.01;
+/// Scores at or above this percentile of the sampled distribution count
+/// as relevant; it defines both the base rate and the sigmoid midpoint.
+const RELEVANCE_BOUNDARY_PERCENTILE: f64 = 0.95;
+/// Below this many sampled scores the percentile boundary and the
+/// standard deviation are noise; the estimator falls back instead of
+/// fabricating a calibration.
+const MIN_CALIBRATION_SAMPLES: usize = 10;
+/// Floor on the coefficient of variation when deriving `alpha` from
+/// the score spread. Near-identical samples would otherwise explode
+/// `alpha = 1 / std` into a step function that erases ranking.
+const MIN_RELATIVE_STD: f64 = 0.25;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BayesianScoreEstimator {
@@ -85,7 +100,7 @@ impl BayesianScoreEstimator {
 
             let mut sorted = query_scores.clone();
             sorted.sort_by(f64::total_cmp);
-            let percentile_index = ((sorted.len() as f64) * 0.95) as usize;
+            let percentile_index = ((sorted.len() as f64) * RELEVANCE_BOUNDARY_PERCENTILE) as usize;
             let threshold = sorted[percentile_index.min(sorted.len() - 1)];
             let high_count = query_scores
                 .iter()
@@ -95,12 +110,13 @@ impl BayesianScoreEstimator {
             all_scores.extend(query_scores);
         }
 
-        if all_scores.is_empty() {
+        if all_scores.len() < MIN_CALIBRATION_SAMPLES {
             return fallback_params(bm25_params);
         }
 
         all_scores.sort_by(f64::total_cmp);
-        let beta = all_scores[all_scores.len() / 2];
+        let boundary_index = ((all_scores.len() as f64) * RELEVANCE_BOUNDARY_PERCENTILE) as usize;
+        let beta = all_scores[boundary_index.min(all_scores.len() - 1)];
         let mean = all_scores.iter().sum::<f64>() / all_scores.len() as f64;
         let variance = all_scores
             .iter()
@@ -110,7 +126,7 @@ impl BayesianScoreEstimator {
             })
             .sum::<f64>()
             / all_scores.len() as f64;
-        let standard_deviation = variance.sqrt();
+        let standard_deviation = variance.sqrt().max(MIN_RELATIVE_STD * mean.abs());
         let alpha = if standard_deviation > 0.0 {
             standard_deviation.recip()
         } else {

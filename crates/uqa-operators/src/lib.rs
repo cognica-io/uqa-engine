@@ -34,8 +34,8 @@ pub use base::{
 };
 pub use boolean::{ComplementOperator, IntersectOperator, UnionOperator};
 pub use fusion_wrappers::{
-    AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator, LearnedFusionOperator,
-    MultiFieldSearchOperator, WeightSource,
+    fit_pool_calibration, AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator,
+    LearnedFusionOperator, MultiFieldSearchOperator, RelevantSampleSplit,
 };
 pub use hierarchical::{
     eval_path, parse_path, project_paths, unnest_array, AggregationKind as PathAggKind,

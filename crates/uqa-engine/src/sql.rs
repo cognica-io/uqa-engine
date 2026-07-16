@@ -85,9 +85,9 @@ use row_functions::{
     validate_joined_expr_text_match_fields,
 };
 pub(crate) use row_functions::{
-    run_bayesian_match_public, run_bayesian_match_with_prior_public,
-    run_calibrated_vector_match_public, run_knn_match_public, run_multi_field_match_public,
-    run_text_match_public,
+    run_bayesian_evidence_match_public, run_bayesian_match_public,
+    run_bayesian_match_with_prior_public, run_calibrated_vector_match_public, run_knn_match_public,
+    run_multi_field_match_public, run_text_match_public,
 };
 use select::{
     apply_row_order_limit, build_projection_row, execute_select, expand_star_columns,

@@ -100,12 +100,17 @@ impl Operator for SemanticFilterOperator {
 
 /// Multi-signal fusion via log-odds conjunction (Section 4, Paper 4).
 ///
-/// Each signal must produce calibrated probabilities in `(0, 1)`. Missing
-/// documents contribute zero gated logit, matching Lucene's sparse scorer.
+/// Each signal must produce prior-free evidence probabilities in
+/// `(0, 1)`; a configured `base_rate` enters the fusion exactly once.
+/// Missing documents contribute zero gated logit, matching Lucene's
+/// sparse scorer. The default softplus gating floors match evidence at
+/// the prior; without a configured `base_rate` the operator reduces to
+/// Lucene's `LogOddsFusionQuery` exactly.
 pub struct LogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,
     pub gating: LogitGating,
+    pub base_rate: Option<f64>,
     pub weights: Option<Vec<f64>>,
     pub logit_min: Option<Vec<f64>>,
     pub logit_max: Option<Vec<f64>>,
@@ -119,6 +124,7 @@ impl LogOddsFusionOperator {
             signals,
             alpha,
             gating: LogitGating::Softplus,
+            base_rate: None,
             weights: None,
             logit_min: None,
             logit_max: None,
@@ -128,6 +134,13 @@ impl LogOddsFusionOperator {
 
     pub fn with_gating(mut self, gating: LogitGating) -> Self {
         self.gating = gating;
+        self
+    }
+
+    /// Fusion-level relevance prior, applied exactly once.
+    pub fn with_base_rate(mut self, base_rate: f64) -> Self {
+        LogOddsFusion::new(self.alpha).with_base_rate(base_rate);
+        self.base_rate = Some(base_rate);
         self
     }
 
@@ -168,6 +181,9 @@ impl Operator for LogOddsFusionOperator {
     fn execute(&self, ctx: &ExecutionContext) -> PostingList {
         let mut fuser = LogOddsFusion::new(self.alpha);
         fuser.gating = self.gating;
+        if let Some(base_rate) = self.base_rate {
+            fuser = fuser.with_base_rate(base_rate);
+        }
         fuser
             .validate_configuration(
                 self.signals.len(),
@@ -201,11 +217,18 @@ impl Operator for LogOddsFusionOperator {
             .iter()
             .filter(|scores| !scores.is_empty())
             .count();
+        // An entirely absent signal drops out of the fusion (Lucene's
+        // single-clause rewrite): the surviving signal passes through
+        // at n = 1, where a configured prior still enters once.
         if active_signal_count == 1 {
             let result = posting_lists
                 .into_iter()
                 .find(|posting_list| !posting_list.is_empty())
                 .expect("one active signal has a posting list");
+            let result = match self.base_rate {
+                Some(_) => result.with_scores(|entry| fuser.fuse(&[entry.payload.score])),
+                None => result,
+            };
             return match self.top_k {
                 Some(k) => result.top_k(k),
                 None => result,

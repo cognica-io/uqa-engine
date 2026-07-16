@@ -18,8 +18,30 @@ pub struct BayesianBM25Params {
     pub bm25: BM25Params,
     pub alpha: f64,
     pub beta: f64,
-    /// Corpus base rate in `[0, 1)`. Zero disables the base-rate shift.
+    /// Corpus relevance prior in `[0, 1)`; zero means "not estimated".
+    /// The prior never enters the posterior transform (which matches
+    /// Lucene's `BayesianScoreQuery` exactly); it is metadata for
+    /// fusion, where it converts posteriors to evidence and enters the
+    /// fused score exactly once.
     pub base_rate: f64,
+}
+
+impl BayesianBM25Params {
+    /// Parameters whose posterior equals this calibration's prior-free
+    /// evidence `sigmoid(alpha * (raw - beta) - logit(base_rate))`,
+    /// expressed through the equivalent midpoint shift
+    /// `beta + logit(base_rate) / alpha`. With no estimated prior the
+    /// calibration is returned unchanged.
+    pub fn evidence_params(&self) -> Self {
+        if self.base_rate <= 0.0 {
+            return *self;
+        }
+        Self {
+            beta: self.beta + logit(self.base_rate) / self.alpha,
+            base_rate: 0.0,
+            ..*self
+        }
+    }
 }
 
 impl Default for BayesianBM25Params {
@@ -37,7 +59,6 @@ impl Default for BayesianBM25Params {
 pub struct BayesianBM25Scorer {
     pub params: BayesianBM25Params,
     pub bm25: BM25Scorer,
-    logit_base_rate: f64,
 }
 
 impl BayesianBM25Scorer {
@@ -57,15 +78,9 @@ impl BayesianBM25Scorer {
             "base_rate must be in [0, 1), got {}",
             params.base_rate
         );
-        let logit_base_rate = if params.base_rate > 0.0 {
-            logit(params.base_rate)
-        } else {
-            0.0
-        };
         Self {
             params,
             bm25: BM25Scorer::new(params.bm25, stats),
-            logit_base_rate,
         }
     }
 
@@ -86,10 +101,14 @@ impl BayesianBM25Scorer {
 
     /// Calibrate the complete raw BM25 query score.
     ///
-    /// `P = sigmoid(alpha * (score - beta) + logit(base_rate))`.
-    /// The base-rate term is zero when `base_rate` is disabled.
+    /// `P = sigmoid(alpha * (score - beta))` -- exactly Lucene's
+    /// `BayesianScoreQuery` transform. With the estimator's boundary
+    /// anchoring, `beta` sits at the relevance boundary, so the
+    /// posterior crosses 0.5 where matches start counting as relevant.
+    /// The corpus prior (`params.base_rate`) belongs to fusion, not to
+    /// this transform.
     pub fn calibrate_raw_score(&self, raw_score: f64) -> f64 {
-        sigmoid(self.params.alpha * (raw_score - self.params.beta) + self.logit_base_rate)
+        sigmoid(self.params.alpha * (raw_score - self.params.beta))
     }
 
     /// Combine raw BM25 term contributions, then calibrate exactly once.
@@ -165,16 +184,41 @@ mod tests {
     }
 
     #[test]
-    fn base_rate_is_added_once_at_query_level() {
-        let scorer = BayesianBM25Scorer::new(
+    fn base_rate_never_enters_the_posterior() {
+        let with_prior = BayesianBM25Scorer::new(
             BayesianBM25Params {
                 base_rate: 0.1,
                 ..BayesianBM25Params::default()
             },
             stats(1000, 10.0),
         );
-        let combined = scorer.combine_scores(&[0.7, 0.4]);
-        let expected = sigmoid(1.1 + logit(0.1));
-        assert!((combined - expected).abs() < 1e-12);
+        let without_prior =
+            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+        let combined = with_prior.combine_scores(&[0.7, 0.4]);
+        assert!((combined - without_prior.combine_scores(&[0.7, 0.4])).abs() < 1e-12);
+        assert!((combined - sigmoid(1.1)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn evidence_params_subtract_the_prior_in_logit_space() {
+        let params = BayesianBM25Params {
+            alpha: 2.0,
+            beta: 3.0,
+            base_rate: 0.05,
+            ..BayesianBM25Params::default()
+        };
+        let posterior_scorer = BayesianBM25Scorer::new(params, stats(1000, 10.0));
+        let evidence_scorer = BayesianBM25Scorer::new(params.evidence_params(), stats(1000, 10.0));
+        for raw in [0.0, 1.5, 3.0, 6.0] {
+            let posterior = posterior_scorer.calibrate_raw_score(raw);
+            let evidence = evidence_scorer.calibrate_raw_score(raw);
+            let expected = sigmoid(logit(posterior) - logit(0.05));
+            assert!(
+                (evidence - expected).abs() < 1e-12,
+                "raw {raw}: {evidence} vs {expected}"
+            );
+        }
+        let plain = BayesianBM25Params::default();
+        assert!((plain.evidence_params().beta - plain.beta).abs() < 1e-12);
     }
 }

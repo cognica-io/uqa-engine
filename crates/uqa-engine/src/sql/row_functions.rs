@@ -407,8 +407,16 @@ fn run_multi_field_match(
     let mut active_fields = vec![false; n_fields];
     let mut per_doc: std::collections::BTreeMap<u64, Vec<Option<f64>>> =
         std::collections::BTreeMap::new();
+    let mut field_priors: Vec<f64> = Vec::new();
     for (i, (field, q)) in fields.iter().zip(queries.iter()).enumerate() {
-        let mode = crate::ScoringMode::BayesianBM25(engine.bayesian_params_for(table, field));
+        let calibration = engine.bayesian_params_for(table, field);
+        if calibration.base_rate > 0.0 {
+            field_priors.push(calibration.base_rate);
+        }
+        let mode = crate::ScoringMode::BayesianBM25(uqa_scoring::BayesianBM25Params {
+            base_rate: 0.0,
+            ..calibration
+        });
         let scored = engine.search(table, field, q, &mode, usize::MAX);
         for entry in scored {
             active_fields[i] = true;
@@ -419,12 +427,18 @@ fn run_multi_field_match(
         }
     }
     let active_field_count = active_fields.iter().filter(|active| **active).count();
-    let fusion = uqa_fusion::LogOddsFusion::new(0.5);
+    let mut fusion = uqa_fusion::LogOddsFusion::new(0.5);
+    if let Some(base_rate) = crate::operator_tree_bridge::combine_signal_priors(&field_priors) {
+        fusion = fusion.with_base_rate(base_rate);
+    }
     let mut out: Vec<ScoredEntry> = per_doc
         .into_iter()
         .map(|(doc_id, probabilities)| {
             let fused = if active_field_count == 1 {
-                probabilities.into_iter().flatten().next().unwrap_or(0.5)
+                // A de-facto single field passes through at n = 1,
+                // where a configured prior still enters exactly once.
+                let evidence = probabilities.into_iter().flatten().next().unwrap_or(0.5);
+                fusion.fuse(&[evidence])
             } else {
                 fusion
                     .fuse_weighted_sparse(&probabilities, &weights)
@@ -1333,6 +1347,60 @@ fn run_bayesian_match(
     )
 }
 
+/// `bayesian_match` with the corpus prior stripped: emits prior-free
+/// evidence probabilities for fusion contexts, where the prior enters
+/// the fusion exactly once instead of once per signal.
+fn run_bayesian_evidence_match(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_text_match_scored(
+        engine,
+        table,
+        args,
+        params,
+        "bayesian_match",
+        &|field| {
+            crate::ScoringMode::BayesianBM25(
+                engine.bayesian_params_for(table, field).evidence_params(),
+            )
+        },
+        None,
+    )
+}
+
+pub(crate) fn run_bayesian_evidence_match_public(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_bayesian_evidence_match(engine, table, args, params)
+}
+
+/// The corpus relevance prior a text signal would fold into its
+/// posterior: the field's estimated base rate, or the logit-mean rate
+/// across every text-indexed field for `_all` queries.
+fn text_signal_prior(engine: &Engine, table: &str, field_expr: &Expr) -> Option<f64> {
+    let field = match field_expr {
+        Expr::Column(name) => Some(name.as_str()),
+        Expr::QualifiedColumn { column, .. } => Some(column.as_str()),
+        _ => None,
+    };
+    let rates: Vec<f64> = match field {
+        Some(field) => vec![engine.bayesian_params_for(table, field).base_rate],
+        None => engine
+            .fts_fields_for_table(table)
+            .iter()
+            .map(|field| engine.bayesian_params_for(table, field).base_rate)
+            .collect(),
+    };
+    let rates: Vec<f64> = rates.into_iter().filter(|rate| *rate > 0.0).collect();
+    crate::operator_tree_bridge::combine_signal_priors(&rates)
+}
+
 /// Reject silently-empty text searches up front: a match function whose
 /// field is not a real column, or is a column without a text index,
 /// previously returned zero rows with no diagnostic.
@@ -1843,6 +1911,7 @@ fn run_fuse_log_odds(
     let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
         Vec::with_capacity(args.len());
     let mut all_doc_ids = std::collections::BTreeSet::new();
+    let mut signal_priors: Vec<f64> = Vec::new();
     let ctx = EvalContext::new(None, params).with_engine(engine);
     for arg in args {
         if let Some((name, value_expr)) = named_arg_expr(arg) {
@@ -1895,12 +1964,29 @@ fn run_fuse_log_odds(
                                 return Err(non_probability_signal_error(name, "fuse_log_odds"));
                             }
                             FunctionKind::BayesianMatch => {
-                                run_bayesian_match(engine, table, inner, params, None)?
+                                if let Some(prior) = text_signal_prior(engine, table, &inner[0]) {
+                                    signal_priors.push(prior);
+                                }
+                                run_bayesian_evidence_match(engine, table, inner, params)?
                             }
                             _ => unreachable!("matched text scoring function"),
                         }
                     }
-                    FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
+                    FunctionKind::FTSMatch => {
+                        match crate::operator_tree_bridge::run_fts_fusion_signal(
+                            engine, table, inner, params,
+                        ) {
+                            Some((rows, prior)) => {
+                                if let Some(prior) = prior {
+                                    signal_priors.push(prior);
+                                }
+                                rows
+                            }
+                            // Non-constant arguments cannot be lowered;
+                            // the signal stays an opaque posterior.
+                            None => run_fts_match(engine, table, inner, params)?,
+                        }
+                    }
                     FunctionKind::BayesianMatchWithPrior => {
                         run_bayesian_match_with_prior(engine, table, inner, params)?
                     }
@@ -1912,7 +1998,10 @@ fn run_fuse_log_odds(
                                 actual: inner.len(),
                             });
                         }
-                        cosine_rows_to_probabilities(run_knn_match(engine, table, inner, params)?)
+                        // Vector signals in fusion contexts contribute
+                        // likelihood-ratio calibrated evidence, not the
+                        // standalone (1 + cos) / 2 map.
+                        run_calibrated_vector_match(engine, table, inner, params)?
                     }
                     FunctionKind::CalibratedVectorMatch => {
                         run_calibrated_vector_match(engine, table, inner, params)?
@@ -2005,6 +2094,9 @@ fn run_fuse_log_odds(
     }
     let mut fuser = uqa_fusion::LogOddsFusion::new(alpha);
     fuser.gating = gating;
+    if let Some(base_rate) = crate::operator_tree_bridge::combine_signal_priors(&signal_priors) {
+        fuser = fuser.with_base_rate(base_rate);
+    }
     fuser
         .fuse_configured(
             &vec![None; n],
@@ -2019,12 +2111,17 @@ fn run_fuse_log_odds(
         .filter(|scores| !scores.is_empty())
         .count();
     if active_signal_count == 1 {
+        // The surviving signal passes through at n = 1, where a
+        // configured prior still enters exactly once.
         return Ok(score_maps
             .into_iter()
             .find(|scores| !scores.is_empty())
             .expect("one active signal has scores")
             .into_iter()
-            .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+            .map(|(doc_id, score)| ScoredEntry {
+                doc_id,
+                score: fuser.fuse(&[score]),
+            })
             .collect());
     }
 

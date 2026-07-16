@@ -14,7 +14,7 @@ fn approx_eq(a: f64, b: f64, tol: f64) {
 
 #[test]
 fn softplus_gating_treats_every_match_as_positive_evidence() {
-    let fusion = LogOddsFusion::new(0.0);
+    let fusion = LogOddsFusion::with_gating(0.0, Some("softplus"));
     for p in [0.1, 0.3, 0.5, 0.7, 0.9] {
         for n in [2, 3, 5, 10] {
             assert!(fusion.fuse(&vec![p; n]) > 0.5);
@@ -24,19 +24,32 @@ fn softplus_gating_treats_every_match_as_positive_evidence() {
 
 #[test]
 fn softplus_gating_preserves_weak_match_ordering() {
-    let fusion = LogOddsFusion::new(0.5);
+    let fusion = LogOddsFusion::with_gating(0.5, Some("softplus"));
     assert!(fusion.fuse(&[0.8, 0.7, 0.6, 0.9]) > 0.5);
     assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) > 0.5);
     assert!(fusion.fuse(&[0.4, 0.3]) > fusion.fuse(&[0.2, 0.1]));
 }
 
 #[test]
-fn sparse_absence_is_weaker_than_a_low_probability_match() {
+fn pass_gating_lets_weak_evidence_sink() {
+    let fusion = LogOddsFusion::with_gating(0.5, Some("pass"));
+    assert!(fusion.fuse(&[0.8, 0.7, 0.6, 0.9]) > 0.5);
+    assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) < 0.5);
+    assert!(fusion.fuse(&[0.4, 0.3]) > fusion.fuse(&[0.2, 0.1]));
+}
+
+#[test]
+fn sparse_absence_never_outranks_a_match_by_default() {
     let fusion = LogOddsFusion::new(0.5);
     let absent = fusion.fuse_sparse(&[None, None]);
     let weak_match = fusion.fuse_sparse(&[Some(0.1), None]);
+    let strong_match = fusion.fuse_sparse(&[Some(0.9), None]);
     assert_eq!(absent, 0.5);
     assert!(weak_match > absent);
+    assert!(strong_match > weak_match);
+    // Signed pass gating lets weak evidence sink below absence.
+    let signed = LogOddsFusion::with_gating(0.5, Some("pass"));
+    assert!(signed.fuse_sparse(&[Some(0.1), None]) < absent);
 }
 
 #[test]

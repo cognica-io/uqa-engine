@@ -8,9 +8,13 @@
 //! across fields (Section 12.2 #1, Paper 3).
 //!
 //! Each field has independent calibration parameters (`alpha, beta,
-//! base_rate`) plus a fusion weight. Per-field posteriors combine via
-//! Lucene-compatible sparse log-odds fusion. An absent field contributes
-//! zero, while a matching field contributes a softplus-gated logit.
+//! base_rate`) plus a fusion weight. Per-field posteriors are unwrapped
+//! into prior-free evidence logits (`logit(p_i) - logit(r_i)`), floored
+//! by softplus (Remark 6.5.4: a matching field never counts against a
+//! document beyond the prior), the weighted evidence is
+//! confidence-scaled by `sqrt(n)`, and the weighted prior enters
+//! exactly once. An absent field contributes zero evidence, so a
+//! document matching nothing rests at the prior.
 
 use std::sync::Arc;
 
@@ -88,20 +92,23 @@ impl MultiFieldBayesianScorer {
         } else {
             panic!("multi-field weights must be non-negative and have a positive finite sum")
         };
-        let gated_sum: f64 = probabilities
+        let evidence_sum: f64 = probabilities
             .iter()
             .zip(&normalized)
-            .filter_map(|(probability, weight)| {
-                probability.map(|probability| weight * softplus(lucene_logit(probability)))
+            .zip(&self.scorers)
+            .filter_map(|((probability, weight), scorer)| {
+                probability.map(|probability| {
+                    weight * softplus(lucene_logit(probability) - field_prior_logit(scorer))
+                })
             })
             .sum();
-        sigmoid(gated_sum * (probabilities.len() as f64).sqrt())
+        let prior_logit: f64 = normalized
+            .iter()
+            .zip(&self.scorers)
+            .map(|(weight, scorer)| weight * field_prior_logit(scorer))
+            .sum();
+        sigmoid(evidence_sum * (probabilities.len() as f64).sqrt() + prior_logit)
     }
-}
-
-fn lucene_logit(probability: f64) -> f64 {
-    let clamped = probability.clamp(1e-7, 1.0 - 1e-7);
-    (clamped / (1.0 - clamped)).ln()
 }
 
 fn softplus(value: f64) -> f64 {
@@ -110,6 +117,23 @@ fn softplus(value: f64) -> f64 {
     } else {
         value.exp().ln_1p()
     }
+}
+
+/// `logit(base_rate)` of a field's calibration; zero when the field's
+/// prior is disabled (`base_rate == 0`), i.e. the posterior is already
+/// prior-free evidence.
+fn field_prior_logit(scorer: &BayesianBM25Scorer) -> f64 {
+    let base_rate = scorer.params.base_rate;
+    if base_rate > 0.0 {
+        lucene_logit(base_rate)
+    } else {
+        0.0
+    }
+}
+
+fn lucene_logit(probability: f64) -> f64 {
+    let clamped = probability.clamp(1e-7, 1.0 - 1e-7);
+    (clamped / (1.0 - clamped)).ln()
 }
 
 #[cfg(test)]

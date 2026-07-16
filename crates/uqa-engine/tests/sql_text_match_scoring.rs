@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoredEntry, ScoringMode};
-use uqa_scoring::{logit, sigmoid, BM25Params, BayesianBM25Params};
+use uqa_scoring::{sigmoid, BM25Params, BayesianBM25Params};
 
 fn engine() -> Engine {
     let eng = Engine::new();
@@ -205,7 +205,9 @@ fn multi_term_bayesian_calibration_preserves_bm25_ranking() {
             .collect::<Vec<_>>()
     );
     for (raw, calibrated) in bm25.iter().zip(&bayesian) {
-        let expected = sigmoid(params.alpha * (raw.score - params.beta) + logit(params.base_rate));
+        // The posterior is Lucene's transform; the corpus prior never
+        // enters it (it belongs to fusion).
+        let expected = sigmoid(params.alpha * (raw.score - params.beta));
         assert!(
             (calibrated.score - expected).abs() < 1e-12,
             "doc {}: {} != {}",
@@ -244,10 +246,7 @@ fn fts_match_calibrates_the_complete_boolean_query_once() {
         usize::MAX,
     ));
     let raw_doc_2 = raw.get(&2).copied().expect("doc 2 matches both terms");
-    let expected = BTreeMap::from([(
-        2,
-        sigmoid(params.alpha * (raw_doc_2 - params.beta) + logit(params.base_rate)),
-    )]);
+    let expected = BTreeMap::from([(2, sigmoid(params.alpha * (raw_doc_2 - params.beta)))]);
     let sql = sql_score_map(&eng, "fts_match(body, 'rust AND language')");
 
     assert_scores_match(&sql, &expected);

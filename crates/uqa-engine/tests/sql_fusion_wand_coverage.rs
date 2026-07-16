@@ -425,31 +425,45 @@ fn test_log_odds_with_gating_swish() {
     assert!(!result.rows.is_empty());
 }
 
+/// Resolve the calibration the engine auto-estimated for a field and
+/// the per-signal evidence maps derived from it.
+fn evidence_calibration(
+    engine: &Engine,
+    field: &str,
+    queries: [&str; 2],
+) -> (BayesianBM25Params, [BTreeMap<u64, f64>; 2]) {
+    let saved: BTreeMap<String, f64> = serde_json::from_str(
+        &engine
+            .load_scoring_params(&format!("docs.{field}"))
+            .expect("auto-estimated params are persisted"),
+    )
+    .unwrap();
+    let params = BayesianBM25Params {
+        alpha: saved["alpha"],
+        beta: saved["beta"],
+        base_rate: saved["base_rate"],
+        ..BayesianBM25Params::default()
+    };
+    let evidence_map = |query: &str| -> BTreeMap<u64, f64> {
+        engine
+            .search(
+                "docs",
+                field,
+                query,
+                &ScoringMode::BayesianBM25(params.evidence_params()),
+                usize::MAX,
+            )
+            .into_iter()
+            .map(|entry| (entry.doc_id, entry.score))
+            .collect()
+    };
+    let maps = [evidence_map(queries[0]), evidence_map(queries[1])];
+    (params, maps)
+}
+
 #[test]
-fn test_log_odds_matches_lucene_sparse_softplus_formula() {
+fn test_log_odds_fuses_prior_free_evidence_with_the_prior_once() {
     let engine = engine();
-    let learning: BTreeMap<u64, f64> = engine
-        .search(
-            "docs",
-            "content",
-            "learning",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            usize::MAX,
-        )
-        .into_iter()
-        .map(|entry| (entry.doc_id, entry.score))
-        .collect();
-    let algorithms: BTreeMap<u64, f64> = engine
-        .search(
-            "docs",
-            "content",
-            "algorithms",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            usize::MAX,
-        )
-        .into_iter()
-        .map(|entry| (entry.doc_id, entry.score))
-        .collect();
     let result = engine
         .sql(
             "SELECT id, _score FROM docs WHERE \
@@ -458,7 +472,12 @@ fn test_log_odds_matches_lucene_sparse_softplus_formula() {
             &[],
         )
         .unwrap();
-    let fusion = LogOddsFusion::new(0.5);
+    let (params, [learning, algorithms]) =
+        evidence_calibration(&engine, "content", ["learning", "algorithms"]);
+    let mut fusion = LogOddsFusion::new(0.5);
+    if params.base_rate > 0.0 {
+        fusion = fusion.with_base_rate(params.base_rate);
+    }
 
     for row in result.rows {
         let doc_id = match row.get("id") {
@@ -480,28 +499,6 @@ fn test_log_odds_matches_lucene_sparse_softplus_formula() {
 #[test]
 fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
     let engine = engine();
-    let learning: BTreeMap<u64, f64> = engine
-        .search(
-            "docs",
-            "content",
-            "learning",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            usize::MAX,
-        )
-        .into_iter()
-        .map(|entry| (entry.doc_id, entry.score))
-        .collect();
-    let algorithms: BTreeMap<u64, f64> = engine
-        .search(
-            "docs",
-            "content",
-            "algorithms",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            usize::MAX,
-        )
-        .into_iter()
-        .map(|entry| (entry.doc_id, entry.score))
-        .collect();
     let result = engine
         .sql(
             "SELECT id, _score FROM docs WHERE \
@@ -513,7 +510,12 @@ fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
             &[],
         )
         .unwrap();
-    let fusion = LogOddsFusion::new(0.5);
+    let (params, [learning, algorithms]) =
+        evidence_calibration(&engine, "content", ["learning", "algorithms"]);
+    let mut fusion = LogOddsFusion::new(0.5);
+    if params.base_rate > 0.0 {
+        fusion = fusion.with_base_rate(params.base_rate);
+    }
     let weights = [0.8, 0.2];
     let minimums = [-4.0, -1.0];
     let maximums = [4.0, 3.0];

@@ -103,8 +103,8 @@ use uqa_ml::{
     TrainingSet,
 };
 use uqa_operators::{
-    CosineProbabilityOperator, ExecutionContext, KNNOperator, LogOddsFusionOperator, Operator,
-    ScoreOperator, TermOperator, VectorSimilarityOperator,
+    CalibratedVectorOperator, ExecutionContext, LogOddsFusionOperator, Operator, ScoreOperator,
+    TermOperator, VectorSimilarityOperator,
 };
 use uqa_scoring::{
     BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,

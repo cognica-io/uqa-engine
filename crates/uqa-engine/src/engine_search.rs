@@ -9,10 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
-    CalibrationMetrics, CalibrationReport, CosineProbabilityOperator, DocId, Engine,
-    ExecutionContext, HybridSearchParams, InvertedIndex, KNNOperator, LogOddsFusionOperator,
-    Operator, ParameterLearner, PostingList, SQLError, ScoreOperator, ScoredEntry, Scorer,
-    ScoringMode, TermOperator, VectorSimilarityOperator,
+    CalibratedVectorOperator, CalibrationMetrics, CalibrationReport, DocId, Engine,
+    ExecutionContext, HybridSearchParams, InvertedIndex, LogOddsFusionOperator, Operator,
+    ParameterLearner, PostingList, SQLError, ScoreOperator, ScoredEntry, Scorer, ScoringMode,
+    TermOperator, VectorSimilarityOperator,
 };
 use uqa_core::IndexStats;
 
@@ -33,37 +33,103 @@ fn search_stats_for_terms(
     stats
 }
 
+/// Auto-estimated parameters are refreshed once the corpus doubles or
+/// halves relative to the document count stamped at estimation time.
+const ESTIMATE_STALENESS_FACTOR: f64 = 2.0;
+
+fn resolve_saved_params(params: &BTreeMap<String, f64>) -> BayesianBM25Params {
+    let mut resolved = BayesianBM25Params::default();
+    if let Some(alpha) = params
+        .get("alpha")
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        resolved.alpha = alpha;
+    }
+    if let Some(beta) = params
+        .get("beta")
+        .copied()
+        .filter(|value| value.is_finite())
+    {
+        resolved.beta = beta;
+    }
+    if let Some(base_rate) = params
+        .get("base_rate")
+        .copied()
+        .filter(|value| value.is_finite() && (0.0..1.0).contains(value))
+    {
+        resolved.base_rate = base_rate;
+    }
+    resolved
+}
+
 impl Engine {
+    /// Resolve the Bayesian BM25 calibration for `table.field`.
+    ///
+    /// Saved parameters win. Absent, unparseable, or stale
+    /// auto-estimated parameters trigger a corpus-driven estimation
+    /// that is persisted for subsequent queries, so the raw-score
+    /// identity calibration (`alpha = 1, beta = 0`) never silently
+    /// ships a score for a populated field. Parameters written by the
+    /// online learner carry no `estimated_doc_count` stamp and are
+    /// never overwritten automatically.
     pub(crate) fn bayesian_params_for(&self, table: &str, field: &str) -> BayesianBM25Params {
-        let mut resolved = BayesianBM25Params::default();
-        let Some(json) = self.load_scoring_params(&format!("{table}.{field}")) else {
-            return resolved;
+        let saved = self
+            .load_scoring_params(&format!("{table}.{field}"))
+            .and_then(|json| serde_json::from_str::<BTreeMap<String, f64>>(&json).ok());
+        if let Some(params) = saved {
+            let stamp = params.get("estimated_doc_count").copied();
+            if !self.estimated_params_are_stale(table, stamp) {
+                return resolve_saved_params(&params);
+            }
+        }
+        self.auto_estimate_params(table, field).unwrap_or_default()
+    }
+
+    /// A stamped estimate goes stale when the corpus grows or shrinks
+    /// past [`ESTIMATE_STALENESS_FACTOR`]. Unstamped parameters (online
+    /// learner output, hand-written values) never go stale.
+    fn estimated_params_are_stale(&self, table: &str, stamp: Option<f64>) -> bool {
+        let Some(stamped_doc_count) = stamp.filter(|value| value.is_finite() && *value > 0.0)
+        else {
+            return false;
         };
-        let Ok(params) = serde_json::from_str::<BTreeMap<String, f64>>(&json) else {
-            return resolved;
+        let Some(table_state) = self.table(table) else {
+            return false;
         };
-        if let Some(alpha) = params
-            .get("alpha")
-            .copied()
-            .filter(|value| value.is_finite() && *value > 0.0)
-        {
-            resolved.alpha = alpha;
-        }
-        if let Some(beta) = params
-            .get("beta")
-            .copied()
-            .filter(|value| value.is_finite())
-        {
-            resolved.beta = beta;
-        }
-        if let Some(base_rate) = params
-            .get("base_rate")
-            .copied()
-            .filter(|value| value.is_finite() && (0.0..1.0).contains(value))
-        {
-            resolved.base_rate = base_rate;
-        }
-        resolved
+        let current = table_state.inverted_index.read().doc_count() as f64;
+        current >= stamped_doc_count * ESTIMATE_STALENESS_FACTOR
+            || current <= stamped_doc_count / ESTIMATE_STALENESS_FACTOR
+    }
+
+    /// Estimate calibration parameters from the field's indexed
+    /// vocabulary and persist them with a document-count stamp.
+    /// Returns `None` (without persisting) when the field has nothing
+    /// to sample, so an empty table estimates on first real use.
+    fn auto_estimate_params(&self, table: &str, field: &str) -> Option<BayesianBM25Params> {
+        let table_state = self.table(table)?;
+        let (params, doc_count) = {
+            let index = table_state.inverted_index.read();
+            if index.doc_count() == 0 || index.vocabulary_terms(field).is_empty() {
+                return None;
+            }
+            let params = BayesianScoreEstimator::default().estimate(
+                index.as_ref(),
+                field,
+                BM25Params::default(),
+            );
+            (params, index.doc_count())
+        };
+        let values = BTreeMap::from([
+            ("alpha".to_string(), params.alpha),
+            ("beta".to_string(), params.beta),
+            ("base_rate".to_string(), params.base_rate),
+            ("estimated_doc_count".to_string(), doc_count as f64),
+        ]);
+        let json = serde_json::to_string(&values).ok()?;
+        self.save_scoring_params(&format!("{table}.{field}"), &json)
+            .ok()?;
+        Some(params)
     }
 
     pub(crate) fn snapshot_context(
@@ -327,18 +393,18 @@ impl Engine {
         let Some(table_state) = self.table(table) else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let params = {
-            let index = table_state.inverted_index.read();
-            BayesianScoreEstimator::new(n_samples, tokens_per_query, seed).estimate(
-                index.as_ref(),
-                field,
-                BM25Params::default(),
-            )
-        };
+        let (params, doc_count) =
+            {
+                let index = table_state.inverted_index.read();
+                let params = BayesianScoreEstimator::new(n_samples, tokens_per_query, seed)
+                    .estimate(index.as_ref(), field, BM25Params::default());
+                (params, index.doc_count())
+            };
         let values = BTreeMap::from([
             ("alpha".to_string(), params.alpha),
             ("beta".to_string(), params.beta),
             ("base_rate".to_string(), params.base_rate),
+            ("estimated_doc_count".to_string(), doc_count as f64),
         ]);
         let json = serde_json::to_string(&values)
             .map_err(|err| SQLError::Internal(format!("serialize scoring params: {err}")))?;
@@ -428,12 +494,15 @@ impl Engine {
         out
     }
 
-    /// Hybrid search: query-level Bayesian BM25 over `text_field` and
-    /// KNN over `vector_field`, combined with sparse softplus-gated
-    /// log-odds fusion. Both signals are calibrated to `(0, 1)` before
-    /// fusion: BM25 by one sigmoid over the complete raw query score,
-    /// and cosine similarity by `cosine_to_probability`. Returns the
-    /// top-`top_k` entries by descending fused score.
+    /// Hybrid search under the probability contract: query-level
+    /// Bayesian BM25 over `text_field` and likelihood-ratio calibrated
+    /// KNN over `vector_field`, combined with sparse log-odds fusion.
+    /// Both signals enter as prior-free evidence -- BM25 by one sigmoid
+    /// over the complete raw query score with the prior stripped, and
+    /// cosine distance by the pool-fitted two-Gaussian calibration --
+    /// while the text field's estimated relevance prior enters the
+    /// fusion exactly once. Returns the top-`top_k` entries by
+    /// descending fused probability.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
         let Some((ctx, _)) = self.snapshot_context(params.table) else {
             return Vec::new();
@@ -449,6 +518,7 @@ impl Engine {
         }
 
         let mut signals: Vec<Arc<dyn Operator>> = Vec::new();
+        let mut fusion_base_rate = None;
 
         if !analyzed_terms.is_empty() {
             let stats_arc = Arc::new(
@@ -459,8 +529,12 @@ impl Engine {
             );
             let term_op: Arc<dyn Operator> =
                 Arc::new(TermOperator::new(params.text_query, params.text_field));
+            let calibration = self.bayesian_params_for(params.table, params.text_field);
+            if calibration.base_rate > 0.0 {
+                fusion_base_rate = Some(calibration.base_rate);
+            }
             let bayes = Arc::new(BayesianBM25Scorer::new(
-                self.bayesian_params_for(params.table, params.text_field),
+                calibration.evidence_params(),
                 stats_arc,
             )) as Arc<dyn Scorer>;
             let scored: Arc<dyn Operator> = Arc::new(ScoreOperator::new(
@@ -473,20 +547,22 @@ impl Engine {
         }
 
         if ctx.vector_indexes.contains_key(params.vector_field) {
-            let knn: Arc<dyn Operator> = Arc::new(KNNOperator::new(
+            let calibrated: Arc<dyn Operator> = Arc::new(CalibratedVectorOperator::new(
                 params.query_vector.clone(),
                 params.knn_pool,
                 params.vector_field,
             ));
-            let cosine_prob: Arc<dyn Operator> = Arc::new(CosineProbabilityOperator::new(knn));
-            signals.push(cosine_prob);
+            signals.push(calibrated);
         }
 
         if signals.is_empty() {
             return Vec::new();
         }
 
-        let fusion = LogOddsFusionOperator::new(signals, params.alpha);
+        let mut fusion = LogOddsFusionOperator::new(signals, params.alpha);
+        if let Some(base_rate) = fusion_base_rate {
+            fusion = fusion.with_base_rate(base_rate);
+        }
         let result = fusion.execute(&ctx);
         Self::rank_top_k(&result, params.top_k)
     }

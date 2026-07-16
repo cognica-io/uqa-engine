@@ -189,6 +189,18 @@ fn engine_state_survives_close_and_reopen() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("uqa.sqlite3");
 
+    let hybrid_params = || HybridSearchParams {
+        table: "articles",
+        text_field: "title",
+        text_query: "rust",
+        vector_field: "embedding",
+        query_vector: vec![1.0, 0.0, 0.0],
+        knn_pool: 5,
+        alpha: 0.5,
+        top_k: 5,
+    };
+
+    let score_before_close;
     {
         let eng = Engine::open(&db_path).unwrap();
         eng.create_default_table("articles", vec!["title".into()]);
@@ -199,6 +211,10 @@ fn engine_state_survives_close_and_reopen() {
         vectors.insert("embedding".into(), vec![1.0f32, 0.0, 0.0]);
         eng.add_document_with_vectors("articles", 42, d, vectors)
             .unwrap();
+        let hits = eng.hybrid_search(&hybrid_params());
+        assert_eq!(hits.first().map(|h| h.doc_id), Some(42));
+        score_before_close = hits[0].score;
+        assert!(score_before_close > 0.0);
     } // engine drops; SQLite connection closes; WAL is checkpointed on next open.
 
     let eng = Engine::open(&db_path).unwrap();
@@ -206,21 +222,13 @@ fn engine_state_survives_close_and_reopen() {
     assert_eq!(got.get("title"), Some(&Value::Str("rust language".into())));
 
     // Hybrid search still works after restore: the inverted index, doc
-    // store, and vector index were restored from the catalog.
-    let hits = eng.hybrid_search(&HybridSearchParams {
-        table: "articles",
-        text_field: "title",
-        text_query: "rust",
-        vector_field: "embedding",
-        query_vector: vec![1.0, 0.0, 0.0],
-        knn_pool: 5,
-        alpha: 0.5,
-        top_k: 5,
-    });
+    // store, vector index, and persisted calibration parameters were
+    // restored from the catalog, so the fused probability is identical.
+    let hits = eng.hybrid_search(&hybrid_params());
     assert_eq!(hits.first().map(|h| h.doc_id), Some(42));
     assert!(
-        hits[0].score > 0.5,
-        "hybrid score {} too low",
+        (hits[0].score - score_before_close).abs() < 1e-12,
+        "hybrid score changed across reopen: {} vs {score_before_close}",
         hits[0].score
     );
 }

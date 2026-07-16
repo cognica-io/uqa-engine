@@ -6,12 +6,16 @@
 
 //! Supervised fitting for query-level Bayesian BM25 calibration.
 //!
-//! The fitted model is the same transform used by `BayesianBM25Scorer`:
-//! `sigmoid(alpha * (raw_bm25_score - beta) + logit(base_rate))`.
+//! The fitted posterior is the same transform used by
+//! `BayesianBM25Scorer`: `sigmoid(alpha * (raw_bm25_score - beta))`.
+//! Any intercept the labels call for is absorbed into `beta`. The
+//! `base_rate` is not a model term: it tracks the observed positive
+//! label rate as an exponential moving average, estimating the corpus
+//! relevance prior that fusion applies exactly once.
 
 use std::collections::BTreeMap;
 
-use crate::prob::{logit, sigmoid, PROB_EPSILON};
+use crate::prob::{sigmoid, PROB_EPSILON};
 
 #[derive(Debug, Clone)]
 pub struct ParameterLearner {
@@ -61,8 +65,7 @@ impl ParameterLearner {
     }
 
     pub fn probability(&self, raw_score: f64) -> f64 {
-        let base_rate_logit = self.base_rate.map_or(0.0, logit);
-        sigmoid(self.alpha * (raw_score - self.beta) + base_rate_logit)
+        sigmoid(self.alpha * (raw_score - self.beta))
     }
 
     /// Apply one exact logistic-loss gradient step to a raw BM25 score.
@@ -85,8 +88,8 @@ impl ParameterLearner {
         self.beta -= learning_rate * error * -alpha_before;
 
         if let Some(base_rate) = self.base_rate {
-            let updated_logit = logit(base_rate) - learning_rate * error;
-            self.base_rate = Some(sigmoid(updated_logit).clamp(PROB_EPSILON, 1.0 - PROB_EPSILON));
+            let updated = base_rate + learning_rate * (label - base_rate);
+            self.base_rate = Some(updated.clamp(PROB_EPSILON, 1.0 - PROB_EPSILON));
         }
     }
 

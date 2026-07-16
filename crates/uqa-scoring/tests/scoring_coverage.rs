@@ -152,32 +152,36 @@ fn test_base_rate_identity() {
 }
 
 #[test]
-fn test_base_rate_shifts_posterior() {
-    let low = BayesianBM25Scorer::new(
-        BayesianBM25Params {
-            base_rate: 0.2,
+fn test_base_rate_never_shifts_the_posterior() {
+    let posterior_for = |base_rate: f64| {
+        BayesianBM25Scorer::new(
+            BayesianBM25Params {
+                base_rate,
+                ..BayesianBM25Params::default()
+            },
+            stats(),
+        )
+        .score(5, 200, 100)
+    };
+    let default = posterior_for(0.0);
+    assert_close(posterior_for(0.2), default, 1e-12);
+    assert_close(posterior_for(0.8), default, 1e-12);
+}
+
+#[test]
+fn test_base_rate_shifts_the_evidence() {
+    let evidence_for = |base_rate: f64| {
+        let params = BayesianBM25Params {
+            base_rate,
             ..BayesianBM25Params::default()
-        },
-        stats(),
-    )
-    .score(5, 200, 100);
-    let default = BayesianBM25Scorer::new(
-        BayesianBM25Params {
-            base_rate: 0.5,
-            ..BayesianBM25Params::default()
-        },
-        stats(),
-    )
-    .score(5, 200, 100);
-    let high = BayesianBM25Scorer::new(
-        BayesianBM25Params {
-            base_rate: 0.8,
-            ..BayesianBM25Params::default()
-        },
-        stats(),
-    )
-    .score(5, 200, 100);
-    assert!(low < default && default < high);
+        };
+        BayesianBM25Scorer::new(params.evidence_params(), stats()).score(5, 200, 100)
+    };
+    // A smaller corpus prior makes any match stronger evidence.
+    let low_prior = evidence_for(0.2);
+    let neutral = evidence_for(0.5);
+    let high_prior = evidence_for(0.8);
+    assert!(low_prior > neutral && neutral > high_prior);
 }
 
 #[test]

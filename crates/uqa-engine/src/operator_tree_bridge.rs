@@ -1265,13 +1265,15 @@ impl EngineDriver<'_> {
         if signals.is_empty() {
             return PostingList::new();
         }
-        let signal_ops: Vec<std::sync::Arc<dyn Operator>> = self
-            .execute_branches(signals)
-            .into_iter()
-            .map(|pl| -> std::sync::Arc<dyn Operator> {
-                std::sync::Arc::new(StaticPostingList { pl })
-            })
-            .collect();
+        let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
+        let mut signal_priors: Vec<f64> = Vec::new();
+        for signal in signals {
+            let (pl, prior) = self.execute_fusion_signal(signal);
+            signal_ops.push(std::sync::Arc::new(StaticPostingList { pl }));
+            if let Some(prior) = prior {
+                signal_priors.push(prior);
+            }
+        }
         let logit_gating = match gating {
             GatingSpec::Softplus => uqa_fusion::LogitGating::Softplus,
             GatingSpec::Pass => uqa_fusion::LogitGating::Pass,
@@ -1281,6 +1283,9 @@ impl EngineDriver<'_> {
             GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
         };
         let mut operator = LogOddsFusionOperator::new(signal_ops, alpha).with_gating(logit_gating);
+        if let Some(base_rate) = combine_signal_priors(&signal_priors) {
+            operator = operator.with_base_rate(base_rate);
+        }
         if let Some(weights) = weights {
             operator = operator.with_weights(weights.to_vec());
         }
@@ -1290,12 +1295,103 @@ impl EngineDriver<'_> {
         operator.execute(&self.bridge_context())
     }
 
+    /// Execute a fusion child under the probability contract: the
+    /// signal contributes prior-free evidence and reports the corpus
+    /// relevance prior it would otherwise have folded in, so the
+    /// fusion can apply that prior exactly once.
+    fn execute_fusion_signal(&self, signal: &OperatorTree) -> (PostingList, Option<f64>) {
+        match signal {
+            OperatorTree::BayesianScore { source, field } => {
+                let params = field
+                    .as_deref()
+                    .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
+                        self.engine.bayesian_params_for(self.table, field)
+                    });
+                let prior = (params.base_rate > 0.0).then_some(params.base_rate);
+                let evidence_params = params.evidence_params();
+                let raw = self.execute_node(source);
+                let evidence = raw.with_scores(|entry| {
+                    uqa_scoring::sigmoid(
+                        evidence_params.alpha * (entry.payload.score - evidence_params.beta),
+                    )
+                });
+                (evidence, prior)
+            }
+            OperatorTree::Term {
+                query,
+                field,
+                scoring: Some(TextScoringMode::BayesianBM25),
+            } => {
+                let field_expr = match field {
+                    Some(f) => Expr::Column(f.clone()),
+                    None => Expr::Literal(Value::Str(String::new())),
+                };
+                let args = vec![field_expr, Expr::Literal(Value::Str(query.clone()))];
+                let rows = sql::run_bayesian_evidence_match_public(
+                    self.engine,
+                    self.table,
+                    &args,
+                    self.params,
+                )
+                .unwrap_or_default();
+                (
+                    scored_to_posting_list(&rows),
+                    self.text_field_prior(field.as_deref()),
+                )
+            }
+            OperatorTree::CosineProbability(source) => (self.execute_cosine_evidence(source), None),
+            other => (self.execute_node(other), None),
+        }
+    }
+
+    /// The corpus relevance prior of a text field, or the logit-mean
+    /// prior across every text-indexed field for `_all` queries.
+    fn text_field_prior(&self, field: Option<&str>) -> Option<f64> {
+        let priors: Vec<f64> = match field {
+            Some(field) => vec![self.engine.bayesian_params_for(self.table, field).base_rate],
+            None => self
+                .engine
+                .fts_fields_for_table(self.table)
+                .iter()
+                .map(|field| self.engine.bayesian_params_for(self.table, field).base_rate)
+                .collect(),
+        };
+        combine_signal_priors(
+            &priors
+                .into_iter()
+                .filter(|rate| *rate > 0.0)
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// Likelihood-ratio calibrated vector evidence: fit the pool
+    /// calibration on the source's cosine similarities and emit
+    /// prior-free posteriors (base rate 0.5 contributes zero log-odds).
+    fn execute_cosine_evidence(&self, source: &OperatorTree) -> PostingList {
+        let pl = self.execute_node(source);
+        let distances: Vec<f64> = pl.iter().map(|e| 1.0 - e.payload.score).collect();
+        match uqa_operators::fit_pool_calibration(
+            &distances,
+            uqa_operators::RelevantSampleSplit::default(),
+            0.5,
+        ) {
+            Some(transform) => pl.with_scores(|e| {
+                transform
+                    .calibrate_one(1.0 - e.payload.score)
+                    .clamp(1e-6, 1.0 - 1e-6)
+            }),
+            None => pl.with_scores(|_| 0.5),
+        }
+    }
+
     fn execute_cosine_probability(&self, source: &OperatorTree) -> PostingList {
         // Lift cosine similarities in `[-1, 1]` onto the (0, 1)
         // probability scale via `(1 + s) / 2`. Mirrors
         // [`uqa_operators::CosineProbabilityOperator`] but skips the
         // trait wrapper because the source has already been driven
-        // through the engine.
+        // through the engine. Standalone `knn_match` keeps this
+        // Definition 7.1.2 map; fusion contexts route through
+        // [`Self::execute_cosine_evidence`] instead.
         use uqa_scoring::cosine_to_probability;
         let pl = self.execute_node(source);
         pl.with_scores(|e| cosine_to_probability(e.payload.score))
@@ -1306,15 +1402,8 @@ impl EngineDriver<'_> {
         let params = field.map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
             self.engine.bayesian_params_for(self.table, field)
         });
-        let base_rate_logit = if params.base_rate > 0.0 {
-            uqa_scoring::logit(params.base_rate)
-        } else {
-            0.0
-        };
         raw.with_scores(|entry| {
-            uqa_scoring::sigmoid(
-                params.alpha * (entry.payload.score - params.beta) + base_rate_logit,
-            )
+            uqa_scoring::sigmoid(params.alpha * (entry.payload.score - params.beta))
         })
     }
 
@@ -1647,6 +1736,39 @@ pub fn run_optimised(
     let mut executor = PlanExecutor::new(&driver);
     let pl = executor.execute(&optimised);
     Ok(Some(posting_list_to_scored(&pl)))
+}
+
+/// Combine the corpus priors reported by fusion signals into the single
+/// fusion-level prior: the mean of their logits. Every signal estimates
+/// the same corpus-level P(relevant), so averaging in log-odds space
+/// yields one prior no matter how many signals report it.
+pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
+    if priors.is_empty() {
+        return None;
+    }
+    let mean_logit = priors
+        .iter()
+        .map(|rate| uqa_scoring::logit(*rate))
+        .sum::<f64>()
+        / priors.len() as f64;
+    Some(uqa_scoring::sigmoid(mean_logit))
+}
+
+/// Execute an `fts_match(field, query)` call as a fusion signal:
+/// prior-free evidence rows plus the corpus prior the signal would
+/// otherwise fold in. Returns `None` when the query cannot be lowered
+/// (e.g. non-constant arguments), in which case the caller falls back
+/// to the opaque posterior form.
+pub(crate) fn run_fts_fusion_signal(
+    engine: &Engine,
+    table: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Option<(Vec<ScoredEntry>, Option<f64>)> {
+    let tree = lower_calibrated_signal("fts_match", args, params)?;
+    let driver = EngineDriver::new(engine, table, params);
+    let (pl, prior) = driver.execute_fusion_signal(&tree);
+    Some((posting_list_to_scored(&pl), prior))
 }
 
 // `eval_path` lives in storage; expose a shim so we don't pull in the

@@ -28,6 +28,7 @@ use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
 use uqa_fusion::{AttentionFusion, LearnedFusion, MultiHeadAttentionFusion};
+use uqa_scoring::VectorProbabilityTransform;
 
 use crate::base::{ExecutionContext, Operator};
 use crate::hybrid::coverage_based_default;
@@ -166,9 +167,10 @@ impl Operator for LearnedFusionOperator {
 
 /// Multi-field Bayesian BM25 search (Section 12.2 #1, Paper 3).
 /// Searches every `field` for the same `query`, scores each field
-/// through the supplied [`uqa_scoring::BayesianBM25Scorer`], and
-/// fuses the per-field probabilities through weighted sparse softplus
-/// log-odds fusion (`uqa_fusion::log_odds`).
+/// through a prior-free [`uqa_scoring::BayesianBM25Scorer`], and fuses
+/// the per-field evidence through weighted sparse log-odds fusion
+/// (`uqa_fusion::log_odds`); the configured `base_rate` enters the
+/// fusion exactly once.
 pub struct MultiFieldSearchOperator {
     pub fields: Vec<String>,
     pub query: String,
@@ -203,6 +205,7 @@ impl Operator for MultiFieldSearchOperator {
         // same per-field search analyzer that [`TermOperator`] uses
         // for matching, so term-frequency lookups see the tokens that
         // were actually indexed.
+        let evidence_params = self.bayesian_params.evidence_params();
         let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
         let mut all_ids: BTreeSet<u64> = BTreeSet::new();
         for field in &self.fields {
@@ -210,7 +213,7 @@ impl Operator for MultiFieldSearchOperator {
             let terms = analyzer.analyze(&self.query);
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(&self.query, field));
             let scorer: Arc<dyn Scorer> = Arc::new(BayesianBM25Scorer::new(
-                self.bayesian_params,
+                evidence_params,
                 StdArc::new(idx.field_stats(field)),
             ));
             let score_op = ScoreOperator::new(scorer, term_op, terms, field);
@@ -241,7 +244,10 @@ impl Operator for MultiFieldSearchOperator {
         };
 
         let active_field_count = per_field.iter().filter(|scores| !scores.is_empty()).count();
-        let fusion = uqa_fusion::LogOddsFusion::new(self.fusion_alpha);
+        let mut fusion = uqa_fusion::LogOddsFusion::new(self.fusion_alpha);
+        if self.bayesian_params.base_rate > 0.0 {
+            fusion = fusion.with_base_rate(self.bayesian_params.base_rate);
+        }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
         for doc_id in all_ids {
             let probabilities: Vec<Option<f64>> = per_field
@@ -249,7 +255,10 @@ impl Operator for MultiFieldSearchOperator {
                 .map(|scores| scores.get(&doc_id).copied())
                 .collect();
             let fused = if active_field_count == 1 {
-                probabilities.into_iter().flatten().next().unwrap_or(0.5)
+                // A de-facto single signal skips the weighted mean and
+                // sqrt(n) scaling, but a configured prior still enters.
+                let evidence = probabilities.into_iter().flatten().next().unwrap_or(0.5);
+                fusion.fuse(&[evidence])
             } else {
                 fusion
                     .fuse_weighted_sparse(&probabilities, &normalized)
@@ -275,37 +284,38 @@ impl Operator for MultiFieldSearchOperator {
 // Calibrated vector
 // -------------------------------------------------------------------------
 
-/// Source of importance weights for the `f_R` likelihood-ratio
-/// estimation.
+/// How the relevant-document sample (`f_R`) is split from the
+/// retrieved pool before fitting the likelihood-ratio calibration.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum WeightSource {
-    /// Uniform weighting (every retrieved document contributes
-    /// equally to the relevance density estimate).
+pub enum RelevantSampleSplit {
+    /// The closest quarter of the pool models the relevant density.
     #[default]
-    Uniform,
-    /// Distance-gap detection (Strategy 4.6.1, Paper 5): documents
-    /// past the dominant gap in retrieved similarities are
-    /// down-weighted.
+    TopQuartile,
+    /// Strategy 4.6.1 (Paper 5): documents before the dominant gap in
+    /// the sorted distances model the relevant density. Falls back to
+    /// the top quartile when the pool has no positive gap.
     DistanceGap,
 }
 
-/// Calibrated KNN search operator (Paper 5).
+/// Calibrated KNN search operator (Paper 5, Theorem 3.1.1).
 ///
-/// The canonical UQA behavior draws importance weights from external BM25
-/// probabilities, the IVF cell-density prior, or the distance-gap
-/// detector. This implementation supports the uniform and distance-gap
-/// strategies — the IVF / cross-modal BM25 variants land alongside
-/// the IVF index path.
+/// Fits the likelihood-ratio calibration from the retrieved pool at
+/// query time: the head of the sorted distance distribution (per
+/// [`RelevantSampleSplit`]) estimates the relevant density `f_R`, the
+/// tail estimates the background density `f_G`, and each candidate's
+/// posterior is `sigmoid(log(f_R(d) / f_G(d)) + logit(base_rate))` via
+/// [`VectorProbabilityTransform`]. An uninformative pool (too small,
+/// zero spread, or no head/tail separation) yields the prior for every
+/// candidate instead of fabricating discrimination.
 pub struct CalibratedVectorOperator {
     pub query_vector: Vec<f32>,
     pub k: usize,
     pub field: String,
+    /// Relevance prior folded into the posterior. The default `0.5`
+    /// contributes zero log-odds, so the output doubles as prior-free
+    /// evidence for fusion-level priors.
     pub base_rate: f64,
-    pub weight_source: WeightSource,
-    /// Sensitivity for the distance-gap weighting kernel: rows below
-    /// the gap keep weight `1.0`; rows above pay `exp(-gamma *
-    /// excess)` so a wider gap drops their contribution faster.
-    pub density_gamma: f64,
+    pub split: RelevantSampleSplit,
 }
 
 impl CalibratedVectorOperator {
@@ -315,13 +325,12 @@ impl CalibratedVectorOperator {
             k,
             field: field.into(),
             base_rate: 0.5,
-            weight_source: WeightSource::Uniform,
-            density_gamma: 1.0,
+            split: RelevantSampleSplit::default(),
         }
     }
 
-    pub fn with_weight_source(mut self, source: WeightSource) -> Self {
-        self.weight_source = source;
+    pub fn with_split(mut self, split: RelevantSampleSplit) -> Self {
+        self.split = split;
         self
     }
 
@@ -341,80 +350,99 @@ impl Operator for CalibratedVectorOperator {
             return PostingList::default();
         }
 
-        let entries: Vec<&PostingEntry> = raw.iter().collect();
-        let similarities: Vec<f64> = entries.iter().map(|e| e.payload.score).collect();
-        let distances: Vec<f64> = similarities.iter().map(|s| 1.0 - s).collect();
+        let distances: Vec<f64> = raw.iter().map(|e| 1.0 - e.payload.score).collect();
+        let calibrator = fit_pool_calibration(&distances, self.split, self.base_rate);
 
-        // Compute per-row weights according to the configured
-        // strategy. The output is a uniform (relevance, weight) view
-        // that the calibrator folds into the likelihood ratio.
-        let weights: Vec<f64> = match self.weight_source {
-            WeightSource::Uniform => vec![1.0; distances.len()],
-            WeightSource::DistanceGap => distance_gap_weights(&distances, self.density_gamma),
-        };
-
-        let weight_sum: f64 = weights.iter().sum();
-        let mean_weight = if weight_sum > 0.0 {
-            weight_sum / weights.len() as f64
-        } else {
-            1.0
-        };
-
-        let mut out_entries: Vec<PostingEntry> = Vec::with_capacity(entries.len());
-        for ((entry, distance), weight) in entries.iter().zip(distances.iter()).zip(weights.iter())
-        {
-            // Likelihood ratio per row: e ^ (-distance) is the
-            // Gaussian-kernel relevance score; weighting and base
-            // rate fold via Bayes' rule into a calibrated posterior.
-            let kernel = (-distance).exp();
-            let weighted = kernel * (weight / mean_weight.max(1e-9));
-            let lr = (weighted * (self.base_rate / (1.0 - self.base_rate))).max(1e-12);
-            let posterior = lr / (1.0 + lr);
-            let calibrated = posterior.clamp(1e-6, 1.0 - 1e-6);
-            out_entries.push(PostingEntry::new(
-                entry.doc_id,
-                Payload {
-                    score: calibrated,
-                    ..Default::default()
-                },
-            ));
-        }
+        let mut out_entries: Vec<PostingEntry> = raw
+            .iter()
+            .zip(&distances)
+            .map(|(entry, distance)| {
+                let posterior = calibrator.as_ref().map_or(self.base_rate, |transform| {
+                    transform.calibrate_one(*distance)
+                });
+                PostingEntry::new(
+                    entry.doc_id,
+                    Payload {
+                        score: posterior.clamp(1e-6, 1.0 - 1e-6),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
         // Sort by doc_id so the output is a valid PostingList.
         out_entries.sort_by_key(|e| e.doc_id);
         PostingList::from_sorted_unchecked(out_entries)
     }
 }
 
-/// Strategy 4.6.1: detect the largest gap between consecutive
-/// distances and weight rows past the gap by `exp(-gamma * excess)`.
-fn distance_gap_weights(distances: &[f64], gamma: f64) -> Vec<f64> {
+/// Fit the two-Gaussian likelihood-ratio calibration from a retrieved
+/// distance pool. Returns `None` when the pool carries no usable
+/// relevance signal: fewer than two candidates, negligible spread, or
+/// a head that is not closer than the tail.
+pub fn fit_pool_calibration(
+    distances: &[f64],
+    split: RelevantSampleSplit,
+    base_rate: f64,
+) -> Option<VectorProbabilityTransform> {
     if distances.len() < 2 {
-        return vec![1.0; distances.len()];
+        return None;
     }
     let mut sorted = distances.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mut max_gap = 0.0f64;
-    let mut gap_value = sorted[0];
-    for w in sorted.windows(2) {
-        let g = w[1] - w[0];
-        if g > max_gap {
-            max_gap = g;
-            gap_value = w[0];
+    sorted.sort_by(f64::total_cmp);
+
+    let head_len = match split {
+        RelevantSampleSplit::TopQuartile => quartile_head(sorted.len()),
+        RelevantSampleSplit::DistanceGap => {
+            distance_gap_split(&sorted).unwrap_or_else(|| quartile_head(sorted.len()))
         }
     }
-    if max_gap <= 0.0 {
-        return vec![1.0; distances.len()];
+    .clamp(1, sorted.len() - 1);
+
+    let mu_match = mean(&sorted[..head_len]);
+    let mu_random = mean(&sorted[head_len..]);
+    let sigma = standard_deviation(&sorted);
+    if sigma <= f64::EPSILON || mu_random - mu_match <= f64::EPSILON {
+        return None;
     }
-    distances
+    Some(VectorProbabilityTransform::new(
+        mu_match, mu_random, sigma, base_rate,
+    ))
+}
+
+fn quartile_head(pool_size: usize) -> usize {
+    pool_size.div_ceil(4)
+}
+
+/// Strategy 4.6.1: index of the first element after the dominant gap
+/// between consecutive sorted distances, provided a positive gap exists.
+fn distance_gap_split(sorted: &[f64]) -> Option<usize> {
+    let mut max_gap = 0.0f64;
+    let mut split_index = None;
+    for (index, window) in sorted.windows(2).enumerate() {
+        let gap = window[1] - window[0];
+        if gap > max_gap {
+            max_gap = gap;
+            split_index = Some(index + 1);
+        }
+    }
+    split_index
+}
+
+fn mean(values: &[f64]) -> f64 {
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn standard_deviation(values: &[f64]) -> f64 {
+    let mu = mean(values);
+    let variance = values
         .iter()
-        .map(|d| {
-            if *d <= gap_value {
-                1.0
-            } else {
-                (-gamma * (*d - gap_value)).exp()
-            }
+        .map(|value| {
+            let difference = value - mu;
+            difference * difference
         })
-        .collect()
+        .sum::<f64>()
+        / values.len() as f64;
+    variance.sqrt()
 }
 
 #[cfg(test)]
@@ -456,13 +484,38 @@ mod tests {
     }
 
     #[test]
-    fn calibrated_vector_uniform_weights_clamp_to_unit_interval() {
-        // Reuse the LearnedFusion test path indirectly by feeding a
-        // synthetic vector index. The operator's behaviour at this
-        // scope is just that posteriors stay in (eps, 1 - eps).
+    fn calibrated_vector_missing_index_returns_empty() {
         let op = CalibratedVectorOperator::new(vec![0.0; 3], 0, "missing").with_base_rate(0.5);
-        // Index missing -> empty PostingList.
         let out = op.execute(&ExecutionContext::new());
         assert_eq!(out.len(), 0);
+    }
+
+    #[test]
+    fn pool_calibration_discriminates_head_from_tail() {
+        let distances = [0.02, 0.05, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55];
+        let transform = fit_pool_calibration(&distances, RelevantSampleSplit::TopQuartile, 0.5)
+            .expect("separated pool fits");
+        let head = transform.calibrate_one(0.02);
+        let mid = transform.calibrate_one(0.30);
+        let tail = transform.calibrate_one(0.55);
+        assert!(head > mid && mid > tail, "{head} > {mid} > {tail}");
+        assert!(head > 0.5, "head evidence must be positive, got {head}");
+        assert!(tail < 0.5, "tail evidence must be negative, got {tail}");
+    }
+
+    #[test]
+    fn pool_calibration_rejects_uninformative_pools() {
+        assert!(fit_pool_calibration(&[0.3], RelevantSampleSplit::TopQuartile, 0.5).is_none());
+        assert!(
+            fit_pool_calibration(&[0.3, 0.3, 0.3, 0.3], RelevantSampleSplit::TopQuartile, 0.5)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn distance_gap_split_finds_the_semantic_cliff() {
+        let sorted = [0.05, 0.06, 0.07, 0.40, 0.42, 0.44];
+        assert_eq!(distance_gap_split(&sorted), Some(3));
+        assert_eq!(distance_gap_split(&[0.3, 0.3, 0.3]), None);
     }
 }

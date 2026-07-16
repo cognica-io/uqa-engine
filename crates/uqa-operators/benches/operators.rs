@@ -18,7 +18,7 @@ use uqa_fusion::{AttentionFusion, LearnedFusion};
 use uqa_operators::{
     AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator, Cutoff, ExecutionContext,
     LearnedFusionOperator, MultiFieldSearchOperator, MultiStageOperator, Operator,
-    ProgressiveFusionOperator, SparseThresholdOperator, WeightSource,
+    ProgressiveFusionOperator, RelevantSampleSplit, SparseThresholdOperator,
 };
 use uqa_storage::{InvertedIndex, MemoryInvertedIndex, MemoryVectorIndex, VectorIndex};
 
@@ -218,7 +218,7 @@ fn bench_calibrated_vector(c: &mut Criterion) {
     let query: Vec<f32> = (0..16).map(|d| d as f32 / 16.0).collect();
     let uniform = CalibratedVectorOperator::new(query.clone(), 100, "embedding");
     let gap = CalibratedVectorOperator::new(query, 100, "embedding")
-        .with_weight_source(WeightSource::DistanceGap);
+        .with_split(RelevantSampleSplit::DistanceGap);
     c.bench_function("calibrated_vector_uniform", |bencher| {
         bencher.iter(|| {
             let result = black_box(&uniform).execute(black_box(&ctx));
