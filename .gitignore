@@ -44,3 +44,7 @@ flamegraph.svg
 
 # Claude Code workspace metadata (local only)
 /.claude/
+
+# napi build outputs
+crates/uqa-node/*.node
+crates/uqa-node/node_modules/

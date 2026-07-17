@@ -1,0 +1,40 @@
+{
+  "name": "uqa",
+  "version": "0.1.0",
+  "description": "Node.js bindings for the UQA engine",
+  "license": "AGPL-3.0-only",
+  "author": "Jaepil Jeong <jaepil@cognica.io>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cognica-io/uqa-rs"
+  },
+  "homepage": "https://github.com/cognica-io/uqa-rs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">= 16"
+  },
+  "napi": {
+    "binaryName": "uqa",
+    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\n",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  }
+}
