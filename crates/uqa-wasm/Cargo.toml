@@ -1,0 +1,27 @@
+[package]
+name = "uqa-wasm"
+description = "Browser (emscripten) bindings for the UQA engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "uqa"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+parking_lot = { workspace = true }
+serde_json = { workspace = true }
+uqa-core = { workspace = true }
+uqa-engine = { workspace = true }
+uqa-scoring = { workspace = true }
+uqa-sql = { workspace = true }
+uqa-storage = { workspace = true }
+
+[lints]
+workspace = true

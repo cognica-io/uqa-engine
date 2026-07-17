@@ -65,6 +65,12 @@ Vector search supports both `VECTOR(N)` and `TENSOR(N)` columns. Tensors store m
 
 `uqa-pg-wire` parses and encodes PostgreSQL wire messages, but it intentionally leaves sockets, task scheduling, TLS policy, authentication storage, query planning, and SQL execution to the embedding server.
 
+## Language Bindings
+
+- **Python** (`crates/uqa-python`, package `uqa`): pyo3/maturin bindings covering SQL with typed parameters, Python-defined scalar/table/aggregate SQL functions, every search surface, the calibration workflow, Cypher, and catalog migration. Build with `maturin build`; tests live in `tests/python/`.
+- **Node.js / TypeScript** (`crates/uqa-node`, npm package `uqa`): async-first Node-API addon -- queries and searches return Promises computed off the event loop, with `*Sync` twins and generated TypeScript definitions. Build with `npx napi build --platform` in `crates/uqa-node`; tests live in `tests/node/`.
+- **Browser WASM** (`crates/uqa-wasm`, npm package `uqa-wasm`): the engine compiled to `wasm32-unknown-emscripten` with SQLite persistence mounted on IndexedDB, wrapped by a typed async API. Encryption and DuckDB/Arrow FDW handlers are excluded in browser builds. Build with `scripts/build-wasm.sh` (requires `emcc`); tests live in `tests/wasm/`.
+
 ## Build
 
 ```sh

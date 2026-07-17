@@ -21,6 +21,7 @@ members = [
     "crates/uqa-cli",
     "crates/uqa-python",
     "crates/uqa-node",
+    "crates/uqa-wasm",
 ]
 # `fuzz/` is its own cargo-fuzz workspace; only nightly + cargo-fuzz
 # can build it, so we exclude it from the regular workspace.

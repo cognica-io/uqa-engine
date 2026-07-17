@@ -45,6 +45,10 @@ flamegraph.svg
 # Claude Code workspace metadata (local only)
 /.claude/
 
+# emscripten build outputs copied into the WASM npm package
+crates/uqa-wasm/js/uqa.js
+crates/uqa-wasm/js/uqa.wasm
+
 # napi build outputs
 crates/uqa-node/*.node
 crates/uqa-node/node_modules/
