@@ -227,15 +227,17 @@ impl Engine {
                 handler.load(table_name, rows);
                 handler.scan(&table, columns, predicates, limit)
             }
+            #[cfg(not(target_os = "emscripten"))]
             "duckdb_fdw" => {
                 let handler = uqa_fdw::DuckDBHandler::new(server);
                 handler.scan(&table, columns, predicates, limit)
             }
+            #[cfg(not(target_os = "emscripten"))]
             "arrow_fdw" => {
                 let handler = uqa_fdw::ArrowIpcHandler::new(server);
                 handler.scan(&table, columns, predicates, limit)
             }
-            other => return Err(format!("Unsupported FDW type: `{other}`")),
+            other => return Err(format!("FDW type `{other}` is not available in this build")),
         };
         rows.map_err(|err| err.to_string())
     }

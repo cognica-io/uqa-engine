@@ -18,8 +18,15 @@ parking_lot = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rusqlite = { workspace = true }
 thiserror = { workspace = true }
+
+# SQLCipher's crypto provider does not exist on the browser target;
+# emscripten builds bundle plain SQLite instead.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+rusqlite = { workspace = true }
+
+[target.'cfg(target_os = "emscripten")'.dependencies]
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

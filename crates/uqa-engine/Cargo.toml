@@ -25,11 +25,18 @@ uqa-execution = { workspace = true }
 uqa-fdw = { workspace = true }
 parking_lot = { workspace = true }
 regex = { workspace = true }
-rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3.13"
 thiserror = { workspace = true }
+
+# SQLCipher's crypto provider does not exist on the browser target;
+# emscripten builds bundle plain SQLite instead.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+rusqlite = { workspace = true }
+
+[target.'cfg(target_os = "emscripten")'.dependencies]
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [dev-dependencies]
 uqa-storage-sqlite = { workspace = true }

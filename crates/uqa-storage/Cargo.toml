@@ -12,7 +12,6 @@ rust-version.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-analysis = { workspace = true }
-rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }
@@ -20,10 +19,19 @@ thiserror = { workspace = true }
 argon2 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 crc32fast = { workspace = true }
-fs2 = { workspace = true }
 lz4_flex = { workspace = true }
 getrandom = { workspace = true }
 zstd = { workspace = true }
+
+# SQLCipher's crypto provider does not exist on the browser target;
+# emscripten builds bundle plain SQLite instead. `fs2` file locks are
+# replaced by a single-process shim there.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+rusqlite = { workspace = true }
+fs2 = { workspace = true }
+
+[target.'cfg(target_os = "emscripten")'.dependencies]
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [dev-dependencies]
 tempfile = "3.13"

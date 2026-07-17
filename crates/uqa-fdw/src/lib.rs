@@ -13,17 +13,27 @@
 //! stores pre-loaded rows and applies projection, pushdown predicate
 //! filtering, and a row limit before returning.
 
+// The DuckDB and Arrow handlers wrap native C/C++ engines that do not
+// exist on the browser (emscripten) target; the registry types and the
+// in-memory handler below stay available everywhere.
+#[cfg(not(target_os = "emscripten"))]
 pub mod arrow_flight;
+#[cfg(not(target_os = "emscripten"))]
 pub mod arrow_ipc;
+#[cfg(not(target_os = "emscripten"))]
 pub mod duckdb;
 
+#[cfg(not(target_os = "emscripten"))]
 pub use arrow_flight::{
     build_where_clause as build_arrow_flight_where_clause,
     prepare_query as arrow_flight_prepare_query, quote_literal as arrow_flight_quote_literal,
     ArrowFlightPrepareError,
 };
+#[cfg(not(target_os = "emscripten"))]
 pub use arrow_ipc::ArrowIpcHandler as ArrowHandler;
+#[cfg(not(target_os = "emscripten"))]
 pub use arrow_ipc::{ArrowIpcHandler, ArrowIpcPrepareError};
+#[cfg(not(target_os = "emscripten"))]
 pub use duckdb::{
     build_where_clause as build_duckdb_where_clause, normalize_source as duckdb_normalize_source,
     prepare_query as duckdb_prepare_query, DuckDBHandler, DuckDBPrepareError, FILE_READERS,
@@ -115,12 +125,16 @@ pub type Row = BTreeMap<String, Value>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FDWError {
+    #[cfg(not(target_os = "emscripten"))]
     #[error(transparent)]
     DuckDBPrepare(#[from] DuckDBPrepareError),
+    #[cfg(not(target_os = "emscripten"))]
     #[error(transparent)]
     ArrowIpcPrepare(#[from] ArrowIpcPrepareError),
+    #[cfg(not(target_os = "emscripten"))]
     #[error(transparent)]
     DuckDB(#[from] ::duckdb::Error),
+    #[cfg(not(target_os = "emscripten"))]
     #[error(transparent)]
     Arrow(#[from] arrow_schema::ArrowError),
     #[error(transparent)]

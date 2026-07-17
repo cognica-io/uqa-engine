@@ -27,7 +27,30 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use argon2::{Argon2, Block};
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
+#[cfg(not(target_os = "emscripten"))]
 use fs2::FileExt;
+
+/// Browser (emscripten) builds run a single process against a virtual
+/// filesystem, so the inter-process byte locks `fs2` provides are
+/// vacuously held; this shim keeps the SQLite VFS locking protocol
+/// call sites identical across targets.
+#[cfg(target_os = "emscripten")]
+struct FileExt;
+
+#[cfg(target_os = "emscripten")]
+impl FileExt {
+    fn try_lock_exclusive(_file: &std::fs::File) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn try_lock_shared(_file: &std::fs::File) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn unlock(_file: &std::fs::File) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 use rusqlite::ffi;
 
 pub const VFS_NAME: &str = "uqa_compressed";

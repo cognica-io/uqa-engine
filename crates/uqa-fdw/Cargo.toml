@@ -11,11 +11,16 @@ rust-version.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }
+thiserror = { workspace = true }
+
+# DuckDB and Arrow wrap native C/C++ engines that cannot target the
+# browser; the emscripten build keeps only the registry types and the
+# in-memory handler.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
 arrow-array = { workspace = true }
 arrow-ipc = { workspace = true }
 arrow-schema = { workspace = true }
 duckdb = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

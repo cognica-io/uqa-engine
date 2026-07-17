@@ -20,6 +20,9 @@
 //!   `LogOddsFusion` / `ProbBoolFusion` children, deep-fusion
 //!   `SignalLayer` signals) without serialising them.
 
+// The browser (emscripten) target runs single-threaded, so the rayon
+// pool is native-only and every parallel site keeps a sequential twin.
+#[cfg(not(target_os = "emscripten"))]
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -52,13 +55,23 @@ where
             acc.last_mut().unwrap().push(x);
             acc
         });
-    chunks
-        .into_par_iter()
-        .map(worker)
-        .reduce(Vec::new, |mut a, b| {
+    #[cfg(not(target_os = "emscripten"))]
+    {
+        chunks
+            .into_par_iter()
+            .map(worker)
+            .reduce(Vec::new, |mut a, b| {
+                a.extend(b);
+                a
+            })
+    }
+    #[cfg(target_os = "emscripten")]
+    {
+        chunks.into_iter().map(worker).fold(Vec::new(), |mut a, b| {
             a.extend(b);
             a
         })
+    }
 }
 
 #[cfg(test)]
@@ -175,7 +188,14 @@ impl ParallelExecutor {
         if !self.enabled() || workers.len() < MIN_PARALLEL_BRANCHES {
             return workers.iter().map(|w| w()).collect();
         }
-        workers.par_iter().map(|w| w()).collect()
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            workers.par_iter().map(|w| w()).collect()
+        }
+        #[cfg(target_os = "emscripten")]
+        {
+            workers.iter().map(|w| w()).collect()
+        }
     }
 }
 
