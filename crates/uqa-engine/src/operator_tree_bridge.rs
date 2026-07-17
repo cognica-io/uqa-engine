@@ -1306,7 +1306,8 @@ impl EngineDriver<'_> {
                     .as_deref()
                     .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
                         self.engine.bayesian_params_for(self.table, field)
-                    });
+                    })
+                    .scaled_for_query_terms(scored_term_count(source));
                 let prior = (params.base_rate > 0.0).then_some(params.base_rate);
                 let evidence_params = params.evidence_params();
                 let raw = self.execute_node(source);
@@ -1399,9 +1400,11 @@ impl EngineDriver<'_> {
 
     fn execute_bayesian_score(&self, source: &OperatorTree, field: Option<&str>) -> PostingList {
         let raw = self.execute_node(source);
-        let params = field.map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
-            self.engine.bayesian_params_for(self.table, field)
-        });
+        let params = field
+            .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
+                self.engine.bayesian_params_for(self.table, field)
+            })
+            .scaled_for_query_terms(scored_term_count(source));
         raw.with_scores(|entry| {
             uqa_scoring::sigmoid(params.alpha * (entry.payload.score - params.beta))
         })
@@ -1742,6 +1745,24 @@ pub fn run_optimised(
 /// fusion-level prior: the mean of their logits. Every signal estimates
 /// the same corpus-level P(relevant), so averaging in log-odds space
 /// yields one prior no matter how many signals report it.
+/// Number of score-contributing text terms in a bound BM25 query tree.
+/// Set operations merge payloads by summing scores, so the raw query
+/// score scales with this count and the calibration must be translated
+/// to it. Complements filter without contributing score.
+fn scored_term_count(tree: &OperatorTree) -> usize {
+    match tree {
+        OperatorTree::Term { .. } => 1,
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().map(scored_term_count).sum(),
+        OperatorTree::Filter { source, .. } => source.as_deref().map_or(0, scored_term_count),
+        OperatorTree::BayesianScore { source, .. } | OperatorTree::Score { source, .. } => {
+            scored_term_count(source)
+        }
+        _ => 0,
+    }
+}
+
 pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
     if priors.is_empty() {
         return None;

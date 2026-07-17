@@ -62,6 +62,27 @@ fn resolve_saved_params(params: &BTreeMap<String, f64>) -> BayesianBM25Params {
     {
         resolved.base_rate = base_rate;
     }
+    if let Some(calibration_tokens) = params
+        .get("calibration_tokens")
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        resolved.calibration_tokens = calibration_tokens;
+        if let Some(beta_slope) = params
+            .get("beta_slope")
+            .copied()
+            .filter(|value| value.is_finite())
+        {
+            resolved.beta_slope = beta_slope;
+        }
+        if let Some(sigma_slope) = params
+            .get("sigma_slope")
+            .copied()
+            .filter(|value| value.is_finite())
+        {
+            resolved.sigma_slope = sigma_slope;
+        }
+    }
     resolved
 }
 
@@ -104,28 +125,94 @@ impl Engine {
             || current <= stamped_doc_count / ESTIMATE_STALENESS_FACTOR
     }
 
+    /// Build coherent calibration pseudo-queries by sampling stored
+    /// documents: each query takes the leading distinct analyzed terms
+    /// of one document, so its terms co-occur the way real query terms
+    /// do in relevant documents. Vocabulary-random sampling cannot
+    /// model that co-occurrence, which flattens the fitted length
+    /// slopes on sparse-vocabulary corpora. Documents are
+    /// stride-sampled, so the result is deterministic per corpus.
+    fn sample_calibration_queries(
+        &self,
+        table: &str,
+        field: &str,
+        estimator: &BayesianScoreEstimator,
+    ) -> Vec<Vec<String>> {
+        let Some(table_state) = self.table(table) else {
+            return Vec::new();
+        };
+        let analyzer = table_state.inverted_index.read().get_search_analyzer(field);
+        let store = table_state.document_store.read();
+        let mut doc_ids: Vec<DocId> = store.doc_ids().into_iter().collect();
+        doc_ids.sort_unstable();
+        if doc_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let lengths = estimator.calibration_lengths();
+        let target = estimator.n_samples();
+        // Oversample document slots: short documents cannot fill the
+        // longer query lengths and get skipped.
+        let stride = (doc_ids.len() / (target * 2).max(1)).max(1);
+        let mut queries: Vec<Vec<String>> = Vec::new();
+        let mut length_index = 0;
+        let mut cursor = 0;
+        while queries.len() < target && cursor < doc_ids.len() {
+            let doc_id = doc_ids[cursor];
+            cursor += stride;
+            let Some(uqa_core::Value::Str(text)) = store.get_field(doc_id, field) else {
+                continue;
+            };
+            let mut distinct: Vec<String> = Vec::new();
+            let mut seen = BTreeSet::new();
+            for term in analyzer.analyze(&text) {
+                if seen.insert(term.clone()) {
+                    distinct.push(term);
+                }
+            }
+            let length = lengths[length_index % lengths.len()];
+            if distinct.len() < length {
+                continue;
+            }
+            distinct.truncate(length);
+            queries.push(distinct);
+            length_index += 1;
+        }
+        queries
+    }
+
     /// Estimate calibration parameters from the field's indexed
     /// vocabulary and persist them with a document-count stamp.
     /// Returns `None` (without persisting) when the field has nothing
     /// to sample, so an empty table estimates on first real use.
     fn auto_estimate_params(&self, table: &str, field: &str) -> Option<BayesianBM25Params> {
         let table_state = self.table(table)?;
+        let estimator = BayesianScoreEstimator::default();
+        let queries = self.sample_calibration_queries(table, field, &estimator);
         let (params, doc_count) = {
             let index = table_state.inverted_index.read();
             if index.doc_count() == 0 || index.vocabulary_terms(field).is_empty() {
                 return None;
             }
-            let params = BayesianScoreEstimator::default().estimate(
-                index.as_ref(),
-                field,
-                BM25Params::default(),
-            );
+            let params = if queries.is_empty() {
+                estimator.estimate(index.as_ref(), field, BM25Params::default())
+            } else {
+                estimator.estimate_with_queries(
+                    index.as_ref(),
+                    field,
+                    BM25Params::default(),
+                    &queries,
+                )
+            };
             (params, index.doc_count())
         };
         let values = BTreeMap::from([
             ("alpha".to_string(), params.alpha),
             ("beta".to_string(), params.beta),
             ("base_rate".to_string(), params.base_rate),
+            ("calibration_tokens".to_string(), params.calibration_tokens),
+            ("beta_slope".to_string(), params.beta_slope),
+            ("sigma_slope".to_string(), params.sigma_slope),
             ("estimated_doc_count".to_string(), doc_count as f64),
         ]);
         let json = serde_json::to_string(&values).ok()?;
@@ -159,10 +246,14 @@ impl Engine {
     fn build_text_scorer(
         mode: &ScoringMode,
         stats_arc: Arc<uqa_core::IndexStats>,
+        query_term_count: usize,
     ) -> Arc<dyn Scorer> {
         match mode {
             ScoringMode::BM25(p) => Arc::new(BM25Scorer::new(*p, stats_arc)),
-            ScoringMode::BayesianBM25(p) => Arc::new(BayesianBM25Scorer::new(*p, stats_arc)),
+            ScoringMode::BayesianBM25(p) => Arc::new(BayesianBM25Scorer::new(
+                p.scaled_for_query_terms(query_term_count),
+                stats_arc,
+            )),
         }
     }
 
@@ -229,7 +320,7 @@ impl Engine {
                 &analyzed_terms,
                 &term_doc_freqs,
             ));
-            let scorer = Self::build_text_scorer(mode, stats_arc);
+            let scorer = Self::build_text_scorer(mode, stats_arc, 1);
             let idf = scorer.idf(term_doc_freqs[0]);
 
             let doc_ids: Vec<DocId> = term_freqs.iter().map(|(doc_id, _)| *doc_id).collect();
@@ -268,7 +359,7 @@ impl Engine {
                 &analyzed_terms,
                 &term_doc_freqs,
             ));
-            let scorer = Self::build_text_scorer(mode, stats_arc);
+            let scorer = Self::build_text_scorer(mode, stats_arc, analyzed_terms.len());
             let term_idfs: Vec<f64> = term_doc_freqs
                 .iter()
                 .map(|doc_freq| scorer.idf(*doc_freq))
@@ -411,17 +502,29 @@ impl Engine {
         let Some(table_state) = self.table(table) else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let (params, doc_count) =
-            {
-                let index = table_state.inverted_index.read();
-                let params = BayesianScoreEstimator::new(n_samples, tokens_per_query, seed)
-                    .estimate(index.as_ref(), field, BM25Params::default());
-                (params, index.doc_count())
+        let estimator = BayesianScoreEstimator::new(n_samples, tokens_per_query, seed);
+        let queries = self.sample_calibration_queries(table, field, &estimator);
+        let (params, doc_count) = {
+            let index = table_state.inverted_index.read();
+            let params = if queries.is_empty() {
+                estimator.estimate(index.as_ref(), field, BM25Params::default())
+            } else {
+                estimator.estimate_with_queries(
+                    index.as_ref(),
+                    field,
+                    BM25Params::default(),
+                    &queries,
+                )
             };
+            (params, index.doc_count())
+        };
         let values = BTreeMap::from([
             ("alpha".to_string(), params.alpha),
             ("beta".to_string(), params.beta),
             ("base_rate".to_string(), params.base_rate),
+            ("calibration_tokens".to_string(), params.calibration_tokens),
+            ("beta_slope".to_string(), params.beta_slope),
+            ("sigma_slope".to_string(), params.sigma_slope),
             ("estimated_doc_count".to_string(), doc_count as f64),
         ]);
         let json = serde_json::to_string(&values)
@@ -550,7 +653,9 @@ impl Engine {
             );
             let term_op: Arc<dyn Operator> =
                 Arc::new(TermOperator::new(params.text_query, params.text_field));
-            let calibration = self.bayesian_params_for(params.table, params.text_field);
+            let calibration = self
+                .bayesian_params_for(params.table, params.text_field)
+                .scaled_for_query_terms(analyzed_terms.len());
             if calibration.base_rate > 0.0 {
                 fusion_base_rate = Some(calibration.base_rate);
             }

@@ -205,7 +205,6 @@ impl Operator for MultiFieldSearchOperator {
         // same per-field search analyzer that [`TermOperator`] uses
         // for matching, so term-frequency lookups see the tokens that
         // were actually indexed.
-        let evidence_params = self.bayesian_params.evidence_params();
         let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
         let mut all_ids: BTreeSet<u64> = BTreeSet::new();
         for field in &self.fields {
@@ -213,7 +212,9 @@ impl Operator for MultiFieldSearchOperator {
             let terms = analyzer.analyze(&self.query);
             let term_op: Arc<dyn Operator> = Arc::new(TermOperator::new(&self.query, field));
             let scorer: Arc<dyn Scorer> = Arc::new(BayesianBM25Scorer::new(
-                evidence_params,
+                self.bayesian_params
+                    .scaled_for_query_terms(terms.len())
+                    .evidence_params(),
                 StdArc::new(idx.field_stats(field)),
             ));
             let score_op = ScoreOperator::new(scorer, term_op, terms, field);

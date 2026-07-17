@@ -22,8 +22,10 @@
 //!
 //! Reference points measured on `SciFact` (5,183 docs, 300 test
 //! queries, `all-MiniLM-L6-v2`): text 0.6860, vector 0.6451, hybrid
-//! 0.7190 `NDCG@10` -- in line with published BM25 (~0.67), `MiniLM`
-//! (~0.65), and hybrid (~0.70-0.72) baselines.
+//! 0.7236 `NDCG@10` -- in line with published BM25 (~0.67), `MiniLM`
+//! (~0.65), and hybrid (~0.70-0.72) baselines, and above the Lucene
+//! PR 15948 configuration (median-beta estimator with a per-signal
+//! prior), which measures 0.7079 on the same data.
 
 use std::collections::BTreeMap;
 use std::io::BufRead;

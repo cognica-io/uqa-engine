@@ -13,6 +13,11 @@ use uqa_core::IndexStats;
 use crate::bm25::{BM25Params, BM25Scorer};
 use crate::prob::{logit, sigmoid};
 
+/// Floor on the scaled score spread, as a fraction of the reference
+/// spread, so extrapolating to very short queries cannot drive `sigma`
+/// to zero and explode `alpha` into a step function.
+const MIN_SIGMA_SCALE: f64 = 0.25;
+
 #[derive(Debug, Clone, Copy)]
 pub struct BayesianBM25Params {
     pub bm25: BM25Params,
@@ -24,6 +29,16 @@ pub struct BayesianBM25Params {
     /// fusion, where it converts posteriors to evidence and enters the
     /// fused score exactly once.
     pub base_rate: f64,
+    /// Query length (analyzed term count) the calibration was fitted
+    /// at. Zero disables query-length scaling, so hand-written and
+    /// learner-fitted parameters apply verbatim.
+    pub calibration_tokens: f64,
+    /// Fitted per-token slope of the sigmoid midpoint: raw BM25 sums
+    /// grow with the number of query terms, and `beta` must track that
+    /// scale for the posterior to stay in its linear region.
+    pub beta_slope: f64,
+    /// Fitted per-token slope of the score spread (`1 / alpha`).
+    pub sigma_slope: f64,
 }
 
 impl BayesianBM25Params {
@@ -42,6 +57,37 @@ impl BayesianBM25Params {
             ..*self
         }
     }
+
+    /// The calibration translated to a query with `term_count` analyzed
+    /// terms. Raw BM25 query scores are sums over query terms, so both
+    /// the midpoint and the spread of the matching-score distribution
+    /// move with the term count; the estimator fits those slopes and
+    /// this method applies them:
+    ///
+    /// `beta_q = beta + beta_slope * (q - q_ref)`
+    /// `sigma_q = max(sigma_ref + sigma_slope * (q - q_ref), floor)`
+    ///
+    /// Parameters without a fitted reference length (or a zero term
+    /// count) are returned unchanged. Scaling happens per query, never
+    /// per document, so within-query ranking stays monotone in the raw
+    /// score.
+    pub fn scaled_for_query_terms(&self, term_count: usize) -> Self {
+        if self.calibration_tokens <= 0.0 || term_count == 0 {
+            return *self;
+        }
+        let delta = term_count as f64 - self.calibration_tokens;
+        if delta == 0.0 {
+            return *self;
+        }
+        let sigma_reference = self.alpha.recip();
+        let sigma =
+            (sigma_reference + self.sigma_slope * delta).max(sigma_reference * MIN_SIGMA_SCALE);
+        Self {
+            beta: self.beta + self.beta_slope * delta,
+            alpha: sigma.recip(),
+            ..*self
+        }
+    }
 }
 
 impl Default for BayesianBM25Params {
@@ -51,6 +97,9 @@ impl Default for BayesianBM25Params {
             alpha: 1.0,
             beta: 0.0,
             base_rate: 0.0,
+            calibration_tokens: 0.0,
+            beta_slope: 0.0,
+            sigma_slope: 0.0,
         }
     }
 }
@@ -197,6 +246,59 @@ mod tests {
         let combined = with_prior.combine_scores(&[0.7, 0.4]);
         assert!((combined - without_prior.combine_scores(&[0.7, 0.4])).abs() < 1e-12);
         assert!((combined - sigmoid(1.1)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn query_length_scaling_translates_the_calibration() {
+        let params = BayesianBM25Params {
+            alpha: 0.5,
+            beta: 6.0,
+            calibration_tokens: 5.0,
+            beta_slope: 1.2,
+            sigma_slope: 0.3,
+            ..BayesianBM25Params::default()
+        };
+        let scaled = params.scaled_for_query_terms(15);
+        assert!((scaled.beta - (6.0 + 1.2 * 10.0)).abs() < 1e-12);
+        assert!((scaled.alpha - (2.0_f64 + 0.3 * 10.0).recip()).abs() < 1e-12);
+        // Slopes and reference travel unchanged.
+        assert!((scaled.calibration_tokens - 5.0).abs() < 1e-12);
+        assert!((scaled.beta_slope - 1.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn query_length_scaling_is_inert_without_a_reference() {
+        let params = BayesianBM25Params {
+            alpha: 1.7,
+            beta: 0.8,
+            base_rate: 0.08,
+            ..BayesianBM25Params::default()
+        };
+        let scaled = params.scaled_for_query_terms(12);
+        assert!((scaled.alpha - params.alpha).abs() < 1e-12);
+        assert!((scaled.beta - params.beta).abs() < 1e-12);
+        let reference = BayesianBM25Params {
+            calibration_tokens: 5.0,
+            ..params
+        };
+        let same_length = reference.scaled_for_query_terms(5);
+        assert!((same_length.beta - reference.beta).abs() < 1e-12);
+    }
+
+    #[test]
+    fn query_length_scaling_floors_the_spread() {
+        let params = BayesianBM25Params {
+            alpha: 1.0,
+            beta: 6.0,
+            calibration_tokens: 5.0,
+            beta_slope: 1.2,
+            sigma_slope: 0.3,
+            ..BayesianBM25Params::default()
+        };
+        // Extrapolating down to one term would drive sigma negative;
+        // the floor keeps alpha finite and bounded.
+        let scaled = params.scaled_for_query_terms(1);
+        assert!((scaled.alpha - 4.0).abs() < 1e-12, "got {}", scaled.alpha);
     }
 
     #[test]
