@@ -96,7 +96,7 @@ impl Engine {
     /// ships a score for a populated field. Parameters written by the
     /// online learner carry no `estimated_doc_count` stamp and are
     /// never overwritten automatically.
-    pub(crate) fn bayesian_params_for(&self, table: &str, field: &str) -> BayesianBM25Params {
+    pub fn bayesian_params_for(&self, table: &str, field: &str) -> BayesianBM25Params {
         let saved = self
             .load_scoring_params(&format!("{table}.{field}"))
             .and_then(|json| serde_json::from_str::<BTreeMap<String, f64>>(&json).ok());

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pyo3::conversion::IntoPyObjectExt;
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
 use uqa_core::{DecimalValue, TemporalValue, Value};
@@ -22,9 +22,9 @@ use uqa_engine::{
     Engine, HybridSearchParams, SQLAggregateFunction, SQLAggregateState, SQLParam, SQLResult,
     SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, ScoredEntry, ScoringMode,
 };
-use uqa_scoring::{BM25Params, BayesianBM25Params};
+use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_sql::SQLError;
-use uqa_storage::SQLiteCompressionOptions;
+use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 struct PyScalarFunction {
     name: String,
@@ -276,6 +276,21 @@ impl PyEngine {
     }
 
     #[staticmethod]
+    #[pyo3(signature = (path, key=None))]
+    fn open_auto(path: PathBuf, key: Option<&str>) -> PyResult<Self> {
+        Ok(Self {
+            inner: Arc::new(Engine::open_auto(&path, key).map_err(runtime_error)?),
+        })
+    }
+
+    #[staticmethod]
+    fn detect_database_file(path: PathBuf) -> PyResult<&'static str> {
+        let format = Engine::detect_database_file(&path)
+            .map_err(|err| PyIOError::new_err(err.to_string()))?;
+        Ok(database_file_format_name(format))
+    }
+
+    #[staticmethod]
     #[pyo3(signature = (path, codec="zstd", page_size=None, chunk_pages=None, level=None))]
     fn open_compressed(
         path: PathBuf,
@@ -476,8 +491,10 @@ impl PyEngine {
         top_k: usize,
         scoring: &str,
     ) -> PyResult<Py<PyAny>> {
-        let mode = scoring_mode(scoring)?;
-        let entries = py.detach(|| self.inner.search(table, field, query, &mode, top_k));
+        let entries = py.detach(|| -> PyResult<Vec<ScoredEntry>> {
+            let mode = scoring_mode(&self.inner, table, field, scoring)?;
+            Ok(self.inner.search(table, field, query, &mode, top_k))
+        })?;
         scored_entries_to_py(py, &entries)
     }
 
@@ -535,6 +552,97 @@ impl PyEngine {
         };
         let entries = py.detach(|| self.inner.hybrid_search(&params));
         scored_entries_to_py(py, &entries)
+    }
+
+    #[pyo3(signature = (table, field, n_samples=50, tokens_per_query=5, seed=42))]
+    fn estimate_scoring_params(
+        &self,
+        py: Python<'_>,
+        table: &str,
+        field: &str,
+        n_samples: usize,
+        tokens_per_query: usize,
+        seed: i64,
+    ) -> PyResult<Py<PyAny>> {
+        let params = py
+            .detach(|| {
+                self.inner
+                    .estimate_scoring_params(table, field, n_samples, tokens_per_query, seed)
+            })
+            .map_err(runtime_error)?;
+        float_map_to_py(py, &params)
+    }
+
+    fn learn_scoring_params(
+        &self,
+        py: Python<'_>,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: Vec<u8>,
+    ) -> PyResult<Py<PyAny>> {
+        let params = py
+            .detach(|| {
+                self.inner
+                    .learn_scoring_params(table, field, query, &labels)
+            })
+            .map_err(runtime_error)?;
+        float_map_to_py(py, &params)
+    }
+
+    fn update_scoring_params(
+        &self,
+        table: &str,
+        field: &str,
+        score: f64,
+        label: u8,
+    ) -> PyResult<()> {
+        self.inner
+            .update_scoring_params(table, field, score, label)
+            .map_err(runtime_error)
+    }
+
+    fn calibration_report(
+        &self,
+        py: Python<'_>,
+        table: &str,
+        field: &str,
+        query: &str,
+        labels: Vec<u8>,
+    ) -> PyResult<Py<PyAny>> {
+        let report = py
+            .detach(|| self.inner.calibration_report(table, field, query, &labels))
+            .map_err(runtime_error)?;
+        calibration_report_to_py(py, &report)
+    }
+
+    fn save_scoring_params(&self, name: &str, params: &Bound<'_, PyAny>) -> PyResult<()> {
+        let params = float_map_from_py(params)?;
+        let json = serde_json::to_string(&params)
+            .map_err(|err| PyValueError::new_err(format!("serialize scoring params: {err}")))?;
+        self.inner
+            .save_scoring_params(name, &json)
+            .map_err(runtime_error)
+    }
+
+    fn load_scoring_params(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        match self.inner.load_scoring_params(name) {
+            Some(json) => float_map_to_py(py, &parse_scoring_params(name, &json)?),
+            None => Ok(py.None()),
+        }
+    }
+
+    fn load_all_scoring_params(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let dict = PyDict::new(py);
+        for (name, json) in self.inner.load_all_scoring_params() {
+            let params = parse_scoring_params(&name, &json)?;
+            dict.set_item(name, float_map_to_py(py, &params)?)?;
+        }
+        Ok(dict.into_any().unbind())
+    }
+
+    fn drop_scoring_params(&self, name: &str) -> bool {
+        self.inner.drop_scoring_params(name)
     }
 
     #[pyo3(signature = (graph, query, params=None))]
@@ -603,6 +711,18 @@ impl PyEngine {
         self.inner.list_foreign_tables()
     }
 
+    fn take_sql_notices(&self) -> Vec<(String, String)> {
+        self.inner.take_sql_notices()
+    }
+
+    fn sql_function_depth_limit(&self) -> usize {
+        self.inner.sql_function_depth_limit()
+    }
+
+    fn set_sql_function_depth_limit(&self, limit: usize) {
+        self.inner.set_sql_function_depth_limit(limit);
+    }
+
     fn cancel(&self) {
         self.inner.cancel();
     }
@@ -624,6 +744,17 @@ fn open(path: PathBuf) -> PyResult<PyEngine> {
 #[pyfunction]
 fn open_encrypted(path: PathBuf, key: &str) -> PyResult<PyEngine> {
     PyEngine::open_encrypted(path, key)
+}
+
+#[pyfunction]
+#[pyo3(signature = (path, key=None))]
+fn open_auto(path: PathBuf, key: Option<&str>) -> PyResult<PyEngine> {
+    PyEngine::open_auto(path, key)
+}
+
+#[pyfunction]
+fn detect_database_file(path: PathBuf) -> PyResult<&'static str> {
+    PyEngine::detect_database_file(path)
 }
 
 #[pyfunction]
@@ -682,6 +813,8 @@ fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySQLResult>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
     m.add_function(wrap_pyfunction!(open_encrypted, m)?)?;
+    m.add_function(wrap_pyfunction!(open_auto, m)?)?;
+    m.add_function(wrap_pyfunction!(detect_database_file, m)?)?;
     m.add_function(wrap_pyfunction!(open_compressed, m)?)?;
     m.add_function(wrap_pyfunction!(open_compressed_encrypted, m)?)?;
     m.add_function(wrap_pyfunction!(vector, m)?)?;
@@ -719,15 +852,25 @@ fn compression_options(
     options.validate().map_err(PyValueError::new_err)
 }
 
-fn scoring_mode(scoring: &str) -> PyResult<ScoringMode> {
+fn scoring_mode(engine: &Engine, table: &str, field: &str, scoring: &str) -> PyResult<ScoringMode> {
     match scoring.to_ascii_lowercase().as_str() {
         "bm25" => Ok(ScoringMode::BM25(BM25Params::default())),
-        "bayesian" | "bayesian_bm25" => {
-            Ok(ScoringMode::BayesianBM25(BayesianBM25Params::default()))
-        }
+        "bayesian" | "bayesian_bm25" => Ok(ScoringMode::BayesianBM25(
+            engine.bayesian_params_for(table, field),
+        )),
         other => Err(PyValueError::new_err(format!(
             "unsupported scoring mode `{other}`"
         ))),
+    }
+}
+
+fn database_file_format_name(format: DatabaseFileFormat) -> &'static str {
+    match format {
+        DatabaseFileFormat::Missing => "missing",
+        DatabaseFileFormat::PlainSQLite => "sqlite",
+        DatabaseFileFormat::CompressedContainer { encrypted: false } => "compressed",
+        DatabaseFileFormat::CompressedContainer { encrypted: true } => "compressed_encrypted",
+        DatabaseFileFormat::Unrecognized => "unrecognized",
     }
 }
 
@@ -975,6 +1118,50 @@ fn rows_to_py(py: Python<'_>, rows: &[BTreeMap<String, Value>]) -> PyResult<Py<P
         list.append(map_to_py(py, row)?)?;
     }
     Ok(list.into_any().unbind())
+}
+
+fn float_map_to_py(py: Python<'_>, values: &BTreeMap<String, f64>) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    for (key, value) in values {
+        dict.set_item(key, *value)?;
+    }
+    Ok(dict.into_any().unbind())
+}
+
+fn float_map_from_py(value: &Bound<'_, PyAny>) -> PyResult<BTreeMap<String, f64>> {
+    let dict = value
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("expected a dict of float scoring parameters"))?;
+    let mut out = BTreeMap::new();
+    for (key, value) in dict.iter() {
+        out.insert(key.extract::<String>()?, value.extract::<f64>()?);
+    }
+    Ok(out)
+}
+
+fn parse_scoring_params(name: &str, json: &str) -> PyResult<BTreeMap<String, f64>> {
+    serde_json::from_str(json).map_err(|err| {
+        PyValueError::new_err(format!(
+            "scoring params `{name}` are not a map of floats: {err}"
+        ))
+    })
+}
+
+fn calibration_report_to_py(py: Python<'_>, report: &CalibrationReport) -> PyResult<Py<PyAny>> {
+    let bins = PyList::empty(py);
+    for bin in &report.bins {
+        let entry = PyDict::new(py);
+        entry.set_item("avg_predicted", bin.avg_predicted)?;
+        entry.set_item("avg_actual", bin.avg_actual)?;
+        entry.set_item("count", bin.count)?;
+        bins.append(entry)?;
+    }
+    let dict = PyDict::new(py);
+    dict.set_item("ece", report.ece)?;
+    dict.set_item("brier", report.brier)?;
+    dict.set_item("log_loss", report.log_loss)?;
+    dict.set_item("bins", bins)?;
+    Ok(dict.into_any().unbind())
 }
 
 fn scored_entries_to_py(py: Python<'_>, entries: &[ScoredEntry]) -> PyResult<Py<PyAny>> {
