@@ -22,7 +22,9 @@ fn search_stats_for_terms(
     terms: &[String],
     doc_freqs: &[u64],
 ) -> IndexStats {
-    let mut stats = index.field_stats(field);
+    // The scalar variant skips the vocabulary-wide doc-freq map; every
+    // term this query scores gets its frequency set explicitly below.
+    let mut stats = index.field_stats_scalar(field);
 
     let mut seen = BTreeSet::<&str>::new();
     for (term, doc_freq) in terms.iter().zip(doc_freqs) {
@@ -209,35 +211,35 @@ impl Engine {
             return Vec::new();
         }
 
-        let posting_lists = index.get_posting_lists_bulk(field, &analyzed_terms);
-        let term_doc_freqs: Vec<u64> = posting_lists
-            .iter()
-            .map(|posting_list| posting_list.len() as u64)
-            .collect();
-        let stats_arc = Arc::new(search_stats_for_terms(
-            index.as_ref(),
-            field,
-            &analyzed_terms,
-            &term_doc_freqs,
-        ));
-        let scorer = Self::build_text_scorer(mode, stats_arc.clone());
-        let term_idfs: Vec<f64> = analyzed_terms
-            .iter()
-            .zip(&term_doc_freqs)
-            .map(|(_, doc_freq)| scorer.idf(*doc_freq))
-            .collect();
-
+        // Walk the postings once per term occurrence, keeping only
+        // `(doc_id, term_freq)` - no owned posting lists, so no payload
+        // clone per matching document. The walk also yields each term's
+        // document frequency, which the scorer needs before any scoring
+        // happens.
         let entries = if analyzed_terms.len() == 1 {
-            let idf = term_idfs[0];
-            let doc_ids: Vec<DocId> = posting_lists[0].iter().map(|entry| entry.doc_id).collect();
+            let term = &analyzed_terms[0];
+            let mut term_freqs: Vec<(DocId, u64)> = Vec::new();
+            index.for_each_posting(field, term, &mut |entry| {
+                term_freqs.push((entry.doc_id, entry.payload.positions.len() as u64));
+            });
+            let term_doc_freqs = [term_freqs.len() as u64];
+            let stats_arc = Arc::new(search_stats_for_terms(
+                index.as_ref(),
+                field,
+                &analyzed_terms,
+                &term_doc_freqs,
+            ));
+            let scorer = Self::build_text_scorer(mode, stats_arc);
+            let idf = scorer.idf(term_doc_freqs[0]);
+
+            let doc_ids: Vec<DocId> = term_freqs.iter().map(|(doc_id, _)| *doc_id).collect();
             let doc_lengths = index.get_doc_lengths_bulk(&doc_ids, field);
-            posting_lists[0]
-                .iter()
-                .map(|entry| {
-                    let term_freq = entry.payload.positions.len() as u64;
-                    let doc_length = doc_lengths.get(&entry.doc_id).copied().unwrap_or(0);
+            term_freqs
+                .into_iter()
+                .map(|(doc_id, term_freq)| {
+                    let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
                     ScoredEntry {
-                        doc_id: entry.doc_id,
+                        doc_id,
                         score: scorer.finalize_score(&[
                             scorer.term_score_with_idf(term_freq, doc_length, idf)
                         ]),
@@ -247,15 +249,31 @@ impl Engine {
         } else {
             let mut candidate_ids = BTreeSet::<DocId>::new();
             let mut present_terms = BTreeMap::<DocId, Vec<(usize, u64)>>::new();
-            for (term_index, posting_list) in posting_lists.iter().enumerate() {
-                for entry in posting_list {
+            let mut term_doc_freqs: Vec<u64> = Vec::with_capacity(analyzed_terms.len());
+            for (term_index, term) in analyzed_terms.iter().enumerate() {
+                let mut doc_freq = 0_u64;
+                index.for_each_posting(field, term, &mut |entry| {
+                    doc_freq += 1;
                     candidate_ids.insert(entry.doc_id);
                     present_terms
                         .entry(entry.doc_id)
                         .or_default()
                         .push((term_index, entry.payload.positions.len() as u64));
-                }
+                });
+                term_doc_freqs.push(doc_freq);
             }
+            let stats_arc = Arc::new(search_stats_for_terms(
+                index.as_ref(),
+                field,
+                &analyzed_terms,
+                &term_doc_freqs,
+            ));
+            let scorer = Self::build_text_scorer(mode, stats_arc);
+            let term_idfs: Vec<f64> = term_doc_freqs
+                .iter()
+                .map(|doc_freq| scorer.idf(*doc_freq))
+                .collect();
+
             let candidate_ids: Vec<DocId> = candidate_ids.into_iter().collect();
             let doc_lengths = index.get_doc_lengths_bulk(&candidate_ids, field);
             let mut per_term = Vec::with_capacity(analyzed_terms.len());

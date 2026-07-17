@@ -356,6 +356,23 @@ impl Engine {
         Ok(())
     }
 
+    /// [`Engine::add_document_with_vector_values`] for a document id
+    /// the caller has proven absent. See
+    /// [`Engine::add_document_known_new`] for the contract.
+    pub(crate) fn add_document_with_vector_values_known_new(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+    ) -> Result<(), SQLError> {
+        self.add_document_known_new(table, doc_id, document)?;
+        for (field, vectors) in vectors {
+            self.add_vector_values(table, doc_id, &field, vectors);
+        }
+        Ok(())
+    }
+
     pub fn create_default_table(&self, name: impl Into<String>, fts_fields: Vec<FieldName>) {
         self.create_table(name, standard_analyzer("english"), fts_fields);
     }

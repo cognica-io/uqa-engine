@@ -4345,24 +4345,64 @@ fn run_doc_ordered_select(
     key_fields.dedup();
     let field_refs: Vec<&str> = key_fields.iter().map(String::as_str).collect();
     let field_values = engine.get_document_fields_multi(table, &doc_ids, &field_refs);
+
+    // Bare-column order keys read straight out of the fetched field
+    // vectors; only computed keys (expressions over columns) pay for a
+    // per-row document and the expression evaluator.
+    enum OrderKeySource {
+        Field(usize),
+        Score,
+        DocId,
+    }
+    let direct_sources: Option<Vec<OrderKeySource>> = keys
+        .iter()
+        .map(|key| match &key.expr {
+            Expr::Column(name) if name == SCORE_COLUMN => Some(OrderKeySource::Score),
+            Expr::Column(name) if name == DOC_ID_COLUMN => Some(OrderKeySource::DocId),
+            Expr::Column(name) => key_fields
+                .iter()
+                .position(|field| field == name)
+                .map(OrderKeySource::Field),
+            _ => None,
+        })
+        .collect();
+
     let mut decorated: Vec<(Vec<Value>, usize)> = Vec::with_capacity(scored.len());
-    for (idx, entry) in scored.iter().enumerate() {
-        let mut doc = Document::new();
-        if let Some(values) = field_values.get(&entry.doc_id) {
-            for (name, value) in key_fields.iter().zip(values) {
-                doc.insert(name.clone(), value.clone());
+    if let Some(sources) = direct_sources {
+        for (idx, entry) in scored.iter().enumerate() {
+            let values = field_values.get(&entry.doc_id);
+            let key_vals: Vec<Value> = sources
+                .iter()
+                .map(|source| match source {
+                    OrderKeySource::Field(i) => values
+                        .and_then(|row| row.get(*i))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    OrderKeySource::Score => Value::Float(entry.score),
+                    OrderKeySource::DocId => Value::Int(entry.doc_id as i64),
+                })
+                .collect();
+            decorated.push((key_vals, idx));
+        }
+    } else {
+        for (idx, entry) in scored.iter().enumerate() {
+            let mut doc = Document::new();
+            if let Some(values) = field_values.get(&entry.doc_id) {
+                for (name, value) in key_fields.iter().zip(values) {
+                    doc.insert(name.clone(), value.clone());
+                }
             }
+            if needs_score {
+                doc.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
+                doc.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
+            }
+            let ctx = EvalContext::new(Some(&doc), params).with_engine(engine);
+            let mut key_vals = Vec::with_capacity(keys.len());
+            for key in &keys {
+                key_vals.push(eval(&key.expr, &ctx)?);
+            }
+            decorated.push((key_vals, idx));
         }
-        if needs_score {
-            doc.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
-            doc.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
-        }
-        let ctx = EvalContext::new(Some(&doc), params).with_engine(engine);
-        let mut key_vals = Vec::with_capacity(keys.len());
-        for key in &keys {
-            key_vals.push(eval(&key.expr, &ctx)?);
-        }
-        decorated.push((key_vals, idx));
     }
 
     // Partial selection when a LIMIT bounds the survivors, then a

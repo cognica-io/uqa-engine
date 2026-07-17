@@ -439,6 +439,18 @@ impl crate::Engine {
         }
     }
 
+    /// Names of every built value-index field, or `None` when no index
+    /// is built. Known-new writes use this instead of
+    /// [`Engine::value_indexes_old_values`], because a document id that
+    /// was never stored has no previous values worth a storage lookup.
+    pub(crate) fn value_indexes_built_fields(t: &TableState) -> Option<Vec<String>> {
+        let indexes = t.value_indexes.read();
+        if indexes.is_empty() {
+            return None;
+        }
+        Some(indexes.keys().cloned().collect())
+    }
+
     /// Fetch the previous values of every built-index field for
     /// `doc_id`, so a write can unindex them. Returns `None` when no
     /// indexes are built (the common case, costing one read-lock).

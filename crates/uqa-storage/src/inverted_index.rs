@@ -97,6 +97,20 @@ pub trait InvertedIndex: Send + Sync {
             .collect()
     }
 
+    /// Visit every posting entry for `(field, term)` in ascending
+    /// doc-id order without handing out an owned list.
+    ///
+    /// [`InvertedIndex::get_posting_list`] deep-copies each entry's
+    /// payload (positions vector included), which costs one heap
+    /// allocation per matching document. Read-only scoring walks use
+    /// this instead; backends whose postings already live in memory
+    /// override it to iterate in place.
+    fn for_each_posting(&self, field: &str, term: &str, visit: &mut dyn FnMut(&PostingEntry)) {
+        for entry in &self.get_posting_list(field, term) {
+            visit(entry);
+        }
+    }
+
     fn doc_freq(&self, field: &str, term: &str) -> u64;
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> u64;
@@ -119,6 +133,25 @@ pub trait InvertedIndex: Send + Sync {
     /// and produces scores that cannot match a field-scoped BM25 scorer.
     fn field_stats(&self, field: &str) -> IndexStats {
         let mut stats = self.stats();
+        let field_docs = self.field_doc_count(field);
+        stats.total_docs = field_docs;
+        stats.avg_doc_length = if field_docs > 0 {
+            self.total_field_length(field) as f64 / field_docs as f64
+        } else {
+            0.0
+        };
+        stats
+    }
+
+    /// [`InvertedIndex::field_stats`] without the vocabulary-wide
+    /// document-frequency map.
+    ///
+    /// Query execution that already knows its terms' document
+    /// frequencies (it read them off the posting lists) only needs the
+    /// field's document count and average length; copying the whole
+    /// term dictionary per query is O(vocabulary) for nothing.
+    fn field_stats_scalar(&self, field: &str) -> IndexStats {
+        let mut stats = IndexStats::default();
         let field_docs = self.field_doc_count(field);
         stats.total_docs = field_docs;
         stats.avg_doc_length = if field_docs > 0 {
@@ -274,6 +307,10 @@ pub struct MemoryInvertedIndex {
     doc_lengths: BTreeMap<DocId, BTreeMap<FieldName, u64>>,
     /// Sum of field lengths across all docs, per field.
     total_length: BTreeMap<FieldName, u64>,
+    /// Number of documents with indexed content per field, maintained
+    /// incrementally so per-query BM25 statistics never walk
+    /// `doc_lengths` (O(corpus) at query time otherwise).
+    field_doc_counts: BTreeMap<FieldName, u64>,
     doc_count: u64,
     /// Per-field analyzer override applied at index time. Falls back
     /// to [`MemoryInvertedIndex::analyzer`] when no entry exists.
@@ -291,6 +328,7 @@ impl MemoryInvertedIndex {
             doc_terms: BTreeMap::new(),
             doc_lengths: BTreeMap::new(),
             total_length: BTreeMap::new(),
+            field_doc_counts: BTreeMap::new(),
             doc_count: 0,
             index_field_analyzers: BTreeMap::new(),
             search_field_analyzers: BTreeMap::new(),
@@ -322,6 +360,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             let length = tokens.len() as u64;
             per_doc_lengths.insert(field.clone(), length);
             *self.total_length.entry(field.clone()).or_insert(0) += length;
+            *self.field_doc_counts.entry(field.clone()).or_insert(0) += 1;
 
             // Group token positions by term.
             let mut term_positions: BTreeMap<String, Vec<u32>> = BTreeMap::new();
@@ -370,6 +409,13 @@ impl InvertedIndex for MemoryInvertedIndex {
                 if let Some(total) = self.total_length.get_mut(&field) {
                     *total = total.saturating_sub(length);
                 }
+                match self.field_doc_counts.get_mut(&field) {
+                    Some(count) if *count > 1 => *count -= 1,
+                    Some(_) => {
+                        self.field_doc_counts.remove(&field);
+                    }
+                    None => {}
+                }
             }
         }
         if self.doc_count > 0 {
@@ -382,6 +428,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         self.doc_terms.clear();
         self.doc_lengths.clear();
         self.total_length.clear();
+        self.field_doc_counts.clear();
         self.doc_count = 0;
     }
 
@@ -392,6 +439,15 @@ impl InvertedIndex for MemoryInvertedIndex {
         };
         let entries: Vec<PostingEntry> = inner.values().cloned().collect();
         PostingList::from_sorted_unchecked(entries)
+    }
+
+    fn for_each_posting(&self, field: &str, term: &str, visit: &mut dyn FnMut(&PostingEntry)) {
+        let key = (field.to_string(), term.to_string());
+        if let Some(inner) = self.index.get(&key) {
+            for entry in inner.values() {
+                visit(entry);
+            }
+        }
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> u64 {
@@ -453,16 +509,8 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn doc_length_count(&self, field: Option<&str>) -> u64 {
         match field {
-            Some(target) => self
-                .doc_lengths
-                .values()
-                .filter(|lengths| lengths.contains_key(target))
-                .count() as u64,
-            None => self
-                .doc_lengths
-                .values()
-                .map(|lengths| lengths.len() as u64)
-                .sum(),
+            Some(target) => self.field_doc_counts.get(target).copied().unwrap_or(0),
+            None => self.field_doc_counts.values().sum(),
         }
     }
 

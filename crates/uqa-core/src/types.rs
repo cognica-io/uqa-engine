@@ -780,7 +780,7 @@ fn parse_interval_year_month_token(token: &str) -> Option<(i64, i64)> {
 ///
 /// Covers the JSON-like values the engine round-trips through a posting
 /// list. Date and datetime variants land with the SQL type system.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum Value {
     #[default]
@@ -794,6 +794,175 @@ pub enum Value {
     Decimal(DecimalValue),
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
+}
+
+/// Reconstruct the value a `$uqa_type`-tagged map encodes, or `None`
+/// when the map does not match any tagged encoding and must stay a
+/// plain [`Value::Map`].
+///
+/// Temporal variants mirror the `deny_unknown_fields` internally-tagged
+/// derive on [`TemporalValue`]: the field set must match exactly and
+/// every field must be an in-range integer. The decimal encoding
+/// mirrors the tolerant tagged struct in [`DecimalValue`]'s
+/// `Deserialize`: extra fields are ignored.
+fn value_from_tagged_map(tag: &str, map: &BTreeMap<String, Value>) -> Option<Value> {
+    fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
+        match map.get(key)? {
+            Value::Int(number) => T::try_from(*number).ok(),
+            _ => None,
+        }
+    }
+
+    let temporal = match tag {
+        "date" if map.len() == 2 => TemporalValue::Date {
+            days: int_field(map, "days")?,
+        },
+        "time" if map.len() == 2 => TemporalValue::Time {
+            micros: int_field(map, "micros")?,
+        },
+        "time_tz" if map.len() == 3 => TemporalValue::TimeTz {
+            micros: int_field(map, "micros")?,
+            offset_minutes: int_field(map, "offset_minutes")?,
+        },
+        "timestamp" if map.len() == 2 => TemporalValue::Timestamp {
+            micros: int_field(map, "micros")?,
+        },
+        "timestamp_tz" if map.len() == 2 => TemporalValue::TimestampTz {
+            micros: int_field(map, "micros")?,
+        },
+        "interval" if map.len() == 4 => TemporalValue::Interval {
+            months: int_field(map, "months")?,
+            days: int_field(map, "days")?,
+            micros: int_field(map, "micros")?,
+        },
+        "decimal" => {
+            let Some(Value::Str(text)) = map.get("value") else {
+                return None;
+            };
+            return DecimalValue::parse(text).map(Value::Decimal);
+        }
+        _ => return None,
+    };
+    Some(Value::Temporal(temporal))
+}
+
+/// Hand-written [`Deserialize`] with the exact variant-resolution order
+/// of the previous `#[serde(untagged)]` derive (Null, Bool, Int, Float,
+/// Str, Bytes, Temporal, Decimal, List, Map), without the untagged
+/// machinery's per-variant trial errors. Untagged deserialization
+/// buffers the input and formats a rejection error for every variant
+/// that does not match; profiling showed that error construction alone
+/// consuming a quarter of `SQLite` read time. The visitor dispatches on
+/// the self-describing input directly instead.
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a UQA value")
+            }
+
+            fn visit_unit<E>(self) -> std::result::Result<Value, E> {
+                Ok(Value::Null)
+            }
+
+            fn visit_none<E>(self) -> std::result::Result<Value, E> {
+                Ok(Value::Null)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> std::result::Result<Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                Value::deserialize(deserializer)
+            }
+
+            fn visit_bool<E>(self, value: bool) -> std::result::Result<Value, E> {
+                Ok(Value::Bool(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> std::result::Result<Value, E> {
+                Ok(Value::Int(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> std::result::Result<Value, E> {
+                // The untagged order tries Int(i64) before Float, so
+                // only out-of-range magnitudes land on Float.
+                Ok(i64::try_from(value).map_or(Value::Float(value as f64), Value::Int))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> std::result::Result<Value, E> {
+                Ok(Value::Float(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Value, E> {
+                Ok(Value::Str(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> std::result::Result<Value, E> {
+                Ok(Value::Str(value))
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> std::result::Result<Value, E> {
+                Ok(Value::Bytes(value.to_vec()))
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> std::result::Result<Value, E> {
+                Ok(Value::Bytes(value))
+            }
+
+            fn visit_seq<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut items: Vec<Value> = Vec::with_capacity(access.size_hint().unwrap_or(0));
+                while let Some(item) = access.next_element::<Value>()? {
+                    items.push(item);
+                }
+                // Bytes(Vec<u8>) precedes List in the untagged variant
+                // order, so an array whose elements all fit a byte -
+                // including the empty array - resolves as Bytes.
+                let all_bytes = items
+                    .iter()
+                    .all(|item| matches!(item, Value::Int(number) if (0..=255).contains(number)));
+                if all_bytes {
+                    let bytes = items
+                        .iter()
+                        .map(|item| match item {
+                            Value::Int(number) => *number as u8,
+                            _ => unreachable!("all_bytes checked every element"),
+                        })
+                        .collect();
+                    return Ok(Value::Bytes(bytes));
+                }
+                Ok(Value::List(items))
+            }
+
+            fn visit_map<A>(self, mut access: A) -> std::result::Result<Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut map = BTreeMap::new();
+                while let Some((key, value)) = access.next_entry::<String, Value>()? {
+                    map.insert(key, value);
+                }
+                if let Some(Value::Str(tag)) = map.get("$uqa_type") {
+                    if let Some(value) = value_from_tagged_map(&tag.clone(), &map) {
+                        return Ok(value);
+                    }
+                }
+                Ok(Value::Map(map))
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor)
+    }
 }
 
 /// Posting list entry payload: token positions, relevance score, and any
@@ -1099,5 +1268,345 @@ mod tests {
         assert!(json.contains("\"$uqa_type\":\"decimal\""));
         assert!(json.contains("\"value\":\"123.4500\""));
         assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
+    }
+
+    fn decode(json: &str) -> Value {
+        serde_json::from_str::<Value>(json).expect("decodable JSON value")
+    }
+
+    /// The `Value` decoder must keep the exact variant-resolution order
+    /// of the original `#[serde(untagged)]` derive: Null, Bool, Int,
+    /// Float, Str, Bytes, Temporal, Decimal, List, Map.
+    #[test]
+    fn value_json_decoding_scalar_shapes() {
+        assert_eq!(decode("null"), Value::Null);
+        assert_eq!(decode("true"), Value::Bool(true));
+        assert_eq!(decode("false"), Value::Bool(false));
+        assert_eq!(decode("42"), Value::Int(42));
+        assert_eq!(decode("-42"), Value::Int(-42));
+        assert_eq!(decode(&i64::MAX.to_string()), Value::Int(i64::MAX));
+        assert_eq!(decode(&i64::MIN.to_string()), Value::Int(i64::MIN));
+        // u64 beyond the i64 range falls through Int to Float.
+        assert_eq!(decode(&u64::MAX.to_string()), Value::Float(u64::MAX as f64));
+        assert_eq!(decode("1.5"), Value::Float(1.5));
+        assert_eq!(decode("1.0"), Value::Float(1.0));
+        assert_eq!(decode("\"hello\""), Value::Str("hello".into()));
+        // Strings resolve as Str even when they look temporal.
+        assert_eq!(decode("\"2024-01-01\""), Value::Str("2024-01-01".into()));
+    }
+
+    #[test]
+    fn value_json_decoding_array_shapes() {
+        // Bytes(Vec<u8>) precedes List in variant order, so an all-
+        // byte-range integer array decodes as Bytes - including empty.
+        assert_eq!(decode("[]"), Value::Bytes(Vec::new()));
+        assert_eq!(decode("[1, 2, 255]"), Value::Bytes(vec![1, 2, 255]));
+        assert_eq!(decode("[0]"), Value::Bytes(vec![0]));
+        // Any element outside u8 falls through to List.
+        assert_eq!(
+            decode("[1, 256]"),
+            Value::List(vec![Value::Int(1), Value::Int(256)])
+        );
+        assert_eq!(
+            decode("[1, -1]"),
+            Value::List(vec![Value::Int(1), Value::Int(-1)])
+        );
+        assert_eq!(
+            decode("[1, 2.0]"),
+            Value::List(vec![Value::Int(1), Value::Float(2.0)])
+        );
+        assert_eq!(
+            decode("[\"a\", 1]"),
+            Value::List(vec![Value::Str("a".into()), Value::Int(1)])
+        );
+        assert_eq!(decode("[[3]]"), Value::List(vec![Value::Bytes(vec![3])]));
+    }
+
+    #[test]
+    fn value_json_decoding_tagged_map_shapes() {
+        // Temporal variants: internally tagged, deny_unknown_fields.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"date\",\"days\":19723}"),
+            Value::Temporal(TemporalValue::Date { days: 19723 })
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"time\",\"micros\":123}"),
+            Value::Temporal(TemporalValue::Time { micros: 123 })
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"time_tz\",\"micros\":5,\"offset_minutes\":-90}"),
+            Value::Temporal(TemporalValue::TimeTz {
+                micros: 5,
+                offset_minutes: -90
+            })
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"timestamp\",\"micros\":-7}"),
+            Value::Temporal(TemporalValue::Timestamp { micros: -7 })
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"timestamp_tz\",\"micros\":8}"),
+            Value::Temporal(TemporalValue::TimestampTz { micros: 8 })
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"interval\",\"months\":1,\"days\":2,\"micros\":3}"),
+            Value::Temporal(TemporalValue::Interval {
+                months: 1,
+                days: 2,
+                micros: 3
+            })
+        );
+        // A temporal tag with an unknown extra field fails the
+        // deny_unknown_fields temporal decode and lands on Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"date\",\"days\":1,\"extra\":2}"),
+            Value::Map(BTreeMap::from([
+                ("$uqa_type".to_string(), Value::Str("date".into())),
+                ("days".to_string(), Value::Int(1)),
+                ("extra".to_string(), Value::Int(2)),
+            ]))
+        );
+        // A temporal tag with a missing field also lands on Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"date\"}"),
+            Value::Map(BTreeMap::from([(
+                "$uqa_type".to_string(),
+                Value::Str("date".into())
+            ),]))
+        );
+        // A temporal tag with an out-of-range field value lands on Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"date\",\"days\":4294967296}"),
+            Value::Map(BTreeMap::from([
+                ("$uqa_type".to_string(), Value::Str("date".into())),
+                ("days".to_string(), Value::Int(4_294_967_296)),
+            ]))
+        );
+        // Decimal: tagged struct without deny_unknown_fields, so extra
+        // fields are tolerated.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"decimal\",\"value\":\"1.50\"}"),
+            Value::Decimal(DecimalValue::parse("1.50").unwrap())
+        );
+        assert_eq!(
+            decode("{\"$uqa_type\":\"decimal\",\"value\":\"1.50\",\"extra\":true}"),
+            Value::Decimal(DecimalValue::parse("1.50").unwrap())
+        );
+        // An unparseable decimal payload falls through to Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"decimal\",\"value\":\"not a number\"}"),
+            Value::Map(BTreeMap::from([
+                ("$uqa_type".to_string(), Value::Str("decimal".into())),
+                ("value".to_string(), Value::Str("not a number".into())),
+            ]))
+        );
+        // Unknown tags fall through to Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":\"mystery\",\"value\":1}"),
+            Value::Map(BTreeMap::from([
+                ("$uqa_type".to_string(), Value::Str("mystery".into())),
+                ("value".to_string(), Value::Int(1)),
+            ]))
+        );
+        // A non-string tag falls through to Map.
+        assert_eq!(
+            decode("{\"$uqa_type\":7}"),
+            Value::Map(BTreeMap::from([("$uqa_type".to_string(), Value::Int(7)),]))
+        );
+    }
+
+    #[test]
+    fn value_json_decoding_plain_maps_and_nesting() {
+        assert_eq!(decode("{}"), Value::Map(BTreeMap::new()));
+        assert_eq!(
+            decode("{\"a\":1,\"b\":\"x\"}"),
+            Value::Map(BTreeMap::from([
+                ("a".to_string(), Value::Int(1)),
+                ("b".to_string(), Value::Str("x".into())),
+            ]))
+        );
+        assert_eq!(
+            decode("{\"outer\":{\"$uqa_type\":\"date\",\"days\":3}}"),
+            Value::Map(BTreeMap::from([(
+                "outer".to_string(),
+                Value::Temporal(TemporalValue::Date { days: 3 })
+            ),]))
+        );
+        assert_eq!(
+            decode("{\"list\":[\"x\",{\"$uqa_type\":\"decimal\",\"value\":\"2\"}]}"),
+            Value::Map(BTreeMap::from([(
+                "list".to_string(),
+                Value::List(vec![
+                    Value::Str("x".into()),
+                    Value::Decimal(DecimalValue::parse("2").unwrap()),
+                ])
+            ),]))
+        );
+    }
+
+    /// The untagged derive accepted serde's sequence form for
+    /// internally-tagged enums and tagged structs: an array whose first
+    /// element names (or indexes) a temporal variant - or spells
+    /// "decimal" - and whose remaining elements match that variant's
+    /// fields deserialized as Temporal / Decimal instead of List.
+    /// `[1,-1]` silently became `Time { micros: -1 }`. The visitor
+    /// deliberately drops that quirk: arrays that are not byte arrays
+    /// are lists, which is also the only round-trip-stable reading.
+    #[test]
+    fn value_json_decoding_keeps_arrays_as_lists() {
+        assert_eq!(
+            decode("[1,-1]"),
+            Value::List(vec![Value::Int(1), Value::Int(-1)])
+        );
+        assert_eq!(
+            decode("[1,256]"),
+            Value::List(vec![Value::Int(1), Value::Int(256)])
+        );
+        assert_eq!(
+            decode("[\"time\",-1]"),
+            Value::List(vec![Value::Str("time".into()), Value::Int(-1)])
+        );
+        assert_eq!(
+            decode("[\"decimal\",\"1.5\"]"),
+            Value::List(vec![Value::Str("decimal".into()), Value::Str("1.5".into())])
+        );
+    }
+
+    /// Differential check against the previous implementation: an
+    /// untagged derive with the same variant order must agree with the
+    /// hand-written visitor on every JSON shape. The sequence-form
+    /// quirk cases covered by
+    /// [`value_json_decoding_keeps_arrays_as_lists`] are the one
+    /// deliberate divergence and stay out of this corpus.
+    #[test]
+    fn value_json_decoding_matches_untagged_derive() {
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        #[serde(untagged)]
+        enum UntaggedValue {
+            Null,
+            Bool(bool),
+            Int(i64),
+            Float(f64),
+            Str(String),
+            Bytes(Vec<u8>),
+            Temporal(TemporalValue),
+            Decimal(DecimalValue),
+            List(Vec<UntaggedValue>),
+            Map(BTreeMap<String, UntaggedValue>),
+        }
+
+        fn to_value(untagged: UntaggedValue) -> Value {
+            match untagged {
+                UntaggedValue::Null => Value::Null,
+                UntaggedValue::Bool(value) => Value::Bool(value),
+                UntaggedValue::Int(value) => Value::Int(value),
+                UntaggedValue::Float(value) => Value::Float(value),
+                UntaggedValue::Str(value) => Value::Str(value),
+                UntaggedValue::Bytes(value) => Value::Bytes(value),
+                UntaggedValue::Temporal(value) => Value::Temporal(value),
+                UntaggedValue::Decimal(value) => Value::Decimal(value),
+                UntaggedValue::List(items) => {
+                    Value::List(items.into_iter().map(to_value).collect())
+                }
+                UntaggedValue::Map(map) => Value::Map(
+                    map.into_iter()
+                        .map(|(key, value)| (key, to_value(value)))
+                        .collect(),
+                ),
+            }
+        }
+
+        let corpus = [
+            "null",
+            "true",
+            "false",
+            "0",
+            "-1",
+            "42",
+            "9223372036854775807",
+            "-9223372036854775808",
+            "18446744073709551615",
+            "1.5",
+            "1.0",
+            "-0.0",
+            "1e300",
+            "\"\"",
+            "\"hello\"",
+            "\"2024-01-01\"",
+            "\"$uqa_type\"",
+            "[]",
+            "[0]",
+            "[255]",
+            "[1,2,3]",
+            "[1,2.0]",
+            "[\"a\"]",
+            "[[1],[2]]",
+            "[{\"a\":1}]",
+            "{}",
+            "{\"a\":1}",
+            "{\"a\":{\"b\":[1,2]}}",
+            "{\"$uqa_type\":\"date\",\"days\":19723}",
+            "{\"$uqa_type\":\"date\",\"days\":1,\"extra\":2}",
+            "{\"$uqa_type\":\"date\"}",
+            "{\"$uqa_type\":\"date\",\"days\":4294967296}",
+            "{\"$uqa_type\":\"date\",\"days\":\"x\"}",
+            "{\"$uqa_type\":\"date\",\"days\":1.0}",
+            "{\"$uqa_type\":\"time\",\"micros\":123}",
+            "{\"$uqa_type\":\"time_tz\",\"micros\":5,\"offset_minutes\":-90}",
+            "{\"$uqa_type\":\"time_tz\",\"micros\":5}",
+            "{\"$uqa_type\":\"timestamp\",\"micros\":-7}",
+            "{\"$uqa_type\":\"timestamp_tz\",\"micros\":8}",
+            "{\"$uqa_type\":\"interval\",\"months\":1,\"days\":2,\"micros\":3}",
+            "{\"$uqa_type\":\"interval\",\"months\":1,\"days\":2}",
+            "{\"$uqa_type\":\"decimal\",\"value\":\"1.50\"}",
+            "{\"$uqa_type\":\"decimal\",\"value\":\"1.50\",\"extra\":true}",
+            "{\"$uqa_type\":\"decimal\",\"value\":\"not a number\"}",
+            "{\"$uqa_type\":\"decimal\",\"value\":7}",
+            "{\"$uqa_type\":\"decimal\"}",
+            "{\"$uqa_type\":\"mystery\",\"value\":1}",
+            "{\"$uqa_type\":7}",
+            "{\"$uqa_type\":[\"date\"]}",
+            "{\"outer\":{\"$uqa_type\":\"date\",\"days\":3}}",
+            "[{\"$uqa_type\":\"decimal\",\"value\":\"2\"},\"x\"]",
+        ];
+        for json in corpus {
+            let expected = to_value(serde_json::from_str::<UntaggedValue>(json).unwrap());
+            assert_eq!(
+                serde_json::from_str::<Value>(json).unwrap(),
+                expected,
+                "visitor and untagged derive disagree for {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_json_round_trips_every_variant() {
+        let values = vec![
+            Value::Null,
+            Value::Bool(true),
+            Value::Int(-5),
+            Value::Float(2.25),
+            Value::Str("text".into()),
+            Value::Bytes(vec![0, 1, 255]),
+            Value::Temporal(TemporalValue::Interval {
+                months: 14,
+                days: 3,
+                micros: 4_000_000,
+            }),
+            Value::Decimal(DecimalValue::parse("-12.75").unwrap()),
+            Value::List(vec![Value::Str("a".into()), Value::Int(300)]),
+            Value::Map(BTreeMap::from([(
+                "k".to_string(),
+                Value::List(vec![Value::Float(0.5)]),
+            )])),
+        ];
+        for value in values {
+            let json = serde_json::to_string(&value).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&json).unwrap(),
+                value,
+                "round trip failed for {json}"
+            );
+        }
     }
 }

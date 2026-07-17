@@ -250,6 +250,7 @@ fn run_merge_inner(
                         doc_id,
                         document,
                         params,
+                        false,
                     )?;
                     affected += 1;
                     if !stmt.returning.is_empty() {
@@ -1352,8 +1353,14 @@ fn run_insert_inner(
                 document.insert(c.into(), Value::Int(doc_id as i64));
             }
             engine.advance_next_id(&stmt.table, doc_id);
-            let document =
-                insert_document_with_constraints(engine, &stmt.table, doc_id, document, params)?;
+            let document = insert_document_with_constraints(
+                engine,
+                &stmt.table,
+                doc_id,
+                document,
+                params,
+                false,
+            )?;
             if !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
                     engine,
@@ -1390,6 +1397,11 @@ fn run_insert_inner(
             .map(|c| c.name)
     });
     let id_column = id_column.unwrap_or_else(|| "id".into());
+    // Whether a user-supplied id value is covered by the strict UNIQUE
+    // pre-check below. The legacy bare-`id` fallback maps a plain
+    // column onto the doc id without any uniqueness guarantee, so
+    // writes through it may replace an existing document.
+    let id_column_is_unique_key = engine.unique_columns(&stmt.table).contains(&id_column);
 
     let columns: Vec<String> = if stmt.columns.is_empty() {
         // INSERT without explicit column list: project the table schema.
@@ -1617,6 +1629,7 @@ fn run_insert_inner(
             }
         }
 
+        let supplied_id = doc_id.is_some();
         let doc_id = if let Some(id) = doc_id {
             id
         } else {
@@ -1632,8 +1645,22 @@ fn run_insert_inner(
             id
         };
         engine.advance_next_id(&stmt.table, doc_id);
-        let document =
-            insert_document_with_constraints(engine, &stmt.table, doc_id, document, params)?;
+        // A document is known new when nothing can have claimed its doc
+        // id: an allocator-issued id is fresh by construction, and a
+        // user-supplied id is proven absent by the strict UNIQUE
+        // pre-check above - which only covers the id column when it is
+        // an actual key (not the legacy bare-`id` fallback). ON
+        // CONFLICT skips the pre-check, and its target can miss the
+        // primary key, so that path keeps the replacement-aware write.
+        let known_new = stmt.on_conflict.is_none() && (!supplied_id || id_column_is_unique_key);
+        let document = insert_document_with_constraints(
+            engine,
+            &stmt.table,
+            doc_id,
+            document,
+            params,
+            known_new,
+        )?;
         if !stmt.returning.is_empty() {
             returning_rows.push(build_returning_row(
                 engine,
@@ -1658,21 +1685,36 @@ fn run_insert_inner(
     Ok(SQLResult::from_affected(affected))
 }
 
+/// `known_new` asserts the caller proved `doc_id` absent (fresh
+/// allocator id, or a VALUES insert whose strict uniqueness pre-check
+/// ran). Paths that can legitimately overwrite an existing document -
+/// MERGE inserts and INSERT ... SELECT with caller-supplied ids - must
+/// pass `false` so value-index maintenance unindexes the old values.
 fn insert_document_with_constraints(
     engine: &Engine,
     table: &str,
     doc_id: DocId,
     mut document: Document,
     params: &[SQLParam],
+    known_new: bool,
 ) -> Result<Document, SQLError> {
     apply_missing_column_defaults(engine, table, &mut document, params)?;
     validate_document_constraints(engine, table, doc_id, &document, params)?;
-    engine.add_document_with_vector_values(
-        table,
-        doc_id,
-        document.clone(),
-        document_vectors(engine, table, &document),
-    )?;
+    if known_new {
+        engine.add_document_with_vector_values_known_new(
+            table,
+            doc_id,
+            document.clone(),
+            document_vectors(engine, table, &document),
+        )?;
+    } else {
+        engine.add_document_with_vector_values(
+            table,
+            doc_id,
+            document.clone(),
+            document_vectors(engine, table, &document),
+        )?;
+    }
     Ok(document)
 }
 

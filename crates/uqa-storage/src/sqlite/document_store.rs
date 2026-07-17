@@ -414,6 +414,27 @@ fn value_as_finite_f64(value: &Value) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+/// Take `field` out of a parsed document body, hydrating a blob marker
+/// into its stored bytes. `Ok(None)` means the document has no such
+/// field, so the caller keeps its absent-field default.
+fn take_requested_field(
+    conn: &rusqlite::Connection,
+    table: &str,
+    doc_id: DocId,
+    document: &mut Document,
+    field: &str,
+) -> SQLiteResult<Option<Value>> {
+    let Some(mut value) = document.remove(field) else {
+        return Ok(None);
+    };
+    if let Some(marker) = blob_marker_info(&value) {
+        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+            value = decoded;
+        }
+    }
+    Ok(Some(value))
+}
+
 fn decode_json_field_value(
     conn: &rusqlite::Connection,
     table: &str,
@@ -672,20 +693,32 @@ impl DocumentStore for SQLiteDocumentStore {
             return out;
         }
 
-        let path = sqlite_json_path(field);
+        // Fetch the document body and extract the field in Rust: one
+        // JSON parse per row. Extracting through `json_type` +
+        // `json_extract` made `SQLite` parse the same body twice per
+        // requested field.
+        let mut decode_row = |c: &rusqlite::Connection,
+                              row: &rusqlite::Row<'_>|
+         -> SQLiteResult<()> {
+            let doc_id = row.get::<_, i64>(0)? as DocId;
+            let body = row.get::<_, String>(1)?;
+            let mut document: Document = serde_json::from_str(&body)?;
+            if let Some(value) = take_requested_field(c, &self.table, doc_id, &mut document, field)?
+            {
+                out.insert(doc_id, value);
+            }
+            Ok(())
+        };
+
         // Selective requests probe by id; wide requests (half the
         // table or more) sequential-scan once instead of issuing many
         // B-tree probes.
         if doc_ids.len() <= DOC_ID_IN_CHUNK || doc_ids.len() * 2 < self.len() {
-            let leading = [
-                rusqlite::types::Value::Text(self.table.clone()),
-                rusqlite::types::Value::Text(path),
-            ];
+            let leading = [rusqlite::types::Value::Text(self.table.clone())];
             let sql = format!(
-                "SELECT doc_id, json_type(body, ?2), json_quote(json_extract(body, ?2))
-                 FROM _documents
+                "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
-                doc_id_in_placeholders(3, DOC_ID_IN_CHUNK)
+                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)
             );
             let _ = self.conn.with(|c| {
                 for chunk in doc_ids.chunks(DOC_ID_IN_CHUNK) {
@@ -693,14 +726,7 @@ impl DocumentStore for SQLiteDocumentStore {
                     let bind = chunk_bind_values(&leading, chunk);
                     let mut rows = stmt.query(rusqlite::params_from_iter(bind))?;
                     while let Some(row) = rows.next()? {
-                        let doc_id = row.get::<_, i64>(0)? as DocId;
-                        let json_type = row.get::<_, Option<String>>(1)?;
-                        let json_text = row.get::<_, String>(2)?;
-                        if let Some(value) =
-                            decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)?
-                        {
-                            out.insert(doc_id, value);
-                        }
+                        decode_row(c, row)?;
                     }
                 }
                 Ok(())
@@ -711,24 +737,17 @@ impl DocumentStore for SQLiteDocumentStore {
         let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
         let _ = self.conn.with(|c| {
             let mut stmt = c.prepare_cached(
-                "SELECT doc_id, json_type(body, ?2), json_quote(json_extract(body, ?2))
-                 FROM _documents
+                "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1
                  ORDER BY doc_id",
             )?;
-            let mut rows = stmt.query(params![self.table, path])?;
+            let mut rows = stmt.query(params![self.table])?;
             while let Some(row) = rows.next()? {
                 let doc_id = row.get::<_, i64>(0)? as DocId;
                 if !requested.contains(&doc_id) {
                     continue;
                 }
-                let json_type = row.get::<_, Option<String>>(1)?;
-                let json_text = row.get::<_, String>(2)?;
-                if let Some(value) =
-                    decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)?
-                {
-                    out.insert(doc_id, value);
-                }
+                decode_row(c, row)?;
             }
             Ok(())
         });
@@ -736,51 +755,42 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
-        use std::fmt::Write as _;
-
         let mut out: BTreeMap<DocId, Vec<Value>> = BTreeMap::new();
         if doc_ids.is_empty() || fields.is_empty() {
             return out;
         }
 
-        // One `json_type`/`json_extract` pair per field; the SQL text
-        // depends only on the field count, so cached statements are
-        // reused across queries touching different columns.
-        let mut select_exprs = String::new();
-        for i in 0..fields.len() {
-            // Field paths start at ?2 (selective) / ?2..N+1 (scan).
-            let idx = i + 2;
-            let _ = write!(
-                select_exprs,
-                ", json_type(body, ?{idx}), json_quote(json_extract(body, ?{idx}))"
-            );
-        }
+        // Fetch the document body and extract every requested field in
+        // Rust: one JSON parse per row, however many fields the caller
+        // asked for. The previous `json_type` + `json_extract` pair per
+        // field made `SQLite` parse the same body twice per field.
         let decode_row = |c: &rusqlite::Connection,
                           row: &rusqlite::Row<'_>|
          -> SQLiteResult<(DocId, Vec<Value>)> {
             let doc_id = row.get::<_, i64>(0)? as DocId;
+            let body = row.get::<_, String>(1)?;
+            let document: Document = serde_json::from_str(&body)?;
             let mut values = Vec::with_capacity(fields.len());
-            for i in 0..fields.len() {
-                let json_type = row.get::<_, Option<String>>(1 + i * 2)?;
-                let json_text = row.get::<_, String>(2 + i * 2)?;
-                values.push(
-                    decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)?
-                        .unwrap_or(Value::Null),
-                );
+            for field in fields {
+                let mut value = document.get(*field).cloned().unwrap_or(Value::Null);
+                if let Some(marker) = blob_marker_info(&value) {
+                    if let Some(decoded) =
+                        load_marked_document_blob(c, &self.table, doc_id, &marker)?
+                    {
+                        value = decoded;
+                    }
+                }
+                values.push(value);
             }
             Ok((doc_id, values))
         };
 
         if doc_ids.len() <= DOC_ID_IN_CHUNK || doc_ids.len() * 2 < self.len() {
-            let mut leading = Vec::with_capacity(1 + fields.len());
-            leading.push(rusqlite::types::Value::Text(self.table.clone()));
-            for field in fields {
-                leading.push(rusqlite::types::Value::Text(sqlite_json_path(field)));
-            }
+            let leading = [rusqlite::types::Value::Text(self.table.clone())];
             let sql = format!(
-                "SELECT doc_id{select_exprs} FROM _documents
+                "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
-                doc_id_in_placeholders(2 + fields.len(), DOC_ID_IN_CHUNK)
+                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)
             );
             let _ = self.conn.with(|c| {
                 for chunk in doc_ids.chunks(DOC_ID_IN_CHUNK) {
@@ -798,19 +808,13 @@ impl DocumentStore for SQLiteDocumentStore {
         }
 
         let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
-        let sql = format!(
-            "SELECT doc_id{select_exprs} FROM _documents
-             WHERE table_name = ?1
-             ORDER BY doc_id"
-        );
         let _ = self.conn.with(|c| {
-            let mut stmt = c.prepare_cached(&sql)?;
-            let mut bind: Vec<rusqlite::types::Value> = Vec::with_capacity(1 + fields.len());
-            bind.push(rusqlite::types::Value::Text(self.table.clone()));
-            for field in fields {
-                bind.push(rusqlite::types::Value::Text(sqlite_json_path(field)));
-            }
-            let mut rows = stmt.query(rusqlite::params_from_iter(bind))?;
+            let mut stmt = c.prepare_cached(
+                "SELECT doc_id, body FROM _documents
+                 WHERE table_name = ?1
+                 ORDER BY doc_id",
+            )?;
+            let mut rows = stmt.query(params![self.table])?;
             while let Some(row) = rows.next()? {
                 let doc_id = row.get::<_, i64>(0)? as DocId;
                 if !requested.contains(&doc_id) {

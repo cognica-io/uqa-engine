@@ -80,6 +80,29 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
+        self.add_document_impl(table, doc_id, document, false)
+    }
+
+    /// [`Engine::add_document`] for a document id the caller has proven
+    /// absent (a fresh id from the allocator, or an INSERT whose
+    /// uniqueness validation already ran). Skips the per-row old-value
+    /// lookup that value-index maintenance needs for replacements.
+    pub(crate) fn add_document_known_new(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        self.add_document_impl(table, doc_id, document, true)
+    }
+
+    fn add_document_impl(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
         let Some(table_name) = self.resolve_table_name(table) else {
             return Ok(());
         };
@@ -100,11 +123,25 @@ impl Engine {
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so
         // the common path costs one read-lock check. A failed put must
-        // leave the value indexes untouched.
-        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
-        let new_indexed: Option<BTreeMap<String, Value>> = old_indexed.as_ref().map(|old| {
-            old.keys()
-                .map(|k| (k.clone(), document.get(k).cloned().unwrap_or(Value::Null)))
+        // leave the value indexes untouched. A known-new document has
+        // no previous values to unindex, so its writes skip the per-row
+        // storage lookup entirely and only insert the new values.
+        let (old_indexed, indexed_fields) = if known_new {
+            (None, Self::value_indexes_built_fields(&t))
+        } else {
+            let old = Self::value_indexes_old_values(&t, doc_id);
+            let fields = old
+                .as_ref()
+                .map(|old| old.keys().cloned().collect::<Vec<String>>());
+            (old, fields)
+        };
+        let new_indexed: Option<BTreeMap<String, Value>> = indexed_fields.map(|fields| {
+            fields
+                .into_iter()
+                .map(|k| {
+                    let value = document.get(&k).cloned().unwrap_or(Value::Null);
+                    (k, value)
+                })
                 .collect()
         });
         let persistent_indexed =
@@ -116,8 +153,8 @@ impl Engine {
         if let Some(new) = persistent_indexed.as_ref() {
             self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new))?;
         }
-        if let (Some(old), Some(new)) = (old_indexed.as_ref(), new_indexed.as_ref()) {
-            Self::value_indexes_apply_write(&t, doc_id, Some(old), Some(new));
+        if let Some(new) = new_indexed.as_ref() {
+            Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));
         }
         drop(store);
         self.mark_column_stats_dirty(&table_name, &t);
