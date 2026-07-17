@@ -37,6 +37,56 @@ pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 
     f64::midpoint(1.0 - r, 0.0) + floor * r
 }
 
+/// Share of the adaptive weight mass distributed by gated-evidence
+/// spread; the remainder stays uniform so no matching signal is ever
+/// silenced entirely.
+const ADAPTIVE_SPREAD_SHARE: f64 = 0.5;
+
+/// Discrimination-based per-signal weights: each signal's weight blends
+/// a uniform share with its share of the total gated-evidence spread
+/// across its own matches. A signal that assigns every candidate the
+/// same evidence carries no ranking information and sinks toward the
+/// uniform floor. Returns `None` when no signal has measurable spread,
+/// falling back to the unweighted mean.
+fn adaptive_signal_weights(
+    fuser: &LogOddsFusion,
+    score_maps: &[BTreeMap<DocId, f64>],
+) -> Option<Vec<f64>> {
+    let spreads: Vec<f64> = score_maps
+        .iter()
+        .map(|scores| {
+            if scores.len() < 2 {
+                return 0.0;
+            }
+            let logits: Vec<f64> = scores
+                .values()
+                .map(|probability| fuser.gated_logit(*probability))
+                .collect();
+            let mean = logits.iter().sum::<f64>() / logits.len() as f64;
+            let variance = logits
+                .iter()
+                .map(|logit| {
+                    let difference = logit - mean;
+                    difference * difference
+                })
+                .sum::<f64>()
+                / logits.len() as f64;
+            variance.sqrt()
+        })
+        .collect();
+    let total: f64 = spreads.iter().sum();
+    if total <= f64::EPSILON {
+        return None;
+    }
+    let uniform = (1.0 - ADAPTIVE_SPREAD_SHARE) / score_maps.len() as f64;
+    Some(
+        spreads
+            .iter()
+            .map(|spread| uniform + ADAPTIVE_SPREAD_SHARE * spread / total)
+            .collect(),
+    )
+}
+
 /// `Hybrid_{t, q, theta} = T(t) AND V_theta(q)` (Definition 3.3.1).
 pub struct HybridTextVectorOperator {
     term_op: TermOperator,
@@ -112,6 +162,11 @@ pub struct LogOddsFusionOperator {
     pub gating: LogitGating,
     pub base_rate: Option<f64>,
     pub weights: Option<Vec<f64>>,
+    /// Derive per-signal weights from each signal's gated-evidence
+    /// spread over its matches (Theorem 8.3 reliability weighting,
+    /// estimated unsupervised). Ignored when explicit `weights` are
+    /// set.
+    pub adaptive_weights: bool,
     pub logit_min: Option<Vec<f64>>,
     pub logit_max: Option<Vec<f64>>,
     pub top_k: Option<usize>,
@@ -126,10 +181,16 @@ impl LogOddsFusionOperator {
             gating: LogitGating::Softplus,
             base_rate: None,
             weights: None,
+            adaptive_weights: false,
             logit_min: None,
             logit_max: None,
             top_k: None,
         }
+    }
+
+    pub fn with_adaptive_weights(mut self) -> Self {
+        self.adaptive_weights = true;
+        self
     }
 
     pub fn with_gating(mut self, gating: LogitGating) -> Self {
@@ -235,6 +296,13 @@ impl Operator for LogOddsFusionOperator {
             };
         }
 
+        let weights = self.weights.clone().or_else(|| {
+            if self.adaptive_weights {
+                adaptive_signal_weights(&fuser, &score_maps)
+            } else {
+                None
+            }
+        });
         let mut entries = Vec::with_capacity(all_doc_ids.len());
         for doc_id in &all_doc_ids {
             let probabilities: Vec<Option<f64>> = score_maps
@@ -244,7 +312,7 @@ impl Operator for LogOddsFusionOperator {
             let fused_score = fuser
                 .fuse_configured(
                     &probabilities,
-                    self.weights.as_deref(),
+                    weights.as_deref(),
                     self.logit_min.as_deref(),
                     self.logit_max.as_deref(),
                 )
@@ -586,8 +654,12 @@ impl Operator for AdaptiveLogOddsFusionOperator {
             .iter()
             .map(|m| coverage_based_default(m.len(), num_docs, 0.01))
             .collect();
-        let fusion = AdaptiveLogOddsFuser::new(self.base_alpha);
-        let _ = &self.gating; // gating isn't wired into the Rust fuser yet.
+        let mut fusion = AdaptiveLogOddsFuser::new(self.base_alpha);
+        if let Some(name) = &self.gating {
+            let gating = LogitGating::parse(name)
+                .unwrap_or_else(|| panic!("unknown logit gating function: {name}"));
+            fusion = fusion.with_gating(gating);
+        }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(num_docs);
         for doc_id in &all_doc_ids {
             let probs: Vec<f64> = score_maps
@@ -643,6 +715,63 @@ impl Operator for IndexScanOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct LiteralOperator(Vec<(DocId, f64)>);
+
+    impl Operator for LiteralOperator {
+        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
+            PostingList::from_sorted_unchecked(
+                self.0
+                    .iter()
+                    .map(|(doc_id, score)| PostingEntry::new(*doc_id, Payload::with_score(*score)))
+                    .collect(),
+            )
+        }
+
+        fn cost_estimate(&self, _stats: &IndexStats) -> f64 {
+            self.0.len() as f64
+        }
+    }
+
+    #[test]
+    fn adaptive_weights_favor_the_discriminating_signal() {
+        let fuser = LogOddsFusion::new(0.5);
+        let flat: BTreeMap<DocId, f64> = [(1, 0.7), (2, 0.7), (3, 0.7)].into_iter().collect();
+        let spread: BTreeMap<DocId, f64> = [(1, 0.9), (2, 0.5), (3, 0.1)].into_iter().collect();
+        let weights = adaptive_signal_weights(&fuser, &[flat.clone(), spread])
+            .expect("spread signal yields weights");
+        assert!(
+            weights[1] > weights[0],
+            "discriminating signal must outweigh the flat one: {weights:?}"
+        );
+        assert!((weights.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert!(
+            adaptive_signal_weights(&fuser, &[flat.clone(), flat]).is_none(),
+            "all-flat signals fall back to the unweighted mean"
+        );
+    }
+
+    #[test]
+    fn adaptive_operator_wires_gating_to_the_fuser() {
+        let signals: Vec<Arc<dyn Operator>> = vec![
+            Arc::new(LiteralOperator(vec![(1, 0.2)])),
+            Arc::new(LiteralOperator(vec![(1, 0.3)])),
+        ];
+        let softplus = AdaptiveLogOddsFusionOperator::new(signals.clone(), 0.5, None)
+            .execute(&ExecutionContext::new());
+        let pass = AdaptiveLogOddsFusionOperator::new(signals, 0.5, Some("pass".into()))
+            .execute(&ExecutionContext::new());
+        let softplus_score = softplus.entries()[0].payload.score;
+        let pass_score = pass.entries()[0].payload.score;
+        assert!(
+            softplus_score > 0.5,
+            "softplus floors weak evidence, got {softplus_score}"
+        );
+        assert!(
+            pass_score < 0.5,
+            "pass gating lets weak evidence sink, got {pass_score}"
+        );
+    }
 
     #[test]
     fn coverage_default_neutral_at_zero_coverage() {

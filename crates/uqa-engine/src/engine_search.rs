@@ -519,7 +519,10 @@ impl Engine {
     /// over the complete raw query score with the prior stripped, and
     /// cosine distance by the pool-fitted two-Gaussian calibration --
     /// while the text field's estimated relevance prior enters the
-    /// fusion exactly once. Returns the top-`top_k` entries by
+    /// fusion exactly once. Signals are weighted per query by their
+    /// gated-evidence spread over the candidate pool, so a signal that
+    /// cannot separate the candidates loses influence instead of
+    /// diluting the fused ranking. Returns the top-`top_k` entries by
     /// descending fused probability.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
         let Some((ctx, _)) = self.snapshot_context(params.table) else {
@@ -577,7 +580,7 @@ impl Engine {
             return Vec::new();
         }
 
-        let mut fusion = LogOddsFusionOperator::new(signals, params.alpha);
+        let mut fusion = LogOddsFusionOperator::new(signals, params.alpha).with_adaptive_weights();
         if let Some(base_rate) = fusion_base_rate {
             fusion = fusion.with_base_rate(base_rate);
         }

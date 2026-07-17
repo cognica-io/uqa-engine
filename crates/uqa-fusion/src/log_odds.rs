@@ -124,6 +124,14 @@ impl LogOddsFusion {
         self.base_rate.map_or(0.0, prior_logit)
     }
 
+    /// The gated evidence logit a probability would contribute to this
+    /// fusion. Exposed so callers can derive per-signal statistics
+    /// (e.g. discrimination-based weights) from the same transform the
+    /// fusion applies.
+    pub fn gated_logit(&self, probability: f64) -> f64 {
+        self.gating.apply(lucene_logit(probability))
+    }
+
     pub fn fuse(&self, probabilities: &[f64]) -> f64 {
         let sparse: Vec<Option<f64>> = probabilities.iter().copied().map(Some).collect();
         self.fuse_sparse(&sparse)
@@ -289,17 +297,26 @@ pub struct SignalQuality {
 #[derive(Debug, Clone, Copy)]
 pub struct AdaptiveLogOddsFusion {
     pub base_alpha: f64,
+    pub gating: LogitGating,
 }
 
 impl Default for AdaptiveLogOddsFusion {
     fn default() -> Self {
-        Self { base_alpha: 0.5 }
+        Self::new(0.5)
     }
 }
 
 impl AdaptiveLogOddsFusion {
     pub fn new(base_alpha: f64) -> Self {
-        Self { base_alpha }
+        Self {
+            base_alpha,
+            gating: LogitGating::Softplus,
+        }
+    }
+
+    pub fn with_gating(mut self, gating: LogitGating) -> Self {
+        self.gating = gating;
+        self
     }
 
     pub fn signal_alpha(&self, quality: SignalQuality) -> f64 {
@@ -335,7 +352,9 @@ impl AdaptiveLogOddsFusion {
                     return Err("computed weights sum to zero");
                 }
                 let normalized: Vec<f64> = raw.iter().map(|weight| weight / total).collect();
-                LogOddsFusion::new(self.base_alpha).fuse_weighted(probabilities, &normalized)
+                let mut inner = LogOddsFusion::new(self.base_alpha);
+                inner.gating = self.gating;
+                inner.fuse_weighted(probabilities, &normalized)
             }
         }
     }
@@ -476,6 +495,31 @@ mod tests {
                 .fuse_configured(&probabilities, None, Some(&minimums), None)
                 .unwrap(),
             fusion.fuse_sparse(&probabilities),
+        );
+    }
+
+    #[test]
+    fn adaptive_fusion_honors_gating() {
+        let quality = SignalQuality {
+            coverage_ratio: 1.0,
+            score_variance: 0.0,
+            calibration_error: 0.0,
+        };
+        let probabilities = [0.2, 0.3];
+        let softplus_fused = AdaptiveLogOddsFusion::new(0.5)
+            .fuse(&probabilities, &[quality, quality])
+            .unwrap();
+        let pass_fused = AdaptiveLogOddsFusion::new(0.5)
+            .with_gating(LogitGating::Pass)
+            .fuse(&probabilities, &[quality, quality])
+            .unwrap();
+        assert!(
+            softplus_fused > 0.5,
+            "softplus floors weak evidence, got {softplus_fused}"
+        );
+        assert!(
+            pass_fused < 0.5,
+            "pass gating lets weak evidence sink, got {pass_fused}"
         );
     }
 

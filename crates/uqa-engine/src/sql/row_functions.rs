@@ -1710,7 +1710,17 @@ fn run_attention_fusion(
                 run_bayesian_match_with_prior(engine, table, inner, params)?
             }
             FunctionKind::KNNMatch => {
-                cosine_rows_to_probabilities(run_knn_match(engine, table, inner, params)?)
+                if inner.len() != 3 {
+                    return Err(SQLError::BadArity {
+                        name: name.clone(),
+                        expected: "3".into(),
+                        actual: inner.len(),
+                    });
+                }
+                // Vector signals in fusion contexts contribute
+                // likelihood-ratio calibrated evidence, not the
+                // standalone (1 + cos) / 2 map.
+                run_calibrated_vector_match(engine, table, inner, params)?
             }
             FunctionKind::CalibratedVectorMatch => {
                 run_calibrated_vector_match(engine, table, inner, params)?
@@ -1755,13 +1765,6 @@ fn non_probability_signal_error(name: &str, parent: &str) -> SQLError {
     SQLError::TypeMismatch(format!(
         "{parent} requires probability-valued signals; `{name}` returns BM25 scores, use `bayesian_match`"
     ))
-}
-
-fn cosine_rows_to_probabilities(mut rows: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
-    for row in &mut rows {
-        row.score = uqa_scoring::cosine_to_probability(row.score);
-    }
-    rows
 }
 
 fn run_sparse_threshold(

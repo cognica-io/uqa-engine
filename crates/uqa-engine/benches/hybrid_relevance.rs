@@ -38,21 +38,23 @@ use uqa_engine::{Engine, HybridSearchParams, ScoringMode};
 use uqa_scoring::{average_precision_at_k, ndcg_at_k, BM25Params};
 use uqa_storage::document_store::Document;
 
-const SEED: u64 = 20260716;
+const SEED: u64 = 20_260_716;
 const DIM: usize = 24;
 const TOPIC_COUNT: usize = 3;
 const SUBTOPICS_PER_TOPIC: usize = 3;
 const K: usize = 10;
 const KNN_POOL: usize = 30;
 
+// The project naming convention keeps acronyms fully capitalized.
+#[allow(clippy::upper_case_acronyms)]
 struct LCG(u64);
 
 impl LCG {
     fn next_f32(&mut self) -> f32 {
         self.0 = self
             .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         ((self.0 >> 33) as f32) / (u32::MAX >> 1) as f32
     }
 
@@ -114,7 +116,7 @@ const REGIMES: [RegimeSpec; 2] = [
         name: "small_corpus",
         docs_per_subtopic: 7,
         max_repeat: 1,
-        // Measured 0.9295 / 0.5196 at the pinned seed.
+        // Measured 0.9293 / 0.5963 at the pinned seed.
         min_hybrid_ndcg: 0.90,
         min_hybrid_map: 0.45,
         hybrid_must_beat_text: true,
@@ -123,7 +125,7 @@ const REGIMES: [RegimeSpec; 2] = [
         name: "large_corpus",
         docs_per_subtopic: 70,
         max_repeat: 3,
-        // Measured 0.7685 / 0.0913 at the pinned seed. The quality
+        // Measured 0.7802 / 0.1101 at the pinned seed. The quality
         // tier lives entirely in the text signal here, so text-only
         // ranking is the ceiling rather than a floor.
         min_hybrid_ndcg: 0.74,
@@ -217,7 +219,7 @@ fn build_corpus(spec: &RegimeSpec) -> Corpus {
     let mut docs: Vec<DocSpec> = Vec::new();
     let mut doc_id: u64 = 0;
     for topic in 0..TOPIC_COUNT {
-        for subtopic in 0..SUBTOPICS_PER_TOPIC {
+        for (subtopic, subtopic_terms) in SUBTOPIC_TERMS[topic].iter().enumerate() {
             for doc_index in 0..spec.docs_per_subtopic {
                 doc_id += 1;
                 // Latent quality tier: one document in ten is canonical
@@ -232,7 +234,7 @@ fn build_corpus(spec: &RegimeSpec) -> Corpus {
                 // each of the doc's own subtopic terms appears with
                 // probability 0.6, so roughly one in six relevant
                 // documents carries neither term.
-                for (term_index, term) in SUBTOPIC_TERMS[topic][subtopic].iter().enumerate() {
+                for (term_index, term) in subtopic_terms.iter().enumerate() {
                     if rng.chance(0.6) {
                         let base = 1 + (doc_id as usize * 7 + term_index) % spec.max_repeat;
                         let repeats = if canonical { base * 2 + 1 } else { base };
@@ -271,8 +273,7 @@ fn build_corpus(spec: &RegimeSpec) -> Corpus {
 
     let mut queries: Vec<QueryCase> = Vec::new();
     for topic in 0..TOPIC_COUNT {
-        for subtopic in 0..SUBTOPICS_PER_TOPIC {
-            let terms = &SUBTOPIC_TERMS[topic][subtopic];
+        for (subtopic, terms) in SUBTOPIC_TERMS[topic].iter().enumerate() {
             queries.push(QueryCase {
                 text: format!(
                     "{} {} {} {} {}",
@@ -313,7 +314,7 @@ fn judgments_for(docs: &[DocSpec], query: &QueryCase) -> BTreeMap<u64, f64> {
         .collect()
 }
 
-fn hybrid_params<'a>(query: &'a QueryCase) -> HybridSearchParams<'a> {
+fn hybrid_params(query: &QueryCase) -> HybridSearchParams<'_> {
     HybridSearchParams {
         table: "articles",
         text_field: "title",
