@@ -67,6 +67,10 @@ name = "relevance"
 harness = false
 
 [[bench]]
+name = "hybrid_relevance"
+harness = false
+
+[[bench]]
 name = "compiler"
 harness = false
 
