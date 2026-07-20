@@ -78,8 +78,45 @@ pub trait EngineHook {
     }
 }
 
+/// Read-only row interface used by the expression evaluator. Most callers
+/// use a materialised [`ResultRow`], while hot execution paths can expose a
+/// projected value slice without rebuilding a string-keyed map for every row.
+pub trait RowLookup {
+    fn column(&self, name: &str) -> Option<&Value>;
+
+    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
+
+    /// Correlated subqueries require the concrete row shape expected by the
+    /// engine hook. Projected row views return `None`; planners only use them
+    /// for expressions that cannot contain subqueries.
+    fn result_row(&self) -> Option<&ResultRow> {
+        None
+    }
+}
+
+impl RowLookup for ResultRow {
+    fn column(&self, name: &str) -> Option<&Value> {
+        row_column_value(self, name)
+    }
+
+    fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value> {
+        let value = if key.is_empty() {
+            let qualified_key = format!("{qualifier}.{column}");
+            self.get(&qualified_key)
+        } else {
+            self.get(key)
+        };
+        value.or_else(|| unqualified_fallback(self, column))
+    }
+
+    fn result_row(&self) -> Option<&ResultRow> {
+        Some(self)
+    }
+}
+
 pub struct EvalContext<'a> {
     pub row: Option<&'a ResultRow>,
+    row_lookup: Option<&'a dyn RowLookup>,
     pub params: &'a [SQLParam],
     pub engine: Option<&'a dyn EngineHook>,
 }
@@ -88,6 +125,16 @@ impl<'a> EvalContext<'a> {
     pub fn new(row: Option<&'a ResultRow>, params: &'a [SQLParam]) -> Self {
         Self {
             row,
+            row_lookup: row.map(|row| row as &dyn RowLookup),
+            params,
+            engine: None,
+        }
+    }
+
+    pub fn from_row_lookup(row: &'a dyn RowLookup, params: &'a [SQLParam]) -> Self {
+        Self {
+            row: row.result_row(),
+            row_lookup: Some(row),
             params,
             engine: None,
         }
@@ -96,6 +143,11 @@ impl<'a> EvalContext<'a> {
     pub fn with_engine(mut self, engine: &'a dyn EngineHook) -> Self {
         self.engine = Some(engine);
         self
+    }
+
+    fn row_lookup(&self) -> Result<&'a dyn RowLookup> {
+        self.row_lookup
+            .ok_or_else(|| SQLError::Internal("column reference without row context".into()))
     }
 }
 
@@ -122,47 +174,24 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {
-            let row = ctx
-                .row
-                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
             // Plain column refs match either an unqualified key or the
             // suffix of a qualified `table.col` key, so the same row
             // shape works for single-table SELECTs and JOIN tuples.
-            if let Some(v) = row.get(name) {
-                return Ok(v.clone());
-            }
-            for (key, value) in row {
-                if key.rsplit_once('.').is_some_and(|(_, col)| col == name) {
-                    return Ok(value.clone());
-                }
-            }
-            Ok(Value::Null)
+            Ok(ctx
+                .row_lookup()?
+                .column(name)
+                .cloned()
+                .unwrap_or(Value::Null))
         }
         Expr::QualifiedColumn {
             qualifier,
             column,
             key,
-        } => {
-            let row = ctx
-                .row
-                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
-            let value = if key.is_empty() {
-                let key = format!("{qualifier}.{column}");
-                row.get(&key)
-            } else {
-                row.get(key)
-            };
-            if let Some(value) = value {
-                return Ok(value.clone());
-            }
-            // Single-relation rows carry unqualified keys, so
-            // `SELECT items.id FROM items` must fall back to the bare
-            // column - but only when no other qualifier claims that
-            // column (join rows keep qualified keys for both sides).
-            Ok(unqualified_fallback(row, column)
-                .cloned()
-                .unwrap_or(Value::Null))
-        }
+        } => Ok(ctx
+            .row_lookup()?
+            .qualified_column(qualifier, column, key)
+            .cloned()
+            .unwrap_or(Value::Null)),
         Expr::Array(elements) => {
             let mut out = Vec::with_capacity(elements.len());
             for e in elements {
@@ -524,17 +553,25 @@ fn eval_binary(op: BinaryOp, lhs: &Expr, rhs: &Expr, ctx: &EvalContext<'_>) -> R
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
+    eval_binary_values(op, &l, &r)
+}
+
+/// Apply a binary SQL operator to values that have already been evaluated.
+/// Execution engines use this when a hot path compiles expression traversal
+/// ahead of time but must retain the evaluator's exact comparison, numeric
+/// promotion, NULL, overflow, and division-by-zero semantics.
+pub fn eval_binary_values(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
     match op {
         BinaryOp::Equal
         | BinaryOp::NotEqual
         | BinaryOp::Less
         | BinaryOp::LessEqual
         | BinaryOp::Greater
-        | BinaryOp::GreaterEqual => eval_comparison_op(op, &l, &r),
-        BinaryOp::Add => arith(&l, &r, op),
-        BinaryOp::Subtract => arith(&l, &r, op),
-        BinaryOp::Multiply => arith(&l, &r, op),
-        BinaryOp::Divide => arith(&l, &r, op),
+        | BinaryOp::GreaterEqual => eval_comparison_op(op, l, r),
+        BinaryOp::Add => arith(l, r, op),
+        BinaryOp::Subtract => arith(l, r, op),
+        BinaryOp::Multiply => arith(l, r, op),
+        BinaryOp::Divide => arith(l, r, op),
     }
 }
 
@@ -606,34 +643,20 @@ fn eval_operand_borrowed<'a>(
             Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
             None => Err(SQLError::MissingParam(*i)),
         },
-        Expr::Column(name) => {
-            let row = ctx
-                .row
-                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
-            Ok(Some(match row_column_value(row, name) {
-                Some(value) => EvalOperand::Borrowed(value),
-                None => EvalOperand::Owned(Value::Null),
-            }))
-        }
+        Expr::Column(name) => Ok(Some(match ctx.row_lookup()?.column(name) {
+            Some(value) => EvalOperand::Borrowed(value),
+            None => EvalOperand::Owned(Value::Null),
+        })),
         Expr::QualifiedColumn {
             qualifier,
             column,
             key,
-        } => {
-            let row = ctx
-                .row
-                .ok_or_else(|| SQLError::Internal("column reference without row context".into()))?;
-            let value = if key.is_empty() {
-                let key = format!("{qualifier}.{column}");
-                row.get(&key)
-            } else {
-                row.get(key)
-            };
-            Ok(Some(match value {
+        } => Ok(Some(
+            match ctx.row_lookup()?.qualified_column(qualifier, column, key) {
                 Some(value) => EvalOperand::Borrowed(value),
                 None => EvalOperand::Owned(Value::Null),
-            }))
-        }
+            },
+        )),
         _ => Ok(None),
     }
 }
@@ -796,27 +819,11 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     if matches!(a, Value::Null) || matches!(b, Value::Null) {
         return Ok(Value::Null);
     }
-    if matches!(op, BinaryOp::Subtract) {
-        if let Some(value) = json_delete(&[a.clone(), b.clone()])? {
-            return Ok(value);
-        }
-    }
-    if matches!(a, Value::Temporal(_)) || matches!(b, Value::Temporal(_)) {
-        return time::temporal_arith(a, b, op);
-    }
-    let has_decimal = matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_));
-    let has_float = matches!(a, Value::Float(_)) || matches!(b, Value::Float(_));
-    // PostgreSQL numeric promotion: double precision wins mixed
-    // float/numeric arithmetic. Exact decimal arithmetic only applies
-    // when no float operand is involved.
-    if has_decimal && !has_float {
-        return decimal_arith(a, b, op);
-    }
-    // Integer x integer arithmetic stays exact and errors on overflow
-    // the way PostgreSQL does. Note: integer literals are compiled to
-    // i64 (bigint), so `2147483647 + 1` promotes to bigint here instead
-    // of raising `integer out of range` - a deliberate typed-literal
-    // divergence from PostgreSQL, which types small literals as int4.
+    // Integer x integer is the overwhelmingly common analytical path.
+    // Resolve it before probing unrelated temporal / decimal / floating
+    // representations, while retaining PostgreSQL overflow behavior. Integer
+    // literals are represented as i64 here, so small-literal int4 overflow
+    // remains the evaluator's existing deliberate PostgreSQL divergence.
     if let (Value::Int(li), Value::Int(ri)) = (a, b) {
         let out = match op {
             BinaryOp::Add => li.checked_add(*ri),
@@ -832,6 +839,22 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
             _ => unreachable!("non-arith op routed through arith"),
         };
         return out.map(Value::Int).ok_or_else(|| out_of_range("bigint"));
+    }
+    if matches!(op, BinaryOp::Subtract) && matches!(a, Value::Map(_) | Value::List(_)) {
+        if let Some(value) = json_delete(&[a.clone(), b.clone()])? {
+            return Ok(value);
+        }
+    }
+    if matches!(a, Value::Temporal(_)) || matches!(b, Value::Temporal(_)) {
+        return time::temporal_arith(a, b, op);
+    }
+    let has_decimal = matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_));
+    let has_float = matches!(a, Value::Float(_)) || matches!(b, Value::Float(_));
+    // PostgreSQL numeric promotion: double precision wins mixed
+    // float/numeric arithmetic. Exact decimal arithmetic only applies
+    // when no float operand is involved.
+    if has_decimal && !has_float {
+        return decimal_arith(a, b, op);
     }
     let lf = to_f64(a)?;
     let rf = to_f64(b)?;
@@ -3558,6 +3581,67 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got, Value::List(vec![Value::Int(1), Value::Int(2)]));
+    }
+
+    #[test]
+    fn projected_row_lookup_evaluates_columns_without_a_result_map() {
+        struct ProjectedRow {
+            names: [&'static str; 2],
+            values: [Value; 2],
+        }
+
+        impl RowLookup for ProjectedRow {
+            fn column(&self, name: &str) -> Option<&Value> {
+                self.names
+                    .iter()
+                    .position(|candidate| *candidate == name)
+                    .and_then(|index| self.values.get(index))
+            }
+
+            fn qualified_column(
+                &self,
+                _qualifier: &str,
+                column: &str,
+                _key: &str,
+            ) -> Option<&Value> {
+                self.column(column)
+            }
+        }
+
+        let row = ProjectedRow {
+            names: ["quantity", "status"],
+            values: [Value::Int(7), Value::Str("O".into())],
+        };
+        let ctx = EvalContext::from_row_lookup(&row, &[]);
+
+        assert_eq!(
+            eval(&Expr::Column("quantity".into()), &ctx).unwrap(),
+            Value::Int(7)
+        );
+        assert_eq!(
+            eval(
+                &Expr::QualifiedColumn {
+                    qualifier: "lineitem".into(),
+                    column: "status".into(),
+                    key: String::new(),
+                },
+                &ctx,
+            )
+            .unwrap(),
+            Value::Str("O".into())
+        );
+        assert_eq!(
+            eval(
+                &Expr::Binary {
+                    op: BinaryOp::Greater,
+                    lhs: Box::new(Expr::Column("quantity".into())),
+                    rhs: Box::new(Expr::Literal(Value::Int(5))),
+                },
+                &ctx,
+            )
+            .unwrap(),
+            Value::Bool(true)
+        );
     }
 
     #[test]

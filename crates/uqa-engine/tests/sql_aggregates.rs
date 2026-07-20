@@ -163,6 +163,63 @@ fn aggregates_can_be_nested_inside_projection_expressions() {
 }
 
 #[test]
+fn qualified_columns_work_in_projected_single_table_aggregates() {
+    let eng = engine_with_data();
+    let r = eng
+        .sql(
+            "SELECT SUM(u.age) AS total, AVG(u.age) AS mean, COUNT(*) AS cnt FROM users AS u",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(int_col(&r.rows[0], "total"), Some(115));
+    assert_eq!(float_col(&r.rows[0], "mean"), Some(28.75));
+    assert_eq!(int_col(&r.rows[0], "cnt"), Some(4));
+}
+
+#[test]
+fn scalar_functions_inside_aggregates_use_the_materialized_fallback() {
+    let eng = engine_with_data();
+    let r = eng
+        .sql("SELECT SUM(ABS(age)) AS total FROM users", &[])
+        .unwrap();
+
+    assert_eq!(int_col(&r.rows[0], "total"), Some(115));
+}
+
+#[test]
+fn projected_group_cache_falls_back_for_high_cardinality_keys() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE group_cardinality (id INTEGER PRIMARY KEY, amount INTEGER)",
+        &[],
+    )
+    .unwrap();
+    let values = (0..40)
+        .map(|id| format!("({id}, {})", id * 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    eng.sql(
+        &format!("INSERT INTO group_cardinality (id, amount) VALUES {values}"),
+        &[],
+    )
+    .unwrap();
+
+    let r = eng
+        .sql(
+            "SELECT id, SUM(amount) AS total, COUNT(*) AS cnt \
+             FROM group_cardinality GROUP BY id ORDER BY id",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(r.rows.len(), 40);
+    assert_eq!(int_col(&r.rows[39], "id"), Some(39));
+    assert_eq!(int_col(&r.rows[39], "total"), Some(78));
+    assert_eq!(int_col(&r.rows[39], "cnt"), Some(1));
+}
+
+#[test]
 fn count_distinct_with_group_by() {
     let eng = engine();
     eng.sql("CREATE TABLE sales (dept TEXT, product TEXT)", &[])

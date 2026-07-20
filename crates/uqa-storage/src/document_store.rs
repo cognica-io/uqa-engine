@@ -103,6 +103,44 @@ pub trait DocumentStore: Send + Sync {
             .collect()
     }
 
+    /// Visit a column projection in the caller's document-id order.
+    /// The callback receives one owned row at a time, allowing scan and
+    /// aggregate pipelines to avoid materialising a second doc-id map.
+    /// Returning `false` stops the visit early. Missing documents yield
+    /// a row of NULLs, matching row-evaluator semantics.
+    fn for_each_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
+    ) {
+        let mut projected = self.get_fields_multi(doc_ids, fields);
+        for doc_id in doc_ids {
+            let values = projected
+                .remove(doc_id)
+                .unwrap_or_else(|| vec![Value::Null; fields.len()]);
+            if !visitor(*doc_id, values) {
+                break;
+            }
+        }
+    }
+
+    /// Visit a column projection by reference when the backend can keep
+    /// decoded values alive for the duration of the callback. The default
+    /// adapter preserves the backend's owned/batched projection path;
+    /// in-memory stores override it to avoid cloning every projected value.
+    fn for_each_fields_multi_ref(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) {
+        self.for_each_fields_multi(doc_ids, fields, &mut |doc_id, values| {
+            let references: Vec<&Value> = values.iter().collect();
+            visitor(doc_id, &references)
+        });
+    }
+
     /// Bulk variant of [`DocumentStore::get_field`]. The default
     /// implementation walks each id one at a time; persistent backends
     /// should override to run a single batched query.
@@ -217,6 +255,39 @@ impl MemoryDocumentStore {
     }
 }
 
+fn project_document_fields_ref<'a>(
+    document: Option<&'a Document>,
+    fields: &[&str],
+    fields_are_sorted: bool,
+    null: &'a Value,
+    values: &mut Vec<&'a Value>,
+) {
+    values.clear();
+    match document {
+        Some(document) if fields_are_sorted => {
+            // Both sides are ordered. Merge them once instead of
+            // performing a B-tree lookup for every projected field.
+            let mut stored_fields = document.iter();
+            let mut current = stored_fields.next();
+            for requested in fields {
+                while current.is_some_and(|(stored, _)| stored.as_str() < *requested) {
+                    current = stored_fields.next();
+                }
+                values.push(match current {
+                    Some((stored, value)) if stored.as_str() == *requested => value,
+                    _ => null,
+                });
+            }
+        }
+        Some(document) => values.extend(
+            fields
+                .iter()
+                .map(|field| document.get(*field).unwrap_or(null)),
+        ),
+        None => values.resize(fields.len(), null),
+    }
+}
+
 impl DocumentStore for MemoryDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         self.documents.insert(doc_id, document);
@@ -235,6 +306,98 @@ impl DocumentStore for MemoryDocumentStore {
         self.documents
             .get(&doc_id)
             .and_then(|d| d.get(field).cloned())
+    }
+
+    fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
+        doc_ids
+            .iter()
+            .filter_map(|doc_id| {
+                let document = self.documents.get(doc_id)?;
+                let values = fields
+                    .iter()
+                    .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                    .collect();
+                Some((*doc_id, values))
+            })
+            .collect()
+    }
+
+    fn for_each_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
+    ) {
+        for doc_id in doc_ids {
+            let values = self.documents.get(doc_id).map_or_else(
+                || vec![Value::Null; fields.len()],
+                |document| {
+                    fields
+                        .iter()
+                        .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                        .collect()
+                },
+            );
+            if !visitor(*doc_id, values) {
+                break;
+            }
+        }
+    }
+
+    fn for_each_fields_multi_ref(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) {
+        let null = Value::Null;
+        let mut values = Vec::with_capacity(fields.len());
+        let fields_are_sorted = fields.windows(2).all(|pair| pair[0] <= pair[1]);
+
+        let doc_ids_are_sorted = doc_ids.windows(2).all(|pair| pair[0] <= pair[1]);
+        let use_merge_scan = doc_ids_are_sorted
+            && doc_ids.len().saturating_mul(8) >= self.documents.len()
+            && !doc_ids.is_empty();
+        if use_merge_scan {
+            // Posting-list output is ordered and analytical predicates are
+            // commonly dense. Walk the document tree once in that case;
+            // sparse probes retain logarithmic point lookup below.
+            let mut documents = self.documents.range(doc_ids[0]..);
+            let mut current = documents.next();
+            for doc_id in doc_ids {
+                while current.is_some_and(|(stored_id, _)| stored_id < doc_id) {
+                    current = documents.next();
+                }
+                let document = match current {
+                    Some((stored_id, document)) if stored_id == doc_id => Some(document),
+                    _ => None,
+                };
+                project_document_fields_ref(
+                    document,
+                    fields,
+                    fields_are_sorted,
+                    &null,
+                    &mut values,
+                );
+                if !visitor(*doc_id, &values) {
+                    return;
+                }
+            }
+            return;
+        }
+
+        for doc_id in doc_ids {
+            project_document_fields_ref(
+                self.documents.get(doc_id),
+                fields,
+                fields_are_sorted,
+                &null,
+                &mut values,
+            );
+            if !visitor(*doc_id, &values) {
+                return;
+            }
+        }
     }
 
     fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
@@ -350,6 +513,125 @@ mod tests {
         assert_eq!(got.get(&1), Some(&Value::Int(2026)));
         assert_eq!(got.get(&2), Some(&Value::Int(2025)));
         assert_eq!(got.get(&99), Some(&Value::Null));
+    }
+
+    #[test]
+    fn get_fields_multi_projects_in_requested_order() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(
+            1,
+            doc([
+                ("year", Value::Int(2026)),
+                ("title", Value::Str("rust".into())),
+                ("unused", Value::Bool(true)),
+            ]),
+        )
+        .unwrap();
+
+        let got = s.get_fields_multi(&[1, 99], &["title", "missing", "year"]);
+        assert_eq!(
+            got.get(&1),
+            Some(&vec![
+                Value::Str("rust".into()),
+                Value::Null,
+                Value::Int(2026)
+            ])
+        );
+        assert!(!got.contains_key(&99));
+    }
+
+    #[test]
+    fn for_each_fields_multi_streams_doc_id_order_and_can_stop() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(2, doc([("value", Value::Int(20))])).unwrap();
+        s.put(1, doc([("value", Value::Int(10))])).unwrap();
+
+        let mut visited = Vec::new();
+        s.for_each_fields_multi(&[2, 99, 1], &["value"], &mut |doc_id, values| {
+            visited.push((doc_id, values));
+            doc_id != 99
+        });
+
+        assert_eq!(
+            visited,
+            vec![(2, vec![Value::Int(20)]), (99, vec![Value::Null])]
+        );
+    }
+
+    #[test]
+    fn for_each_fields_multi_ref_borrows_memory_values_and_reuses_nulls() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(2, doc([("value", Value::Str("twenty".into()))]))
+            .unwrap();
+        let stored = std::ptr::from_ref(s.documents[&2].get("value").unwrap());
+
+        let mut visited = Vec::new();
+        s.for_each_fields_multi_ref(&[2, 99], &["value"], &mut |doc_id, values| {
+            if doc_id == 2 {
+                assert_eq!(std::ptr::from_ref(values[0]), stored);
+            }
+            visited.push((doc_id, values[0].clone()));
+            true
+        });
+
+        assert_eq!(
+            visited,
+            vec![(2, Value::Str("twenty".into())), (99, Value::Null),]
+        );
+    }
+
+    #[test]
+    fn for_each_fields_multi_ref_preserves_projection_order_across_scan_paths() {
+        let mut s = MemoryDocumentStore::new();
+        for doc_id in 1..=10 {
+            s.put(
+                doc_id,
+                doc([
+                    ("alpha", Value::Int(doc_id as i64)),
+                    ("middle", Value::Bool(true)),
+                    ("zulu", Value::Int((doc_id * 10) as i64)),
+                ]),
+            )
+            .unwrap();
+        }
+
+        let mut dense = Vec::new();
+        s.for_each_fields_multi_ref(
+            &[2, 3, 4, 99],
+            &["alpha", "missing", "zulu"],
+            &mut |doc_id, values| {
+                dense.push((
+                    doc_id,
+                    values.iter().map(|value| (*value).clone()).collect(),
+                ));
+                true
+            },
+        );
+        assert_eq!(
+            dense,
+            vec![
+                (2, vec![Value::Int(2), Value::Null, Value::Int(20)]),
+                (3, vec![Value::Int(3), Value::Null, Value::Int(30)]),
+                (4, vec![Value::Int(4), Value::Null, Value::Int(40)]),
+                (99, vec![Value::Null, Value::Null, Value::Null]),
+            ]
+        );
+
+        let mut unsorted = Vec::new();
+        s.for_each_fields_multi_ref(&[10, 1], &["zulu", "alpha"], &mut |doc_id, values| {
+            unsorted.push((
+                doc_id,
+                values.iter().map(|value| (*value).clone()).collect(),
+            ));
+            true
+        });
+        assert_eq!(
+            unsorted,
+            vec![
+                (10, vec![Value::Int(100), Value::Int(10)]),
+                (1, vec![Value::Int(10), Value::Int(1)]),
+            ]
+        );
     }
 
     #[test]

@@ -53,6 +53,29 @@ Unchanged paths (interleaved A/B verified, same-minute alternating binaries): `s
 
 One deliberate semantic change rode along with the serde rewrite: serde's sequence form for internally-tagged enums no longer turns arrays like `[1, -1]` into `Temporal` / `Decimal` values - arrays that are not byte arrays now always decode as lists, which is the only round-trip-stable reading. `value_json_decoding_keeps_arrays_as_lists` documents it.
 
+## TPC-H-style analytical pass (2026-07-19)
+
+The `tpch_style` benchmark builds 100k synthetic `lineitem` rows and runs two repeatable analytical shapes: a Q1-style low-cardinality grouped aggregate with shared arithmetic subexpressions, and a Q6-style range-filtered revenue aggregate. Setup validates the Q1 qualifying-row count and exact Q6 revenue before timing. It is intentionally TPC-H-style rather than an audited TPC-H implementation; its purpose is to pin the engine paths that sampling identified, not to publish a TPC-H score.
+
+The representation boundary remains unchanged: every scalar index scan produces a sorted, deduplicated `PostingList`, range predicates combine through the normal posting-list Boolean algebra, and only the final selected doc IDs cross into document projection. No row-set, bitmap, or format-specific filtering carrier was introduced. The dense bitmap in `BTreeIndex::scan` is a bounded internal sort/dedup strategy and is converted immediately into the same `PostingList`; sparse doc-ID spaces retain `sort_unstable`.
+
+Sampling exposed five compounding costs:
+
+1. Simple aggregates retained every input value and updated state their finalizers never read. Built-in accumulators now keep only the required streaming state, with exact `i128` integer sums, floating accumulation deferred until the first non-integer input, and lazy decimal promotion.
+2. Single-table aggregation materialized whole document maps and cloned projected values. The document-store abstraction now offers an ordered visitor with a borrowed-value fast path for memory storage and an owned/batched default for persistent backends; dense sorted memory scans merge-walk documents and fields.
+3. Every row rebuilt string-keyed evaluation state, lowercased aggregate names, and interpreted simple aggregate arguments through the general AST evaluator. Projected rows implement `RowLookup`, direct column inputs borrow slots, and supported binary aggregate expressions compile once while calling the canonical SQL binary-operation function for NULL, promotion, overflow, and division semantics. Built-ins without `FILTER`, `DISTINCT`, `ORDER BY`, or NULL-preserving collection behavior now feed those compiled inputs directly into their planned accumulator state; modified aggregates retain the general dispatcher.
+4. Low-cardinality grouping repeatedly cloned keys and searched the result `BTreeMap`. Up to 32 groups now retain their accumulators in a bounded fingerprinted cache and flush once at the end; the 33rd distinct key permanently switches that query to the general map path.
+5. Dense scalar range scans comparison-sorted large doc-ID vectors. When the doc-ID span is at most eight times the number of collected IDs, a cache-local bitmap performs sort/dedup using no more memory than the input vector; sparse ranges keep the prior comparison sort.
+
+Final reference run (`cargo bench -p uqa-engine --bench tpch_style`, 20 Criterion samples):
+
+| Workload | Central estimate |
+| --- | --- |
+| `tpch_style/q1_100k` | 29.154 ms |
+| `tpch_style/q6_100k` | 5.854 ms |
+
+The first exploratory `--quick` estimates were 250.21 ms for Q1 and 24.05 ms for Q6. Those figures document the optimization trajectory only: Q6 was first recorded after the earliest accumulator fix, and `--quick` is not statistically comparable to the final 20-sample run. The final table above is the reproducible baseline.
+
 ## Reference numbers (post-optimization)
 
 | Workload | Bench | Median time |
@@ -65,6 +88,8 @@ One deliberate semantic change rode along with the serde rewrite: serde's sequen
 | SQL inner join (10k x 1k) | `cargo bench -p uqa-engine --bench join` | ~1.55 ms |
 | k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~769 us |
 | SQL text match (1M docs, top 10) | `cargo bench -p uqa-engine --bench sql_1m` | ~41.7 ms |
+| TPC-H-style Q1 aggregate (100k rows) | `cargo bench -p uqa-engine --bench tpch_style` | ~29.2 ms |
+| TPC-H-style Q6 indexed aggregate (100k rows) | same bench | ~5.85 ms |
 | Relevance bench (3 queries, BM25) | `cargo bench -p uqa-engine --bench relevance` | ~24 us |
 | RPQ concat 3-hop (1k vertices) | `cargo bench -p uqa-graph --bench rpq` | ~2.2 us |
 
@@ -79,8 +104,9 @@ The hash-join path on `sql_inner_join_10k_x_1k` remains the load-bearing rewrite
 
 ## Measurement caveats
 
-- Criterion times are wall-clock, single-threaded. Multi-threaded workloads are not represented; the benchmark gate focuses on the hot single-threaded paths.
+- Criterion reports wall-clock time. Most reference workloads focus on single-threaded hot paths, while `tpch_style/q6_100k` can execute independent predicate branches through the Rayon-backed branch executor; scheduler contention therefore affects that result more strongly.
 - Session-to-session drift on this machine reaches +/-10% for millisecond-scale e2e workloads (thermal and scheduling state). Deltas below that band are only trustworthy from interleaved A/B runs of both binaries within the same minute; the criterion `--baseline` comparison alone is sufficient only for larger movements.
-- `--quick` undercuts measurement stability; use the default sample count (100) for any number you intend to publish.
+- Unrelated build and test processes must be stopped before recording reference numbers; branch-parallel indexed filters are especially sensitive to scheduler contention.
+- `--quick` undercuts measurement stability; use the benchmark's configured full sample count (20 for `tpch_style`, 100 by default elsewhere) for any number you intend to publish.
 - `sql_1m` exercises a single text match across the full corpus without pre-filtering. It is a scaling check, not a latency target.
 - Write benches that mutate persistent state (`point_update_indexed`) accumulate WAL growth across iterations and wobble accordingly; compare them only via interleaved A/B.

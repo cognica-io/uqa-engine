@@ -854,6 +854,21 @@ impl Engine {
         got
     }
 
+    pub(crate) fn for_each_document_fields_multi_ref(
+        &self,
+        table: &str,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) {
+        let Some(t) = self.table(table) else {
+            return;
+        };
+        t.document_store
+            .read()
+            .for_each_fields_multi_ref(doc_ids, fields, visitor);
+    }
+
     pub(crate) fn get_document_fields(
         &self,
         table: &str,

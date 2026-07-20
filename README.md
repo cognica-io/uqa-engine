@@ -179,6 +179,7 @@ cargo bench -p uqa-planner   --bench planner
 cargo bench -p uqa-engine    --bench sql_e2e
 cargo bench -p uqa-engine    --bench sql_1m
 cargo bench -p uqa-engine    --bench sql_workloads
+cargo bench -p uqa-engine    --bench tpch_style
 cargo bench -p uqa-engine    --bench graph_sql
 cargo bench -p uqa-engine    --bench compiler
 cargo bench -p uqa-engine    --bench execution

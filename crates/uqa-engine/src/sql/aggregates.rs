@@ -13,8 +13,8 @@ use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
 use uqa_core::{DecimalValue, Value};
-use uqa_sql::ast::{Expr, OrderBy, Projection, SelectStmt};
-use uqa_sql::expr::EvalContext;
+use uqa_sql::ast::{BinaryOp, Expr, OrderBy, Projection, SelectStmt};
+use uqa_sql::expr::{EvalContext, RowLookup};
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 
@@ -630,12 +630,67 @@ pub(super) fn collect_expr_columns(expr: &Expr, out: &mut BTreeSet<String>) -> b
 /// documents are required (`*` expansion, subqueries, ...). `count(*)`
 /// contributes no columns.
 fn aggregation_column_projection(
+    engine: &Engine,
     stmt: &SelectStmt,
     agg_targets: &[&Expr],
 ) -> Option<BTreeSet<String>> {
+    fn safe_while_document_store_is_borrowed(expr: &Expr) -> bool {
+        match expr {
+            Expr::Literal(_) | Expr::Param(_) | Expr::Column(_) | Expr::QualifiedColumn { .. } => {
+                true
+            }
+            Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+                items.iter().all(safe_while_document_store_is_borrowed)
+            }
+            Expr::Binary { lhs, rhs, .. } => {
+                safe_while_document_store_is_borrowed(lhs)
+                    && safe_while_document_store_is_borrowed(rhs)
+            }
+            Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
+                safe_while_document_store_is_borrowed(inner)
+            }
+            Expr::IsNull { expr, .. } => safe_while_document_store_is_borrowed(expr),
+            Expr::Between { expr, low, high } => {
+                safe_while_document_store_is_borrowed(expr)
+                    && safe_while_document_store_is_borrowed(low)
+                    && safe_while_document_store_is_borrowed(high)
+            }
+            Expr::InList { expr, list, .. } => {
+                safe_while_document_store_is_borrowed(expr)
+                    && list.iter().all(safe_while_document_store_is_borrowed)
+            }
+            Expr::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                base.as_deref()
+                    .is_none_or(safe_while_document_store_is_borrowed)
+                    && when.iter().all(|(condition, result)| {
+                        safe_while_document_store_is_borrowed(condition)
+                            && safe_while_document_store_is_borrowed(result)
+                    })
+                    && else_branch
+                        .as_deref()
+                        .is_none_or(safe_while_document_store_is_borrowed)
+            }
+            // Functions can re-enter the engine through EngineHook. Keep
+            // their evaluation outside the document-store read guard, along
+            // with every expression form that already requires whole rows.
+            Expr::Star
+            | Expr::Func { .. }
+            | Expr::WindowCall { .. }
+            | Expr::ScalarSubquery(_)
+            | Expr::Exists { .. }
+            | Expr::InSubquery { .. } => false,
+        }
+    }
+
     let mut columns = BTreeSet::new();
     for group in &stmt.group_by {
-        if !collect_expr_columns(group, &mut columns) {
+        if !safe_while_document_store_is_borrowed(group)
+            || !collect_expr_columns(group, &mut columns)
+        {
             return None;
         }
     }
@@ -648,27 +703,41 @@ fn aggregation_column_projection(
             ..
         } = expr
         else {
-            if !collect_expr_columns(expr, &mut columns) {
+            if !safe_while_document_store_is_borrowed(expr)
+                || !collect_expr_columns(expr, &mut columns)
+            {
                 return None;
             }
             continue;
         };
+        // Registered aggregate states are user code and can re-enter the
+        // engine from `observe`. Materialise their rows so that callback runs
+        // after the document-store read guard has been released.
+        if engine.registered_aggregate_function(name).is_some() {
+            return None;
+        }
         let count_star =
             name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [Expr::Star]);
         if !count_star {
             for arg in args {
-                if !collect_expr_columns(arg, &mut columns) {
+                if !safe_while_document_store_is_borrowed(arg)
+                    || !collect_expr_columns(arg, &mut columns)
+                {
                     return None;
                 }
             }
         }
         if let Some(filter_expr) = filter.as_deref() {
-            if !collect_expr_columns(filter_expr, &mut columns) {
+            if !safe_while_document_store_is_borrowed(filter_expr)
+                || !collect_expr_columns(filter_expr, &mut columns)
+            {
                 return None;
             }
         }
         for order in order_by {
-            if !collect_expr_columns(&order.expr, &mut columns) {
+            if !safe_while_document_store_is_borrowed(&order.expr)
+                || !collect_expr_columns(&order.expr, &mut columns)
+            {
                 return None;
             }
         }
@@ -676,36 +745,618 @@ fn aggregation_column_projection(
     Some(columns)
 }
 
-/// Materialise the documents an aggregation pass needs: nothing for
-/// count-only aggregates, a column projection when the referenced
-/// column set is known, whole documents otherwise.
-fn aggregation_documents(
+struct ProjectedRow<'a> {
+    columns: &'a ProjectedColumns,
+    values: &'a [&'a Value],
+}
+
+const PROJECTED_SLOT_EMPTY: u32 = u32::MAX;
+const PROJECTED_SLOT_COLLISION: u32 = u32::MAX - 1;
+
+struct ProjectedColumns {
+    // `names` is the sorted, complete set collected from every expression that
+    // can be evaluated through this projection. That invariant lets the
+    // single-first-byte case return its slot without repeating a string
+    // comparison in the per-row hot loop.
+    names: Vec<String>,
+    first_byte_slots: [u32; 256],
+}
+
+impl ProjectedColumns {
+    fn new(names: Vec<String>) -> Self {
+        debug_assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+        let mut first_byte_slots = [PROJECTED_SLOT_EMPTY; 256];
+        for (index, name) in names.iter().enumerate() {
+            let Some(first) = name.as_bytes().first().copied() else {
+                continue;
+            };
+            let slot = &mut first_byte_slots[usize::from(first)];
+            if *slot == PROJECTED_SLOT_EMPTY {
+                *slot = u32::try_from(index).unwrap_or(PROJECTED_SLOT_COLLISION);
+            } else {
+                *slot = PROJECTED_SLOT_COLLISION;
+            }
+        }
+        Self {
+            names,
+            first_byte_slots,
+        }
+    }
+
+    fn index(&self, name: &str) -> Option<usize> {
+        if let Some(first) = name.as_bytes().first().copied() {
+            let slot = self.first_byte_slots[usize::from(first)];
+            if slot < PROJECTED_SLOT_COLLISION {
+                let index = slot as usize;
+                debug_assert_eq!(self.names[index], name);
+                return Some(index);
+            }
+        }
+        self.names
+            .binary_search_by(|candidate| candidate.as_str().cmp(name))
+            .ok()
+    }
+}
+
+fn projected_group_slots(stmt: &SelectStmt, columns: &ProjectedColumns) -> Option<Vec<usize>> {
+    stmt.group_by
+        .iter()
+        .map(|expr| match expr {
+            Expr::Column(name) => columns.index(name),
+            Expr::QualifiedColumn { column, .. } => columns.index(column),
+            _ => None,
+        })
+        .collect()
+}
+
+enum ProjectedAggregateInput {
+    Evaluate,
+    Slot(usize),
+    CountOne,
+    Expression(ProjectedExpression),
+}
+
+enum ProjectedAggregatePlan {
+    /// No FILTER, DISTINCT, ORDER BY, or NULL-preserving behavior remains to
+    /// dispatch per row; feed the compiled input straight into its accumulator.
+    Direct(ProjectedAggregateInput),
+    General(ProjectedAggregateInput),
+}
+
+enum ProjectedExpression {
+    Slot(usize),
+    Literal(Value),
+    Binary {
+        op: BinaryOp,
+        lhs: Box<ProjectedExpression>,
+        rhs: Box<ProjectedExpression>,
+    },
+}
+
+enum ProjectedExpressionValue<'a> {
+    Borrowed(&'a Value),
+    Owned(Value),
+}
+
+impl ProjectedExpressionValue<'_> {
+    fn as_value(&self) -> &Value {
+        match self {
+            Self::Borrowed(value) => value,
+            Self::Owned(value) => value,
+        }
+    }
+}
+
+impl ProjectedExpression {
+    fn compile(expr: &Expr, columns: &ProjectedColumns) -> Option<Self> {
+        match expr {
+            Expr::Column(name) => Some(Self::Slot(columns.index(name)?)),
+            Expr::QualifiedColumn { column, .. } => Some(Self::Slot(columns.index(column)?)),
+            Expr::Literal(value) => Some(Self::Literal(value.clone())),
+            Expr::Binary { op, lhs, rhs } => Some(Self::Binary {
+                op: *op,
+                lhs: Box::new(Self::compile(lhs, columns)?),
+                rhs: Box::new(Self::compile(rhs, columns)?),
+            }),
+            _ => None,
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        values: &'a [&'a Value],
+    ) -> Result<ProjectedExpressionValue<'a>, SQLError> {
+        match self {
+            Self::Slot(slot) => Ok(ProjectedExpressionValue::Borrowed(values[*slot])),
+            Self::Literal(value) => Ok(ProjectedExpressionValue::Borrowed(value)),
+            Self::Binary { op, lhs, rhs } => {
+                let left = lhs.evaluate(values)?;
+                let right = rhs.evaluate(values)?;
+                Ok(ProjectedExpressionValue::Owned(
+                    uqa_sql::expr::eval_binary_values(*op, left.as_value(), right.as_value())?,
+                ))
+            }
+        }
+    }
+}
+
+fn projected_aggregate_plans(
+    engine: &Engine,
+    agg_targets: &[&Expr],
+    columns: &ProjectedColumns,
+) -> Vec<ProjectedAggregatePlan> {
+    agg_targets
+        .iter()
+        .map(|expr| {
+            let Expr::Func {
+                name,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } = expr
+            else {
+                return ProjectedAggregatePlan::General(ProjectedAggregateInput::Evaluate);
+            };
+            if engine.registered_aggregate_function(name).is_some() {
+                return ProjectedAggregatePlan::General(ProjectedAggregateInput::Evaluate);
+            }
+            let input = if name.eq_ignore_ascii_case("count")
+                && (args.is_empty() || matches!(args.as_slice(), [Expr::Star]))
+            {
+                ProjectedAggregateInput::CountOne
+            } else if is_ordered_set_aggregate(name) || is_json_object_aggregate(name) {
+                ProjectedAggregateInput::Evaluate
+            } else {
+                match args.first() {
+                    Some(Expr::Column(name)) => columns.index(name).map_or(
+                        ProjectedAggregateInput::Evaluate,
+                        ProjectedAggregateInput::Slot,
+                    ),
+                    Some(Expr::QualifiedColumn { column, .. }) => columns.index(column).map_or(
+                        ProjectedAggregateInput::Evaluate,
+                        ProjectedAggregateInput::Slot,
+                    ),
+                    Some(expr) => ProjectedExpression::compile(expr, columns).map_or(
+                        ProjectedAggregateInput::Evaluate,
+                        ProjectedAggregateInput::Expression,
+                    ),
+                    None => ProjectedAggregateInput::Evaluate,
+                }
+            };
+            let direct = filter.is_none()
+                && !*distinct
+                && order_by.is_empty()
+                && !is_json_array_aggregate(name)
+                && !matches!(input, ProjectedAggregateInput::Evaluate);
+            if direct {
+                ProjectedAggregatePlan::Direct(input)
+            } else {
+                ProjectedAggregatePlan::General(input)
+            }
+        })
+        .collect()
+}
+
+impl RowLookup for ProjectedRow<'_> {
+    fn column(&self, name: &str) -> Option<&Value> {
+        self.columns
+            .index(name)
+            .and_then(|index| self.values.get(index).copied())
+    }
+
+    fn qualified_column(&self, _qualifier: &str, column: &str, _key: &str) -> Option<&Value> {
+        // This view is only used by the single-table aggregation path,
+        // whose stored documents carry bare field names.
+        self.column(column)
+    }
+}
+
+/// Feed the selected rows into an aggregate without forcing projected
+/// fields through two whole-result maps. Known column projections are
+/// visited in doc-id order and folded immediately; only expressions
+/// that cannot declare their columns retain the whole-document fallback.
+fn accumulate_table_rows(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
     stmt: &SelectStmt,
     agg_targets: &[&Expr],
-) -> BTreeMap<uqa_core::DocId, Document> {
+    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
     if !aggregation_needs_documents(stmt, agg_targets) {
-        return BTreeMap::new();
+        let empty_document = Document::new();
+        for _ in scored {
+            accumulate_document(engine, stmt, agg_targets, groups, &empty_document, params)?;
+        }
+        return Ok(());
     }
     let doc_ids: Vec<uqa_core::DocId> = scored.iter().map(|entry| entry.doc_id).collect();
-    match aggregation_column_projection(stmt, agg_targets) {
+    match aggregation_column_projection(engine, stmt, agg_targets) {
         Some(columns) if !columns.is_empty() => {
-            let names: Vec<String> = columns.into_iter().collect();
-            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            engine
-                .get_document_fields_multi(table, &doc_ids, &refs)
-                .into_iter()
-                .map(|(doc_id, values)| {
-                    let document: Document = names.iter().cloned().zip(values).collect();
-                    (doc_id, document)
-                })
-                .collect()
+            let columns = ProjectedColumns::new(columns.into_iter().collect());
+            let refs: Vec<&str> = columns.names.iter().map(String::as_str).collect();
+            let group_slots = projected_group_slots(stmt, &columns);
+            let aggregate_plans = projected_aggregate_plans(engine, agg_targets, &columns);
+            let mut group_key_cache = ProjectedGroupCache::Active(Vec::new());
+            let mut error = None;
+            engine.for_each_document_fields_multi_ref(
+                table,
+                &doc_ids,
+                &refs,
+                &mut |_doc_id, values| {
+                    let row = ProjectedRow {
+                        columns: &columns,
+                        values,
+                    };
+                    let ctx = EvalContext::from_row_lookup(&row, params).with_engine(engine);
+                    let result = match group_slots.as_deref() {
+                        Some(slots) => accumulate_projected_context(
+                            engine,
+                            agg_targets,
+                            groups,
+                            &mut group_key_cache,
+                            &aggregate_plans,
+                            values,
+                            slots,
+                            &ctx,
+                        ),
+                        None => accumulate_context(engine, stmt, agg_targets, groups, &ctx),
+                    };
+                    match result {
+                        Ok(()) => true,
+                        Err(err) => {
+                            error = Some(err);
+                            false
+                        }
+                    }
+                },
+            );
+            if let Some(err) = error {
+                Err(err)
+            } else {
+                flush_projected_group_cache(&mut group_key_cache, groups);
+                Ok(())
+            }
         }
-        Some(_) => BTreeMap::new(),
-        None => engine.get_documents_bulk(table, &doc_ids),
+        Some(_) => {
+            let empty_document = Document::new();
+            for _ in scored {
+                accumulate_document(engine, stmt, agg_targets, groups, &empty_document, params)?;
+            }
+            Ok(())
+        }
+        None => {
+            let documents = engine.get_documents_bulk(table, &doc_ids);
+            let empty_document = Document::new();
+            for entry in scored {
+                let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
+                accumulate_document(engine, stmt, agg_targets, groups, document, params)?;
+            }
+            Ok(())
+        }
     }
+}
+
+fn accumulate_document(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    agg_targets: &[&Expr],
+    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+    document: &Document,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
+    accumulate_context(engine, stmt, agg_targets, groups, &ctx)
+}
+
+fn accumulate_context(
+    engine: &Engine,
+    stmt: &SelectStmt,
+    agg_targets: &[&Expr],
+    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
+    let group_values: Vec<Value> = stmt
+        .group_by
+        .iter()
+        .map(|group| uqa_sql::expr::eval(group, ctx))
+        .collect::<Result<Vec<_>, _>>()?;
+    let bucket = group_bucket(engine, groups, group_values, agg_targets)?;
+    observe_aggregate_targets(bucket, agg_targets, ctx)
+}
+
+const PROJECTED_GROUP_CACHE_LIMIT: usize = 32;
+
+struct ProjectedGroupCacheEntry {
+    fingerprint: u64,
+    key: Vec<Value>,
+    bucket: (Vec<AggregateAccumulator>, Vec<Value>),
+}
+
+enum ProjectedGroupCache {
+    Active(Vec<ProjectedGroupCacheEntry>),
+    Disabled,
+}
+
+fn flush_projected_group_cache(
+    cache: &mut ProjectedGroupCache,
+    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+) {
+    let ProjectedGroupCache::Active(entries) =
+        std::mem::replace(cache, ProjectedGroupCache::Disabled)
+    else {
+        return;
+    };
+    for entry in entries {
+        debug_assert!(!groups.contains_key(&entry.key));
+        groups.insert(entry.key, entry.bucket);
+    }
+}
+
+fn projected_group_fingerprint(values: &[&Value], group_slots: &[usize]) -> u64 {
+    let mut fingerprint = 0xcbf2_9ce4_8422_2325;
+    for index in group_slots {
+        fingerprint_value(&mut fingerprint, values[*index]);
+    }
+    fingerprint
+}
+
+fn fingerprint_value(fingerprint: &mut u64, value: &Value) {
+    fn write(fingerprint: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *fingerprint ^= u64::from(*byte);
+            *fingerprint = fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    match value {
+        Value::Null => write(fingerprint, &[0]),
+        // `Value::cmp` compares Bool / Int / Float / Decimal across types.
+        // Give every numeric value one conservative token so values that
+        // compare equal can never land in different fingerprint buckets.
+        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => {
+            write(fingerprint, &[1]);
+        }
+        Value::Str(value) => {
+            write(fingerprint, &[2]);
+            write(fingerprint, &(value.len() as u64).to_le_bytes());
+            write(fingerprint, value.as_bytes());
+        }
+        Value::Bytes(value) => {
+            write(fingerprint, &[3]);
+            write(fingerprint, &(value.len() as u64).to_le_bytes());
+            write(fingerprint, value);
+        }
+        Value::Temporal(_) => write(fingerprint, &[4]),
+        Value::List(values) => {
+            write(fingerprint, &[5]);
+            write(fingerprint, &(values.len() as u64).to_le_bytes());
+            for value in values {
+                fingerprint_value(fingerprint, value);
+            }
+        }
+        Value::Map(values) => {
+            write(fingerprint, &[6]);
+            write(fingerprint, &(values.len() as u64).to_le_bytes());
+            for (key, value) in values {
+                write(fingerprint, &(key.len() as u64).to_le_bytes());
+                write(fingerprint, key.as_bytes());
+                fingerprint_value(fingerprint, value);
+            }
+        }
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the hot loop passes independent borrowed state without a context wrapper"
+)]
+fn accumulate_projected_context(
+    engine: &Engine,
+    agg_targets: &[&Expr],
+    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
+    group_key_cache: &mut ProjectedGroupCache,
+    aggregate_plans: &[ProjectedAggregatePlan],
+    values: &[&Value],
+    group_slots: &[usize],
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
+    // A global aggregate has one empty-key bucket. The one-entry B-tree
+    // lookup is cheaper than fingerprinting and probing the bounded cache.
+    if group_slots.is_empty() {
+        if groups.is_empty() {
+            let bucket = group_bucket(engine, groups, Vec::new(), agg_targets)?;
+            return observe_projected_aggregate_targets(
+                bucket,
+                agg_targets,
+                aggregate_plans,
+                values,
+                ctx,
+            );
+        }
+        let bucket = groups
+            .get_mut(&[] as &[Value])
+            .ok_or_else(|| SQLError::Internal("global aggregate bucket missing".into()))?;
+        return observe_projected_aggregate_targets(
+            bucket,
+            agg_targets,
+            aggregate_plans,
+            values,
+            ctx,
+        );
+    }
+
+    if let ProjectedGroupCache::Active(entries) = group_key_cache {
+        let fingerprint = projected_group_fingerprint(values, group_slots);
+        if let Some(index) = entries.iter().position(|entry| {
+            entry.fingerprint == fingerprint
+                && entry.key.len() == group_slots.len()
+                && entry
+                    .key
+                    .iter()
+                    .zip(group_slots)
+                    .all(|(stored, index)| stored.cmp(values[*index]) == Ordering::Equal)
+        }) {
+            return observe_projected_aggregate_targets(
+                &mut entries[index].bucket,
+                agg_targets,
+                aggregate_plans,
+                values,
+                ctx,
+            );
+        }
+
+        if entries.len() < PROJECTED_GROUP_CACHE_LIMIT {
+            let group_values: Vec<Value> = group_slots
+                .iter()
+                .map(|index| values[*index].clone())
+                .collect();
+            let bucket = (
+                new_aggregate_accumulators(engine, agg_targets)?,
+                group_values.clone(),
+            );
+            entries.push(ProjectedGroupCacheEntry {
+                fingerprint,
+                key: group_values,
+                bucket,
+            });
+            return observe_projected_aggregate_targets(
+                &mut entries.last_mut().expect("cached group inserted").bucket,
+                agg_targets,
+                aggregate_plans,
+                values,
+                ctx,
+            );
+        }
+    }
+
+    // A 33rd distinct key makes this a high-cardinality aggregation.
+    // Flush the bounded cache exactly once and retain the general B-tree
+    // path for all remaining rows.
+    flush_projected_group_cache(group_key_cache, groups);
+    let group_values: Vec<Value> = group_slots
+        .iter()
+        .map(|index| values[*index].clone())
+        .collect();
+    let bucket = group_bucket(engine, groups, group_values, agg_targets)?;
+    observe_projected_aggregate_targets(bucket, agg_targets, aggregate_plans, values, ctx)
+}
+
+fn observe_projected_aggregate_targets(
+    bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
+    agg_targets: &[&Expr],
+    aggregate_plans: &[ProjectedAggregatePlan],
+    values: &[&Value],
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
+    for (index, plan) in aggregate_plans.iter().enumerate() {
+        let ProjectedAggregatePlan::General(input) = plan else {
+            match plan {
+                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Slot(slot)) => {
+                    bucket.0[index].observe(values[*slot])?;
+                }
+                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::CountOne) => {
+                    debug_assert!(matches!(
+                        bucket.0[index].state_plan,
+                        AggregateStatePlan::Count
+                    ));
+                    bucket.0[index].count += 1;
+                }
+                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Expression(expression)) => {
+                    let value = expression.evaluate(values)?;
+                    bucket.0[index].observe(value.as_value())?;
+                }
+                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Evaluate)
+                | ProjectedAggregatePlan::General(_) => unreachable!("direct aggregate plan"),
+            }
+            continue;
+        };
+        let Some(expr) = agg_targets.get(index) else {
+            return Err(SQLError::Internal(
+                "projected aggregate plan lost its expression".into(),
+            ));
+        };
+        let Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } = expr
+        else {
+            continue;
+        };
+        if let Some(filter_expr) = filter.as_deref() {
+            let keep = uqa_sql::expr::eval(filter_expr, ctx)
+                .is_ok_and(|value| uqa_sql::expr::truthy(&value));
+            if !keep {
+                continue;
+            }
+        }
+        match input {
+            ProjectedAggregateInput::Slot(slot) => observe_builtin_aggregate_value(
+                &mut bucket.0[index],
+                name,
+                values[*slot],
+                *distinct,
+                order_by,
+                ctx,
+            )?,
+            ProjectedAggregateInput::CountOne => observe_builtin_aggregate_value(
+                &mut bucket.0[index],
+                name,
+                &Value::Int(1),
+                *distinct,
+                order_by,
+                ctx,
+            )?,
+            ProjectedAggregateInput::Evaluate => {
+                observe_aggregate(&mut bucket.0[index], name, args, *distinct, order_by, ctx)?;
+            }
+            ProjectedAggregateInput::Expression(expression) => {
+                let value = expression.evaluate(values)?;
+                observe_builtin_aggregate_value(
+                    &mut bucket.0[index],
+                    name,
+                    value.as_value(),
+                    *distinct,
+                    order_by,
+                    ctx,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn observe_aggregate_targets(
+    bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
+    agg_targets: &[&Expr],
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
+    for (index, expr) in agg_targets.iter().enumerate() {
+        let Expr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } = expr
+        else {
+            continue;
+        };
+        if let Some(filter_expr) = filter.as_deref() {
+            let keep = uqa_sql::expr::eval(filter_expr, ctx)
+                .is_ok_and(|value| uqa_sql::expr::truthy(&value));
+            if !keep {
+                continue;
+            }
+        }
+        observe_aggregate(&mut bucket.0[index], name, args, *distinct, order_by, ctx)?;
+    }
+    Ok(())
 }
 
 /// Whether the aggregation pass has to materialise stored documents.
@@ -936,39 +1587,47 @@ fn aggregate_input_value(
     order_by: &[OrderBy],
     ctx: &EvalContext<'_>,
 ) -> Result<Value, SQLError> {
-    match (name.to_ascii_lowercase().as_str(), args) {
-        ("count", [Expr::Star]) | ("count", []) => Ok(Value::Int(1)),
-        // Ordered-set aggregates: the percentile / mode fraction is a
-        // direct positional argument; the value to fold comes from
-        // `WITHIN GROUP (ORDER BY ...)` which the compiler parks in
-        // `order_by[0]`.
-        ("percentile_cont" | "percentile_disc" | "mode", _) => order_by
+    if name.eq_ignore_ascii_case("count") && (args.is_empty() || matches!(args, [Expr::Star])) {
+        return Ok(Value::Int(1));
+    }
+    // Ordered-set aggregates: the percentile / mode fraction is a
+    // direct positional argument; the value to fold comes from
+    // `WITHIN GROUP (ORDER BY ...)` which the compiler parks in
+    // `order_by[0]`.
+    if is_ordered_set_aggregate(name) {
+        return order_by
             .first()
             .map(|ob| uqa_sql::expr::eval(&ob.expr, ctx))
             .transpose()
-            .map(|v| v.unwrap_or(Value::Null)),
-        ("json_object_agg" | "jsonb_object_agg", [key_expr, value_expr]) => {
-            let key = uqa_sql::expr::eval(key_expr, ctx)?;
-            if matches!(key, Value::Null) {
-                return Ok(Value::Null);
-            }
-            let value = uqa_sql::expr::eval(value_expr, ctx)?;
-            Ok(Value::List(vec![key, value]))
-        }
-        ("json_object_agg" | "jsonb_object_agg", _) => Err(SQLError::TypeMismatch(format!(
-            "{name} requires 2 arguments"
-        ))),
-        ("json_agg" | "jsonb_agg", [arg]) => uqa_sql::expr::eval(arg, ctx),
-        ("json_agg" | "jsonb_agg", _) => Err(SQLError::TypeMismatch(format!(
-            "{name} requires 1 argument"
-        ))),
-        (_, args) => {
-            let arg = args
-                .first()
-                .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-            uqa_sql::expr::eval(arg, ctx)
-        }
+            .map(|v| v.unwrap_or(Value::Null));
     }
+    if is_json_object_aggregate(name) {
+        return match args {
+            [key_expr, value_expr] => {
+                let key = uqa_sql::expr::eval(key_expr, ctx)?;
+                if matches!(key, Value::Null) {
+                    return Ok(Value::Null);
+                }
+                let value = uqa_sql::expr::eval(value_expr, ctx)?;
+                Ok(Value::List(vec![key, value]))
+            }
+            _ => Err(SQLError::TypeMismatch(format!(
+                "{name} requires 2 arguments"
+            ))),
+        };
+    }
+    if is_json_array_aggregate(name) {
+        return match args {
+            [arg] => uqa_sql::expr::eval(arg, ctx),
+            _ => Err(SQLError::TypeMismatch(format!(
+                "{name} requires 1 argument"
+            ))),
+        };
+    }
+    let arg = args
+        .first()
+        .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
+    uqa_sql::expr::eval(arg, ctx)
 }
 
 fn aggregate_input_values(args: &[Expr], ctx: &EvalContext<'_>) -> Result<Vec<Value>, SQLError> {
@@ -988,7 +1647,7 @@ fn new_aggregate_accumulators(
         .iter()
         .map(|expr| match expr {
             Expr::Func { name, .. } => Ok(engine.registered_aggregate_function(name).map_or_else(
-                AggregateAccumulator::default,
+                || AggregateAccumulator::builtin(name),
                 AggregateAccumulator::registered,
             )),
             _ => Ok(AggregateAccumulator::default()),
@@ -1039,9 +1698,20 @@ fn observe_aggregate(
     }
 
     let value = aggregate_input_value(name, args, order_by, ctx)?;
+    observe_builtin_aggregate_value(acc, name, &value, distinct, order_by, ctx)
+}
+
+fn observe_builtin_aggregate_value(
+    acc: &mut AggregateAccumulator,
+    name: &str,
+    value: &Value,
+    distinct: bool,
+    order_by: &[OrderBy],
+    ctx: &EvalContext<'_>,
+) -> Result<(), SQLError> {
     let preserves_null_inputs = is_json_array_aggregate(name);
     if distinct && (preserves_null_inputs || !matches!(value, Value::Null)) {
-        let key = distinct_key(&value);
+        let key = distinct_key(value);
         if !acc.distinct.insert(key) {
             return Ok(());
         }
@@ -1052,17 +1722,27 @@ fn observe_aggregate(
         sort_keys.push((v, ob.descending));
     }
     if preserves_null_inputs {
-        acc.observe_including_null(&value, sort_keys)?;
+        acc.observe_including_null(value, sort_keys)?;
     } else if order_by.is_empty() {
-        acc.observe(&value)?;
+        acc.observe(value)?;
     } else {
-        acc.observe_with_sort_keys(&value, sort_keys)?;
+        acc.observe_with_sort_keys(value, sort_keys)?;
     }
     Ok(())
 }
 
 fn is_json_array_aggregate(name: &str) -> bool {
-    matches!(name.to_ascii_lowercase().as_str(), "json_agg" | "jsonb_agg")
+    name.eq_ignore_ascii_case("json_agg") || name.eq_ignore_ascii_case("jsonb_agg")
+}
+
+fn is_json_object_aggregate(name: &str) -> bool {
+    name.eq_ignore_ascii_case("json_object_agg") || name.eq_ignore_ascii_case("jsonb_object_agg")
+}
+
+fn is_ordered_set_aggregate(name: &str) -> bool {
+    name.eq_ignore_ascii_case("percentile_cont")
+        || name.eq_ignore_ascii_case("percentile_disc")
+        || name.eq_ignore_ascii_case("mode")
 }
 
 pub(super) struct AggregateAccumulator {
@@ -1071,6 +1751,7 @@ pub(super) struct AggregateAccumulator {
     registered_ordered: RegisteredAggregateBuffer,
     count: u64,
     sum: f64,
+    integer_sum: i128,
     decimal_sum: Option<DecimalValue>,
     has_decimal: bool,
     has_float: bool,
@@ -1080,6 +1761,10 @@ pub(super) struct AggregateAccumulator {
     /// aggregate was annotated with `DISTINCT`. Holds canonical-form
     /// keys so `Int(1)` and `Float(1.0)` collapse to the same bucket.
     distinct: std::collections::BTreeSet<String>,
+    /// Only collection, ordered-set, and statistical aggregates need
+    /// their complete input. Streaming aggregates keep constant-size
+    /// state and must not spill values that their finalizer never reads.
+    state_plan: AggregateStatePlan,
     values: AggregateValueBuffer,
     all_values_int: bool,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
@@ -1087,6 +1772,47 @@ pub(super) struct AggregateAccumulator {
     /// `PostgreSQL`).
     bool_and: Option<bool>,
     bool_or: Option<bool>,
+}
+
+#[derive(Clone, Copy)]
+enum AggregateStatePlan {
+    /// Conservative fallback for an aggregate whose state requirements
+    /// are not known here.
+    Generic,
+    Count,
+    Sum,
+    Min,
+    Max,
+    BoolAnd,
+    BoolOr,
+    Buffered,
+    BufferedWithCount,
+}
+
+impl AggregateStatePlan {
+    fn builtin(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "count" => Self::Count,
+            "sum" | "avg" => Self::Sum,
+            "min" => Self::Min,
+            "max" => Self::Max,
+            "bool_and" => Self::BoolAnd,
+            "bool_or" => Self::BoolOr,
+            "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
+                Self::BufferedWithCount
+            }
+            "string_agg" | "array_agg" | "json_agg" | "jsonb_agg" | "json_object_agg"
+            | "jsonb_object_agg" | "percentile_cont" | "percentile_disc" | "mode" => Self::Buffered,
+            _ => Self::Generic,
+        }
+    }
+
+    fn retains_values(self) -> bool {
+        matches!(
+            self,
+            Self::Generic | Self::Buffered | Self::BufferedWithCount
+        )
+    }
 }
 
 impl Default for AggregateAccumulator {
@@ -1097,12 +1823,14 @@ impl Default for AggregateAccumulator {
             registered_ordered: RegisteredAggregateBuffer::default(),
             count: 0,
             sum: 0.0,
+            integer_sum: 0,
             decimal_sum: None,
             has_decimal: false,
             has_float: false,
             min: None,
             max: None,
             distinct: BTreeSet::new(),
+            state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::default(),
             all_values_int: true,
             bool_and: None,
@@ -1112,6 +1840,13 @@ impl Default for AggregateAccumulator {
 }
 
 impl AggregateAccumulator {
+    pub(super) fn builtin(name: &str) -> Self {
+        Self {
+            state_plan: AggregateStatePlan::builtin(name),
+            ..Self::default()
+        }
+    }
+
     fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
         let state = function.create_state();
         Self {
@@ -1125,55 +1860,112 @@ impl AggregateAccumulator {
         if matches!(value, Value::Null) {
             return Ok(());
         }
-        self.observe_numeric(value)?;
-        self.values.push(value.clone(), Vec::new())
+        self.observe_state(value)?;
+        if self.state_plan.retains_values() {
+            self.values.push(value.clone(), Vec::new())?;
+        }
+        Ok(())
     }
 
-    fn observe_numeric(&mut self, value: &Value) -> Result<(), SQLError> {
-        self.count += 1;
-        if !matches!(value, Value::Int(_)) {
+    fn observe_state(&mut self, value: &Value) -> Result<(), SQLError> {
+        match self.state_plan {
+            AggregateStatePlan::Generic => {
+                self.count += 1;
+                self.observe_sum(value)?;
+                self.observe_min(value);
+                self.observe_max(value);
+                self.observe_bool_and(value);
+                self.observe_bool_or(value);
+            }
+            AggregateStatePlan::Count => self.count += 1,
+            AggregateStatePlan::Sum => {
+                self.count += 1;
+                self.observe_sum(value)?;
+            }
+            AggregateStatePlan::Min => self.observe_min(value),
+            AggregateStatePlan::Max => self.observe_max(value),
+            AggregateStatePlan::BoolAnd => self.observe_bool_and(value),
+            AggregateStatePlan::BoolOr => self.observe_bool_or(value),
+            AggregateStatePlan::Buffered => {}
+            AggregateStatePlan::BufferedWithCount => self.count += 1,
+        }
+        Ok(())
+    }
+
+    fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {
+        if !matches!(value, Value::Int(_)) && self.all_values_int {
             self.all_values_int = false;
+            // Integer-only SUM/AVG finalizers use `integer_sum` directly.
+            // Seed the floating accumulator once, at the first non-integer,
+            // instead of converting and adding every integer row twice.
+            self.sum = self.integer_sum as f64;
         }
         match value {
             Value::Int(n) => {
-                let next = DecimalValue::from_i64(*n);
-                self.decimal_sum = Some(match &self.decimal_sum {
-                    Some(sum) => sum.checked_add(&next).ok_or_else(|| {
-                        SQLError::TypeMismatch("decimal aggregate overflow".into())
-                    })?,
-                    None => next,
-                });
+                self.integer_sum = self
+                    .integer_sum
+                    .checked_add(i128::from(*n))
+                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
+                if self.has_decimal {
+                    let next = DecimalValue::from_i64(*n);
+                    self.decimal_sum = Some(
+                        self.decimal_sum
+                            .as_ref()
+                            .and_then(|sum| sum.checked_add(&next))
+                            .ok_or_else(|| {
+                                SQLError::TypeMismatch("decimal aggregate overflow".into())
+                            })?,
+                    );
+                }
             }
             Value::Decimal(d) => {
+                let next = match &self.decimal_sum {
+                    Some(sum) => sum.checked_add(d),
+                    None if self.integer_sum == 0 => Some(d.clone()),
+                    None => DecimalValue::parse(&self.integer_sum.to_string())
+                        .and_then(|sum| sum.checked_add(d)),
+                }
+                .ok_or_else(|| SQLError::TypeMismatch("decimal aggregate overflow".into()))?;
+                self.decimal_sum = Some(next);
                 self.has_decimal = true;
-                self.decimal_sum = Some(match &self.decimal_sum {
-                    Some(sum) => sum.checked_add(d).ok_or_else(|| {
-                        SQLError::TypeMismatch("decimal aggregate overflow".into())
-                    })?,
-                    None => d.clone(),
-                });
             }
             Value::Float(_) => {
                 self.has_float = true;
             }
             _ => {}
         }
-        if let Ok(f) = value_as_f64(value) {
-            self.sum += f;
+        if !self.all_values_int {
+            if let Ok(f) = value_as_f64(value) {
+                self.sum += f;
+            }
         }
+        Ok(())
+    }
+
+    fn observe_min(&mut self, value: &Value) {
         match &self.min {
             Some(cur) if !value_lt(value, cur) => {}
             _ => self.min = Some(value.clone()),
         }
+    }
+
+    fn observe_max(&mut self, value: &Value) {
         match &self.max {
             Some(cur) if !value_gt(value, cur) => {}
             _ => self.max = Some(value.clone()),
         }
+    }
+
+    fn observe_bool_and(&mut self, value: &Value) {
         if let Value::Bool(b) = value {
             self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
+        }
+    }
+
+    fn observe_bool_or(&mut self, value: &Value) {
+        if let Value::Bool(b) = value {
             self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
         }
-        Ok(())
     }
 
     fn observe_with_sort_keys(
@@ -1184,8 +1976,11 @@ impl AggregateAccumulator {
         if matches!(value, Value::Null) {
             return Ok(());
         }
-        self.observe_numeric(value)?;
-        self.values.push(value.clone(), keys)
+        self.observe_state(value)?;
+        if self.state_plan.retains_values() {
+            self.values.push(value.clone(), keys)?;
+        }
+        Ok(())
     }
 
     fn observe_including_null(
@@ -1635,38 +2430,15 @@ pub(super) fn build_aggregate_rows(
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
 
-    let documents = aggregation_documents(engine, table, scored, stmt, &agg_targets);
-    let empty_document = Document::new();
-    for entry in scored {
-        let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
-        let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
-        let group_values: Vec<Value> = stmt
-            .group_by
-            .iter()
-            .map(|g| uqa_sql::expr::eval(g, &ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
-        for (i, expr) in agg_targets.iter().enumerate() {
-            let Expr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } = expr
-            else {
-                continue;
-            };
-            if let Some(filter_expr) = filter.as_deref() {
-                let keep =
-                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
-                if !keep {
-                    continue;
-                }
-            }
-            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
-        }
-    }
+    accumulate_table_rows(
+        engine,
+        table,
+        scored,
+        stmt,
+        &agg_targets,
+        &mut groups,
+        params,
+    )?;
 
     if groups.is_empty() && stmt.group_by.is_empty() {
         // SELECT count(*) FROM t with no rows still produces a row of
@@ -1761,38 +2533,15 @@ fn build_aggregate_rows_relaxed(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
-    let documents = aggregation_documents(engine, table, scored, stmt, &agg_targets);
-    let empty_document = Document::new();
-    for entry in scored {
-        let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
-        let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
-        let group_values: Vec<Value> = stmt
-            .group_by
-            .iter()
-            .map(|g| uqa_sql::expr::eval(g, &ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
-        for (i, expr) in agg_targets.iter().enumerate() {
-            let Expr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } = expr
-            else {
-                continue;
-            };
-            if let Some(filter_expr) = filter.as_deref() {
-                let keep =
-                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
-                if !keep {
-                    continue;
-                }
-            }
-            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
-        }
-    }
+    accumulate_table_rows(
+        engine,
+        table,
+        scored,
+        stmt,
+        &agg_targets,
+        &mut groups,
+        params,
+    )?;
     if groups.is_empty() && stmt.group_by.is_empty() {
         groups.insert(
             Vec::new(),
@@ -1867,7 +2616,11 @@ fn aggregate_value_with_args(
             } else if acc.has_decimal && !acc.has_float {
                 acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
             } else if acc.all_values_int {
-                Value::Int(acc.sum as i64)
+                Value::Int(
+                    acc.integer_sum
+                        .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
+                        as i64,
+                )
             } else {
                 Value::Float(acc.sum)
             }
@@ -1881,6 +2634,8 @@ fn aggregate_value_with_args(
                     .as_ref()
                     .and_then(|sum| sum.checked_div(&divisor))
                     .map_or(Value::Null, Value::Decimal)
+            } else if acc.all_values_int {
+                Value::Float(acc.integer_sum as f64 / acc.count as f64)
             } else {
                 Value::Float(acc.sum / acc.count as f64)
             }
@@ -2141,5 +2896,225 @@ pub(super) fn projection_label_at(proj: &Projection) -> String {
         Expr::Star => "*".into(),
         Expr::Func { name, .. } => name.clone(),
         _ => "?column?".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct NoopRegisteredAggregate;
+
+    impl SQLAggregateState for NoopRegisteredAggregate {
+        fn observe(&mut self, _args: &[Value]) -> Result<(), SQLError> {
+            Ok(())
+        }
+
+        fn finish(&self) -> Result<Value, SQLError> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn registered_aggregates_do_not_run_under_the_document_store_guard() {
+        let engine = Engine::new();
+        engine
+            .register_aggregate_function("registered_agg", NoopRegisteredAggregate::default)
+            .unwrap();
+        let mut statements = uqa_sql::compile("SELECT registered_agg(value) FROM samples").unwrap();
+        let uqa_sql::ast::Statement::Select(stmt) = statements.remove(0) else {
+            panic!("expected SELECT");
+        };
+        let agg_targets = aggregate_exprs(&engine, &stmt.projections);
+
+        assert!(aggregation_column_projection(&engine, &stmt, &agg_targets).is_none());
+    }
+
+    #[test]
+    fn streaming_aggregate_does_not_retain_or_spill_inputs() {
+        let mut accumulator = AggregateAccumulator::builtin("sum");
+        let end = AGGREGATE_SPILL_ROWS as i64 + 1;
+        for value in 0..end {
+            accumulator.observe(&Value::Int(value)).unwrap();
+        }
+
+        assert!(accumulator.values.rows.is_empty());
+        assert!(accumulator.values.runs.is_empty());
+        assert_eq!(
+            aggregate_value("sum", &accumulator).unwrap(),
+            Value::Int(end * (end - 1) / 2)
+        );
+    }
+
+    #[test]
+    fn collection_aggregate_still_retains_inputs() {
+        let mut accumulator = AggregateAccumulator::builtin("array_agg");
+        accumulator.observe(&Value::Int(7)).unwrap();
+
+        assert_eq!(accumulator.count, 0);
+        assert_eq!(accumulator.decimal_sum, None);
+        assert_eq!(accumulator.min, None);
+        assert_eq!(accumulator.max, None);
+        assert_eq!(accumulator.values.rows.len(), 1);
+        assert_eq!(
+            aggregate_value("array_agg", &accumulator).unwrap(),
+            Value::List(vec![Value::Int(7)])
+        );
+    }
+
+    #[test]
+    fn builtins_only_update_state_used_by_their_finalizer() {
+        let mut count = AggregateAccumulator::builtin("count");
+        count.observe(&Value::Int(7)).unwrap();
+        assert_eq!(count.count, 1);
+        assert_eq!(count.decimal_sum, None);
+        assert_eq!(count.min, None);
+        assert_eq!(count.max, None);
+
+        let mut sum = AggregateAccumulator::builtin("sum");
+        sum.observe(&Value::Int(7)).unwrap();
+        assert_eq!(sum.count, 1);
+        assert_eq!(sum.integer_sum, 7);
+        assert_eq!(sum.decimal_sum, None);
+        assert_eq!(sum.min, None);
+        assert_eq!(sum.max, None);
+
+        let mut min = AggregateAccumulator::builtin("min");
+        min.observe(&Value::Int(7)).unwrap();
+        assert_eq!(min.count, 0);
+        assert_eq!(min.decimal_sum, None);
+        assert_eq!(min.min, Some(Value::Int(7)));
+        assert_eq!(min.max, None);
+
+        let mut bool_or = AggregateAccumulator::builtin("bool_or");
+        bool_or.observe(&Value::Bool(true)).unwrap();
+        assert_eq!(bool_or.count, 0);
+        assert_eq!(bool_or.bool_and, None);
+        assert_eq!(bool_or.bool_or, Some(true));
+    }
+
+    #[test]
+    fn statistical_aggregate_counts_and_retains_without_unrelated_state() {
+        let mut accumulator = AggregateAccumulator::builtin("stddev_pop");
+        accumulator.observe(&Value::Int(7)).unwrap();
+
+        assert_eq!(accumulator.count, 1);
+        assert_eq!(accumulator.decimal_sum, None);
+        assert_eq!(accumulator.min, None);
+        assert_eq!(accumulator.max, None);
+        assert_eq!(accumulator.values.rows.len(), 1);
+    }
+
+    #[test]
+    fn integer_sum_stays_exact_beyond_float_precision() {
+        let mut accumulator = AggregateAccumulator::builtin("sum");
+        accumulator
+            .observe(&Value::Int(9_007_199_254_740_992))
+            .unwrap();
+        accumulator.observe(&Value::Int(1)).unwrap();
+
+        assert_eq!(
+            aggregate_value("sum", &accumulator).unwrap(),
+            Value::Int(9_007_199_254_740_993)
+        );
+        assert_eq!(accumulator.decimal_sum, None);
+    }
+
+    #[test]
+    fn integer_average_promotes_to_float_only_when_finalized_or_mixed() {
+        let mut integers = AggregateAccumulator::builtin("avg");
+        integers.observe(&Value::Int(2)).unwrap();
+        integers.observe(&Value::Int(3)).unwrap();
+        assert_eq!(integers.sum, 0.0);
+        assert_eq!(
+            aggregate_value("avg", &integers).unwrap(),
+            Value::Float(2.5)
+        );
+
+        integers.observe(&Value::Float(1.5)).unwrap();
+        assert_eq!(integers.sum, 6.5);
+        assert_eq!(
+            aggregate_value("avg", &integers).unwrap(),
+            Value::Float(6.5 / 3.0)
+        );
+    }
+
+    #[test]
+    fn decimal_sum_absorbs_integers_observed_before_and_after_it() {
+        let mut accumulator = AggregateAccumulator::builtin("sum");
+        accumulator.observe(&Value::Int(2)).unwrap();
+        accumulator
+            .observe(&Value::Decimal(DecimalValue::parse("0.5").unwrap()))
+            .unwrap();
+        accumulator.observe(&Value::Int(3)).unwrap();
+
+        assert_eq!(
+            aggregate_value("sum", &accumulator).unwrap(),
+            Value::Decimal(DecimalValue::parse("5.5").unwrap())
+        );
+    }
+
+    #[test]
+    fn projected_columns_use_direct_unique_slots_and_collision_fallback() {
+        let columns =
+            ProjectedColumns::new(vec!["amount".into(), "apple".into(), "quantity".into()]);
+
+        assert_eq!(columns.index("amount"), Some(0));
+        assert_eq!(columns.index("apple"), Some(1));
+        assert_eq!(columns.index("quantity"), Some(2));
+        assert_eq!(columns.index("missing"), None);
+    }
+
+    #[test]
+    fn projected_expression_reuses_sql_binary_semantics() {
+        let columns = ProjectedColumns::new(vec!["discount".into(), "price".into()]);
+        let expression = Expr::Binary {
+            op: BinaryOp::Divide,
+            lhs: Box::new(Expr::Binary {
+                op: BinaryOp::Multiply,
+                lhs: Box::new(Expr::Column("price".into())),
+                rhs: Box::new(Expr::Binary {
+                    op: BinaryOp::Subtract,
+                    lhs: Box::new(Expr::Literal(Value::Int(100))),
+                    rhs: Box::new(Expr::Column("discount".into())),
+                }),
+            }),
+            rhs: Box::new(Expr::Literal(Value::Int(100))),
+        };
+        let plan = ProjectedExpression::compile(&expression, &columns).unwrap();
+        let discount = Value::Int(10);
+        let price = Value::Int(10_000);
+
+        assert_eq!(
+            plan.evaluate(&[&discount, &price]).unwrap().as_value(),
+            &Value::Int(9_000)
+        );
+
+        let null = Value::Null;
+        assert_eq!(
+            plan.evaluate(&[&null, &price]).unwrap().as_value(),
+            &Value::Null
+        );
+    }
+
+    #[test]
+    fn group_fingerprint_preserves_cross_numeric_comparison_equivalence() {
+        fn fingerprint(value: &Value) -> u64 {
+            projected_group_fingerprint(&[value], &[0])
+        }
+
+        let int = Value::Int(1);
+        let float = Value::Float(1.0);
+        let decimal = Value::Decimal(DecimalValue::from_i64(1));
+        let boolean = Value::Bool(true);
+        assert_eq!(int.cmp(&float), Ordering::Equal);
+        assert_eq!(fingerprint(&int), fingerprint(&float));
+        assert_eq!(fingerprint(&int), fingerprint(&decimal));
+        assert_eq!(fingerprint(&int), fingerprint(&boolean));
+        assert_ne!(
+            fingerprint(&Value::Str("A".into())),
+            fingerprint(&Value::Str("R".into()))
+        );
     }
 }

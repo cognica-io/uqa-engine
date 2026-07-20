@@ -566,7 +566,7 @@ fn evaluate_window_aggregate(
         None if spec.order_by.is_empty() => {
             // No ORDER BY and no explicit frame: aggregate over the
             // whole partition.
-            let mut acc = AggregateAccumulator::default();
+            let mut acc = AggregateAccumulator::builtin(name);
             for v in &materialized {
                 acc.observe(v)?;
             }
@@ -592,7 +592,7 @@ fn evaluate_window_aggregate(
             }
             return Ok(());
         }
-        let mut acc = AggregateAccumulator::default();
+        let mut acc = AggregateAccumulator::builtin(name);
         for (i, (orig, _)) in indexed.iter().enumerate() {
             acc.observe(&materialized[i])?;
             output[*orig] = aggregate_value(name, &acc)?;
@@ -631,7 +631,7 @@ fn evaluate_window_aggregate(
                 resolve_rows_frame_index(i, n, &end_bound, rows, params, engine, indexed)?,
             ),
         };
-        let mut acc = AggregateAccumulator::default();
+        let mut acc = AggregateAccumulator::builtin(name);
         if start <= end && start < n as i64 && end >= 0 {
             let lo = start.max(0) as usize;
             let hi = (end as usize).min(n.saturating_sub(1));

@@ -90,6 +90,10 @@ name = "sql_workloads"
 harness = false
 
 [[bench]]
+name = "tpch_style"
+harness = false
+
+[[bench]]
 name = "graph_sql"
 harness = false
 

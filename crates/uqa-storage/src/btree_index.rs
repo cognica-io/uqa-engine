@@ -16,6 +16,48 @@ use std::ops::Bound;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 
+fn sort_and_dedup_doc_ids(doc_ids: &mut Vec<DocId>) {
+    if doc_ids.len() < 2 {
+        return;
+    }
+
+    let mut min_doc_id = DocId::MAX;
+    let mut max_doc_id = DocId::MIN;
+    for doc_id in doc_ids.iter().copied() {
+        min_doc_id = min_doc_id.min(doc_id);
+        max_doc_id = max_doc_id.max(doc_id);
+    }
+    let dense_span = max_doc_id
+        .checked_sub(min_doc_id)
+        .and_then(|span| span.checked_add(1))
+        .and_then(|span| usize::try_from(span).ok())
+        .filter(|span| *span <= doc_ids.len().saturating_mul(8));
+
+    let Some(span) = dense_span else {
+        doc_ids.sort_unstable();
+        doc_ids.dedup();
+        return;
+    };
+
+    // At density >= 1/8, this bitmap is no larger than the input id
+    // vector and turns comparison sorting into two linear, cache-local
+    // passes. Sparse or very large id spaces stay on sort_unstable above.
+    let mut words = vec![0u64; span.div_ceil(u64::BITS as usize)];
+    for doc_id in doc_ids.iter().copied() {
+        let offset = usize::try_from(doc_id - min_doc_id).expect("dense doc-id offset fits usize");
+        words[offset / u64::BITS as usize] |= 1u64 << (offset % u64::BITS as usize);
+    }
+
+    doc_ids.clear();
+    for (word_index, mut word) in words.into_iter().enumerate() {
+        while word != 0 {
+            let bit = word.trailing_zeros();
+            doc_ids.push(min_doc_id + word_index as u64 * u64::from(u64::BITS) + u64::from(bit));
+            word &= word - 1;
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct BTreeIndex {
     field: String,
@@ -115,8 +157,7 @@ impl BTreeIndex {
                 all_ids.extend_from_slice(bucket);
             }
         }
-        all_ids.sort_unstable();
-        all_ids.dedup();
+        sort_and_dedup_doc_ids(&mut all_ids);
         let entries = all_ids
             .into_iter()
             .map(|doc_id| PostingEntry::new(doc_id, Payload::default()))
@@ -186,5 +227,26 @@ mod tests {
         s.insert(Value::Int(2030));
         let pl = idx.scan(&Predicate::InSet(s));
         assert_eq!(ids(&pl), vec![1, 5]);
+    }
+
+    #[test]
+    fn dense_scan_deduplicates_docs_present_in_multiple_value_buckets() {
+        let mut idx = idx_with_ints();
+        idx.insert(3, Value::Int(2030));
+
+        let pl = idx.scan(&Predicate::Between {
+            low: Value::Int(2020),
+            high: Value::Int(2030),
+        });
+        assert_eq!(ids(&pl), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn sparse_extreme_doc_ids_fall_back_to_comparison_sort() {
+        let mut doc_ids = vec![DocId::MAX, 0, 42, 0];
+
+        sort_and_dedup_doc_ids(&mut doc_ids);
+
+        assert_eq!(doc_ids, vec![0, 42, DocId::MAX]);
     }
 }
