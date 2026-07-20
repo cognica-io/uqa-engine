@@ -897,8 +897,8 @@ impl Engine {
     /// Lookup order: the integer-primary-key slot mapping, then a
     /// value-index equality probe on the first index-answerable
     /// conflict column (conflict targets are PRIMARY KEY / UNIQUE
-    /// columns, exactly the columns [`Self::value_indexable_fields`]
-    /// admits), and only then the evaluated document scan. The index
+    /// columns admitted by `value_indexable_fields`), and only then the
+    /// evaluated document scan. The index
     /// probe is what keeps per-row UNIQUE and FOREIGN KEY validation
     /// `O(log n)` during bulk inserts -- previously every insert into a
     /// table with a non-integer unique column re-scanned all documents,
