@@ -1865,7 +1865,7 @@ fn run_calibrated_vector_match(
     } else {
         None
     };
-    let Some((ctx, _)) = engine.snapshot_context(table) else {
+    let Some(ctx) = engine.snapshot_context(table) else {
         return Ok(Vec::new());
     };
     use uqa_operators::base::Operator;

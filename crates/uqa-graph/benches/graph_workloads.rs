@@ -19,7 +19,7 @@ use uqa_graph::{
     AggregationKind, BetweennessCentrality, Direction, EdgePattern, GMatch, GraphDelta,
     GraphEmbedding, GraphPattern, GraphStore, IncrementalPatternMatcher, MemoryGraphStore,
     MessagePassing, PageRank, PathIndex, RegularPathQuery, SubgraphIndex, TemporalFilter,
-    TemporalTraverse, Traverse, VersionedGraphStore, VertexPattern, VertexPredicate,
+    TemporalTraverse, Traverse, VersionedGraphStore, VertexMatch, VertexPattern, VertexPredicate,
     WeightedPathQueryOperator, HITS,
 };
 use uqa_operators::{ExecutionContext, Operator};
@@ -136,6 +136,14 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
     c.bench_function("graph_vertices_by_label", |bencher| {
         bencher.iter(|| {
             let result = store.vertices_by_label(black_box("Person"), GRAPH);
+            black_box(result.len())
+        });
+    });
+    c.bench_function("graph_vertex_match_label", |bencher| {
+        bencher.iter(|| {
+            let result = VertexMatch::new(GRAPH)
+                .label(black_box("Person"))
+                .execute(&store);
             black_box(result.len())
         });
     });

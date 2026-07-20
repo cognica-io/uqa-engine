@@ -169,11 +169,7 @@ impl<'a> VertexMatch<'a> {
 
     pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
         let candidates: Vec<VertexId> = match self.label {
-            Some(l) => store
-                .vertices_by_label(l, self.graph)
-                .into_iter()
-                .map(|v| v.vertex_id)
-                .collect(),
+            Some(l) => store.vertex_ids_by_label(l, self.graph),
             None => store.vertex_ids_in_graph(self.graph).into_iter().collect(),
         };
         let mut entries: Vec<PostingEntry> = Vec::new();

@@ -243,6 +243,8 @@ pub fn eval_path_in_document(doc: &Document, path: &[PathSegment]) -> Option<Val
 #[derive(Debug, Default, Clone)]
 pub struct MemoryDocumentStore {
     documents: BTreeMap<DocId, Document>,
+    document_layout_ids: BTreeMap<DocId, usize>,
+    layouts: Vec<Vec<String>>,
 }
 
 impl MemoryDocumentStore {
@@ -252,6 +254,59 @@ impl MemoryDocumentStore {
 
     pub fn iter(&self) -> impl Iterator<Item = (&DocId, &Document)> {
         self.documents.iter()
+    }
+}
+
+fn intern_document_layout(layouts: &mut Vec<Vec<String>>, document: &Document) -> usize {
+    if let Some(layout_id) = layouts.iter().position(|layout| {
+        layout.len() == document.len()
+            && layout
+                .iter()
+                .map(String::as_str)
+                .eq(document.keys().map(String::as_str))
+    }) {
+        return layout_id;
+    }
+    layouts.push(document.keys().cloned().collect());
+    layouts.len() - 1
+}
+
+fn projected_layout_slots(layout: &[String], fields: &[&str]) -> Vec<Option<usize>> {
+    fields
+        .iter()
+        .map(|field| {
+            layout
+                .binary_search_by(|stored| stored.as_str().cmp(field))
+                .ok()
+        })
+        .collect()
+}
+
+fn project_document_layout_ref<'a>(
+    document: Option<&'a Document>,
+    slots: &[Option<usize>],
+    null: &'a Value,
+    values: &mut Vec<&'a Value>,
+) {
+    values.clear();
+    let Some(document) = document else {
+        values.resize(slots.len(), null);
+        return;
+    };
+    let mut stored_values = document.values().enumerate();
+    let mut current = stored_values.next();
+    for slot in slots {
+        let Some(slot) = slot else {
+            values.push(null);
+            continue;
+        };
+        while current.is_some_and(|(stored_slot, _)| stored_slot < *slot) {
+            current = stored_values.next();
+        }
+        values.push(match current {
+            Some((stored_slot, value)) if stored_slot == *slot => value,
+            _ => null,
+        });
     }
 }
 
@@ -290,7 +345,9 @@ fn project_document_fields_ref<'a>(
 
 impl DocumentStore for MemoryDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        let layout_id = intern_document_layout(&mut self.layouts, &document);
         self.documents.insert(doc_id, document);
+        self.document_layout_ids.insert(doc_id, layout_id);
         Ok(())
     }
 
@@ -353,6 +410,14 @@ impl DocumentStore for MemoryDocumentStore {
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let fields_are_sorted = fields.windows(2).all(|pair| pair[0] <= pair[1]);
+        let layout_slots: Vec<Vec<Option<usize>>> = if fields_are_sorted {
+            self.layouts
+                .iter()
+                .map(|layout| projected_layout_slots(layout, fields))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let doc_ids_are_sorted = doc_ids.windows(2).all(|pair| pair[0] <= pair[1]);
         let use_merge_scan = doc_ids_are_sorted
@@ -364,21 +429,34 @@ impl DocumentStore for MemoryDocumentStore {
             // sparse probes retain logarithmic point lookup below.
             let mut documents = self.documents.range(doc_ids[0]..);
             let mut current = documents.next();
+            let mut layout_ids = self.document_layout_ids.range(doc_ids[0]..);
+            let mut current_layout = layout_ids.next();
             for doc_id in doc_ids {
                 while current.is_some_and(|(stored_id, _)| stored_id < doc_id) {
                     current = documents.next();
+                }
+                while current_layout.is_some_and(|(stored_id, _)| stored_id < doc_id) {
+                    current_layout = layout_ids.next();
                 }
                 let document = match current {
                     Some((stored_id, document)) if stored_id == doc_id => Some(document),
                     _ => None,
                 };
-                project_document_fields_ref(
-                    document,
-                    fields,
-                    fields_are_sorted,
-                    &null,
-                    &mut values,
-                );
+                let layout_id = match current_layout {
+                    Some((stored_id, layout_id)) if stored_id == doc_id => Some(*layout_id),
+                    _ => None,
+                };
+                if let Some(slots) = layout_id.and_then(|layout_id| layout_slots.get(layout_id)) {
+                    project_document_layout_ref(document, slots, &null, &mut values);
+                } else {
+                    project_document_fields_ref(
+                        document,
+                        fields,
+                        fields_are_sorted,
+                        &null,
+                        &mut values,
+                    );
+                }
                 if !visitor(*doc_id, &values) {
                     return;
                 }
@@ -387,13 +465,22 @@ impl DocumentStore for MemoryDocumentStore {
         }
 
         for doc_id in doc_ids {
-            project_document_fields_ref(
-                self.documents.get(doc_id),
-                fields,
-                fields_are_sorted,
-                &null,
-                &mut values,
-            );
+            let document = self.documents.get(doc_id);
+            let slots = self
+                .document_layout_ids
+                .get(doc_id)
+                .and_then(|layout_id| layout_slots.get(*layout_id));
+            if let Some(slots) = slots {
+                project_document_layout_ref(document, slots, &null, &mut values);
+            } else {
+                project_document_fields_ref(
+                    document,
+                    fields,
+                    fields_are_sorted,
+                    &null,
+                    &mut values,
+                );
+            }
             if !visitor(*doc_id, &values) {
                 return;
             }
@@ -424,26 +511,33 @@ impl DocumentStore for MemoryDocumentStore {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
     ) -> StorageBackendResult<bool> {
-        let Some(document) = self.documents.get_mut(&doc_id) else {
-            return Ok(false);
-        };
-        for (field, value) in updates {
-            if matches!(value, Value::Null) {
-                document.remove(field);
-            } else {
-                document.insert(field.clone(), value.clone());
+        let layout_id = {
+            let Some(document) = self.documents.get_mut(&doc_id) else {
+                return Ok(false);
+            };
+            for (field, value) in updates {
+                if matches!(value, Value::Null) {
+                    document.remove(field);
+                } else {
+                    document.insert(field.clone(), value.clone());
+                }
             }
-        }
+            intern_document_layout(&mut self.layouts, document)
+        };
+        self.document_layout_ids.insert(doc_id, layout_id);
         Ok(true)
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         self.documents.remove(&doc_id);
+        self.document_layout_ids.remove(&doc_id);
         Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
         self.documents.clear();
+        self.document_layout_ids.clear();
+        self.layouts.clear();
         Ok(())
     }
 
@@ -632,6 +726,55 @@ mod tests {
                 (1, vec![Value::Int(10), Value::Int(1)]),
             ]
         );
+    }
+
+    #[test]
+    fn for_each_fields_multi_ref_uses_each_documents_layout() {
+        let mut s = MemoryDocumentStore::new();
+        s.put(
+            1,
+            doc([("alpha", Value::Int(1)), ("zulu", Value::Str("one".into()))]),
+        )
+        .unwrap();
+        s.put(
+            2,
+            doc([
+                ("alpha", Value::Int(2)),
+                ("middle", Value::Str("two".into())),
+            ]),
+        )
+        .unwrap();
+
+        let mut projected = Vec::new();
+        s.for_each_fields_multi_ref(&[1, 2], &["alpha", "zulu"], &mut |doc_id, values| {
+            projected.push((
+                doc_id,
+                values.iter().map(|value| (*value).clone()).collect(),
+            ));
+            true
+        });
+        assert_eq!(
+            projected,
+            vec![
+                (1, vec![Value::Int(1), Value::Str("one".into())]),
+                (2, vec![Value::Int(2), Value::Null]),
+            ]
+        );
+
+        s.patch_fields(
+            2,
+            &BTreeMap::from([
+                ("middle".to_string(), Value::Null),
+                ("zulu".to_string(), Value::Str("patched".into())),
+            ]),
+        )
+        .unwrap();
+        let mut patched = Vec::new();
+        s.for_each_fields_multi_ref(&[2], &["alpha", "zulu"], &mut |_doc_id, values| {
+            patched.extend(values.iter().map(|value| (*value).clone()));
+            true
+        });
+        assert_eq!(patched, vec![Value::Int(2), Value::Str("patched".into())]);
     }
 
     #[test]

@@ -717,6 +717,21 @@ impl InvertedIndex for SQLiteInvertedIndex {
             .collect()
     }
 
+    fn for_each_term_freq(&self, field: &str, term: &str, visit: &mut dyn FnMut(DocId, u64)) {
+        let _ = self.conn.with(|c| {
+            let mut stmt = c.prepare_cached(
+                "SELECT doc_id, length(positions) / 4 FROM _postings
+                 WHERE table_name = ?1 AND field = ?2 AND term = ?3
+                 ORDER BY doc_id",
+            )?;
+            let mut rows = stmt.query(params![self.table, field, term])?;
+            while let Some(row) = rows.next()? {
+                visit(row.get::<_, i64>(0)? as DocId, row.get::<_, i64>(1)? as u64);
+            }
+            Ok(())
+        });
+    }
+
     fn doc_freq(&self, field: &str, term: &str) -> u64 {
         self.conn
             .with(|c| {
@@ -778,6 +793,58 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 Ok(out)
             })
             .unwrap_or_default()
+    }
+
+    fn get_scoring_inputs_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[String],
+    ) -> Vec<(u64, Vec<u64>)> {
+        if doc_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let doc_lengths = self.get_doc_lengths_bulk(doc_ids, field);
+        let mut inputs: Vec<(u64, Vec<u64>)> = doc_ids
+            .iter()
+            .map(|doc_id| {
+                (
+                    doc_lengths.get(doc_id).copied().unwrap_or(0),
+                    vec![0; terms.len()],
+                )
+            })
+            .collect();
+        if terms.is_empty() {
+            return inputs;
+        }
+
+        let mut output_positions = BTreeMap::<DocId, Vec<usize>>::new();
+        for (position, doc_id) in doc_ids.iter().copied().enumerate() {
+            output_positions.entry(doc_id).or_default().push(position);
+        }
+        let _ = self.conn.with(|c| {
+            let mut stmt = c.prepare_cached(
+                "SELECT doc_id, length(positions) / 4
+                 FROM _postings
+                 WHERE table_name = ?1 AND field = ?2 AND term = ?3
+                 ORDER BY doc_id",
+            )?;
+            for (term_index, term) in terms.iter().enumerate() {
+                let mut rows = stmt.query(params![self.table, field, term])?;
+                while let Some(row) = rows.next()? {
+                    let doc_id = row.get::<_, i64>(0)? as DocId;
+                    let term_freq = row.get::<_, i64>(1)? as u64;
+                    if let Some(positions) = output_positions.get(&doc_id) {
+                        for position in positions {
+                            inputs[*position].1[term_index] = term_freq;
+                        }
+                    }
+                }
+            }
+            Ok(())
+        });
+        inputs
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> u64 {
@@ -1045,6 +1112,11 @@ mod tests {
         assert_eq!(idx.doc_freq("title", "rust"), 2);
         assert_eq!(idx.get_term_freq(1, "title", "rust"), 3);
         assert_eq!(idx.get_term_freq(2, "title", "rust"), 1);
+        let mut visited = Vec::new();
+        idx.for_each_term_freq("title", "rust", &mut |doc_id, term_freq| {
+            visited.push((doc_id, term_freq));
+        });
+        assert_eq!(visited, vec![(1, 3), (2, 1)]);
     }
 
     #[test]
@@ -1079,6 +1151,31 @@ mod tests {
         assert_eq!(bulk.get(&2), Some(&idx.get_doc_length(2, "title")));
         assert_eq!(bulk.get(&3), Some(&idx.get_doc_length(3, "title")));
         assert_eq!(bulk.get(&99), None);
+    }
+
+    #[test]
+    fn bulk_scoring_inputs_match_point_lookups_in_requested_order() {
+        let mut idx = idx();
+        idx.add_document(1, fields([("title", "rust rust language")]));
+        idx.add_document(2, fields([("title", "python language")]));
+        idx.add_document(3, fields([("title", "rust search engine")]));
+
+        let doc_ids = [3, 1, 99, 2, 1];
+        let terms = ["rust", "languag", "missing"].map(str::to_string);
+        let bulk = idx.get_scoring_inputs_bulk(&doc_ids, "title", &terms);
+        let expected: Vec<_> = doc_ids
+            .iter()
+            .map(|doc_id| {
+                (
+                    idx.get_doc_length(*doc_id, "title"),
+                    terms
+                        .iter()
+                        .map(|term| idx.get_term_freq(*doc_id, "title", term))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(bulk, expected);
     }
 
     #[test]

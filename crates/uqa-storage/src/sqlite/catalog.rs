@@ -29,7 +29,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SCHEMA_VERSION: u32 = 12;
 
 pub struct Catalog {
     conn: ManagedConnection,
@@ -141,8 +141,6 @@ impl Catalog {
                 positions  BLOB NOT NULL,
                 PRIMARY KEY (table_name, field, term, doc_id)
             );
-            CREATE INDEX IF NOT EXISTS _postings_term_idx
-                ON _postings (table_name, field, term);
             CREATE INDEX IF NOT EXISTS _postings_doc_idx
                 ON _postings (table_name, doc_id);
 
@@ -1566,8 +1564,6 @@ const MIGRATIONS: &[(u32, &str)] = &[
         positions  BLOB NOT NULL,
         PRIMARY KEY (table_name, field, term, doc_id)
     );
-    CREATE INDEX IF NOT EXISTS _postings_term_idx
-        ON _postings (table_name, field, term);
     CREATE INDEX IF NOT EXISTS _postings_doc_idx
         ON _postings (table_name, doc_id);
 
@@ -1859,6 +1855,16 @@ const MIGRATIONS: &[(u32, &str)] = &[
         ON _btree_index_entries (table_name, doc_id);
     ",
     ),
+    // `_postings` already has a unique auto-index over
+    // `(table_name, field, term, doc_id)`. Its first three columns cover
+    // term lookup, so the former `_postings_term_idx` duplicated every FTS
+    // write without enabling a distinct access path.
+    (
+        12,
+        r"
+    DROP INDEX IF EXISTS _postings_term_idx;
+    ",
+    ),
 ];
 
 #[cfg(test)]
@@ -1941,5 +1947,50 @@ mod tests {
         // Reopen on the same handle: should not re-run migrations or
         // raise an error.
         let _cat2 = Catalog::open(mc).unwrap();
+    }
+
+    #[test]
+    fn migration_drops_redundant_postings_term_index() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let _current = Catalog::open(mc.clone()).unwrap();
+        mc.with(|conn| {
+            conn.execute(
+                "CREATE INDEX _postings_term_idx
+                 ON _postings (table_name, field, term)",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE _metadata SET value = '11' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let _migrated = Catalog::open(mc.clone()).unwrap();
+        mc.with(|conn| {
+            let term_index_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = '_postings_term_idx'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(term_index_count, 0);
+
+            let plan: String = conn.query_row(
+                "EXPLAIN QUERY PLAN
+                 SELECT doc_id, positions FROM _postings
+                 WHERE table_name = 'docs' AND field = 'body' AND term = 'rust'
+                 ORDER BY doc_id",
+                [],
+                |row| row.get(3),
+            )?;
+            assert!(
+                plan.contains("sqlite_autoindex__postings_1"),
+                "term lookup must use the composite primary-key index: {plan}"
+            );
+            Ok(())
+        })
+        .unwrap();
     }
 }

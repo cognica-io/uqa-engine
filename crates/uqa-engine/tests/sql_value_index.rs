@@ -13,6 +13,7 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::SQLResult;
+use uqa_storage::sqlite::CURRENT_SCHEMA_VERSION;
 
 fn persisted_index_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
     rusqlite::Connection::open(path)
@@ -444,5 +445,5 @@ fn schema_v10_database_backfills_btree_once() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, i64::from(CURRENT_SCHEMA_VERSION));
 }

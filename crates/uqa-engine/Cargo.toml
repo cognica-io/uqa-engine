@@ -97,5 +97,9 @@ harness = false
 name = "graph_sql"
 harness = false
 
+[[bench]]
+name = "retrieval_workloads"
+harness = false
+
 [lints]
 workspace = true

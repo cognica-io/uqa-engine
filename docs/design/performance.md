@@ -74,7 +74,55 @@ Final reference run (`cargo bench -p uqa-engine --bench tpch_style`, 20 Criterio
 | `tpch_style/q1_100k` | 29.154 ms |
 | `tpch_style/q6_100k` | 5.854 ms |
 
-The first exploratory `--quick` estimates were 250.21 ms for Q1 and 24.05 ms for Q6. Those figures document the optimization trajectory only: Q6 was first recorded after the earliest accumulator fix, and `--quick` is not statistically comparable to the final 20-sample run. The final table above is the reproducible baseline.
+The first exploratory `--quick` estimates were 250.21 ms for Q1 and 24.05 ms for Q6. Those figures document the optimization trajectory only: Q6 was first recorded after the earliest accumulator fix, and `--quick` is not statistically comparable to the final 20-sample run. The table above is preserved as the first analytical-pass baseline; the current baseline is recorded below.
+
+## Unified retrieval and second analytical pass (2026-07-20)
+
+This pass kept the same representation boundary across every workload: scalar, text, vector, graph, and hybrid candidate sets continue to cross execution stages as sorted `PostingList` values. The optimization adds a consuming intersection inside that abstraction, but it does not introduce a bitmap result type, row-set side channel, or data-type-specific carrier. Small consuming intersections use the existing allocating merge; at 4,096 entries or more the common API compacts the owned left buffer in place.
+
+Time Profiler attributed 69.19% of Q1 samples to projected-expression evaluation and 17.66% exclusively to `memcmp`, mostly repeated document-field name comparisons. Q6 additionally spent material time allocating and destroying temporary posting-list intersections. The resulting fixes were:
+
+1. Integer analytical expressions compile once to a postfix instruction stream evaluated on a fixed stack. Exact integer SUM/COUNT state is updated directly, while non-integer inputs, NULL, overflow, and division errors fall back to the canonical SQL evaluator.
+2. `MemoryDocumentStore` interns document key layouts and resolves projection ordinals once per layout, eliminating per-row field-name comparisons without assuming every document has the same shape.
+3. `PostingList::intersect_owned` adaptively retains the allocating path for small inputs and reuses the left buffer for large owned inputs. Engine filters, Boolean operators, staged retrieval, and text/vector intersections use this same API.
+4. Persistent text scoring can stream `(doc_id, term_frequency)` without decoding position blobs and fetch document lengths plus term frequencies in bulk. Hybrid search constructs statistics only for the analyzed query terms rather than copying vocabulary-wide field statistics.
+5. The persistent postings primary key already covers `(table_name, field, term)`, so schema version 12 removes the redundant `_postings_term_idx`. GIN backfill projects only indexed text fields instead of cloning whole documents.
+6. Vector top-k selection partitions candidates in linear expected time before sorting only the retained `k`. Graph label matching reads vertex IDs directly from the label index instead of cloning complete vertices.
+
+All measurements below ran with `CARGO_BUILD_JOBS=10` and `RAYON_NUM_THREADS=10` on the same workstation.
+
+### Analytical results
+
+Configured 20-sample run (`cargo bench -p uqa-engine --bench tpch_style`):
+
+| Workload | First pass | Current | Change |
+| --- | --- | --- | --- |
+| `tpch_style/q1_100k` | 29.154 ms | 17.306 ms | -40.6% |
+| `tpch_style/q6_100k` | 5.854 ms | 5.169 ms | -11.7% |
+
+The consuming-input posting-list benchmark uses equivalent owned inputs on both sides, so input destruction is part of both timed paths. At 1k entries the adaptive API remains statistically neutral (4.370 us allocating versus 4.482 us adaptive); at 100k it reduces the configured 100-sample central estimate from 918.07 us to 841.98 us (-8.3%).
+
+### Unified retrieval results
+
+`retrieval_workloads` builds equivalent fixtures for every index case, validates non-empty/capped results before timing, and then measures warm search on already-indexed data.
+
+| Index build | Corpus | Central estimate |
+| --- | ---: | ---: |
+| Persistent GIN | 2k documents | 68.749 ms |
+| Persistent IVF | 2k documents | 12.650 ms |
+| Persistent GIN + IVF | 2k documents | 77.823 ms |
+| Graph `PathIndex`, depth 1-3 | 1k vertices | 1.015 ms |
+
+| Warm search | Corpus | Central estimate |
+| --- | ---: | ---: |
+| Bayesian text SQL, top 100 | 4k documents | 4.864 ms |
+| IVF vector SQL, top 100 | 4k documents | 1.131 ms |
+| Graph label `VertexMatch` | 1k vertices | 86.836 us |
+| Direct text/vector hybrid, top 100 | 4k documents | 8.571 ms |
+
+Targeted before/after probes isolated the largest retrieval changes: k-NN top-10 over 10k 32-dimensional vectors moved from about 802 us to 274 us (-65.8%), graph label matching moved from 206.64 us to 85.83 us (-58.5%), and the same 4k direct hybrid fixture moved from 12.010 ms to 8.802 ms (-26.7%) after query-scoped statistics. The configured unified run above is the publication baseline; these `--quick` pairs record direction and mechanism only.
+
+The release-profile persistent probe independently recorded a 4k-document GIN build at 173.554 ms, IVF build at 25.082 ms, warm Bayesian SQL at 4.860 ms, direct Bayesian API search at 4.340 ms, vector SQL at 2.462 ms, and direct hybrid API search at 9.159 ms. Hybrid relevance remained above every existing floor: small-corpus NDCG@10/MAP@10 were 0.9143/0.3899 (floors 0.90/0.34), and large-corpus values were 0.7784/0.1062 (floors 0.74/0.05).
 
 ## Reference numbers (post-optimization)
 
@@ -82,14 +130,19 @@ The first exploratory `--quick` estimates were 250.21 ms for Q1 and 24.05 ms for
 | --- | --- | --- |
 | Posting list union (100k entries) | `cargo bench -p uqa-core --bench posting_list` | ~987 us |
 | Posting list intersect (100k entries) | same bench | ~365 us |
+| Posting list consuming intersect (100k owned inputs) | same bench | ~842 us |
 | BM25 score (100k inner-loop iterations) | `cargo bench -p uqa-scoring --bench bm25` | ~407 us |
 | SQL filter (10k rows) | `cargo bench -p uqa-engine --bench sql_e2e` | ~1.70 ms |
 | SQL text match (10k docs) | same bench | ~121 us |
 | SQL inner join (10k x 1k) | `cargo bench -p uqa-engine --bench join` | ~1.55 ms |
-| k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~769 us |
+| k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~274 us |
 | SQL text match (1M docs, top 10) | `cargo bench -p uqa-engine --bench sql_1m` | ~41.7 ms |
-| TPC-H-style Q1 aggregate (100k rows) | `cargo bench -p uqa-engine --bench tpch_style` | ~29.2 ms |
-| TPC-H-style Q6 indexed aggregate (100k rows) | same bench | ~5.85 ms |
+| TPC-H-style Q1 aggregate (100k rows) | `cargo bench -p uqa-engine --bench tpch_style` | ~17.3 ms |
+| TPC-H-style Q6 indexed aggregate (100k rows) | same bench | ~5.17 ms |
+| Persistent Bayesian text search (4k docs, top 100) | `cargo bench -p uqa-engine --bench retrieval_workloads` | ~4.86 ms |
+| Persistent IVF search (4k docs, top 100) | same bench | ~1.13 ms |
+| Persistent direct hybrid search (4k docs, top 100) | same bench | ~8.57 ms |
+| Graph label match (1k vertices) | same bench | ~86.8 us |
 | Relevance bench (3 queries, BM25) | `cargo bench -p uqa-engine --bench relevance` | ~24 us |
 | RPQ concat 3-hop (1k vertices) | `cargo bench -p uqa-graph --bench rpq` | ~2.2 us |
 

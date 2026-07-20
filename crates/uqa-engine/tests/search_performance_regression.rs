@@ -12,7 +12,8 @@ use std::time::Instant;
 use tempfile::tempdir;
 use tempfile::TempDir;
 use uqa_core::Value;
-use uqa_engine::Engine;
+use uqa_engine::{Engine, HybridSearchParams, ScoringMode};
+use uqa_scoring::BayesianBM25Params;
 use uqa_sql::SQLParam;
 
 const LIMIT: usize = 100;
@@ -275,20 +276,7 @@ fn profile_sqlite_insert_components_release() {
     });
 }
 
-#[test]
-#[ignore = "release-profile probe; run explicitly when changing search execution"]
-fn profile_maek_like_global_search_sqlite_release() {
-    let rows = std::env::var("UQA_SEARCH_PROFILE_ROWS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(4_000);
-    let (engine, _dir) = profile("setup", || build_engine(rows));
-    let query = SQLParam::scalar(Value::Str("button search".to_string()));
-    let embedding = SQLParam::vector(vec![1.0, 0.0, 0.2, 0.4, 0.25, 0.5, 0.75, 1.0]);
-
-    let doc_ids = profile("table_doc_ids", || engine.table_doc_ids("messages"));
-    println!("table_doc_ids_count={}", doc_ids.len());
-
+fn profile_text_search_paths(engine: &Engine, query: &SQLParam) {
     let text = profile("bayesian_sql", || {
         engine
             .sql(
@@ -297,13 +285,47 @@ fn profile_maek_like_global_search_sqlite_release() {
                      WHERE bayesian_match(content, $1) \
                      ORDER BY _score DESC LIMIT {LIMIT}"
                 ),
-                std::slice::from_ref(&query),
+                std::slice::from_ref(query),
             )
             .unwrap()
     });
     println!("bayesian_hits={}", text.rows.len());
     assert!(!text.rows.is_empty());
 
+    let warm_text = profile("bayesian_sql_warm", || {
+        engine
+            .sql(
+                &format!(
+                    "SELECT id, _score FROM messages \
+                     WHERE bayesian_match(content, $1) \
+                     ORDER BY _score DESC LIMIT {LIMIT}"
+                ),
+                std::slice::from_ref(query),
+            )
+            .unwrap()
+    });
+    println!("bayesian_warm_hits={}", warm_text.rows.len());
+    assert!(!warm_text.rows.is_empty());
+
+    let api_text = profile("bayesian_api", || {
+        engine.search(
+            "messages",
+            "content",
+            "button search",
+            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+            LIMIT,
+        )
+    });
+    println!("bayesian_api_hits={}", api_text.len());
+    assert!(!api_text.is_empty());
+}
+
+fn profile_vector_hybrid_paths(
+    engine: &Engine,
+    query: &SQLParam,
+    embedding: &SQLParam,
+    query_vector: &[f32],
+) {
     let knn = profile("knn_sql", || {
         engine
             .sql(
@@ -312,7 +334,7 @@ fn profile_maek_like_global_search_sqlite_release() {
                      WHERE knn_match(embedding, $1, {LIMIT}) \
                      ORDER BY _score DESC LIMIT {LIMIT}"
                 ),
-                std::slice::from_ref(&embedding),
+                std::slice::from_ref(embedding),
             )
             .unwrap()
     });
@@ -337,6 +359,21 @@ fn profile_maek_like_global_search_sqlite_release() {
     println!("fuse_hits={}", fused.rows.len());
     assert!(!fused.rows.is_empty());
 
+    let hybrid = profile("hybrid_api", || {
+        engine.hybrid_search(&HybridSearchParams {
+            table: "messages",
+            text_field: "content",
+            text_query: "button search",
+            vector_field: "embedding",
+            query_vector: query_vector.to_vec(),
+            knn_pool: LIMIT,
+            alpha: 0.5,
+            top_k: LIMIT,
+        })
+    });
+    println!("hybrid_api_hits={}", hybrid.len());
+    assert!(!hybrid.is_empty());
+
     let derived = profile("derived_fuse_sql", || {
         engine
             .sql(
@@ -351,10 +388,28 @@ fn profile_maek_like_global_search_sqlite_release() {
                      ) hits \
                      ORDER BY hits._score DESC LIMIT {LIMIT}"
                 ),
-                &[query, embedding],
+                &[query.clone(), embedding.clone()],
             )
             .unwrap()
     });
     println!("derived_fuse_hits={}", derived.rows.len());
     assert!(!derived.rows.is_empty());
+}
+
+#[test]
+#[ignore = "release-profile probe; run explicitly when changing search execution"]
+fn profile_maek_like_global_search_sqlite_release() {
+    let rows = std::env::var("UQA_SEARCH_PROFILE_ROWS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4_000);
+    let (engine, _dir) = profile("setup", || build_engine(rows));
+    let query = SQLParam::scalar(Value::Str("button search".to_string()));
+    let query_vector = vec![1.0, 0.0, 0.2, 0.4, 0.25, 0.5, 0.75, 1.0];
+    let embedding = SQLParam::vector(query_vector.clone());
+
+    let doc_ids = profile("table_doc_ids", || engine.table_doc_ids("messages"));
+    println!("table_doc_ids_count={}", doc_ids.len());
+    profile_text_search_paths(&engine, &query);
+    profile_vector_hybrid_paths(&engine, &query, &embedding, &query_vector);
 }

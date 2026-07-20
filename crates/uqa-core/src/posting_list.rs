@@ -38,6 +38,9 @@ pub struct PostingList {
     entries: Vec<PostingEntry>,
 }
 
+// Pinned by `posting_list_intersect_consuming_inputs`: below this input size a small result allocation is cheaper than in-place compaction, while larger lists benefit from reusing the left buffer.
+const INTERSECT_REUSE_MIN_ENTRIES: usize = 4_096;
+
 impl PostingList {
     /// Construct an empty posting list.
     pub fn new() -> Self {
@@ -120,6 +123,36 @@ impl PostingList {
             }
         }
         Self::from_sorted_unchecked(out)
+    }
+
+    /// Consuming intersection that avoids a result allocation for large inputs by reusing the left posting buffer. Small inputs retain the lower-overhead allocating path. Payload semantics are identical to [`PostingList::intersect`], including right-hand field precedence.
+    #[inline]
+    pub fn intersect_owned(self, other: &Self) -> Self {
+        if self.entries.len().min(other.entries.len()) < INTERSECT_REUSE_MIN_ENTRIES {
+            return self.intersect(other);
+        }
+        self.intersect_reusing_left(other)
+    }
+
+    #[inline(never)]
+    fn intersect_reusing_left(mut self, other: &Self) -> Self {
+        let mut other_index = 0;
+        self.entries.retain_mut(|entry| {
+            while other_index < other.entries.len()
+                && other.entries[other_index].doc_id < entry.doc_id
+            {
+                other_index += 1;
+            }
+            if other_index >= other.entries.len()
+                || other.entries[other_index].doc_id != entry.doc_id
+            {
+                return false;
+            }
+            entry.payload = merge_payloads(&entry.payload, &other.entries[other_index].payload);
+            other_index += 1;
+            true
+        });
+        self
     }
 
     /// `A - B`: entries of `A` whose `doc_id` does not appear in `B`.
@@ -282,6 +315,22 @@ impl FromIterator<PostingEntry> for PostingList {
 ///   are stated over doc-id sets, not scores)
 /// - fields: right-hand side wins on key collision
 fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
+    let a_score_only = a.positions.is_empty() && a.fields.is_empty();
+    let b_score_only = b.positions.is_empty() && b.fields.is_empty();
+    if a_score_only && b_score_only {
+        return Payload::with_score(a.score + b.score);
+    }
+    if a_score_only {
+        let mut merged = b.clone();
+        merged.score = a.score + b.score;
+        return merged;
+    }
+    if b_score_only {
+        let mut merged = a.clone();
+        merged.score = a.score + b.score;
+        return merged;
+    }
+
     let mut positions: Vec<u32> = Vec::with_capacity(a.positions.len() + b.positions.len());
     positions.extend_from_slice(&a.positions);
     positions.extend_from_slice(&b.positions);
@@ -546,6 +595,42 @@ mod tests {
         let merged = merge_payloads(&a, &b);
         assert_eq!(merged.positions, vec![1, 2, 3]);
         assert!((merged.score - 3.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn consuming_intersection_matches_borrowed_payload_semantics() {
+        let left = PostingList::from_sorted_unchecked(vec![
+            PostingEntry::new(1, Payload::with_score(1.0)),
+            PostingEntry::new(
+                3,
+                Payload {
+                    positions: vec![1, 4],
+                    score: 2.0,
+                    fields: BTreeMap::from([
+                        ("left".into(), Value::Bool(true)),
+                        ("shared".into(), Value::Str("left".into())),
+                    ]),
+                },
+            ),
+            PostingEntry::new(5, Payload::default()),
+        ]);
+        let right = PostingList::from_sorted_unchecked(vec![
+            PostingEntry::new(2, Payload::default()),
+            PostingEntry::new(
+                3,
+                Payload {
+                    positions: vec![2, 4],
+                    score: 4.0,
+                    fields: BTreeMap::from([
+                        ("right".into(), Value::Bool(true)),
+                        ("shared".into(), Value::Str("right".into())),
+                    ]),
+                },
+            ),
+            PostingEntry::new(5, Payload::with_score(8.0)),
+        ]);
+
+        assert_eq!(left.clone().intersect_owned(&right), left.intersect(&right));
     }
 
     #[test]

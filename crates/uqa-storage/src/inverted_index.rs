@@ -111,6 +111,16 @@ pub trait InvertedIndex: Send + Sync {
         }
     }
 
+    /// Visit `(doc_id, term_frequency)` pairs without requiring callers to
+    /// materialize or decode payload details they do not use. The default
+    /// keeps every backend compatible through the posting-list contract;
+    /// persistent backends can stream compact frequency projections.
+    fn for_each_term_freq(&self, field: &str, term: &str, visit: &mut dyn FnMut(DocId, u64)) {
+        self.for_each_posting(field, term, &mut |entry| {
+            visit(entry.doc_id, entry.payload.positions.len() as u64);
+        });
+    }
+
     fn doc_freq(&self, field: &str, term: &str) -> u64;
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> u64;
@@ -255,6 +265,28 @@ pub trait InvertedIndex: Send + Sync {
             .iter()
             .copied()
             .map(|d| (d, self.get_term_freq(d, field, term)))
+            .collect()
+    }
+
+    /// Fetch the document length and one term frequency per query term for
+    /// every requested document. Results stay aligned with `doc_ids`.
+    /// Persistent backends override this to collapse the scoring loop's
+    /// per-document point reads into a small number of set-oriented queries.
+    fn get_scoring_inputs_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        terms: &[String],
+    ) -> Vec<(u64, Vec<u64>)> {
+        doc_ids
+            .iter()
+            .map(|doc_id| {
+                let term_freqs = terms
+                    .iter()
+                    .map(|term| self.get_term_freq(*doc_id, field, term))
+                    .collect();
+                (self.get_doc_length(*doc_id, field), term_freqs)
+            })
             .collect()
     }
 
@@ -446,6 +478,15 @@ impl InvertedIndex for MemoryInvertedIndex {
         if let Some(inner) = self.index.get(&key) {
             for entry in inner.values() {
                 visit(entry);
+            }
+        }
+    }
+
+    fn for_each_term_freq(&self, field: &str, term: &str, visit: &mut dyn FnMut(DocId, u64)) {
+        let key = (field.to_string(), term.to_string());
+        if let Some(inner) = self.index.get(&key) {
+            for entry in inner.values() {
+                visit(entry.doc_id, entry.payload.positions.len() as u64);
             }
         }
     }

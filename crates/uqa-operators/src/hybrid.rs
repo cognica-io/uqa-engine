@@ -112,7 +112,7 @@ impl Operator for HybridTextVectorOperator {
     fn execute(&self, ctx: &ExecutionContext) -> PostingList {
         self.term_op
             .execute(ctx)
-            .intersect(&self.vector_op.execute(ctx))
+            .intersect_owned(&self.vector_op.execute(ctx))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -138,7 +138,7 @@ impl Operator for SemanticFilterOperator {
     fn execute(&self, ctx: &ExecutionContext) -> PostingList {
         self.source
             .execute(ctx)
-            .intersect(&self.vector_op.execute(ctx))
+            .intersect_owned(&self.vector_op.execute(ctx))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

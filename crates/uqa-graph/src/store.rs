@@ -73,6 +73,14 @@ pub trait GraphStore {
 
     fn vertices_by_label(&self, label: &str, graph: &str) -> Vec<Vertex>;
 
+    /// Return only the vertex ids for a label. Stores with a label index should override this to avoid materializing full vertices.
+    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> Vec<VertexId> {
+        self.vertices_by_label(label, graph)
+            .into_iter()
+            .map(|vertex| vertex.vertex_id)
+            .collect()
+    }
+
     fn vertices_in_graph(&self, graph: &str) -> Vec<Vertex>;
 
     fn edges_in_graph(&self, graph: &str) -> Vec<Edge>;

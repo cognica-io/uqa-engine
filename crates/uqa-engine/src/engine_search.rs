@@ -221,26 +221,20 @@ impl Engine {
         Some(params)
     }
 
-    pub(crate) fn snapshot_context(
-        &self,
-        table: &str,
-    ) -> Option<(ExecutionContext, Arc<uqa_core::IndexStats>)> {
+    pub(crate) fn snapshot_context(&self, table: &str) -> Option<ExecutionContext> {
         let t = self.table(table)?;
         let inv = t.inverted_index.read().snapshot();
-        let stats = inv.stats();
-        let stats_arc = Arc::new(stats.clone());
         let docs = t.document_store.read().snapshot();
 
         let mut ctx = ExecutionContext::new()
             .with_inverted_index(inv)
-            .with_document_store(docs)
-            .with_stats(stats);
+            .with_document_store(docs);
 
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(field.clone(), idx.snapshot());
         }
 
-        Some((ctx, stats_arc))
+        Some(ctx)
     }
 
     fn build_text_scorer(
@@ -310,8 +304,8 @@ impl Engine {
         let entries = if analyzed_terms.len() == 1 {
             let term = &analyzed_terms[0];
             let mut term_freqs: Vec<(DocId, u64)> = Vec::new();
-            index.for_each_posting(field, term, &mut |entry| {
-                term_freqs.push((entry.doc_id, entry.payload.positions.len() as u64));
+            index.for_each_term_freq(field, term, &mut |doc_id, term_freq| {
+                term_freqs.push((doc_id, term_freq));
             });
             let term_doc_freqs = [term_freqs.len() as u64];
             let stats_arc = Arc::new(search_stats_for_terms(
@@ -343,13 +337,13 @@ impl Engine {
             let mut term_doc_freqs: Vec<u64> = Vec::with_capacity(analyzed_terms.len());
             for (term_index, term) in analyzed_terms.iter().enumerate() {
                 let mut doc_freq = 0_u64;
-                index.for_each_posting(field, term, &mut |entry| {
+                index.for_each_term_freq(field, term, &mut |doc_id, term_freq| {
                     doc_freq += 1;
-                    candidate_ids.insert(entry.doc_id);
+                    candidate_ids.insert(doc_id);
                     present_terms
-                        .entry(entry.doc_id)
+                        .entry(doc_id)
                         .or_default()
-                        .push((term_index, entry.payload.positions.len() as u64));
+                        .push((term_index, term_freq));
                 });
                 term_doc_freqs.push(doc_freq);
             }
@@ -600,7 +594,7 @@ impl Engine {
         query_vector: Vec<f32>,
         threshold: f32,
     ) -> Vec<ScoredEntry> {
-        let Some((ctx, _)) = self.snapshot_context(table) else {
+        let Some(ctx) = self.snapshot_context(table) else {
             return Vec::new();
         };
         let op = VectorSimilarityOperator::new(query_vector, threshold, field);
@@ -628,7 +622,7 @@ impl Engine {
     /// diluting the fused ranking. Returns the top-`top_k` entries by
     /// descending fused probability.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Vec<ScoredEntry> {
-        let Some((ctx, _)) = self.snapshot_context(params.table) else {
+        let Some(ctx) = self.snapshot_context(params.table) else {
             return Vec::new();
         };
         let analyzer = ctx
@@ -645,12 +639,20 @@ impl Engine {
         let mut fusion_base_rate = None;
 
         if !analyzed_terms.is_empty() {
-            let stats_arc = Arc::new(
-                ctx.inverted_index
-                    .as_ref()
-                    .expect("snapshot_context populates the inverted index")
-                    .field_stats(params.text_field),
-            );
+            let inverted_index = ctx
+                .inverted_index
+                .as_ref()
+                .expect("snapshot_context populates the inverted index");
+            let doc_freqs: Vec<u64> = analyzed_terms
+                .iter()
+                .map(|term| inverted_index.doc_freq(params.text_field, term))
+                .collect();
+            let stats_arc = Arc::new(search_stats_for_terms(
+                inverted_index.as_ref(),
+                params.text_field,
+                &analyzed_terms,
+                &doc_freqs,
+            ));
             let term_op: Arc<dyn Operator> =
                 Arc::new(TermOperator::new(params.text_query, params.text_field));
             let calibration = self

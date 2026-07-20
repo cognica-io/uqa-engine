@@ -939,7 +939,7 @@ impl<'a> EngineDriver<'a> {
         // with evaluated-scan semantics, so this never changes results.
         if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate) {
             return match source {
-                Some(child) => self.execute_node(child).intersect(&indexed),
+                Some(child) => self.execute_node(child).intersect_owned(&indexed),
                 None => indexed,
             };
         }
@@ -1067,7 +1067,7 @@ impl EngineDriver<'_> {
         let Some(first) = iter.next() else {
             return PostingList::new();
         };
-        iter.fold(first, |acc, next| acc.intersect(&next))
+        iter.fold(first, |acc, next| acc.intersect_owned(&next))
     }
 
     fn execute_union(&self, parts: &[OperatorTree]) -> PostingList {
@@ -1096,7 +1096,7 @@ impl EngineDriver<'_> {
         let Some(first) = iter.next() else {
             return PostingList::new();
         };
-        iter.fold(first, |acc, next| acc.intersect(&next))
+        iter.fold(first, |acc, next| acc.intersect_owned(&next))
     }
 
     fn execute_facet_vector(&self, vector_op: &OperatorTree, facet_field: &str) -> PostingList {

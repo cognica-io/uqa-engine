@@ -15,6 +15,17 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
+pub(crate) fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
+    if scored.len() > k {
+        scored.select_nth_unstable_by(k, |a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        scored.truncate(k);
+    }
+}
+
 /// Cosine similarity between two equal-length vectors. Returns `0.0` when
 /// either vector has zero norm or the dimensions differ.
 ///
@@ -126,12 +137,7 @@ impl VectorIndex for MemoryVectorIndex {
             .iter()
             .filter_map(|(&doc_id, vectors)| best_vector_score(query, vectors).map(|s| (doc_id, s)))
             .collect();
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        scored.truncate(k);
+        select_top_k_scored(&mut scored, k);
         // The output of `top_k` is re-sorted by doc_id ascending so the
         // posting list invariant holds; the score lives in the payload.
         scored.sort_by_key(|(id, _)| *id);
@@ -222,6 +228,14 @@ mod tests {
         let entry1 = pl.get_entry(1).unwrap();
         let entry2 = pl.get_entry(2).unwrap();
         assert!(entry1.payload.score > entry2.payload.score);
+    }
+
+    #[test]
+    fn partial_top_k_keeps_deterministic_doc_id_ties() {
+        let mut scored = vec![(10, 0.5), (3, 0.9), (1, 0.9), (8, 0.7), (2, 0.1)];
+        select_top_k_scored(&mut scored, 2);
+        scored.sort_by_key(|(doc_id, _)| *doc_id);
+        assert_eq!(scored, vec![(1, 0.9), (3, 0.9)]);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFState};
 use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
-use crate::vector_index::{cosine_similarity, VectorIndex};
+use crate::vector_index::{cosine_similarity, select_top_k_scored, VectorIndex};
 
 const STALE_FRACTION: f64 = 0.20;
 
@@ -218,12 +218,7 @@ impl VectorIndex for SQLiteVectorIndex {
                 .or_insert(sim);
         }
         let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        scored.truncate(k);
+        select_top_k_scored(&mut scored, k);
         scored.sort_by_key(|(id, _)| *id);
         let entries: Vec<PostingEntry> = scored
             .into_iter()
@@ -918,12 +913,7 @@ fn scored_posting_list(query: &[f32], entries: &[(DocId, Vec<f32>)], k: usize) -
             .or_insert(sim);
     }
     let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
-    scored.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
-    scored.truncate(k);
+    select_top_k_scored(&mut scored, k);
     scored.sort_by_key(|(id, _)| *id);
     let entries = scored
         .into_iter()

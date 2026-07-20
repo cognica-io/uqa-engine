@@ -11,7 +11,7 @@
 //! pairwise Boolean operations by input size and overlap, top-k,
 //! n-way merge, scored-payload union, and binary-search lookup.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use uqa_core::{Payload, PostingEntry, PostingList};
 
 const N: u64 = 100_000;
@@ -95,6 +95,40 @@ fn bench_intersect(c: &mut Criterion) {
         });
     }
     group.finish();
+
+    let mut owned_group = c.benchmark_group("posting_list_intersect_consuming_inputs");
+    for size in [1_000, 10_000, 100_000] {
+        let (a, b) = build_pair(size, 0.3);
+        owned_group.bench_with_input(BenchmarkId::new("allocate", size), &size, |bencher, _| {
+            bencher.iter_batched(
+                || (a.clone(), b.clone()),
+                |(left, right)| {
+                    let left = black_box(left);
+                    let right = black_box(right);
+                    let result = left.intersect(&right);
+                    black_box(result).len()
+                },
+                BatchSize::LargeInput,
+            );
+        });
+        owned_group.bench_with_input(
+            BenchmarkId::new("adaptive_owned", size),
+            &size,
+            |bencher, _| {
+                bencher.iter_batched(
+                    || (a.clone(), b.clone()),
+                    |(left, right)| {
+                        let left = black_box(left);
+                        let right = black_box(right);
+                        let result = left.intersect_owned(&right);
+                        black_box(result).len()
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    owned_group.finish();
 
     let mut overlap_group = c.benchmark_group("posting_list_intersect_by_overlap");
     for overlap in [0.0, 0.3, 0.7, 1.0] {

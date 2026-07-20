@@ -470,6 +470,10 @@ impl GraphStore for SQLiteGraphStore {
         self.inner.vertices_by_label(label, graph)
     }
 
+    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> Vec<VertexId> {
+        self.inner.vertex_ids_by_label(label, graph)
+    }
+
     fn vertices_in_graph(&self, graph: &str) -> Vec<Vertex> {
         self.inner.vertices_in_graph(graph)
     }

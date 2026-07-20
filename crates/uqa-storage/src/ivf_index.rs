@@ -33,7 +33,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
-use crate::vector_index::{cosine_similarity, VectorIndex};
+use crate::vector_index::{cosine_similarity, select_top_k_scored, VectorIndex};
 
 const DEFAULT_NLIST: usize = 100;
 const DEFAULT_NPROBE: usize = 10;
@@ -473,12 +473,7 @@ impl VectorIndex for IVFIndex {
                 .or_insert(score);
         }
         let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
-        scored.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        scored.truncate(k);
+        select_top_k_scored(&mut scored, k);
         scored.sort_by_key(|&(d, _)| d);
         let entries: Vec<PostingEntry> = scored
             .into_iter()

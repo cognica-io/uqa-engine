@@ -302,30 +302,26 @@ impl Operator for ScoreOperator {
             })
             .collect();
 
-        let entries: Vec<PostingEntry> = source_pl
-            .iter()
-            .map(|entry| {
-                let dl = idx.get_doc_length(entry.doc_id, &self.field);
-                let per_term: Vec<f64> = self
-                    .query_terms
-                    .iter()
-                    .zip(&term_idfs)
-                    .map(|(term, idf)| {
-                        let tf = idx.get_term_freq(entry.doc_id, &self.field, term);
-                        self.scorer.term_score_with_idf(tf, dl, *idf)
-                    })
-                    .collect();
-                let total = self.scorer.finalize_score(&per_term);
-                PostingEntry {
-                    doc_id: entry.doc_id,
-                    payload: Payload {
-                        positions: entry.payload.positions.clone(),
-                        score: total,
-                        fields: entry.payload.fields.clone(),
-                    },
-                }
-            })
-            .collect();
+        let doc_ids: Vec<DocId> = source_pl.iter().map(|entry| entry.doc_id).collect();
+        let scoring_inputs = idx.get_scoring_inputs_bulk(&doc_ids, &self.field, &self.query_terms);
+        debug_assert_eq!(source_pl.len(), scoring_inputs.len());
+        let mut entries = Vec::with_capacity(source_pl.len());
+        let mut per_term_scores = Vec::with_capacity(self.query_terms.len());
+        for (entry, (doc_length, term_freqs)) in source_pl.iter().zip(scoring_inputs) {
+            per_term_scores.clear();
+            per_term_scores.extend(term_freqs.into_iter().zip(&term_idfs).map(
+                |(term_freq, idf)| self.scorer.term_score_with_idf(term_freq, doc_length, *idf),
+            ));
+            let total = self.scorer.finalize_score(&per_term_scores);
+            entries.push(PostingEntry {
+                doc_id: entry.doc_id,
+                payload: Payload {
+                    positions: entry.payload.positions.clone(),
+                    score: total,
+                    fields: entry.payload.fields.clone(),
+                },
+            });
+        }
         PostingList::from_sorted_unchecked(entries)
     }
 }

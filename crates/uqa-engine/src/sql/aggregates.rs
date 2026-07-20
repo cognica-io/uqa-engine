@@ -813,7 +813,10 @@ enum ProjectedAggregateInput {
     Evaluate,
     Slot(usize),
     CountOne,
-    Expression(ProjectedExpression),
+    Expression {
+        general: ProjectedExpression,
+        integer: Option<ProjectedIntegerExpression>,
+    },
 }
 
 enum ProjectedAggregatePlan {
@@ -836,6 +839,26 @@ enum ProjectedExpression {
 enum ProjectedExpressionValue<'a> {
     Borrowed(&'a Value),
     Owned(Value),
+}
+
+#[derive(Clone, Copy)]
+enum ProjectedIntegerValue {
+    Integer(i64),
+    Null,
+    General,
+}
+
+#[derive(Clone, Copy)]
+enum ProjectedIntegerInstruction {
+    Slot(usize),
+    Literal(Option<i64>),
+    Binary(BinaryOp),
+}
+
+const PROJECTED_INTEGER_STACK_LIMIT: usize = 16;
+
+struct ProjectedIntegerExpression {
+    instructions: Vec<ProjectedIntegerInstruction>,
 }
 
 impl ProjectedExpressionValue<'_> {
@@ -880,6 +903,130 @@ impl ProjectedExpression {
     }
 }
 
+impl ProjectedIntegerExpression {
+    fn compile(expr: &Expr, columns: &ProjectedColumns) -> Option<Self> {
+        fn emit(
+            expr: &Expr,
+            columns: &ProjectedColumns,
+            instructions: &mut Vec<ProjectedIntegerInstruction>,
+            stack_depth: &mut usize,
+            max_stack_depth: &mut usize,
+        ) -> Option<()> {
+            match expr {
+                Expr::Column(name) => {
+                    instructions.push(ProjectedIntegerInstruction::Slot(columns.index(name)?));
+                    *stack_depth += 1;
+                }
+                Expr::QualifiedColumn { column, .. } => {
+                    instructions.push(ProjectedIntegerInstruction::Slot(columns.index(column)?));
+                    *stack_depth += 1;
+                }
+                Expr::Literal(Value::Int(value)) => {
+                    instructions.push(ProjectedIntegerInstruction::Literal(Some(*value)));
+                    *stack_depth += 1;
+                }
+                Expr::Literal(Value::Null) => {
+                    instructions.push(ProjectedIntegerInstruction::Literal(None));
+                    *stack_depth += 1;
+                }
+                Expr::Binary { op, lhs, rhs }
+                    if matches!(
+                        op,
+                        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+                    ) =>
+                {
+                    emit(lhs, columns, instructions, stack_depth, max_stack_depth)?;
+                    emit(rhs, columns, instructions, stack_depth, max_stack_depth)?;
+                    instructions.push(ProjectedIntegerInstruction::Binary(*op));
+                    *stack_depth = stack_depth.checked_sub(1)?;
+                }
+                _ => return None,
+            }
+            *max_stack_depth = (*max_stack_depth).max(*stack_depth);
+            Some(())
+        }
+
+        let mut instructions = Vec::new();
+        let mut stack_depth = 0;
+        let mut max_stack_depth = 0;
+        emit(
+            expr,
+            columns,
+            &mut instructions,
+            &mut stack_depth,
+            &mut max_stack_depth,
+        )?;
+        (stack_depth == 1 && max_stack_depth <= PROJECTED_INTEGER_STACK_LIMIT)
+            .then_some(Self { instructions })
+    }
+
+    /// Evaluate a compiled integer analytical expression without recursive dispatch or intermediate `Value`s. Any non-integer input falls back to the canonical evaluator at the caller.
+    fn evaluate(&self, values: &[&Value]) -> Result<ProjectedIntegerValue, SQLError> {
+        let mut stack = [ProjectedIntegerValue::General; PROJECTED_INTEGER_STACK_LIMIT];
+        let mut stack_len = 0;
+        for instruction in &self.instructions {
+            match *instruction {
+                ProjectedIntegerInstruction::Slot(slot) => {
+                    stack[stack_len] = match values[slot] {
+                        Value::Int(value) => ProjectedIntegerValue::Integer(*value),
+                        Value::Null => ProjectedIntegerValue::Null,
+                        _ => return Ok(ProjectedIntegerValue::General),
+                    };
+                    stack_len += 1;
+                }
+                ProjectedIntegerInstruction::Literal(value) => {
+                    stack[stack_len] =
+                        value.map_or(ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer);
+                    stack_len += 1;
+                }
+                ProjectedIntegerInstruction::Binary(op) => {
+                    debug_assert!(stack_len >= 2);
+                    let right = stack[stack_len - 1];
+                    let left = stack[stack_len - 2];
+                    stack_len -= 1;
+                    stack[stack_len - 1] = match (left, right) {
+                        (
+                            ProjectedIntegerValue::Integer(left),
+                            ProjectedIntegerValue::Integer(right),
+                        ) => {
+                            let value = match op {
+                                BinaryOp::Add => left.checked_add(right),
+                                BinaryOp::Subtract => left.checked_sub(right),
+                                BinaryOp::Multiply => left.checked_mul(right),
+                                BinaryOp::Divide if right != 0 => left.checked_div(right),
+                                BinaryOp::Divide => None,
+                                _ => unreachable!("integer analytical expression operator"),
+                            };
+                            if let Some(value) = value {
+                                ProjectedIntegerValue::Integer(value)
+                            } else {
+                                // Reuse the canonical evaluator only on the exceptional path so error type, SQLSTATE, and message remain identical.
+                                let value = uqa_sql::expr::eval_binary_values(
+                                    op,
+                                    &Value::Int(left),
+                                    &Value::Int(right),
+                                )?;
+                                let Value::Int(value) = value else {
+                                    return Ok(ProjectedIntegerValue::General);
+                                };
+                                ProjectedIntegerValue::Integer(value)
+                            }
+                        }
+                        (ProjectedIntegerValue::Null, ProjectedIntegerValue::Null)
+                        | (ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer(_))
+                        | (ProjectedIntegerValue::Integer(_), ProjectedIntegerValue::Null) => {
+                            ProjectedIntegerValue::Null
+                        }
+                        _ => return Ok(ProjectedIntegerValue::General),
+                    };
+                }
+            }
+        }
+        debug_assert_eq!(stack_len, 1);
+        Ok(stack[0])
+    }
+}
+
 fn projected_aggregate_plans(
     engine: &Engine,
     agg_targets: &[&Expr],
@@ -919,7 +1066,10 @@ fn projected_aggregate_plans(
                     ),
                     Some(expr) => ProjectedExpression::compile(expr, columns).map_or(
                         ProjectedAggregateInput::Evaluate,
-                        ProjectedAggregateInput::Expression,
+                        |general| ProjectedAggregateInput::Expression {
+                            general,
+                            integer: ProjectedIntegerExpression::compile(expr, columns),
+                        },
                     ),
                     None => ProjectedAggregateInput::Evaluate,
                 }
@@ -1255,7 +1405,7 @@ fn observe_projected_aggregate_targets(
         let ProjectedAggregatePlan::General(input) = plan else {
             match plan {
                 ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Slot(slot)) => {
-                    bucket.0[index].observe(values[*slot])?;
+                    bucket.0[index].observe_projected(values[*slot])?;
                 }
                 ProjectedAggregatePlan::Direct(ProjectedAggregateInput::CountOne) => {
                     debug_assert!(matches!(
@@ -1264,9 +1414,24 @@ fn observe_projected_aggregate_targets(
                     ));
                     bucket.0[index].count += 1;
                 }
-                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Expression(expression)) => {
-                    let value = expression.evaluate(values)?;
-                    bucket.0[index].observe(value.as_value())?;
+                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Expression {
+                    general,
+                    integer,
+                }) => {
+                    match integer
+                        .as_ref()
+                        .map_or(Ok(ProjectedIntegerValue::General), |integer| {
+                            integer.evaluate(values)
+                        })? {
+                        ProjectedIntegerValue::Integer(value) => {
+                            bucket.0[index].observe_projected_integer(value)?;
+                        }
+                        ProjectedIntegerValue::Null => {}
+                        ProjectedIntegerValue::General => {
+                            let value = general.evaluate(values)?;
+                            bucket.0[index].observe_projected(value.as_value())?;
+                        }
+                    }
                 }
                 ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Evaluate)
                 | ProjectedAggregatePlan::General(_) => unreachable!("direct aggregate plan"),
@@ -1315,8 +1480,8 @@ fn observe_projected_aggregate_targets(
             ProjectedAggregateInput::Evaluate => {
                 observe_aggregate(&mut bucket.0[index], name, args, *distinct, order_by, ctx)?;
             }
-            ProjectedAggregateInput::Expression(expression) => {
-                let value = expression.evaluate(values)?;
+            ProjectedAggregateInput::Expression { general, .. } => {
+                let value = general.evaluate(values)?;
                 observe_builtin_aggregate_value(
                     &mut bucket.0[index],
                     name,
@@ -1865,6 +2030,45 @@ impl AggregateAccumulator {
             self.values.push(value.clone(), Vec::new())?;
         }
         Ok(())
+    }
+
+    fn observe_projected(&mut self, value: &Value) -> Result<(), SQLError> {
+        match value {
+            Value::Int(value) => self.observe_projected_integer(*value),
+            _ => self.observe(value),
+        }
+    }
+
+    fn observe_projected_integer(&mut self, value: i64) -> Result<(), SQLError> {
+        match self.state_plan {
+            AggregateStatePlan::Count => {
+                self.count += 1;
+                Ok(())
+            }
+            AggregateStatePlan::Sum => {
+                self.count += 1;
+                self.integer_sum = self
+                    .integer_sum
+                    .checked_add(i128::from(value))
+                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
+                if self.has_decimal {
+                    let next = DecimalValue::from_i64(value);
+                    self.decimal_sum = Some(
+                        self.decimal_sum
+                            .as_ref()
+                            .and_then(|sum| sum.checked_add(&next))
+                            .ok_or_else(|| {
+                                SQLError::TypeMismatch("decimal aggregate overflow".into())
+                            })?,
+                    );
+                }
+                if !self.all_values_int {
+                    self.sum += value as f64;
+                }
+                Ok(())
+            }
+            _ => self.observe(&Value::Int(value)),
+        }
     }
 
     fn observe_state(&mut self, value: &Value) -> Result<(), SQLError> {

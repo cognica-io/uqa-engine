@@ -57,7 +57,7 @@ impl Operator for IntersectOperator {
             if acc.is_empty() {
                 return acc;
             }
-            acc = acc.intersect(&op.execute(ctx));
+            acc = acc.intersect_owned(&op.execute(ctx));
         }
         acc
     }

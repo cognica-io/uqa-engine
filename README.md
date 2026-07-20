@@ -181,6 +181,7 @@ cargo bench -p uqa-engine    --bench sql_1m
 cargo bench -p uqa-engine    --bench sql_workloads
 cargo bench -p uqa-engine    --bench tpch_style
 cargo bench -p uqa-engine    --bench graph_sql
+cargo bench -p uqa-engine    --bench retrieval_workloads
 cargo bench -p uqa-engine    --bench compiler
 cargo bench -p uqa-engine    --bench execution
 cargo bench -p uqa-engine    --bench knn

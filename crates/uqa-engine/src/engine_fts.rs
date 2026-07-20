@@ -53,24 +53,29 @@ impl Engine {
 
     pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
         let fts_fields = t.fts_fields();
-        let docs: Vec<(DocId, Document)> = {
+        let indexed_docs = {
             let store = t.document_store.read();
-            store.iter_all().collect()
-        };
-        let mut index = t.inverted_index.write();
-        let mut indexed_docs = Vec::new();
-        for (doc_id, document) in docs {
-            let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-            for field in &fts_fields {
-                if let Some(Value::Str(s)) = document.get(field) {
-                    text_fields.insert(field.clone(), s.clone());
+            let doc_ids = store.doc_ids();
+            let fields: Vec<&str> = fts_fields.iter().map(String::as_str).collect();
+            let mut indexed_docs = Vec::with_capacity(doc_ids.len());
+            store.for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
+                let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
+                for (field, value) in fts_fields.iter().zip(projected_values) {
+                    if let Value::Str(text) = value {
+                        text_fields.insert(field.clone(), text.clone());
+                    }
                 }
-            }
-            if !text_fields.is_empty() {
-                indexed_docs.push((doc_id, text_fields));
-            }
+                if !text_fields.is_empty() {
+                    indexed_docs.push((doc_id, text_fields));
+                }
+                true
+            });
+            indexed_docs
+        };
+        {
+            let mut index = t.inverted_index.write();
+            index.try_rebuild_documents(indexed_docs)?;
         }
-        index.try_rebuild_documents(indexed_docs)?;
         Ok(())
     }
 

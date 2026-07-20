@@ -319,11 +319,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     ) -> Result<Vec<MatchState>, CypherError> {
         // Candidate vertex set: by label if specified, else everything in the graph.
         let candidate_ids: Vec<VertexId> = if let Some(label) = np.labels.first() {
-            self.store
-                .vertices_by_label(label, self.graph)
-                .into_iter()
-                .map(|v| v.vertex_id)
-                .collect()
+            self.store.vertex_ids_by_label(label, self.graph)
         } else {
             self.store
                 .vertex_ids_in_graph(self.graph)

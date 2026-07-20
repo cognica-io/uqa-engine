@@ -220,6 +220,42 @@ fn projected_group_cache_falls_back_for_high_cardinality_keys() {
 }
 
 #[test]
+fn projected_integer_arithmetic_preserves_null_and_error_semantics() {
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE integer_arithmetic (id INTEGER PRIMARY KEY, lhs INTEGER, rhs INTEGER)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO integer_arithmetic (id, lhs, rhs) VALUES \
+         (1, 10, 2), (2, 7, 3), (3, NULL, 4)",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT SUM(lhs * rhs + 1) AS total, AVG(lhs - rhs) AS mean \
+             FROM integer_arithmetic",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(int_col(&result.rows[0], "total"), Some(43));
+    assert_eq!(float_col(&result.rows[0], "mean"), Some(6.0));
+
+    eng.sql(
+        "INSERT INTO integer_arithmetic (id, lhs, rhs) VALUES (4, 1, 0)",
+        &[],
+    )
+    .unwrap();
+    let error = eng
+        .sql("SELECT SUM(lhs / rhs) FROM integer_arithmetic", &[])
+        .unwrap_err();
+    assert!(error.to_string().contains("division by zero"));
+}
+
+#[test]
 fn count_distinct_with_group_by() {
     let eng = engine();
     eng.sql("CREATE TABLE sales (dept TEXT, product TEXT)", &[])

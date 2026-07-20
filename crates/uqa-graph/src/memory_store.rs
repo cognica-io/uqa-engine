@@ -669,6 +669,16 @@ impl GraphStore for MemoryGraphStore {
             .collect()
     }
 
+    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> Vec<VertexId> {
+        self.require_partition(graph)
+            .vertex_label_index
+            .get(label)
+            .into_iter()
+            .flat_map(|set| set.iter())
+            .copied()
+            .collect()
+    }
+
     fn vertices_in_graph(&self, graph: &str) -> Vec<Vertex> {
         self.require_partition(graph)
             .vertex_ids
@@ -839,6 +849,14 @@ mod tests {
         let mut out = store.neighbors(1, Some("knows"), Direction::Out, "g");
         out.sort_unstable();
         assert_eq!(out, vec![2]);
+    }
+
+    #[test]
+    fn vertex_ids_by_label_uses_label_membership() {
+        let store = build_basic_graph();
+        assert_eq!(store.vertex_ids_by_label("person", "g"), vec![1, 2]);
+        assert_eq!(store.vertex_ids_by_label("company", "g"), vec![3]);
+        assert!(store.vertex_ids_by_label("missing", "g").is_empty());
     }
 
     #[test]
