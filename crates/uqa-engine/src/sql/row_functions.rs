@@ -2109,25 +2109,11 @@ fn run_fuse_log_odds(
         )
         .map_err(|message| SQLError::TypeMismatch(format!("fuse_log_odds: {message}")))?;
 
-    let active_signal_count = score_maps
-        .iter()
-        .filter(|scores| !scores.is_empty())
-        .count();
-    if active_signal_count == 1 {
-        // The surviving signal passes through at n = 1, where a
-        // configured prior still enters exactly once.
-        return Ok(score_maps
-            .into_iter()
-            .find(|scores| !scores.is_empty())
-            .expect("one active signal has scores")
-            .into_iter()
-            .map(|(doc_id, score)| ScoredEntry {
-                doc_id,
-                score: fuser.fuse(&[score]),
-            })
-            .collect());
-    }
-
+    // A signal with no matches still contributes neutral evidence to
+    // every document: the declared signal count governs `n^alpha` and
+    // the uniform denominator, so a document's fused score cannot
+    // depend on whether another signal happened to match elsewhere
+    // (Lucene PR 16410 semantics).
     Ok(all_doc_ids
         .into_iter()
         .map(|doc_id| {

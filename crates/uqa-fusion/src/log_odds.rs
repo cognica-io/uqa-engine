@@ -16,10 +16,13 @@
 //! document beyond the prior, while ordering among weak matches is
 //! preserved. Because the gate is applied to prior-free evidence and
 //! the prior enters once, the floor sits at the corpus prior -- not at
-//! Lucene's unconditional p = 0.5. Without a configured `base_rate`
-//! the formula reduces to Lucene PR 15827's `LogOddsFusionQuery`
-//! exactly. `Pass` gating keeps the raw sign of evidence
-//! (Theorem 4.2.2) for callers that want strictly signed fusion.
+//! an unconditional p = 0.5. `Pass` gating keeps the raw sign of
+//! evidence (Theorem 4.2.2) for callers that want strictly signed
+//! fusion; it matches Lucene's `LogOddsFusionQuery` default since
+//! Lucene PR 16410 flipped that query to signed log-odds with softplus
+//! as the explicit opt-in (`Gating.SOFTPLUS`). The softplus default
+//! here is deliberate and BEIR-validated: with prior-free evidence the
+//! floor is the prior, which Lucene's posterior-fed softplus lacked.
 
 use uqa_scoring::{logit as prior_logit, sigmoid};
 
@@ -172,8 +175,10 @@ impl LogOddsFusion {
         }
 
         // The single-signal identity (Proposition 4.3.2) only holds for
-        // prior-free fusion; a configured prior must still enter once.
-        if probabilities.len() == 1 && self.base_rate.is_none() {
+        // prior-free fusion without normalization bounds; a configured
+        // prior must still enter once, and explicit logit bounds are a
+        // learned per-signal transform that must not be bypassed.
+        if probabilities.len() == 1 && self.base_rate.is_none() && logit_min.is_none() {
             return Ok(probabilities[0].unwrap_or(0.5));
         }
 
@@ -184,14 +189,11 @@ impl LogOddsFusion {
             };
             let raw_logit = lucene_logit(*probability);
             let gated = match (logit_min, logit_max) {
-                (Some(minimums), Some(maximums)) => {
-                    let range = maximums[index] - minimums[index];
-                    if range > 0.0 {
-                        ((raw_logit - minimums[index]) / range).clamp(0.0, 1.0)
-                    } else {
-                        0.5
-                    }
-                }
+                // Validation guarantees min < max, so the range is
+                // strictly positive here.
+                (Some(minimums), Some(maximums)) => ((raw_logit - minimums[index])
+                    / (maximums[index] - minimums[index]))
+                    .clamp(0.0, 1.0),
                 _ => self.gating.apply(raw_logit),
             };
             logit_sum += weights.map_or(gated, |signal_weights| signal_weights[index] * gated);
@@ -261,15 +263,20 @@ fn validate_bounds(
     logit_min: Option<&[f64]>,
     logit_max: Option<&[f64]>,
 ) -> Result<(), &'static str> {
-    match (logit_min, logit_max) {
-        (Some(minimums), Some(maximums))
-            if minimums.len() == signal_count && maximums.len() == signal_count =>
-        {
-            Ok(())
-        }
-        (Some(_), Some(_)) => Err("logit bound lengths must equal signal count"),
-        _ => Ok(()),
+    let (minimums, maximums) = match (logit_min, logit_max) {
+        (None, None) => return Ok(()),
+        (Some(minimums), Some(maximums)) => (minimums, maximums),
+        _ => return Err("logit_min and logit_max must either both be set or absent"),
+    };
+    if minimums.len() != signal_count || maximums.len() != signal_count {
+        return Err("logit bound lengths must equal signal count");
     }
+    if minimums.iter().zip(maximums).any(|(minimum, maximum)| {
+        !minimum.is_finite() || !maximum.is_finite() || minimum >= maximum
+    }) {
+        return Err("logit bounds must be finite with min < max");
+    }
+    Ok(())
 }
 
 fn lucene_logit(probability: f64) -> f64 {
@@ -486,15 +493,54 @@ mod tests {
     }
 
     #[test]
-    fn partial_logit_bounds_fall_back_to_gating() {
+    fn partial_logit_bounds_are_rejected() {
         let fusion = LogOddsFusion::new(0.5);
         let probabilities = [Some(0.8), Some(0.6)];
         let minimums = [-1.0, 0.0];
+        assert_eq!(
+            fusion.fuse_configured(&probabilities, None, Some(&minimums), None),
+            Err("logit_min and logit_max must either both be set or absent"),
+        );
+        assert_eq!(
+            fusion.fuse_configured(&probabilities, None, None, Some(&minimums)),
+            Err("logit_min and logit_max must either both be set or absent"),
+        );
+    }
+
+    #[test]
+    fn degenerate_logit_bounds_are_rejected() {
+        let fusion = LogOddsFusion::new(0.5);
+        let probabilities = [Some(0.8), Some(0.6)];
+        let inverted = ([0.0, 1.0], [1.0, 1.0]);
+        assert_eq!(
+            fusion.fuse_configured(&probabilities, None, Some(&inverted.0), Some(&inverted.1)),
+            Err("logit bounds must be finite with min < max"),
+        );
+        let non_finite = ([f64::NEG_INFINITY, 0.0], [1.0, 1.0]);
+        assert_eq!(
+            fusion.fuse_configured(
+                &probabilities,
+                None,
+                Some(&non_finite.0),
+                Some(&non_finite.1)
+            ),
+            Err("logit bounds must be finite with min < max"),
+        );
+    }
+
+    #[test]
+    fn single_signal_with_bounds_applies_normalization() {
+        // Explicit logit bounds are a learned per-signal transform, so
+        // the single-signal identity must not bypass them.
+        let fusion = LogOddsFusion::new(0.5);
+        let minimums = [0.0];
+        let maximums = [2.0 * lucene_logit(0.8)];
+        let expected = sigmoid(0.5);
         approx_eq(
             fusion
-                .fuse_configured(&probabilities, None, Some(&minimums), None)
+                .fuse_configured(&[Some(0.8)], None, Some(&minimums), Some(&maximums))
                 .unwrap(),
-            fusion.fuse_sparse(&probabilities),
+            expected,
         );
     }
 

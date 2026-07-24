@@ -34,7 +34,6 @@ use crate::bm25::{BM25Params, BM25Scorer};
 const DEFAULT_N_SAMPLES: usize = 50;
 const DEFAULT_TOKENS_PER_QUERY: usize = 5;
 const DEFAULT_SEED: i64 = 42;
-const MAX_COLLECTED_DOCS: usize = 10_000;
 const BASE_RATE_MIN: f64 = 1e-6;
 const BASE_RATE_MAX: f64 = 0.5;
 const FALLBACK_BASE_RATE: f64 = 0.01;
@@ -132,8 +131,8 @@ impl BayesianScoreEstimator {
         bm25_params: BM25Params,
         queries: &[Vec<String>],
     ) -> BayesianBM25Params {
-        let max_doc = index.doc_count() as usize;
-        if max_doc == 0 || queries.is_empty() {
+        let doc_count = index.doc_count() as usize;
+        if doc_count == 0 || queries.is_empty() {
             return fallback_params(bm25_params);
         }
 
@@ -145,23 +144,22 @@ impl BayesianScoreEstimator {
             if query_terms.is_empty() {
                 continue;
             }
+            // Every matching document participates in the calibration;
+            // capping at a top-scored sample would bias the percentile
+            // boundary and the base rate on corpora with more matches
+            // than the cap (Lucene PR 16410).
             let mut query_scores = collect_scores(index, field, query_terms, &bm25_scorer);
             if query_scores.is_empty() {
                 continue;
             }
 
-            query_scores.sort_by(|left, right| right.total_cmp(left));
-            query_scores.truncate(max_doc.min(MAX_COLLECTED_DOCS));
-
-            let mut sorted = query_scores.clone();
-            sorted.sort_by(f64::total_cmp);
-            let percentile_index = ((sorted.len() as f64) * RELEVANCE_BOUNDARY_PERCENTILE) as usize;
-            let threshold = sorted[percentile_index.min(sorted.len() - 1)];
-            let high_count = query_scores
-                .iter()
-                .filter(|score| **score >= threshold)
-                .count();
-            base_rate_fractions.push(high_count as f64 / max_doc as f64);
+            query_scores.sort_by(f64::total_cmp);
+            let percentile_index =
+                ((query_scores.len() as f64) * RELEVANCE_BOUNDARY_PERCENTILE) as usize;
+            let threshold = query_scores[percentile_index.min(query_scores.len() - 1)];
+            let high_count =
+                query_scores.len() - query_scores.partition_point(|score| *score < threshold);
+            base_rate_fractions.push(high_count as f64 / doc_count as f64);
             scores_by_length
                 .entry(query_terms.len())
                 .or_default()
@@ -479,6 +477,35 @@ mod tests {
         assert!(first.alpha.is_finite() && first.alpha > 0.0);
         assert!(first.beta.is_finite());
         assert!((BASE_RATE_MIN..=BASE_RATE_MAX).contains(&first.base_rate));
+    }
+
+    #[test]
+    fn estimate_uses_all_matching_documents_beyond_ten_thousand() {
+        // 24 distinct BM25 score levels (one per document length), 500
+        // documents each. The 95th percentile of the full 12,000-score
+        // distribution sits two levels below the top, giving a base
+        // rate of exactly 1000/12000; truncating to the 10,000 highest
+        // scores would move the boundary to the top level and halve it.
+        let mut index = MemoryInvertedIndex::new(standard_analyzer("english"));
+        for doc_id in 0..12_000u64 {
+            let padding = " pad".repeat((doc_id % 24) as usize);
+            index.add_document(
+                doc_id + 1,
+                BTreeMap::from([("body".to_string(), format!("common{padding}"))]),
+            );
+        }
+        let params = BayesianScoreEstimator::default().estimate_with_queries(
+            &index,
+            "body",
+            BM25Params::default(),
+            &[vec!["common".to_string()]],
+        );
+        let expected = 1_000.0 / 12_000.0;
+        assert!(
+            (params.base_rate - expected).abs() < 1e-9,
+            "base rate must come from the full matching distribution, got {}",
+            params.base_rate
+        );
     }
 
     #[test]

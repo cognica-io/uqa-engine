@@ -152,10 +152,12 @@ impl Operator for SemanticFilterOperator {
 ///
 /// Each signal must produce prior-free evidence probabilities in
 /// `(0, 1)`; a configured `base_rate` enters the fusion exactly once.
-/// Missing documents contribute zero gated logit, matching Lucene's
-/// sparse scorer. The default softplus gating floors match evidence at
-/// the prior; without a configured `base_rate` the operator reduces to
-/// Lucene's `LogOddsFusionQuery` exactly.
+/// Missing documents contribute zero gated logit, and a signal with no
+/// matches at all stays in the declared signal set as neutral evidence
+/// (Lucene PR 16410 semantics: the clause count that governs `n^alpha`
+/// and the uniform denominator never shrinks at execution time). The
+/// default softplus gating floors match evidence at the prior;
+/// `LogitGating::Pass` matches Lucene's signed default.
 pub struct LogOddsFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,
@@ -274,28 +276,11 @@ impl Operator for LogOddsFusionOperator {
             return PostingList::new();
         }
 
-        let active_signal_count = score_maps
-            .iter()
-            .filter(|scores| !scores.is_empty())
-            .count();
-        // An entirely absent signal drops out of the fusion (Lucene's
-        // single-clause rewrite): the surviving signal passes through
-        // at n = 1, where a configured prior still enters once.
-        if active_signal_count == 1 {
-            let result = posting_lists
-                .into_iter()
-                .find(|posting_list| !posting_list.is_empty())
-                .expect("one active signal has a posting list");
-            let result = match self.base_rate {
-                Some(_) => result.with_scores(|entry| fuser.fuse(&[entry.payload.score])),
-                None => result,
-            };
-            return match self.top_k {
-                Some(k) => result.top_k(k),
-                None => result,
-            };
-        }
-
+        // A signal with no matches still contributes neutral evidence to
+        // every document: the declared signal count governs `n^alpha`
+        // and the uniform denominator, so a document's fused score
+        // cannot depend on whether another signal happened to match
+        // elsewhere (Lucene PR 16410 semantics).
         let weights = self.weights.clone().or_else(|| {
             if self.adaptive_weights {
                 adaptive_signal_weights(&fuser, &score_maps)

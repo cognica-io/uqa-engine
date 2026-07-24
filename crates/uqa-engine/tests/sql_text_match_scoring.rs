@@ -174,6 +174,34 @@ fn probabilistic_fusion_rejects_raw_text_match_scores() {
 }
 
 #[test]
+fn fusion_keeps_declared_signal_count_when_one_signal_is_empty() {
+    let eng = engine();
+    let with_empty = sql_score_map(
+        &eng,
+        "fuse_log_odds(bayesian_match(body, 'rust'), bayesian_match(body, 'zzzabsent'))",
+    );
+    let with_unrelated = sql_score_map(
+        &eng,
+        "fuse_log_odds(bayesian_match(body, 'rust'), bayesian_match(body, 'python'))",
+    );
+
+    // Documents 1 and 2 match only the first signal in both queries;
+    // their fused scores must not depend on whether the second signal
+    // matched elsewhere, because the declared signal count governs the
+    // fusion either way (Lucene PR 16410 semantics).
+    for id in [1, 2] {
+        let empty_score = with_empty.get(&id).expect("doc matches the first signal");
+        let unrelated_score = with_unrelated
+            .get(&id)
+            .expect("doc matches the first signal");
+        assert!(
+            (empty_score - unrelated_score).abs() < 1e-12,
+            "doc {id}: {empty_score} vs {unrelated_score}"
+        );
+    }
+}
+
+#[test]
 fn multi_term_bayesian_calibration_preserves_bm25_ranking() {
     let eng = engine();
     let params = BayesianBM25Params {

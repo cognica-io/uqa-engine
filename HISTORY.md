@@ -50,6 +50,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **Log-odds fusion neutral signals and calibration sampling (Lucene PR 16410):** `LogOddsFusionOperator` and SQL `fuse_log_odds` no longer collapse to a single-signal pass-through when every other declared signal has no matches; the declared signal count keeps governing `n^alpha` and the uniform denominator, so a document's fused score cannot change because an unrelated document matched the other signal, and configured weights, logit bounds, and priors always apply. `LogOddsFusion` now rejects partial, non-finite, or inverted logit-normalization bounds instead of silently ignoring them, and single-signal fusion applies configured bounds instead of bypassing them. `BayesianScoreEstimator` calibrates from every matching document rather than the 10,000 highest scores, removing the percentile-boundary and base-rate bias on corpora with more matches than the cap.
 - **Persistent open latency:** large persistent catalogs no longer rebuild inverted/vector indexes or deserialize large statistics payloads during open.
 - **Nested persistent writes:** SQLite-backed inverted and vector index writes use savepoints when they run inside outer engine transactions, avoiding transaction conflicts in SQL-managed index lifecycle tests.
 - **Mixed SQL function predicates:** search-aware functions now compose with ordinary WHERE predicates instead of dropping the non-function filters during operator-tree lowering.
