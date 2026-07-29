@@ -207,11 +207,9 @@ pub struct Engine {
     /// keyed by signal name. Round-trips through the catalog when the
     /// engine is `SQLite`-backed.
     scoring_params: RwLock<BTreeMap<String, String>>,
-    /// Persisted view definitions and their compiled relational plans. The
-    /// SQL text remains the catalog representation; execution reads the
-    /// corresponding `QueryPlan` so a view cannot bypass the unified plan.
-    views: RwLock<BTreeMap<String, uqa_sql::ast::SelectStmt>>,
-    view_plans: RwLock<BTreeMap<String, uqa_planner::QueryPlan>>,
+    /// Persisted, fully lowered view definitions. Execution and catalog
+    /// restoration both use the same `QueryPlan`; no AST carrier is kept.
+    views: RwLock<BTreeMap<String, uqa_planner::QueryPlan>>,
     /// Registered secondary indexes from `CREATE INDEX`.
     catalog_indexes: RwLock<BTreeMap<String, CatalogIndexRow>>,
     /// Registered schema names. Engine-level schemas are advisory
@@ -290,7 +288,6 @@ struct SQLStatementCache {
 
 #[derive(Clone)]
 struct PreparedStatementPlan {
-    definition: uqa_sql::ast::Statement,
     plan: uqa_planner::UnifiedPlan,
 }
 
@@ -498,7 +495,6 @@ impl Engine {
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
-            view_plans: RwLock::new(BTreeMap::new()),
             catalog_indexes: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
@@ -584,18 +580,6 @@ impl uqa_sql::expr::EngineHook for Engine {
         args: &[(Option<String>, Value)],
     ) -> Option<std::result::Result<Value, SQLError>> {
         crate::sql::call_user_scalar_function(self, name, args)
-    }
-    fn run_subquery(
-        &self,
-        stmt: &uqa_sql::ast::SelectStmt,
-        outer_row: Option<&uqa_sql::result::ResultRow>,
-        params: &[uqa_sql::SQLParam],
-    ) -> std::result::Result<(Vec<String>, Vec<uqa_sql::result::ResultRow>), String> {
-        let ctes = crate::sql::CteScope::new();
-        match crate::sql::run_correlated_subquery(self, stmt, outer_row, params, &ctes) {
-            Ok(r) => Ok((r.columns, r.rows)),
-            Err(e) => Err(format!("subquery failed: {e}")),
-        }
     }
 }
 

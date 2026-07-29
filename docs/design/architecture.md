@@ -65,29 +65,34 @@ graph TD
 ```mermaid
 flowchart LR
     SQL["SQL string"] --> Parse["uqa-sql::compile"]
-    Parse --> Engine["Engine::sql"]
-    Engine --> Lowerable{"lowerable single-table WHERE?"}
-    Lowerable -->|yes| IR["OperatorTree"]
-    Engine --> IRBacked["IR-backed graph / ML functions"]
-    IRBacked --> IR
+    Parse --> Lower["UnifiedPlan lowering"]
+    Lower --> PlanOpt["plan-native optimizer"]
+    PlanOpt --> Unified["UnifiedPlanExecutor"]
+    Unified --> Query["QueryPlan / ScalarExpr"]
+    Unified --> Command["physical command plans"]
+    Query --> Access{"AccessPathPlan"}
+    Access -->|row| Row["relational physical operators"]
+    Access -->|hybrid| Hybrid["posting candidates + scalar residual"]
+    Access -->|operator| IR["OperatorTree"]
+    Hybrid --> IR
     IR --> Optimize["QueryOptimizer (10 passes)"]
     Optimize --> Execute["PlanExecutor + EngineDriver"]
     Execute --> Output["OperatorOutput"]
     Output --> Posting["PostingList"]
     Output --> Generalized["GeneralizedPostingList"]
-    Lowerable -->|no| Direct["direct dispatch / row execution"]
-    Engine --> Dedicated["non-IR mutation / dedicated APIs"]
-    Posting --> Result["SQLResult"]
+    Row --> Result["SQLResult"]
+    Command --> Result
+    Posting --> Result
     Generalized --> Result
-    Direct --> Result
-    Dedicated --> Result
 ```
 
 `EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent generalized set algebra. Graph payloads retain their subgraph metadata through the `GraphPostingList` Phi encoding. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
 
-The remaining boundary is SQL expressiveness, not missing physical dispatch for IR nodes. Arithmetic expressions, subqueries, windows, mutations, and functions with no equivalent `OperatorTree` node retain the relational row executor or a dedicated API. IR-backed graph functions lower to the same optimizer/driver path; graph inspection and mutation calls without a matching IR node do not pretend to do so.
+`OperatorTree` is a child access algebra, not the container for every SQL semantic. Arithmetic, subqueries, windows, and row mutations are represented by `ScalarExpr`, `QueryPlan`, and physical command nodes in the enclosing `UnifiedPlan`; retrieval, graph, join, centrality, and fusion nodes use `OperatorTree` where its posting-list or tuple carrier is the correct representation. The plan-native optimizer sees both layers and chooses row, operator-tree, or hybrid access after lowering. Every SQL form still enters the same exhaustive `UnifiedPlanExecutor`, so this representation choice is not an execution bypass.
 
-INNER JOIN takes a hash-join fast path when the `ON` predicate is a clean equality between qualified columns from the two sides; the engine buckets the right side by join key once and probes per left row in `O(left + right)`. Anything else falls back to the nested-loop `cross_filter`. See `try_hash_inner_join` in [`crates/uqa-engine/src/sql.rs`](../../crates/uqa-engine/src/sql.rs).
+Relational/DML parser expressions, DML statements, and `SelectStmt` values end at lowering. Scalar subqueries use owned `QueryPlan` slots, query blocks execute directly without rebuilding an AST carrier, and CTE, view, prepared, and EXPLAIN bodies remain plan children. Catalog/procedural DDL keeps its typed command data, but it cannot re-enter a separate SQL executor.
+
+INNER JOIN takes a hash-join fast path when the `ON` predicate is a clean equality between qualified columns from the two sides; the engine buckets the right side by join key once and probes per left row in `O(left + right)`. Anything else falls back to the nested-loop `cross_filter`. See `try_hash_inner_join` in [`crates/uqa-engine/src/sql/from_rows.rs`](../../crates/uqa-engine/src/sql/from_rows.rs).
 
 ## Inference and persistence
 

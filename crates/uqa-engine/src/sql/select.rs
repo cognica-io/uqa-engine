@@ -4,15 +4,19 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL SELECT, set-operation, CTE, ordering, and projection execution.
+//! SQL SELECT, set-operation, `CtePlan`, ordering, and projection execution.
 
-use std::cell::RefCell;
 use std::collections::HashSet;
 
 use uqa_core::DocId;
+use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound};
 use uqa_joins::row_join::JoinKey;
-use uqa_planner::{ComputePlan, CtePlan, QueryBlockPlan, QueryPlan, RelationalPlan};
+use uqa_planner::{
+    AccessPathPlan, ComputePlan, CtePlan, ProjectionPlan, QueryBlockPlan, QueryPlan,
+    RelationalPlan, SourcePlan, UnifiedPlan,
+};
 
+use super::scalar::{eval_physical_scalar, PhysicalEvalContext, PhysicalSubqueryRunner};
 use super::{
     aggregate_join_rows, build_aggregate_rows, build_join_rows_with_ctes,
     build_join_rows_with_ctes_filtered, build_join_rows_with_ctes_filtered_by_qualifier,
@@ -20,22 +24,21 @@ use super::{
     build_join_rows_with_ctes_filtered_pruned,
     build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier,
     build_join_rows_with_ctes_pruned, build_join_rows_with_ctes_pruned_filtered_by_qualifier,
-    compute_window_columns, engine_func_intercept, eval, execute_function,
-    execute_function_with_top_k, execute_lateral_subquery, execute_mixed_where, expect_column_name,
-    has_aggregate, has_window, project_join_row_with_engine, project_join_row_with_hook,
-    project_join_row_with_hook_and_labels, projected_value_from_row, projection_label_at, BTreeMap,
-    BTreeSet, BinaryOp, ColumnPrune, Document, Engine, EvalContext, Expr, FromClause, Projection,
-    QualifierFilters, ResultRow, SQLError, SQLParam, SQLResult, ScoredEntry, SelectStmt, SetOpKind,
-    Statement, Value, CTE, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    compute_window_columns, engine_func_intercept, execute_function, execute_function_with_top_k,
+    execute_lateral_subquery, execute_mixed_where, expect_column_name, has_aggregate, has_window,
+    project_join_row_with_plan, projected_value_from_row, projection_label_at, BTreeMap, BTreeSet,
+    BinaryOp, ColumnPrune, Document, Engine, QualifierFilters, ResultRow, SQLError, SQLParam,
+    SQLResult, ScoredEntry, SetOpKind, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 
 // -------------------------------------------------------------------------
 // SELECT
 // -------------------------------------------------------------------------
 
-/// Execute the structural relational plan directly. CTEs and set-operation
-/// branches recurse through plan children; only a single query block is
-/// adapted to the existing row-operator configuration.
+/// Execute the physical relational plan directly. CTEs, set-operation
+/// branches, values, and query blocks recurse through plan children; query
+/// blocks select physical access and row operators without reconstructing a
+/// parser statement.
 pub(super) fn execute_query_plan(
     engine: &Engine,
     plan: &QueryPlan,
@@ -45,30 +48,7 @@ pub(super) fn execute_query_plan(
     execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
 }
 
-/// Plan and execute a SELECT AST supplied by a stored view, routine, or
-/// expression subquery. These runtime-produced statements still enter the
-/// unified plan before any physical work begins.
-pub(super) fn execute_select_ast(
-    engine: &Engine,
-    statement: &SelectStmt,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let mut ctes = CteScope::new();
-    execute_select_ast_with_ctes(engine, statement, params, &mut ctes)
-}
-
-pub(super) fn execute_select_ast_with_ctes(
-    engine: &Engine,
-    statement: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<SQLResult, SQLError> {
-    let plan = QueryPlan::lower_with(statement.clone(), &|name: &str| {
-        engine.has_registered_aggregate_function(name)
-    });
-    execute_query_plan_with_ctes(engine, &plan, params, ctes)
-}
-
+/// Execute a physical query plan while preserving the caller's CTE scope.
 pub(super) fn execute_query_plan_with_ctes(
     engine: &Engine,
     plan: &QueryPlan,
@@ -76,15 +56,8 @@ pub(super) fn execute_query_plan_with_ctes(
     ctes: &mut CteScope,
 ) -> Result<SQLResult, SQLError> {
     if !plan.ctes.is_empty() {
-        if let Some(statement) = plan.physical_select() {
-            // Reuse the mature CTE physical optimiser (single-use inlining,
-            // output-filter pushdown, and recursive working-set pruning). Its
-            // child queries re-enter `execute_select_ast_with_ctes`, so this
-            // is a physical planning step rather than an AST execution path.
-            materialize_ctes(engine, &statement, params, ctes)?;
-        } else {
-            materialize_plan_ctes(engine, &plan.ctes, params, ctes)?;
-        }
+        let filters = cte_output_filters(plan);
+        materialize_plan_ctes_with_filters(engine, &plan.ctes, params, ctes, &filters)?;
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
@@ -98,44 +71,45 @@ pub(super) fn execute_query_plan_with_ctes(
             order_by,
             limit,
             offset,
+            subqueries,
         } => {
             let lhs = execute_query_plan_with_ctes(engine, left, params, ctes)?;
             let rhs = execute_query_plan_with_ctes(engine, right, params, ctes)?;
             let mut combined = combine_set_results(*kind, *all, lhs, rhs);
             if !order_by.is_empty() || limit.is_some() || offset.is_some() {
-                let synthetic = SelectStmt {
+                let synthetic = QueryBlockPlan {
                     projections: Vec::new(),
                     from: None,
                     r#where: None,
+                    compute: ComputePlan::Project,
                     group_by: Vec::new(),
                     grouping_sets: Vec::new(),
                     having: None,
-                    order_by: order_by
-                        .iter()
-                        .map(|order| uqa_sql::ast::OrderBy {
-                            expr: order.expression.expression.clone(),
-                            descending: order.descending,
-                            nulls: order.nulls,
-                        })
-                        .collect(),
-                    limit: limit
-                        .as_ref()
-                        .map(|expression| expression.expression.clone()),
-                    offset: offset
-                        .as_ref()
-                        .map(|expression| expression.expression.clone()),
-                    with: Vec::new(),
-                    set_op: None,
+                    order_by: order_by.clone(),
+                    limit: limit.as_deref().cloned(),
+                    offset: offset.as_deref().cloned(),
                     distinct: false,
                     distinct_on: Vec::new(),
+                    subqueries: subqueries.clone(),
+                    access: AccessPathPlan::Row,
                 };
                 let columns = combined.columns.clone();
-                combined.rows = apply_row_order_limit(combined.rows, &synthetic, engine, params)?;
+                let mut ordering_scope = ctes.clone();
+                ordering_scope.scalar_subqueries.clone_from(subqueries);
+                combined.rows = apply_row_order_limit_with_ctes(
+                    combined.rows,
+                    &synthetic,
+                    engine,
+                    params,
+                    &ordering_scope,
+                )?;
                 combined.columns = columns;
             }
             Ok(combined)
         }
-        RelationalPlan::Values { rows } => execute_plan_values(engine, rows, params),
+        RelationalPlan::Values { rows, subqueries } => {
+            execute_plan_values(engine, rows, subqueries, params, ctes)
+        }
     }
 }
 
@@ -146,15 +120,10 @@ fn execute_query_block_plan(
     ctes: &mut CteScope,
     prepared_exists_filter: Option<&ExistsMembershipPlan>,
 ) -> Result<SQLResult, SQLError> {
-    let saved_subqueries = ctes.planned_subqueries.clone();
-    ctes.install_source_plan(&block.source);
-    for expression in block.expressions() {
-        ctes.install_expression_plan(expression);
-    }
+    let saved_subqueries = std::mem::replace(&mut ctes.scalar_subqueries, block.subqueries.clone());
     let result = (|| {
-        let original = block.physical_select();
-        let defer_distinct_limit = should_defer_distinct_limit(&original);
-        let execution = select_execution_stmt(&original, defer_distinct_limit);
+        let defer_distinct_limit = should_defer_distinct_limit(block);
+        let execution = select_execution_stmt(block, defer_distinct_limit);
         let mut result = run_query_block_with_prepared_exists(
             engine,
             block,
@@ -163,19 +132,24 @@ fn execute_query_block_plan(
             ctes,
             prepared_exists_filter,
         )?;
-        result = apply_select_distinct(engine, &original, result, params)?;
+        result = apply_select_distinct(engine, block, result, params, ctes)?;
         if defer_distinct_limit {
             let columns = result.columns.clone();
-            result.rows = apply_limit_offset_only(result.rows, &original, engine, params)?;
+            result.rows = apply_limit_offset_only(result.rows, block, engine, params, ctes)?;
             result.columns = columns;
         }
         Ok(result)
     })();
-    ctes.planned_subqueries = saved_subqueries;
+    ctes.scalar_subqueries = saved_subqueries;
     result
 }
 
-fn combine_set_results(kind: SetOpKind, all: bool, lhs: SQLResult, rhs: SQLResult) -> SQLResult {
+pub(super) fn combine_set_results(
+    kind: SetOpKind,
+    all: bool,
+    lhs: SQLResult,
+    rhs: SQLResult,
+) -> SQLResult {
     match (kind, all) {
         (SetOpKind::Union, true) => {
             let mut rows = lhs.rows;
@@ -214,8 +188,10 @@ fn combine_set_results(kind: SetOpKind, all: bool, lhs: SQLResult, rhs: SQLResul
 
 fn execute_plan_values(
     engine: &Engine,
-    rows: &[Vec<uqa_planner::ExpressionPlan>],
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     if rows.is_empty() {
         return Ok(SQLResult::empty());
@@ -223,14 +199,10 @@ fn execute_plan_values(
     let columns: Vec<String> = (0..rows[0].len())
         .map(|index| format!("column{}", index + 1))
         .collect();
-    let mut scope = CteScope::new();
-    for row in rows {
-        for expression in row {
-            scope.install_expression_plan(expression);
-        }
-    }
-    let hook = ScopedEngineHook::new(engine, &scope);
-    let context = EvalContext::new(None, params).with_engine(&hook);
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let context = PhysicalEvalContext::new(None, params)
+        .with_function_hook(&hook)
+        .with_subquery_runner(&hook);
     let mut output = Vec::with_capacity(rows.len());
     for source in rows {
         if source.len() != columns.len() {
@@ -244,7 +216,7 @@ fn execute_plan_values(
         for (index, expression) in source.iter().enumerate() {
             row.insert(
                 columns[index].clone(),
-                eval(&expression.expression, &context)?,
+                eval_physical_scalar(expression, subqueries, &context)?,
             );
         }
         output.push(row);
@@ -258,21 +230,19 @@ pub(super) fn materialize_plan_ctes(
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<(), SQLError> {
+    materialize_plan_ctes_with_filters(engine, plans, params, ctes, &BTreeMap::new())
+}
+
+fn materialize_plan_ctes_with_filters(
+    engine: &Engine,
+    plans: &[CtePlan],
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
+) -> Result<(), SQLError> {
     for plan in plans {
         let rows = if plan.recursive {
-            let query = plan.query.physical_select().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "recursive CTE `{}` does not have a SELECT carrier",
-                    plan.name
-                ))
-            })?;
-            let cte = CTE {
-                name: plan.name.clone(),
-                columns: plan.columns.clone(),
-                recursive: true,
-                query: Box::new(query),
-            };
-            materialize_recursive_cte(engine, &cte, params, ctes, None)?
+            materialize_recursive_cte(engine, plan, params, ctes, output_filters.get(&plan.name))?
         } else {
             let result = execute_query_plan_with_ctes(engine, &plan.query, params, ctes)?;
             apply_cte_column_aliases(result.rows, &result.columns, &plan.columns)
@@ -286,13 +256,13 @@ pub(super) fn materialize_plan_ctes(
 /// the canonical UQA implementation's `_explain_plan`: returns a single-column `plan` table with
 /// one row per line.
 pub(super) fn run_explain(
-    engine: &Engine,
-    body: Statement,
+    _engine: &Engine,
+    body: &UnifiedPlan,
     _params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let plan_text = match &body {
-        Statement::Select(stmt) => format_select_plan(stmt),
-        other => format!("{other:?}"),
+    let plan_text = match body {
+        UnifiedPlan::Query(query) => format_query_plan(query),
+        UnifiedPlan::Command(command) => format!("{}\n  {command:#?}", command.name()),
     };
     let mut rows: Vec<ResultRow> = Vec::new();
     for line in plan_text.split('\n') {
@@ -300,7 +270,6 @@ pub(super) fn run_explain(
         r.insert("plan".to_string(), Value::Str(line.to_string()));
         rows.push(r);
     }
-    let _ = engine; // keep the parameter live for future cost extension
     Ok(SQLResult {
         columns: vec!["plan".to_string()],
         rows,
@@ -308,7 +277,35 @@ pub(super) fn run_explain(
     })
 }
 
-fn format_select_plan(stmt: &SelectStmt) -> String {
+fn format_query_plan(plan: &QueryPlan) -> String {
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => format_select_plan(block),
+        RelationalPlan::SetOp {
+            kind,
+            all,
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            ..
+        } => format!(
+            "SetOp\n  kind={kind:?}\n  all={all}\n  left=({})\n  right=({})\n  order_by={}\n  limit={}\n  offset={}",
+            format_query_plan(left).replace('\n', "\n    "),
+            format_query_plan(right).replace('\n', "\n    "),
+            order_by.len(),
+            limit
+                .as_deref()
+                .map_or_else(|| "none".into(), explain_int_expr),
+            offset
+                .as_deref()
+                .map_or_else(|| "none".into(), explain_int_expr),
+        ),
+        RelationalPlan::Values { rows, .. } => format!("Values\n  rows={}", rows.len()),
+    }
+}
+
+fn format_select_plan(stmt: &QueryBlockPlan) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(s, "Select");
@@ -342,11 +339,11 @@ fn format_select_plan(stmt: &SelectStmt) -> String {
     s.trim_end().to_string()
 }
 
-fn should_defer_distinct_limit(stmt: &SelectStmt) -> bool {
+fn should_defer_distinct_limit(stmt: &QueryBlockPlan) -> bool {
     stmt.distinct && (stmt.limit.is_some() || stmt.offset.is_some())
 }
 
-fn select_execution_stmt(stmt: &SelectStmt, defer_distinct_limit: bool) -> SelectStmt {
+fn select_execution_stmt(stmt: &QueryBlockPlan, defer_distinct_limit: bool) -> QueryBlockPlan {
     if !defer_distinct_limit {
         return stmt.clone();
     }
@@ -358,7 +355,7 @@ fn select_execution_stmt(stmt: &SelectStmt, defer_distinct_limit: bool) -> Selec
 
 fn run_select_without_from(
     engine: &Engine,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
@@ -368,8 +365,10 @@ fn run_select_without_from(
     // `SELECT 1 WHERE false` must produce zero rows: the WHERE clause
     // applies even without a FROM (three-valued: NULL filters too).
     if let Some(filter) = stmt.r#where.as_ref() {
-        let ctx = EvalContext::new(Some(&row), params).with_engine(&hook);
-        let keep = eval(filter, &ctx)?;
+        let ctx = PhysicalEvalContext::new(Some(&row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
+        let keep = eval_physical_scalar(filter, &ctes.scalar_subqueries, &ctx)?;
         if !uqa_sql::expr::truthy(&keep) {
             return Ok(SQLResult {
                 columns,
@@ -383,9 +382,11 @@ fn run_select_without_from(
     if let Some(result) = expand_projection_srf(engine, &hook, stmt, &row, params)? {
         return Ok(result);
     }
-    let projected = super::from_rows::project_join_row_with_engine_hook(
+    let projected = super::from_rows::project_join_row_with_plan(
         engine,
         &hook,
+        &hook,
+        &ctes.scalar_subqueries,
         &row,
         &stmt.projections,
         params,
@@ -403,8 +404,8 @@ fn run_select_without_from(
 /// SRF-in-select-list behavior for the single-SRF case.
 fn expand_projection_srf(
     engine: &Engine,
-    hook: &dyn uqa_sql::expr::EngineHook,
-    stmt: &SelectStmt,
+    hook: &ScopedEngineHook<'_>,
+    stmt: &QueryBlockPlan,
     row: &ResultRow,
     params: &[SQLParam],
 ) -> Result<Option<SQLResult>, SQLError> {
@@ -412,7 +413,7 @@ fn expand_projection_srf(
         return Ok(None);
     }
     let projection = &stmt.projections[0];
-    let Expr::Func { name, args, .. } = &projection.expr else {
+    let ScalarExpr::Func { name, args, .. } = &projection.expr else {
         return Ok(None);
     };
     let lower = name.to_ascii_lowercase();
@@ -421,8 +422,10 @@ fn expand_projection_srf(
     // Object-key extractors return a set of rows in PostgreSQL; the
     // scalar evaluator produces the key list, unpacked here.
     if matches!(lower.as_str(), "json_object_keys" | "jsonb_object_keys") {
-        let ctx = EvalContext::new(Some(row), params).with_engine(hook);
-        let value = eval(&projection.expr, &ctx)?;
+        let ctx = PhysicalEvalContext::new(Some(row), params)
+            .with_function_hook(hook)
+            .with_subquery_runner(hook);
+        let value = eval_physical_scalar(&projection.expr, &stmt.subqueries, &ctx)?;
         let Value::List(items) = value else {
             return Ok(None);
         };
@@ -454,7 +457,13 @@ fn expand_projection_srf(
     if !is_srf {
         return Ok(None);
     }
-    let context = super::from_rows::TableFunctionEvalContext::new(engine, params, hook);
+    let context = super::from_rows::TableFunctionEvalContext::new(
+        engine,
+        params,
+        hook,
+        hook,
+        &stmt.subqueries,
+    );
     let produced =
         super::from_rows::build_table_function_rows(&context, &lower, args, None, &[], &[])?;
     let out: Vec<ResultRow> = produced
@@ -510,15 +519,16 @@ fn distinct_rows_stable(rows: Vec<ResultRow>) -> Vec<ResultRow> {
 
 fn apply_select_distinct(
     engine: &Engine,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     mut result: SQLResult,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     if stmt.distinct {
         result.rows = if stmt.distinct_on.is_empty() {
             distinct_rows_stable(result.rows)
         } else {
-            distinct_on_rows(engine, result.rows, &stmt.distinct_on, params)?
+            distinct_on_rows(engine, result.rows, &stmt.distinct_on, params, ctes)?
         };
     }
     Ok(result)
@@ -526,42 +536,48 @@ fn apply_select_distinct(
 
 fn apply_limit_offset_only(
     rows: Vec<ResultRow>,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     engine: &Engine,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    let synthetic = SelectStmt {
+    let synthetic = QueryBlockPlan {
         projections: Vec::new(),
         from: None,
         r#where: None,
+        compute: ComputePlan::Project,
         group_by: Vec::new(),
         grouping_sets: Vec::new(),
         having: None,
         order_by: Vec::new(),
         limit: stmt.limit.clone(),
         offset: stmt.offset.clone(),
-        with: Vec::new(),
-        set_op: None,
         distinct: false,
         distinct_on: Vec::new(),
+        subqueries: stmt.subqueries.clone(),
+        access: AccessPathPlan::Row,
     };
-    apply_row_order_limit(rows, &synthetic, engine, params)
+    apply_row_order_limit_with_ctes(rows, &synthetic, engine, params, ctes)
 }
 
 fn distinct_on_rows(
     engine: &Engine,
     rows: Vec<ResultRow>,
-    keys: &[Expr],
+    keys: &[ScalarExpr],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut seen: std::collections::HashSet<String> =
         std::collections::HashSet::with_capacity(rows.len());
     let mut out = Vec::with_capacity(rows.len());
+    let hook = ScopedEngineHook::new(engine, ctes);
     for row in rows {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+        let ctx = PhysicalEvalContext::new(Some(&row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
         let mut key = String::new();
         for expr in keys {
-            let value = eval(expr, &ctx)?;
+            let value = eval_physical_scalar(expr, &ctes.scalar_subqueries, &ctx)?;
             push_distinct_key_segment(&mut key, &distinct_value_key(&value));
         }
         if seen.insert(key) {
@@ -599,13 +615,10 @@ fn distinct_value_key(value: &Value) -> String {
     }
 }
 
-type SubqueryCache = BTreeMap<String, (Vec<String>, Vec<ResultRow>)>;
-
 #[derive(Clone, Default)]
 pub(crate) struct CteScope {
     pub(super) rows: BTreeMap<String, Vec<ResultRow>>,
-    pub(super) inlined: BTreeMap<String, SelectStmt>,
-    pub(super) planned_subqueries: BTreeMap<String, QueryPlan>,
+    pub(super) scalar_subqueries: Vec<QueryPlan>,
 }
 
 impl CteScope {
@@ -623,18 +636,6 @@ impl CteScope {
         self.rows.remove(name)
     }
 
-    pub(super) fn install_expression_plan(&mut self, expression: &uqa_planner::ExpressionPlan) {
-        for (key, query) in expression.subquery_bindings() {
-            self.planned_subqueries.insert(key, query.clone());
-        }
-    }
-
-    pub(super) fn install_source_plan(&mut self, source: &uqa_planner::SourcePlan) {
-        for (key, query) in source.subquery_bindings() {
-            self.planned_subqueries.insert(key, query.clone());
-        }
-    }
-
     fn remove_prefixed_row_caches(&mut self, name: &str) {
         let prefix = format!("__uqa_internal_prefixed_cte_cache__:{name}:");
         self.rows.retain(|key, _| !key.starts_with(&prefix));
@@ -644,49 +645,21 @@ impl CteScope {
 pub(super) struct ScopedEngineHook<'a> {
     engine: &'a Engine,
     ctes: &'a CteScope,
-    subquery_cache: RefCell<SubqueryCache>,
 }
 
 impl<'a> ScopedEngineHook<'a> {
     pub(super) fn new(engine: &'a Engine, ctes: &'a CteScope) -> Self {
-        Self {
-            engine,
-            ctes,
-            subquery_cache: RefCell::new(BTreeMap::new()),
-        }
-    }
-
-    fn execute_subquery(
-        &self,
-        statement: &SelectStmt,
-        outer_row: Option<&ResultRow>,
-        params: &[SQLParam],
-    ) -> Result<SQLResult, SQLError> {
-        let correlated = outer_row.is_some() && select_references_outer(statement);
-        if let Some(plan) = self.ctes.planned_subqueries.get(&format!("{statement:?}")) {
-            if correlated {
-                return execute_lateral_query_plan(
-                    self.engine,
-                    plan,
-                    outer_row.expect("correlated subquery has an outer row"),
-                    params,
-                    self.ctes,
-                );
-            }
-            let mut scoped_ctes = self.ctes.clone();
-            return execute_query_plan_with_ctes(self.engine, plan, params, &mut scoped_ctes);
-        }
-        run_correlated_subquery(self.engine, statement, outer_row, params, self.ctes)
+        Self { engine, ctes }
     }
 }
 
 struct ExistsMembershipPlan {
     filters: Vec<ExistsMembershipFilter>,
-    residual: Option<Expr>,
+    residual: Option<ScalarExpr>,
 }
 
 struct ExistsMembershipFilter {
-    outer_exprs: Vec<Expr>,
+    outer_exprs: Vec<ScalarExpr>,
     inner_keys: HashSet<Vec<JoinKey>>,
     negated: bool,
 }
@@ -723,53 +696,20 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     ) -> Option<std::result::Result<Value, SQLError>> {
         crate::sql::call_user_scalar_function(self.engine, name, args)
     }
-
-    fn run_subquery(
-        &self,
-        stmt: &uqa_sql::ast::SelectStmt,
-        outer_row: Option<&ResultRow>,
-        params: &[SQLParam],
-    ) -> std::result::Result<(Vec<String>, Vec<ResultRow>), String> {
-        let correlated = outer_row.is_some() && select_references_outer(stmt);
-        let cache_key = if select_contains_volatile_function(stmt) {
-            None
-        } else if correlated {
-            outer_row.and_then(|row| correlated_subquery_cache_key(stmt, row))
-        } else {
-            Some(format!("uncorrelated:{stmt:?}"))
-        };
-        if let Some(key) = cache_key {
-            if let Some(cached) = self.subquery_cache.borrow().get(&key) {
-                return Ok(cached.clone());
-            }
-            let result = self
-                .execute_subquery(stmt, if correlated { outer_row } else { None }, params)
-                .map(|result| (result.columns, result.rows))
-                .map_err(|e| format!("subquery failed: {e}"))?;
-            self.subquery_cache.borrow_mut().insert(key, result.clone());
-            return Ok(result);
-        }
-        self.execute_subquery(stmt, outer_row, params)
-            .map(|result| (result.columns, result.rows))
-            .map_err(|e| format!("subquery failed: {e}"))
-    }
 }
 
-pub(crate) fn run_correlated_subquery(
-    engine: &Engine,
-    stmt: &SelectStmt,
-    outer_row: Option<&ResultRow>,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<SQLResult, SQLError> {
-    if let Some(row) = outer_row {
-        let plan = QueryPlan::lower_with(stmt.clone(), &|name: &str| {
-            engine.has_registered_aggregate_function(name)
-        });
-        execute_lateral_query_plan(engine, &plan, row, params, ctes)
-    } else {
-        let mut scoped_ctes = ctes.clone();
-        execute_select_ast_with_ctes(engine, stmt, params, &mut scoped_ctes)
+impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
+    fn execute_subquery(
+        &self,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        if let Some(outer_row) = outer_row {
+            return execute_lateral_query_plan(self.engine, plan, outer_row, params, self.ctes);
+        }
+        let mut scoped_ctes = self.ctes.clone();
+        execute_query_plan_with_ctes(self.engine, plan, params, &mut scoped_ctes)
     }
 }
 
@@ -780,149 +720,24 @@ fn execute_lateral_query_plan(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
-    let physical = plan.physical_select().ok_or_else(|| {
-        SQLError::Internal("correlated subquery is not a SELECT query plan".into())
-    })?;
-    execute_lateral_subquery(engine, &physical, outer_row, params, ctes)
+    execute_lateral_subquery(engine, plan, outer_row, params, ctes)
 }
 
-fn select_references_outer(stmt: &SelectStmt) -> bool {
-    let mut local_qualifiers = std::collections::BTreeSet::new();
-    if let Some(from) = stmt.from.as_ref() {
-        collect_local_qualifiers(from, &mut local_qualifiers);
-    }
-    let has_local_from = stmt.from.is_some();
-    stmt.projections.iter().any(|projection| {
-        expr_references_outer(&projection.expr, &local_qualifiers, has_local_from)
-    }) || stmt
-        .r#where
-        .as_ref()
-        .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt
-            .group_by
-            .iter()
-            .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt.grouping_sets.iter().any(|set| {
-            set.iter()
-                .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        })
-        || stmt
-            .having
-            .as_ref()
-            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt
-            .order_by
-            .iter()
-            .any(|order| expr_references_outer(&order.expr, &local_qualifiers, has_local_from))
-        || stmt
-            .limit
-            .as_ref()
-            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt
-            .offset
-            .as_ref()
-            .is_some_and(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt
-            .distinct_on
-            .iter()
-            .any(|expr| expr_references_outer(expr, &local_qualifiers, has_local_from))
-        || stmt.set_op.as_ref().is_some_and(|set_op| {
-            set_op.left.as_deref().is_some_and(select_references_outer)
-                || select_references_outer(&set_op.right)
-        })
-}
-
-fn correlated_subquery_cache_key(stmt: &SelectStmt, outer_row: &ResultRow) -> Option<String> {
-    let refs = select_outer_references(stmt);
-    if refs.is_empty() {
-        return None;
-    }
-    let mut key = format!("correlated:{stmt:?}:");
-    for (qualifier, column) in refs {
-        push_distinct_key_segment(&mut key, &qualifier);
-        push_distinct_key_segment(&mut key, &column);
-        let value = outer_reference_value(outer_row, &qualifier, &column);
-        push_distinct_key_segment(&mut key, &distinct_value_key(&value));
-    }
-    Some(key)
-}
-
-fn select_outer_references(stmt: &SelectStmt) -> Vec<(String, String)> {
-    let mut local_qualifiers = std::collections::BTreeSet::new();
-    if let Some(from) = stmt.from.as_ref() {
-        collect_local_qualifiers(from, &mut local_qualifiers);
-    }
-    let has_local_from = stmt.from.is_some();
-    let mut refs = std::collections::BTreeSet::new();
-    for projection in &stmt.projections {
-        collect_expr_outer_references(
-            &projection.expr,
-            &local_qualifiers,
-            has_local_from,
-            &mut refs,
-        );
-    }
-    if let Some(expr) = stmt.r#where.as_ref() {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    for expr in &stmt.group_by {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    for set in &stmt.grouping_sets {
-        for expr in set {
-            collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-        }
-    }
-    if let Some(expr) = stmt.having.as_ref() {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    for order in &stmt.order_by {
-        collect_expr_outer_references(&order.expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    if let Some(expr) = stmt.limit.as_ref() {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    if let Some(expr) = stmt.offset.as_ref() {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    for expr in &stmt.distinct_on {
-        collect_expr_outer_references(expr, &local_qualifiers, has_local_from, &mut refs);
-    }
-    if let Some(set_op) = stmt.set_op.as_ref() {
-        if let Some(left) = set_op.left.as_deref() {
-            refs.extend(select_outer_references(left));
-        }
-        refs.extend(select_outer_references(&set_op.right));
-    }
-    refs.into_iter().collect()
-}
-
-fn outer_reference_value(row: &ResultRow, qualifier: &str, column: &str) -> Value {
-    if qualifier.is_empty() {
-        return row.get(column).cloned().unwrap_or(Value::Null);
-    }
-    let lookup_key = format!("{qualifier}.{column}");
-    row.get(&lookup_key)
-        .or_else(|| row.get(column))
-        .cloned()
-        .unwrap_or(Value::Null)
-}
-
-fn collect_local_qualifiers(from: &FromClause, out: &mut std::collections::BTreeSet<String>) {
+fn collect_local_qualifiers(from: &SourcePlan, out: &mut std::collections::BTreeSet<String>) {
     match from {
-        FromClause::Table { name, alias } => {
+        SourcePlan::Table { name, alias } => {
             out.insert(name.clone());
             if let Some(alias) = alias {
                 out.insert(alias.clone());
             }
         }
-        FromClause::Join { left, right, .. } => {
+        SourcePlan::Join { left, right, .. } => {
             collect_local_qualifiers(left, out);
             collect_local_qualifiers(right, out);
         }
-        FromClause::Values { alias, .. }
-        | FromClause::Function { alias, .. }
-        | FromClause::Subquery { alias, .. } => {
+        SourcePlan::Values { alias, .. }
+        | SourcePlan::Function { alias, .. }
+        | SourcePlan::Subquery { alias, .. } => {
             if let Some(alias) = alias {
                 out.insert(alias.clone());
             }
@@ -930,138 +745,14 @@ fn collect_local_qualifiers(from: &FromClause, out: &mut std::collections::BTree
     }
 }
 
-fn collect_expr_outer_references(
-    expr: &Expr,
-    local_qualifiers: &std::collections::BTreeSet<String>,
-    has_local_from: bool,
-    refs: &mut std::collections::BTreeSet<(String, String)>,
-) {
-    match expr {
-        Expr::Column(column) => {
-            if !has_local_from {
-                refs.insert((String::new(), column.clone()));
-            }
-        }
-        Expr::QualifiedColumn {
-            qualifier, column, ..
-        } => {
-            if !local_qualifiers.contains(qualifier) {
-                refs.insert((qualifier.clone(), column.clone()));
-            }
-        }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            for item in items {
-                collect_expr_outer_references(item, local_qualifiers, has_local_from, refs);
-            }
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for arg in args {
-                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
-            }
-            for order in order_by {
-                collect_expr_outer_references(&order.expr, local_qualifiers, has_local_from, refs);
-            }
-            if let Some(filter) = filter.as_ref() {
-                collect_expr_outer_references(filter, local_qualifiers, has_local_from, refs);
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            collect_expr_outer_references(lhs, local_qualifiers, has_local_from, refs);
-            collect_expr_outer_references(rhs, local_qualifiers, has_local_from, refs);
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            collect_expr_outer_references(inner, local_qualifiers, has_local_from, refs);
-        }
-        Expr::Between { expr, low, high } => {
-            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
-            collect_expr_outer_references(low, local_qualifiers, has_local_from, refs);
-            collect_expr_outer_references(high, local_qualifiers, has_local_from, refs);
-        }
-        Expr::InList { expr, list, .. } => {
-            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
-            for item in list {
-                collect_expr_outer_references(item, local_qualifiers, has_local_from, refs);
-            }
-        }
-        Expr::WindowCall { args, spec, .. } => {
-            for arg in args {
-                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
-            }
-            for arg in &spec.partition_by {
-                collect_expr_outer_references(arg, local_qualifiers, has_local_from, refs);
-            }
-            for order in &spec.order_by {
-                collect_expr_outer_references(&order.expr, local_qualifiers, has_local_from, refs);
-            }
-            if let Some(frame) = spec.frame.as_ref() {
-                collect_frame_bound_outer_references(
-                    &frame.start,
-                    local_qualifiers,
-                    has_local_from,
-                    refs,
-                );
-                collect_frame_bound_outer_references(
-                    &frame.end,
-                    local_qualifiers,
-                    has_local_from,
-                    refs,
-                );
-            }
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_ref() {
-                collect_expr_outer_references(base, local_qualifiers, has_local_from, refs);
-            }
-            for (cond, result) in when {
-                collect_expr_outer_references(cond, local_qualifiers, has_local_from, refs);
-                collect_expr_outer_references(result, local_qualifiers, has_local_from, refs);
-            }
-            if let Some(else_branch) = else_branch.as_ref() {
-                collect_expr_outer_references(else_branch, local_qualifiers, has_local_from, refs);
-            }
-        }
-        Expr::Star
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => {}
-    }
-}
-
-fn collect_frame_bound_outer_references(
-    bound: &uqa_sql::ast::FrameBound,
-    local_qualifiers: &std::collections::BTreeSet<String>,
-    has_local_from: bool,
-    refs: &mut std::collections::BTreeSet<(String, String)>,
-) {
-    match bound {
-        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
-            collect_expr_outer_references(expr, local_qualifiers, has_local_from, refs);
-        }
-        uqa_sql::ast::FrameBound::UnboundedPreceding
-        | uqa_sql::ast::FrameBound::UnboundedFollowing
-        | uqa_sql::ast::FrameBound::CurrentRow => {}
-    }
-}
-
 fn prepare_exists_membership_filter(
     engine: &Engine,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Option<ExistsMembershipPlan>, SQLError> {
     match filter {
-        _ if exists_predicate_parts(filter).is_some() => {
+        _ if exists_predicate_parts(filter, &ctes.scalar_subqueries).is_some() => {
             let Some(filter) = prepare_single_exists_membership(engine, filter, params, ctes)?
             else {
                 return Ok(None);
@@ -1071,11 +762,11 @@ fn prepare_exists_membership_filter(
                 residual: None,
             }))
         }
-        Expr::And(items) => {
+        ScalarExpr::And(items) => {
             let mut filters = Vec::new();
             let mut residual = Vec::new();
             for item in items {
-                if exists_predicate_parts(item).is_some() {
+                if exists_predicate_parts(item, &ctes.scalar_subqueries).is_some() {
                     let Some(filter) =
                         prepare_single_exists_membership(engine, item, params, ctes)?
                     else {
@@ -1100,34 +791,17 @@ fn prepare_exists_membership_filter(
     }
 }
 
-fn exists_membership_filter_is_stable(engine: &Engine, filter: &Expr, ctes: &CteScope) -> bool {
-    match filter {
-        _ if exists_predicate_parts(filter).is_some() => exists_predicate_parts(filter)
-            .and_then(|(body, _)| body.from.as_ref())
-            .is_some_and(|from| exists_membership_from_is_stable(engine, from, ctes)),
-        Expr::And(items) => items.iter().all(|item| {
-            if exists_predicate_parts(item).is_some() {
-                exists_membership_filter_is_stable(engine, item, ctes)
-            } else {
-                !expr_contains_subquery(item) && !expr_contains_volatile_function(item)
-            }
-        }),
-        _ => false,
-    }
-}
-
 fn prepare_single_exists_membership(
     engine: &Engine,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Option<ExistsMembershipFilter>, SQLError> {
-    let Some((body, negated)) = exists_predicate_parts(filter) else {
+    let Some((body, negated)) = exists_predicate_parts(filter, &ctes.scalar_subqueries) else {
         return Ok(None);
     };
-    if !body.with.is_empty()
-        || body.set_op.is_some()
-        || body.distinct
+    let body = body.clone();
+    if body.distinct
         || !body.distinct_on.is_empty()
         || !body.group_by.is_empty()
         || !body.grouping_sets.is_empty()
@@ -1135,7 +809,7 @@ fn prepare_single_exists_membership(
         || !body.order_by.is_empty()
         || body.limit.is_some()
         || body.offset.is_some()
-        || select_contains_volatile_function(body)
+        || select_contains_volatile_function(&body)
     {
         return Ok(None);
     }
@@ -1158,13 +832,20 @@ fn prepare_single_exists_membership(
     let mut inner_keys = HashSet::with_capacity(inner_rows.len());
     for row in &inner_rows {
         if let Some(local_filter) = local_filter.as_ref() {
-            let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-            if !uqa_sql::expr::truthy(&eval(local_filter, &ctx)?) {
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let ctx = PhysicalEvalContext::new(Some(row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&hook);
+            if !uqa_sql::expr::truthy(&eval_physical_scalar(local_filter, &body.subqueries, &ctx)?)
+            {
                 continue;
             }
         }
-        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-        if let Some(key) = membership_key_for_exprs(&inner_exprs, &ctx)? {
+        let hook = ScopedEngineHook::new(engine, ctes);
+        let ctx = PhysicalEvalContext::new(Some(row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
+        if let Some(key) = membership_key_for_exprs(&inner_exprs, &body.subqueries, &ctx)? {
             inner_keys.insert(key);
         }
     }
@@ -1176,34 +857,34 @@ fn prepare_single_exists_membership(
     }))
 }
 
-fn exists_membership_from_is_stable(engine: &Engine, from: &FromClause, ctes: &CteScope) -> bool {
-    let mut tables = Vec::new();
-    from.collect_tables(&mut tables);
-    !tables.is_empty()
-        && tables.iter().all(|(name, _)| {
-            engine.table(name).is_some()
-                && !ctes.rows.contains_key(name)
-                && !ctes.inlined.contains_key(name)
-        })
-}
-
-fn exists_predicate_parts(expr: &Expr) -> Option<(&SelectStmt, bool)> {
-    match expr {
-        Expr::Exists { body, negated } => Some((body, *negated)),
-        Expr::Not(inner) => match inner.as_ref() {
-            Expr::Exists { body, negated } => Some((body, !*negated)),
-            _ => None,
+fn exists_predicate_parts<'a>(
+    expr: &ScalarExpr,
+    subqueries: &'a [QueryPlan],
+) -> Option<(&'a QueryBlockPlan, bool)> {
+    let (slot, negated) = match expr {
+        ScalarExpr::Exists { subquery, negated } => (*subquery, *negated),
+        ScalarExpr::Not(inner) => match inner.as_ref() {
+            ScalarExpr::Exists { subquery, negated } => (*subquery, !*negated),
+            _ => return None,
         },
-        _ => None,
+        _ => return None,
+    };
+    let query = subqueries.get(slot)?;
+    if !query.ctes.is_empty() {
+        return None;
+    }
+    match &query.root {
+        RelationalPlan::QueryBlock(block) => Some((block, negated)),
+        RelationalPlan::SetOp { .. } | RelationalPlan::Values { .. } => None,
     }
 }
 
 fn split_exists_membership_where(
-    expr: &Expr,
+    expr: &ScalarExpr,
     local_qualifiers: &std::collections::BTreeSet<String>,
-) -> Option<(Vec<Expr>, Vec<Expr>, Option<Expr>)> {
+) -> Option<(Vec<ScalarExpr>, Vec<ScalarExpr>, Option<ScalarExpr>)> {
     match expr {
-        Expr::And(items) => {
+        ScalarExpr::And(items) => {
             let mut inner_exprs = Vec::new();
             let mut outer_exprs = Vec::new();
             let mut local_filters = Vec::new();
@@ -1232,19 +913,19 @@ fn split_exists_membership_where(
     }
 }
 
-fn combine_and_items(items: Vec<Expr>) -> Option<Expr> {
+fn combine_and_items(items: Vec<ScalarExpr>) -> Option<ScalarExpr> {
     match items.len() {
         0 => None,
         1 => items.into_iter().next(),
-        _ => Some(Expr::And(items)),
+        _ => Some(ScalarExpr::And(items)),
     }
 }
 
 fn split_correlated_equality(
-    expr: &Expr,
+    expr: &ScalarExpr,
     local_qualifiers: &std::collections::BTreeSet<String>,
-) -> Option<(Expr, Expr)> {
-    let Expr::Binary {
+) -> Option<(ScalarExpr, ScalarExpr)> {
+    let ScalarExpr::Binary {
         op: BinaryOp::Equal,
         lhs,
         rhs,
@@ -1269,7 +950,7 @@ enum ExistsExprSide {
 }
 
 fn classify_exists_expr_side(
-    expr: &Expr,
+    expr: &ScalarExpr,
     local_qualifiers: &std::collections::BTreeSet<String>,
 ) -> Option<ExistsExprSide> {
     if expr_contains_subquery(expr) || expr_contains_volatile_function(expr) {
@@ -1287,19 +968,28 @@ fn apply_exists_membership_filter(
     rows: Vec<ResultRow>,
     plan: &ExistsMembershipPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::with_capacity(rows.len());
+    let hook = ScopedEngineHook::new(engine, ctes);
     for row in rows {
-        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
+        let ctx = PhysicalEvalContext::new(Some(&row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
         if let Some(residual) = plan.residual.as_ref() {
-            if !uqa_sql::expr::truthy(&eval(residual, &ctx)?) {
+            if !uqa_sql::expr::truthy(&eval_physical_scalar(
+                residual,
+                &ctes.scalar_subqueries,
+                &ctx,
+            )?) {
                 continue;
             }
         }
         let mut keep = true;
         for filter in &plan.filters {
-            let contains = membership_key_for_exprs(&filter.outer_exprs, &ctx)?
-                .is_some_and(|key| filter.inner_keys.contains(&key));
+            let contains =
+                membership_key_for_exprs(&filter.outer_exprs, &ctes.scalar_subqueries, &ctx)?
+                    .is_some_and(|key| filter.inner_keys.contains(&key));
             if contains == filter.negated {
                 keep = false;
                 break;
@@ -1332,10 +1022,10 @@ fn exists_membership_plan_applicable_to_row(plan: &ExistsMembershipPlan, row: &R
         })
 }
 
-fn expr_applicable_to_row(expr: &Expr, row: &ResultRow) -> bool {
+fn expr_applicable_to_row(expr: &ScalarExpr, row: &ResultRow) -> bool {
     match expr {
-        Expr::Column(name) => column_present(row, name),
-        Expr::QualifiedColumn {
+        ScalarExpr::Column(name) => column_present(row, name),
+        ScalarExpr::QualifiedColumn {
             qualifier,
             column,
             key,
@@ -1346,8 +1036,8 @@ fn expr_applicable_to_row(expr: &Expr, row: &ResultRow) -> bool {
                 row.contains_key(key)
             }
         }
-        Expr::Literal(_) | Expr::Param(_) => true,
-        Expr::Func {
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -1361,25 +1051,25 @@ fn expr_applicable_to_row(expr: &Expr, row: &ResultRow) -> bool {
                     .as_ref()
                     .is_none_or(|expr| expr_applicable_to_row(expr, row))
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().all(|expr| expr_applicable_to_row(expr, row))
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_applicable_to_row(lhs, row) && expr_applicable_to_row(rhs, row)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_applicable_to_row(inner, row)
-        }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_applicable_to_row(inner, row),
+        ScalarExpr::Between { expr, low, high } => {
             expr_applicable_to_row(expr, row)
                 && expr_applicable_to_row(low, row)
                 && expr_applicable_to_row(high, row)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_applicable_to_row(expr, row)
                 && list.iter().all(|item| expr_applicable_to_row(item, row))
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -1393,11 +1083,11 @@ fn expr_applicable_to_row(expr: &Expr, row: &ResultRow) -> bool {
                     .as_ref()
                     .is_none_or(|expr| expr_applicable_to_row(expr, row))
         }
-        Expr::Star
-        | Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => false,
+        ScalarExpr::Star
+        | ScalarExpr::WindowCall { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => false,
     }
 }
 
@@ -1410,12 +1100,13 @@ fn column_present(row: &ResultRow, name: &str) -> bool {
 }
 
 fn membership_key_for_exprs(
-    exprs: &[Expr],
-    ctx: &EvalContext<'_>,
+    exprs: &[ScalarExpr],
+    subqueries: &[QueryPlan],
+    ctx: &PhysicalEvalContext<'_>,
 ) -> Result<Option<Vec<JoinKey>>, SQLError> {
     let mut key = Vec::with_capacity(exprs.len());
     for expr in exprs {
-        let value = eval(expr, ctx)?;
+        let value = eval_physical_scalar(expr, subqueries, ctx)?;
         if matches!(value, Value::Null) {
             return Ok(None);
         }
@@ -1424,193 +1115,19 @@ fn membership_key_for_exprs(
     Ok(Some(key))
 }
 
-fn precompute_uncorrelated_subqueries(
-    engine: &Engine,
-    expr: &Expr,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Expr, SQLError> {
-    match expr {
-        Expr::ScalarSubquery(body)
-            if !select_references_outer(body) && !select_contains_volatile_function(body) =>
-        {
-            Ok(Expr::Literal(evaluate_scalar_subquery_once(
-                engine, body, params, ctes,
-            )?))
-        }
-        Expr::Exists { body, negated }
-            if !select_references_outer(body) && !select_contains_volatile_function(body) =>
-        {
-            let result = run_correlated_subquery(engine, body, None, params, ctes)?;
-            let exists = !result.rows.is_empty();
-            Ok(Expr::Literal(Value::Bool(if *negated {
-                !exists
-            } else {
-                exists
-            })))
-        }
-        Expr::Array(items) => Ok(Expr::Array(
-            items
-                .iter()
-                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
-                .collect::<Result<_, _>>()?,
-        )),
-        Expr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => Ok(Expr::Func {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| precompute_uncorrelated_subqueries(engine, arg, params, ctes))
-                .collect::<Result<_, _>>()?,
-            distinct: *distinct,
-            order_by: order_by.clone(),
-            filter: filter
-                .as_ref()
-                .map(|filter| precompute_uncorrelated_subqueries(engine, filter, params, ctes))
-                .transpose()?
-                .map(Box::new),
-        }),
-        Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
-            op: *op,
-            lhs: Box::new(precompute_uncorrelated_subqueries(
-                engine, lhs, params, ctes,
-            )?),
-            rhs: Box::new(precompute_uncorrelated_subqueries(
-                engine, rhs, params, ctes,
-            )?),
-        }),
-        Expr::Not(inner) => Ok(Expr::Not(Box::new(precompute_uncorrelated_subqueries(
-            engine, inner, params, ctes,
-        )?))),
-        Expr::And(items) => Ok(Expr::And(
-            items
-                .iter()
-                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
-                .collect::<Result<_, _>>()?,
-        )),
-        Expr::Or(items) => Ok(Expr::Or(
-            items
-                .iter()
-                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
-                .collect::<Result<_, _>>()?,
-        )),
-        Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
-            expr: Box::new(precompute_uncorrelated_subqueries(
-                engine, expr, params, ctes,
-            )?),
-            negated: *negated,
-        }),
-        Expr::Between { expr, low, high } => Ok(Expr::Between {
-            expr: Box::new(precompute_uncorrelated_subqueries(
-                engine, expr, params, ctes,
-            )?),
-            low: Box::new(precompute_uncorrelated_subqueries(
-                engine, low, params, ctes,
-            )?),
-            high: Box::new(precompute_uncorrelated_subqueries(
-                engine, high, params, ctes,
-            )?),
-        }),
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => Ok(Expr::InList {
-            expr: Box::new(precompute_uncorrelated_subqueries(
-                engine, expr, params, ctes,
-            )?),
-            list: list
-                .iter()
-                .map(|item| precompute_uncorrelated_subqueries(engine, item, params, ctes))
-                .collect::<Result<_, _>>()?,
-            negated: *negated,
-        }),
-        Expr::WindowCall { name, args, spec } => Ok(Expr::WindowCall {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| precompute_uncorrelated_subqueries(engine, arg, params, ctes))
-                .collect::<Result<_, _>>()?,
-            spec: spec.clone(),
-        }),
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => Ok(Expr::Case {
-            base: base
-                .as_ref()
-                .map(|expr| precompute_uncorrelated_subqueries(engine, expr, params, ctes))
-                .transpose()?
-                .map(Box::new),
-            when: when
-                .iter()
-                .map(|(cond, result)| {
-                    Ok((
-                        precompute_uncorrelated_subqueries(engine, cond, params, ctes)?,
-                        precompute_uncorrelated_subqueries(engine, result, params, ctes)?,
-                    ))
-                })
-                .collect::<Result<_, SQLError>>()?,
-            else_branch: else_branch
-                .as_ref()
-                .map(|expr| precompute_uncorrelated_subqueries(engine, expr, params, ctes))
-                .transpose()?
-                .map(Box::new),
-        }),
-        Expr::Cast { expr, ty } => Ok(Expr::Cast {
-            expr: Box::new(precompute_uncorrelated_subqueries(
-                engine, expr, params, ctes,
-            )?),
-            ty: ty.clone(),
-        }),
-        _ => Ok(expr.clone()),
-    }
-}
-
-fn evaluate_scalar_subquery_once(
-    engine: &Engine,
-    body: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Value, SQLError> {
-    let result = run_correlated_subquery(engine, body, None, params, ctes)?;
-    if result.rows.is_empty() {
-        return Ok(Value::Null);
-    }
-    if result.rows.len() > 1 {
-        return Err(SQLError::TypeMismatch(
-            "scalar subquery returned more than one row".into(),
-        ));
-    }
-    let first_col = result
-        .columns
-        .first()
-        .ok_or_else(|| SQLError::TypeMismatch("scalar subquery returned no columns".into()))?;
-    Ok(result.rows[0]
-        .get(first_col)
-        .cloned()
-        .unwrap_or(Value::Null))
-}
-
 fn expr_references_outer(
-    expr: &Expr,
+    expr: &ScalarExpr,
     local_qualifiers: &std::collections::BTreeSet<String>,
     has_local_from: bool,
 ) -> bool {
     match expr {
-        Expr::Star | Expr::Literal(_) | Expr::Param(_) => false,
-        Expr::Column(_) => !has_local_from,
-        Expr::QualifiedColumn { qualifier, .. } => !local_qualifiers.contains(qualifier),
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => items
+        ScalarExpr::Star | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Column(_) => !has_local_from,
+        ScalarExpr::QualifiedColumn { qualifier, .. } => !local_qualifiers.contains(qualifier),
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
             .iter()
             .any(|item| expr_references_outer(item, local_qualifiers, has_local_from)),
-        Expr::Func {
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -1625,25 +1142,27 @@ fn expr_references_outer(
                     .as_ref()
                     .is_some_and(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_references_outer(lhs, local_qualifiers, has_local_from)
                 || expr_references_outer(rhs, local_qualifiers, has_local_from)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => {
             expr_references_outer(inner, local_qualifiers, has_local_from)
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Between { expr, low, high } => {
             expr_references_outer(expr, local_qualifiers, has_local_from)
                 || expr_references_outer(low, local_qualifiers, has_local_from)
                 || expr_references_outer(high, local_qualifiers, has_local_from)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_references_outer(expr, local_qualifiers, has_local_from)
                 || list
                     .iter()
                     .any(|item| expr_references_outer(item, local_qualifiers, has_local_from))
         }
-        Expr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
             args.iter()
                 .any(|arg| expr_references_outer(arg, local_qualifiers, has_local_from))
                 || spec
@@ -1662,7 +1181,7 @@ fn expr_references_outer(
                         )
                 })
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -1677,17 +1196,21 @@ fn expr_references_outer(
                     expr_references_outer(expr, local_qualifiers, has_local_from)
                 })
         }
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
+        ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => true,
     }
 }
 
-fn expr_contains_subquery(expr: &Expr) -> bool {
+fn expr_contains_subquery(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => true,
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(expr_contains_subquery)
         }
-        Expr::Func {
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -1701,19 +1224,21 @@ fn expr_contains_subquery(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_subquery(expr))
         }
-        Expr::Binary { lhs, rhs, .. } => expr_contains_subquery(lhs) || expr_contains_subquery(rhs),
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_contains_subquery(inner)
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_subquery(lhs) || expr_contains_subquery(rhs)
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_contains_subquery(inner),
+        ScalarExpr::Between { expr, low, high } => {
             expr_contains_subquery(expr)
                 || expr_contains_subquery(low)
                 || expr_contains_subquery(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_contains_subquery(expr) || list.iter().any(expr_contains_subquery)
         }
-        Expr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
             args.iter().any(expr_contains_subquery)
                 || spec.partition_by.iter().any(expr_contains_subquery)
                 || spec
@@ -1725,7 +1250,7 @@ fn expr_contains_subquery(expr: &Expr) -> bool {
                         || frame_bound_contains_subquery(&frame.end)
                 })
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -1739,15 +1264,15 @@ fn expr_contains_subquery(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_subquery(expr))
         }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => false,
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_) => false,
     }
 }
 
-pub(super) fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
+pub(super) fn select_contains_volatile_function(stmt: &QueryBlockPlan) -> bool {
     stmt.projections
         .iter()
         .any(|projection| expr_contains_volatile_function(&projection.expr))
@@ -1777,30 +1302,11 @@ pub(super) fn select_contains_volatile_function(stmt: &SelectStmt) -> bool {
             .as_ref()
             .is_some_and(expr_contains_volatile_function)
         || stmt.distinct_on.iter().any(expr_contains_volatile_function)
-        || stmt.set_op.as_ref().is_some_and(|set_op| {
-            set_op
-                .left
-                .as_deref()
-                .is_some_and(select_contains_volatile_function)
-                || select_contains_volatile_function(&set_op.right)
-                || set_op
-                    .combined_order_by
-                    .iter()
-                    .any(|order| expr_contains_volatile_function(&order.expr))
-                || set_op
-                    .combined_limit
-                    .as_ref()
-                    .is_some_and(expr_contains_volatile_function)
-                || set_op
-                    .combined_offset
-                    .as_ref()
-                    .is_some_and(expr_contains_volatile_function)
-        })
 }
 
-fn expr_contains_volatile_function(expr: &Expr) -> bool {
+fn expr_contains_volatile_function(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::Func {
+        ScalarExpr::Func {
             name,
             args,
             order_by,
@@ -1818,25 +1324,25 @@ fn expr_contains_volatile_function(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_volatile_function(expr))
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(expr_contains_volatile_function)
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_contains_volatile_function(lhs) || expr_contains_volatile_function(rhs)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_contains_volatile_function(inner)
-        }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_contains_volatile_function(inner),
+        ScalarExpr::Between { expr, low, high } => {
             expr_contains_volatile_function(expr)
                 || expr_contains_volatile_function(low)
                 || expr_contains_volatile_function(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_contains_volatile_function(expr)
                 || list.iter().any(expr_contains_volatile_function)
         }
-        Expr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
             args.iter().any(expr_contains_volatile_function)
                 || spec
                     .partition_by
@@ -1851,7 +1357,7 @@ fn expr_contains_volatile_function(expr: &Expr) -> bool {
                         || frame_bound_contains_volatile_function(&frame.end)
                 })
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -1865,60 +1371,61 @@ fn expr_contains_volatile_function(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_contains_volatile_function(expr))
         }
-        Expr::ScalarSubquery(body) => select_contains_volatile_function(body),
-        Expr::Exists { body, .. } => select_contains_volatile_function(body),
-        Expr::InSubquery { expr, body, .. } => {
-            expr_contains_volatile_function(expr) || select_contains_volatile_function(body)
-        }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => false,
+        // Query-valued children are inspected by the enclosing `QueryPlan`.
+        // At expression-only optimization sites, treating them as volatile is
+        // the safe choice because it prevents duplication or reordering.
+        ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => true,
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_) => false,
     }
 }
 
-fn frame_bound_contains_volatile_function(bound: &uqa_sql::ast::FrameBound) -> bool {
+fn frame_bound_contains_volatile_function(bound: &ScalarFrameBound) -> bool {
     match bound {
-        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
             expr_contains_volatile_function(expr)
         }
-        uqa_sql::ast::FrameBound::UnboundedPreceding
-        | uqa_sql::ast::FrameBound::UnboundedFollowing
-        | uqa_sql::ast::FrameBound::CurrentRow => false,
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => false,
     }
 }
 
-fn frame_bound_contains_subquery(bound: &uqa_sql::ast::FrameBound) -> bool {
+fn frame_bound_contains_subquery(bound: &ScalarFrameBound) -> bool {
     match bound {
-        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
             expr_contains_subquery(expr)
         }
-        uqa_sql::ast::FrameBound::UnboundedPreceding
-        | uqa_sql::ast::FrameBound::UnboundedFollowing
-        | uqa_sql::ast::FrameBound::CurrentRow => false,
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => false,
     }
 }
 
 fn frame_bound_references_outer(
-    bound: &uqa_sql::ast::FrameBound,
+    bound: &ScalarFrameBound,
     local_qualifiers: &std::collections::BTreeSet<String>,
     has_local_from: bool,
 ) -> bool {
     match bound {
-        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
+        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
             expr_references_outer(expr, local_qualifiers, has_local_from)
         }
-        uqa_sql::ast::FrameBound::UnboundedPreceding
-        | uqa_sql::ast::FrameBound::UnboundedFollowing
-        | uqa_sql::ast::FrameBound::CurrentRow => false,
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => false,
     }
 }
 
 fn run_query_block_with_prepared_exists(
     engine: &Engine,
     block: &QueryBlockPlan,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     prepared_exists_filter: Option<&ExistsMembershipPlan>,
@@ -1933,9 +1440,9 @@ fn run_query_block_with_prepared_exists(
     // `fuse_log_odds(bayesian_match(...), knn_match(...))` fall
     // through to scalar expression evaluation.
     if prepared_exists_filter.is_none() {
-        if let FromClause::Table { name, alias } = from {
+        if let SourcePlan::Table { name, alias } = from {
             if alias.is_none() && engine.foreign_table(name).is_some() {
-                return run_single_foreign_select(engine, name, block, stmt, params);
+                return run_single_foreign_select(engine, name, block, stmt, params, ctes);
             }
             let is_virtual = name.contains('.')
                 || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
@@ -1945,12 +1452,12 @@ fn run_query_block_with_prepared_exists(
                 .iter()
                 .any(|projection| expr_contains_subquery(&projection.expr));
             if alias.is_none()
-                && !matches!(&block.compute, ComputePlan::Window { .. })
+                && !matches!(&block.compute, ComputePlan::Window)
                 && !is_virtual
                 && !has_subquery_filter
                 && !has_subquery_projection
             {
-                return run_single_table_select(engine, name, block, stmt, params);
+                return run_single_table_select(engine, name, block, stmt, params, ctes);
             }
         }
     }
@@ -1973,6 +1480,7 @@ fn run_query_block_with_prepared_exists(
     let exists_filter = prepared_exists_filter.or(owned_exists_filter.as_ref());
     let mut early_exists_applied = false;
     let joined = if let Some(exists_filter) = exists_filter {
+        let exists_eval_scope = ctes.clone();
         let mut row_filter = |rows: &mut Vec<ResultRow>| -> Result<(), SQLError> {
             if !early_exists_applied
                 && exists_membership_plan_applicable_to_rows(exists_filter, rows)
@@ -1982,6 +1490,7 @@ fn run_query_block_with_prepared_exists(
                     std::mem::take(rows),
                     exists_filter,
                     params,
+                    &exists_eval_scope,
                 )?;
                 *rows = filtered;
                 early_exists_applied = true;
@@ -2035,13 +1544,9 @@ fn run_query_block_with_prepared_exists(
         }
     };
 
-    // Aggregates and window functions still go through their dedicated
-    // routines because they need access to the SQL function registry
-    // (e.g. text_match calls in projection lists). Pure projection
-    // SELECTs flow through a Volcano sub-pipeline:
-    //   TableScan -> [Filter] -> Project -> [Sort] -> [Limit]
-    // built on the operators in `uqa-execution` so the planner-driven
-    // execution layer is exercised on every projection-only SELECT.
+    // Aggregate and window compute plans use their stateful physical
+    // operators. Pure projection plans flow through the row pipeline, with
+    // source-namespace ordering/limiting before the final Project operator.
     let final_filter =
         final_filter_after_qualifier_pushdown(stmt, from, qualifier_filters.as_ref());
     let filtered = if let Some(filter) = final_filter.as_ref() {
@@ -2051,26 +1556,26 @@ fn run_query_block_with_prepared_exists(
             if early_exists_applied {
                 joined
             } else {
-                apply_exists_membership_filter(engine, joined, exists_filter, params)?
+                apply_exists_membership_filter(engine, joined, exists_filter, params, ctes)?
             }
         } else if let Some(exists_filter) = owned_exists_filter.as_ref() {
             if early_exists_applied {
                 joined
             } else {
-                apply_exists_membership_filter(engine, joined, exists_filter, params)?
+                apply_exists_membership_filter(engine, joined, exists_filter, params, ctes)?
             }
         } else {
-            let filter = precompute_uncorrelated_subqueries(engine, filter, params, ctes)?;
-            let scoped_hook = ScopedEngineHook {
-                engine,
-                ctes,
-                subquery_cache: RefCell::new(BTreeMap::new()),
-            };
+            let scoped_hook = ScopedEngineHook::new(engine, ctes);
             let mut out: Vec<ResultRow> = Vec::with_capacity(joined.len());
             for row in joined {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(&scoped_hook);
-                if uqa_sql::expr::truthy(&uqa_sql::expr::eval(&filter, &ctx)?) {
+                let ctx = PhysicalEvalContext::new(Some(&row), params)
+                    .with_function_hook(&scoped_hook)
+                    .with_subquery_runner(&scoped_hook);
+                if uqa_sql::expr::truthy(&eval_physical_scalar(
+                    filter,
+                    &ctes.scalar_subqueries,
+                    &ctx,
+                )?) {
                     out.push(row);
                 }
             }
@@ -2080,34 +1585,38 @@ fn run_query_block_with_prepared_exists(
         joined
     };
 
-    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
+    if matches!(&block.compute, ComputePlan::Aggregate) {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
-        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params, ctes)?;
+        let rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    if matches!(&block.compute, ComputePlan::Window { .. }) {
+    if matches!(&block.compute, ComputePlan::Window) {
         let columns = projection_columns(&stmt.projections);
-        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
+        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params, ctes)?;
+        let scoped_hook = ScopedEngineHook::new(engine, ctes);
         let mut rows: Vec<ResultRow> = windowed
             .rows
             .iter()
             .map(|src| {
-                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
+                project_join_row_with_plan(
+                    engine,
+                    &scoped_hook,
+                    &scoped_hook,
+                    &ctes.scalar_subqueries,
+                    src,
+                    &windowed.projections,
+                    params,
+                )
             })
             .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    // Pure projection: use the Volcano Project + Sort + Limit chain.
-    let scoped_hook = ScopedEngineHook {
-        engine,
-        ctes,
-        subquery_cache: RefCell::new(BTreeMap::new()),
-    };
-    let projected = volcano_project_sort_limit(engine, &filtered, stmt, params, &scoped_hook)?;
+    // Pure projection: stage source rows, then run the physical Project.
+    let projected = volcano_project_sort_limit(engine, &filtered, stmt, params, ctes)?;
     let columns = expand_from_star_columns(
         engine,
         projection_columns(&stmt.projections),
@@ -2117,10 +1626,10 @@ fn run_query_block_with_prepared_exists(
     Ok(SQLResult::from_rows(columns, projected))
 }
 
-fn column_prune_for_stmt(stmt: &SelectStmt, from: &FromClause) -> Option<ColumnPrune> {
+fn column_prune_for_stmt(stmt: &QueryBlockPlan, from: &SourcePlan) -> Option<ColumnPrune> {
     if has_window(&stmt.projections)
         || stmt.projections.iter().any(|projection| {
-            matches!(projection.expr, Expr::Star)
+            matches!(projection.expr, ScalarExpr::Star)
                 || expr_contains_subquery(&projection.expr)
                 || expr_contains_volatile_function(&projection.expr)
         })
@@ -2169,18 +1678,18 @@ fn column_prune_for_stmt(stmt: &SelectStmt, from: &FromClause) -> Option<ColumnP
     Some(prune)
 }
 
-fn collect_from_qualifiers(from: &FromClause, out: &mut Vec<String>) {
+fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
     match from {
-        FromClause::Table { name, alias } => {
+        SourcePlan::Table { name, alias } => {
             out.push(alias.clone().unwrap_or_else(|| name.clone()));
         }
-        FromClause::Join { left, right, .. } => {
+        SourcePlan::Join { left, right, .. } => {
             collect_from_qualifiers(left, out);
             collect_from_qualifiers(right, out);
         }
-        FromClause::Values { alias, .. }
-        | FromClause::Function { alias, .. }
-        | FromClause::Subquery { alias, .. } => {
+        SourcePlan::Values { alias, .. }
+        | SourcePlan::Function { alias, .. }
+        | SourcePlan::Subquery { alias, .. } => {
             if let Some(alias) = alias {
                 out.push(alias.clone());
             }
@@ -2189,13 +1698,13 @@ fn collect_from_qualifiers(from: &FromClause, out: &mut Vec<String>) {
 }
 
 fn collect_from_prune_columns(
-    from: &FromClause,
+    from: &SourcePlan,
     qualifiers: &[String],
     prune: &mut ColumnPrune,
     valid: &mut bool,
 ) {
     match from {
-        FromClause::Join {
+        SourcePlan::Join {
             left, right, on, ..
         } => {
             collect_from_prune_columns(left, qualifiers, prune, valid);
@@ -2204,40 +1713,40 @@ fn collect_from_prune_columns(
                 collect_expr_prune_columns(on, qualifiers, prune, valid);
             }
         }
-        FromClause::Values { rows, .. } => {
+        SourcePlan::Values { rows, .. } => {
             for row in rows {
                 for expr in row {
                     collect_expr_prune_columns(expr, qualifiers, prune, valid);
                 }
             }
         }
-        FromClause::Function { args, .. } => {
+        SourcePlan::Function { args, .. } => {
             for expr in args {
                 collect_expr_prune_columns(expr, qualifiers, prune, valid);
             }
         }
-        FromClause::Subquery { .. } => {
+        SourcePlan::Subquery { .. } => {
             *valid = false;
         }
-        FromClause::Table { .. } => {}
+        SourcePlan::Table { .. } => {}
     }
 }
 
 fn collect_expr_prune_columns(
-    expr: &Expr,
+    expr: &ScalarExpr,
     qualifiers: &[String],
     prune: &mut ColumnPrune,
     valid: &mut bool,
 ) {
     match expr {
-        Expr::Column(column) => {
+        ScalarExpr::Column(column) => {
             for qualifier in qualifiers {
                 if let Some(columns) = prune.get_mut(qualifier) {
                     columns.insert(column.clone());
                 }
             }
         }
-        Expr::QualifiedColumn {
+        ScalarExpr::QualifiedColumn {
             qualifier, column, ..
         } => {
             if let Some(columns) = prune.get_mut(qualifier) {
@@ -2246,16 +1755,19 @@ fn collect_expr_prune_columns(
                 *valid = false;
             }
         }
-        Expr::Literal(_) | Expr::Param(_) => {}
-        Expr::Star | Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => {}
+        ScalarExpr::Star
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => {
             *valid = false;
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             for item in items {
                 collect_expr_prune_columns(item, qualifiers, prune, valid);
             }
         }
-        Expr::Func {
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -2271,28 +1783,30 @@ fn collect_expr_prune_columns(
                 collect_expr_prune_columns(filter, qualifiers, prune, valid);
             }
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             collect_expr_prune_columns(lhs, qualifiers, prune, valid);
             collect_expr_prune_columns(rhs, qualifiers, prune, valid);
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => {
             collect_expr_prune_columns(inner, qualifiers, prune, valid);
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Between { expr, low, high } => {
             collect_expr_prune_columns(expr, qualifiers, prune, valid);
             collect_expr_prune_columns(low, qualifiers, prune, valid);
             collect_expr_prune_columns(high, qualifiers, prune, valid);
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             collect_expr_prune_columns(expr, qualifiers, prune, valid);
             for item in list {
                 collect_expr_prune_columns(item, qualifiers, prune, valid);
             }
         }
-        Expr::WindowCall { .. } => {
+        ScalarExpr::WindowCall { .. } => {
             *valid = false;
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -2311,7 +1825,10 @@ fn collect_expr_prune_columns(
     }
 }
 
-fn qualifier_filters_for_stmt(stmt: &SelectStmt, from: &FromClause) -> Option<QualifierFilters> {
+fn qualifier_filters_for_stmt(
+    stmt: &QueryBlockPlan,
+    from: &SourcePlan,
+) -> Option<QualifierFilters> {
     let filter = stmt.r#where.as_ref()?;
     if expr_contains_subquery(filter) || expr_contains_volatile_function(filter) {
         return None;
@@ -2335,10 +1852,10 @@ fn qualifier_filters_for_stmt(stmt: &SelectStmt, from: &FromClause) -> Option<Qu
 }
 
 fn qualifier_filter_for_part(
-    part: &Expr,
+    part: &ScalarExpr,
     from_quals: &BTreeSet<String>,
     single_qualifier: Option<&str>,
-) -> Option<(String, Expr)> {
+) -> Option<(String, ScalarExpr)> {
     if expr_contains_subquery(part) || expr_contains_volatile_function(part) {
         return None;
     }
@@ -2362,10 +1879,10 @@ fn qualifier_filter_for_part(
 }
 
 fn final_filter_after_qualifier_pushdown(
-    stmt: &SelectStmt,
-    from: &FromClause,
+    stmt: &QueryBlockPlan,
+    from: &SourcePlan,
     filters: Option<&QualifierFilters>,
-) -> Option<Expr> {
+) -> Option<ScalarExpr> {
     let filter = stmt.r#where.as_ref()?;
     if filters.is_none() || !qualifier_filter_elision_safe(from) {
         return Some(filter.clone());
@@ -2374,7 +1891,7 @@ fn final_filter_after_qualifier_pushdown(
     let single_qualifier = (from_quals.len() == 1)
         .then(|| from_quals.iter().next().cloned())
         .flatten();
-    let residual: Vec<Expr> = flatten_and_filter_parts(filter)
+    let residual: Vec<ScalarExpr> = flatten_and_filter_parts(filter)
         .into_iter()
         .filter(|part| {
             qualifier_filter_for_part(part, &from_quals, single_qualifier.as_deref()).is_none()
@@ -2384,9 +1901,9 @@ fn final_filter_after_qualifier_pushdown(
     combine_filter_parts(residual)
 }
 
-fn qualifier_filter_elision_safe(from: &FromClause) -> bool {
+fn qualifier_filter_elision_safe(from: &SourcePlan) -> bool {
     match from {
-        FromClause::Join {
+        SourcePlan::Join {
             left, right, kind, ..
         } => {
             matches!(
@@ -2395,51 +1912,461 @@ fn qualifier_filter_elision_safe(from: &FromClause) -> bool {
             ) && qualifier_filter_elision_safe(left)
                 && qualifier_filter_elision_safe(right)
         }
-        FromClause::Table { .. }
-        | FromClause::Values { .. }
-        | FromClause::Function { .. }
-        | FromClause::Subquery { .. } => true,
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => true,
     }
 }
 
-fn combine_filter_parts(mut parts: Vec<Expr>) -> Option<Expr> {
+fn combine_filter_parts(mut parts: Vec<ScalarExpr>) -> Option<ScalarExpr> {
     match parts.len() {
         0 => None,
         1 => parts.pop(),
-        _ => Some(Expr::And(parts)),
+        _ => Some(ScalarExpr::And(parts)),
     }
 }
 
-fn flatten_and_filter_parts(expr: &Expr) -> Vec<&Expr> {
+/// Find predicates on a directly referenced CTE output. The predicate remains
+/// on the consumer and is duplicated into the CTE only when that CTE has one
+/// reference in this query block. This makes the rewrite semantics-preserving
+/// for shared CTE materializations.
+fn cte_output_filters(plan: &QueryPlan) -> BTreeMap<String, (String, ScalarExpr)> {
+    let RelationalPlan::QueryBlock(block) = &plan.root else {
+        return BTreeMap::new();
+    };
+    let (Some(from), Some(filter)) = (block.from.as_ref(), block.r#where.as_ref()) else {
+        return BTreeMap::new();
+    };
+    if expr_contains_subquery(filter) || expr_contains_volatile_function(filter) {
+        return BTreeMap::new();
+    }
+
+    let cte_names: BTreeSet<&str> = plan.ctes.iter().map(|cte| cte.name.as_str()).collect();
+    let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    collect_cte_source_references(from, &cte_names, &mut references);
+    let qualifier_to_cte: BTreeMap<String, String> = references
+        .into_iter()
+        .filter_map(|(cte, qualifiers)| {
+            (qualifiers.len() == 1).then(|| (qualifiers[0].clone(), cte))
+        })
+        .collect();
+    if qualifier_to_cte.is_empty() {
+        return BTreeMap::new();
+    }
+
+    let from_qualifiers = from_qualifier_set(from);
+    let single_qualifier = (from_qualifiers.len() == 1)
+        .then(|| from_qualifiers.iter().next().cloned())
+        .flatten();
+    let mut grouped: BTreeMap<String, (String, Vec<ScalarExpr>)> = BTreeMap::new();
+    for part in flatten_and_filter_parts(filter) {
+        let Some((qualifier, predicate)) =
+            qualifier_filter_for_part(part, &from_qualifiers, single_qualifier.as_deref())
+        else {
+            continue;
+        };
+        let Some(cte_name) = qualifier_to_cte.get(&qualifier) else {
+            continue;
+        };
+        let entry = grouped
+            .entry(cte_name.clone())
+            .or_insert_with(|| (qualifier, Vec::new()));
+        entry.1.push(predicate);
+    }
+
+    grouped
+        .into_iter()
+        .filter_map(|(name, (qualifier, predicates))| {
+            combine_filter_parts(predicates).map(|predicate| (name, (qualifier, predicate)))
+        })
+        .collect()
+}
+
+fn collect_cte_source_references(
+    source: &SourcePlan,
+    cte_names: &BTreeSet<&str>,
+    references: &mut BTreeMap<String, Vec<String>>,
+) {
+    match source {
+        SourcePlan::Table { name, alias } if cte_names.contains(name.as_str()) => {
+            references
+                .entry(name.clone())
+                .or_default()
+                .push(alias.clone().unwrap_or_else(|| name.clone()));
+        }
+        SourcePlan::Join { left, right, .. } => {
+            collect_cte_source_references(left, cte_names, references);
+            collect_cte_source_references(right, cte_names, references);
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => {}
+    }
+}
+
+/// Specialize a physical query plan with a predicate on its output columns.
+/// The caller keeps the original predicate as a residual check; this function
+/// only returns a plan when pushing the predicate below the output boundary is
+/// provably safe.
+pub(super) fn push_output_filter_into_query_plan(
+    engine: &Engine,
+    plan: &QueryPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+) -> Option<QueryPlan> {
+    if expr_contains_subquery(filter) || expr_contains_volatile_function(filter) {
+        return None;
+    }
+    let specialized =
+        specialize_query_output_filter(plan, qualifier, filter, output_columns_override)?;
+    let aggregate_classifier = |name: &str| engine.has_registered_aggregate_function(name);
+    match uqa_planner::optimizer::optimize_with_aggregates(
+        UnifiedPlan::Query(Box::new(specialized)),
+        &uqa_planner::optimizer::OptimizerConfig::default(),
+        &aggregate_classifier,
+    ) {
+        UnifiedPlan::Query(plan) => Some(*plan),
+        UnifiedPlan::Command(_) => unreachable!("query optimizer changed the plan kind"),
+    }
+}
+
+fn specialize_query_output_filter(
+    plan: &QueryPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+) -> Option<QueryPlan> {
+    let mut specialized = plan.clone();
+    specialize_relational_output_filter(
+        &mut specialized.root,
+        qualifier,
+        filter,
+        output_columns_override,
+    )?;
+    Some(specialized)
+}
+
+fn specialize_relational_output_filter(
+    root: &mut RelationalPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+) -> Option<()> {
+    match root {
+        RelationalPlan::QueryBlock(block) => {
+            specialize_query_block_output_filter(block, qualifier, filter, output_columns_override)
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            limit,
+            offset,
+            ..
+        } => {
+            if limit.is_some() || offset.is_some() {
+                return None;
+            }
+            let output_columns = match output_columns_override {
+                Some(columns) => columns.to_vec(),
+                None => query_plan_output_columns(left)?,
+            };
+            let specialized_left =
+                specialize_query_output_filter(left, qualifier, filter, Some(&output_columns))?;
+            let specialized_right =
+                specialize_query_output_filter(right, qualifier, filter, Some(&output_columns))?;
+            **left = specialized_left;
+            **right = specialized_right;
+            Some(())
+        }
+        RelationalPlan::Values { .. } => None,
+    }
+}
+
+fn query_plan_output_columns(plan: &QueryPlan) -> Option<Vec<String>> {
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => Some(projection_columns(&block.projections)),
+        RelationalPlan::SetOp { left, .. } => query_plan_output_columns(left),
+        RelationalPlan::Values { rows, .. } => rows.first().map(|row| {
+            (1..=row.len())
+                .map(|index| format!("column{index}"))
+                .collect()
+        }),
+    }
+}
+
+fn specialize_query_block_output_filter(
+    block: &mut QueryBlockPlan,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    output_columns_override: Option<&[String]>,
+) -> Option<()> {
+    if block.limit.is_some()
+        || block.offset.is_some()
+        || matches!(block.compute, ComputePlan::Window)
+        || !block.distinct_on.is_empty()
+        || !block.grouping_sets.is_empty()
+    {
+        return None;
+    }
+
+    let output_columns = output_columns_override.map_or_else(
+        || projection_columns(&block.projections),
+        <[String]>::to_vec,
+    );
+    if output_columns.len() != block.projections.len() {
+        return None;
+    }
+    let mut used = BTreeSet::new();
+    let rewritten = rewrite_output_filter(
+        filter,
+        qualifier,
+        &output_columns,
+        &block.projections,
+        &mut used,
+    )?;
+    if used.is_empty() {
+        return None;
+    }
+
+    for index in &used {
+        let expression = &block.projections[*index].expr;
+        if matches!(expression, ScalarExpr::Star)
+            || expression.contains_window()
+            || expr_contains_subquery(expression)
+            || expr_contains_volatile_function(expression)
+        {
+            return None;
+        }
+        if matches!(block.compute, ComputePlan::Aggregate)
+            && !block.group_by.iter().any(|group| group == expression)
+        {
+            return None;
+        }
+    }
+    if block.distinct
+        && block
+            .projections
+            .iter()
+            .enumerate()
+            .any(|(index, projection)| {
+                !used.contains(&index) && expr_contains_function(&projection.expr)
+            })
+    {
+        return None;
+    }
+
+    block.r#where = match block.r#where.take() {
+        Some(existing) => Some(ScalarExpr::And(vec![existing, rewritten])),
+        None => Some(rewritten),
+    };
+    Some(())
+}
+
+fn rewrite_output_filter(
+    expression: &ScalarExpr,
+    qualifier: &str,
+    output_columns: &[String],
+    projections: &[ProjectionPlan],
+    used: &mut BTreeSet<usize>,
+) -> Option<ScalarExpr> {
+    let map_column = |column: &str, used: &mut BTreeSet<usize>| {
+        let index = output_columns
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(column))?;
+        used.insert(index);
+        Some(projections[index].expr.clone())
+    };
+    let recur = |expression: &ScalarExpr, used: &mut BTreeSet<usize>| {
+        rewrite_output_filter(expression, qualifier, output_columns, projections, used)
+    };
+
+    Some(match expression {
+        ScalarExpr::Column(column) => map_column(column, used)?,
+        ScalarExpr::QualifiedColumn {
+            qualifier: expression_qualifier,
+            column,
+            ..
+        } if expression_qualifier.eq_ignore_ascii_case(qualifier) => map_column(column, used)?,
+        ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Star
+        | ScalarExpr::WindowCall { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => return None,
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => expression.clone(),
+        ScalarExpr::Array(items) => ScalarExpr::Array(
+            items
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        ScalarExpr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } => ScalarExpr::Func {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| recur(arg, used))
+                .collect::<Option<Vec<_>>>()?,
+            distinct: *distinct,
+            order_by: order_by
+                .iter()
+                .map(|order| {
+                    Some(uqa_execution::ScalarOrder {
+                        expr: recur(&order.expr, used)?,
+                        descending: order.descending,
+                        nulls: order.nulls,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+            filter: match filter.as_deref() {
+                Some(filter) => Some(Box::new(recur(filter, used)?)),
+                None => None,
+            },
+        },
+        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
+            op: *op,
+            lhs: Box::new(recur(lhs, used)?),
+            rhs: Box::new(recur(rhs, used)?),
+        },
+        ScalarExpr::Not(inner) => ScalarExpr::Not(Box::new(recur(inner, used)?)),
+        ScalarExpr::And(items) => ScalarExpr::And(
+            items
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        ScalarExpr::Or(items) => ScalarExpr::Or(
+            items
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
+            expr: Box::new(recur(expr, used)?),
+            negated: *negated,
+        },
+        ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
+            expr: Box::new(recur(expr, used)?),
+            low: Box::new(recur(low, used)?),
+            high: Box::new(recur(high, used)?),
+        },
+        ScalarExpr::InList {
+            expr,
+            list,
+            negated,
+        } => ScalarExpr::InList {
+            expr: Box::new(recur(expr, used)?),
+            list: list
+                .iter()
+                .map(|item| recur(item, used))
+                .collect::<Option<Vec<_>>>()?,
+            negated: *negated,
+        },
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => ScalarExpr::Case {
+            base: match base.as_deref() {
+                Some(base) => Some(Box::new(recur(base, used)?)),
+                None => None,
+            },
+            when: when
+                .iter()
+                .map(|(condition, result)| Some((recur(condition, used)?, recur(result, used)?)))
+                .collect::<Option<Vec<_>>>()?,
+            else_branch: match else_branch.as_deref() {
+                Some(branch) => Some(Box::new(recur(branch, used)?)),
+                None => None,
+            },
+        },
+        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+            expr: Box::new(recur(expr, used)?),
+            ty: ty.clone(),
+        },
+    })
+}
+
+fn expr_contains_function(expression: &ScalarExpr) -> bool {
+    match expression {
+        ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. } => true,
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            items.iter().any(expr_contains_function)
+        }
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            expr_contains_function(lhs) || expr_contains_function(rhs)
+        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_contains_function(inner),
+        ScalarExpr::Between { expr, low, high } => {
+            expr_contains_function(expr)
+                || expr_contains_function(low)
+                || expr_contains_function(high)
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            expr_contains_function(expr) || list.iter().any(expr_contains_function)
+        }
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref().is_some_and(expr_contains_function)
+                || when.iter().any(|(condition, result)| {
+                    expr_contains_function(condition) || expr_contains_function(result)
+                })
+                || else_branch.as_deref().is_some_and(expr_contains_function)
+        }
+        ScalarExpr::InSubquery { expr, .. } => expr_contains_function(expr),
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => false,
+    }
+}
+
+fn flatten_and_filter_parts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     match expr {
-        Expr::And(items) => items.iter().flat_map(flatten_and_filter_parts).collect(),
+        ScalarExpr::And(items) => items.iter().flat_map(flatten_and_filter_parts).collect(),
         other => vec![other],
     }
 }
 
-fn from_qualifier_set(from: &FromClause) -> BTreeSet<String> {
+fn from_qualifier_set(from: &SourcePlan) -> BTreeSet<String> {
     let mut qualifiers = Vec::new();
     collect_from_qualifiers(from, &mut qualifiers);
     qualifiers.into_iter().collect()
 }
 
-fn expr_qualifiers(expr: &Expr) -> BTreeSet<String> {
+fn expr_qualifiers(expr: &ScalarExpr) -> BTreeSet<String> {
     let mut qualifiers = BTreeSet::new();
     collect_expr_qualifiers(expr, &mut qualifiers);
     qualifiers
 }
 
-fn collect_expr_qualifiers(expr: &Expr, qualifiers: &mut BTreeSet<String>) {
+fn collect_expr_qualifiers(expr: &ScalarExpr, qualifiers: &mut BTreeSet<String>) {
     match expr {
-        Expr::QualifiedColumn { qualifier, .. } => {
+        ScalarExpr::QualifiedColumn { qualifier, .. } => {
             qualifiers.insert(qualifier.clone());
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             for item in items {
                 collect_expr_qualifiers(item, qualifiers);
             }
         }
-        Expr::Func {
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -2455,25 +2382,27 @@ fn collect_expr_qualifiers(expr: &Expr, qualifiers: &mut BTreeSet<String>) {
                 collect_expr_qualifiers(filter, qualifiers);
             }
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             collect_expr_qualifiers(lhs, qualifiers);
             collect_expr_qualifiers(rhs, qualifiers);
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => {
             collect_expr_qualifiers(inner, qualifiers);
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Between { expr, low, high } => {
             collect_expr_qualifiers(expr, qualifiers);
             collect_expr_qualifiers(low, qualifiers);
             collect_expr_qualifiers(high, qualifiers);
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             collect_expr_qualifiers(expr, qualifiers);
             for item in list {
                 collect_expr_qualifiers(item, qualifiers);
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
             for arg in args {
                 collect_expr_qualifiers(arg, qualifiers);
             }
@@ -2484,7 +2413,7 @@ fn collect_expr_qualifiers(expr: &Expr, qualifiers: &mut BTreeSet<String>) {
                 collect_expr_qualifiers(&order.expr, qualifiers);
             }
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -2500,23 +2429,23 @@ fn collect_expr_qualifiers(expr: &Expr, qualifiers: &mut BTreeSet<String>) {
                 collect_expr_qualifiers(else_branch, qualifiers);
             }
         }
-        Expr::InSubquery { expr, .. } => collect_expr_qualifiers(expr, qualifiers),
-        Expr::Column(_)
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::Star
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => {}
+        ScalarExpr::InSubquery { expr, .. } => collect_expr_qualifiers(expr, qualifiers),
+        ScalarExpr::Column(_)
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::Star
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => {}
     }
 }
 
-fn expr_has_unqualified_column(expr: &Expr) -> bool {
+fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::Column(_) => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Column(_) => true,
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(expr_has_unqualified_column)
         }
-        Expr::Func {
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -2530,21 +2459,21 @@ fn expr_has_unqualified_column(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|filter| expr_has_unqualified_column(filter))
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_has_unqualified_column(lhs) || expr_has_unqualified_column(rhs)
         }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_has_unqualified_column(inner)
-        }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_has_unqualified_column(inner),
+        ScalarExpr::Between { expr, low, high } => {
             expr_has_unqualified_column(expr)
                 || expr_has_unqualified_column(low)
                 || expr_has_unqualified_column(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_has_unqualified_column(expr) || list.iter().any(expr_has_unqualified_column)
         }
-        Expr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall { args, spec, .. } => {
             args.iter().any(expr_has_unqualified_column)
                 || spec.partition_by.iter().any(expr_has_unqualified_column)
                 || spec
@@ -2552,7 +2481,7 @@ fn expr_has_unqualified_column(expr: &Expr) -> bool {
                     .iter()
                     .any(|order| expr_has_unqualified_column(&order.expr))
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -2566,60 +2495,63 @@ fn expr_has_unqualified_column(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_has_unqualified_column(expr))
         }
-        Expr::InSubquery { expr, .. } => expr_has_unqualified_column(expr),
-        Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::Star
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => false,
+        ScalarExpr::InSubquery { expr, .. } => expr_has_unqualified_column(expr),
+        ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::Star
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => false,
     }
 }
 
-fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
+fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> ScalarExpr {
     match expr {
-        Expr::Column(column) => Expr::qualified_column(qualifier, column),
-        Expr::QualifiedColumn { .. } | Expr::Literal(_) | Expr::Param(_) | Expr::Star => {
-            expr.clone()
-        }
-        Expr::Array(items) => Expr::Array(
+        ScalarExpr::Column(column) => ScalarExpr::qualified_column(qualifier, column),
+        ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::Star => expr.clone(),
+        ScalarExpr::Array(items) => ScalarExpr::Array(
             items
                 .iter()
                 .map(|item| qualify_unqualified_columns(item, qualifier))
                 .collect(),
         ),
-        Expr::And(items) => Expr::And(
+        ScalarExpr::And(items) => ScalarExpr::And(
             items
                 .iter()
                 .map(|item| qualify_unqualified_columns(item, qualifier))
                 .collect(),
         ),
-        Expr::Or(items) => Expr::Or(
+        ScalarExpr::Or(items) => ScalarExpr::Or(
             items
                 .iter()
                 .map(|item| qualify_unqualified_columns(item, qualifier))
                 .collect(),
         ),
-        Expr::Binary { op, lhs, rhs } => Expr::Binary {
+        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(qualify_unqualified_columns(lhs, qualifier)),
             rhs: Box::new(qualify_unqualified_columns(rhs, qualifier)),
         },
-        Expr::Not(inner) => Expr::Not(Box::new(qualify_unqualified_columns(inner, qualifier))),
-        Expr::IsNull { expr, negated } => Expr::IsNull {
+        ScalarExpr::Not(inner) => {
+            ScalarExpr::Not(Box::new(qualify_unqualified_columns(inner, qualifier)))
+        }
+        ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             negated: *negated,
         },
-        Expr::Between { expr, low, high } => Expr::Between {
+        ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             low: Box::new(qualify_unqualified_columns(low, qualifier)),
             high: Box::new(qualify_unqualified_columns(high, qualifier)),
         },
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
-        } => Expr::InList {
+        } => ScalarExpr::InList {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             list: list
                 .iter()
@@ -2627,13 +2559,13 @@ fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
                 .collect(),
             negated: *negated,
         },
-        Expr::Func {
+        ScalarExpr::Func {
             name,
             args,
             distinct,
             order_by,
             filter,
-        } => Expr::Func {
+        } => ScalarExpr::Func {
             name: name.clone(),
             args: args
                 .iter()
@@ -2645,7 +2577,7 @@ fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
                 .as_ref()
                 .map(|filter| Box::new(qualify_unqualified_columns(filter, qualifier))),
         },
-        Expr::WindowCall { name, args, spec } => Expr::WindowCall {
+        ScalarExpr::WindowCall { name, args, spec } => ScalarExpr::WindowCall {
             name: name.clone(),
             args: args
                 .iter()
@@ -2653,11 +2585,11 @@ fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
                 .collect(),
             spec: spec.clone(),
         },
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
-        } => Expr::Case {
+        } => ScalarExpr::Case {
             base: base
                 .as_ref()
                 .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
@@ -2674,30 +2606,32 @@ fn qualify_unqualified_columns(expr: &Expr, qualifier: &str) -> Expr {
                 .as_ref()
                 .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
         },
-        Expr::Cast { expr, ty } => Expr::Cast {
+        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
             ty: ty.clone(),
         },
-        Expr::InSubquery {
+        ScalarExpr::InSubquery {
             expr,
-            body,
+            subquery,
             negated,
-        } => Expr::InSubquery {
+        } => ScalarExpr::InSubquery {
             expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            body: body.clone(),
+            subquery: *subquery,
             negated: *negated,
         },
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } => expr.clone(),
+        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => expr.clone(),
     }
 }
 
 fn expand_from_star_columns(
     engine: &Engine,
     columns: Vec<String>,
-    projections: &[Projection],
-    from: &FromClause,
+    projections: &[ProjectionPlan],
+    from: &SourcePlan,
 ) -> Vec<String> {
-    let has_star = projections.iter().any(|p| matches!(p.expr, Expr::Star));
+    let has_star = projections
+        .iter()
+        .any(|p| matches!(p.expr, ScalarExpr::Star));
     if !has_star {
         return columns;
     }
@@ -2716,9 +2650,9 @@ fn expand_from_star_columns(
     out
 }
 
-fn from_clause_output_columns(engine: &Engine, from: &FromClause) -> Vec<String> {
+fn from_clause_output_columns(engine: &Engine, from: &SourcePlan) -> Vec<String> {
     match from {
-        FromClause::Function {
+        SourcePlan::Function {
             name,
             alias,
             column_aliases,
@@ -2731,7 +2665,7 @@ fn from_clause_output_columns(engine: &Engine, from: &FromClause) -> Vec<String>
             };
             qualify_output_columns(alias.as_deref(), cols)
         }
-        FromClause::Values {
+        SourcePlan::Values {
             rows,
             alias,
             column_aliases,
@@ -2744,17 +2678,17 @@ fn from_clause_output_columns(engine: &Engine, from: &FromClause) -> Vec<String>
             };
             qualify_output_columns(alias.as_deref(), cols)
         }
-        FromClause::Subquery {
+        SourcePlan::Subquery {
             alias,
             column_aliases,
             ..
         } => qualify_output_columns(alias.as_deref(), column_aliases.clone()),
-        FromClause::Join { left, right, .. } => {
+        SourcePlan::Join { left, right, .. } => {
             let mut cols = from_clause_output_columns(engine, left);
             cols.extend(from_clause_output_columns(engine, right));
             cols
         }
-        FromClause::Table { .. } => Vec::new(),
+        SourcePlan::Table { .. } => Vec::new(),
     }
 }
 
@@ -2797,10 +2731,11 @@ fn qualify_output_columns(alias: Option<&str>, columns: Vec<String>) -> Vec<Stri
 fn volcano_project_sort_limit(
     engine: &Engine,
     src_rows: &[ResultRow],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
-    projection_hook: &dyn uqa_sql::expr::EngineHook,
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let projection_hook = ScopedEngineHook::new(engine, ctes);
     // Some projection callsites (e.g. `text_match` in the SELECT
     // list) need the engine-side function registry, which the
     // execution-layer Project operator does not understand. Detect
@@ -2809,7 +2744,7 @@ fn volcano_project_sort_limit(
     let has_engine_funcs = stmt.projections.iter().any(|p| {
         let mut found = false;
         walk_expr(&p.expr, &mut |e| {
-            if let Expr::Func { name, .. } = e {
+            if let ScalarExpr::Func { name, .. } = e {
                 let lower = name.to_ascii_lowercase();
                 if uqa_sql::registry::is_registered(&lower)
                     || engine.has_registered_scalar_function(&lower)
@@ -2823,21 +2758,20 @@ fn volcano_project_sort_limit(
     let has_star = stmt
         .projections
         .iter()
-        .any(|p| matches!(p.expr, Expr::Star));
+        .any(|p| matches!(p.expr, ScalarExpr::Star));
     let has_subquery_projection = stmt
         .projections
         .iter()
         .any(|p| expr_contains_subquery(&p.expr));
-    // Pre-projection ordering / limiting. PG semantics: ORDER BY can
-    // reference columns that the SELECT list drops, so the sort and
-    // the limit must happen against the source rows -- the Project
-    // step is the *last* node in the pipeline. Output column aliases
-    // from the projection list are not addressable here, but the
-    // common cases (`ORDER BY <source-column>`, `ORDER BY <const>`)
-    // both work because the source row carries every column the
-    // FROM relation produced.
-    let resolved_offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?;
-    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
+    // Pre-projection ordering / limiting. PostgreSQL semantics allow
+    // ORDER BY to reference columns that the SELECT list drops, so the
+    // source rows must be staged before projection. This engine-side
+    // stage uses the same physical scalar context as every other
+    // relational site, including the query block's subquery arena.
+    let resolved_offset =
+        resolve_limit_offset_with_ctes(stmt.offset.as_ref(), engine, params, "OFFSET", ctes)?;
+    let resolved_limit =
+        resolve_limit_offset_with_ctes(stmt.limit.as_ref(), engine, params, "LIMIT", ctes)?;
     let top_k_rows = top_k_ordered_source_rows(
         engine,
         src_rows,
@@ -2845,84 +2779,53 @@ fn volcano_project_sort_limit(
         params,
         resolved_offset,
         resolved_limit,
+        ctes,
     )?;
 
-    if !has_engine_funcs
-        && !has_star
-        && !has_subquery_projection
-        && stmt.order_by.is_empty()
-        && resolved_offset.is_none()
-        && resolved_limit.is_none()
-    {
-        let labels = projection_columns(&stmt.projections);
-        return src_rows
-            .iter()
-            .map(|src| {
-                project_join_row_with_hook_and_labels(
-                    Some(projection_hook),
-                    src,
-                    &stmt.projections,
-                    &labels,
-                    params,
-                )
-            })
-            .collect();
-    }
+    let staged = if let Some(rows) = top_k_rows {
+        rows
+    } else {
+        stage_source_rows(
+            src_rows,
+            stmt,
+            engine,
+            params,
+            resolved_offset,
+            resolved_limit,
+            ctes,
+        )?
+    };
 
     if has_engine_funcs || has_star || has_subquery_projection {
-        let staged = if let Some(rows) = top_k_rows {
-            rows
-        } else {
-            stage_source_rows(
-                src_rows,
-                stmt,
-                engine,
-                params,
-                resolved_offset,
-                resolved_limit,
-            )?
-        };
         let rows: Vec<ResultRow> = staged
             .iter()
             .map(|src| {
-                project_join_row_with_hook(Some(projection_hook), src, &stmt.projections, params)
+                project_join_row_with_plan(
+                    engine,
+                    &projection_hook,
+                    &projection_hook,
+                    &stmt.subqueries,
+                    src,
+                    &stmt.projections,
+                    params,
+                )
             })
             .collect::<Result<_, _>>()?;
         return Ok(rows);
     }
 
     use uqa_execution::physical::{run_to_rows, ExecError, PhysicalOperator};
-    use uqa_execution::relational::{Limit, Project, Sort, SortKey};
+    use uqa_execution::relational::Project;
     use uqa_execution::scan::TableScan;
 
-    let columns: Vec<String> = src_rows
+    let columns: Vec<String> = staged
         .first()
         .map(|r| r.keys().cloned().collect())
         .unwrap_or_default();
-    let top_k_applied = top_k_rows.is_some();
-    let source_rows = top_k_rows.unwrap_or_else(|| src_rows.to_vec());
-    let mut op: Box<dyn PhysicalOperator> = Box::new(TableScan::from_rows(columns, source_rows));
-
-    if !top_k_applied && !stmt.order_by.is_empty() {
-        let keys: Vec<SortKey> = stmt
-            .order_by
-            .iter()
-            .map(|o| SortKey {
-                expr: o.expr.clone(),
-                descending: o.descending,
-                nulls_first: o
-                    .nulls
-                    .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
-            })
-            .collect();
-        op = Box::new(Sort::new(op, keys, params.to_vec()));
-    }
-    if !top_k_applied && (resolved_offset.is_some() || resolved_limit.is_some()) {
-        op = Box::new(Limit::new(op, resolved_offset.unwrap_or(0), resolved_limit));
-    }
+    let mut op: Box<dyn PhysicalOperator> = Box::new(TableScan::from_rows(columns, staged));
 
     let labels = projection_columns(&stmt.projections);
-    let projections: Vec<(String, Expr)> = stmt
+    let projections: Vec<(String, ScalarExpr)> = stmt
         .projections
         .iter()
         .enumerate()
@@ -2943,59 +2846,32 @@ fn volcano_project_sort_limit(
 /// pipeline has already trimmed the input set.
 fn stage_source_rows(
     src_rows: &[ResultRow],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     engine: &Engine,
     params: &[SQLParam],
     offset: Option<u64>,
     limit: Option<u64>,
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_execution::physical::{run_to_rows, PhysicalOperator};
-    use uqa_execution::relational::{Limit, Sort, SortKey};
-    use uqa_execution::scan::TableScan;
-
     if stmt.order_by.is_empty() && offset.is_none() && limit.is_none() {
         return Ok(src_rows.to_vec());
     }
-    if let Some(rows) = top_k_ordered_source_rows(engine, src_rows, stmt, params, offset, limit)? {
+    if let Some(rows) =
+        top_k_ordered_source_rows(engine, src_rows, stmt, params, offset, limit, ctes)?
+    {
         return Ok(rows);
     }
-    let columns: Vec<String> = src_rows
-        .first()
-        .map(|r| r.keys().cloned().collect())
-        .unwrap_or_default();
-    let mut op: Box<dyn PhysicalOperator> =
-        Box::new(TableScan::from_rows(columns, src_rows.to_vec()));
-    if !stmt.order_by.is_empty() {
-        let keys: Vec<SortKey> = stmt
-            .order_by
-            .iter()
-            .map(|o| SortKey {
-                expr: o.expr.clone(),
-                descending: o.descending,
-                nulls_first: o
-                    .nulls
-                    .map(|n| matches!(n, uqa_sql::ast::NullsOrder::First)),
-            })
-            .collect();
-        op = Box::new(Sort::new(op, keys, params.to_vec()));
-    }
-    if offset.is_some() || limit.is_some() {
-        op = Box::new(Limit::new(op, offset.unwrap_or(0), limit));
-    }
-    let (_cols, rows) = run_to_rows(op.as_mut()).map_err(|e| match e {
-        uqa_execution::physical::ExecError::SQL(err) => err,
-        uqa_execution::physical::ExecError::Other(msg) => SQLError::Internal(msg),
-    })?;
-    Ok(rows)
+    apply_row_order_limit_with_ctes(src_rows.to_vec(), stmt, engine, params, ctes)
 }
 
 fn top_k_ordered_source_rows(
     engine: &Engine,
     src_rows: &[ResultRow],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
     offset: Option<u64>,
     limit: Option<u64>,
+    ctes: &CteScope,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(limit) = limit else {
         return Ok(None);
@@ -3014,11 +2890,18 @@ fn top_k_ordered_source_rows(
     }
 
     let mut decorated = Vec::with_capacity(src_rows.len());
+    let hook = ScopedEngineHook::new(engine, ctes);
     for (idx, row) in src_rows.iter().enumerate() {
-        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+        let ctx = PhysicalEvalContext::new(Some(row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
         let mut key_values = Vec::with_capacity(stmt.order_by.len());
         for order in &stmt.order_by {
-            key_values.push(eval(&order.expr, &ctx)?);
+            key_values.push(eval_physical_scalar(
+                &order.expr,
+                &ctes.scalar_subqueries,
+                &ctx,
+            )?);
         }
         decorated.push((key_values, idx, row.clone()));
     }
@@ -3044,7 +2927,7 @@ fn compare_order_key_values(
     left_idx: usize,
     right: &[Value],
     right_idx: usize,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
 ) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     for (i, order) in stmt.order_by.iter().enumerate() {
@@ -3118,37 +3001,37 @@ fn compare_sort_values(left: &Value, right: &Value) -> std::cmp::Ordering {
     }
 }
 
-fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
+fn walk_expr<F: FnMut(&ScalarExpr)>(expr: &ScalarExpr, f: &mut F) {
     f(expr);
     match expr {
-        Expr::And(parts) | Expr::Or(parts) => {
+        ScalarExpr::And(parts) | ScalarExpr::Or(parts) => {
             for p in parts {
                 walk_expr(p, f);
             }
         }
-        Expr::Not(inner) => walk_expr(inner, f),
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Not(inner) => walk_expr(inner, f),
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             walk_expr(lhs, f);
             walk_expr(rhs, f);
         }
-        Expr::IsNull { expr, .. } => walk_expr(expr, f),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::IsNull { expr, .. } => walk_expr(expr, f),
+        ScalarExpr::Between { expr, low, high } => {
             walk_expr(expr, f);
             walk_expr(low, f);
             walk_expr(high, f);
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             walk_expr(expr, f);
             for p in list {
                 walk_expr(p, f);
             }
         }
-        Expr::Func { args, .. } | Expr::WindowCall { args, .. } => {
+        ScalarExpr::Func { args, .. } | ScalarExpr::WindowCall { args, .. } => {
             for p in args {
                 walk_expr(p, f);
             }
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -3164,8 +3047,8 @@ fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
                 walk_expr(e, f);
             }
         }
-        Expr::Cast { expr, .. } => walk_expr(expr, f),
-        Expr::Array(items) => {
+        ScalarExpr::Cast { expr, .. } => walk_expr(expr, f),
+        ScalarExpr::Array(items) => {
             for p in items {
                 walk_expr(p, f);
             }
@@ -3174,7 +3057,7 @@ fn walk_expr<F: FnMut(&Expr)>(expr: &Expr, f: &mut F) {
     }
 }
 
-fn expr_contains_jsonpath_fts_match(expr: &Expr) -> bool {
+fn expr_contains_jsonpath_fts_match(expr: &ScalarExpr) -> bool {
     let mut found = false;
     walk_expr(expr, &mut |part| {
         if expr_is_jsonpath_fts_match(part) {
@@ -3184,666 +3067,170 @@ fn expr_contains_jsonpath_fts_match(expr: &Expr) -> bool {
     found
 }
 
-fn expr_is_jsonpath_fts_match(expr: &Expr) -> bool {
+fn expr_is_jsonpath_fts_match(expr: &ScalarExpr) -> bool {
     matches!(
         expr,
-        Expr::Func { name, args, .. }
+        ScalarExpr::Func { name, args, .. }
             if name.eq_ignore_ascii_case("fts_match")
                 && matches!(
                     args.get(1),
-                    Some(Expr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
+                    Some(ScalarExpr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
                 )
     )
 }
 
-pub(super) fn materialize_ctes(
-    engine: &Engine,
-    stmt: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<(), SQLError> {
-    let has_statement_filter = stmt.r#where.is_some();
-    let cte_filters = cte_output_filters_for_stmt(stmt);
-    let has_inline_candidate = stmt
-        .with
-        .iter()
-        .any(|cte| !cte.recursive && (cte_query_is_constant(&cte.query) || has_statement_filter));
-    if !has_inline_candidate && cte_filters.is_empty() {
-        return materialize_cte_list(engine, &stmt.with, params, ctes);
-    }
-    let ref_stats = cte_reference_stats(stmt);
-    for cte in &stmt.with {
-        if !cte.recursive
-            && ref_stats.counts.get(&cte.name).copied().unwrap_or(0) == 1
-            && !ref_stats.subquery_refs.contains(&cte.name)
-            && (cte_query_is_constant(&cte.query)
-                || (has_statement_filter && !select_contains_volatile_function(&cte.query)))
-        {
-            ctes.inlined.insert(cte.name.clone(), (*cte.query).clone());
-            continue;
-        }
-        let rows = if cte.recursive {
-            materialize_recursive_cte(engine, cte, params, ctes, cte_filters.get(&cte.name))?
-        } else {
-            let result = execute_select_ast_with_ctes(engine, &cte.query, params, ctes)?;
-            apply_cte_column_aliases(result.rows, &result.columns, &cte.columns)
-        };
-        ctes.insert_materialized(cte.name.clone(), rows);
-    }
-    Ok(())
-}
-
-fn cte_query_is_constant(stmt: &SelectStmt) -> bool {
-    stmt.with.is_empty()
-        && stmt.set_op.is_none()
-        && stmt.from.is_none()
-        && stmt.r#where.is_none()
-        && stmt.group_by.is_empty()
-        && stmt.grouping_sets.is_empty()
-        && stmt.having.is_none()
-        && stmt.order_by.is_empty()
-        && stmt.limit.is_none()
-        && stmt.offset.is_none()
-        && !stmt.distinct
-        && stmt.distinct_on.is_empty()
-        && !stmt.projections.iter().any(|projection| {
-            expr_contains_subquery(&projection.expr)
-                || expr_contains_volatile_function(&projection.expr)
-                || has_window_projection(&projection.expr)
-        })
-}
-
-fn has_window_projection(expr: &Expr) -> bool {
-    match expr {
-        Expr::WindowCall { .. } => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().any(has_window_projection)
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            args.iter().any(has_window_projection)
-                || order_by
-                    .iter()
-                    .any(|order| has_window_projection(&order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|expr| has_window_projection(expr))
-        }
-        Expr::Binary { lhs, rhs, .. } => has_window_projection(lhs) || has_window_projection(rhs),
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            has_window_projection(inner)
-        }
-        Expr::Between { expr, low, high } => {
-            has_window_projection(expr) || has_window_projection(low) || has_window_projection(high)
-        }
-        Expr::InList { expr, list, .. } => {
-            has_window_projection(expr) || list.iter().any(has_window_projection)
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref()
-                .is_some_and(|expr| has_window_projection(expr))
-                || when.iter().any(|(cond, result)| {
-                    has_window_projection(cond) || has_window_projection(result)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| has_window_projection(expr))
-        }
-        Expr::InSubquery { expr, .. } => has_window_projection(expr),
-        Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => false,
-    }
-}
-
-pub(super) fn materialize_cte_list(
-    engine: &Engine,
-    list: &[CTE],
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<(), SQLError> {
-    for cte in list {
-        let rows = if cte.recursive {
-            materialize_recursive_cte(engine, cte, params, ctes, None)?
-        } else {
-            let result = execute_select_ast_with_ctes(engine, &cte.query, params, ctes)?;
-            apply_cte_column_aliases(result.rows, &result.columns, &cte.columns)
-        };
-        ctes.insert_materialized(cte.name.clone(), rows);
-    }
-    Ok(())
-}
-
-struct CteReferenceStats {
-    counts: BTreeMap<String, usize>,
-    subquery_refs: HashSet<String>,
-}
-
-fn cte_reference_stats(stmt: &SelectStmt) -> CteReferenceStats {
-    let names: HashSet<String> = stmt.with.iter().map(|cte| cte.name.clone()).collect();
-    let mut stats = CteReferenceStats {
-        counts: BTreeMap::new(),
-        subquery_refs: HashSet::new(),
-    };
-    if names.is_empty() {
-        return stats;
-    }
-    for cte in &stmt.with {
-        collect_select_cte_references(&cte.query, &names, &mut stats, false, true);
-    }
-    collect_select_cte_references(stmt, &names, &mut stats, false, false);
-    stats
-}
-
-fn collect_select_cte_references(
-    stmt: &SelectStmt,
-    names: &HashSet<String>,
-    stats: &mut CteReferenceStats,
-    inside_subquery: bool,
-    include_with: bool,
-) {
-    if include_with {
-        for cte in &stmt.with {
-            collect_select_cte_references(&cte.query, names, stats, inside_subquery, true);
-        }
-    }
-    if let Some(set_op) = stmt.set_op.as_ref().filter(|set_op| set_op.left.is_some()) {
-        collect_select_cte_references(
-            set_op.left.as_deref().unwrap(),
-            names,
-            stats,
-            inside_subquery,
-            true,
-        );
-        collect_select_cte_references(&set_op.right, names, stats, inside_subquery, true);
-        for order in &set_op.combined_order_by {
-            collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
-        }
-        if let Some(limit) = set_op.combined_limit.as_ref() {
-            collect_expr_cte_references(limit, names, stats, inside_subquery);
-        }
-        if let Some(offset) = set_op.combined_offset.as_ref() {
-            collect_expr_cte_references(offset, names, stats, inside_subquery);
-        }
-        return;
-    }
-    if let Some(from) = stmt.from.as_ref() {
-        collect_from_cte_references(from, names, stats, inside_subquery);
-    }
-    for projection in &stmt.projections {
-        collect_expr_cte_references(&projection.expr, names, stats, inside_subquery);
-    }
-    if let Some(filter) = stmt.r#where.as_ref() {
-        collect_expr_cte_references(filter, names, stats, inside_subquery);
-    }
-    for expr in &stmt.group_by {
-        collect_expr_cte_references(expr, names, stats, inside_subquery);
-    }
-    for set in &stmt.grouping_sets {
-        for expr in set {
-            collect_expr_cte_references(expr, names, stats, inside_subquery);
-        }
-    }
-    if let Some(having) = stmt.having.as_ref() {
-        collect_expr_cte_references(having, names, stats, inside_subquery);
-    }
-    for order in &stmt.order_by {
-        collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
-    }
-    if let Some(limit) = stmt.limit.as_ref() {
-        collect_expr_cte_references(limit, names, stats, inside_subquery);
-    }
-    if let Some(offset) = stmt.offset.as_ref() {
-        collect_expr_cte_references(offset, names, stats, inside_subquery);
-    }
-    for expr in &stmt.distinct_on {
-        collect_expr_cte_references(expr, names, stats, inside_subquery);
-    }
-    if let Some(set_op) = stmt.set_op.as_ref() {
-        if let Some(left) = set_op.left.as_deref() {
-            collect_select_cte_references(left, names, stats, inside_subquery, true);
-        }
-        collect_select_cte_references(&set_op.right, names, stats, inside_subquery, true);
-        for order in &set_op.combined_order_by {
-            collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
-        }
-        if let Some(limit) = set_op.combined_limit.as_ref() {
-            collect_expr_cte_references(limit, names, stats, inside_subquery);
-        }
-        if let Some(offset) = set_op.combined_offset.as_ref() {
-            collect_expr_cte_references(offset, names, stats, inside_subquery);
-        }
-    }
-}
-
-fn collect_from_cte_references(
-    from: &FromClause,
-    names: &HashSet<String>,
-    stats: &mut CteReferenceStats,
-    inside_subquery: bool,
-) {
-    match from {
-        FromClause::Table { name, .. } => {
-            if names.contains(name) {
-                *stats.counts.entry(name.clone()).or_insert(0) += 1;
-                if inside_subquery {
-                    stats.subquery_refs.insert(name.clone());
-                }
-            }
-        }
-        FromClause::Join {
-            left, right, on, ..
-        } => {
-            collect_from_cte_references(left, names, stats, inside_subquery);
-            collect_from_cte_references(right, names, stats, inside_subquery);
-            if let Some(on) = on.as_ref() {
-                collect_expr_cte_references(on, names, stats, inside_subquery);
-            }
-        }
-        FromClause::Values { rows, .. } => {
-            for row in rows {
-                for expr in row {
-                    collect_expr_cte_references(expr, names, stats, inside_subquery);
-                }
-            }
-        }
-        FromClause::Function { args, .. } => {
-            for expr in args {
-                collect_expr_cte_references(expr, names, stats, inside_subquery);
-            }
-        }
-        FromClause::Subquery { body, .. } => {
-            collect_select_cte_references(body, names, stats, true, true);
-        }
-    }
-}
-
-fn collect_expr_cte_references(
-    expr: &Expr,
-    names: &HashSet<String>,
-    stats: &mut CteReferenceStats,
-    inside_subquery: bool,
-) {
-    match expr {
-        Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
-            collect_select_cte_references(body, names, stats, true, true);
-        }
-        Expr::InSubquery { expr, body, .. } => {
-            collect_expr_cte_references(expr, names, stats, inside_subquery);
-            collect_select_cte_references(body, names, stats, true, true);
-        }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            for item in items {
-                collect_expr_cte_references(item, names, stats, inside_subquery);
-            }
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for arg in args {
-                collect_expr_cte_references(arg, names, stats, inside_subquery);
-            }
-            for order in order_by {
-                collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
-            }
-            if let Some(filter) = filter.as_ref() {
-                collect_expr_cte_references(filter, names, stats, inside_subquery);
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            collect_expr_cte_references(lhs, names, stats, inside_subquery);
-            collect_expr_cte_references(rhs, names, stats, inside_subquery);
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            collect_expr_cte_references(inner, names, stats, inside_subquery);
-        }
-        Expr::Between { expr, low, high } => {
-            collect_expr_cte_references(expr, names, stats, inside_subquery);
-            collect_expr_cte_references(low, names, stats, inside_subquery);
-            collect_expr_cte_references(high, names, stats, inside_subquery);
-        }
-        Expr::InList { expr, list, .. } => {
-            collect_expr_cte_references(expr, names, stats, inside_subquery);
-            for item in list {
-                collect_expr_cte_references(item, names, stats, inside_subquery);
-            }
-        }
-        Expr::WindowCall { args, spec, .. } => {
-            for arg in args {
-                collect_expr_cte_references(arg, names, stats, inside_subquery);
-            }
-            for expr in &spec.partition_by {
-                collect_expr_cte_references(expr, names, stats, inside_subquery);
-            }
-            for order in &spec.order_by {
-                collect_expr_cte_references(&order.expr, names, stats, inside_subquery);
-            }
-            if let Some(frame) = spec.frame.as_ref() {
-                collect_frame_bound_cte_references(&frame.start, names, stats, inside_subquery);
-                collect_frame_bound_cte_references(&frame.end, names, stats, inside_subquery);
-            }
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_ref() {
-                collect_expr_cte_references(base, names, stats, inside_subquery);
-            }
-            for (cond, result) in when {
-                collect_expr_cte_references(cond, names, stats, inside_subquery);
-                collect_expr_cte_references(result, names, stats, inside_subquery);
-            }
-            if let Some(else_branch) = else_branch.as_ref() {
-                collect_expr_cte_references(else_branch, names, stats, inside_subquery);
-            }
-        }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => {}
-    }
-}
-
-fn collect_frame_bound_cte_references(
-    bound: &uqa_sql::ast::FrameBound,
-    names: &HashSet<String>,
-    stats: &mut CteReferenceStats,
-    inside_subquery: bool,
-) {
-    match bound {
-        uqa_sql::ast::FrameBound::Preceding(expr) | uqa_sql::ast::FrameBound::Following(expr) => {
-            collect_expr_cte_references(expr, names, stats, inside_subquery);
-        }
-        uqa_sql::ast::FrameBound::UnboundedPreceding
-        | uqa_sql::ast::FrameBound::UnboundedFollowing
-        | uqa_sql::ast::FrameBound::CurrentRow => {}
-    }
-}
-
-fn cte_output_filters_for_stmt(stmt: &SelectStmt) -> BTreeMap<String, (String, Expr)> {
-    let Some(filter) = stmt.r#where.as_ref() else {
-        return BTreeMap::new();
-    };
-    if expr_contains_subquery(filter) || expr_contains_volatile_function(filter) {
-        return BTreeMap::new();
-    }
-    let cte_names: BTreeSet<String> = stmt.with.iter().map(|cte| cte.name.clone()).collect();
-    if cte_names.is_empty() {
-        return BTreeMap::new();
-    }
-    let mut alias_to_cte = BTreeMap::new();
-    if let Some(from) = stmt.from.as_ref() {
-        collect_cte_reference_aliases(from, &cte_names, &mut alias_to_cte);
-    }
-    if alias_to_cte.is_empty() {
-        return BTreeMap::new();
-    }
-
-    let mut grouped: BTreeMap<String, (String, Vec<Expr>)> = BTreeMap::new();
-    for part in flatten_and_filter_parts(filter) {
-        if expr_contains_subquery(part) || expr_contains_volatile_function(part) {
-            continue;
-        }
-        let qualifiers = expr_qualifiers(part);
-        if qualifiers.len() == 1 {
-            let qualifier = qualifiers.iter().next().unwrap();
-            if let Some(cte_name) = alias_to_cte.get(qualifier) {
-                let entry = grouped
-                    .entry(cte_name.clone())
-                    .or_insert_with(|| (qualifier.clone(), Vec::new()));
-                entry.1.push(part.clone());
-            }
-            continue;
-        }
-        if qualifiers.is_empty() && expr_has_unqualified_column(part) && alias_to_cte.len() == 1 {
-            let (qualifier, cte_name) = alias_to_cte.iter().next().unwrap();
-            let entry = grouped
-                .entry(cte_name.clone())
-                .or_insert_with(|| (qualifier.clone(), Vec::new()));
-            entry.1.push(qualify_unqualified_columns(part, qualifier));
-        }
-    }
-
-    grouped
-        .into_iter()
-        .map(|(cte_name, (qualifier, filters))| {
-            (cte_name, (qualifier, combine_filter_exprs(filters)))
-        })
-        .collect()
-}
-
-fn collect_cte_reference_aliases(
-    from: &FromClause,
-    cte_names: &BTreeSet<String>,
-    out: &mut BTreeMap<String, String>,
-) {
-    match from {
-        FromClause::Table { name, alias } => {
-            if cte_names.contains(name) {
-                out.insert(alias.clone().unwrap_or_else(|| name.clone()), name.clone());
-            }
-        }
-        FromClause::Join { left, right, .. } => {
-            collect_cte_reference_aliases(left, cte_names, out);
-            collect_cte_reference_aliases(right, cte_names, out);
-        }
-        FromClause::Values { .. } | FromClause::Function { .. } => {}
-        FromClause::Subquery { body, .. } => {
-            if let Some(from) = body.from.as_ref() {
-                collect_cte_reference_aliases(from, cte_names, out);
-            }
-        }
-    }
-}
-
-fn combine_filter_exprs(mut filters: Vec<Expr>) -> Expr {
-    if filters.len() == 1 {
-        filters.pop().unwrap()
-    } else {
-        Expr::And(filters)
-    }
-}
-
-/// Iterate the recursive CTE: take the anchor (LHS of UNION ALL) as
+/// Iterate the recursive `CtePlan`: take the anchor (LHS of UNION ALL) as
 /// the initial row set, then repeatedly evaluate the recursive step
-/// (RHS) with the CTE bound to the *new rows from the previous
+/// (RHS) with the `CtePlan` bound to the *new rows from the previous
 /// iteration* (working set), unioning the result back into the total.
 /// Caps at 1024 iterations to keep buggy queries from running away.
 fn materialize_recursive_cte(
     engine: &Engine,
-    cte: &CTE,
+    cte: &CtePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
-    output_filter: Option<&(String, Expr)>,
+    output_filter: Option<&(String, ScalarExpr)>,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    let set_op = cte
-        .query
-        .set_op
-        .as_ref()
-        .ok_or_else(|| SQLError::Unsupported("recursive CTE requires UNION ALL".into()))?;
-    if set_op.kind != SetOpKind::Union {
+    if !cte.query.ctes.is_empty() {
+        materialize_plan_ctes(engine, &cte.query.ctes, params, ctes)?;
+    }
+
+    let RelationalPlan::SetOp {
+        kind,
+        all,
+        left,
+        right,
+        order_by,
+        limit,
+        offset,
+        subqueries,
+    } = &cte.query.root
+    else {
+        return Err(SQLError::Unsupported(
+            "recursive CTE requires a UNION query".into(),
+        ));
+    };
+    if *kind != SetOpKind::Union {
         return Err(SQLError::Unsupported(
             "recursive CTE only supports UNION".into(),
         ));
     }
 
-    // Anchor: the explicit LHS subtree. Older serialized statements may not
-    // carry it, so retain the historical implicit-LHS fallback.
-    let mut anchor_stmt = if let Some(left) = set_op.left.as_deref() {
-        left.clone()
+    let declared_columns = (!cte.columns.is_empty()).then_some(cte.columns.as_slice());
+    let (anchor_plan, step_plan) = if let Some((qualifier, filter)) = output_filter {
+        let output_columns = declared_columns
+            .map(<[String]>::to_vec)
+            .or_else(|| query_plan_output_columns(left));
+        match output_columns {
+            Some(output_columns) => {
+                let specialized_anchor = push_output_filter_into_query_plan(
+                    engine,
+                    left,
+                    qualifier,
+                    filter,
+                    Some(&output_columns),
+                );
+                let specialized_step = push_output_filter_into_query_plan(
+                    engine,
+                    right,
+                    qualifier,
+                    filter,
+                    Some(&output_columns),
+                );
+                match (specialized_anchor, specialized_step) {
+                    (Some(anchor), Some(step)) => (anchor, step),
+                    _ => ((**left).clone(), (**right).clone()),
+                }
+            }
+            None => ((**left).clone(), (**right).clone()),
+        }
     } else {
-        let mut anchor = cte.query.as_ref().clone();
-        anchor.set_op = None;
-        anchor
+        ((**left).clone(), (**right).clone())
     };
-    anchor_stmt.with.clear();
-    let source_anchor_columns = projection_columns(&anchor_stmt.projections);
+
+    let anchor = execute_query_plan_with_ctes(engine, &anchor_plan, params, ctes)?;
     let anchor_columns = if cte.columns.is_empty() {
-        source_anchor_columns.clone()
+        anchor.columns.clone()
     } else {
         cte.columns.clone()
     };
-    if let Some((qualifier, filter)) = output_filter {
-        if let Some(filtered) = super::from_rows::push_output_filter_into_select_with_columns(
-            engine,
-            anchor_stmt.clone(),
-            qualifier,
-            filter,
-            &anchor_columns,
-        ) {
-            anchor_stmt = filtered;
-        }
-    }
-    let anchor_plan = QueryPlan::lower_with(anchor_stmt, &|name: &str| {
-        engine.has_registered_aggregate_function(name)
-    });
-    let anchor_rows = execute_query_plan_with_ctes(engine, &anchor_plan, params, ctes)?.rows;
-    let anchor_rows =
-        apply_cte_column_aliases(anchor_rows, &source_anchor_columns, &anchor_columns);
+    let mut working = apply_cte_column_aliases(anchor.rows, &anchor.columns, &anchor_columns);
 
-    let mut working = anchor_rows;
+    const MAX_ITERATIONS: usize = 1024;
+    let rows = if *all {
+        let mut accumulated = Vec::new();
+        let mut iterations = 0usize;
+        loop {
+            if working.is_empty() {
+                break accumulated;
+            }
+            if iterations == MAX_ITERATIONS {
+                return Err(SQLError::Unsupported(format!(
+                    "recursive CTE `{}` exceeded {MAX_ITERATIONS} iterations",
+                    cte.name
+                )));
+            }
+            iterations += 1;
 
-    let mut step_stmt = set_op.right.clone();
-    step_stmt.with.clear();
-    let step_columns = projection_columns(&step_stmt.projections);
-    if let Some((qualifier, filter)) = output_filter {
-        if let Some(filtered) = super::from_rows::push_output_filter_into_select_with_columns(
-            engine,
-            step_stmt.clone(),
-            qualifier,
-            filter,
-            &anchor_columns,
-        ) {
-            step_stmt = filtered;
+            ctes.insert_materialized(cte.name.clone(), working);
+            let step_result = execute_query_plan_with_ctes(engine, &step_plan, params, ctes);
+            let previous = ctes.remove_materialized(&cte.name).unwrap_or_default();
+            accumulated.extend(previous);
+            let step = step_result?;
+            working = apply_cte_column_aliases(step.rows, &step.columns, &anchor_columns);
         }
-    }
-    let step_exists_filter = step_stmt
-        .r#where
-        .as_ref()
-        .filter(|filter| exists_membership_filter_is_stable(engine, filter, ctes))
-        .map(|filter| prepare_exists_membership_filter(engine, filter, params, ctes))
-        .transpose()?
-        .flatten();
-    let step_plan = QueryPlan::lower_with(step_stmt, &|name: &str| {
-        engine.has_registered_aggregate_function(name)
-    });
-    let RelationalPlan::QueryBlock(step_block) = &step_plan.root else {
-        return Err(SQLError::Internal(
-            "recursive CTE step did not lower to a query block".into(),
-        ));
+    } else {
+        let mut accumulated = working.clone();
+        let mut iterations = 0usize;
+        loop {
+            if working.is_empty() {
+                break accumulated;
+            }
+            if iterations == MAX_ITERATIONS {
+                return Err(SQLError::Unsupported(format!(
+                    "recursive CTE `{}` exceeded {MAX_ITERATIONS} iterations",
+                    cte.name
+                )));
+            }
+            iterations += 1;
+
+            ctes.insert_materialized(cte.name.clone(), working);
+            let step_result = execute_query_plan_with_ctes(engine, &step_plan, params, ctes);
+            ctes.remove_materialized(&cte.name);
+            let step = step_result?;
+            let renamed = apply_cte_column_aliases(step.rows, &step.columns, &anchor_columns);
+            let next: Vec<_> = renamed
+                .into_iter()
+                .filter(|row| !accumulated.iter().any(|seen| seen == row))
+                .collect();
+            accumulated.extend(next.iter().cloned());
+            working = next;
+        }
     };
 
-    const MAX_ITER: usize = 1024;
-    if set_op.all {
-        let mut chunks: Vec<Vec<ResultRow>> = Vec::new();
-        for _ in 0..MAX_ITER {
-            if working.is_empty() {
-                break;
-            }
-            ctes.insert_materialized(cte.name.clone(), working);
-            let new_rows = execute_query_block_plan(
-                engine,
-                step_block,
-                params,
-                ctes,
-                step_exists_filter.as_ref(),
-            );
-            let old_working = ctes.remove_materialized(&cte.name).unwrap_or_default();
-            chunks.push(old_working);
-            let new_rows = new_rows?.rows;
-
-            if new_rows.is_empty() {
-                working = Vec::new();
-                break;
-            }
-            working = if step_columns == anchor_columns {
-                new_rows
-            } else {
-                new_rows
-                    .into_iter()
-                    .map(|row| rename_columns(&row, &step_columns, &anchor_columns))
-                    .collect()
-            };
-        }
-        if !working.is_empty() {
-            chunks.push(working);
-        }
-        let row_count = chunks.iter().map(Vec::len).sum();
-        let mut rows = Vec::with_capacity(row_count);
-        for chunk in chunks {
-            rows.extend(chunk);
-        }
+    if order_by.is_empty() && limit.is_none() && offset.is_none() {
         return Ok(rows);
     }
-
-    let mut all_rows = working.clone();
-    for _ in 0..MAX_ITER {
-        if working.is_empty() {
-            break;
-        }
-        // Bind the CTE name to the working set under the anchor's
-        // column shape so the recursive step's FROM ... <cte> ... sees
-        // the same keys it saw on the prior pass.
-        ctes.insert_materialized(cte.name.clone(), working);
-        let new_rows = execute_query_block_plan(
-            engine,
-            step_block,
-            params,
-            ctes,
-            step_exists_filter.as_ref(),
-        );
-        ctes.remove_materialized(&cte.name);
-        let new_rows = new_rows?.rows;
-
-        if new_rows.is_empty() {
-            break;
-        }
-        // Rename the step's positional projection labels to the
-        // anchor's so subsequent iterations and the outer SELECT see a
-        // consistent shape (anchor names win, mirroring `PostgreSQL`).
-        let renamed: Vec<ResultRow> = if step_columns == anchor_columns {
-            new_rows
-        } else {
-            new_rows
-                .into_iter()
-                .map(|row| rename_columns(&row, &step_columns, &anchor_columns))
-                .collect()
-        };
-        let next = if set_op.all {
-            renamed
-        } else {
-            renamed
-                .into_iter()
-                .filter(|row| !all_rows.iter().any(|seen| seen == row))
-                .collect()
-        };
-        if next.is_empty() {
-            break;
-        }
-        all_rows.extend(next.clone());
-        working = next;
-    }
-    Ok(all_rows)
+    let synthetic = QueryBlockPlan {
+        projections: Vec::new(),
+        from: None,
+        r#where: None,
+        compute: ComputePlan::Project,
+        group_by: Vec::new(),
+        grouping_sets: Vec::new(),
+        having: None,
+        order_by: order_by.clone(),
+        limit: limit.as_deref().cloned(),
+        offset: offset.as_deref().cloned(),
+        distinct: false,
+        distinct_on: Vec::new(),
+        subqueries: subqueries.clone(),
+        access: AccessPathPlan::Row,
+    };
+    let mut ordering_scope = ctes.clone();
+    ordering_scope.scalar_subqueries.clone_from(subqueries);
+    apply_row_order_limit_with_ctes(rows, &synthetic, engine, params, &ordering_scope)
 }
-
 fn apply_cte_column_aliases(
     rows: Vec<ResultRow>,
     source_columns: &[String],
@@ -3875,8 +3262,9 @@ fn run_single_table_select(
     engine: &Engine,
     table: &str,
     block: &QueryBlockPlan,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     if let Some(filter) = stmt.r#where.as_ref() {
         super::validate_expr_text_match_fields(engine, table, filter)?;
@@ -3893,7 +3281,7 @@ fn run_single_table_select(
         && !stmt.distinct
         && stmt.projections.len() == 1
     {
-        if let Expr::Func {
+        if let ScalarExpr::Func {
             name,
             args,
             distinct,
@@ -3902,7 +3290,7 @@ fn run_single_table_select(
         } = &stmt.projections[0].expr
         {
             if name.eq_ignore_ascii_case("count")
-                && matches!(args.as_slice(), [Expr::Star])
+                && matches!(args.as_slice(), [ScalarExpr::Star])
                 && !*distinct
                 && filter.is_none()
             {
@@ -3917,8 +3305,17 @@ fn run_single_table_select(
         }
     }
 
-    let score_top_k = score_order_top_k(stmt, engine, params)?;
-    let score_top_k = score_top_k.filter(|_| score_limited_text_filter(stmt.r#where.as_ref()));
+    let score_top_k = if matches!(
+        block.access,
+        AccessPathPlan::OperatorTree {
+            score_limit_pushdown: true
+        }
+    ) {
+        score_order_top_k(stmt, engine, params, ctes)?
+            .filter(|_| score_limited_text_filter(stmt.r#where.as_ref()))
+    } else {
+        None
+    };
     let has_jsonpath_fts_filter = stmt
         .r#where
         .as_ref()
@@ -3930,9 +3327,11 @@ fn run_single_table_select(
     // returns `None` for shapes that are not posting-list access paths
     // (arithmetic across columns, subqueries, window calls, ...); those
     // remain scalar predicates in this relational filter node.
-    let optimised = if has_jsonpath_fts_filter {
+    let optimised = if has_jsonpath_fts_filter
+        || !matches!(block.access, AccessPathPlan::OperatorTree { .. })
+    {
         None
-    } else if let (Some(top_k), Some(Expr::Func { name, args, .. })) =
+    } else if let (Some(top_k), Some(ScalarExpr::Func { name, args, .. })) =
         (score_top_k, stmt.r#where.as_ref())
     {
         Some(execute_function_with_top_k(
@@ -3955,7 +3354,7 @@ fn run_single_table_select(
                 .into_iter()
                 .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
                 .collect::<Vec<_>>(),
-            Some(filter_expr @ Expr::Func { name, args, .. })
+            Some(filter_expr @ ScalarExpr::Func { name, args, .. })
                 if uqa_sql::registry::is_registered(name)
                     && !expr_is_jsonpath_fts_match(filter_expr) =>
             {
@@ -3965,10 +3364,10 @@ fn run_single_table_select(
         }
     };
 
-    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
+    if matches!(&block.compute, ComputePlan::Aggregate) {
         let columns = projection_columns(&stmt.projections);
-        let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
-        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        let rows = build_aggregate_rows(engine, table, &scored, stmt, params, ctes)?;
+        let rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
@@ -3983,7 +3382,7 @@ fn run_single_table_select(
         // doc ids first and project only the surviving rows - with a
         // LIMIT this turns a full projection pass into a top-K
         // selection.
-        if let Some(result) = run_doc_ordered_select(engine, table, &scored, stmt, params)? {
+        if let Some(result) = run_doc_ordered_select(engine, table, &scored, stmt, params, ctes)? {
             return Ok(result);
         }
         // Fallback: ORDER BY needs projected values (aliases,
@@ -4007,7 +3406,7 @@ fn run_single_table_select(
             }
             all_rows.push(row);
         }
-        let rows = apply_row_order_limit(all_rows, stmt, engine, params)?;
+        let rows = apply_row_order_limit_with_ctes(all_rows, stmt, engine, params, ctes)?;
         // Strip the helper fields to keep the projection honest.
         let projected: Vec<_> = rows
             .into_iter()
@@ -4019,7 +3418,7 @@ fn run_single_table_select(
         return Ok(SQLResult::from_rows(columns, projected));
     }
 
-    let scored = apply_order_limit(scored, stmt, engine, params)?;
+    let scored = apply_order_limit(scored, stmt, engine, params, ctes)?;
     let columns = expand_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,
@@ -4034,9 +3433,11 @@ fn run_single_foreign_select(
     engine: &Engine,
     table: &str,
     block: &QueryBlockPlan,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
+    let projection_hook = ScopedEngineHook::new(engine, ctes);
     let predicates = fdw_predicates_from_where(stmt.r#where.as_ref(), params);
     let scanned = engine
         .scan_foreign_table(table, None, &predicates, None)
@@ -4045,8 +3446,14 @@ fn run_single_foreign_select(
     let filtered = if let Some(filter) = stmt.r#where.as_ref() {
         let mut out = Vec::with_capacity(scanned.len());
         for row in scanned {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
-            if uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+            let ctx = PhysicalEvalContext::new(Some(&row), params)
+                .with_function_hook(&projection_hook)
+                .with_subquery_runner(&projection_hook);
+            if uqa_sql::expr::truthy(&eval_physical_scalar(
+                filter,
+                &ctes.scalar_subqueries,
+                &ctx,
+            )?) {
                 out.push(row);
             }
         }
@@ -4055,28 +3462,36 @@ fn run_single_foreign_select(
         scanned
     };
 
-    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
+    if matches!(&block.compute, ComputePlan::Aggregate) {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
-        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params, ctes)?;
+        let rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    if matches!(&block.compute, ComputePlan::Window { .. }) {
+    if matches!(&block.compute, ComputePlan::Window) {
         let columns = projection_columns(&stmt.projections);
-        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
+        let windowed = compute_window_columns(engine, &stmt.projections, filtered, params, ctes)?;
         let mut rows: Vec<ResultRow> = windowed
             .rows
             .iter()
             .map(|src| {
-                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
+                project_join_row_with_plan(
+                    engine,
+                    &projection_hook,
+                    &projection_hook,
+                    &stmt.subqueries,
+                    src,
+                    &windowed.projections,
+                    params,
+                )
             })
             .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    let rows = volcano_project_sort_limit(engine, &filtered, stmt, params, engine)?;
+    let rows = volcano_project_sort_limit(engine, &filtered, stmt, params, ctes)?;
     let columns = expand_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,
@@ -4087,7 +3502,7 @@ fn run_single_foreign_select(
 }
 
 fn fdw_predicates_from_where(
-    expr: Option<&Expr>,
+    expr: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Vec<uqa_fdw::FDWPredicate> {
     let Some(expr) = expr else {
@@ -4098,9 +3513,13 @@ fn fdw_predicates_from_where(
     out
 }
 
-fn collect_fdw_predicates(expr: &Expr, params: &[SQLParam], out: &mut Vec<uqa_fdw::FDWPredicate>) {
+fn collect_fdw_predicates(
+    expr: &ScalarExpr,
+    params: &[SQLParam],
+    out: &mut Vec<uqa_fdw::FDWPredicate>,
+) {
     match expr {
-        Expr::And(parts) => {
+        ScalarExpr::And(parts) => {
             for part in parts {
                 collect_fdw_predicates(part, params, out);
             }
@@ -4113,9 +3532,9 @@ fn collect_fdw_predicates(expr: &Expr, params: &[SQLParam], out: &mut Vec<uqa_fd
     }
 }
 
-fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredicate> {
+fn fdw_predicate(expr: &ScalarExpr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredicate> {
     match expr {
-        Expr::Binary { op, lhs, rhs } => {
+        ScalarExpr::Binary { op, lhs, rhs } => {
             if let Some(column) = fdw_column_name(lhs) {
                 let value = fdw_const_value(rhs, params)?;
                 return Some(uqa_fdw::FDWPredicate {
@@ -4134,7 +3553,7 @@ fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredica
             }
             None
         }
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
@@ -4150,7 +3569,7 @@ fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredica
                 value: Value::List(values),
             })
         }
-        Expr::IsNull { expr, negated } => Some(uqa_fdw::FDWPredicate {
+        ScalarExpr::IsNull { expr, negated } => Some(uqa_fdw::FDWPredicate {
             column: fdw_column_name(expr)?,
             operator: if *negated {
                 uqa_fdw::PredicateOp::NotEq
@@ -4159,9 +3578,9 @@ fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredica
             },
             value: Value::Null,
         }),
-        Expr::Func { name, args, .. } => fdw_like_predicate(name, args, false, params),
-        Expr::Not(inner) => match inner.as_ref() {
-            Expr::Func { name, args, .. } => fdw_like_predicate(name, args, true, params),
+        ScalarExpr::Func { name, args, .. } => fdw_like_predicate(name, args, false, params),
+        ScalarExpr::Not(inner) => match inner.as_ref() {
+            ScalarExpr::Func { name, args, .. } => fdw_like_predicate(name, args, true, params),
             _ => None,
         },
         _ => None,
@@ -4170,7 +3589,7 @@ fn fdw_predicate(expr: &Expr, params: &[SQLParam]) -> Option<uqa_fdw::FDWPredica
 
 fn fdw_like_predicate(
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     negated: bool,
     params: &[SQLParam],
 ) -> Option<uqa_fdw::FDWPredicate> {
@@ -4192,17 +3611,17 @@ fn fdw_like_predicate(
     })
 }
 
-fn fdw_column_name(expr: &Expr) -> Option<String> {
+fn fdw_column_name(expr: &ScalarExpr) -> Option<String> {
     match expr {
-        Expr::Column(name) => Some(name.clone()),
-        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
+        ScalarExpr::Column(name) => Some(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column.clone()),
         _ => None,
     }
 }
 
-fn fdw_const_value(expr: &Expr, params: &[SQLParam]) -> Option<Value> {
-    let ctx = uqa_sql::expr::EvalContext::new(None, params);
-    uqa_sql::expr::eval(expr, &ctx).ok()
+fn fdw_const_value(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Value> {
+    let ctx = ScalarEvalContext::new(None, params);
+    eval_scalar(expr, &ctx).ok()
 }
 
 fn fdw_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
@@ -4229,11 +3648,13 @@ fn fdw_reversed_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
     })
 }
 
-fn facet_projection_fields(projections: &[Projection]) -> Result<Option<Vec<String>>, SQLError> {
+fn facet_projection_fields(
+    projections: &[ProjectionPlan],
+) -> Result<Option<Vec<String>>, SQLError> {
     if projections.len() != 1 {
         return Ok(None);
     }
-    let Expr::Func { name, args, .. } = &projections[0].expr else {
+    let ScalarExpr::Func { name, args, .. } = &projections[0].expr else {
         return Ok(None);
     };
     if !name.eq_ignore_ascii_case("uqa_facets") {
@@ -4294,17 +3715,19 @@ fn build_facet_rows(
     }
 }
 
-/// When a projection list contains `Expr::Star`, replace the synthetic
+/// When a projection list contains `ScalarExpr::Star`, replace the synthetic
 /// `*` placeholder in the result column list with the source schema.
 /// Empty result sets still report the correct column shape, matching
 /// `PostgreSQL`'s behaviour of `SELECT * FROM empty_table`.
 pub(super) fn expand_star_columns(
     columns: Vec<String>,
-    projections: &[Projection],
+    projections: &[ProjectionPlan],
     engine: &Engine,
     table: Option<&str>,
 ) -> Vec<String> {
-    let has_star = projections.iter().any(|p| matches!(p.expr, Expr::Star));
+    let has_star = projections
+        .iter()
+        .any(|p| matches!(p.expr, ScalarExpr::Star));
     if !has_star {
         return columns;
     }
@@ -4337,9 +3760,9 @@ pub(super) fn expand_star_columns(
     out
 }
 
-fn order_by_references_field(stmt: &SelectStmt) -> bool {
+fn order_by_references_field(stmt: &QueryBlockPlan) -> bool {
     stmt.order_by.iter().any(|o| match &o.expr {
-        Expr::Column(name) => name != SCORE_COLUMN,
+        ScalarExpr::Column(name) => name != SCORE_COLUMN,
         _ => true,
     })
 }
@@ -4349,35 +3772,37 @@ fn order_by_references_field(stmt: &SelectStmt) -> bool {
 /// that cannot be resolved against a stored document alone: function
 /// calls, subqueries, window calls, `*`, or a bare literal (which
 /// `PostgreSQL` would treat as an output-ordinal reference).
-fn collect_order_key_columns(expr: &Expr, out: &mut Vec<String>) -> bool {
+fn collect_order_key_columns(expr: &ScalarExpr, out: &mut Vec<String>) -> bool {
     match expr {
-        Expr::Column(name) => {
+        ScalarExpr::Column(name) => {
             out.push(name.clone());
             true
         }
-        Expr::QualifiedColumn { column, .. } => {
+        ScalarExpr::QualifiedColumn { column, .. } => {
             out.push(column.clone());
             true
         }
-        Expr::Literal(_) | Expr::Param(_) => true,
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             collect_order_key_columns(lhs, out) && collect_order_key_columns(rhs, out)
         }
-        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => collect_order_key_columns(inner, out),
-        Expr::IsNull { expr, .. } => collect_order_key_columns(expr, out),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+            collect_order_key_columns(inner, out)
+        }
+        ScalarExpr::IsNull { expr, .. } => collect_order_key_columns(expr, out),
+        ScalarExpr::Between { expr, low, high } => {
             collect_order_key_columns(expr, out)
                 && collect_order_key_columns(low, out)
                 && collect_order_key_columns(high, out)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             collect_order_key_columns(expr, out)
                 && list.iter().all(|item| collect_order_key_columns(item, out))
         }
-        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => items
+        ScalarExpr::And(items) | ScalarExpr::Or(items) | ScalarExpr::Array(items) => items
             .iter()
             .all(|item| collect_order_key_columns(item, out)),
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -4406,8 +3831,9 @@ fn run_doc_ordered_select(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Option<SQLResult>, SQLError> {
     use uqa_execution::relational::{compare_sort_key_values, SortKey};
 
@@ -4417,7 +3843,7 @@ fn run_doc_ordered_select(
     if stmt
         .order_by
         .iter()
-        .any(|o| matches!(o.expr, Expr::Literal(_)))
+        .any(|o| matches!(o.expr, ScalarExpr::Literal(_)))
     {
         return Ok(None);
     }
@@ -4435,7 +3861,8 @@ fn run_doc_ordered_select(
             continue;
         }
         for (idx, label) in columns.iter().enumerate() {
-            if label == name && !matches!(&stmt.projections[idx].expr, Expr::Column(c) if c == name)
+            if label == name
+                && !matches!(&stmt.projections[idx].expr, ScalarExpr::Column(c) if c == name)
             {
                 return Ok(None);
             }
@@ -4446,9 +3873,11 @@ fn run_doc_ordered_select(
         .any(|name| name == SCORE_COLUMN || name == DOC_ID_COLUMN);
 
     let resolved_offset =
-        resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?.unwrap_or(0) as usize;
-    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?
-        .map(|limit| limit as usize);
+        resolve_limit_offset_with_ctes(stmt.offset.as_ref(), engine, params, "OFFSET", ctes)?
+            .unwrap_or(0) as usize;
+    let resolved_limit =
+        resolve_limit_offset_with_ctes(stmt.limit.as_ref(), engine, params, "LIMIT", ctes)?
+            .map(|limit| limit as usize);
 
     let keys: Vec<SortKey> = stmt
         .order_by
@@ -4486,9 +3915,9 @@ fn run_doc_ordered_select(
     let direct_sources: Option<Vec<OrderKeySource>> = keys
         .iter()
         .map(|key| match &key.expr {
-            Expr::Column(name) if name == SCORE_COLUMN => Some(OrderKeySource::Score),
-            Expr::Column(name) if name == DOC_ID_COLUMN => Some(OrderKeySource::DocId),
-            Expr::Column(name) => key_fields
+            ScalarExpr::Column(name) if name == SCORE_COLUMN => Some(OrderKeySource::Score),
+            ScalarExpr::Column(name) if name == DOC_ID_COLUMN => Some(OrderKeySource::DocId),
+            ScalarExpr::Column(name) => key_fields
                 .iter()
                 .position(|field| field == name)
                 .map(OrderKeySource::Field),
@@ -4525,10 +3954,17 @@ fn run_doc_ordered_select(
                 doc.insert(DOC_ID_COLUMN.into(), Value::Int(entry.doc_id as i64));
                 doc.insert(SCORE_COLUMN.into(), Value::Float(entry.score));
             }
-            let ctx = EvalContext::new(Some(&doc), params).with_engine(engine);
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let ctx = PhysicalEvalContext::new(Some(&doc), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&hook);
             let mut key_vals = Vec::with_capacity(keys.len());
             for key in &keys {
-                key_vals.push(eval(&key.expr, &ctx)?);
+                key_vals.push(eval_physical_scalar(
+                    &key.expr,
+                    &ctes.scalar_subqueries,
+                    &ctx,
+                )?);
             }
             decorated.push((key_vals, idx));
         }
@@ -4582,8 +4018,8 @@ fn run_doc_ordered_select(
     Ok(Some(SQLResult::from_rows(columns, rows)))
 }
 
-fn score_limited_text_filter(expr: Option<&Expr>) -> bool {
-    let Some(Expr::Func { name, .. }) = expr else {
+fn score_limited_text_filter(expr: Option<&ScalarExpr>) -> bool {
+    let Some(ScalarExpr::Func { name, .. }) = expr else {
         return false;
     };
     matches!(
@@ -4593,9 +4029,10 @@ fn score_limited_text_filter(expr: Option<&Expr>) -> bool {
 }
 
 fn score_order_top_k(
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     engine: &Engine,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Option<usize>, SQLError> {
     if stmt.distinct
         || !stmt.distinct_on.is_empty()
@@ -4608,19 +4045,24 @@ fn score_order_top_k(
     {
         return Ok(None);
     }
-    let Some(limit) = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")? else {
+    let Some(limit) =
+        resolve_limit_offset_with_ctes(stmt.limit.as_ref(), engine, params, "LIMIT", ctes)?
+    else {
         return Ok(None);
     };
-    let offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?.unwrap_or(0);
+    let offset =
+        resolve_limit_offset_with_ctes(stmt.offset.as_ref(), engine, params, "OFFSET", ctes)?
+            .unwrap_or(0);
     let top_k = usize::try_from(limit.saturating_add(offset)).unwrap_or(usize::MAX);
     Ok(Some(top_k))
 }
 
-pub(super) fn apply_row_order_limit(
+pub(super) fn apply_row_order_limit_with_ctes(
     rows: Vec<ResultRow>,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     engine: &Engine,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     // Build a Volcano sub-pipeline:  Sort? -> Limit?  on top of an
     // in-memory TableScan over the rows the caller already projected.
@@ -4633,8 +4075,10 @@ pub(super) fn apply_row_order_limit(
     if rows.is_empty() {
         return Ok(rows);
     }
-    let resolved_offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?;
-    let resolved_limit = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")?;
+    let resolved_offset =
+        resolve_limit_offset_with_ctes(stmt.offset.as_ref(), engine, params, "OFFSET", ctes)?;
+    let resolved_limit =
+        resolve_limit_offset_with_ctes(stmt.limit.as_ref(), engine, params, "LIMIT", ctes)?;
     if stmt.order_by.is_empty() && resolved_offset.is_none() && resolved_limit.is_none() {
         return Ok(rows);
     }
@@ -4644,13 +4088,16 @@ pub(super) fn apply_row_order_limit(
     // so registered scalar functions would fail inside it.
     let mut rows = rows;
     if !stmt.order_by.is_empty() {
+        let hook = ScopedEngineHook::new(engine, ctes);
         let key_values: Vec<Vec<Value>> = rows
             .iter()
             .map(|row| {
-                let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+                let ctx = PhysicalEvalContext::new(Some(row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&hook);
                 stmt.order_by
                     .iter()
-                    .map(|order| eval(&order.expr, &ctx))
+                    .map(|order| eval_physical_scalar(&order.expr, &ctes.scalar_subqueries, &ctx))
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<_, _>>()?;
@@ -4674,7 +4121,7 @@ pub(super) fn apply_row_order_limit(
             .iter()
             .enumerate()
             .map(|(idx, o)| SortKey {
-                expr: Expr::Column(format!("{ORDER_KEY_PREFIX}{idx}")),
+                expr: ScalarExpr::Column(format!("{ORDER_KEY_PREFIX}{idx}")),
                 descending: o.descending,
                 nulls_first: o
                     .nulls
@@ -4709,9 +4156,9 @@ pub(super) fn apply_row_order_limit(
     Ok(rows)
 }
 
-fn explain_int_expr(expr: &Expr) -> String {
+fn explain_int_expr(expr: &ScalarExpr) -> String {
     match expr {
-        Expr::Literal(Value::Int(n)) => n.to_string(),
+        ScalarExpr::Literal(Value::Int(n)) => n.to_string(),
         _ => "<expr>".to_string(),
     }
 }
@@ -4721,17 +4168,21 @@ fn explain_int_expr(expr: &Expr) -> String {
 /// `$N` parameter references, and any expression that the row-evaluator
 /// can fold to an integer at execute time. Returns `None` when the
 /// clause was absent.
-fn resolve_limit_offset(
-    expr: Option<&Expr>,
+fn resolve_limit_offset_with_ctes(
+    expr: Option<&ScalarExpr>,
     engine: &Engine,
     params: &[SQLParam],
     label: &str,
+    ctes: &CteScope,
 ) -> Result<Option<u64>, SQLError> {
     let Some(expr) = expr else {
         return Ok(None);
     };
-    let ctx = uqa_sql::expr::EvalContext::new(None, params).with_engine(engine);
-    let value = uqa_sql::expr::eval(expr, &ctx)?;
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let ctx = PhysicalEvalContext::new(None, params)
+        .with_function_hook(&hook)
+        .with_subquery_runner(&hook);
+    let value = eval_physical_scalar(expr, &ctes.scalar_subqueries, &ctx)?;
     match value {
         Value::Null => Ok(None),
         Value::Int(n) if n >= 0 => Ok(Some(n as u64)),
@@ -4747,9 +4198,10 @@ fn resolve_limit_offset(
 
 fn apply_order_limit(
     mut entries: Vec<ScoredEntry>,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     engine: &Engine,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if !stmt.order_by.is_empty() {
         // Scored-entry retrieval paths sort by the computed score. Full
@@ -4764,7 +4216,9 @@ fn apply_order_limit(
             if descending { cmp.reverse() } else { cmp }.then_with(|| a.doc_id.cmp(&b.doc_id))
         });
     }
-    if let Some(offset) = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")? {
+    if let Some(offset) =
+        resolve_limit_offset_with_ctes(stmt.offset.as_ref(), engine, params, "OFFSET", ctes)?
+    {
         let off = offset as usize;
         if off >= entries.len() {
             entries.clear();
@@ -4772,13 +4226,15 @@ fn apply_order_limit(
             entries.drain(0..off);
         }
     }
-    if let Some(limit) = resolve_limit_offset(stmt.limit.as_ref(), engine, params, "LIMIT")? {
+    if let Some(limit) =
+        resolve_limit_offset_with_ctes(stmt.limit.as_ref(), engine, params, "LIMIT", ctes)?
+    {
         entries.truncate(limit as usize);
     }
     Ok(entries)
 }
 
-pub(super) fn projection_columns(projections: &[Projection]) -> Vec<String> {
+pub(super) fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {
     let mut out = Vec::with_capacity(projections.len());
     for proj in projections {
         let base = projection_label_at(proj);
@@ -4797,7 +4253,7 @@ fn build_rows(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
-    projections: &[Projection],
+    projections: &[ProjectionPlan],
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let doc_ids: Vec<DocId> = scored.iter().map(|entry| entry.doc_id).collect();
@@ -4816,18 +4272,18 @@ fn build_rows(
 pub(super) fn build_projection_row(
     engine: Option<&Engine>,
     document: &Document,
-    projections: &[Projection],
+    projections: &[ProjectionPlan],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    let mut ctx = EvalContext::new(Some(document), params);
+    let mut ctx = ScalarEvalContext::new(Some(document), params);
     if let Some(e) = engine {
-        ctx = ctx.with_engine(e);
+        ctx = ctx.with_function_hook(e);
     }
     let labels = projection_columns(projections);
     let mut row = ResultRow::new();
     for (idx, proj) in projections.iter().enumerate() {
         let label = labels[idx].clone();
-        if let Expr::Star = proj.expr {
+        if let ScalarExpr::Star = proj.expr {
             for (k, v) in document {
                 if k.as_str() == SCORE_COLUMN
                     || k.as_str() == DOC_ID_COLUMN
@@ -4846,14 +4302,64 @@ pub(super) fn build_projection_row(
         // Engine-side registry hooks (uqa_highlight / graph_create /
         // graph_drop) need access to the engine; intercept them
         // before falling through to the scalar evaluator.
-        if let Expr::Func { name, args, .. } = &proj.expr {
-            if let Some(value) = engine_func_intercept(engine, name, args, document, params)? {
+        if let ScalarExpr::Func { name, args, .. } = &proj.expr {
+            let mut evaluate = |expr: &ScalarExpr| eval_scalar(expr, &ctx);
+            if let Some(value) = engine_func_intercept(engine, name, args, document, &mut evaluate)?
+            {
                 row.insert(label, value);
                 continue;
             }
         }
-        let value = eval(&proj.expr, &ctx)?;
+        let value = eval_scalar(&proj.expr, &ctx)?;
         row.insert(label, value);
+    }
+    Ok(row)
+}
+
+pub(super) fn build_projection_row_with_ctes(
+    engine: &Engine,
+    document: &Document,
+    projections: &[ProjectionPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<ResultRow, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let context = PhysicalEvalContext::new(Some(document), params)
+        .with_function_hook(&hook)
+        .with_subquery_runner(&hook);
+    let labels = projection_columns(projections);
+    let mut row = ResultRow::new();
+    for (index, projection) in projections.iter().enumerate() {
+        let label = labels[index].clone();
+        if matches!(projection.expr, ScalarExpr::Star) {
+            for (key, value) in document {
+                if key.as_str() != SCORE_COLUMN
+                    && key.as_str() != DOC_ID_COLUMN
+                    && key.as_str() != MERGE_ACTION_COLUMN
+                {
+                    row.insert(key.clone(), value.clone());
+                }
+            }
+            continue;
+        }
+        if let Some(value) = projected_value_from_row(&projection.expr, document) {
+            row.insert(label, value);
+            continue;
+        }
+        if let ScalarExpr::Func { name, args, .. } = &projection.expr {
+            let mut evaluate =
+                |expr: &ScalarExpr| eval_physical_scalar(expr, &ctes.scalar_subqueries, &context);
+            if let Some(value) =
+                engine_func_intercept(Some(engine), name, args, document, &mut evaluate)?
+            {
+                row.insert(label, value);
+                continue;
+            }
+        }
+        row.insert(
+            label,
+            eval_physical_scalar(&projection.expr, &ctes.scalar_subqueries, &context)?,
+        );
     }
     Ok(row)
 }

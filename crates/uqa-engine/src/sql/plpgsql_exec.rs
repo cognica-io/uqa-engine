@@ -12,7 +12,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use uqa_sql::ast::{CreateFunction, DropFunctionStmt, Expr, FunctionReturns, Statement};
-use uqa_sql::expr::{cast_value, evaluate_call_args, truthy, value_type_name, EvalContext};
+use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, IntoTarget, PLpgSQLBlock, PLpgSQLDatum,
     PLpgSQLFunction, PLpgSQLStmt, RaiseLevel, VariableResolver,
@@ -23,6 +23,7 @@ use crate::engine_user_functions::{CompiledFunctionBody, SQLUserFunction};
 use crate::{Engine, SQLTableFunctionResult};
 
 use super::execute_compiled_statement;
+use super::scalar::eval_lowered_expression;
 use std::sync::Arc;
 
 use uqa_core::Value;
@@ -81,19 +82,15 @@ pub(super) fn run_do_block(
 pub(super) fn run_call(
     engine: &Engine,
     name: &str,
-    args: &[Expr],
-    params: &[SQLParam],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    call_args: &[(Option<String>, Value)],
 ) -> Result<SQLResult, SQLError> {
-    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
-    let call_args = evaluate_call_args(args, &ctx)?;
-    let function = match resolve_routine(engine, name, &call_args, "procedure")? {
+    let function = match resolve_routine(engine, name, call_args, "procedure")? {
         Some(resolved) => resolved,
         None => {
             return Err(routine_resolution_error(
                 "procedure",
                 name,
-                &call_args,
+                call_args,
                 "does not exist",
             ));
         }
@@ -102,7 +99,7 @@ pub(super) fn run_call(
     if !function.def.is_procedure {
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),
-            message: format!("{} is not a procedure", call_signature(name, &call_args)),
+            message: format!("{} is not a procedure", call_signature(name, call_args)),
         });
     }
     let outcome = execute_routine(engine, &function, bound)?;
@@ -358,7 +355,6 @@ fn materialize_arguments(
     slots: Vec<ArgSlot>,
 ) -> Result<Vec<Value>, SQLError> {
     let signature = def.signature_params();
-    let ctx = EvalContext::new(None, &[]).with_engine(engine);
     let mut bound = Vec::with_capacity(slots.len());
     for (idx, slot) in slots.into_iter().enumerate() {
         let value = match slot {
@@ -367,7 +363,7 @@ fn materialize_arguments(
                 let default = signature[param_idx].default.as_ref().ok_or_else(|| {
                     SQLError::Internal("argument default vanished during resolution".into())
                 })?;
-                uqa_sql::expr::eval(default, &ctx)?
+                eval_lowered_expression(engine, default, None, &[])?
             }
         };
         bound.push(best_effort_cast(&value, &signature[idx].type_name)?);
@@ -808,8 +804,7 @@ impl<'a> Interpreter<'a> {
 
     fn eval_expr(&self, expr: &Expr) -> Result<Value, SQLError> {
         let bound = bind_expr(expr, &mut self.resolver())?;
-        let ctx = EvalContext::new(None, &[]).with_engine(self.engine);
-        uqa_sql::expr::eval(&bound, &ctx)
+        eval_lowered_expression(self.engine, &bound, None, &[])
     }
 
     fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {

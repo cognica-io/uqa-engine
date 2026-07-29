@@ -33,29 +33,14 @@ use time::{
     pg_to_chrono_fmt,
 };
 
-/// Engine-side hook that the expression evaluator calls into for
-/// stateful scalar functions and subquery execution. Keeps
-/// `uqa-sql` independent of `uqa-engine` while still letting the
-/// evaluator drive `nextval` / `currval` / `setval` and run
-/// `(SELECT ...)` / `EXISTS (...)` / `IN (SELECT ...)` subqueries.
+/// Engine-side hook that scalar function evaluation calls for stateful
+/// sequence and user-defined functions. Query-valued expressions are not
+/// accepted here: lowering assigns them physical query-plan slots executed by
+/// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
     fn nextval(&self, name: &str) -> std::result::Result<i64, String>;
     fn currval(&self, name: &str) -> std::result::Result<i64, String>;
     fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, String>;
-    /// Run a subquery and return its rows + column ordering. The
-    /// evaluator extracts a scalar (single-row, single-column) from
-    /// the result for `ScalarSubquery`, sees whether the row count
-    /// is zero for `Exists`, and tests membership for `InSubquery`.
-    /// Default returns Unsupported so backends that don't surface
-    /// subqueries still satisfy the trait.
-    fn run_subquery(
-        &self,
-        _stmt: &crate::ast::SelectStmt,
-        _row: Option<&crate::result::ResultRow>,
-        _params: &[crate::params::SQLParam],
-    ) -> std::result::Result<(Vec<String>, Vec<crate::result::ResultRow>), String> {
-        Err("subquery execution not supported by this engine".into())
-    }
 
     fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {
         None
@@ -86,9 +71,9 @@ pub trait RowLookup {
 
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
 
-    /// Correlated subqueries require the concrete row shape expected by the
-    /// engine hook. Projected row views return `None`; planners only use them
-    /// for expressions that cannot contain subqueries.
+    /// Physical correlated subqueries require the concrete outer row passed
+    /// to `ScalarSubqueryRunner`. Projected row views return `None`; planners
+    /// only use them for expressions that cannot contain subqueries.
     fn result_row(&self) -> Option<&ResultRow> {
         None
     }
@@ -149,6 +134,31 @@ impl<'a> EvalContext<'a> {
         self.row_lookup
             .ok_or_else(|| SQLError::Internal("column reference without row context".into()))
     }
+
+    /// Resolve an unqualified column through the same row semantics used by
+    /// the AST evaluator. Physical scalar IR evaluators call this instead of
+    /// reconstructing an [`Expr::Column`] carrier.
+    pub fn column_value(&self, name: &str) -> Result<Value> {
+        Ok(self
+            .row_lookup()?
+            .column(name)
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
+
+    /// Resolve a qualified column without constructing an AST expression.
+    pub fn qualified_column_value(
+        &self,
+        qualifier: &str,
+        column: &str,
+        key: &str,
+    ) -> Result<Value> {
+        Ok(self
+            .row_lookup()?
+            .qualified_column(qualifier, column, key)
+            .cloned()
+            .unwrap_or(Value::Null))
+    }
 }
 
 /// Evaluate a value-producing expression. Function calls are *not*
@@ -201,74 +211,8 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         }
         Expr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
         Expr::Func { name, args, .. } => {
-            // Functions registered in the operator registry (text_match,
-            // knn_match, ...) are dispatched by the engine; only pure
-            // scalar built-ins are evaluated inline here.
-            let lower = normalized_function_name(name);
-            let lower = lower.as_ref();
-            if crate::registry::is_registered(lower) {
-                if lower == "fts_match" {
-                    let evaluated: Vec<Value> = args
-                        .iter()
-                        .map(|a| eval(a, ctx))
-                        .collect::<Result<Vec<_>>>()?;
-                    if jsonpath_candidate(&evaluated) {
-                        return jsonpath_match(&evaluated);
-                    }
-                }
-                return Err(SQLError::Unsupported(format!(
-                    "scalar evaluation of `{name}` is not supported (use the function registry)"
-                )));
-            }
             let call_args = evaluate_call_args(args, ctx)?;
-            if call_args.iter().any(|(name, _)| name.is_some()) {
-                // `make_interval` is the one built-in the engine
-                // accepts with named arguments (PostgreSQL declares
-                // defaults for every parameter).
-                if lower == "make_interval" {
-                    if let Some(positional) = make_interval_named_args(&call_args) {
-                        return eval_scalar_function(lower, &positional);
-                    }
-                }
-                // Other named-argument calls only reach user-defined
-                // routines; built-ins are positional.
-                if let Some(engine) = ctx.engine {
-                    if let Some(result) = engine.call_user_function(lower, &call_args) {
-                        return result;
-                    }
-                }
-                return Err(unknown_function_error(lower, &call_args));
-            }
-            let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
-            // Sequence functions need the engine hook because they
-            // mutate per-engine state (`_engine._sequences` in the
-            // canonical UQA behavior). Routed before the pure-scalar
-            // dispatch so they take precedence over any future
-            // built-in named the same.
-            if matches!(lower, "nextval" | "currval" | "setval") {
-                return eval_sequence_function(lower, &evaluated, ctx);
-            }
-            if let Some(engine) = ctx.engine.filter(|engine| engine.has_scalar_functions()) {
-                if let Some(result) = engine.call_scalar_function(lower, &evaluated) {
-                    return result;
-                }
-            }
-            match eval_scalar_function(lower, &evaluated) {
-                // Unknown built-in: fall through to user-defined
-                // functions, mirroring PostgreSQL's search-path order
-                // (pg_catalog wins over user schemas).
-                Err(SQLError::UnknownFunction(_)) => {
-                    let call_args: Vec<(Option<String>, Value)> =
-                        evaluated.into_iter().map(|value| (None, value)).collect();
-                    if let Some(engine) = ctx.engine {
-                        if let Some(result) = engine.call_user_function(lower, &call_args) {
-                            return result;
-                        }
-                    }
-                    Err(unknown_function_error(lower, &call_args))
-                }
-                other => other,
-            }
+            eval_function_call(name, call_args, ctx)
         }
         Expr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
@@ -300,61 +244,11 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let v = eval(expr, ctx)?;
             cast_value(&v, ty)
         }
-        Expr::ScalarSubquery(body) => {
-            let engine = ctx.engine.ok_or_else(|| {
-                SQLError::Unsupported(
-                    "scalar subquery requires an engine hook on the EvalContext".into(),
-                )
-            })?;
-            let (cols, rows) = engine
-                .run_subquery(body, ctx.row, ctx.params)
-                .map_err(SQLError::Unsupported)?;
-            if rows.is_empty() {
-                return Ok(Value::Null);
-            }
-            if rows.len() > 1 {
-                return Err(SQLError::TypeMismatch(
-                    "scalar subquery returned more than one row".into(),
-                ));
-            }
-            let first_col = cols.first().ok_or_else(|| {
-                SQLError::TypeMismatch("scalar subquery returned no columns".into())
-            })?;
-            Ok(rows[0].get(first_col).cloned().unwrap_or(Value::Null))
-        }
-        Expr::Exists { body, negated } => {
-            let engine = ctx.engine.ok_or_else(|| {
-                SQLError::Unsupported(
-                    "EXISTS subquery requires an engine hook on the EvalContext".into(),
-                )
-            })?;
-            let (_cols, rows) = engine
-                .run_subquery(body, ctx.row, ctx.params)
-                .map_err(SQLError::Unsupported)?;
-            let exists = !rows.is_empty();
-            Ok(Value::Bool(if *negated { !exists } else { exists }))
-        }
-        Expr::InSubquery {
-            expr,
-            body,
-            negated,
-        } => {
-            let needle = eval(expr, ctx)?;
-            let engine = ctx.engine.ok_or_else(|| {
-                SQLError::Unsupported(
-                    "IN (SELECT ...) requires an engine hook on the EvalContext".into(),
-                )
-            })?;
-            let (cols, rows) = engine
-                .run_subquery(body, ctx.row, ctx.params)
-                .map_err(SQLError::Unsupported)?;
-            let Some(first_col) = cols.first() else {
-                return Ok(Value::Bool(*negated));
-            };
-            let found = rows
-                .iter()
-                .any(|r| r.get(first_col).is_some_and(|v| v == &needle));
-            Ok(Value::Bool(if *negated { !found } else { found }))
+        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+            Err(SQLError::Unsupported(
+                "query-valued expressions must be lowered to physical ScalarExpr/QueryPlan slots"
+                    .into(),
+            ))
         }
         Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, ctx),
         Expr::Not(inner) => {
@@ -495,6 +389,75 @@ pub fn evaluate_call_args(
             other => Ok((None, eval(other, ctx)?)),
         })
         .collect()
+}
+
+/// Execute a scalar function after its argument expressions have already
+/// been evaluated.
+///
+/// This is the shared SQL-semantics kernel used by both the parser AST
+/// evaluator and the physical scalar IR evaluator. Keeping dispatch here
+/// avoids converting a physical expression back into [`Expr`] merely to
+/// reuse built-in, sequence, registered, or user-defined function behavior.
+pub fn eval_function_call(
+    name: &str,
+    call_args: Vec<(Option<String>, Value)>,
+    ctx: &EvalContext<'_>,
+) -> Result<Value> {
+    let lower = normalized_function_name(name);
+    let lower = lower.as_ref();
+    let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
+
+    // Functions registered in the operator registry (text_match,
+    // knn_match, ...) are dispatched by the relational/access-path
+    // executor. JSONPath fts_match is the scalar exception.
+    if crate::registry::is_registered(lower) {
+        if lower == "fts_match" && jsonpath_candidate(&evaluated) {
+            return jsonpath_match(&evaluated);
+        }
+        return Err(SQLError::Unsupported(format!(
+            "scalar evaluation of `{name}` is not supported (use the function registry)"
+        )));
+    }
+
+    if call_args.iter().any(|(name, _)| name.is_some()) {
+        // `make_interval` is the one built-in that accepts named
+        // arguments; PostgreSQL declares defaults for every parameter.
+        if lower == "make_interval" {
+            if let Some(positional) = make_interval_named_args(&call_args) {
+                return eval_scalar_function(lower, &positional);
+            }
+        }
+        if let Some(engine) = ctx.engine {
+            if let Some(result) = engine.call_user_function(lower, &call_args) {
+                return result;
+            }
+        }
+        return Err(unknown_function_error(lower, &call_args));
+    }
+
+    // Sequence functions mutate engine state and therefore precede pure
+    // built-in dispatch.
+    if matches!(lower, "nextval" | "currval" | "setval") {
+        return eval_sequence_function(lower, &evaluated, ctx);
+    }
+    if let Some(engine) = ctx.engine.filter(|engine| engine.has_scalar_functions()) {
+        if let Some(result) = engine.call_scalar_function(lower, &evaluated) {
+            return result;
+        }
+    }
+    match eval_scalar_function(lower, &evaluated) {
+        // Unknown built-in: fall through to user-defined functions,
+        // mirroring PostgreSQL's search-path order.
+        Err(SQLError::UnknownFunction(_)) => {
+            if let Some(engine) = ctx.engine {
+                if let Some(result) = engine.call_user_function(lower, &call_args) {
+                    return result;
+                }
+            }
+            Err(unknown_function_error(lower, &call_args))
+        }
+        other => other,
+    }
 }
 
 /// Map `make_interval(name => value, ...)` onto the positional

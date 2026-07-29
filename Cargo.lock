@@ -3437,6 +3437,7 @@ name = "uqa-execution"
 version = "0.1.0"
 dependencies = [
  "parking_lot",
+ "serde",
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-sql",
@@ -3548,6 +3549,7 @@ dependencies = [
  "criterion",
  "proptest",
  "rayon",
+ "serde",
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-execution",

@@ -61,6 +61,7 @@
 pub mod batch;
 pub mod physical;
 pub mod relational;
+pub mod scalar;
 pub mod scan;
 pub mod spill;
 
@@ -68,6 +69,10 @@ pub use batch::{Batch, RowSchema};
 pub use physical::{ExecError, ExecResult, PhysicalOperator};
 pub use relational::{
     AggregateKind, Filter, HashAggregate, Limit, Project, Sort, SortKey, Window, WindowKind,
+};
+pub use scalar::{
+    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
+    ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,
 };
 pub use scan::{RowSource, TableScan};
 pub use spill::SpillBuffer;

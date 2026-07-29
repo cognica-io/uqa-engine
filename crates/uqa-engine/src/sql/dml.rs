@@ -7,54 +7,60 @@
 //! SQL DML execution, constraints, referential actions, and RETURNING rows.
 
 use super::{
-    build_join_rows_with_ctes, build_projection_row, coerce_to_column_type, column_type_name, eval,
-    expand_star_columns, prefix_row, projection_columns, validate_vector_dimensions,
-    value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
-    DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey, ForeignKeyAction,
-    ForeignKeyMatch, InsertStmt, Projection, ResultRow, RowIndependentUpdateValues, SQLError,
-    SQLParam, SQLResult, ScopedEngineHook, UpdateStmt, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    build_join_rows_with_ctes, build_projection_row_with_ctes, coerce_to_column_type,
+    column_type_name, expand_star_columns, prefix_row, projection_columns,
+    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
+    ColumnType, CteScope, DocId, Document, Engine, ForeignKey, ForeignKeyAction, ForeignKeyMatch,
+    ResultRow, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    MERGE_ACTION_COLUMN,
 };
-use uqa_planner::{CtePlan, ExpressionPlan, SourcePlan};
+use uqa_execution::ScalarExpr;
+use uqa_planner::{
+    ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan,
+    ProjectionPlan, SourcePlan, UpdatePlan,
+};
+
+use super::scalar::{eval_lowered_expression, eval_physical_scalar, PhysicalEvalContext};
+use super::ScopedEngineHook;
+
+fn eval_mutation_expr(
+    engine: &Engine,
+    ctes: &CteScope,
+    expression: &ScalarExpr,
+    row: Option<&ResultRow>,
+    params: &[SQLParam],
+) -> Result<Value, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let context = PhysicalEvalContext::new(row, params)
+        .with_function_hook(&hook)
+        .with_subquery_runner(&hook);
+    eval_physical_scalar(expression, &ctes.scalar_subqueries, &context)
+}
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn run_merge(
     engine: &Engine,
-    stmt: uqa_sql::ast::MergeStmt,
-    source_plan: SourcePlan,
-    expressions: Vec<ExpressionPlan>,
+    stmt: MergePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| {
-        run_merge_inner(engine, stmt, &source_plan, &expressions, params)
-    })
+    engine.transaction(move |engine| run_merge_inner(engine, &stmt, params))
 }
 
 #[allow(clippy::too_many_lines)]
 fn run_merge_inner(
     engine: &Engine,
-    stmt: uqa_sql::ast::MergeStmt,
-    source_plan: &SourcePlan,
-    expressions: &[ExpressionPlan],
+    stmt: &MergePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    use uqa_sql::ast::MergeWhen;
-    use uqa_sql::expr::{eval, truthy, EvalContext};
+    use uqa_sql::expr::truthy;
     let target_table = stmt.target.clone();
     let target_qual = stmt
         .target_alias
         .clone()
         .unwrap_or_else(|| target_table.clone());
     let mut ctes = CteScope::new();
-    ctes.install_source_plan(source_plan);
-    for expression in expressions {
-        ctes.install_expression_plan(expression);
-    }
-    let source = source_plan.physical_from().ok_or_else(|| {
-        SQLError::Internal("MERGE source plan does not produce a row source".into())
-    })?;
-    let source_rows = build_join_rows_with_ctes(engine, &source, params, &mut ctes)?;
-    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &mut ctes)?;
     let mut affected = 0_u64;
     let mut returning_rows = Vec::new();
 
@@ -83,8 +89,13 @@ fn run_merge_inner(
             for (k, v) in src {
                 joined.insert(k.clone(), v.clone());
             }
-            let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
-            if truthy(&eval(&stmt.join_condition, &ctx)?) {
+            if truthy(&eval_mutation_expr(
+                engine,
+                &ctes,
+                &stmt.join_condition,
+                Some(&joined),
+                params,
+            )?) {
                 paired_idx = Some(idx);
                 matched_source.insert(idx);
                 break;
@@ -125,15 +136,19 @@ fn run_merge_inner(
         }
         for clause in &stmt.when_clauses {
             let (condition, action_idx, applies) = match clause {
-                MergeWhen::UpdateMatched { condition, .. } if matched => {
+                MergeWhenPlan::UpdateMatched { condition, .. } if matched => {
                     (condition.as_ref(), 0_u8, true)
                 }
-                MergeWhen::DeleteMatched { condition } if matched => (condition.as_ref(), 1, true),
-                MergeWhen::NothingMatched { condition } if matched => (condition.as_ref(), 2, true),
-                MergeWhen::InsertNotMatched { condition, .. } if !matched => {
+                MergeWhenPlan::DeleteMatched { condition } if matched => {
+                    (condition.as_ref(), 1, true)
+                }
+                MergeWhenPlan::NothingMatched { condition } if matched => {
+                    (condition.as_ref(), 2, true)
+                }
+                MergeWhenPlan::InsertNotMatched { condition, .. } if !matched => {
                     (condition.as_ref(), 3, true)
                 }
-                MergeWhen::NothingNotMatched { condition } if !matched => {
+                MergeWhenPlan::NothingNotMatched { condition } if !matched => {
                     (condition.as_ref(), 2, true)
                 }
                 _ => (None, 0, false),
@@ -142,27 +157,37 @@ fn run_merge_inner(
                 continue;
             }
             if let Some(c) = condition {
-                let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
-                if !truthy(&eval(c, &ctx)?) {
+                if !truthy(&eval_mutation_expr(
+                    engine,
+                    &ctes,
+                    c,
+                    Some(&joined),
+                    params,
+                )?) {
                     continue;
                 }
             }
             match (action_idx, clause) {
-                (0, MergeWhen::UpdateMatched { assignments, .. }) => {
+                (0, MergeWhenPlan::UpdateMatched { assignments, .. }) => {
                     if let Some(doc_id) = pair.doc_id {
                         let Some(mut doc) = engine.get_document(&target_table, doc_id) else {
                             break;
                         };
                         let original_doc = doc.clone();
-                        let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
-                        for (col, expr) in assignments {
+                        for assignment in assignments {
                             let value = coerce_to_column_type(
                                 engine,
                                 &target_table,
-                                col,
-                                eval(expr, &ctx)?,
+                                &assignment.column,
+                                eval_mutation_expr(
+                                    engine,
+                                    &ctes,
+                                    &assignment.value,
+                                    Some(&joined),
+                                    params,
+                                )?,
                             )?;
-                            doc.insert(col.clone(), value);
+                            doc.insert(assignment.column.clone(), value);
                         }
                         rewrite_document_with_referential_actions(
                             engine,
@@ -186,11 +211,12 @@ fn run_merge_inner(
                                 },
                                 &stmt.returning,
                                 params,
+                                &ctes,
                             )?);
                         }
                     }
                 }
-                (1, MergeWhen::DeleteMatched { .. }) => {
+                (1, MergeWhenPlan::DeleteMatched { .. }) => {
                     if let Some(doc_id) = pair.doc_id {
                         let returning_doc = if stmt.returning.is_empty() {
                             None
@@ -221,17 +247,17 @@ fn run_merge_inner(
                                 },
                                 &stmt.returning,
                                 params,
+                                &ctes,
                             )?);
                         }
                     }
                 }
                 (
                     3,
-                    MergeWhen::InsertNotMatched {
+                    MergeWhenPlan::InsertNotMatched {
                         columns, values, ..
                     },
                 ) => {
-                    let ctx = EvalContext::new(Some(&joined), params).with_engine(eval_hook);
                     let mut document = Document::new();
                     if values.len() != columns.len() {
                         return Err(SQLError::Internal(format!(
@@ -245,7 +271,7 @@ fn run_merge_inner(
                             engine,
                             &target_table,
                             col,
-                            eval(&values[i], &ctx)?,
+                            eval_mutation_expr(engine, &ctes, &values[i], Some(&joined), params)?,
                         )?;
                         document.insert(col.clone(), v);
                     }
@@ -255,7 +281,7 @@ fn run_merge_inner(
                         _ => engine.allocate_next_id(&target_table)?,
                     };
                     if let Some(c) = id_col.as_deref() {
-                        document.insert(c.into(), Value::Int(doc_id as i64));
+                        document.insert(c.to_string(), Value::Int(doc_id as i64));
                     }
                     engine.advance_next_id(&target_table, doc_id);
                     let inserted = insert_document_with_constraints(
@@ -280,6 +306,7 @@ fn run_merge_inner(
                             },
                             &stmt.returning,
                             params,
+                            &ctes,
                         )?);
                     }
                 }
@@ -313,8 +340,9 @@ struct MergeReturningRow<'a> {
 fn build_merge_returning_row(
     engine: &Engine,
     input: MergeReturningRow<'_>,
-    returning: &[Projection],
+    returning: &[ProjectionPlan],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<ResultRow, SQLError> {
     let mut row_doc = input.document.clone();
     row_doc.insert(DOC_ID_COLUMN.into(), Value::Int(input.doc_id as i64));
@@ -327,7 +355,7 @@ fn build_merge_returning_row(
             row_doc.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
-    build_projection_row(Some(engine), &row_doc, returning, params).map_err(|err| {
+    build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
             "MERGE RETURNING projection failed for table `{}` doc {}: {err}",
             input.target_table, input.doc_id
@@ -337,74 +365,43 @@ fn build_merge_returning_row(
 
 pub(super) fn run_update(
     engine: &Engine,
-    stmt: UpdateStmt,
-    cte_plans: Vec<CtePlan>,
-    source_plan: Option<SourcePlan>,
-    expressions: Vec<ExpressionPlan>,
+    stmt: UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| {
-        run_update_inner(
-            engine,
-            stmt,
-            &cte_plans,
-            source_plan.as_ref(),
-            &expressions,
-            params,
-        )
-    })
+    engine.transaction(move |engine| run_update_inner(engine, &stmt, params))
 }
 
 fn run_update_inner(
     engine: &Engine,
-    stmt: UpdateStmt,
-    cte_plans: &[CtePlan],
-    source_plan: Option<&SourcePlan>,
-    expressions: &[ExpressionPlan],
+    stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut ctes = CteScope::new();
-    super::select::materialize_plan_ctes(engine, cte_plans, params, &mut ctes)?;
-    if let Some(source) = source_plan {
-        ctes.install_source_plan(source);
-    }
-    for expression in expressions {
-        ctes.install_expression_plan(expression);
-    }
+    super::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
     // UPDATE ... FROM other [WHERE ...]: build the joined relation,
     // evaluate the WHERE against each joined row, and apply
     // assignments to the matching target rows. Mirrors the canonical UQA implementation's
     // _compile_update_from.
-    if let Some(source) = source_plan {
-        let from_clause = source.physical_from().ok_or_else(|| {
-            SQLError::Internal("UPDATE source plan does not produce a row source".into())
-        })?;
-        return run_update_from(engine, &stmt, &from_clause, params, &mut ctes);
+    if let Some(source) = stmt.source.as_deref() {
+        return run_update_from(engine, stmt, source, params, &mut ctes);
     }
-    if stmt.from.is_some() {
-        return Err(SQLError::Internal(
-            "UPDATE reached the mutation runtime without its source plan".into(),
-        ));
-    }
-    let has_runtime_scope =
-        !ctes.rows.is_empty() || !ctes.inlined.is_empty() || !ctes.planned_subqueries.is_empty();
+    let has_runtime_scope = !ctes.rows.is_empty() || !ctes.scalar_subqueries.is_empty();
     if !has_runtime_scope {
-        if let Some(result) = try_run_point_update(engine, &stmt, params)? {
+        if let Some(result) = try_run_point_update(engine, stmt, params)? {
             return Ok(result);
         }
     }
-    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
     // Without CTEs the WHERE clause resolves through the accelerated
     // single-table machinery (value indexes, posting lists) up front;
     // the per-row re-check below is then unnecessary.
-    let preselected = !has_runtime_scope && stmt.r#where.is_some();
+    let preselected = !has_runtime_scope && stmt.predicate.is_some();
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
-        let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
+        let filter = stmt.predicate.as_ref().expect("preselected requires WHERE");
         super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
     } else {
         engine.table_doc_ids(&stmt.table)
@@ -416,19 +413,26 @@ fn run_update_inner(
         };
         let original_doc = doc.clone();
         if !preselected {
-            if let Some(filter) = stmt.r#where.as_ref() {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
-                if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+            if let Some(filter) = stmt.predicate.as_ref() {
+                if !uqa_sql::expr::truthy(&eval_mutation_expr(
+                    engine,
+                    &ctes,
+                    filter,
+                    Some(&doc),
+                    params,
+                )?) {
                     continue;
                 }
             }
         }
-        for (col, expr) in &stmt.assignments {
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
-            let value =
-                coerce_to_column_type(engine, &stmt.table, col, uqa_sql::expr::eval(expr, &ctx)?)?;
-            doc.insert(col.clone(), value);
+        for assignment in &stmt.assignments {
+            let value = coerce_to_column_type(
+                engine,
+                &stmt.table,
+                &assignment.column,
+                eval_mutation_expr(engine, &ctes, &assignment.value, Some(&doc), params)?,
+            )?;
+            doc.insert(assignment.column.clone(), value);
         }
         rewrite_document_with_referential_actions(
             engine,
@@ -446,6 +450,7 @@ fn run_update_inner(
                 &doc,
                 &stmt.returning,
                 params,
+                &ctes,
             )?);
         }
         affected += 1;
@@ -464,14 +469,14 @@ fn run_update_inner(
 
 fn try_run_point_update(
     engine: &Engine,
-    stmt: &UpdateStmt,
+    stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<Option<SQLResult>, SQLError> {
     if !stmt.returning.is_empty() {
         return Ok(None);
     }
     let Some((lookup_field, lookup_value)) =
-        point_lookup_filter(stmt.r#where.as_ref(), engine, params)?
+        point_lookup_filter(stmt.predicate.as_ref(), engine, params)?
     else {
         return Ok(None);
     };
@@ -497,11 +502,11 @@ fn try_run_point_update(
 }
 
 fn point_lookup_filter(
-    filter: Option<&Expr>,
+    filter: Option<&ScalarExpr>,
     engine: &Engine,
     params: &[SQLParam],
 ) -> Result<Option<(String, Value)>, SQLError> {
-    let Some(Expr::Binary {
+    let Some(ScalarExpr::Binary {
         op: BinaryOp::Equal,
         lhs,
         rhs,
@@ -511,70 +516,81 @@ fn point_lookup_filter(
     };
     if let Some(field) = top_level_column(lhs) {
         if expr_is_row_independent(rhs) {
-            let ctx = EvalContext::new(None, params).with_engine(engine);
-            return Ok(Some((field.to_string(), eval(rhs, &ctx)?)));
+            let ctes = CteScope::new();
+            return Ok(Some((
+                field.to_string(),
+                eval_mutation_expr(engine, &ctes, rhs, None, params)?,
+            )));
         }
     }
     if let Some(field) = top_level_column(rhs) {
         if expr_is_row_independent(lhs) {
-            let ctx = EvalContext::new(None, params).with_engine(engine);
-            return Ok(Some((field.to_string(), eval(lhs, &ctx)?)));
+            let ctes = CteScope::new();
+            return Ok(Some((
+                field.to_string(),
+                eval_mutation_expr(engine, &ctes, lhs, None, params)?,
+            )));
         }
     }
     Ok(None)
 }
 
-fn top_level_column(expr: &Expr) -> Option<&str> {
+fn top_level_column(expr: &ScalarExpr) -> Option<&str> {
     match expr {
-        Expr::Column(name) => Some(name),
-        Expr::QualifiedColumn { column, .. } => Some(column),
+        ScalarExpr::Column(name) => Some(name),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column),
         _ => None,
     }
 }
 
 fn row_independent_update_values(
     engine: &Engine,
-    stmt: &UpdateStmt,
+    stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    for (column, expr) in &stmt.assignments {
-        if !expr_is_row_independent(expr) {
+    let ctes = CteScope::new();
+    for assignment in &stmt.assignments {
+        if !expr_is_row_independent(&assignment.value) {
             return Ok(None);
         }
-        let value = coerce_to_column_type(engine, &stmt.table, column, eval(expr, &ctx)?)?;
-        if let Some(ty) = engine.column_type(&stmt.table, column) {
+        let value = coerce_to_column_type(
+            engine,
+            &stmt.table,
+            &assignment.column,
+            eval_mutation_expr(engine, &ctes, &assignment.value, None, params)?,
+        )?;
+        if let Some(ty) = engine.column_type(&stmt.table, &assignment.column) {
             if let Ok(values) = index_vectors_for_type(&value, &ty) {
-                vectors.insert(column.clone(), values);
+                vectors.insert(assignment.column.clone(), values);
             }
         }
-        updates.insert(column.clone(), value);
+        updates.insert(assignment.column.clone(), value);
     }
     Ok(Some((updates, vectors)))
 }
 
-fn expr_is_row_independent(expr: &Expr) -> bool {
+fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::Literal(_) | Expr::Param(_) => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().all(expr_is_row_independent)
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_is_row_independent(lhs) && expr_is_row_independent(rhs)
         }
-        Expr::Not(inner) => expr_is_row_independent(inner),
-        Expr::IsNull { expr, .. } => expr_is_row_independent(expr),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner) => expr_is_row_independent(inner),
+        ScalarExpr::IsNull { expr, .. } => expr_is_row_independent(expr),
+        ScalarExpr::Between { expr, low, high } => {
             expr_is_row_independent(expr)
                 && expr_is_row_independent(low)
                 && expr_is_row_independent(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_is_row_independent(expr) && list.iter().all(expr_is_row_independent)
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -585,15 +601,15 @@ fn expr_is_row_independent(expr: &Expr) -> bool {
                 })
                 && else_branch.as_deref().map_or(true, expr_is_row_independent)
         }
-        Expr::Cast { expr, .. } => expr_is_row_independent(expr),
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Func { .. }
-        | Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => false,
+        ScalarExpr::Cast { expr, .. } => expr_is_row_independent(expr),
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Func { .. }
+        | ScalarExpr::WindowCall { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => false,
     }
 }
 
@@ -676,8 +692,7 @@ fn validate_document_constraints(
     }
 
     for (cname, expr) in engine.check_constraints(table) {
-        let row_ctx = EvalContext::new(Some(document), params).with_engine(engine);
-        let result = eval(&expr, &row_ctx)?;
+        let result = eval_lowered_expression(engine, &expr, Some(document), params)?;
         if !uqa_sql::expr::truthy(&result) {
             let label = cname.unwrap_or_else(|| "<unnamed>".into());
             return Err(SQLError::TypeMismatch(format!(
@@ -905,8 +920,7 @@ fn apply_set_action_to_child(
             ForeignKeyAction::SetNull => Value::Null,
             ForeignKeyAction::SetDefault => {
                 if let Some(expr) = engine.column_default_expr(table, column) {
-                    let ctx = EvalContext::new(Some(old_doc), params).with_engine(engine);
-                    eval(&expr, &ctx)?
+                    eval_lowered_expression(engine, &expr, Some(old_doc), params)?
                 } else {
                     Value::Null
                 }
@@ -925,14 +939,12 @@ fn apply_set_action_to_child(
 
 fn run_update_from(
     engine: &Engine,
-    stmt: &UpdateStmt,
-    from_clause: &uqa_sql::ast::FromClause,
+    stmt: &UpdatePlan,
+    from_clause: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<SQLResult, SQLError> {
     let from_rows = build_join_rows_with_ctes(engine, from_clause, params, ctes)?;
-    let scoped_hook = ScopedEngineHook::new(engine, ctes);
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     let cancel = engine.cancellation_token();
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
@@ -959,20 +971,27 @@ fn run_update_from(
             for (k, v) in from_row {
                 joined.insert(k.clone(), v.clone());
             }
-            if let Some(filter) = stmt.r#where.as_ref() {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(eval_hook);
-                if !uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+            if let Some(filter) = stmt.predicate.as_ref() {
+                if !uqa_sql::expr::truthy(&eval_mutation_expr(
+                    engine,
+                    ctes,
+                    filter,
+                    Some(&joined),
+                    params,
+                )?) {
                     continue;
                 }
             }
             // Apply assignments evaluated against the joined row so
             // RHS expressions can read FROM-side columns.
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params).with_engine(eval_hook);
-            for (col, expr) in &stmt.assignments {
-                let value =
-                    coerce_to_column_type(engine, &target, col, uqa_sql::expr::eval(expr, &ctx)?)?;
-                doc.insert(col.clone(), value);
+            for assignment in &stmt.assignments {
+                let value = coerce_to_column_type(
+                    engine,
+                    &target,
+                    &assignment.column,
+                    eval_mutation_expr(engine, ctes, &assignment.value, Some(&joined), params)?,
+                )?;
+                doc.insert(assignment.column.clone(), value);
             }
             rewrite_document_with_referential_actions(
                 engine,
@@ -990,6 +1009,7 @@ fn run_update_from(
                     &doc,
                     &stmt.returning,
                     params,
+                    ctes,
                 )?);
             }
             applied = true;
@@ -1013,30 +1033,15 @@ fn run_update_from(
 
 pub(super) fn run_delete(
     engine: &Engine,
-    stmt: DeleteStmt,
-    cte_plans: Vec<CtePlan>,
-    source_plan: Option<SourcePlan>,
-    expressions: Vec<ExpressionPlan>,
+    stmt: DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| {
-        run_delete_inner(
-            engine,
-            stmt,
-            &cte_plans,
-            source_plan.as_ref(),
-            &expressions,
-            params,
-        )
-    })
+    engine.transaction(move |engine| run_delete_inner(engine, &stmt, params))
 }
 
 fn run_delete_inner(
     engine: &Engine,
-    stmt: DeleteStmt,
-    cte_plans: &[CtePlan],
-    source_plan: Option<&SourcePlan>,
-    expressions: &[ExpressionPlan],
+    stmt: &DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
@@ -1044,42 +1049,24 @@ fn run_delete_inner(
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
     let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
     let mut ctes = CteScope::new();
-    super::select::materialize_plan_ctes(engine, cte_plans, params, &mut ctes)?;
-    if let Some(source) = source_plan {
-        ctes.install_source_plan(source);
-    }
-    for expression in expressions {
-        ctes.install_expression_plan(expression);
-    }
+    super::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     // DELETE FROM t USING other WHERE ... -- materialise the join
     // first, then collect target doc ids whose joined image
     // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
-    let using_rows: Option<Vec<ResultRow>> = match source_plan {
-        Some(source) => {
-            let clause = source.physical_from().ok_or_else(|| {
-                SQLError::Internal("DELETE source plan does not produce a row source".into())
-            })?;
-            Some(build_join_rows_with_ctes(
-                engine, &clause, params, &mut ctes,
-            )?)
-        }
+    let using_rows: Option<Vec<ResultRow>> = match stmt.source.as_deref() {
+        Some(source) => Some(build_join_rows_with_ctes(
+            engine, source, params, &mut ctes,
+        )?),
         None => None,
     };
-    if stmt.using.is_some() != source_plan.is_some() {
-        return Err(SQLError::Internal(
-            "DELETE source plan does not match the compiled statement".into(),
-        ));
-    }
-    let has_runtime_scope =
-        !ctes.rows.is_empty() || !ctes.inlined.is_empty() || !ctes.planned_subqueries.is_empty();
-    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
+    let has_runtime_scope = !ctes.rows.is_empty() || !ctes.scalar_subqueries.is_empty();
     // Plain `DELETE FROM t WHERE ...` resolves the WHERE through the
     // accelerated single-table machinery instead of materialising the
     // whole table.
-    let preselected = !has_runtime_scope && source_plan.is_none() && stmt.r#where.is_some();
+    let preselected = !has_runtime_scope && stmt.source.is_none() && stmt.predicate.is_some();
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
-        let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
+        let filter = stmt.predicate.as_ref().expect("preselected requires WHERE");
         super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
     } else {
         engine.table_doc_ids(&stmt.table)
@@ -1095,14 +1082,16 @@ fn run_delete_inner(
         let Some(doc) = engine.get_document(&stmt.table, doc_id) else {
             continue;
         };
-        let keep = match (stmt.r#where.as_ref(), using_rows.as_ref()) {
+        let keep = match (stmt.predicate.as_ref(), using_rows.as_ref()) {
             (None, _) => true,
             (Some(_), None) if preselected => true,
-            (Some(filter), None) => {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
-                uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?)
-            }
+            (Some(filter), None) => uqa_sql::expr::truthy(&eval_mutation_expr(
+                engine,
+                &ctes,
+                filter,
+                Some(&doc),
+                params,
+            )?),
             (Some(filter), Some(rows)) => {
                 let mut matched = false;
                 for using_row in rows {
@@ -1114,9 +1103,13 @@ fn run_delete_inner(
                     for (k, v) in using_row {
                         joined.insert(k.clone(), v.clone());
                     }
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params)
-                        .with_engine(eval_hook);
-                    if uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
+                    if uqa_sql::expr::truthy(&eval_mutation_expr(
+                        engine,
+                        &ctes,
+                        filter,
+                        Some(&joined),
+                        params,
+                    )?) {
                         matched = true;
                         break;
                     }
@@ -1151,7 +1144,15 @@ fn run_delete_inner(
         let returning_rows = returning_docs
             .into_iter()
             .map(|(doc_id, doc)| {
-                build_returning_row(engine, &stmt.table, doc_id, &doc, &stmt.returning, params)
+                build_returning_row(
+                    engine,
+                    &stmt.table,
+                    doc_id,
+                    &doc,
+                    &stmt.returning,
+                    params,
+                    &ctes,
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(dml_returning_result(
@@ -1267,7 +1268,7 @@ fn delete_set_columns(fk: &ForeignKey) -> Vec<String> {
 fn find_insert_conflict(
     engine: &Engine,
     table: &str,
-    on_conflict: &uqa_sql::ast::OnConflict,
+    on_conflict: &ConflictPlan,
     document: &Document,
 ) -> Option<DocId> {
     if !on_conflict.conflict_columns.is_empty() {
@@ -1300,12 +1301,13 @@ fn build_returning_row(
     table: &str,
     doc_id: DocId,
     document: &Document,
-    returning: &[Projection],
+    returning: &[ProjectionPlan],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<ResultRow, SQLError> {
     let mut row_doc = document.clone();
     row_doc.insert(DOC_ID_COLUMN.into(), Value::Int(doc_id as i64));
-    build_projection_row(Some(engine), &row_doc, returning, params).map_err(|err| {
+    build_projection_row_with_ctes(engine, &row_doc, returning, params, ctes).map_err(|err| {
         SQLError::Internal(format!(
             "RETURNING projection failed for table `{table}` doc {doc_id}: {err}"
         ))
@@ -1315,7 +1317,7 @@ fn build_returning_row(
 fn dml_returning_result(
     engine: &Engine,
     table: &str,
-    returning: &[Projection],
+    returning: &[ProjectionPlan],
     rows: Vec<ResultRow>,
     affected_rows: u64,
 ) -> SQLResult {
@@ -1339,35 +1341,27 @@ fn dml_returning_result(
 
 pub(super) fn run_insert(
     engine: &Engine,
-    stmt: InsertStmt,
-    source_plan: Option<uqa_planner::QueryPlan>,
-    expressions: Vec<ExpressionPlan>,
+    stmt: InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| {
-        run_insert_inner(engine, stmt, source_plan.as_ref(), &expressions, params)
-    })
+    engine.transaction(move |engine| run_insert_inner(engine, &stmt, params))
 }
 
 #[allow(clippy::too_many_lines)]
 fn run_insert_inner(
     engine: &Engine,
-    stmt: InsertStmt,
-    source_plan: Option<&uqa_planner::QueryPlan>,
-    expressions: &[ExpressionPlan],
+    stmt: &InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut scope = CteScope::new();
-    for expression in expressions {
-        scope.install_expression_plan(expression);
-    }
-    let scoped_hook = ScopedEngineHook::new(engine, &scope);
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
+    super::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
+    scope.scalar_subqueries.clone_from(&stmt.subqueries);
     // INSERT ... SELECT: materialise the inner SELECT first, then
     // route each row through the standard add_document path under
     // the named columns.
-    if let Some(source) = source_plan {
-        let result = super::select::execute_query_plan(engine, source, params)?;
+    if let Some(source) = stmt.source.as_deref() {
+        let result =
+            super::select::execute_query_plan_with_ctes(engine, source, params, &mut scope)?;
         let columns: Vec<String> = if stmt.columns.is_empty() {
             result.columns.clone()
         } else {
@@ -1405,7 +1399,7 @@ fn run_insert_inner(
                 _ => engine.allocate_next_id(&stmt.table)?,
             };
             if let Some(c) = auto_id_col.as_deref() {
-                document.insert(c.into(), Value::Int(doc_id as i64));
+                document.insert(c.to_string(), Value::Int(doc_id as i64));
             }
             engine.advance_next_id(&stmt.table, doc_id);
             let document = insert_document_with_constraints(
@@ -1424,6 +1418,7 @@ fn run_insert_inner(
                     &document,
                     &stmt.returning,
                     params,
+                    &scope,
                 )?);
             }
             affected += 1;
@@ -1438,12 +1433,6 @@ fn run_insert_inner(
             ));
         }
         return Ok(SQLResult::from_affected(affected));
-    }
-
-    if stmt.select_source.is_some() {
-        return Err(SQLError::Internal(
-            "INSERT SELECT reached the mutation runtime without its QueryPlan child".into(),
-        ));
     }
 
     let auto_id_col = engine.auto_increment_column(&stmt.table);
@@ -1485,7 +1474,6 @@ fn run_insert_inner(
 
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
-    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
         cancel.check()?;
@@ -1499,7 +1487,7 @@ fn run_insert_inner(
         let mut document = Document::new();
         let mut doc_id: Option<u64> = None;
         for (i, col) in columns.iter().enumerate() {
-            let mut v = eval(&row[i], &ctx)?;
+            let mut v = eval_mutation_expr(engine, &scope, &row[i], None, params)?;
             v = coerce_to_column_type(engine, &stmt.table, col, v)?;
             if Some(i) == id_index {
                 // Auto-increment primary keys must be integers. A
@@ -1532,8 +1520,12 @@ fn run_insert_inner(
                 continue;
             }
             if let Some(default_expr) = engine.column_default_expr(&stmt.table, &col) {
-                let v =
-                    coerce_to_column_type(engine, &stmt.table, &col, eval(&default_expr, &ctx)?)?;
+                let v = coerce_to_column_type(
+                    engine,
+                    &stmt.table,
+                    &col,
+                    eval_lowered_expression(engine, &default_expr, None, params)?,
+                )?;
                 document.insert(col.clone(), v);
             }
         }
@@ -1561,8 +1553,7 @@ fn run_insert_inner(
         // level CHECK against the row and reject when any returns a
         // non-truthy value.
         for (cname, expr) in engine.check_constraints(&stmt.table) {
-            let row_ctx = EvalContext::new(Some(&document), params).with_engine(eval_hook);
-            let result = eval(&expr, &row_ctx)?;
+            let result = eval_lowered_expression(engine, &expr, Some(&document), params)?;
             if !uqa_sql::expr::truthy(&result) {
                 let label = cname.unwrap_or_else(|| "<unnamed>".into());
                 return Err(SQLError::TypeMismatch(format!(
@@ -1630,12 +1621,12 @@ fn run_insert_inner(
                 find_insert_conflict(engine, &stmt.table, on_conflict, &document)
             {
                 match &on_conflict.action {
-                    uqa_sql::ast::OnConflictAction::Nothing => {
+                    ConflictActionPlan::Nothing => {
                         continue;
                     }
-                    uqa_sql::ast::OnConflictAction::Update {
+                    ConflictActionPlan::Update {
                         assignments,
-                        r#where,
+                        predicate,
                     } => {
                         let existing_doc = engine
                             .get_document(&stmt.table, existing_id)
@@ -1647,23 +1638,33 @@ fn run_insert_inner(
                         for (col, value) in &document {
                             conflict_ctx_doc.insert(format!("excluded.{col}"), value.clone());
                         }
-                        let row_ctx = EvalContext::new(Some(&conflict_ctx_doc), params)
-                            .with_engine(eval_hook);
-                        if let Some(pred) = r#where {
-                            let keep = eval(pred, &row_ctx)?;
+                        if let Some(pred) = predicate {
+                            let keep = eval_mutation_expr(
+                                engine,
+                                &scope,
+                                pred,
+                                Some(&conflict_ctx_doc),
+                                params,
+                            )?;
                             if !uqa_sql::expr::truthy(&keep) {
                                 continue;
                             }
                         }
                         let mut updated_doc = existing_doc.clone();
-                        for (col, expr) in assignments {
+                        for assignment in assignments {
                             let v = coerce_to_column_type(
                                 engine,
                                 &stmt.table,
-                                col,
-                                eval(expr, &row_ctx)?,
+                                &assignment.column,
+                                eval_mutation_expr(
+                                    engine,
+                                    &scope,
+                                    &assignment.value,
+                                    Some(&conflict_ctx_doc),
+                                    params,
+                                )?,
                             )?;
-                            updated_doc.insert(col.clone(), v.clone());
+                            updated_doc.insert(assignment.column.clone(), v.clone());
                         }
                         rewrite_document_with_referential_actions(
                             engine,
@@ -1681,6 +1682,7 @@ fn run_insert_inner(
                                 &updated_doc,
                                 &stmt.returning,
                                 params,
+                                &scope,
                             )?);
                         }
                         affected += 1;
@@ -1730,6 +1732,7 @@ fn run_insert_inner(
                 &document,
                 &stmt.returning,
                 params,
+                &scope,
             )?);
         }
         affected += 1;
@@ -1785,13 +1788,17 @@ fn apply_missing_column_defaults(
     document: &mut Document,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let ctx = EvalContext::new(None, params).with_engine(engine);
     for col in engine.table_columns(table) {
         if document.contains_key(&col) {
             continue;
         }
         if let Some(default_expr) = engine.column_default_expr(table, &col) {
-            let value = coerce_to_column_type(engine, table, &col, eval(&default_expr, &ctx)?)?;
+            let value = coerce_to_column_type(
+                engine,
+                table,
+                &col,
+                eval_lowered_expression(engine, &default_expr, None, params)?,
+            )?;
             document.insert(col, value);
         }
     }

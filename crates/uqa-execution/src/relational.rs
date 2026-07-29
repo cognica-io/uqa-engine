@@ -12,12 +12,13 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DecimalValue, Value};
-use uqa_sql::expr::{eval, truthy, EvalContext};
+use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
-use uqa_sql::{ast::Expr, SQLError, SQLParam};
+use uqa_sql::{SQLError, SQLParam};
 
 use crate::batch::{Batch, RowSchema};
 use crate::physical::{ExecError, ExecResult, PhysicalOperator};
+use crate::scalar::{eval_scalar, ScalarEvalContext, ScalarExpr};
 
 // -------------------------------------------------------------------------
 // Filter
@@ -27,13 +28,17 @@ use crate::physical::{ExecError, ExecResult, PhysicalOperator};
 /// to `false` or `NULL`; truthy rows pass through unchanged.
 pub struct Filter {
     child: Box<dyn PhysicalOperator>,
-    predicate: Expr,
+    predicate: ScalarExpr,
     params: Vec<SQLParam>,
     schema: RowSchema,
 }
 
 impl Filter {
-    pub fn new(child: Box<dyn PhysicalOperator>, predicate: Expr, params: Vec<SQLParam>) -> Self {
+    pub fn new(
+        child: Box<dyn PhysicalOperator>,
+        predicate: ScalarExpr,
+        params: Vec<SQLParam>,
+    ) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
         Self {
             child,
@@ -60,8 +65,8 @@ impl PhysicalOperator for Filter {
             };
             let mut kept = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let ctx = EvalContext::new(Some(&row), &self.params);
-                if truthy(&eval(&self.predicate, &ctx)?) {
+                let ctx = ScalarEvalContext::new(Some(&row), &self.params);
+                if truthy(&eval_scalar(&self.predicate, &ctx)?) {
                     kept.push(row);
                 }
             }
@@ -85,7 +90,7 @@ impl PhysicalOperator for Filter {
 /// child schema is replaced with the output aliases.
 pub struct Project {
     child: Box<dyn PhysicalOperator>,
-    projections: Vec<(String, Expr)>,
+    projections: Vec<(String, ScalarExpr)>,
     params: Vec<SQLParam>,
     schema: RowSchema,
     /// When `true`, every input column also flows through to the
@@ -97,7 +102,7 @@ pub struct Project {
 impl Project {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
-        projections: Vec<(String, Expr)>,
+        projections: Vec<(String, ScalarExpr)>,
         params: Vec<SQLParam>,
     ) -> Self {
         let schema = RowSchema::new(projections.iter().map(|(name, _)| name.clone()).collect());
@@ -114,7 +119,7 @@ impl Project {
     /// the projections at the end. Used by aggregate / window paths.
     pub fn appending(
         child: Box<dyn PhysicalOperator>,
-        projections: Vec<(String, Expr)>,
+        projections: Vec<(String, ScalarExpr)>,
         params: Vec<SQLParam>,
     ) -> Self {
         let mut cols = child.schema().to_vec();
@@ -154,9 +159,9 @@ impl PhysicalOperator for Project {
             } else {
                 ResultRow::new()
             };
-            let ctx = EvalContext::new(Some(&row), &self.params);
+            let ctx = ScalarEvalContext::new(Some(&row), &self.params);
             for (name, expr) in &self.projections {
-                let v = eval(expr, &ctx)?;
+                let v = eval_scalar(expr, &ctx)?;
                 new_row.insert(name.clone(), v);
             }
             out.push(new_row);
@@ -175,7 +180,7 @@ impl PhysicalOperator for Project {
 
 #[derive(Debug, Clone)]
 pub struct SortKey {
-    pub expr: Expr,
+    pub expr: ScalarExpr,
     pub descending: bool,
     /// `Some(true)` forces NULLS FIRST, `Some(false)` forces NULLS
     /// LAST. `None` falls back to the SQL-standard default - NULLS
@@ -317,10 +322,10 @@ impl PhysicalOperator for Sort {
         // Materialise sort keys per row, then sort by them.
         let mut decorated: Vec<(Vec<Value>, ResultRow)> = Vec::with_capacity(rows.len());
         for row in rows {
-            let ctx = EvalContext::new(Some(&row), &self.params);
+            let ctx = ScalarEvalContext::new(Some(&row), &self.params);
             let mut key_vals = Vec::with_capacity(self.keys.len());
             for k in &self.keys {
-                key_vals.push(eval(&k.expr, &ctx)?);
+                key_vals.push(eval_scalar(&k.expr, &ctx)?);
             }
             decorated.push((key_vals, row));
         }
@@ -447,7 +452,7 @@ pub enum AggregateKind {
 pub struct AggregateSpec {
     pub kind: AggregateKind,
     /// Argument to the aggregate. Ignored for `CountStar`.
-    pub arg: Option<Expr>,
+    pub arg: Option<ScalarExpr>,
     /// Output column alias.
     pub alias: String,
     /// `COUNT(DISTINCT x)` / `SUM(DISTINCT x)` / etc.
@@ -460,7 +465,7 @@ pub struct AggregateSpec {
 /// order they were first observed.
 pub struct HashAggregate {
     child: Box<dyn PhysicalOperator>,
-    group_keys: Vec<(String, Expr)>,
+    group_keys: Vec<(String, ScalarExpr)>,
     aggregates: Vec<AggregateSpec>,
     params: Vec<SQLParam>,
     schema: RowSchema,
@@ -470,7 +475,7 @@ pub struct HashAggregate {
 impl HashAggregate {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
-        group_keys: Vec<(String, Expr)>,
+        group_keys: Vec<(String, ScalarExpr)>,
         aggregates: Vec<AggregateSpec>,
         params: Vec<SQLParam>,
     ) -> Self {
@@ -547,8 +552,8 @@ fn fold_into(
                     spec.kind
                 ))
             })?;
-            let ctx = EvalContext::new(Some(row), params);
-            let v = eval(arg, &ctx)?;
+            let ctx = ScalarEvalContext::new(Some(row), params);
+            let v = eval_scalar(arg, &ctx)?;
             if matches!(v, Value::Null) {
                 return Ok(());
             }
@@ -622,11 +627,11 @@ impl PhysicalOperator for HashAggregate {
         let mut order: Vec<String> = Vec::new();
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
-                let ctx = EvalContext::new(Some(&row), &self.params);
+                let ctx = ScalarEvalContext::new(Some(&row), &self.params);
                 let mut key_vals: Vec<Value> = Vec::with_capacity(self.group_keys.len());
                 let mut key_repr = String::new();
                 for (i, (_, expr)) in self.group_keys.iter().enumerate() {
-                    let v = eval(expr, &ctx)?;
+                    let v = eval_scalar(expr, &ctx)?;
                     if i > 0 {
                         key_repr.push('\x1f');
                     }
@@ -696,19 +701,19 @@ pub enum WindowKind {
     RowNumber,
     Rank,
     DenseRank,
-    Lag(Expr, i64),
-    Lead(Expr, i64),
+    Lag(ScalarExpr, i64),
+    Lead(ScalarExpr, i64),
     Ntile(i64),
-    AggSum(Expr),
-    AggCount(Option<Expr>),
-    AggAvg(Expr),
-    AggMin(Expr),
-    AggMax(Expr),
+    AggSum(ScalarExpr),
+    AggCount(Option<ScalarExpr>),
+    AggAvg(ScalarExpr),
+    AggMin(ScalarExpr),
+    AggMax(ScalarExpr),
 }
 
 #[derive(Debug, Clone)]
 pub struct WindowSpec {
-    pub partition_by: Vec<Expr>,
+    pub partition_by: Vec<ScalarExpr>,
     pub order_by: Vec<SortKey>,
 }
 
@@ -771,13 +776,13 @@ impl PhysicalOperator for Window {
         let mut buckets: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         let mut bucket_order: Vec<String> = Vec::new();
         for (i, row) in rows.iter().enumerate() {
-            let ctx = EvalContext::new(Some(row), &self.params);
+            let ctx = ScalarEvalContext::new(Some(row), &self.params);
             let mut key = String::new();
             for (j, p) in self.spec.partition_by.iter().enumerate() {
                 if j > 0 {
                     key.push('\x1f');
                 }
-                let v = eval(p, &ctx)?;
+                let v = eval_scalar(p, &ctx)?;
                 key.push_str(&distinct_key(&v));
             }
             buckets.entry(key.clone()).or_insert_with(|| {
@@ -791,10 +796,10 @@ impl PhysicalOperator for Window {
             let keys: Result<Vec<Vec<Value>>, SQLError> = indices
                 .iter()
                 .map(|&i| {
-                    let ctx = EvalContext::new(Some(&rows[i]), &self.params);
+                    let ctx = ScalarEvalContext::new(Some(&rows[i]), &self.params);
                     let mut k = Vec::with_capacity(self.spec.order_by.len());
                     for s in &self.spec.order_by {
-                        k.push(eval(&s.expr, &ctx)?);
+                        k.push(eval_scalar(&s.expr, &ctx)?);
                     }
                     Ok(k)
                 })
@@ -830,10 +835,10 @@ impl PhysicalOperator for Window {
                         let mut last_keys: Option<Vec<Value>> = None;
                         let mut tie_block_start = 1i64;
                         for (i, &row_idx) in indices.iter().enumerate() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
                             let mut k = Vec::with_capacity(self.spec.order_by.len());
                             for s in &self.spec.order_by {
-                                k.push(eval(&s.expr, &ctx)?);
+                                k.push(eval_scalar(&s.expr, &ctx)?);
                             }
                             if let Some(prev) = last_keys.as_ref() {
                                 if prev != &k {
@@ -848,10 +853,10 @@ impl PhysicalOperator for Window {
                         let mut last_keys: Option<Vec<Value>> = None;
                         let mut current = 0i64;
                         for &row_idx in indices.iter() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
                             let mut k = Vec::with_capacity(self.spec.order_by.len());
                             for s in &self.spec.order_by {
-                                k.push(eval(&s.expr, &ctx)?);
+                                k.push(eval_scalar(&s.expr, &ctx)?);
                             }
                             match last_keys.as_ref() {
                                 Some(prev) if prev == &k => {}
@@ -866,8 +871,8 @@ impl PhysicalOperator for Window {
                             let pos = i as i64 - *off;
                             let v = if pos >= 0 && (pos as usize) < indices.len() {
                                 let src_row = &rows[indices[pos as usize]];
-                                let ctx = EvalContext::new(Some(src_row), &self.params);
-                                eval(arg, &ctx)?
+                                let ctx = ScalarEvalContext::new(Some(src_row), &self.params);
+                                eval_scalar(arg, &ctx)?
                             } else {
                                 Value::Null
                             };
@@ -879,8 +884,8 @@ impl PhysicalOperator for Window {
                             let pos = i as i64 + *off;
                             let v = if pos >= 0 && (pos as usize) < indices.len() {
                                 let src_row = &rows[indices[pos as usize]];
-                                let ctx = EvalContext::new(Some(src_row), &self.params);
-                                eval(arg, &ctx)?
+                                let ctx = ScalarEvalContext::new(Some(src_row), &self.params);
+                                eval_scalar(arg, &ctx)?
                             } else {
                                 Value::Null
                             };
@@ -908,8 +913,8 @@ impl PhysicalOperator for Window {
                         let mut sum = 0f64;
                         let mut any = false;
                         for &row_idx in indices.iter() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval(arg, &ctx)?;
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let v = eval_scalar(arg, &ctx)?;
                             if let Some(n) = value_to_f64(&v) {
                                 sum += n;
                                 any = true;
@@ -926,8 +931,9 @@ impl PhysicalOperator for Window {
                             match arg {
                                 None => c += 1,
                                 Some(e) => {
-                                    let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
-                                    if !matches!(eval(e, &ctx)?, Value::Null) {
+                                    let ctx =
+                                        ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
+                                    if !matches!(eval_scalar(e, &ctx)?, Value::Null) {
                                         c += 1;
                                     }
                                 }
@@ -941,8 +947,8 @@ impl PhysicalOperator for Window {
                         let mut sum = 0f64;
                         let mut count: i64 = 0;
                         for &row_idx in indices.iter() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval(arg, &ctx)?;
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let v = eval_scalar(arg, &ctx)?;
                             if let Some(n) = value_to_f64(&v) {
                                 sum += n;
                                 count += 1;
@@ -960,8 +966,8 @@ impl PhysicalOperator for Window {
                     WindowKind::AggMin(arg) => {
                         let mut acc: Option<Value> = None;
                         for &row_idx in indices.iter() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval(arg, &ctx)?;
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let v = eval_scalar(arg, &ctx)?;
                             if matches!(v, Value::Null) {
                                 continue;
                             }
@@ -984,8 +990,8 @@ impl PhysicalOperator for Window {
                     WindowKind::AggMax(arg) => {
                         let mut acc: Option<Value> = None;
                         for &row_idx in indices.iter() {
-                            let ctx = EvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval(arg, &ctx)?;
+                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
+                            let v = eval_scalar(arg, &ctx)?;
                             if matches!(v, Value::Null) {
                                 continue;
                             }
@@ -1044,7 +1050,7 @@ mod tests {
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
     use uqa_core::Value;
-    use uqa_sql::ast::{BinaryOp, Expr};
+    use uqa_sql::ast::BinaryOp;
 
     fn row<const N: usize>(pairs: [(&str, Value); N]) -> ResultRow {
         pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -1054,12 +1060,12 @@ mod tests {
         Box::new(TableScan::from_rows(schema, rows))
     }
 
-    fn col(name: &str) -> Expr {
-        Expr::Column(name.into())
+    fn col(name: &str) -> ScalarExpr {
+        ScalarExpr::Column(name.into())
     }
 
-    fn bin(op: BinaryOp, lhs: Expr, rhs: Expr) -> Expr {
-        Expr::Binary {
+    fn bin(op: BinaryOp, lhs: ScalarExpr, rhs: ScalarExpr) -> ScalarExpr {
+        ScalarExpr::Binary {
             op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
@@ -1076,7 +1082,11 @@ mod tests {
                 row([("x", Value::Int(3))]),
             ],
         );
-        let predicate = bin(BinaryOp::Greater, col("x"), Expr::Literal(Value::Int(1)));
+        let predicate = bin(
+            BinaryOp::Greater,
+            col("x"),
+            ScalarExpr::Literal(Value::Int(1)),
+        );
         let mut filt = Filter::new(scan, predicate, vec![]);
         let (_cols, rows) = run_to_rows(&mut filt).unwrap();
         assert_eq!(rows.len(), 2);
@@ -1087,7 +1097,11 @@ mod tests {
         let scan = boxed_scan(vec!["x".into()], vec![row([("x", Value::Int(1))])]);
         let zero = bin(BinaryOp::Subtract, col("x"), col("x"));
         let division = bin(BinaryOp::Divide, col("x"), zero);
-        let predicate = bin(BinaryOp::Greater, division, Expr::Literal(Value::Int(0)));
+        let predicate = bin(
+            BinaryOp::Greater,
+            division,
+            ScalarExpr::Literal(Value::Int(0)),
+        );
         let mut filter = Filter::new(scan, predicate, vec![]);
         let error = run_to_rows(&mut filter).unwrap_err();
         assert!(error.to_string().contains("division by zero"));

@@ -6,11 +6,12 @@
 
 //! SQL DDL execution and column type conversion helpers.
 
+use super::scalar::eval_lowered_expression;
 use super::{
-    eval, index_vectors_for_type, value_to_tensor, value_to_vector, AlterTableAction,
-    AlterTableStmt, BTreeMap, ColumnType, CreateIndex, CreateTable, DecimalValue, Document,
-    DropKind, DropStmt, Engine, EvalContext, IVFIndexParams, RowUpdateVectors, SQLColumnDef,
-    SQLError, SQLParam, SQLResult, TemporalValue, Value,
+    index_vectors_for_type, value_to_tensor, value_to_vector, AlterTableAction, AlterTableStmt,
+    BTreeMap, ColumnType, CreateIndex, CreateTable, DecimalValue, Document, DropKind, DropStmt,
+    Engine, IVFIndexParams, RowUpdateVectors, SQLColumnDef, SQLError, SQLParam, SQLResult,
+    TemporalValue, Value,
 };
 use crate::CatalogIndexRow;
 
@@ -845,8 +846,7 @@ fn backfill_added_column(
         return Ok(());
     }
     let default_value = if let Some(expr) = default_expr {
-        let ctx = EvalContext::new(None, &[]).with_engine(engine);
-        eval(expr, &ctx)?
+        eval_lowered_expression(engine, expr, None, &[])?
     } else if not_null {
         return Err(SQLError::TypeMismatch(format!(
             "ALTER TABLE ADD COLUMN `{column}` is NOT NULL but no DEFAULT supplied; \

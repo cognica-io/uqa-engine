@@ -36,12 +36,12 @@ fn engine_with_corpus() -> Engine {
     eng
 }
 
-fn where_of(sql: &str) -> uqa_sql::ast::Expr {
+fn where_of(sql: &str) -> uqa_execution::ScalarExpr {
     let stmts = compile(sql).expect("parse");
     let Statement::Select(stmt) = stmts.into_iter().next().expect("at least one stmt") else {
         panic!("expected SELECT");
     };
-    stmt.r#where.expect("expected WHERE")
+    uqa_planner::ExpressionPlan::lower(stmt.r#where.expect("expected WHERE")).scalar
 }
 
 fn assert_term_scoring(tree: &OperatorTree, expected: TextScoringMode) {
@@ -205,8 +205,8 @@ fn complement_through_not_lowers_correctly() {
 fn unsupported_shape_returns_none() {
     let eng = engine_with_corpus();
     // Arithmetic on columns can't be lowered to OperatorTree's
-    // Filter (no f(col_a, col_b) predicate); the bridge returns None
-    // and the engine falls back to the row evaluator.
+    // Filter (no f(col_a, col_b) predicate); the plan therefore keeps
+    // this predicate in the relational scalar compute path.
     let expr = where_of("SELECT id FROM notes WHERE id + 1 = 2");
     assert!(optimised_tree_for(&eng, "notes", &expr, &[]).is_none());
 }

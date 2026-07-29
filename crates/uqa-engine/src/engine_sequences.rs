@@ -155,21 +155,21 @@ impl Engine {
     // -----------------------------------------------------------------
 
     pub fn register_prepared(&self, name: String, definition: uqa_sql::ast::Statement) {
-        let plan = uqa_planner::UnifiedPlan::lower_with(definition.clone(), &|aggregate: &str| {
+        let plan = uqa_planner::UnifiedPlan::lower_with(definition, &|aggregate: &str| {
             self.has_registered_aggregate_function(aggregate)
         });
-        self.register_prepared_plan(name, definition, plan);
+        let plan = uqa_planner::optimizer::optimize_with_aggregates(
+            plan,
+            &uqa_planner::optimizer::OptimizerConfig::default(),
+            &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
+        );
+        self.register_prepared_plan(name, plan);
     }
 
-    pub(crate) fn register_prepared_plan(
-        &self,
-        name: String,
-        definition: uqa_sql::ast::Statement,
-        plan: uqa_planner::UnifiedPlan,
-    ) {
+    pub(crate) fn register_prepared_plan(&self, name: String, plan: uqa_planner::UnifiedPlan) {
         self.prepared
             .write()
-            .insert(name, super::PreparedStatementPlan { definition, plan });
+            .insert(name, super::PreparedStatementPlan { plan });
     }
 
     pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
@@ -181,8 +181,9 @@ impl Engine {
 
     pub(crate) fn rebind_prepared_plans(&self) {
         for prepared in self.prepared.write().values_mut() {
-            prepared.plan = uqa_planner::UnifiedPlan::lower_with(
-                prepared.definition.clone(),
+            prepared.plan = uqa_planner::optimizer::optimize_with_aggregates(
+                prepared.plan.clone(),
+                &uqa_planner::optimizer::OptimizerConfig::default(),
                 &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
             );
         }

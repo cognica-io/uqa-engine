@@ -210,6 +210,90 @@ fn scalar_subquery_empty() {
 }
 
 #[test]
+fn physical_subqueries_run_across_relational_scalar_sites() {
+    let engine = setup();
+
+    let aggregate = query(
+        &engine,
+        "SELECT SUM((SELECT COUNT(*) FROM departments)) AS total
+         FROM employees WHERE id <= 2",
+    );
+    assert_eq!(aggregate.rows[0]["total"], Value::Int(6));
+
+    let having = query(
+        &engine,
+        "SELECT COUNT(*) AS cnt FROM employees
+         HAVING (SELECT COUNT(*) FROM departments) = 3",
+    );
+    assert_eq!(having.rows[0]["cnt"], Value::Int(5));
+
+    let window = query(
+        &engine,
+        "SELECT id,
+                LAG((SELECT COUNT(*) FROM departments), 1, 0)
+                    OVER (ORDER BY id) AS prior
+         FROM employees ORDER BY id LIMIT 2",
+    );
+    assert_eq!(window.rows[0]["prior"], Value::Int(0));
+    assert_eq!(window.rows[1]["prior"], Value::Int(3));
+
+    let ordered = query(
+        &engine,
+        "SELECT name FROM employees
+         ORDER BY (SELECT COUNT(*) FROM departments), name
+         LIMIT (SELECT 1)",
+    );
+    assert_eq!(ordered.rows[0]["name"], Value::Str("Alice".into()));
+
+    let fully_ordered = query(
+        &engine,
+        "SELECT name FROM employees
+         ORDER BY (SELECT COUNT(*) FROM departments), name",
+    );
+    assert_eq!(
+        names(&fully_ordered),
+        vec!["Alice", "Bob", "Carol", "Dave", "Eve"]
+    );
+
+    let highlighted = query(
+        &engine,
+        "SELECT uqa_highlight(name, (SELECT 'Alice')) AS h
+         FROM employees WHERE id = 1",
+    );
+    assert_eq!(highlighted.rows[0]["h"], Value::Str("<b>Alice</b>".into()));
+
+    query(&engine, "SELECT create_graph((SELECT 'physical_graph'))");
+    assert!(engine.has_graph("physical_graph"));
+    query(
+        &engine,
+        "SELECT drop_graph((SELECT 'physical_graph'), (SELECT true))",
+    );
+    assert!(!engine.has_graph("physical_graph"));
+
+    let joined = query(
+        &engine,
+        "SELECT e.name
+         FROM employees e
+         JOIN departments d
+           ON e.dept_id = d.id AND d.id = (SELECT 1)
+         ORDER BY e.name",
+    );
+    assert_eq!(names(&joined), vec!["Alice", "Carol"]);
+
+    let generated = query(
+        &engine,
+        "SELECT * FROM generate_series(1, (SELECT COUNT(*) FROM departments))",
+    );
+    assert_eq!(generated.rows.len(), 3);
+
+    let values = query(
+        &engine,
+        "SELECT x FROM (VALUES ((SELECT COUNT(*) FROM departments))) AS v(x)",
+    );
+    assert_eq!(values.rows[0]["x"], Value::Int(3));
+}
+
+#[test]
 fn in_subquery_with_like() {
     let engine = setup();
     let result = query(

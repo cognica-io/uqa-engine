@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::DocId;
-use uqa_sql::ast::Expr;
+use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{Engine, ScoredEntry};
@@ -19,7 +19,7 @@ use super::row_functions::execute_function;
 fn filter_table_rows(
     engine: &Engine,
     table: &str,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let doc_ids = engine.table_doc_ids(table);
@@ -27,7 +27,7 @@ fn filter_table_rows(
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document.
     let mut columns = std::collections::BTreeSet::new();
-    if super::aggregates::collect_expr_columns(filter, &mut columns) {
+    if filter.collect_columns(&mut columns) {
         let names: Vec<String> = columns.into_iter().collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs);
@@ -39,8 +39,8 @@ fn filter_table_rows(
             for (name, value) in names.iter().zip(values) {
                 document.insert(name.clone(), value.clone());
             }
-            let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
-            let v = uqa_sql::expr::eval(filter, &ctx)?;
+            let ctx = ScalarEvalContext::new(Some(&document), params).with_function_hook(engine);
+            let v = eval_scalar(filter, &ctx)?;
             if uqa_sql::expr::truthy(&v) {
                 out.push(ScoredEntry { doc_id, score: 0.0 });
             }
@@ -50,8 +50,8 @@ fn filter_table_rows(
     let mut out = Vec::new();
     for doc_id in doc_ids {
         let document = engine.get_document(table, doc_id).unwrap_or_default();
-        let ctx = uqa_sql::expr::EvalContext::new(Some(&document), params).with_engine(engine);
-        let v = uqa_sql::expr::eval(filter, &ctx)?;
+        let ctx = ScalarEvalContext::new(Some(&document), params).with_function_hook(engine);
+        let v = eval_scalar(filter, &ctx)?;
         if uqa_sql::expr::truthy(&v) {
             out.push(ScoredEntry { doc_id, score: 0.0 });
         }
@@ -62,7 +62,7 @@ fn filter_table_rows(
 pub(super) fn execute_mixed_where(
     engine: &Engine,
     table: &str,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let mut rows = execute_mixed_where_expr(engine, table, filter, params)?;
@@ -78,7 +78,7 @@ pub(super) fn execute_mixed_where(
 pub(super) fn collect_where_doc_ids(
     engine: &Engine,
     table: &str,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Vec<DocId>, SQLError> {
     let scored = if is_jsonpath_fts_match_filter(filter) {
@@ -89,7 +89,7 @@ pub(super) fn collect_where_doc_ids(
         entries
     } else {
         match filter {
-            Expr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
+            ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
                 execute_function(engine, table, name, args, params)?
             }
             other => execute_mixed_where(engine, table, other, params)?,
@@ -98,9 +98,9 @@ pub(super) fn collect_where_doc_ids(
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
 }
 
-fn is_jsonpath_fts_match_filter(filter: &Expr) -> bool {
+fn is_jsonpath_fts_match_filter(filter: &ScalarExpr) -> bool {
     match filter {
-        Expr::Func { name, args, .. } => is_jsonpath_fts_match(name, args),
+        ScalarExpr::Func { name, args, .. } => is_jsonpath_fts_match(name, args),
         _ => false,
     }
 }
@@ -108,11 +108,11 @@ fn is_jsonpath_fts_match_filter(filter: &Expr) -> bool {
 fn execute_mixed_where_expr(
     engine: &Engine,
     table: &str,
-    filter: &Expr,
+    filter: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     match filter {
-        Expr::And(parts) => {
+        ScalarExpr::And(parts) => {
             let mut iter = parts.iter();
             let Some(first) = iter.next() else {
                 return Ok(all_table_rows(engine, table));
@@ -124,7 +124,7 @@ fn execute_mixed_where_expr(
             }
             Ok(out)
         }
-        Expr::Or(parts) => {
+        ScalarExpr::Or(parts) => {
             let mut out = Vec::new();
             for part in parts {
                 out = union_scored(out, execute_mixed_where_expr(engine, table, part, params)?);
@@ -136,12 +136,12 @@ fn execute_mixed_where_expr(
         // definite match sets). Column predicates go through the
         // row evaluator so `NOT (col = 5)` keeps SQL three-valued
         // semantics: rows where `col` is NULL match neither side.
-        Expr::Not(inner) if expr_is_null_free(inner) => Ok(complement_scored(
+        ScalarExpr::Not(inner) if expr_is_null_free(inner) => Ok(complement_scored(
             engine,
             table,
             execute_mixed_where_expr(engine, table, inner, params)?,
         )),
-        Expr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
+        ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
             if is_jsonpath_fts_match(name, args) {
                 filter_table_rows(engine, table, filter, params)
             } else {
@@ -152,11 +152,11 @@ fn execute_mixed_where_expr(
     }
 }
 
-fn is_jsonpath_fts_match(name: &str, args: &[Expr]) -> bool {
+fn is_jsonpath_fts_match(name: &str, args: &[ScalarExpr]) -> bool {
     name.eq_ignore_ascii_case("fts_match")
         && matches!(
             args.get(1),
-            Some(Expr::Literal(uqa_core::Value::Str(path))) if path.trim_start().starts_with('$')
+            Some(ScalarExpr::Literal(uqa_core::Value::Str(path))) if path.trim_start().starts_with('$')
         )
 }
 
@@ -164,14 +164,14 @@ fn is_jsonpath_fts_match(name: &str, args: &[Expr]) -> bool {
 /// row: registered search functions, IS NULL tests, and boolean
 /// combinations thereof. Anything referencing column comparisons may
 /// yield NULL, so set-complement `NOT` would be unsound for it.
-pub(crate) fn expr_is_null_free(expr: &Expr) -> bool {
+pub(crate) fn expr_is_null_free(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::Func { name, .. } => uqa_sql::registry::is_registered(name),
-        Expr::IsNull { .. } => true,
-        Expr::Exists { .. } => true,
-        Expr::Literal(v) => !matches!(v, uqa_core::Value::Null),
-        Expr::And(parts) | Expr::Or(parts) => parts.iter().all(expr_is_null_free),
-        Expr::Not(inner) => expr_is_null_free(inner),
+        ScalarExpr::Func { name, .. } => uqa_sql::registry::is_registered(name),
+        ScalarExpr::IsNull { .. } => true,
+        ScalarExpr::Exists { .. } => true,
+        ScalarExpr::Literal(v) => !matches!(v, uqa_core::Value::Null),
+        ScalarExpr::And(parts) | ScalarExpr::Or(parts) => parts.iter().all(expr_is_null_free),
+        ScalarExpr::Not(inner) => expr_is_null_free(inner),
         _ => false,
     }
 }

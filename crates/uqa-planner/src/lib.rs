@@ -82,7 +82,11 @@ pub use query_optimizer::{
     IndexScanCandidate, OptimizerConfig as TreeOptimizerConfig, QueryOptimizer,
 };
 pub use unified_plan::{
-    AggregateClassifier, CommandPlan, ComputePlan, CtePlan, ExpressionPlan, OrderPlan,
-    ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedExecutionStats,
-    UnifiedPlan, UnifiedPlanDriver, UnifiedPlanExecutor,
+    AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
+    ConflictActionPlan, ConflictPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan,
+    MergeWhenPlan, OrderPlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SourcePlan, UnifiedPlan, UpdatePlan,
+};
+pub use uqa_execution::{
+    ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,
 };

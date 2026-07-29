@@ -6,34 +6,44 @@
 
 //! SQL window function evaluation.
 
+use uqa_execution::{
+    eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
+    ScalarSubqueryRunner, ScalarWindowSpec,
+};
+use uqa_planner::ProjectionPlan;
+
+use super::scalar::PlanSubqueryArena;
 use super::{
-    aggregate_value, projection_columns, AggregateAccumulator, BTreeMap, Engine, Expr, OrderBy,
-    Projection, ResultRow, SQLError, SQLParam, Value, WindowSpec,
+    aggregate_value, projection_columns, AggregateAccumulator, BTreeMap, CteScope, Engine,
+    ResultRow, SQLError, SQLParam, ScopedEngineHook, Value,
 };
 
 pub(super) struct WindowProjectionResult {
     pub rows: Vec<ResultRow>,
-    pub projections: Vec<Projection>,
+    pub projections: Vec<ProjectionPlan>,
 }
 
 #[derive(Clone)]
 struct WindowSlot {
     key: String,
     name: String,
-    args: Vec<Expr>,
-    spec: WindowSpec,
+    args: Vec<ScalarExpr>,
+    spec: ScalarWindowSpec,
 }
 
-pub(super) fn has_window(projections: &[Projection]) -> bool {
+pub(super) fn has_window(projections: &[ProjectionPlan]) -> bool {
     projections.iter().any(|p| expr_has_window(&p.expr))
 }
 
 pub(super) fn compute_window_columns(
     engine: &Engine,
-    projections: &[Projection],
+    projections: &[ProjectionPlan],
     rows: Vec<ResultRow>,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<WindowProjectionResult, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&hook));
     let mut rows = rows;
     let labels = projection_columns(projections);
     let mut slots = Vec::new();
@@ -54,7 +64,15 @@ pub(super) fn compute_window_columns(
         .find(|slot| !slot.spec.order_by.is_empty() || !slot.spec.partition_by.is_empty())
         .map(|slot| slot.spec.clone());
     for slot in slots {
-        let values = evaluate_window(engine, &slot.name, &slot.args, &slot.spec, &rows, params)?;
+        let values = evaluate_window(
+            &slot.name,
+            &slot.args,
+            &slot.spec,
+            &rows,
+            params,
+            &hook,
+            &subquery_arena,
+        )?;
         for (row, value) in rows.iter_mut().zip(values) {
             row.insert(slot.key.clone(), value);
         }
@@ -66,16 +84,18 @@ pub(super) fn compute_window_columns(
         let mut keyed: Vec<(Vec<Value>, Vec<Value>, ResultRow)> = rows
             .into_iter()
             .map(|row| -> Result<_, SQLError> {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
+                let ctx = ScalarEvalContext::new(Some(&row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
                 let partition: Vec<Value> = spec
                     .partition_by
                     .iter()
-                    .map(|e| uqa_sql::expr::eval(e, &ctx))
+                    .map(|e| eval_scalar(e, &ctx))
                     .collect::<Result<Vec<_>, _>>()?;
                 let order: Vec<Value> = spec
                     .order_by
                     .iter()
-                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
+                    .map(|o| eval_scalar(&o.expr, &ctx))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((partition, order, row))
             })
@@ -92,10 +112,10 @@ pub(super) fn compute_window_columns(
     })
 }
 
-fn expr_has_window(expr: &Expr) -> bool {
+fn expr_has_window(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::WindowCall { .. } => true,
-        Expr::Func {
+        ScalarExpr::WindowCall { .. } => true,
+        ScalarExpr::Func {
             args,
             order_by,
             filter,
@@ -105,20 +125,20 @@ fn expr_has_window(expr: &Expr) -> bool {
                 || order_by.iter().any(|order| expr_has_window(&order.expr))
                 || filter.as_ref().is_some_and(|expr| expr_has_window(expr))
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(expr_has_window)
         }
-        Expr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_has_window(inner)
-        }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expr_has_window(inner),
+        ScalarExpr::Between { expr, low, high } => {
             expr_has_window(expr) || expr_has_window(low) || expr_has_window(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_has_window(expr) || list.iter().any(expr_has_window)
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -131,25 +151,25 @@ fn expr_has_window(expr: &Expr) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_has_window(expr))
         }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => false,
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => false,
     }
 }
 
 fn rewrite_window_expr(
-    expr: &Expr,
+    expr: &ScalarExpr,
     projection_index: usize,
     counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
-) -> (Expr, bool) {
+) -> (ScalarExpr, bool) {
     match expr {
-        Expr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall { name, args, spec } => {
             let key = format!("__window_{projection_index}_{}", *counter);
             *counter += 1;
             slots.push(WindowSlot {
@@ -158,9 +178,9 @@ fn rewrite_window_expr(
                 args: args.clone(),
                 spec: spec.clone(),
             });
-            (Expr::Column(key), true)
+            (ScalarExpr::Column(key), true)
         }
-        Expr::Func {
+        ScalarExpr::Func {
             name,
             args,
             distinct,
@@ -179,7 +199,7 @@ fn rewrite_window_expr(
                 None => (None, false),
             };
             (
-                Expr::Func {
+                ScalarExpr::Func {
                     name: name.clone(),
                     args,
                     distinct: *distinct,
@@ -189,15 +209,15 @@ fn rewrite_window_expr(
                 args_changed || order_changed || filter_changed,
             )
         }
-        Expr::Array(items) => {
+        ScalarExpr::Array(items) => {
             let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
-            (Expr::Array(items), changed)
+            (ScalarExpr::Array(items), changed)
         }
-        Expr::Binary { op, lhs, rhs } => {
+        ScalarExpr::Binary { op, lhs, rhs } => {
             let (lhs, lhs_changed) = rewrite_window_expr(lhs, projection_index, counter, slots);
             let (rhs, rhs_changed) = rewrite_window_expr(rhs, projection_index, counter, slots);
             (
-                Expr::Binary {
+                ScalarExpr::Binary {
                     op: *op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -205,34 +225,34 @@ fn rewrite_window_expr(
                 lhs_changed || rhs_changed,
             )
         }
-        Expr::Not(inner) => {
+        ScalarExpr::Not(inner) => {
             let (inner, changed) = rewrite_window_expr(inner, projection_index, counter, slots);
-            (Expr::Not(Box::new(inner)), changed)
+            (ScalarExpr::Not(Box::new(inner)), changed)
         }
-        Expr::And(items) => {
+        ScalarExpr::And(items) => {
             let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
-            (Expr::And(items), changed)
+            (ScalarExpr::And(items), changed)
         }
-        Expr::Or(items) => {
+        ScalarExpr::Or(items) => {
             let (items, changed) = rewrite_window_exprs(items, projection_index, counter, slots);
-            (Expr::Or(items), changed)
+            (ScalarExpr::Or(items), changed)
         }
-        Expr::IsNull { expr, negated } => {
+        ScalarExpr::IsNull { expr, negated } => {
             let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
             (
-                Expr::IsNull {
+                ScalarExpr::IsNull {
                     expr: Box::new(expr),
                     negated: *negated,
                 },
                 changed,
             )
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Between { expr, low, high } => {
             let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
             let (low, low_changed) = rewrite_window_expr(low, projection_index, counter, slots);
             let (high, high_changed) = rewrite_window_expr(high, projection_index, counter, slots);
             (
-                Expr::Between {
+                ScalarExpr::Between {
                     expr: Box::new(expr),
                     low: Box::new(low),
                     high: Box::new(high),
@@ -240,7 +260,7 @@ fn rewrite_window_expr(
                 expr_changed || low_changed || high_changed,
             )
         }
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
@@ -248,7 +268,7 @@ fn rewrite_window_expr(
             let (expr, expr_changed) = rewrite_window_expr(expr, projection_index, counter, slots);
             let (list, list_changed) = rewrite_window_exprs(list, projection_index, counter, slots);
             (
-                Expr::InList {
+                ScalarExpr::InList {
                     expr: Box::new(expr),
                     list,
                     negated: *negated,
@@ -256,7 +276,7 @@ fn rewrite_window_expr(
                 expr_changed || list_changed,
             )
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -288,7 +308,7 @@ fn rewrite_window_expr(
                 None => (None, false),
             };
             (
-                Expr::Case {
+                ScalarExpr::Case {
                     base,
                     when: rewritten_when,
                     else_branch,
@@ -296,10 +316,10 @@ fn rewrite_window_expr(
                 changed || else_changed,
             )
         }
-        Expr::Cast { expr, ty } => {
+        ScalarExpr::Cast { expr, ty } => {
             let (expr, changed) = rewrite_window_expr(expr, projection_index, counter, slots);
             (
-                Expr::Cast {
+                ScalarExpr::Cast {
                     expr: Box::new(expr),
                     ty: ty.clone(),
                 },
@@ -311,11 +331,11 @@ fn rewrite_window_expr(
 }
 
 fn rewrite_window_exprs(
-    exprs: &[Expr],
+    exprs: &[ScalarExpr],
     projection_index: usize,
     counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
-) -> (Vec<Expr>, bool) {
+) -> (Vec<ScalarExpr>, bool) {
     let mut changed = false;
     let rewritten = exprs
         .iter()
@@ -329,11 +349,11 @@ fn rewrite_window_exprs(
 }
 
 fn rewrite_window_order_by(
-    order_by: &[OrderBy],
+    order_by: &[ScalarOrder],
     projection_index: usize,
     counter: &mut usize,
     slots: &mut Vec<WindowSlot>,
-) -> (Vec<OrderBy>, bool) {
+) -> (Vec<ScalarOrder>, bool) {
     let mut changed = false;
     let rewritten = order_by
         .iter()
@@ -341,7 +361,7 @@ fn rewrite_window_order_by(
             let (expr, expr_changed) =
                 rewrite_window_expr(&order.expr, projection_index, counter, slots);
             changed |= expr_changed;
-            OrderBy {
+            ScalarOrder {
                 expr,
                 descending: order.descending,
                 nulls: order.nulls,
@@ -352,23 +372,26 @@ fn rewrite_window_order_by(
 }
 
 fn evaluate_window(
-    engine: &Engine,
     name: &str,
-    args: &[Expr],
-    spec: &WindowSpec,
+    args: &[ScalarExpr],
+    spec: &ScalarWindowSpec,
     rows: &[ResultRow],
     params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<Vec<Value>, SQLError> {
     if rows.is_empty() {
         return Ok(Vec::new());
     }
     let mut partitions: BTreeMap<Vec<Value>, Vec<usize>> = BTreeMap::new();
     for (i, row) in rows.iter().enumerate() {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+        let ctx = ScalarEvalContext::new(Some(row), params)
+            .with_function_hook(eval_hook)
+            .with_subquery_runner(subquery_runner);
         let key: Vec<Value> = spec
             .partition_by
             .iter()
-            .map(|e| uqa_sql::expr::eval(e, &ctx))
+            .map(|e| eval_scalar(e, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
         partitions.entry(key).or_default().push(i);
     }
@@ -378,12 +401,13 @@ fn evaluate_window(
         let mut indexed: Vec<(usize, Vec<Value>)> = indices
             .into_iter()
             .map(|i| -> Result<_, SQLError> {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&rows[i]), params).with_engine(engine);
+                let ctx = ScalarEvalContext::new(Some(&rows[i]), params)
+                    .with_function_hook(eval_hook)
+                    .with_subquery_runner(subquery_runner);
                 let key: Vec<Value> = spec
                     .order_by
                     .iter()
-                    .map(|o| uqa_sql::expr::eval(&o.expr, &ctx))
+                    .map(|o| eval_scalar(&o.expr, &ctx))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((i, key))
             })
@@ -431,10 +455,10 @@ fn evaluate_window(
                 let offset_value = match args.get(1) {
                     None => 1i64,
                     Some(expr) => {
-                        let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
-                                .with_engine(engine);
-                        match uqa_sql::expr::eval(expr, &ctx)? {
+                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
+                            .with_function_hook(eval_hook)
+                            .with_subquery_runner(subquery_runner);
+                        match eval_scalar(expr, &ctx)? {
                             Value::Int(n) => n,
                             other => {
                                 return Err(SQLError::TypeMismatch(format!(
@@ -447,10 +471,10 @@ fn evaluate_window(
                 let default_value = match args.get(2) {
                     None => Value::Null,
                     Some(expr) => {
-                        let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
-                                .with_engine(engine);
-                        uqa_sql::expr::eval(expr, &ctx)?
+                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
+                            .with_function_hook(eval_hook)
+                            .with_subquery_runner(subquery_runner);
+                        eval_scalar(expr, &ctx)?
                     }
                 };
                 for (i, (orig, _)) in indexed.iter().enumerate() {
@@ -459,9 +483,10 @@ fn evaluate_window(
                         default_value.clone()
                     } else {
                         let target_orig = indexed[target_idx as usize].0;
-                        let ctx = uqa_sql::expr::EvalContext::new(Some(&rows[target_orig]), params)
-                            .with_engine(engine);
-                        uqa_sql::expr::eval(target_expr, &ctx)?
+                        let ctx = ScalarEvalContext::new(Some(&rows[target_orig]), params)
+                            .with_function_hook(eval_hook)
+                            .with_subquery_runner(subquery_runner);
+                        eval_scalar(target_expr, &ctx)?
                     };
                     output[*orig] = value;
                 }
@@ -469,10 +494,10 @@ fn evaluate_window(
             "ntile" => {
                 let n = match args.first() {
                     Some(expr) => {
-                        let ctx =
-                            uqa_sql::expr::EvalContext::new(Some(&rows[indexed[0].0]), params)
-                                .with_engine(engine);
-                        match uqa_sql::expr::eval(expr, &ctx)? {
+                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
+                            .with_function_hook(eval_hook)
+                            .with_subquery_runner(subquery_runner);
+                        match eval_scalar(expr, &ctx)? {
                             Value::Int(n) if n > 0 => n,
                             other => {
                                 return Err(SQLError::TypeMismatch(format!(
@@ -512,7 +537,6 @@ fn evaluate_window(
             }
             "sum" | "count" | "avg" | "min" | "max" => {
                 evaluate_window_aggregate(
-                    engine,
                     &lower,
                     args,
                     spec,
@@ -520,6 +544,8 @@ fn evaluate_window(
                     params,
                     &indexed,
                     &mut output,
+                    eval_hook,
+                    subquery_runner,
                 )?;
             }
             other => {
@@ -537,25 +563,27 @@ fn evaluate_window(
 /// uqa/execution/relational.py.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_window_aggregate(
-    engine: &Engine,
     name: &str,
-    args: &[Expr],
-    spec: &WindowSpec,
+    args: &[ScalarExpr],
+    spec: &ScalarWindowSpec,
     rows: &[ResultRow],
     params: &[SQLParam],
     indexed: &[(usize, Vec<Value>)],
     output: &mut [Value],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<(), SQLError> {
-    use uqa_sql::ast::{FrameBound, FrameMode};
+    use uqa_sql::ast::FrameMode;
     let arg_expr = args.first();
     let n = indexed.len();
     let materialized: Vec<Value> = match arg_expr {
         Some(expr) => indexed
             .iter()
             .map(|(orig, _)| {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&rows[*orig]), params).with_engine(engine);
-                uqa_sql::expr::eval(expr, &ctx)
+                let ctx = ScalarEvalContext::new(Some(&rows[*orig]), params)
+                    .with_function_hook(eval_hook)
+                    .with_subquery_runner(subquery_runner);
+                eval_scalar(expr, &ctx)
             })
             .collect::<Result<Vec<_>, _>>()?,
         None => vec![Value::Int(1); n],
@@ -578,13 +606,13 @@ fn evaluate_window_aggregate(
         }
         None => (
             FrameMode::Rows,
-            FrameBound::UnboundedPreceding,
-            FrameBound::CurrentRow,
+            ScalarFrameBound::UnboundedPreceding,
+            ScalarFrameBound::CurrentRow,
         ),
     };
     if matches!(mode, FrameMode::Rows)
-        && matches!(start_bound, FrameBound::UnboundedPreceding)
-        && matches!(end_bound, FrameBound::CurrentRow)
+        && matches!(start_bound, ScalarFrameBound::UnboundedPreceding)
+        && matches!(end_bound, ScalarFrameBound::CurrentRow)
     {
         if let Some(values) = prefix_numeric_window_values(name, &materialized) {
             for ((orig, _), value) in indexed.iter().zip(values) {
@@ -610,7 +638,8 @@ fn evaluate_window_aggregate(
                     /* is_start = */ true,
                     rows,
                     params,
-                    engine,
+                    eval_hook,
+                    subquery_runner,
                 )?,
                 resolve_range_frame_index(
                     i,
@@ -620,15 +649,34 @@ fn evaluate_window_aggregate(
                     false,
                     rows,
                     params,
-                    engine,
+                    eval_hook,
+                    subquery_runner,
                 )?,
             ),
             // GROUPS mode is rare; treat as ROWS (offset interpreted as
             // peer groups would require extra plumbing; matches the
             // fallback which also goes through `_resolve_frame_index`).
             FrameMode::Rows | FrameMode::Groups => (
-                resolve_rows_frame_index(i, n, &start_bound, rows, params, engine, indexed)?,
-                resolve_rows_frame_index(i, n, &end_bound, rows, params, engine, indexed)?,
+                resolve_rows_frame_index(
+                    i,
+                    n,
+                    &start_bound,
+                    rows,
+                    params,
+                    indexed,
+                    eval_hook,
+                    subquery_runner,
+                )?,
+                resolve_rows_frame_index(
+                    i,
+                    n,
+                    &end_bound,
+                    rows,
+                    params,
+                    indexed,
+                    eval_hook,
+                    subquery_runner,
+                )?,
             ),
         };
         let mut acc = AggregateAccumulator::builtin(name);
@@ -719,25 +767,37 @@ fn prefix_numeric_window_values(name: &str, values: &[Value]) -> Option<Vec<Valu
 fn resolve_rows_frame_index(
     current: usize,
     n: usize,
-    bound: &uqa_sql::ast::FrameBound,
+    bound: &ScalarFrameBound,
     rows: &[ResultRow],
     params: &[SQLParam],
-    engine: &Engine,
     indexed: &[(usize, Vec<Value>)],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<i64, SQLError> {
-    use uqa_sql::ast::FrameBound;
     let n = n as i64;
     let cur = current as i64;
     Ok(match bound {
-        FrameBound::UnboundedPreceding => 0,
-        FrameBound::UnboundedFollowing => n - 1,
-        FrameBound::CurrentRow => cur,
-        FrameBound::Preceding(e) => {
-            let off = eval_frame_offset(e, &rows[indexed[current].0], params, engine)?;
+        ScalarFrameBound::UnboundedPreceding => 0,
+        ScalarFrameBound::UnboundedFollowing => n - 1,
+        ScalarFrameBound::CurrentRow => cur,
+        ScalarFrameBound::Preceding(e) => {
+            let off = eval_frame_offset(
+                e,
+                &rows[indexed[current].0],
+                params,
+                eval_hook,
+                subquery_runner,
+            )?;
             (cur - off).max(0)
         }
-        FrameBound::Following(e) => {
-            let off = eval_frame_offset(e, &rows[indexed[current].0], params, engine)?;
+        ScalarFrameBound::Following(e) => {
+            let off = eval_frame_offset(
+                e,
+                &rows[indexed[current].0],
+                params,
+                eval_hook,
+                subquery_runner,
+            )?;
             (cur + off).min(n - 1)
         }
     })
@@ -748,18 +808,18 @@ fn resolve_range_frame_index(
     current: usize,
     n: usize,
     order_keys: &[Vec<Value>],
-    bound: &uqa_sql::ast::FrameBound,
+    bound: &ScalarFrameBound,
     is_start: bool,
     rows: &[ResultRow],
     params: &[SQLParam],
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<i64, SQLError> {
-    use uqa_sql::ast::FrameBound;
     let key_at = |idx: usize| -> Option<&Value> { order_keys.get(idx).and_then(|k| k.first()) };
     Ok(match bound {
-        FrameBound::UnboundedPreceding => 0,
-        FrameBound::UnboundedFollowing => (n as i64) - 1,
-        FrameBound::CurrentRow => {
+        ScalarFrameBound::UnboundedPreceding => 0,
+        ScalarFrameBound::UnboundedFollowing => (n as i64) - 1,
+        ScalarFrameBound::CurrentRow => {
             let cur_val = key_at(current).cloned().unwrap_or(Value::Null);
             if is_start {
                 let mut idx = current;
@@ -775,13 +835,13 @@ fn resolve_range_frame_index(
                 idx as i64
             }
         }
-        FrameBound::Preceding(e) | FrameBound::Following(e) => {
-            let off = eval_frame_offset(e, &rows[current], params, engine)?;
+        ScalarFrameBound::Preceding(e) | ScalarFrameBound::Following(e) => {
+            let off = eval_frame_offset(e, &rows[current], params, eval_hook, subquery_runner)?;
             let cur_val = match key_at(current) {
                 Some(Value::Int(n)) => *n as f64,
                 Some(Value::Float(f)) => *f,
                 _ => {
-                    return Ok(if matches!(bound, FrameBound::Preceding(_)) {
+                    return Ok(if matches!(bound, ScalarFrameBound::Preceding(_)) {
                         if is_start {
                             0
                         } else {
@@ -794,7 +854,7 @@ fn resolve_range_frame_index(
                     });
                 }
             };
-            let target = if matches!(bound, FrameBound::Preceding(_)) {
+            let target = if matches!(bound, ScalarFrameBound::Preceding(_)) {
                 cur_val - off as f64
             } else {
                 cur_val + off as f64
@@ -838,13 +898,16 @@ fn resolve_range_frame_index(
 }
 
 fn eval_frame_offset(
-    expr: &Expr,
+    expr: &ScalarExpr,
     row: &ResultRow,
     params: &[SQLParam],
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
 ) -> Result<i64, SQLError> {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
-    match uqa_sql::expr::eval(expr, &ctx)? {
+    let ctx = ScalarEvalContext::new(Some(row), params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(subquery_runner);
+    match eval_scalar(expr, &ctx)? {
         Value::Int(n) => Ok(n),
         Value::Float(f) => Ok(f as i64),
         other => Err(SQLError::TypeMismatch(format!(
@@ -853,7 +916,7 @@ fn eval_frame_offset(
     }
 }
 
-fn sort_keys(a: &[Value], b: &[Value], order: &[OrderBy]) -> std::cmp::Ordering {
+fn sort_keys(a: &[Value], b: &[Value], order: &[ScalarOrder]) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     use uqa_sql::ast::NullsOrder;
     for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {

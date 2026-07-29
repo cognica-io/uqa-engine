@@ -9,29 +9,47 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
+use uqa_execution::{
+    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder,
+    ScalarSubqueryRunner,
+};
 use uqa_joins::row_join::JoinKey;
-use uqa_sql::ast::{Expr, FromClause, JoinKind, Projection, SelectStmt, SetOpKind};
-use uqa_sql::expr::{eval, EvalContext};
+use uqa_planner::{
+    AccessPathPlan, ComputePlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SourcePlan,
+};
+use uqa_sql::ast::JoinKind;
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLTableFunctionResult};
 
+use super::scalar::{
+    eval_physical_scalar, PhysicalEvalContext, PhysicalSubqueryRunner, PlanSubqueryArena,
+};
 use super::select::{
-    execute_query_plan_with_ctes, execute_select_ast, execute_select_ast_with_ctes,
+    execute_query_plan_with_ctes, push_output_filter_into_query_plan,
     select_contains_volatile_function, CteScope, ScopedEngineHook,
 };
 use super::{
-    age_cypher, aggregate_join_rows, apply_row_order_limit, build_info_schema_rows,
+    age_cypher, aggregate_join_rows, apply_row_order_limit_with_ctes, build_info_schema_rows,
     expect_column_name, expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
     graph_pagerank_entries, has_aggregate, json_table_arg, json_table_value_to_text,
-    materialize_ctes, projected_value_from_row, projection_columns, run_age_create_graph,
-    run_age_drop_graph, run_graph_create, run_graph_drop, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    projected_value_from_row, projection_columns, run_age_create_graph_with_evaluator,
+    run_age_drop_graph_with_evaluator, run_graph_create_with_evaluator,
+    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
-pub(super) type QualifierFilters = BTreeMap<String, Vec<Expr>>;
+pub(super) type QualifierFilters = BTreeMap<String, Vec<ScalarExpr>>;
 type RowFilter<'a> = &'a mut dyn FnMut(&mut Vec<ResultRow>) -> Result<(), SQLError>;
+
+struct JoinRuntime<'a> {
+    engine: &'a Engine,
+    function_hook: &'a dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &'a dyn ScalarSubqueryRunner,
+    params: &'a [SQLParam],
+}
 
 fn qualifier_for(name: &str, alias: Option<&str>) -> String {
     alias.unwrap_or(name).to_string()
@@ -213,8 +231,8 @@ fn apply_qualifier_filters(
     let filter = combine_filters(filters.iter().cloned());
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
-        if uqa_sql::expr::truthy(&eval(&filter, &ctx)?) {
+        let ctx = ScalarEvalContext::new(Some(&row), params).with_function_hook(engine);
+        if uqa_sql::expr::truthy(&eval_scalar(&filter, &ctx)?) {
             out.push(row);
         }
     }
@@ -254,88 +272,101 @@ fn run_table_select_for_qualifier_filters(
         return Ok(None);
     };
 
-    let mut projections = vec![Projection {
-        expr: Expr::Star,
+    let mut projections = vec![ProjectionPlan {
+        expr: ScalarExpr::Star,
         alias: None,
     }];
     if prune
         .and_then(|prune| prune.get(qual))
         .is_some_and(|columns| columns.contains(SCORE_COLUMN))
     {
-        projections.push(Projection {
-            expr: Expr::Column(SCORE_COLUMN.to_string()),
+        projections.push(ProjectionPlan {
+            expr: ScalarExpr::Column(SCORE_COLUMN.to_string()),
             alias: None,
         });
     }
 
-    let stmt = SelectStmt {
+    let stmt = QueryBlockPlan {
         projections,
-        from: Some(FromClause::Table {
+        from: Some(SourcePlan::Table {
             name: table.to_string(),
             alias: None,
         }),
         r#where: Some(filter),
+        compute: ComputePlan::Project,
         group_by: Vec::new(),
         grouping_sets: Vec::new(),
         having: None,
         order_by: Vec::new(),
         limit: None,
         offset: None,
-        with: Vec::new(),
-        set_op: None,
         distinct: false,
         distinct_on: Vec::new(),
+        subqueries: Vec::new(),
+        access: AccessPathPlan::OperatorTree {
+            score_limit_pushdown: false,
+        },
     };
-    let result = execute_select_ast(engine, &stmt, params)?;
+    let result = super::select::execute_query_plan(
+        engine,
+        &QueryPlan {
+            ctes: Vec::new(),
+            root: RelationalPlan::QueryBlock(Box::new(stmt)),
+        },
+        params,
+    )?;
     Ok(Some(reprefix_rows_pruned(qual, &result.rows, prune)))
 }
 
-fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
+fn dequalify_expr_for_qualifier(expr: &ScalarExpr, qual: &str) -> Option<ScalarExpr> {
     match expr {
-        Expr::QualifiedColumn {
+        ScalarExpr::QualifiedColumn {
             qualifier, column, ..
-        } => (qualifier == qual).then(|| Expr::Column(column.clone())),
-        Expr::Column(_) | Expr::Literal(_) | Expr::Param(_) | Expr::Star => Some(expr.clone()),
-        Expr::Array(items) => Some(Expr::Array(
+        } => (qualifier == qual).then(|| ScalarExpr::Column(column.clone())),
+        ScalarExpr::Column(_)
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::Star => Some(expr.clone()),
+        ScalarExpr::Array(items) => Some(ScalarExpr::Array(
             items
                 .iter()
                 .map(|item| dequalify_expr_for_qualifier(item, qual))
                 .collect::<Option<Vec<_>>>()?,
         )),
-        Expr::And(items) => Some(Expr::And(
+        ScalarExpr::And(items) => Some(ScalarExpr::And(
             items
                 .iter()
                 .map(|item| dequalify_expr_for_qualifier(item, qual))
                 .collect::<Option<Vec<_>>>()?,
         )),
-        Expr::Or(items) => Some(Expr::Or(
+        ScalarExpr::Or(items) => Some(ScalarExpr::Or(
             items
                 .iter()
                 .map(|item| dequalify_expr_for_qualifier(item, qual))
                 .collect::<Option<Vec<_>>>()?,
         )),
-        Expr::Binary { op, lhs, rhs } => Some(Expr::Binary {
+        ScalarExpr::Binary { op, lhs, rhs } => Some(ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(dequalify_expr_for_qualifier(lhs, qual)?),
             rhs: Box::new(dequalify_expr_for_qualifier(rhs, qual)?),
         }),
-        Expr::Not(inner) => Some(Expr::Not(Box::new(dequalify_expr_for_qualifier(
+        ScalarExpr::Not(inner) => Some(ScalarExpr::Not(Box::new(dequalify_expr_for_qualifier(
             inner, qual,
         )?))),
-        Expr::IsNull { expr, negated } => Some(Expr::IsNull {
+        ScalarExpr::IsNull { expr, negated } => Some(ScalarExpr::IsNull {
             expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
             negated: *negated,
         }),
-        Expr::Between { expr, low, high } => Some(Expr::Between {
+        ScalarExpr::Between { expr, low, high } => Some(ScalarExpr::Between {
             expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
             low: Box::new(dequalify_expr_for_qualifier(low, qual)?),
             high: Box::new(dequalify_expr_for_qualifier(high, qual)?),
         }),
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
-        } => Some(Expr::InList {
+        } => Some(ScalarExpr::InList {
             expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
             list: list
                 .iter()
@@ -343,13 +374,13 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
                 .collect::<Option<Vec<_>>>()?,
             negated: *negated,
         }),
-        Expr::Func {
+        ScalarExpr::Func {
             name,
             args,
             distinct,
             order_by,
             filter,
-        } => Some(Expr::Func {
+        } => Some(ScalarExpr::Func {
             name: name.clone(),
             args: args
                 .iter()
@@ -359,7 +390,7 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
             order_by: order_by
                 .iter()
                 .map(|order| {
-                    Some(uqa_sql::ast::OrderBy {
+                    Some(ScalarOrder {
                         expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
                         descending: order.descending,
                         nulls: order.nulls,
@@ -371,7 +402,7 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
                 None => None,
             },
         }),
-        Expr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall { name, args, spec } => {
             let mut spec = spec.clone();
             spec.partition_by = spec
                 .partition_by
@@ -382,14 +413,14 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
                 .order_by
                 .iter()
                 .map(|order| {
-                    Some(uqa_sql::ast::OrderBy {
+                    Some(ScalarOrder {
                         expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
                         descending: order.descending,
                         nulls: order.nulls,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(Expr::WindowCall {
+            Some(ScalarExpr::WindowCall {
                 name: name.clone(),
                 args: args
                     .iter()
@@ -398,11 +429,11 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
                 spec,
             })
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
-        } => Some(Expr::Case {
+        } => Some(ScalarExpr::Case {
             base: match base.as_ref() {
                 Some(expr) => Some(Box::new(dequalify_expr_for_qualifier(expr, qual)?)),
                 None => None,
@@ -421,674 +452,30 @@ fn dequalify_expr_for_qualifier(expr: &Expr, qual: &str) -> Option<Expr> {
                 None => None,
             },
         }),
-        Expr::Cast { expr, ty } => Some(Expr::Cast {
+        ScalarExpr::Cast { expr, ty } => Some(ScalarExpr::Cast {
             expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
             ty: ty.clone(),
         }),
-        Expr::InSubquery { .. } | Expr::ScalarSubquery(_) | Expr::Exists { .. } => None,
+        ScalarExpr::InSubquery { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => None,
     }
 }
 
-fn combine_filters(filters: impl IntoIterator<Item = Expr>) -> Expr {
-    let mut filters: Vec<Expr> = filters.into_iter().collect();
+fn combine_filters(filters: impl IntoIterator<Item = ScalarExpr>) -> ScalarExpr {
+    let mut filters: Vec<ScalarExpr> = filters.into_iter().collect();
     if filters.len() == 1 {
         filters.pop().unwrap()
     } else {
-        Expr::And(filters)
-    }
-}
-
-fn specialize_select_for_qualifier_filters(
-    engine: &Engine,
-    body: &SelectStmt,
-    filters: Option<&QualifierFilters>,
-    qual: &str,
-) -> Option<SelectStmt> {
-    let filters = filters?.get(qual)?;
-    if filters.is_empty() {
-        return None;
-    }
-    if select_contains_volatile_function(body) {
-        return None;
-    }
-    let filter = combine_filters(filters.iter().cloned());
-    push_output_filter_into_select(engine, body.clone(), qual, &filter)
-}
-
-pub(super) fn push_output_filter_into_select(
-    engine: &Engine,
-    stmt: SelectStmt,
-    qual: &str,
-    filter: &Expr,
-) -> Option<SelectStmt> {
-    push_output_filter_into_select_inner(engine, stmt, qual, filter, None)
-}
-
-pub(super) fn push_output_filter_into_select_with_columns(
-    engine: &Engine,
-    stmt: SelectStmt,
-    qual: &str,
-    filter: &Expr,
-    output_columns: &[String],
-) -> Option<SelectStmt> {
-    push_output_filter_into_select_inner(engine, stmt, qual, filter, Some(output_columns))
-}
-
-fn push_output_filter_into_select_inner(
-    engine: &Engine,
-    mut stmt: SelectStmt,
-    qual: &str,
-    filter: &Expr,
-    output_columns: Option<&[String]>,
-) -> Option<SelectStmt> {
-    if let Some(mut set_op) = stmt.set_op.take() {
-        if set_op.kind != SetOpKind::Union
-            || !set_op.all
-            || !set_op.combined_order_by.is_empty()
-            || set_op.combined_limit.is_some()
-            || set_op.combined_offset.is_some()
-        {
-            stmt.set_op = Some(set_op);
-            return None;
-        }
-        let right = push_output_filter_into_select_inner(
-            engine,
-            set_op.right,
-            qual,
-            filter,
-            output_columns,
-        )?;
-        if let Some(left) = set_op.left.take() {
-            let left =
-                push_output_filter_into_select_inner(engine, *left, qual, filter, output_columns)?;
-            set_op.left = Some(Box::new(left));
-            set_op.right = right;
-            stmt.set_op = Some(set_op);
-            return Some(stmt);
-        }
-        let lhs = push_output_filter_into_select_inner(engine, stmt, qual, filter, output_columns)?;
-        let mut out = lhs;
-        set_op.right = right;
-        out.set_op = Some(set_op);
-        return Some(out);
-    }
-
-    if stmt.limit.is_some()
-        || stmt.offset.is_some()
-        || stmt.distinct
-        || !stmt.distinct_on.is_empty()
-    {
-        return None;
-    }
-    if has_window_projection_in_select(&stmt) {
-        return None;
-    }
-    let rewritten = rewrite_output_filter_for_select(filter, qual, &stmt, output_columns)?;
-    if !filter_can_apply_before_group(engine, &stmt, &rewritten) {
-        return None;
-    }
-    stmt.r#where = Some(match stmt.r#where.take() {
-        Some(existing) => Expr::And(vec![existing, rewritten]),
-        None => rewritten,
-    });
-    Some(stmt)
-}
-
-fn rewrite_output_filter_for_select(
-    filter: &Expr,
-    qual: &str,
-    stmt: &SelectStmt,
-    output_columns: Option<&[String]>,
-) -> Option<Expr> {
-    let output_map = direct_projection_output_map(stmt, output_columns)?;
-    let star_qualifier = star_projection_source_qualifier(stmt);
-    rewrite_output_filter_expr(filter, qual, &output_map, star_qualifier.as_deref())
-}
-
-fn direct_projection_output_map(
-    stmt: &SelectStmt,
-    output_columns: Option<&[String]>,
-) -> Option<BTreeMap<String, Expr>> {
-    let owned_labels;
-    let labels: &[String] = if let Some(columns) = output_columns {
-        if columns.len() != stmt.projections.len() {
-            return None;
-        }
-        columns
-    } else {
-        owned_labels = projection_columns(&stmt.projections);
-        &owned_labels
-    };
-    let mut out = BTreeMap::new();
-    for (idx, projection) in stmt.projections.iter().enumerate() {
-        if matches!(projection.expr, Expr::Star) {
-            continue;
-        }
-        if expr_contains_subquery_local(&projection.expr)
-            || expr_contains_volatile_local(&projection.expr)
-            || expr_has_window(&projection.expr)
-        {
-            continue;
-        }
-        if direct_column_name(&projection.expr).is_some() {
-            out.insert(labels[idx].clone(), projection.expr.clone());
-        }
-    }
-    Some(out)
-}
-
-fn star_projection_source_qualifier(stmt: &SelectStmt) -> Option<String> {
-    if stmt.projections.len() != 1 || !matches!(stmt.projections[0].expr, Expr::Star) {
-        return None;
-    }
-    match stmt.from.as_ref()? {
-        FromClause::Table { name, alias } => Some(alias.clone().unwrap_or_else(|| name.clone())),
-        _ => None,
-    }
-}
-
-fn rewrite_output_filter_expr(
-    expr: &Expr,
-    qual: &str,
-    output_map: &BTreeMap<String, Expr>,
-    star_qualifier: Option<&str>,
-) -> Option<Expr> {
-    match expr {
-        Expr::QualifiedColumn {
-            qualifier, column, ..
-        } => {
-            if qualifier == qual {
-                output_map
-                    .get(column)
-                    .cloned()
-                    .or_else(|| star_qualifier.map(|source| Expr::qualified_column(source, column)))
-            } else {
-                None
-            }
-        }
-        Expr::Column(column) => output_map
-            .get(column)
-            .cloned()
-            .or_else(|| star_qualifier.map(|source| Expr::qualified_column(source, column))),
-        Expr::Literal(value) => Some(Expr::Literal(value.clone())),
-        Expr::Param(index) => Some(Expr::Param(*index)),
-        Expr::Array(items) => Some(Expr::Array(
-            items
-                .iter()
-                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        Expr::And(items) => Some(Expr::And(
-            items
-                .iter()
-                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        Expr::Or(items) => Some(Expr::Or(
-            items
-                .iter()
-                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        Expr::Binary { op, lhs, rhs } => Some(Expr::Binary {
-            op: *op,
-            lhs: Box::new(rewrite_output_filter_expr(
-                lhs,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            rhs: Box::new(rewrite_output_filter_expr(
-                rhs,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-        }),
-        Expr::Not(inner) => Some(Expr::Not(Box::new(rewrite_output_filter_expr(
-            inner,
-            qual,
-            output_map,
-            star_qualifier,
-        )?))),
-        Expr::IsNull { expr, negated } => Some(Expr::IsNull {
-            expr: Box::new(rewrite_output_filter_expr(
-                expr,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            negated: *negated,
-        }),
-        Expr::Between { expr, low, high } => Some(Expr::Between {
-            expr: Box::new(rewrite_output_filter_expr(
-                expr,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            low: Box::new(rewrite_output_filter_expr(
-                low,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            high: Box::new(rewrite_output_filter_expr(
-                high,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-        }),
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => Some(Expr::InList {
-            expr: Box::new(rewrite_output_filter_expr(
-                expr,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            list: list
-                .iter()
-                .map(|item| rewrite_output_filter_expr(item, qual, output_map, star_qualifier))
-                .collect::<Option<Vec<_>>>()?,
-            negated: *negated,
-        }),
-        Expr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => Some(Expr::Func {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| rewrite_output_filter_expr(arg, qual, output_map, star_qualifier))
-                .collect::<Option<Vec<_>>>()?,
-            distinct: *distinct,
-            order_by: order_by.clone(),
-            filter: match filter.as_ref() {
-                Some(filter) => Some(Box::new(rewrite_output_filter_expr(
-                    filter,
-                    qual,
-                    output_map,
-                    star_qualifier,
-                )?)),
-                None => None,
-            },
-        }),
-        Expr::Cast { expr, ty } => Some(Expr::Cast {
-            expr: Box::new(rewrite_output_filter_expr(
-                expr,
-                qual,
-                output_map,
-                star_qualifier,
-            )?),
-            ty: ty.clone(),
-        }),
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => Some(Expr::Case {
-            base: match base.as_ref() {
-                Some(expr) => Some(Box::new(rewrite_output_filter_expr(
-                    expr,
-                    qual,
-                    output_map,
-                    star_qualifier,
-                )?)),
-                None => None,
-            },
-            when: when
-                .iter()
-                .map(|(cond, result)| {
-                    Some((
-                        rewrite_output_filter_expr(cond, qual, output_map, star_qualifier)?,
-                        rewrite_output_filter_expr(result, qual, output_map, star_qualifier)?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?,
-            else_branch: match else_branch.as_ref() {
-                Some(expr) => Some(Box::new(rewrite_output_filter_expr(
-                    expr,
-                    qual,
-                    output_map,
-                    star_qualifier,
-                )?)),
-                None => None,
-            },
-        }),
-        Expr::Star
-        | Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => None,
-    }
-}
-
-fn filter_can_apply_before_group(engine: &Engine, stmt: &SelectStmt, filter: &Expr) -> bool {
-    if stmt.grouping_sets.is_empty()
-        && stmt.group_by.is_empty()
-        && !has_aggregate(engine, &stmt.projections)
-        && stmt.having.is_none()
-    {
-        return true;
-    }
-    if !stmt.grouping_sets.is_empty() || stmt.having.is_some() {
-        return false;
-    }
-    let group_columns: BTreeSet<String> = stmt
-        .group_by
-        .iter()
-        .filter_map(direct_column_name)
-        .collect();
-    if group_columns.is_empty() {
-        return false;
-    }
-    filter_column_names(filter)
-        .into_iter()
-        .all(|column| group_columns.contains(&column))
-}
-
-fn direct_column_name(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Column(column) => Some(column.clone()),
-        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
-        _ => None,
-    }
-}
-
-fn filter_column_names(expr: &Expr) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    collect_filter_column_names(expr, &mut out);
-    out
-}
-
-fn collect_filter_column_names(expr: &Expr, out: &mut BTreeSet<String>) {
-    match expr {
-        Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
-            out.insert(column.clone());
-        }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            for item in items {
-                collect_filter_column_names(item, out);
-            }
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for arg in args {
-                collect_filter_column_names(arg, out);
-            }
-            for order in order_by {
-                collect_filter_column_names(&order.expr, out);
-            }
-            if let Some(filter) = filter.as_ref() {
-                collect_filter_column_names(filter, out);
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            collect_filter_column_names(lhs, out);
-            collect_filter_column_names(rhs, out);
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            collect_filter_column_names(inner, out);
-        }
-        Expr::Between { expr, low, high } => {
-            collect_filter_column_names(expr, out);
-            collect_filter_column_names(low, out);
-            collect_filter_column_names(high, out);
-        }
-        Expr::InList { expr, list, .. } => {
-            collect_filter_column_names(expr, out);
-            for item in list {
-                collect_filter_column_names(item, out);
-            }
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_ref() {
-                collect_filter_column_names(base, out);
-            }
-            for (cond, result) in when {
-                collect_filter_column_names(cond, out);
-                collect_filter_column_names(result, out);
-            }
-            if let Some(else_branch) = else_branch.as_ref() {
-                collect_filter_column_names(else_branch, out);
-            }
-        }
-        Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::Star
-        | Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. }
-        | Expr::InSubquery { .. } => {}
-    }
-}
-
-fn has_window_projection_in_select(stmt: &SelectStmt) -> bool {
-    stmt.projections
-        .iter()
-        .any(|projection| expr_has_window(&projection.expr))
-        || stmt.group_by.iter().any(expr_has_window)
-        || stmt
-            .grouping_sets
-            .iter()
-            .any(|set| set.iter().any(expr_has_window))
-        || stmt.having.as_ref().is_some_and(expr_has_window)
-        || stmt
-            .order_by
-            .iter()
-            .any(|order| expr_has_window(&order.expr))
-}
-
-fn expr_has_window(expr: &Expr) -> bool {
-    match expr {
-        Expr::WindowCall { .. } => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().any(expr_has_window)
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            args.iter().any(expr_has_window)
-                || order_by.iter().any(|order| expr_has_window(&order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|filter| expr_has_window(filter))
-        }
-        Expr::Binary { lhs, rhs, .. } => expr_has_window(lhs) || expr_has_window(rhs),
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_has_window(inner)
-        }
-        Expr::Between { expr, low, high } => {
-            expr_has_window(expr) || expr_has_window(low) || expr_has_window(high)
-        }
-        Expr::InList { expr, list, .. } => {
-            expr_has_window(expr) || list.iter().any(expr_has_window)
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref().is_some_and(|expr| expr_has_window(expr))
-                || when
-                    .iter()
-                    .any(|(cond, result)| expr_has_window(cond) || expr_has_window(result))
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| expr_has_window(expr))
-        }
-        Expr::InSubquery { expr, .. } => expr_has_window(expr),
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => false,
-    }
-}
-
-fn expr_contains_subquery_local(expr: &Expr) -> bool {
-    match expr {
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => true,
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().any(expr_contains_subquery_local)
-        }
-        Expr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            args.iter().any(expr_contains_subquery_local)
-                || order_by
-                    .iter()
-                    .any(|order| expr_contains_subquery_local(&order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|filter| expr_contains_subquery_local(filter))
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            expr_contains_subquery_local(lhs) || expr_contains_subquery_local(rhs)
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_contains_subquery_local(inner)
-        }
-        Expr::Between { expr, low, high } => {
-            expr_contains_subquery_local(expr)
-                || expr_contains_subquery_local(low)
-                || expr_contains_subquery_local(high)
-        }
-        Expr::InList { expr, list, .. } => {
-            expr_contains_subquery_local(expr) || list.iter().any(expr_contains_subquery_local)
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref()
-                .is_some_and(|expr| expr_contains_subquery_local(expr))
-                || when.iter().any(|(cond, result)| {
-                    expr_contains_subquery_local(cond) || expr_contains_subquery_local(result)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| expr_contains_subquery_local(expr))
-        }
-        Expr::WindowCall { args, spec, .. } => {
-            args.iter().any(expr_contains_subquery_local)
-                || spec.partition_by.iter().any(expr_contains_subquery_local)
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| expr_contains_subquery_local(&order.expr))
-        }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => false,
-    }
-}
-
-fn expr_contains_volatile_local(expr: &Expr) -> bool {
-    match expr {
-        Expr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            matches!(
-                name.to_ascii_lowercase().as_str(),
-                "random" | "nextval" | "currval" | "setval"
-            ) || args.iter().any(expr_contains_volatile_local)
-                || order_by
-                    .iter()
-                    .any(|order| expr_contains_volatile_local(&order.expr))
-                || filter
-                    .as_ref()
-                    .is_some_and(|filter| expr_contains_volatile_local(filter))
-        }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
-            items.iter().any(expr_contains_volatile_local)
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            expr_contains_volatile_local(lhs) || expr_contains_volatile_local(rhs)
-        }
-        Expr::Not(inner) | Expr::IsNull { expr: inner, .. } | Expr::Cast { expr: inner, .. } => {
-            expr_contains_volatile_local(inner)
-        }
-        Expr::Between { expr, low, high } => {
-            expr_contains_volatile_local(expr)
-                || expr_contains_volatile_local(low)
-                || expr_contains_volatile_local(high)
-        }
-        Expr::InList { expr, list, .. } => {
-            expr_contains_volatile_local(expr) || list.iter().any(expr_contains_volatile_local)
-        }
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref()
-                .is_some_and(|expr| expr_contains_volatile_local(expr))
-                || when.iter().any(|(cond, result)| {
-                    expr_contains_volatile_local(cond) || expr_contains_volatile_local(result)
-                })
-                || else_branch
-                    .as_ref()
-                    .is_some_and(|expr| expr_contains_volatile_local(expr))
-        }
-        Expr::WindowCall { args, spec, .. } => {
-            args.iter().any(expr_contains_volatile_local)
-                || spec.partition_by.iter().any(expr_contains_volatile_local)
-                || spec
-                    .order_by
-                    .iter()
-                    .any(|order| expr_contains_volatile_local(&order.expr))
-        }
-        Expr::InSubquery { expr, body, .. } => {
-            expr_contains_volatile_local(expr) || select_contains_volatile_function(body)
-        }
-        Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
-            select_contains_volatile_function(body)
-        }
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_) => false,
+        ScalarExpr::And(filters)
     }
 }
 
 fn propagated_join_filters(
     filters: &QualifierFilters,
-    source_from: &FromClause,
-    target_from: &FromClause,
-    on: Option<&Expr>,
+    source_from: &SourcePlan,
+    target_from: &SourcePlan,
+    on: Option<&ScalarExpr>,
 ) -> Option<QualifierFilters> {
     let on = on?;
     let mut out = filters.clone();
@@ -1131,9 +518,9 @@ fn propagate_join_filter_pair(
     if let Some(source_filters) = filters.get(&source.0) {
         for filter in source_filters {
             if let Some(value) = constant_equality_for_column(filter, &source.0, &source.1) {
-                let propagated = Expr::Binary {
+                let propagated = ScalarExpr::Binary {
                     op: uqa_sql::ast::BinaryOp::Equal,
-                    lhs: Box::new(Expr::qualified_column(&target.0, &target.1)),
+                    lhs: Box::new(ScalarExpr::qualified_column(&target.0, &target.1)),
                     rhs: Box::new(value),
                 };
                 out.entry(target.0.clone()).or_default().push(propagated);
@@ -1144,8 +531,8 @@ fn propagate_join_filter_pair(
     changed
 }
 
-fn constant_equality_for_column(expr: &Expr, qual: &str, column: &str) -> Option<Expr> {
-    let Expr::Binary {
+fn constant_equality_for_column(expr: &ScalarExpr, qual: &str, column: &str) -> Option<ScalarExpr> {
+    let ScalarExpr::Binary {
         op: uqa_sql::ast::BinaryOp::Equal,
         lhs,
         rhs,
@@ -1162,10 +549,10 @@ fn constant_equality_for_column(expr: &Expr, qual: &str, column: &str) -> Option
     None
 }
 
-fn expr_is_qualified_column(expr: &Expr, qual: &str, column: &str) -> bool {
+fn expr_is_qualified_column(expr: &ScalarExpr, qual: &str, column: &str) -> bool {
     matches!(
         expr,
-        Expr::QualifiedColumn {
+        ScalarExpr::QualifiedColumn {
             qualifier,
             column: col,
             ..
@@ -1173,14 +560,14 @@ fn expr_is_qualified_column(expr: &Expr, qual: &str, column: &str) -> bool {
     )
 }
 
-fn expr_is_constant(expr: &Expr) -> bool {
-    matches!(expr, Expr::Literal(_) | Expr::Param(_))
+fn expr_is_constant(expr: &ScalarExpr) -> bool {
+    matches!(expr, ScalarExpr::Literal(_) | ScalarExpr::Param(_))
 }
 
-fn join_column_equalities(expr: &Expr) -> Vec<((String, String), (String, String))> {
+fn join_column_equalities(expr: &ScalarExpr) -> Vec<((String, String), (String, String))> {
     match expr {
-        Expr::And(items) => items.iter().flat_map(join_column_equalities).collect(),
-        Expr::Binary {
+        ScalarExpr::And(items) => items.iter().flat_map(join_column_equalities).collect(),
+        ScalarExpr::Binary {
             op: uqa_sql::ast::BinaryOp::Equal,
             lhs,
             rhs,
@@ -1197,33 +584,33 @@ fn join_column_equalities(expr: &Expr) -> Vec<((String, String), (String, String
     }
 }
 
-fn qualified_column_pair(expr: &Expr) -> Option<(String, String)> {
+fn qualified_column_pair(expr: &ScalarExpr) -> Option<(String, String)> {
     match expr {
-        Expr::QualifiedColumn {
+        ScalarExpr::QualifiedColumn {
             qualifier, column, ..
         } => Some((qualifier.clone(), column.clone())),
         _ => None,
     }
 }
 
-fn from_qualifiers(from: &FromClause) -> BTreeSet<String> {
+fn from_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     collect_from_qualifiers(from, &mut out);
     out
 }
 
-fn collect_from_qualifiers(from: &FromClause, out: &mut BTreeSet<String>) {
+fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     match from {
-        FromClause::Table { name, alias } => {
+        SourcePlan::Table { name, alias } => {
             out.insert(alias.clone().unwrap_or_else(|| name.clone()));
         }
-        FromClause::Join { left, right, .. } => {
+        SourcePlan::Join { left, right, .. } => {
             collect_from_qualifiers(left, out);
             collect_from_qualifiers(right, out);
         }
-        FromClause::Values { alias, .. }
-        | FromClause::Function { alias, .. }
-        | FromClause::Subquery { alias, .. } => {
+        SourcePlan::Values { alias, .. }
+        | SourcePlan::Function { alias, .. }
+        | SourcePlan::Subquery { alias, .. } => {
             if let Some(alias) = alias {
                 out.insert(alias.clone());
             }
@@ -1243,7 +630,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
     // Emit NULLs for any column that ever appeared in the table; for an
     // empty table we still know the keys via document_count, but the
     // safe default is just an empty row - a missing key resolves to
-    // NULL through Expr::Column / QualifiedColumn lookup anyway.
+    // NULL through ScalarExpr::Column / QualifiedColumn lookup anyway.
     let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for id in engine.table_doc_ids(table) {
         if let Some(doc) = engine.get_document(table, id) {
@@ -1263,7 +650,7 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
 
 pub(super) fn build_join_rows_with_ctes(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
@@ -1273,7 +660,7 @@ pub(super) fn build_join_rows_with_ctes(
 
 pub(super) fn build_join_rows_with_ctes_pruned(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     prune: &ColumnPrune,
@@ -1292,7 +679,7 @@ pub(super) fn build_join_rows_with_ctes_pruned(
 
 pub(super) fn build_join_rows_with_ctes_filtered_by_qualifier(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     filters: &QualifierFilters,
@@ -1311,7 +698,7 @@ pub(super) fn build_join_rows_with_ctes_filtered_by_qualifier(
 
 pub(super) fn build_join_rows_with_ctes_pruned_filtered_by_qualifier(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     prune: &ColumnPrune,
@@ -1331,7 +718,7 @@ pub(super) fn build_join_rows_with_ctes_pruned_filtered_by_qualifier(
 
 pub(super) fn build_join_rows_with_ctes_filtered(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     row_filter: RowFilter<'_>,
@@ -1342,7 +729,7 @@ pub(super) fn build_join_rows_with_ctes_filtered(
 
 pub(super) fn build_join_rows_with_ctes_filtered_pruned(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     row_filter: RowFilter<'_>,
@@ -1363,7 +750,7 @@ pub(super) fn build_join_rows_with_ctes_filtered_pruned(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     row_filter: RowFilter<'_>,
@@ -1384,7 +771,7 @@ pub(super) fn build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier(
 
 pub(super) fn build_join_rows_with_ctes_filtered_filtered_by_qualifier(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     row_filter: RowFilter<'_>,
@@ -1404,7 +791,7 @@ pub(super) fn build_join_rows_with_ctes_filtered_filtered_by_qualifier(
 
 fn build_join_rows_with_ctes_inner(
     engine: &Engine,
-    from: &FromClause,
+    from: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     row_filter: &mut Option<RowFilter<'_>>,
@@ -1412,7 +799,7 @@ fn build_join_rows_with_ctes_inner(
     filters: Option<&QualifierFilters>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     match from {
-        FromClause::Table { name, alias } => {
+        SourcePlan::Table { name, alias } => {
             let qual = qualifier_for(name, alias.as_deref());
             // CTE reference takes precedence over a real table of the
             // same name (matches `PostgreSQL` semantics).
@@ -1430,62 +817,34 @@ fn build_join_rows_with_ctes_inner(
                 }
                 return Ok(prefixed);
             }
-            if let Some(body) = ctes.inlined.get(name).cloned() {
-                let local_cte_names = select_cte_names(&body);
-                let specialized =
-                    specialize_select_for_qualifier_filters(engine, &body, filters, &qual);
-                let is_specialized = specialized.is_some();
-                let body = specialized.unwrap_or(body);
-                let result =
-                    execute_view_with_parent_cache(engine, &body, params, ctes, &local_cte_names)?;
-                let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
-                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
-                if prune.is_none() && !is_specialized && !has_filters_for_qualifier(filters, &qual)
-                {
-                    ctes.rows.insert(prefixed_cte_cache_key, prefixed.clone());
-                }
-                return Ok(prefixed);
-            }
             let prefixed_view_cache_key = prefixed_view_row_cache_key(name, &qual);
             if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
                 if let Some(rows) = ctes.rows.get(&prefixed_view_cache_key) {
                     return Ok(rows.clone());
                 }
             }
-            if let Some(body) = engine.view(name) {
-                let plan = engine.view_plan(name).ok_or_else(|| {
-                    SQLError::Internal(format!("view `{name}` has no compiled QueryPlan"))
-                })?;
-                let local_cte_names = select_cte_names(&body);
-                let is_volatile = select_contains_volatile_function(&body);
-                let specialized =
-                    specialize_select_for_qualifier_filters(engine, &body, filters, &qual);
-                let is_specialized = specialized.is_some();
-                let result = if let Some(specialized) = specialized {
-                    if is_volatile {
-                        let mut scoped_ctes = ctes.clone();
-                        execute_select_ast_with_ctes(
-                            engine,
-                            &specialized,
-                            params,
-                            &mut scoped_ctes,
-                        )?
-                    } else {
-                        execute_view_with_parent_cache(
-                            engine,
-                            &specialized,
-                            params,
-                            ctes,
-                            &local_cte_names,
-                        )?
-                    }
-                } else if is_volatile {
+            if let Some(rows) = ctes.rows.get(name) {
+                let prefixed = reprefix_rows_pruned(&qual, rows, prune);
+                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
+            }
+            if let Some(plan) = engine.view_plan(name) {
+                let specialized_plan = filters
+                    .and_then(|filters| filters.get(&qual))
+                    .filter(|filters| !filters.is_empty())
+                    .and_then(|filters| {
+                        let filter = combine_filters(filters.iter().cloned());
+                        push_output_filter_into_query_plan(engine, &plan, &qual, &filter, None)
+                    });
+                let execution_plan = specialized_plan.as_ref().unwrap_or(&plan);
+                let local_cte_names = query_cte_names(execution_plan);
+                let is_volatile = query_contains_volatile_function(execution_plan);
+                let result = if is_volatile {
                     let mut scoped_ctes = ctes.clone();
-                    execute_query_plan_with_ctes(engine, &plan, params, &mut scoped_ctes)?
+                    execute_query_plan_with_ctes(engine, execution_plan, params, &mut scoped_ctes)?
                 } else {
                     execute_view_plan_with_parent_cache(
                         engine,
-                        &plan,
+                        execution_plan,
                         params,
                         ctes,
                         &local_cte_names,
@@ -1493,7 +852,7 @@ fn build_join_rows_with_ctes_inner(
                 };
                 let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
                 let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
-                if !is_volatile && !is_specialized {
+                if !is_volatile && specialized_plan.is_none() {
                     ctes.rows.insert(name.clone(), result.rows);
                     if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
                         ctes.rows.insert(prefixed_view_cache_key, prefixed.clone());
@@ -1551,7 +910,7 @@ fn build_join_rows_with_ctes_inner(
             }
             Ok(prefixed)
         }
-        FromClause::Join {
+        SourcePlan::Join {
             left,
             right,
             kind,
@@ -1572,9 +931,9 @@ fn build_join_rows_with_ctes_inner(
             )?;
             // LATERAL: re-evaluate the right side once per left row,
             // so the right body can reference outer columns. The
-            // engine substitutes the outer row into the EvalContext
+            // engine substitutes the outer row into the ScalarEvalContext
             // through the row-level evaluator.
-            let implicit_lateral_function = matches!(right.as_ref(), FromClause::Function { .. });
+            let implicit_lateral_function = matches!(right.as_ref(), SourcePlan::Function { .. });
             if *lateral || implicit_lateral_function {
                 return build_lateral_join_rows(
                     engine,
@@ -1601,12 +960,22 @@ fn build_join_rows_with_ctes_inner(
             let on_expr = on.as_ref();
             let scoped_hook = ScopedEngineHook::new(engine, ctes);
             let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
+            let subquery_arena =
+                PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
+            let subquery_runner: &dyn ScalarSubqueryRunner = &subquery_arena;
+            let join_runtime = JoinRuntime {
+                engine,
+                function_hook: eval_hook,
+                subquery_runner,
+                params,
+            };
 
             let mut rows = match kind {
                 JoinKind::Inner | JoinKind::Cross => {
                     if matches!(kind, JoinKind::Inner) {
                         if let Some(rows) = try_hash_inner_join(
                             eval_hook,
+                            subquery_runner,
                             &left_rows,
                             &right_rows,
                             on_expr,
@@ -1614,61 +983,48 @@ fn build_join_rows_with_ctes_inner(
                         )? {
                             rows
                         } else {
-                            cross_filter(eval_hook, &left_rows, &right_rows, on_expr, params)?
+                            cross_filter(
+                                eval_hook,
+                                subquery_runner,
+                                &left_rows,
+                                &right_rows,
+                                on_expr,
+                                params,
+                            )?
                         }
                     } else {
-                        cross_filter(eval_hook, &left_rows, &right_rows, on_expr, params)?
-                    }
-                }
-                JoinKind::Left => {
-                    if let Some(rows) = try_hash_left_join(
-                        engine,
-                        eval_hook,
-                        &left_rows,
-                        &right_rows,
-                        right,
-                        on_expr,
-                        params,
-                    )? {
-                        rows
-                    } else {
-                        left_outer(
+                        cross_filter(
+                            eval_hook,
+                            subquery_runner,
                             &left_rows,
                             &right_rows,
-                            right,
                             on_expr,
                             params,
-                            engine,
-                            eval_hook,
                         )?
                     }
                 }
-                JoinKind::Right => left_outer(
-                    &right_rows,
-                    &left_rows,
-                    left,
-                    on_expr,
-                    params,
-                    engine,
-                    eval_hook,
-                )?,
-                JoinKind::Full => full_outer(
-                    &left_rows,
-                    &right_rows,
-                    left,
-                    right,
-                    on_expr,
-                    params,
-                    engine,
-                    eval_hook,
-                )?,
+                JoinKind::Left => {
+                    if let Some(rows) =
+                        try_hash_left_join(&join_runtime, &left_rows, &right_rows, right, on_expr)?
+                    {
+                        rows
+                    } else {
+                        left_outer(&join_runtime, &left_rows, &right_rows, right, on_expr)?
+                    }
+                }
+                JoinKind::Right => {
+                    left_outer(&join_runtime, &right_rows, &left_rows, left, on_expr)?
+                }
+                JoinKind::Full => {
+                    full_outer(&join_runtime, &left_rows, &right_rows, left, right, on_expr)?
+                }
             };
             if let Some(filter) = row_filter.as_deref_mut() {
                 filter(&mut rows)?;
             }
             Ok(rows)
         }
-        FromClause::Values {
+        SourcePlan::Values {
             rows,
             alias,
             column_aliases,
@@ -1680,9 +1036,11 @@ fn build_join_rows_with_ctes_inner(
                 column_aliases,
                 params,
                 &hook,
+                &hook,
+                &ctes.scalar_subqueries,
             )?)
         }
-        FromClause::Function {
+        SourcePlan::Function {
             name,
             args,
             alias,
@@ -1690,7 +1048,13 @@ fn build_join_rows_with_ctes_inner(
             column_types,
         } => {
             let hook = ScopedEngineHook::new(engine, ctes);
-            let context = TableFunctionEvalContext::new(engine, params, &hook);
+            let context = TableFunctionEvalContext::new(
+                engine,
+                params,
+                &hook,
+                &hook,
+                &ctes.scalar_subqueries,
+            );
             Ok(build_table_function_rows(
                 &context,
                 name,
@@ -1700,19 +1064,14 @@ fn build_join_rows_with_ctes_inner(
                 column_types,
             )?)
         }
-        FromClause::Subquery {
+        SourcePlan::Subquery {
             body,
             alias,
             column_aliases,
         } => {
-            let planned = ctes.planned_subqueries.get(&format!("{body:?}")).cloned();
-            let result = if let Some(plan) = planned {
-                let local_cte_names = plan.ctes.iter().map(|cte| cte.name.clone()).collect();
-                execute_view_plan_with_parent_cache(engine, &plan, params, ctes, &local_cte_names)?
-            } else {
-                let local_cte_names = select_cte_names(body);
-                execute_view_with_parent_cache(engine, body, params, ctes, &local_cte_names)?
-            };
+            let local_cte_names = query_cte_names(body);
+            let result =
+                execute_view_plan_with_parent_cache(engine, body, params, ctes, &local_cte_names)?;
             Ok(materialize_subquery_rows(
                 result,
                 alias.as_deref(),
@@ -1720,19 +1079,6 @@ fn build_join_rows_with_ctes_inner(
             ))
         }
     }
-}
-
-fn execute_view_with_parent_cache(
-    engine: &Engine,
-    body: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    local_cte_names: &BTreeSet<String>,
-) -> Result<SQLResult, SQLError> {
-    let saved = save_and_remove_cte_names(ctes, local_cte_names);
-    let result = execute_select_ast_with_ctes(engine, body, params, ctes);
-    restore_cte_names(ctes, saved);
-    result
 }
 
 fn execute_view_plan_with_parent_cache(
@@ -1751,24 +1097,15 @@ fn execute_view_plan_with_parent_cache(
 fn save_and_remove_cte_names(
     ctes: &mut CteScope,
     names: &BTreeSet<String>,
-) -> Vec<(String, Option<Vec<ResultRow>>, Option<SelectStmt>)> {
+) -> Vec<(String, Option<Vec<ResultRow>>)> {
     names
         .iter()
-        .map(|name| {
-            (
-                name.clone(),
-                ctes.remove_materialized(name),
-                ctes.inlined.remove(name),
-            )
-        })
+        .map(|name| (name.clone(), ctes.remove_materialized(name)))
         .collect()
 }
 
-fn restore_cte_names(
-    ctes: &mut CteScope,
-    saved: Vec<(String, Option<Vec<ResultRow>>, Option<SelectStmt>)>,
-) {
-    for (name, rows, inlined) in saved {
+fn restore_cte_names(ctes: &mut CteScope, saved: Vec<(String, Option<Vec<ResultRow>>)>) {
+    for (name, rows) in saved {
         match rows {
             Some(rows) => {
                 ctes.rows.insert(name.clone(), rows);
@@ -1777,33 +1114,77 @@ fn restore_cte_names(
                 ctes.remove_materialized(&name);
             }
         }
-        match inlined {
-            Some(query) => {
-                ctes.inlined.insert(name, query);
-            }
-            None => {
-                ctes.inlined.remove(&name);
-            }
-        }
     }
 }
 
-fn select_cte_names(stmt: &SelectStmt) -> BTreeSet<String> {
+fn query_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    collect_select_cte_names(stmt, &mut names);
+    collect_query_cte_names(plan, &mut names);
     names
 }
 
-fn collect_select_cte_names(stmt: &SelectStmt, names: &mut BTreeSet<String>) {
-    for cte in &stmt.with {
+fn collect_query_cte_names(plan: &QueryPlan, names: &mut BTreeSet<String>) {
+    for cte in &plan.ctes {
         names.insert(cte.name.clone());
-        collect_select_cte_names(&cte.query, names);
+        collect_query_cte_names(&cte.query, names);
     }
-    if let Some(set_op) = &stmt.set_op {
-        if let Some(left) = set_op.left.as_deref() {
-            collect_select_cte_names(left, names);
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &block.from {
+                collect_source_query_cte_names(source, names);
+            }
         }
-        collect_select_cte_names(&set_op.right, names);
+        RelationalPlan::SetOp { left, right, .. } => {
+            collect_query_cte_names(left, names);
+            collect_query_cte_names(right, names);
+        }
+        RelationalPlan::Values { .. } => {}
+    }
+}
+
+fn collect_source_query_cte_names(source: &SourcePlan, names: &mut BTreeSet<String>) {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            collect_source_query_cte_names(left, names);
+            collect_source_query_cte_names(right, names);
+        }
+        SourcePlan::Subquery { body, .. } => collect_query_cte_names(body, names),
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+    }
+}
+
+fn query_contains_volatile_function(plan: &QueryPlan) -> bool {
+    plan.ctes
+        .iter()
+        .any(|cte| query_contains_volatile_function(&cte.query))
+        || match &plan.root {
+            RelationalPlan::QueryBlock(block) => {
+                select_contains_volatile_function(block)
+                    || block
+                        .subqueries
+                        .iter()
+                        .any(query_contains_volatile_function)
+                    || block
+                        .from
+                        .as_ref()
+                        .is_some_and(source_contains_volatile_query)
+            }
+            RelationalPlan::SetOp { left, right, .. } => {
+                query_contains_volatile_function(left) || query_contains_volatile_function(right)
+            }
+            RelationalPlan::Values { subqueries, .. } => {
+                subqueries.iter().any(query_contains_volatile_function)
+            }
+        }
+}
+
+fn source_contains_volatile_query(source: &SourcePlan) -> bool {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            source_contains_volatile_query(left) || source_contains_volatile_query(right)
+        }
+        SourcePlan::Subquery { body, .. } => query_contains_volatile_function(body),
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => false,
     }
 }
 
@@ -1842,13 +1223,14 @@ fn materialize_subquery_rows(
 }
 
 fn build_values_rows(
-    rows: &[Vec<Expr>],
+    rows: &[Vec<ScalarExpr>],
     alias: Option<&str>,
     column_aliases: &[String],
     params: &[SQLParam],
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn PhysicalSubqueryRunner,
+    subqueries: &[QueryPlan],
 ) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_sql::expr::{eval, EvalContext};
     if rows.is_empty() {
         return Ok(Vec::new());
     }
@@ -1861,12 +1243,15 @@ fn build_values_rows(
                 .unwrap_or_else(|| format!("column{}", i + 1))
         })
         .collect();
-    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
+    let subquery_arena = PlanSubqueryArena::new(subqueries, Some(subquery_runner));
+    let ctx = ScalarEvalContext::new(None, params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(&subquery_arena);
     let mut out: Vec<ResultRow> = Vec::with_capacity(rows.len());
     for row in rows {
         let mut r = ResultRow::new();
         for (i, expr) in row.iter().enumerate() {
-            let v = eval(expr, &ctx)?;
+            let v = eval_scalar(expr, &ctx)?;
             r.insert(columns[i].clone(), v);
         }
         let r = match alias {
@@ -1889,29 +1274,25 @@ fn build_values_rows(
 fn build_lateral_join_rows(
     engine: &Engine,
     left_rows: &[ResultRow],
-    right: &FromClause,
+    right: &SourcePlan,
     kind: JoinKind,
-    on: Option<&Expr>,
+    on: Option<&ScalarExpr>,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_sql::expr::{eval, truthy, EvalContext};
+    use uqa_sql::expr::truthy;
     let mut out: Vec<ResultRow> = Vec::new();
     for left_row in left_rows {
         let right_rows = match right {
-            FromClause::Subquery {
+            SourcePlan::Subquery {
                 body,
                 alias,
                 column_aliases,
             } => {
-                let planned = ctes.planned_subqueries.get(&format!("{body:?}"));
-                let physical = planned
-                    .and_then(uqa_planner::QueryPlan::physical_select)
-                    .unwrap_or_else(|| (**body).clone());
-                let result = execute_lateral_subquery(engine, &physical, left_row, params, ctes)?;
+                let result = execute_lateral_subquery(engine, body, left_row, params, ctes)?;
                 materialize_subquery_rows(result, alias.as_deref(), column_aliases)
             }
-            FromClause::Function {
+            SourcePlan::Function {
                 name,
                 args,
                 alias,
@@ -1919,7 +1300,13 @@ fn build_lateral_join_rows(
                 column_types,
             } => {
                 let hook = ScopedEngineHook::new(engine, ctes);
-                let context = TableFunctionEvalContext::new(engine, params, &hook);
+                let context = TableFunctionEvalContext::new(
+                    engine,
+                    params,
+                    &hook,
+                    &hook,
+                    &ctes.scalar_subqueries,
+                );
                 build_table_function_rows_with_row(
                     &context,
                     name,
@@ -1933,6 +1320,7 @@ fn build_lateral_join_rows(
             _ => build_join_rows_with_ctes(engine, right, params, ctes)?,
         };
         let scoped_hook = ScopedEngineHook::new(engine, ctes);
+        let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
         for r_row in &right_rows {
             let mut joined = ResultRow::new();
             for (k, v) in left_row {
@@ -1944,8 +1332,10 @@ fn build_lateral_join_rows(
             let keep = match (on, kind) {
                 (None, _) | (_, JoinKind::Cross) => true,
                 (Some(filter), _) => {
-                    let ctx = EvalContext::new(Some(&joined), params).with_engine(&scoped_hook);
-                    truthy(&eval(filter, &ctx)?)
+                    let ctx = ScalarEvalContext::new(Some(&joined), params)
+                        .with_function_hook(&scoped_hook)
+                        .with_subquery_runner(&subquery_arena);
+                    truthy(&eval_scalar(filter, &ctx)?)
                 }
             };
             if keep {
@@ -1958,43 +1348,148 @@ fn build_lateral_join_rows(
 
 pub(super) fn execute_lateral_subquery(
     engine: &Engine,
-    stmt: &SelectStmt,
+    plan: &QueryPlan,
     outer_row: &ResultRow,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     let mut scoped_ctes = ctes.clone();
-    materialize_ctes(engine, stmt, params, &mut scoped_ctes)?;
+    super::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut scoped_ctes)?;
+    execute_lateral_relational_root(engine, &plan.root, outer_row, params, &mut scoped_ctes)
+}
 
+fn execute_lateral_relational_root(
+    engine: &Engine,
+    root: &RelationalPlan,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+) -> Result<SQLResult, SQLError> {
+    match root {
+        RelationalPlan::QueryBlock(block) => {
+            execute_lateral_query_block(engine, block, outer_row, params, ctes)
+        }
+        RelationalPlan::SetOp {
+            kind,
+            all,
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            subqueries,
+        } => {
+            let lhs = execute_lateral_subquery(engine, left, outer_row, params, ctes)?;
+            let rhs = execute_lateral_subquery(engine, right, outer_row, params, ctes)?;
+            let mut result = super::select::combine_set_results(*kind, *all, lhs, rhs);
+            if !order_by.is_empty() || limit.is_some() || offset.is_some() {
+                let order_plan = QueryBlockPlan {
+                    projections: Vec::new(),
+                    from: None,
+                    r#where: None,
+                    compute: ComputePlan::Project,
+                    group_by: Vec::new(),
+                    grouping_sets: Vec::new(),
+                    having: None,
+                    order_by: order_by.clone(),
+                    limit: limit.as_deref().cloned(),
+                    offset: offset.as_deref().cloned(),
+                    distinct: false,
+                    distinct_on: Vec::new(),
+                    subqueries: subqueries.clone(),
+                    access: AccessPathPlan::Row,
+                };
+                result.rows = apply_row_order_limit_with_ctes(
+                    result.rows,
+                    &order_plan,
+                    engine,
+                    params,
+                    ctes,
+                )?;
+            }
+            Ok(result)
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            let columns: Vec<String> = rows
+                .first()
+                .map(|row| {
+                    (0..row.len())
+                        .map(|index| format!("column{}", index + 1))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let context = super::scalar::PhysicalEvalContext::new(Some(outer_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&hook);
+            let rows = rows
+                .iter()
+                .map(|values| {
+                    let mut row = ResultRow::new();
+                    for (index, expression) in values.iter().enumerate() {
+                        row.insert(
+                            columns[index].clone(),
+                            super::scalar::eval_physical_scalar(expression, subqueries, &context)?,
+                        );
+                    }
+                    Ok(row)
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            Ok(SQLResult::from_rows(columns, rows))
+        }
+    }
+}
+
+fn execute_lateral_query_block(
+    engine: &Engine,
+    stmt: &QueryBlockPlan,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    scoped_ctes: &mut CteScope,
+) -> Result<SQLResult, SQLError> {
     let Some(from) = stmt.from.as_ref() else {
         // A FROM-less body still applies its WHERE clause against the
         // outer scope (`EXISTS (SELECT 1 WHERE false)` has no rows).
         if let Some(filter) = stmt.r#where.as_ref() {
-            let ctx = EvalContext::new(Some(outer_row), params).with_engine(engine);
-            if !uqa_sql::expr::truthy(&eval(filter, &ctx)?) {
+            let hook = ScopedEngineHook::new(engine, scoped_ctes);
+            let ctx = PhysicalEvalContext::new(Some(outer_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&hook);
+            if !uqa_sql::expr::truthy(&eval_physical_scalar(filter, &stmt.subqueries, &ctx)?) {
                 return Ok(SQLResult::from_rows(
                     projection_columns(&stmt.projections),
                     Vec::new(),
                 ));
             }
         }
-        let projected =
-            project_join_row_with_engine(Some(engine), outer_row, &stmt.projections, params)?;
+        let hook = ScopedEngineHook::new(engine, scoped_ctes);
+        let projected = project_join_row_with_plan(
+            engine,
+            &hook,
+            &hook,
+            &stmt.subqueries,
+            outer_row,
+            &stmt.projections,
+            params,
+        )?;
         return Ok(SQLResult::from_rows(
             projection_columns(&stmt.projections),
             vec![projected],
         ));
     };
 
-    let inner_rows = build_join_rows_with_ctes(engine, from, params, &mut scoped_ctes)?;
+    let inner_rows = build_join_rows_with_ctes(engine, from, params, scoped_ctes)?;
     let mut filtered: Vec<ResultRow> = Vec::with_capacity(inner_rows.len());
     for inner in inner_rows {
         let merged = merge_lateral_scope_rows(outer_row, &inner);
         let keep = match stmt.r#where.as_ref() {
             None => true,
             Some(filter) => {
-                let ctx = EvalContext::new(Some(&merged), params).with_engine(engine);
-                uqa_sql::expr::truthy(&eval(filter, &ctx)?)
+                let hook = ScopedEngineHook::new(engine, scoped_ctes);
+                let ctx = PhysicalEvalContext::new(Some(&merged), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&hook);
+                uqa_sql::expr::truthy(&eval_physical_scalar(filter, &stmt.subqueries, &ctx)?)
             }
         };
         if keep {
@@ -2007,16 +1502,27 @@ pub(super) fn execute_lateral_subquery(
         || !stmt.grouping_sets.is_empty()
     {
         let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
-        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
+        let rows = aggregate_join_rows(engine, stmt, &filtered, params, scoped_ctes)?;
+        let rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, scoped_ctes)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    let ordered = apply_row_order_limit(filtered, stmt, engine, params)?;
+    let ordered = apply_row_order_limit_with_ctes(filtered, stmt, engine, params, scoped_ctes)?;
     let columns = projection_columns(&stmt.projections);
+    let hook = ScopedEngineHook::new(engine, scoped_ctes);
     let rows = ordered
         .iter()
-        .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
+        .map(|src| {
+            project_join_row_with_plan(
+                engine,
+                &hook,
+                &hook,
+                &stmt.subqueries,
+                src,
+                &stmt.projections,
+                params,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(SQLResult::from_rows(columns, rows))
 }
@@ -2036,6 +1542,8 @@ pub(super) struct TableFunctionEvalContext<'a> {
     engine: &'a Engine,
     params: &'a [SQLParam],
     eval_hook: &'a dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &'a dyn PhysicalSubqueryRunner,
+    subqueries: &'a [QueryPlan],
 }
 
 impl<'a> TableFunctionEvalContext<'a> {
@@ -2043,11 +1551,15 @@ impl<'a> TableFunctionEvalContext<'a> {
         engine: &'a Engine,
         params: &'a [SQLParam],
         eval_hook: &'a dyn uqa_sql::expr::EngineHook,
+        subquery_runner: &'a dyn PhysicalSubqueryRunner,
+        subqueries: &'a [QueryPlan],
     ) -> Self {
         Self {
             engine,
             params,
             eval_hook,
+            subquery_runner,
+            subqueries,
         }
     }
 }
@@ -2056,7 +1568,7 @@ impl<'a> TableFunctionEvalContext<'a> {
 pub(super) fn build_table_function_rows(
     context: &TableFunctionEvalContext<'_>,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     alias: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
@@ -2076,17 +1588,20 @@ pub(super) fn build_table_function_rows(
 fn build_table_function_rows_with_row(
     context: &TableFunctionEvalContext<'_>,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     alias: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
     row: Option<&ResultRow>,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_sql::expr::{evaluate_call_args, unknown_function_error, EvalContext};
+    use uqa_sql::expr::unknown_function_error;
     let engine = context.engine;
-    let ctx = EvalContext::new(row, context.params).with_engine(context.eval_hook);
+    let subquery_arena = PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
+    let ctx = ScalarEvalContext::new(row, context.params)
+        .with_function_hook(context.eval_hook)
+        .with_subquery_runner(&subquery_arena);
     let lower = name.to_ascii_lowercase();
-    let call_args = evaluate_call_args(args, &ctx)?;
+    let call_args = eval_call_arguments(args, &ctx)?;
     let has_named_args = call_args.iter().any(|(name, _)| name.is_some());
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
     let default_col = column_aliases
@@ -2564,9 +2079,10 @@ fn registered_table_function_rows(
 /// cross filter.
 fn try_hash_inner_join(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
-    on: Option<&Expr>,
+    on: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(on_expr) = on else {
@@ -2578,9 +2094,15 @@ fn try_hash_inner_join(
     let mut left_keys = Vec::with_capacity(equalities.len());
     let mut right_keys = Vec::with_capacity(equalities.len());
     for (lhs, rhs) in equalities {
-        let Some((left_key, right_key)) =
-            decide_join_sides(eval_hook, left_rows, right_rows, lhs, rhs, params)
-        else {
+        let Some((left_key, right_key)) = decide_join_sides(
+            eval_hook,
+            subquery_runner,
+            left_rows,
+            right_rows,
+            lhs,
+            rhs,
+            params,
+        ) else {
             return Ok(None);
         };
         left_keys.push(left_key);
@@ -2597,28 +2119,26 @@ fn try_hash_inner_join(
         try_hash_inner_join(
             left_rows,
             right_rows,
-            |row| left_accessor.key(row, eval_hook, params),
-            |row| right_accessor.key(row, eval_hook, params),
+            |row| left_accessor.key(row, eval_hook, subquery_runner, params),
+            |row| right_accessor.key(row, eval_hook, subquery_runner, params),
         )?
     } else {
         try_hash_inner_join(
             left_rows,
             right_rows,
-            |row| composite_join_key(&left_keys, row, eval_hook, params),
-            |row| composite_join_key(&right_keys, row, eval_hook, params),
+            |row| composite_join_key(&left_keys, row, eval_hook, subquery_runner, params),
+            |row| composite_join_key(&right_keys, row, eval_hook, subquery_runner, params),
         )?
     };
     Ok(Some(out))
 }
 
 fn try_hash_left_join(
-    engine: &Engine,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    runtime: &JoinRuntime<'_>,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
-    right_from: &FromClause,
-    on: Option<&Expr>,
-    params: &[SQLParam],
+    right_from: &SourcePlan,
+    on: Option<&ScalarExpr>,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let Some(on_expr) = on else {
         return Ok(None);
@@ -2632,9 +2152,15 @@ fn try_hash_left_join(
     let mut left_keys = Vec::with_capacity(equalities.len());
     let mut right_keys = Vec::with_capacity(equalities.len());
     for (lhs, rhs) in equalities {
-        let Some((left_key, right_key)) =
-            decide_join_sides(eval_hook, left_rows, right_rows, lhs, rhs, params)
-        else {
+        let Some((left_key, right_key)) = decide_join_sides(
+            runtime.function_hook,
+            runtime.subquery_runner,
+            left_rows,
+            right_rows,
+            lhs,
+            rhs,
+            runtime.params,
+        ) else {
             return Ok(None);
         };
         left_keys.push(left_key);
@@ -2644,14 +2170,26 @@ fn try_hash_left_join(
     let mut index: std::collections::HashMap<JoinKey, Vec<&ResultRow>> =
         std::collections::HashMap::with_capacity(right_rows.len());
     for row in right_rows {
-        if let Some(key) = join_key_for_exprs(&right_keys, row, eval_hook, params)? {
+        if let Some(key) = join_key_for_exprs(
+            &right_keys,
+            row,
+            runtime.function_hook,
+            runtime.subquery_runner,
+            runtime.params,
+        )? {
             index.entry(key).or_default().push(row);
         }
     }
 
     let mut out = Vec::with_capacity(left_rows.len());
     for left in left_rows {
-        let key = join_key_for_exprs(&left_keys, left, eval_hook, params)?;
+        let key = join_key_for_exprs(
+            &left_keys,
+            left,
+            runtime.function_hook,
+            runtime.subquery_runner,
+            runtime.params,
+        )?;
         let matches = key.as_ref().and_then(|key| index.get(key));
         match matches {
             Some(rows) if !rows.is_empty() => {
@@ -2661,7 +2199,7 @@ fn try_hash_left_join(
             }
             _ => {
                 let mut padded = left.clone();
-                pad_nulls_for_from(&mut padded, right_from, engine);
+                pad_nulls_for_from(&mut padded, right_from, runtime.engine);
                 out.push(padded);
             }
         }
@@ -2669,17 +2207,17 @@ fn try_hash_left_join(
     Ok(Some(out))
 }
 
-fn split_join_equalities(expr: &Expr) -> Option<Vec<(&Expr, &Expr)>> {
+fn split_join_equalities(expr: &ScalarExpr) -> Option<Vec<(&ScalarExpr, &ScalarExpr)>> {
     match expr {
-        Expr::Binary {
+        ScalarExpr::Binary {
             op: uqa_sql::ast::BinaryOp::Equal,
             lhs,
             rhs,
         } => Some(vec![(lhs, rhs)]),
-        Expr::And(items) => {
+        ScalarExpr::And(items) => {
             let mut equalities = Vec::with_capacity(items.len());
             for item in items {
-                let Expr::Binary {
+                let ScalarExpr::Binary {
                     op: uqa_sql::ast::BinaryOp::Equal,
                     lhs,
                     rhs,
@@ -2702,14 +2240,14 @@ fn split_join_equalities(expr: &Expr) -> Option<Vec<(&Expr, &Expr)>> {
 enum JoinKeyAccessor<'a> {
     Column(&'a str),
     QualifiedColumn(String),
-    Expr(&'a Expr),
+    ScalarExpr(&'a ScalarExpr),
 }
 
 impl<'a> JoinKeyAccessor<'a> {
-    fn new(expr: &'a Expr) -> Self {
+    fn new(expr: &'a ScalarExpr) -> Self {
         match expr {
-            Expr::Column(name) => Self::Column(name.as_str()),
-            Expr::QualifiedColumn {
+            ScalarExpr::Column(name) => Self::Column(name.as_str()),
+            ScalarExpr::QualifiedColumn {
                 qualifier,
                 column,
                 key,
@@ -2718,7 +2256,7 @@ impl<'a> JoinKeyAccessor<'a> {
             } else {
                 key.clone()
             }),
-            _ => Self::Expr(expr),
+            _ => Self::ScalarExpr(expr),
         }
     }
 
@@ -2726,14 +2264,17 @@ impl<'a> JoinKeyAccessor<'a> {
         &self,
         row: &ResultRow,
         eval_hook: &dyn uqa_sql::expr::EngineHook,
+        subquery_runner: &dyn ScalarSubqueryRunner,
         params: &[SQLParam],
     ) -> Result<Option<JoinKey>, SQLError> {
         Ok(match self {
             Self::Column(name) => value_to_join_key(column_value(row, name)),
             Self::QualifiedColumn(key) => value_to_join_key(row.get(key)),
-            Self::Expr(expr) => {
-                let ctx = EvalContext::new(Some(row), params).with_engine(eval_hook);
-                match eval(expr, &ctx)? {
+            Self::ScalarExpr(expr) => {
+                let ctx = ScalarEvalContext::new(Some(row), params)
+                    .with_function_hook(eval_hook)
+                    .with_subquery_runner(subquery_runner);
+                match eval_scalar(expr, &ctx)? {
                     Value::Null => None,
                     value => Some(JoinKey::new(&value)),
                 }
@@ -2759,15 +2300,18 @@ fn value_to_join_key(value: Option<&Value>) -> Option<JoinKey> {
 }
 
 fn composite_join_key(
-    exprs: &[&Expr],
+    exprs: &[&ScalarExpr],
     row: &ResultRow,
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     params: &[SQLParam],
 ) -> Result<Option<JoinKey>, SQLError> {
-    let ctx = EvalContext::new(Some(row), params).with_engine(eval_hook);
+    let ctx = ScalarEvalContext::new(Some(row), params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(subquery_runner);
     let mut values = Vec::with_capacity(exprs.len());
     for expr in exprs {
-        match eval(expr, &ctx)? {
+        match eval_scalar(expr, &ctx)? {
             Value::Null => return Ok(None),
             value => values.push(value),
         }
@@ -2777,15 +2321,16 @@ fn composite_join_key(
 }
 
 fn join_key_for_exprs(
-    exprs: &[&Expr],
+    exprs: &[&ScalarExpr],
     row: &ResultRow,
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     params: &[SQLParam],
 ) -> Result<Option<JoinKey>, SQLError> {
     if exprs.len() == 1 {
-        JoinKeyAccessor::new(exprs[0]).key(row, eval_hook, params)
+        JoinKeyAccessor::new(exprs[0]).key(row, eval_hook, subquery_runner, params)
     } else {
-        composite_join_key(exprs, row, eval_hook, params)
+        composite_join_key(exprs, row, eval_hook, subquery_runner, params)
     }
 }
 
@@ -2795,24 +2340,25 @@ fn join_key_for_exprs(
 /// `None` when the predicate isn't separable across sides.
 fn decide_join_sides<'a>(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
-    lhs: &'a Expr,
-    rhs: &'a Expr,
+    lhs: &'a ScalarExpr,
+    rhs: &'a ScalarExpr,
     params: &[SQLParam],
-) -> Option<(&'a Expr, &'a Expr)> {
+) -> Option<(&'a ScalarExpr, &'a ScalarExpr)> {
     if left_rows.is_empty() || right_rows.is_empty() {
         return None;
     }
     let l_sample = &left_rows[0];
     let r_sample = &right_rows[0];
-    let lhs_on_left = eval_yields_value(eval_hook, l_sample, lhs, params);
-    let rhs_on_right = eval_yields_value(eval_hook, r_sample, rhs, params);
+    let lhs_on_left = eval_yields_value(eval_hook, subquery_runner, l_sample, lhs, params);
+    let rhs_on_right = eval_yields_value(eval_hook, subquery_runner, r_sample, rhs, params);
     if lhs_on_left && rhs_on_right {
         return Some((lhs, rhs));
     }
-    let rhs_on_left = eval_yields_value(eval_hook, l_sample, rhs, params);
-    let lhs_on_right = eval_yields_value(eval_hook, r_sample, lhs, params);
+    let rhs_on_left = eval_yields_value(eval_hook, subquery_runner, l_sample, rhs, params);
+    let lhs_on_right = eval_yields_value(eval_hook, subquery_runner, r_sample, lhs, params);
     if rhs_on_left && lhs_on_right {
         return Some((rhs, lhs));
     }
@@ -2821,19 +2367,23 @@ fn decide_join_sides<'a>(
 
 fn eval_yields_value(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     row: &ResultRow,
-    expr: &Expr,
+    expr: &ScalarExpr,
     params: &[SQLParam],
 ) -> bool {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(eval_hook);
-    matches!(uqa_sql::expr::eval(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
+    let ctx = ScalarEvalContext::new(Some(row), params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(subquery_runner);
+    matches!(eval_scalar(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
 
 fn cross_filter(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
-    on: Option<&Expr>,
+    on: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::with_capacity(left_rows.len() * right_rows.len());
@@ -2843,9 +2393,10 @@ fn cross_filter(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
-                        .with_engine(eval_hook);
-                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                    let ctx = ScalarEvalContext::new(Some(&merged), params)
+                        .with_function_hook(eval_hook)
+                        .with_subquery_runner(subquery_runner);
+                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
                 }
             };
             if keep {
@@ -2857,13 +2408,11 @@ fn cross_filter(
 }
 
 fn left_outer(
+    runtime: &JoinRuntime<'_>,
     outer_rows: &[ResultRow],
     inner_rows: &[ResultRow],
-    inner_from: &FromClause,
-    on: Option<&Expr>,
-    params: &[SQLParam],
-    engine: &Engine,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    inner_from: &SourcePlan,
+    on: Option<&ScalarExpr>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for l in outer_rows {
@@ -2873,9 +2422,10 @@ fn left_outer(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
-                        .with_engine(eval_hook);
-                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                    let ctx = ScalarEvalContext::new(Some(&merged), runtime.params)
+                        .with_function_hook(runtime.function_hook)
+                        .with_subquery_runner(runtime.subquery_runner);
+                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
                 }
             };
             if keep {
@@ -2887,23 +2437,20 @@ fn left_outer(
             // Pad with NULLs for every column the inner side would
             // have contributed.
             let mut pad = l.clone();
-            pad_nulls_for_from(&mut pad, inner_from, engine);
+            pad_nulls_for_from(&mut pad, inner_from, runtime.engine);
             out.push(pad);
         }
     }
     Ok(out)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn full_outer(
+    runtime: &JoinRuntime<'_>,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
-    left_from: &FromClause,
-    right_from: &FromClause,
-    on: Option<&Expr>,
-    params: &[SQLParam],
-    engine: &Engine,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    left_from: &SourcePlan,
+    right_from: &SourcePlan,
+    on: Option<&ScalarExpr>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     let mut matched_right = vec![false; right_rows.len()];
@@ -2914,9 +2461,10 @@ fn full_outer(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
-                        .with_engine(eval_hook);
-                    uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
+                    let ctx = ScalarEvalContext::new(Some(&merged), runtime.params)
+                        .with_function_hook(runtime.function_hook)
+                        .with_subquery_runner(runtime.subquery_runner);
+                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
                 }
             };
             if keep {
@@ -2927,7 +2475,7 @@ fn full_outer(
         }
         if !matched_left {
             let mut padded = left.clone();
-            pad_nulls_for_from(&mut padded, right_from, engine);
+            pad_nulls_for_from(&mut padded, right_from, runtime.engine);
             out.push(padded);
         }
     }
@@ -2936,7 +2484,7 @@ fn full_outer(
             continue;
         }
         let mut padded = ResultRow::new();
-        pad_nulls_for_from(&mut padded, left_from, engine);
+        pad_nulls_for_from(&mut padded, left_from, runtime.engine);
         for (k, v) in right {
             padded.insert(k.clone(), v.clone());
         }
@@ -2945,7 +2493,7 @@ fn full_outer(
     Ok(out)
 }
 
-fn pad_nulls_for_from(row: &mut ResultRow, from: &FromClause, engine: &Engine) {
+fn pad_nulls_for_from(row: &mut ResultRow, from: &SourcePlan, engine: &Engine) {
     let mut tables = Vec::new();
     from.collect_tables(&mut tables);
     for (name, alias) in &tables {
@@ -2956,81 +2504,43 @@ fn pad_nulls_for_from(row: &mut ResultRow, from: &FromClause, engine: &Engine) {
     }
 }
 
-#[allow(dead_code)]
-fn project_join_row(
-    engine: &Engine,
-    src: &ResultRow,
-    projections: &[Projection],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    project_join_row_with_engine(Some(engine), src, projections, params)
-}
-
-pub(super) fn project_join_row_with_engine(
-    engine: Option<&Engine>,
-    src: &ResultRow,
-    projections: &[Projection],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    let hook = engine.map(|engine| engine as &dyn uqa_sql::expr::EngineHook);
-    let labels = projection_columns(projections);
-    project_join_row_inner(engine, hook, src, projections, &labels, params)
-}
-
-pub(super) fn project_join_row_with_hook(
-    engine: Option<&dyn uqa_sql::expr::EngineHook>,
-    src: &ResultRow,
-    projections: &[Projection],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    let labels = projection_columns(projections);
-    project_join_row_inner(None, engine, src, projections, &labels, params)
-}
-
-pub(super) fn project_join_row_with_engine_hook(
+pub(super) fn project_join_row_with_plan(
     engine: &Engine,
     eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn PhysicalSubqueryRunner,
+    subqueries: &[QueryPlan],
     src: &ResultRow,
-    projections: &[Projection],
+    projections: &[ProjectionPlan],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    let labels = projection_columns(projections);
     project_join_row_inner(
-        Some(engine),
-        Some(eval_hook),
+        engine,
+        eval_hook,
+        subquery_runner,
+        subqueries,
         src,
         projections,
-        &labels,
         params,
     )
 }
 
-pub(super) fn project_join_row_with_hook_and_labels(
-    engine: Option<&dyn uqa_sql::expr::EngineHook>,
-    src: &ResultRow,
-    projections: &[Projection],
-    labels: &[String],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    project_join_row_inner(None, engine, src, projections, labels, params)
-}
-
 fn project_join_row_inner(
-    engine: Option<&Engine>,
-    eval_engine: Option<&dyn uqa_sql::expr::EngineHook>,
+    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn PhysicalSubqueryRunner,
+    subqueries: &[QueryPlan],
     src: &ResultRow,
-    projections: &[Projection],
-    labels: &[String],
+    projections: &[ProjectionPlan],
     params: &[SQLParam],
 ) -> Result<ResultRow, SQLError> {
-    let mut ctx = uqa_sql::expr::EvalContext::new(Some(src), params);
-    if let Some(e) = eval_engine {
-        ctx = ctx.with_engine(e);
-    }
+    let labels = projection_columns(projections);
+    let ctx = PhysicalEvalContext::new(Some(src), params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(subquery_runner);
     let mut out = ResultRow::new();
     for (idx, proj) in projections.iter().enumerate() {
         let label = labels[idx].clone();
-        if let Expr::Star = proj.expr {
+        if let ScalarExpr::Star = proj.expr {
             for (k, v) in src {
                 out.insert(k.clone(), v.clone());
             }
@@ -3039,7 +2549,7 @@ fn project_join_row_inner(
         // Window calls are pre-evaluated in `compute_window_columns`
         // and stored on the source row under the projection label;
         // read the cached value through.
-        if matches!(proj.expr, Expr::WindowCall { .. }) {
+        if matches!(proj.expr, ScalarExpr::WindowCall { .. }) {
             let value = src.get(&label).cloned().unwrap_or(Value::Null);
             out.insert(label, value);
             continue;
@@ -3053,15 +2563,16 @@ fn project_join_row_inner(
         // to. Intercept the call here, resolve the string column +
         // query, and emit the wrapped text through
         // `uqa_analysis::highlight`.
-        if let Expr::Func { name, args, .. } = &proj.expr {
-            if let Some(engine) = engine {
-                if let Some(value) = engine_func_intercept(Some(engine), name, args, src, params)? {
-                    out.insert(label, value);
-                    continue;
-                }
+        if let ScalarExpr::Func { name, args, .. } = &proj.expr {
+            let mut evaluate = |expr: &ScalarExpr| eval_physical_scalar(expr, subqueries, &ctx);
+            if let Some(value) =
+                engine_func_intercept(Some(engine), name, args, src, &mut evaluate)?
+            {
+                out.insert(label, value);
+                continue;
             }
         }
-        let value = uqa_sql::expr::eval(&proj.expr, &ctx)?;
+        let value = eval_physical_scalar(&proj.expr, subqueries, &ctx)?;
         out.insert(label, value);
     }
     Ok(out)
@@ -3074,20 +2585,20 @@ fn project_join_row_inner(
 pub(super) fn engine_func_intercept(
     engine: Option<&Engine>,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     row: &ResultRow,
-    params: &[SQLParam],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Option<Value>, SQLError> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "uqa_highlight" => Ok(Some(run_uqa_highlight(engine, row, args, params)?)),
+        "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, evaluate)?)),
         "score_bm25" | "score_bayesian_bm25" => {
-            validate_score_projection_args(&lower, args, row, params)?;
+            validate_score_projection_args(&lower, args, evaluate)?;
             Ok(Some(
                 row.get(SCORE_COLUMN).cloned().unwrap_or(Value::Float(0.0)),
             ))
         }
-        "deep_learn" => Ok(Some(run_deep_learn_projection(engine, args, row, params)?)),
+        "deep_learn" => Ok(Some(run_deep_learn_projection(engine, args, evaluate)?)),
         "merge_action" => {
             if !args.is_empty() {
                 return Err(SQLError::BadArity {
@@ -3104,24 +2615,28 @@ pub(super) fn engine_func_intercept(
         // UQA-native helpers keep their lenient semantics.
         "graph_create" => {
             if let Some(eng) = engine {
-                let _ = run_graph_create(eng, args, params)?;
+                let _ = run_graph_create_with_evaluator(eng, args, evaluate)?;
             }
             Ok(Some(Value::Bool(true)))
         }
         "graph_drop" => {
             if let Some(eng) = engine {
-                let _ = run_graph_drop(eng, args, params)?;
+                let _ = run_graph_drop_with_evaluator(eng, args, evaluate)?;
             }
             Ok(Some(Value::Bool(true)))
         }
         // Apache AGE-compatible functions: strict name validation and
         // a void (SQL NULL) return value.
         "create_graph" => match engine {
-            Some(eng) => Ok(Some(run_age_create_graph(eng, args, params)?)),
+            Some(eng) => Ok(Some(run_age_create_graph_with_evaluator(
+                eng, args, evaluate,
+            )?)),
             None => Ok(Some(Value::Null)),
         },
         "drop_graph" => match engine {
-            Some(eng) => Ok(Some(run_age_drop_graph(eng, args, params)?)),
+            Some(eng) => Ok(Some(run_age_drop_graph_with_evaluator(
+                eng, args, evaluate,
+            )?)),
             None => Ok(Some(Value::Null)),
         },
         _ => Ok(None),
@@ -3130,9 +2645,8 @@ pub(super) fn engine_func_intercept(
 
 fn run_deep_learn_projection(
     engine: Option<&Engine>,
-    args: &[Expr],
-    row: &ResultRow,
-    params: &[SQLParam],
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     let Some(engine) = engine else {
         return Err(SQLError::Unsupported(
@@ -3146,8 +2660,7 @@ fn run_deep_learn_projection(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-    let model_name = match eval(&args[0], &ctx)? {
+    let model_name = match evaluate(&args[0])? {
         Value::Str(s) => s,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -3155,7 +2668,7 @@ fn run_deep_learn_projection(
             )));
         }
     };
-    let training_source = match eval(&args[1], &ctx)? {
+    let training_source = match evaluate(&args[1])? {
         Value::Str(s) => s,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -3189,9 +2702,8 @@ fn run_deep_learn_projection(
 
 fn validate_score_projection_args(
     name: &str,
-    args: &[Expr],
-    row: &ResultRow,
-    params: &[SQLParam],
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<(), SQLError> {
     if !(1..=2).contains(&args.len()) {
         return Err(SQLError::BadArity {
@@ -3204,8 +2716,7 @@ fn validate_score_projection_args(
     if args.len() == 2 {
         let _ = expect_column_name(&args[0], &format!("{name}.field"))?;
     }
-    let ctx = EvalContext::new(Some(row), params);
-    match eval(&args[query_idx], &ctx)? {
+    match evaluate(&args[query_idx])? {
         Value::Str(_) => Ok(()),
         other => Err(SQLError::TypeMismatch(format!(
             "{name}.query must be a string, got {other:?}"
@@ -3219,10 +2730,9 @@ fn validate_score_projection_args(
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
 fn run_uqa_highlight(
-    engine: Option<&Engine>,
     row: &ResultRow,
-    args: &[Expr],
-    params: &[SQLParam],
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     if args.len() < 2 || args.len() > 6 {
         return Err(SQLError::BadArity {
@@ -3231,18 +2741,14 @@ fn run_uqa_highlight(
             actual: args.len(),
         });
     }
-    let mut ctx = uqa_sql::expr::EvalContext::new(Some(row), params);
-    if let Some(e) = engine {
-        ctx = ctx.with_engine(e);
-    }
     let text = match &args[0] {
-        Expr::Column(c) => match row.get(c) {
+        ScalarExpr::Column(c) => match super::row_column_value(row, c) {
             Some(Value::Str(s)) => s.clone(),
             Some(Value::Null) => return Ok(Value::Null),
             Some(other) => format!("{other:?}"),
             None => return Ok(Value::Null),
         },
-        Expr::QualifiedColumn {
+        ScalarExpr::QualifiedColumn {
             qualifier,
             column,
             key,
@@ -3254,20 +2760,23 @@ fn run_uqa_highlight(
             } else {
                 key.as_str()
             };
-            match row.get(lookup_key) {
+            match row
+                .get(lookup_key)
+                .or_else(|| uqa_sql::expr::unqualified_fallback(row, column))
+            {
                 Some(Value::Str(s)) => s.clone(),
                 Some(Value::Null) => return Ok(Value::Null),
                 Some(other) => format!("{other:?}"),
                 None => return Ok(Value::Null),
             }
         }
-        other => match uqa_sql::expr::eval(other, &ctx)? {
+        other => match evaluate(other)? {
             Value::Str(s) => s,
             Value::Null => return Ok(Value::Null),
             v => format!("{v:?}"),
         },
     };
-    let query_str = match uqa_sql::expr::eval(&args[1], &ctx)? {
+    let query_str = match evaluate(&args[1])? {
         Value::Str(s) => s,
         Value::Null => return Ok(Value::Str(text)),
         other => {
@@ -3277,7 +2786,7 @@ fn run_uqa_highlight(
         }
     };
     let start_tag = match args.get(2) {
-        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+        Some(e) => match evaluate(e)? {
             Value::Str(s) => s,
             Value::Null => "<b>".into(),
             other => {
@@ -3289,7 +2798,7 @@ fn run_uqa_highlight(
         None => "<b>".into(),
     };
     let end_tag = match args.get(3) {
-        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+        Some(e) => match evaluate(e)? {
             Value::Str(s) => s,
             Value::Null => "</b>".into(),
             other => {
@@ -3301,7 +2810,7 @@ fn run_uqa_highlight(
         None => "</b>".into(),
     };
     let max_fragments = match args.get(4) {
-        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+        Some(e) => match evaluate(e)? {
             Value::Int(n) if n >= 0 => n as usize,
             Value::Null => 0,
             other => {
@@ -3313,7 +2822,7 @@ fn run_uqa_highlight(
         None => 0,
     };
     let fragment_size = match args.get(5) {
-        Some(e) => match uqa_sql::expr::eval(e, &ctx)? {
+        Some(e) => match evaluate(e)? {
             Value::Int(n) if n > 0 => n as usize,
             Value::Null => 150,
             other => {

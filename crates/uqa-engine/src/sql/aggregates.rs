@@ -13,22 +13,28 @@ use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
 use uqa_core::{DecimalValue, Value};
-use uqa_sql::ast::{BinaryOp, Expr, OrderBy, Projection, SelectStmt};
-use uqa_sql::expr::{EvalContext, RowLookup};
+use uqa_execution::{
+    eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, ScalarSubqueryRunner,
+};
+use uqa_planner::{ProjectionPlan, QueryBlockPlan};
+use uqa_sql::ast::BinaryOp;
+use uqa_sql::expr::RowLookup;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLAggregateFunction, SQLAggregateState, ScoredEntry};
 
-use super::{core_value_to_json, projection_columns};
+use super::scalar::PlanSubqueryArena;
+use super::{core_value_to_json, projection_columns, CteScope, ScopedEngineHook};
 
 const AGGREGATE_SPILL_ROWS: usize = 4096;
 
 pub(super) fn aggregate_join_rows(
     engine: &Engine,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     rows: &[ResultRow],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     // GROUPING SETS / ROLLUP / CUBE: run the aggregator once per
     // grouping set, then concatenate the result rows. Columns that
@@ -41,7 +47,7 @@ pub(super) fn aggregate_join_rows(
             let mut sub = stmt.clone();
             sub.group_by.clone_from(&set);
             sub.grouping_sets = Vec::new();
-            let part = aggregate_join_rows_relaxed(engine, &sub, rows, params)?;
+            let part = aggregate_join_rows_relaxed(engine, &sub, rows, params, ctes)?;
             // Columns from the parent projection that aren't in the
             // active grouping set get filled with NULL on every row.
             for mut row in part {
@@ -60,20 +66,24 @@ pub(super) fn aggregate_join_rows(
         }
         return Ok(combined);
     }
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
 
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
 
     for row in rows {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+        let ctx = ScalarEvalContext::new(Some(row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&subquery_arena);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
-            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .map(|g| eval_scalar(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
         let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
-            let Expr::Func {
+            let ScalarExpr::Func {
                 name,
                 args,
                 distinct,
@@ -84,7 +94,7 @@ pub(super) fn aggregate_join_rows(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, &ctx)?);
+                let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, &ctx)?);
                 if !keep {
                     continue;
                 }
@@ -114,14 +124,16 @@ pub(super) fn aggregate_join_rows(
             if contains_aggregate(engine, &proj.expr) {
                 let resolved =
                     replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
-                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
+                let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                row.insert(label, eval_scalar(&resolved, &ctx)?);
             } else {
                 if !expr_references_columns(&proj.expr) {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
-                        .with_engine(engine);
-                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                        .with_function_hook(&hook)
+                        .with_subquery_runner(&subquery_arena);
+                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
                     continue;
                 }
                 let mut placed = false;
@@ -160,9 +172,10 @@ pub(super) fn aggregate_join_rows(
             for (key, value) in &row {
                 having_row.insert(key.clone(), value.clone());
             }
-            let ctx =
-                uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
-            let kept = uqa_sql::expr::truthy(&uqa_sql::expr::eval(&resolved, &ctx)?);
+            let ctx = ScalarEvalContext::new(Some(&having_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&subquery_arena);
+            let kept = uqa_sql::expr::truthy(&eval_scalar(&resolved, &ctx)?);
             if !kept {
                 continue;
             }
@@ -178,19 +191,19 @@ pub(super) fn aggregate_join_rows(
 /// pass through untouched so the caller can `eval` the result.
 fn resolve_having(
     engine: &Engine,
-    expr: &Expr,
+    expr: &ScalarExpr,
     _projected_row: &ResultRow,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     accs: &[AggregateAccumulator],
     _group_values: &[Value],
     _params: &[SQLParam],
-) -> Result<Expr, SQLError> {
+) -> Result<ScalarExpr, SQLError> {
     fn walk(
         engine: &Engine,
-        e: &Expr,
-        stmt: &SelectStmt,
+        e: &ScalarExpr,
+        stmt: &QueryBlockPlan,
         accs: &[AggregateAccumulator],
-    ) -> Result<Expr, SQLError> {
+    ) -> Result<ScalarExpr, SQLError> {
         if is_aggregate(engine, e) {
             // Find the matching projection so we can pluck the
             // already-computed accumulator value. Falls back to
@@ -200,9 +213,9 @@ fn resolve_having(
                 .enumerate()
             {
                 if exprs_match(agg_expr, e) {
-                    if let Expr::Func { name, args, .. } = agg_expr {
+                    if let ScalarExpr::Func { name, args, .. } = agg_expr {
                         let v = aggregate_value_with_args(name, &accs[idx], args)?;
-                        return Ok(Expr::Literal(v));
+                        return Ok(ScalarExpr::Literal(v));
                     }
                 }
             }
@@ -212,38 +225,40 @@ fn resolve_having(
             ));
         }
         match e {
-            Expr::And(parts) => Ok(Expr::And(
+            ScalarExpr::And(parts) => Ok(ScalarExpr::And(
                 parts
                     .iter()
                     .map(|p| walk(engine, p, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            Expr::Or(parts) => Ok(Expr::Or(
+            ScalarExpr::Or(parts) => Ok(ScalarExpr::Or(
                 parts
                     .iter()
                     .map(|p| walk(engine, p, stmt, accs))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            Expr::Not(inner) => Ok(Expr::Not(Box::new(walk(engine, inner, stmt, accs)?))),
-            Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
+            ScalarExpr::Not(inner) => {
+                Ok(ScalarExpr::Not(Box::new(walk(engine, inner, stmt, accs)?)))
+            }
+            ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
                 op: *op,
                 lhs: Box::new(walk(engine, lhs, stmt, accs)?),
                 rhs: Box::new(walk(engine, rhs, stmt, accs)?),
             }),
-            Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
+            ScalarExpr::IsNull { expr, negated } => Ok(ScalarExpr::IsNull {
                 expr: Box::new(walk(engine, expr, stmt, accs)?),
                 negated: *negated,
             }),
-            Expr::Between { expr, low, high } => Ok(Expr::Between {
+            ScalarExpr::Between { expr, low, high } => Ok(ScalarExpr::Between {
                 expr: Box::new(walk(engine, expr, stmt, accs)?),
                 low: Box::new(walk(engine, low, stmt, accs)?),
                 high: Box::new(walk(engine, high, stmt, accs)?),
             }),
-            Expr::InList {
+            ScalarExpr::InList {
                 expr,
                 list,
                 negated,
-            } => Ok(Expr::InList {
+            } => Ok(ScalarExpr::InList {
                 expr: Box::new(walk(engine, expr, stmt, accs)?),
                 list: list
                     .iter()
@@ -251,13 +266,13 @@ fn resolve_having(
                     .collect::<Result<Vec<_>, _>>()?,
                 negated: *negated,
             }),
-            Expr::Func {
+            ScalarExpr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } => Ok(Expr::Func {
+            } => Ok(ScalarExpr::Func {
                 name: name.clone(),
                 args: args
                     .iter()
@@ -279,22 +294,27 @@ fn resolve_having(
 /// instead of raising an error.
 fn aggregate_join_rows_relaxed(
     engine: &Engine,
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     rows: &[ResultRow],
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     for row in rows {
-        let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+        let ctx = ScalarEvalContext::new(Some(row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&subquery_arena);
         let group_values: Vec<Value> = stmt
             .group_by
             .iter()
-            .map(|g| uqa_sql::expr::eval(g, &ctx))
+            .map(|g| eval_scalar(g, &ctx))
             .collect::<Result<Vec<_>, _>>()?;
         let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
         for (i, expr) in agg_targets.iter().enumerate() {
-            let Expr::Func {
+            let ScalarExpr::Func {
                 name,
                 args,
                 distinct,
@@ -305,7 +325,7 @@ fn aggregate_join_rows_relaxed(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, &ctx)?);
+                let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, &ctx)?);
                 if !keep {
                     continue;
                 }
@@ -333,14 +353,16 @@ fn aggregate_join_rows_relaxed(
             if contains_aggregate(engine, &proj.expr) {
                 let resolved =
                     replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
-                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
+                let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                row.insert(label, eval_scalar(&resolved, &ctx)?);
             } else {
                 if !expr_references_columns(&proj.expr) {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
-                        .with_engine(engine);
-                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                        .with_function_hook(&hook)
+                        .with_subquery_runner(&subquery_arena);
+                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
                     continue;
                 }
                 let mut placed = false;
@@ -361,35 +383,35 @@ fn aggregate_join_rows_relaxed(
     Ok(out)
 }
 
-fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
+fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
-        (Expr::Star, Expr::Star) => true,
-        (Expr::Column(a), Expr::Column(b)) => a == b,
+        (ScalarExpr::Star, ScalarExpr::Star) => true,
+        (ScalarExpr::Column(a), ScalarExpr::Column(b)) => a == b,
         (
-            Expr::QualifiedColumn {
+            ScalarExpr::QualifiedColumn {
                 qualifier: aq,
                 column: ac,
                 ..
             },
-            Expr::QualifiedColumn {
+            ScalarExpr::QualifiedColumn {
                 qualifier: bq,
                 column: bc,
                 ..
             },
         ) => aq == bq && ac == bc,
-        (Expr::Column(c), Expr::QualifiedColumn { column, .. })
-        | (Expr::QualifiedColumn { column, .. }, Expr::Column(c)) => c == column,
-        (Expr::Literal(a), Expr::Literal(b)) => literals_equal(a, b),
-        (Expr::Param(a), Expr::Param(b)) => a == b,
+        (ScalarExpr::Column(c), ScalarExpr::QualifiedColumn { column, .. })
+        | (ScalarExpr::QualifiedColumn { column, .. }, ScalarExpr::Column(c)) => c == column,
+        (ScalarExpr::Literal(a), ScalarExpr::Literal(b)) => literals_equal(a, b),
+        (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
         (
-            Expr::Func {
+            ScalarExpr::Func {
                 name: an,
                 args: aa,
                 distinct: ad,
                 order_by: ao,
                 filter: af,
             },
-            Expr::Func {
+            ScalarExpr::Func {
                 name: bn,
                 args: ba,
                 distinct: bd,
@@ -414,22 +436,22 @@ fn exprs_match(lhs: &Expr, rhs: &Expr) -> bool {
                 }
         }
         (
-            Expr::Binary {
+            ScalarExpr::Binary {
                 op: ao,
                 lhs: al,
                 rhs: ar,
             },
-            Expr::Binary {
+            ScalarExpr::Binary {
                 op: bo,
                 lhs: bl,
                 rhs: br,
             },
         ) => ao == bo && exprs_match(al, bl) && exprs_match(ar, br),
-        (Expr::And(a), Expr::And(b)) | (Expr::Or(a), Expr::Or(b)) => {
+        (ScalarExpr::And(a), ScalarExpr::And(b)) | (ScalarExpr::Or(a), ScalarExpr::Or(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| exprs_match(x, y))
         }
-        (Expr::Not(a), Expr::Not(b)) => exprs_match(a, b),
-        (Expr::Cast { expr: a, ty: at }, Expr::Cast { expr: b, ty: bt }) => {
+        (ScalarExpr::Not(a), ScalarExpr::Not(b)) => exprs_match(a, b),
+        (ScalarExpr::Cast { expr: a, ty: at }, ScalarExpr::Cast { expr: b, ty: bt }) => {
             at == bt && exprs_match(a, b)
         }
         _ => false,
@@ -449,14 +471,14 @@ fn literals_equal(a: &Value, b: &Value) -> bool {
     }
 }
 
-pub(super) fn has_aggregate(engine: &Engine, projections: &[Projection]) -> bool {
+pub(super) fn has_aggregate(engine: &Engine, projections: &[ProjectionPlan]) -> bool {
     projections
         .iter()
         .any(|p| contains_aggregate(engine, &p.expr))
 }
 
-fn is_aggregate(engine: &Engine, expr: &Expr) -> bool {
-    matches!(expr, Expr::Func { name, .. } if matches!(
+fn is_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
+    matches!(expr, ScalarExpr::Func { name, .. } if matches!(
         name.to_ascii_lowercase().as_str(),
         "count"
             | "sum"
@@ -483,7 +505,7 @@ fn is_aggregate(engine: &Engine, expr: &Expr) -> bool {
     ) || engine.has_registered_aggregate_function(name))
 }
 
-fn aggregate_exprs<'a>(engine: &Engine, projections: &'a [Projection]) -> Vec<&'a Expr> {
+fn aggregate_exprs<'a>(engine: &Engine, projections: &'a [ProjectionPlan]) -> Vec<&'a ScalarExpr> {
     let mut out = Vec::new();
     for projection in projections {
         collect_aggregate_exprs(engine, &projection.expr, &mut out);
@@ -491,13 +513,17 @@ fn aggregate_exprs<'a>(engine: &Engine, projections: &'a [Projection]) -> Vec<&'
     out
 }
 
-fn collect_aggregate_exprs<'a>(engine: &Engine, expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+fn collect_aggregate_exprs<'a>(
+    engine: &Engine,
+    expr: &'a ScalarExpr,
+    out: &mut Vec<&'a ScalarExpr>,
+) {
     if is_aggregate(engine, expr) {
         out.push(expr);
         return;
     }
     match expr {
-        Expr::Func { args, filter, .. } => {
+        ScalarExpr::Func { args, filter, .. } => {
             for arg in args {
                 collect_aggregate_exprs(engine, arg, out);
             }
@@ -505,31 +531,31 @@ fn collect_aggregate_exprs<'a>(engine: &Engine, expr: &'a Expr, out: &mut Vec<&'
                 collect_aggregate_exprs(engine, filter, out);
             }
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             for item in items {
                 collect_aggregate_exprs(engine, item, out);
             }
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             collect_aggregate_exprs(engine, lhs, out);
             collect_aggregate_exprs(engine, rhs, out);
         }
-        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
+        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
             collect_aggregate_exprs(engine, inner, out);
         }
-        Expr::IsNull { expr, .. } => collect_aggregate_exprs(engine, expr, out),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::IsNull { expr, .. } => collect_aggregate_exprs(engine, expr, out),
+        ScalarExpr::Between { expr, low, high } => {
             collect_aggregate_exprs(engine, expr, out);
             collect_aggregate_exprs(engine, low, out);
             collect_aggregate_exprs(engine, high, out);
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             collect_aggregate_exprs(engine, expr, out);
             for item in list {
                 collect_aggregate_exprs(engine, item, out);
             }
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -545,19 +571,19 @@ fn collect_aggregate_exprs<'a>(engine: &Engine, expr: &'a Expr, out: &mut Vec<&'
                 collect_aggregate_exprs(engine, else_branch, out);
             }
         }
-        Expr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
-        Expr::Star
-        | Expr::Column(_)
-        | Expr::QualifiedColumn { .. }
-        | Expr::Literal(_)
-        | Expr::Param(_)
-        | Expr::WindowCall { .. }
-        | Expr::ScalarSubquery(_)
-        | Expr::Exists { .. } => {}
+        ScalarExpr::InSubquery { expr, .. } => collect_aggregate_exprs(engine, expr, out),
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::WindowCall { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => {}
     }
 }
 
-fn contains_aggregate(engine: &Engine, expr: &Expr) -> bool {
+fn contains_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
     let mut found = Vec::new();
     collect_aggregate_exprs(engine, expr, &mut found);
     !found.is_empty()
@@ -567,18 +593,18 @@ fn contains_aggregate(engine: &Engine, expr: &Expr) -> bool {
 /// `false` when the expression can reach arbitrary fields (`*`,
 /// subqueries, window calls), in which case callers must materialise
 /// whole documents.
-pub(super) fn collect_expr_columns(expr: &Expr, out: &mut BTreeSet<String>) -> bool {
+pub(super) fn collect_expr_columns(expr: &ScalarExpr, out: &mut BTreeSet<String>) -> bool {
     match expr {
-        Expr::Column(name) => {
+        ScalarExpr::Column(name) => {
             out.insert(name.clone());
             true
         }
-        Expr::QualifiedColumn { column, .. } => {
+        ScalarExpr::QualifiedColumn { column, .. } => {
             out.insert(column.clone());
             true
         }
-        Expr::Literal(_) | Expr::Param(_) => true,
-        Expr::Func {
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Func {
             args,
             filter,
             order_by,
@@ -590,23 +616,25 @@ pub(super) fn collect_expr_columns(expr: &Expr, out: &mut BTreeSet<String>) -> b
                     .is_none_or(|f| collect_expr_columns(f, out))
                 && order_by.iter().all(|o| collect_expr_columns(&o.expr, out))
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             collect_expr_columns(lhs, out) && collect_expr_columns(rhs, out)
         }
-        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => collect_expr_columns(inner, out),
-        Expr::IsNull { expr, .. } => collect_expr_columns(expr, out),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+            collect_expr_columns(inner, out)
+        }
+        ScalarExpr::IsNull { expr, .. } => collect_expr_columns(expr, out),
+        ScalarExpr::Between { expr, low, high } => {
             collect_expr_columns(expr, out)
                 && collect_expr_columns(low, out)
                 && collect_expr_columns(high, out)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             collect_expr_columns(expr, out) && list.iter().all(|i| collect_expr_columns(i, out))
         }
-        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => {
+        ScalarExpr::And(items) | ScalarExpr::Or(items) | ScalarExpr::Array(items) => {
             items.iter().all(|i| collect_expr_columns(i, out))
         }
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -628,35 +656,36 @@ pub(super) fn collect_expr_columns(expr: &Expr, out: &mut BTreeSet<String>) -> b
 /// contributes no columns.
 fn aggregation_column_projection(
     engine: &Engine,
-    stmt: &SelectStmt,
-    agg_targets: &[&Expr],
+    stmt: &QueryBlockPlan,
+    agg_targets: &[&ScalarExpr],
 ) -> Option<BTreeSet<String>> {
-    fn safe_while_document_store_is_borrowed(expr: &Expr) -> bool {
+    fn safe_while_document_store_is_borrowed(expr: &ScalarExpr) -> bool {
         match expr {
-            Expr::Literal(_) | Expr::Param(_) | Expr::Column(_) | Expr::QualifiedColumn { .. } => {
-                true
-            }
-            Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+            ScalarExpr::Literal(_)
+            | ScalarExpr::Param(_)
+            | ScalarExpr::Column(_)
+            | ScalarExpr::QualifiedColumn { .. } => true,
+            ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
                 items.iter().all(safe_while_document_store_is_borrowed)
             }
-            Expr::Binary { lhs, rhs, .. } => {
+            ScalarExpr::Binary { lhs, rhs, .. } => {
                 safe_while_document_store_is_borrowed(lhs)
                     && safe_while_document_store_is_borrowed(rhs)
             }
-            Expr::Not(inner) | Expr::Cast { expr: inner, .. } => {
+            ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
                 safe_while_document_store_is_borrowed(inner)
             }
-            Expr::IsNull { expr, .. } => safe_while_document_store_is_borrowed(expr),
-            Expr::Between { expr, low, high } => {
+            ScalarExpr::IsNull { expr, .. } => safe_while_document_store_is_borrowed(expr),
+            ScalarExpr::Between { expr, low, high } => {
                 safe_while_document_store_is_borrowed(expr)
                     && safe_while_document_store_is_borrowed(low)
                     && safe_while_document_store_is_borrowed(high)
             }
-            Expr::InList { expr, list, .. } => {
+            ScalarExpr::InList { expr, list, .. } => {
                 safe_while_document_store_is_borrowed(expr)
                     && list.iter().all(safe_while_document_store_is_borrowed)
             }
-            Expr::Case {
+            ScalarExpr::Case {
                 base,
                 when,
                 else_branch,
@@ -674,12 +703,12 @@ fn aggregation_column_projection(
             // Functions can re-enter the engine through EngineHook. Keep
             // their evaluation outside the document-store read guard, along
             // with every expression form that already requires whole rows.
-            Expr::Star
-            | Expr::Func { .. }
-            | Expr::WindowCall { .. }
-            | Expr::ScalarSubquery(_)
-            | Expr::Exists { .. }
-            | Expr::InSubquery { .. } => false,
+            ScalarExpr::Star
+            | ScalarExpr::Func { .. }
+            | ScalarExpr::WindowCall { .. }
+            | ScalarExpr::ScalarSubquery(_)
+            | ScalarExpr::Exists { .. }
+            | ScalarExpr::InSubquery { .. } => false,
         }
     }
 
@@ -692,7 +721,7 @@ fn aggregation_column_projection(
         }
     }
     for expr in agg_targets {
-        let Expr::Func {
+        let ScalarExpr::Func {
             name,
             args,
             filter,
@@ -714,7 +743,7 @@ fn aggregation_column_projection(
             return None;
         }
         let count_star =
-            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [Expr::Star]);
+            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [ScalarExpr::Star]);
         if !count_star {
             for arg in args {
                 if !safe_while_document_store_is_borrowed(arg)
@@ -795,12 +824,12 @@ impl ProjectedColumns {
     }
 }
 
-fn projected_group_slots(stmt: &SelectStmt, columns: &ProjectedColumns) -> Option<Vec<usize>> {
+fn projected_group_slots(stmt: &QueryBlockPlan, columns: &ProjectedColumns) -> Option<Vec<usize>> {
     stmt.group_by
         .iter()
         .map(|expr| match expr {
-            Expr::Column(name) => columns.index(name),
-            Expr::QualifiedColumn { column, .. } => columns.index(column),
+            ScalarExpr::Column(name) => columns.index(name),
+            ScalarExpr::QualifiedColumn { column, .. } => columns.index(column),
             _ => None,
         })
         .collect()
@@ -868,12 +897,12 @@ impl ProjectedExpressionValue<'_> {
 }
 
 impl ProjectedExpression {
-    fn compile(expr: &Expr, columns: &ProjectedColumns) -> Option<Self> {
+    fn compile(expr: &ScalarExpr, columns: &ProjectedColumns) -> Option<Self> {
         match expr {
-            Expr::Column(name) => Some(Self::Slot(columns.index(name)?)),
-            Expr::QualifiedColumn { column, .. } => Some(Self::Slot(columns.index(column)?)),
-            Expr::Literal(value) => Some(Self::Literal(value.clone())),
-            Expr::Binary { op, lhs, rhs } => Some(Self::Binary {
+            ScalarExpr::Column(name) => Some(Self::Slot(columns.index(name)?)),
+            ScalarExpr::QualifiedColumn { column, .. } => Some(Self::Slot(columns.index(column)?)),
+            ScalarExpr::Literal(value) => Some(Self::Literal(value.clone())),
+            ScalarExpr::Binary { op, lhs, rhs } => Some(Self::Binary {
                 op: *op,
                 lhs: Box::new(Self::compile(lhs, columns)?),
                 rhs: Box::new(Self::compile(rhs, columns)?),
@@ -901,32 +930,32 @@ impl ProjectedExpression {
 }
 
 impl ProjectedIntegerExpression {
-    fn compile(expr: &Expr, columns: &ProjectedColumns) -> Option<Self> {
+    fn compile(expr: &ScalarExpr, columns: &ProjectedColumns) -> Option<Self> {
         fn emit(
-            expr: &Expr,
+            expr: &ScalarExpr,
             columns: &ProjectedColumns,
             instructions: &mut Vec<ProjectedIntegerInstruction>,
             stack_depth: &mut usize,
             max_stack_depth: &mut usize,
         ) -> Option<()> {
             match expr {
-                Expr::Column(name) => {
+                ScalarExpr::Column(name) => {
                     instructions.push(ProjectedIntegerInstruction::Slot(columns.index(name)?));
                     *stack_depth += 1;
                 }
-                Expr::QualifiedColumn { column, .. } => {
+                ScalarExpr::QualifiedColumn { column, .. } => {
                     instructions.push(ProjectedIntegerInstruction::Slot(columns.index(column)?));
                     *stack_depth += 1;
                 }
-                Expr::Literal(Value::Int(value)) => {
+                ScalarExpr::Literal(Value::Int(value)) => {
                     instructions.push(ProjectedIntegerInstruction::Literal(Some(*value)));
                     *stack_depth += 1;
                 }
-                Expr::Literal(Value::Null) => {
+                ScalarExpr::Literal(Value::Null) => {
                     instructions.push(ProjectedIntegerInstruction::Literal(None));
                     *stack_depth += 1;
                 }
-                Expr::Binary { op, lhs, rhs }
+                ScalarExpr::Binary { op, lhs, rhs }
                     if matches!(
                         op,
                         BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
@@ -1026,13 +1055,13 @@ impl ProjectedIntegerExpression {
 
 fn projected_aggregate_plans(
     engine: &Engine,
-    agg_targets: &[&Expr],
+    agg_targets: &[&ScalarExpr],
     columns: &ProjectedColumns,
 ) -> Vec<ProjectedAggregatePlan> {
     agg_targets
         .iter()
         .map(|expr| {
-            let Expr::Func {
+            let ScalarExpr::Func {
                 name,
                 args,
                 distinct,
@@ -1046,21 +1075,23 @@ fn projected_aggregate_plans(
                 return ProjectedAggregatePlan::General(ProjectedAggregateInput::Evaluate);
             }
             let input = if name.eq_ignore_ascii_case("count")
-                && (args.is_empty() || matches!(args.as_slice(), [Expr::Star]))
+                && (args.is_empty() || matches!(args.as_slice(), [ScalarExpr::Star]))
             {
                 ProjectedAggregateInput::CountOne
             } else if is_ordered_set_aggregate(name) || is_json_object_aggregate(name) {
                 ProjectedAggregateInput::Evaluate
             } else {
                 match args.first() {
-                    Some(Expr::Column(name)) => columns.index(name).map_or(
+                    Some(ScalarExpr::Column(name)) => columns.index(name).map_or(
                         ProjectedAggregateInput::Evaluate,
                         ProjectedAggregateInput::Slot,
                     ),
-                    Some(Expr::QualifiedColumn { column, .. }) => columns.index(column).map_or(
-                        ProjectedAggregateInput::Evaluate,
-                        ProjectedAggregateInput::Slot,
-                    ),
+                    Some(ScalarExpr::QualifiedColumn { column, .. }) => {
+                        columns.index(column).map_or(
+                            ProjectedAggregateInput::Evaluate,
+                            ProjectedAggregateInput::Slot,
+                        )
+                    }
                     Some(expr) => ProjectedExpression::compile(expr, columns).map_or(
                         ProjectedAggregateInput::Evaluate,
                         |general| ProjectedAggregateInput::Expression {
@@ -1103,19 +1134,25 @@ impl RowLookup for ProjectedRow<'_> {
 /// fields through two whole-result maps. Known column projections are
 /// visited in doc-id order and folded immediately; only expressions
 /// that cannot declare their columns retain the whole-document fallback.
+struct AggregateRuntime<'a> {
+    params: &'a [SQLParam],
+    function_hook: &'a dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &'a dyn ScalarSubqueryRunner,
+}
+
 fn accumulate_table_rows(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
-    stmt: &SelectStmt,
-    agg_targets: &[&Expr],
+    stmt: &QueryBlockPlan,
+    agg_targets: &[&ScalarExpr],
     groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    params: &[SQLParam],
+    runtime: &AggregateRuntime<'_>,
 ) -> Result<(), SQLError> {
     if !aggregation_needs_documents(stmt, agg_targets) {
         let empty_document = Document::new();
         for _ in scored {
-            accumulate_document(engine, stmt, agg_targets, groups, &empty_document, params)?;
+            accumulate_document(engine, stmt, agg_targets, groups, &empty_document, runtime)?;
         }
         return Ok(());
     }
@@ -1137,7 +1174,9 @@ fn accumulate_table_rows(
                         columns: &columns,
                         values,
                     };
-                    let ctx = EvalContext::from_row_lookup(&row, params).with_engine(engine);
+                    let ctx = ScalarEvalContext::from_row_lookup(&row, runtime.params)
+                        .with_function_hook(runtime.function_hook)
+                        .with_subquery_runner(runtime.subquery_runner);
                     let result = match group_slots.as_deref() {
                         Some(slots) => accumulate_projected_context(
                             engine,
@@ -1170,7 +1209,7 @@ fn accumulate_table_rows(
         Some(_) => {
             let empty_document = Document::new();
             for _ in scored {
-                accumulate_document(engine, stmt, agg_targets, groups, &empty_document, params)?;
+                accumulate_document(engine, stmt, agg_targets, groups, &empty_document, runtime)?;
             }
             Ok(())
         }
@@ -1179,7 +1218,7 @@ fn accumulate_table_rows(
             let empty_document = Document::new();
             for entry in scored {
                 let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
-                accumulate_document(engine, stmt, agg_targets, groups, document, params)?;
+                accumulate_document(engine, stmt, agg_targets, groups, document, runtime)?;
             }
             Ok(())
         }
@@ -1188,27 +1227,29 @@ fn accumulate_table_rows(
 
 fn accumulate_document(
     engine: &Engine,
-    stmt: &SelectStmt,
-    agg_targets: &[&Expr],
+    stmt: &QueryBlockPlan,
+    agg_targets: &[&ScalarExpr],
     groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
     document: &Document,
-    params: &[SQLParam],
+    runtime: &AggregateRuntime<'_>,
 ) -> Result<(), SQLError> {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(document), params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(Some(document), runtime.params)
+        .with_function_hook(runtime.function_hook)
+        .with_subquery_runner(runtime.subquery_runner);
     accumulate_context(engine, stmt, agg_targets, groups, &ctx)
 }
 
 fn accumulate_context(
     engine: &Engine,
-    stmt: &SelectStmt,
-    agg_targets: &[&Expr],
+    stmt: &QueryBlockPlan,
+    agg_targets: &[&ScalarExpr],
     groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    ctx: &EvalContext<'_>,
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     let group_values: Vec<Value> = stmt
         .group_by
         .iter()
-        .map(|group| uqa_sql::expr::eval(group, ctx))
+        .map(|group| eval_scalar(group, ctx))
         .collect::<Result<Vec<_>, _>>()?;
     let bucket = group_bucket(engine, groups, group_values, agg_targets)?;
     observe_aggregate_targets(bucket, agg_targets, ctx)
@@ -1302,13 +1343,13 @@ fn fingerprint_value(fingerprint: &mut u64, value: &Value) {
 )]
 fn accumulate_projected_context(
     engine: &Engine,
-    agg_targets: &[&Expr],
+    agg_targets: &[&ScalarExpr],
     groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
     group_key_cache: &mut ProjectedGroupCache,
     aggregate_plans: &[ProjectedAggregatePlan],
     values: &[&Value],
     group_slots: &[usize],
-    ctx: &EvalContext<'_>,
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     // A global aggregate has one empty-key bucket. The one-entry B-tree
     // lookup is cheaper than fingerprinting and probing the bounded cache.
@@ -1393,10 +1434,10 @@ fn accumulate_projected_context(
 
 fn observe_projected_aggregate_targets(
     bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
-    agg_targets: &[&Expr],
+    agg_targets: &[&ScalarExpr],
     aggregate_plans: &[ProjectedAggregatePlan],
     values: &[&Value],
-    ctx: &EvalContext<'_>,
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     for (index, plan) in aggregate_plans.iter().enumerate() {
         let ProjectedAggregatePlan::General(input) = plan else {
@@ -1440,7 +1481,7 @@ fn observe_projected_aggregate_targets(
                 "projected aggregate plan lost its expression".into(),
             ));
         };
-        let Expr::Func {
+        let ScalarExpr::Func {
             name,
             args,
             distinct,
@@ -1451,7 +1492,7 @@ fn observe_projected_aggregate_targets(
             continue;
         };
         if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, ctx)?);
+            let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, ctx)?);
             if !keep {
                 continue;
             }
@@ -1494,11 +1535,11 @@ fn observe_projected_aggregate_targets(
 
 fn observe_aggregate_targets(
     bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
-    agg_targets: &[&Expr],
-    ctx: &EvalContext<'_>,
+    agg_targets: &[&ScalarExpr],
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     for (index, expr) in agg_targets.iter().enumerate() {
-        let Expr::Func {
+        let ScalarExpr::Func {
             name,
             args,
             distinct,
@@ -1509,7 +1550,7 @@ fn observe_aggregate_targets(
             continue;
         };
         if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, ctx)?);
+            let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, ctx)?);
             if !keep {
                 continue;
             }
@@ -1523,12 +1564,12 @@ fn observe_aggregate_targets(
 /// `count(*)` (with no column-referencing FILTER) and literal-argument
 /// aggregates can run on doc ids alone, which turns `SELECT count(*)
 /// FROM t` into a no-fetch pass over the match list.
-fn aggregation_needs_documents(stmt: &SelectStmt, agg_targets: &[&Expr]) -> bool {
+fn aggregation_needs_documents(stmt: &QueryBlockPlan, agg_targets: &[&ScalarExpr]) -> bool {
     if stmt.group_by.iter().any(expr_references_columns) {
         return true;
     }
     agg_targets.iter().any(|expr| {
-        let Expr::Func {
+        let ScalarExpr::Func {
             name,
             args,
             filter,
@@ -1539,38 +1580,40 @@ fn aggregation_needs_documents(stmt: &SelectStmt, agg_targets: &[&Expr]) -> bool
             return expr_references_columns(expr);
         };
         let count_star =
-            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [Expr::Star]);
+            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [ScalarExpr::Star]);
         (!count_star && args.iter().any(expr_references_columns))
             || filter.as_deref().is_some_and(expr_references_columns)
             || order_by.iter().any(|o| expr_references_columns(&o.expr))
     })
 }
 
-fn expr_references_columns(expr: &Expr) -> bool {
+fn expr_references_columns(expr: &ScalarExpr) -> bool {
     match expr {
-        Expr::Star | Expr::Column(_) | Expr::QualifiedColumn { .. } => true,
-        Expr::Func { args, filter, .. } => {
+        ScalarExpr::Star | ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => true,
+        ScalarExpr::Func { args, filter, .. } => {
             args.iter().any(expr_references_columns)
                 || filter.as_deref().is_some_and(expr_references_columns)
         }
-        Expr::Array(items) | Expr::And(items) | Expr::Or(items) => {
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(expr_references_columns)
         }
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             expr_references_columns(lhs) || expr_references_columns(rhs)
         }
-        Expr::Not(inner) | Expr::Cast { expr: inner, .. } => expr_references_columns(inner),
-        Expr::IsNull { expr, .. } => expr_references_columns(expr),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
+            expr_references_columns(inner)
+        }
+        ScalarExpr::IsNull { expr, .. } => expr_references_columns(expr),
+        ScalarExpr::Between { expr, low, high } => {
             expr_references_columns(expr)
                 || expr_references_columns(low)
                 || expr_references_columns(high)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             expr_references_columns(expr) || list.iter().any(expr_references_columns)
         }
-        Expr::WindowCall { args, .. } => args.iter().any(expr_references_columns),
-        Expr::Case {
+        ScalarExpr::WindowCall { args, .. } => args.iter().any(expr_references_columns),
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
@@ -1581,20 +1624,20 @@ fn expr_references_columns(expr: &Expr) -> bool {
                 })
                 || else_branch.as_deref().is_some_and(expr_references_columns)
         }
-        Expr::InSubquery { expr, .. } => expr_references_columns(expr),
-        Expr::ScalarSubquery(_) | Expr::Exists { .. } => true,
-        Expr::Literal(_) | Expr::Param(_) => false,
+        ScalarExpr::InSubquery { expr, .. } => expr_references_columns(expr),
+        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => true,
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
     }
 }
 
-fn group_context_row(stmt: &SelectStmt, group_values: &[Value]) -> ResultRow {
+fn group_context_row(stmt: &QueryBlockPlan, group_values: &[Value]) -> ResultRow {
     let mut row = ResultRow::new();
     for (expr, value) in stmt.group_by.iter().zip(group_values) {
         match expr {
-            Expr::Column(column) => {
+            ScalarExpr::Column(column) => {
                 row.insert(column.clone(), value.clone());
             }
-            Expr::QualifiedColumn {
+            ScalarExpr::QualifiedColumn {
                 qualifier,
                 column,
                 key,
@@ -1614,28 +1657,30 @@ fn group_context_row(stmt: &SelectStmt, group_values: &[Value]) -> ResultRow {
 
 fn replace_aggregates_with_values(
     engine: &Engine,
-    expr: &Expr,
+    expr: &ScalarExpr,
     accs: &[AggregateAccumulator],
     cursor: &mut usize,
-) -> Result<Expr, SQLError> {
+) -> Result<ScalarExpr, SQLError> {
     if is_aggregate(engine, expr) {
-        let Expr::Func { name, args, .. } = expr else {
+        let ScalarExpr::Func { name, args, .. } = expr else {
             return Err(SQLError::Internal("aggregate expr lost".into()));
         };
         let Some(acc) = accs.get(*cursor) else {
             return Err(SQLError::Internal("aggregate accumulator missing".into()));
         };
         *cursor += 1;
-        return Ok(Expr::Literal(aggregate_value_with_args(name, acc, args)?));
+        return Ok(ScalarExpr::Literal(aggregate_value_with_args(
+            name, acc, args,
+        )?));
     }
     match expr {
-        Expr::Func {
+        ScalarExpr::Func {
             name,
             args,
             distinct,
             order_by,
             filter,
-        } => Ok(Expr::Func {
+        } => Ok(ScalarExpr::Func {
             name: name.clone(),
             args: args
                 .iter()
@@ -1650,46 +1695,46 @@ fn replace_aggregates_with_values(
                 })
                 .transpose()?,
         }),
-        Expr::Array(items) => Ok(Expr::Array(
+        ScalarExpr::Array(items) => Ok(ScalarExpr::Array(
             items
                 .iter()
                 .map(|item| replace_aggregates_with_values(engine, item, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        Expr::Binary { op, lhs, rhs } => Ok(Expr::Binary {
+        ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
             op: *op,
             lhs: Box::new(replace_aggregates_with_values(engine, lhs, accs, cursor)?),
             rhs: Box::new(replace_aggregates_with_values(engine, rhs, accs, cursor)?),
         }),
-        Expr::Not(inner) => Ok(Expr::Not(Box::new(replace_aggregates_with_values(
+        ScalarExpr::Not(inner) => Ok(ScalarExpr::Not(Box::new(replace_aggregates_with_values(
             engine, inner, accs, cursor,
         )?))),
-        Expr::And(parts) => Ok(Expr::And(
+        ScalarExpr::And(parts) => Ok(ScalarExpr::And(
             parts
                 .iter()
                 .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        Expr::Or(parts) => Ok(Expr::Or(
+        ScalarExpr::Or(parts) => Ok(ScalarExpr::Or(
             parts
                 .iter()
                 .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        Expr::IsNull { expr, negated } => Ok(Expr::IsNull {
+        ScalarExpr::IsNull { expr, negated } => Ok(ScalarExpr::IsNull {
             expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             negated: *negated,
         }),
-        Expr::Between { expr, low, high } => Ok(Expr::Between {
+        ScalarExpr::Between { expr, low, high } => Ok(ScalarExpr::Between {
             expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             low: Box::new(replace_aggregates_with_values(engine, low, accs, cursor)?),
             high: Box::new(replace_aggregates_with_values(engine, high, accs, cursor)?),
         }),
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
-        } => Ok(Expr::InList {
+        } => Ok(ScalarExpr::InList {
             expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             list: list
                 .iter()
@@ -1697,11 +1742,11 @@ fn replace_aggregates_with_values(
                 .collect::<Result<Vec<_>, _>>()?,
             negated: *negated,
         }),
-        Expr::Case {
+        ScalarExpr::Case {
             base,
             when,
             else_branch,
-        } => Ok(Expr::Case {
+        } => Ok(ScalarExpr::Case {
             base: base
                 .as_deref()
                 .map(|base| {
@@ -1724,17 +1769,17 @@ fn replace_aggregates_with_values(
                 })
                 .transpose()?,
         }),
-        Expr::Cast { expr, ty } => Ok(Expr::Cast {
+        ScalarExpr::Cast { expr, ty } => Ok(ScalarExpr::Cast {
             expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
             ty: ty.clone(),
         }),
-        Expr::InSubquery {
+        ScalarExpr::InSubquery {
             expr,
-            body,
+            subquery,
             negated,
-        } => Ok(Expr::InSubquery {
+        } => Ok(ScalarExpr::InSubquery {
             expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
-            body: body.clone(),
+            subquery: *subquery,
             negated: *negated,
         }),
         other => Ok(other.clone()),
@@ -1743,11 +1788,12 @@ fn replace_aggregates_with_values(
 
 fn aggregate_input_value(
     name: &str,
-    args: &[Expr],
-    order_by: &[OrderBy],
-    ctx: &EvalContext<'_>,
+    args: &[ScalarExpr],
+    order_by: &[ScalarOrder],
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
-    if name.eq_ignore_ascii_case("count") && (args.is_empty() || matches!(args, [Expr::Star])) {
+    if name.eq_ignore_ascii_case("count") && (args.is_empty() || matches!(args, [ScalarExpr::Star]))
+    {
         return Ok(Value::Int(1));
     }
     // Ordered-set aggregates: the percentile / mode fraction is a
@@ -1757,18 +1803,18 @@ fn aggregate_input_value(
     if is_ordered_set_aggregate(name) {
         return order_by
             .first()
-            .map(|ob| uqa_sql::expr::eval(&ob.expr, ctx))
+            .map(|ob| eval_scalar(&ob.expr, ctx))
             .transpose()
             .map(|v| v.unwrap_or(Value::Null));
     }
     if is_json_object_aggregate(name) {
         return match args {
             [key_expr, value_expr] => {
-                let key = uqa_sql::expr::eval(key_expr, ctx)?;
+                let key = eval_scalar(key_expr, ctx)?;
                 if matches!(key, Value::Null) {
                     return Ok(Value::Null);
                 }
-                let value = uqa_sql::expr::eval(value_expr, ctx)?;
+                let value = eval_scalar(value_expr, ctx)?;
                 Ok(Value::List(vec![key, value]))
             }
             _ => Err(SQLError::TypeMismatch(format!(
@@ -1778,7 +1824,7 @@ fn aggregate_input_value(
     }
     if is_json_array_aggregate(name) {
         return match args {
-            [arg] => uqa_sql::expr::eval(arg, ctx),
+            [arg] => eval_scalar(arg, ctx),
             _ => Err(SQLError::TypeMismatch(format!(
                 "{name} requires 1 argument"
             ))),
@@ -1787,29 +1833,34 @@ fn aggregate_input_value(
     let arg = args
         .first()
         .ok_or_else(|| SQLError::Internal("aggregate missing arg".into()))?;
-    uqa_sql::expr::eval(arg, ctx)
+    eval_scalar(arg, ctx)
 }
 
-fn aggregate_input_values(args: &[Expr], ctx: &EvalContext<'_>) -> Result<Vec<Value>, SQLError> {
+fn aggregate_input_values(
+    args: &[ScalarExpr],
+    ctx: &ScalarEvalContext<'_>,
+) -> Result<Vec<Value>, SQLError> {
     args.iter()
         .map(|arg| match arg {
-            Expr::Star => Ok(Value::Int(1)),
-            other => uqa_sql::expr::eval(other, ctx),
+            ScalarExpr::Star => Ok(Value::Int(1)),
+            other => eval_scalar(other, ctx),
         })
         .collect()
 }
 
 fn new_aggregate_accumulators(
     engine: &Engine,
-    agg_targets: &[&Expr],
+    agg_targets: &[&ScalarExpr],
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
     agg_targets
         .iter()
         .map(|expr| match expr {
-            Expr::Func { name, .. } => Ok(engine.registered_aggregate_function(name).map_or_else(
-                || AggregateAccumulator::builtin(name),
-                AggregateAccumulator::registered,
-            )),
+            ScalarExpr::Func { name, .. } => {
+                Ok(engine.registered_aggregate_function(name).map_or_else(
+                    || AggregateAccumulator::builtin(name),
+                    AggregateAccumulator::registered,
+                ))
+            }
             _ => Ok(AggregateAccumulator::default()),
         })
         .collect()
@@ -1819,7 +1870,7 @@ fn group_bucket<'a>(
     engine: &Engine,
     groups: &'a mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
     group_values: Vec<Value>,
-    agg_targets: &[&Expr],
+    agg_targets: &[&ScalarExpr],
 ) -> Result<&'a mut (Vec<AggregateAccumulator>, Vec<Value>), SQLError> {
     use std::collections::btree_map::Entry;
 
@@ -1835,10 +1886,10 @@ fn group_bucket<'a>(
 fn observe_aggregate(
     acc: &mut AggregateAccumulator,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     distinct: bool,
-    order_by: &[OrderBy],
-    ctx: &EvalContext<'_>,
+    order_by: &[ScalarOrder],
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     if acc.registered.is_some() {
         let values = aggregate_input_values(args, ctx)?;
@@ -1850,7 +1901,7 @@ fn observe_aggregate(
         }
         let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
         for ob in order_by {
-            let v = uqa_sql::expr::eval(&ob.expr, ctx)?;
+            let v = eval_scalar(&ob.expr, ctx)?;
             sort_keys.push((v, ob.descending));
         }
         acc.observe_registered(values, sort_keys)?;
@@ -1866,8 +1917,8 @@ fn observe_builtin_aggregate_value(
     name: &str,
     value: &Value,
     distinct: bool,
-    order_by: &[OrderBy],
-    ctx: &EvalContext<'_>,
+    order_by: &[ScalarOrder],
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     let preserves_null_inputs = is_json_array_aggregate(name);
     if distinct && (preserves_null_inputs || !matches!(value, Value::Null)) {
@@ -1878,7 +1929,7 @@ fn observe_builtin_aggregate_value(
     }
     let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
     for ob in order_by {
-        let v = uqa_sql::expr::eval(&ob.expr, ctx)?;
+        let v = eval_scalar(&ob.expr, ctx)?;
         sort_keys.push((v, ob.descending));
     }
     if preserves_null_inputs {
@@ -2595,8 +2646,9 @@ pub(super) fn build_aggregate_rows(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
     // GROUPING SETS / ROLLUP / CUBE: run the aggregator per set, then
     // mask out columns not in the active set with NULL.
@@ -2607,7 +2659,7 @@ pub(super) fn build_aggregate_rows(
             let mut sub = stmt.clone();
             sub.group_by.clone_from(set);
             sub.grouping_sets = Vec::new();
-            let part = build_aggregate_rows_relaxed(engine, table, scored, &sub, params)?;
+            let part = build_aggregate_rows_relaxed(engine, table, scored, &sub, params, ctes)?;
             for mut row in part {
                 for (idx, proj) in stmt.projections.iter().enumerate() {
                     let label = labels[idx].clone();
@@ -2624,10 +2676,17 @@ pub(super) fn build_aggregate_rows(
         }
         return Ok(combined);
     }
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
     // group_key -> per-aggregate accumulator vector + the raw group key
     // values used to project the GROUP BY columns.
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
+    let runtime = AggregateRuntime {
+        params,
+        function_hook: &hook,
+        subquery_runner: &subquery_arena,
+    };
 
     accumulate_table_rows(
         engine,
@@ -2636,7 +2695,7 @@ pub(super) fn build_aggregate_rows(
         stmt,
         &agg_targets,
         &mut groups,
-        params,
+        &runtime,
     )?;
 
     if groups.is_empty() && stmt.group_by.is_empty() {
@@ -2662,14 +2721,16 @@ pub(super) fn build_aggregate_rows(
             if contains_aggregate(engine, &proj.expr) {
                 let resolved =
                     replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
-                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
+                let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                row.insert(label, eval_scalar(&resolved, &ctx)?);
             } else {
                 if !expr_references_columns(&proj.expr) {
-                    let ctx = uqa_sql::expr::EvalContext::new(Some(&group_row), params)
-                        .with_engine(engine);
-                    row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
+                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                        .with_function_hook(&hook)
+                        .with_subquery_runner(&subquery_arena);
+                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
                     continue;
                 }
                 // Match a non-aggregate projection against the GROUP BY
@@ -2706,9 +2767,10 @@ pub(super) fn build_aggregate_rows(
             for (key, value) in &row {
                 having_row.insert(key.clone(), value.clone());
             }
-            let ctx =
-                uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
-            let kept = uqa_sql::expr::truthy(&uqa_sql::expr::eval(&resolved, &ctx)?);
+            let ctx = ScalarEvalContext::new(Some(&having_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&subquery_arena);
+            let kept = uqa_sql::expr::truthy(&eval_scalar(&resolved, &ctx)?);
             if !kept {
                 continue;
             }
@@ -2726,11 +2788,19 @@ fn build_aggregate_rows_relaxed(
     engine: &Engine,
     table: &str,
     scored: &[ScoredEntry],
-    stmt: &SelectStmt,
+    stmt: &QueryBlockPlan,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
     let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
     let agg_targets = aggregate_exprs(engine, &stmt.projections);
+    let runtime = AggregateRuntime {
+        params,
+        function_hook: &hook,
+        subquery_runner: &subquery_arena,
+    };
     accumulate_table_rows(
         engine,
         table,
@@ -2738,7 +2808,7 @@ fn build_aggregate_rows_relaxed(
         stmt,
         &agg_targets,
         &mut groups,
-        params,
+        &runtime,
     )?;
     if groups.is_empty() && stmt.group_by.is_empty() {
         groups.insert(
@@ -2760,17 +2830,19 @@ fn build_aggregate_rows_relaxed(
             if contains_aggregate(engine, &proj.expr) {
                 let resolved =
                     replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
-                row.insert(label, uqa_sql::expr::eval(&resolved, &ctx)?);
+                let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                row.insert(label, eval_scalar(&resolved, &ctx)?);
             } else if !expr_references_columns(&proj.expr) {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(&group_row), params).with_engine(engine);
-                row.insert(label, uqa_sql::expr::eval(&proj.expr, &ctx)?);
-            } else if let Expr::Column(col) = &proj.expr {
+                let ctx = ScalarEvalContext::new(Some(&group_row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                row.insert(label, eval_scalar(&proj.expr, &ctx)?);
+            } else if let ScalarExpr::Column(col) = &proj.expr {
                 let mut placed = false;
                 for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if let Expr::Column(g_col) = g_expr {
+                    if let ScalarExpr::Column(g_col) = g_expr {
                         if g_col == col {
                             row.insert(label.clone(), g_value.clone());
                             placed = true;
@@ -2799,7 +2871,7 @@ pub(super) fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Result<
 fn aggregate_value_with_args(
     name: &str,
     acc: &AggregateAccumulator,
-    args: &[Expr],
+    args: &[ScalarExpr],
 ) -> Result<Value, SQLError> {
     if let Some(value) = acc.registered_value() {
         return value;
@@ -2847,7 +2919,7 @@ fn aggregate_value_with_args(
             }
             // Separator: literal second positional arg, or empty.
             let sep = match args.get(1) {
-                Some(Expr::Literal(Value::Str(s))) => s.clone(),
+                Some(ScalarExpr::Literal(Value::Str(s))) => s.clone(),
                 _ => String::new(),
             };
             let parts: Vec<String> = ordered_values
@@ -2954,11 +3026,11 @@ fn aggregate_value_with_args(
     Ok(value)
 }
 
-fn percentile_fraction(args: &[Expr]) -> f64 {
+fn percentile_fraction(args: &[ScalarExpr]) -> f64 {
     match args.first() {
-        Some(Expr::Literal(Value::Float(f))) => *f,
-        Some(Expr::Literal(Value::Int(n))) => *n as f64,
-        Some(Expr::Literal(Value::Decimal(d))) => d.to_f64().unwrap_or(0.5),
+        Some(ScalarExpr::Literal(Value::Float(f))) => *f,
+        Some(ScalarExpr::Literal(Value::Int(n))) => *n as f64,
+        Some(ScalarExpr::Literal(Value::Decimal(d))) => d.to_f64().unwrap_or(0.5),
         _ => 0.5,
     }
 }
@@ -3084,15 +3156,15 @@ fn mode_value(values: &[Value]) -> Value {
 /// Compute a projection's output column name. `PostgreSQL` reports
 /// standalone expressions as `?column?`; `projection_columns` adds a
 /// suffix when the row map needs unique keys.
-pub(super) fn projection_label_at(proj: &Projection) -> String {
+pub(super) fn projection_label_at(proj: &ProjectionPlan) -> String {
     if let Some(a) = &proj.alias {
         return a.clone();
     }
     match &proj.expr {
-        Expr::Column(c) => c.clone(),
-        Expr::QualifiedColumn { column, .. } => column.clone(),
-        Expr::Star => "*".into(),
-        Expr::Func { name, .. } => name.clone(),
+        ScalarExpr::Column(c) => c.clone(),
+        ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
+        ScalarExpr::Star => "*".into(),
+        ScalarExpr::Func { name, .. } => name.clone(),
         _ => "?column?".into(),
     }
 }
@@ -3124,9 +3196,15 @@ mod tests {
         let uqa_sql::ast::Statement::Select(stmt) = statements.remove(0) else {
             panic!("expected SELECT");
         };
-        let agg_targets = aggregate_exprs(&engine, &stmt.projections);
+        let plan = uqa_planner::QueryPlan::lower_with(*stmt, &|name: &str| {
+            engine.has_registered_aggregate_function(name)
+        });
+        let uqa_planner::RelationalPlan::QueryBlock(block) = &plan.root else {
+            panic!("expected query block");
+        };
+        let agg_targets = aggregate_exprs(&engine, &block.projections);
 
-        assert!(aggregation_column_projection(&engine, &stmt, &agg_targets).is_none());
+        assert!(aggregation_column_projection(&engine, block, &agg_targets).is_none());
     }
 
     #[test]
@@ -3267,18 +3345,18 @@ mod tests {
     #[test]
     fn projected_expression_reuses_sql_binary_semantics() {
         let columns = ProjectedColumns::new(vec!["discount".into(), "price".into()]);
-        let expression = Expr::Binary {
+        let expression = ScalarExpr::Binary {
             op: BinaryOp::Divide,
-            lhs: Box::new(Expr::Binary {
+            lhs: Box::new(ScalarExpr::Binary {
                 op: BinaryOp::Multiply,
-                lhs: Box::new(Expr::Column("price".into())),
-                rhs: Box::new(Expr::Binary {
+                lhs: Box::new(ScalarExpr::Column("price".into())),
+                rhs: Box::new(ScalarExpr::Binary {
                     op: BinaryOp::Subtract,
-                    lhs: Box::new(Expr::Literal(Value::Int(100))),
-                    rhs: Box::new(Expr::Column("discount".into())),
+                    lhs: Box::new(ScalarExpr::Literal(Value::Int(100))),
+                    rhs: Box::new(ScalarExpr::Column("discount".into())),
                 }),
             }),
-            rhs: Box::new(Expr::Literal(Value::Int(100))),
+            rhs: Box::new(ScalarExpr::Literal(Value::Int(100))),
         };
         let plan = ProjectedExpression::compile(&expression, &columns).unwrap();
         let discount = Value::Int(10);

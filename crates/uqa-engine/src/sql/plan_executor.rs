@@ -4,93 +4,63 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine implementation of the exhaustive unified SQL plan driver.
+//! Exhaustive physical executor for the unified SQL plan.
 
 use uqa_core::Value;
 use uqa_planner::{
-    CommandPlan, CtePlan, ExpressionPlan, QueryPlan, SourcePlan, UnifiedPlan, UnifiedPlanDriver,
-    UnifiedPlanExecutor,
+    CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
+    UpdatePlan,
 };
-use uqa_sql::ast::{
-    CreateForeignServer, CreateForeignTable, DeleteStmt, InsertStmt, MergeStmt, SelectStmt,
-    UpdateStmt,
-};
-use uqa_sql::expr::{eval, EvalContext};
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult, Statement};
+use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
+use super::scalar::{eval_physical, eval_physical_call_arguments, PhysicalEvalContext};
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
     run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
     run_merge, run_update, select, Engine,
 };
 
-pub(super) struct EngineUnifiedPlanDriver<'engine, 'params> {
+/// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
+/// and prepared-plan execution all enter through this exhaustive dispatcher;
+/// leaf executors never choose a second top-level SQL path.
+pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     engine: &'engine Engine,
     params: &'params [SQLParam],
 }
 
-impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
+impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     pub(super) fn new(engine: &'engine Engine, params: &'params [SQLParam]) -> Self {
         Self { engine, params }
+    }
+
+    pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
+        self.engine.cancellation_token().check()?;
+        match plan {
+            UnifiedPlan::Query(query) => self.execute_query(query),
+            UnifiedPlan::Command(command) => self.execute_command(command),
+        }
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
         select::execute_query_plan(self.engine, query, self.params)
     }
 
-    fn execute_insert(
-        &self,
-        statement: &InsertStmt,
-        source: Option<&QueryPlan>,
-        expressions: &[ExpressionPlan],
-    ) -> Result<SQLResult, SQLError> {
-        run_insert(
-            self.engine,
-            statement.clone(),
-            source.cloned(),
-            expressions.to_vec(),
-            self.params,
-        )
+    fn execute_insert(&self, plan: &InsertPlan) -> Result<SQLResult, SQLError> {
+        run_insert(self.engine, plan.clone(), self.params)
     }
 
-    fn execute_update(
-        &self,
-        statement: &UpdateStmt,
-        ctes: &[CtePlan],
-        source: Option<&SourcePlan>,
-        expressions: &[ExpressionPlan],
-    ) -> Result<SQLResult, SQLError> {
-        run_update(
-            self.engine,
-            statement.clone(),
-            ctes.to_vec(),
-            source.cloned(),
-            expressions.to_vec(),
-            self.params,
-        )
+    fn execute_update(&self, plan: &UpdatePlan) -> Result<SQLResult, SQLError> {
+        run_update(self.engine, plan.clone(), self.params)
     }
 
-    fn execute_delete(
-        &self,
-        statement: &DeleteStmt,
-        ctes: &[CtePlan],
-        source: Option<&SourcePlan>,
-        expressions: &[ExpressionPlan],
-    ) -> Result<SQLResult, SQLError> {
-        run_delete(
-            self.engine,
-            statement.clone(),
-            ctes.to_vec(),
-            source.cloned(),
-            expressions.to_vec(),
-            self.params,
-        )
+    fn execute_delete(&self, plan: &DeletePlan) -> Result<SQLResult, SQLError> {
+        run_delete(self.engine, plan.clone(), self.params)
     }
 
     fn execute_create_view(
         &self,
         name: &str,
-        definition: &SelectStmt,
         query: &QueryPlan,
         or_replace: bool,
     ) -> Result<SQLResult, SQLError> {
@@ -99,13 +69,12 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
                 "CREATE VIEW: relation `{name}` already exists as a table"
             )));
         }
-        if !or_replace && self.engine.view(name).is_some() {
+        if !or_replace && self.engine.view_plan(name).is_some() {
             return Err(SQLError::Unsupported(format!(
                 "CREATE VIEW: relation `{name}` already exists"
             )));
         }
-        self.engine
-            .register_view_plan(name, definition.clone(), query.clone());
+        self.engine.register_view_plan(name, query.clone());
         Ok(SQLResult::empty())
     }
 
@@ -123,23 +92,7 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
     }
 
     fn execute_explain(&self, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
-        match body {
-            UnifiedPlan::Query(query) => {
-                let statement = query.physical_select().ok_or_else(|| {
-                    SQLError::Internal("EXPLAIN query has no physical SELECT carrier".into())
-                })?;
-                run_explain(
-                    self.engine,
-                    Statement::Select(Box::new(statement)),
-                    self.params,
-                )
-            }
-            UnifiedPlan::Command(command) => {
-                let mut row = ResultRow::new();
-                row.insert("plan".into(), Value::Str(command.name().to_string()));
-                Ok(SQLResult::from_rows(vec!["plan".into()], vec![row]))
-            }
-        }
+        run_explain(self.engine, body, self.params)
     }
 
     fn execute_truncate(&self, tables: &[String]) -> Result<SQLResult, SQLError> {
@@ -154,19 +107,14 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
         Ok(SQLResult::empty())
     }
 
-    fn execute_prepare(
-        &self,
-        name: &str,
-        definition: &Statement,
-        body: &UnifiedPlan,
-    ) -> Result<SQLResult, SQLError> {
+    fn execute_prepare(&self, name: &str, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
         if self.engine.lookup_prepared(name).is_some() {
             return Err(SQLError::Unsupported(format!(
                 "Prepared statement `{name}` already exists"
             )));
         }
         self.engine
-            .register_prepared_plan(name.to_string(), definition.clone(), body.clone());
+            .register_prepared_plan(name.to_string(), body.clone());
         Ok(SQLResult::empty())
     }
 
@@ -178,18 +126,16 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
         let plan = self.engine.lookup_prepared(name).ok_or_else(|| {
             SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
         })?;
-        let mut scope = select::CteScope::new();
-        for expression in params {
-            scope.install_expression_plan(expression);
-        }
+        let scope = select::CteScope::new();
         let hook = select::ScopedEngineHook::new(self.engine, &scope);
-        let context = EvalContext::new(None, self.params).with_engine(&hook);
+        let context = PhysicalEvalContext::new(None, self.params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
         let bound: Vec<SQLParam> = params
             .iter()
-            .map(|expression| eval(&expression.expression, &context).map(SQLParam::Scalar))
+            .map(|expression| eval_physical(expression, &context).map(SQLParam::Scalar))
             .collect::<Result<_, _>>()?;
-        let driver = EngineUnifiedPlanDriver::new(self.engine, &bound);
-        UnifiedPlanExecutor::new(&driver).execute(&plan)
+        UnifiedPlanExecutor::new(self.engine, &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
@@ -235,19 +181,8 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
         Ok(SQLResult::empty())
     }
 
-    fn execute_merge(
-        &self,
-        statement: &MergeStmt,
-        source: &SourcePlan,
-        expressions: &[ExpressionPlan],
-    ) -> Result<SQLResult, SQLError> {
-        run_merge(
-            self.engine,
-            statement.clone(),
-            source.clone(),
-            expressions.to_vec(),
-            self.params,
-        )
+    fn execute_merge(&self, plan: &MergePlan) -> Result<SQLResult, SQLError> {
+        run_merge(self.engine, plan.clone(), self.params)
     }
 
     fn execute_call(
@@ -255,49 +190,31 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
         name: &str,
         arguments: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        let mut scope = select::CteScope::new();
-        for expression in arguments {
-            scope.install_expression_plan(expression);
-        }
+        let scope = select::CteScope::new();
         let hook = select::ScopedEngineHook::new(self.engine, &scope);
-        let args: Vec<_> = arguments
-            .iter()
-            .map(|expression| expression.expression.clone())
-            .collect();
-        plpgsql_exec::run_call(self.engine, name, &args, self.params, &hook)
+        let context = PhysicalEvalContext::new(None, self.params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&hook);
+        let args = eval_physical_call_arguments(arguments, &context)?;
+        plpgsql_exec::run_call(self.engine, name, &args)
     }
 
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
         match command {
             CommandPlan::CreateTable(statement) => run_create_table(self.engine, statement.clone()),
             CommandPlan::CreateIndex(statement) => run_create_index(self.engine, statement.clone()),
-            CommandPlan::Insert {
-                statement,
-                source,
-                expressions,
-            } => self.execute_insert(statement, source.as_deref(), expressions),
-            CommandPlan::Update {
-                statement,
-                ctes,
-                source,
-                expressions,
-            } => self.execute_update(statement, ctes, source.as_deref(), expressions),
-            CommandPlan::Delete {
-                statement,
-                ctes,
-                source,
-                expressions,
-            } => self.execute_delete(statement, ctes, source.as_deref(), expressions),
+            CommandPlan::Insert(plan) => self.execute_insert(plan),
+            CommandPlan::Update(plan) => self.execute_update(plan),
+            CommandPlan::Delete(plan) => self.execute_delete(plan),
             CommandPlan::Drop(statement) => run_drop(self.engine, statement.clone()),
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }
             CommandPlan::CreateView {
                 name,
-                definition,
                 query,
                 or_replace,
-            } => self.execute_create_view(name, definition, query, *or_replace),
+            } => self.execute_create_view(name, query, *or_replace),
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
@@ -341,11 +258,7 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
                 query,
                 self.params,
             ),
-            CommandPlan::Prepare {
-                name,
-                definition,
-                body,
-            } => self.execute_prepare(name, definition, body),
+            CommandPlan::Prepare { name, body } => self.execute_prepare(name, body),
             CommandPlan::Execute { name, params } => self.execute_prepared(name, params),
             CommandPlan::Deallocate { name } => self.execute_deallocate(name.as_deref()),
             CommandPlan::CreateForeignServer(statement) => {
@@ -354,11 +267,7 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }
-            CommandPlan::Merge {
-                statement,
-                source,
-                expressions,
-            } => self.execute_merge(statement, source, expressions),
+            CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
                 plpgsql_exec::run_create_function(self.engine, (**definition).clone())
             }
@@ -369,17 +278,6 @@ impl<'engine, 'params> EngineUnifiedPlanDriver<'engine, 'params> {
                 plpgsql_exec::run_do_block(self.engine, language, body)
             }
             CommandPlan::Call { name, args } => self.execute_call(name, args),
-        }
-    }
-}
-
-impl UnifiedPlanDriver for EngineUnifiedPlanDriver<'_, '_> {
-    type Error = SQLError;
-
-    fn execute_plan(&self, plan: &UnifiedPlan) -> Result<SQLResult, Self::Error> {
-        match plan {
-            UnifiedPlan::Query(query) => self.execute_query(query),
-            UnifiedPlan::Command(command) => self.execute_command(command),
         }
     }
 }

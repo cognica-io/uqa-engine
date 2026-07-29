@@ -29,13 +29,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
+use uqa_execution::ScalarExpr;
 use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnDef as SQLColumnDef, ColumnType, CreateIndex,
-    CreateTable, DeleteStmt, DropKind, DropStmt, Expr, ForeignKey, ForeignKeyAction,
-    ForeignKeyMatch, FromClause, InsertStmt, OrderBy, Projection, SelectStmt, SetOpKind, Statement,
-    UpdateStmt, WindowSpec, CTE,
+    CreateTable, DropKind, DropStmt, ForeignKey, ForeignKeyAction, ForeignKeyMatch, SetOpKind,
+    Statement,
 };
-use uqa_sql::expr::{eval, value_to_tensor, value_to_vector, EvalContext};
+use uqa_sql::expr::{value_to_tensor, value_to_vector};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
@@ -47,9 +47,10 @@ mod catalog;
 mod ddl;
 mod dml;
 mod from_rows;
-mod plan_driver;
+mod plan_executor;
 mod plpgsql_exec;
 mod row_functions;
+mod scalar;
 mod select;
 mod where_eval;
 mod window;
@@ -75,27 +76,27 @@ use from_rows::{
     build_join_rows_with_ctes_filtered_pruned,
     build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier,
     build_join_rows_with_ctes_pruned, build_join_rows_with_ctes_pruned_filtered_by_qualifier,
-    engine_func_intercept, execute_lateral_subquery, prefix_row, project_join_row_with_engine,
-    project_join_row_with_hook, project_join_row_with_hook_and_labels, ColumnPrune,
-    QualifierFilters,
+    engine_func_intercept, execute_lateral_subquery, prefix_row, project_join_row_with_plan,
+    ColumnPrune, QualifierFilters,
 };
-use plan_driver::EngineUnifiedPlanDriver;
+use plan_executor::UnifiedPlanExecutor;
 use row_functions::{
     execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,
-    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries, run_age_create_graph,
-    run_age_drop_graph, run_graph_create, run_graph_drop, validate_expr_text_match_fields,
-    validate_joined_expr_text_match_fields,
+    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries,
+    run_age_create_graph_with_evaluator, run_age_drop_graph_with_evaluator,
+    run_graph_create_with_evaluator, run_graph_drop_with_evaluator,
+    validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
 };
 pub(crate) use row_functions::{
     run_bayesian_evidence_match_public, run_bayesian_match_public,
     run_bayesian_match_with_prior_public, run_calibrated_vector_match_public, run_knn_match_public,
     run_multi_field_match_public, run_text_match_public,
 };
+pub(crate) use select::CteScope;
 use select::{
-    apply_row_order_limit, build_projection_row, expand_star_columns, materialize_ctes,
+    apply_row_order_limit_with_ctes, build_projection_row_with_ctes, expand_star_columns,
     projection_columns, run_explain, ScopedEngineHook,
 };
-pub(crate) use select::{run_correlated_subquery, CteScope};
 use where_eval::execute_mixed_where;
 pub(crate) use where_eval::expr_is_null_free as expr_is_null_free_public;
 use window::{compute_window_columns, has_window};
@@ -108,10 +109,12 @@ const SCORE_COLUMN: &str = "_score";
 const DOC_ID_COLUMN: &str = "_doc_id";
 const MERGE_ACTION_COLUMN: &str = "_merge_action";
 
-fn projected_value_from_row(expr: &Expr, row: &ResultRow) -> Option<Value> {
+fn projected_value_from_row(expr: &ScalarExpr, row: &ResultRow) -> Option<Value> {
     match expr {
-        Expr::Column(name) => Some(row_column_value(row, name).cloned().unwrap_or(Value::Null)),
-        Expr::QualifiedColumn {
+        ScalarExpr::Column(name) => {
+            Some(row_column_value(row, name).cloned().unwrap_or(Value::Null))
+        }
+        ScalarExpr::QualifiedColumn {
             qualifier,
             column,
             key,
@@ -148,8 +151,7 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
     if plans.is_empty() {
         return Ok(SQLResult::empty());
     }
-    let driver = EngineUnifiedPlanDriver::new(engine, params);
-    let mut executor = uqa_planner::UnifiedPlanExecutor::new(&driver);
+    let mut executor = UnifiedPlanExecutor::new(engine, params);
     let mut last = SQLResult::empty();
     for plan in &plans {
         engine.cancellation_token().check()?;
@@ -167,28 +169,19 @@ fn compile_optimized_plans(
     }
     let plans = compile(sql)?
         .into_iter()
-        .map(optimize_statement)
         .map(|statement| {
-            uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
+            let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
-            })
+            });
+            uqa_planner::optimizer::optimize_with_aggregates(
+                plan,
+                &uqa_planner::optimizer::OptimizerConfig::default(),
+                &|name: &str| engine.has_registered_aggregate_function(name),
+            )
         })
         .collect::<Vec<_>>();
     engine.cache_sql_plans(sql.to_string(), plans.clone());
     Ok(plans)
-}
-
-fn optimize_statement(stmt: Statement) -> Statement {
-    use uqa_planner::optimizer::{optimize, OptimizerConfig};
-    let cfg = OptimizerConfig::default();
-    match stmt {
-        Statement::Select(s) => Statement::Select(Box::new(optimize(*s, &cfg))),
-        Statement::Prepare { name, body } => Statement::Prepare {
-            name,
-            body: Box::new(optimize_statement(*body)),
-        },
-        other => other,
-    }
 }
 
 /// Lower and execute an already-compiled statement through the same unified
@@ -199,12 +192,15 @@ pub(super) fn execute_compiled_statement(
     statement: Statement,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let statement = optimize_statement(statement);
     let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
         engine.has_registered_aggregate_function(name)
     });
-    let driver = EngineUnifiedPlanDriver::new(engine, params);
-    uqa_planner::UnifiedPlanExecutor::new(&driver).execute(&plan)
+    let plan = uqa_planner::optimizer::optimize_with_aggregates(
+        plan,
+        &uqa_planner::optimizer::OptimizerConfig::default(),
+        &|name: &str| engine.has_registered_aggregate_function(name),
+    );
+    UnifiedPlanExecutor::new(engine, params).execute(&plan)
 }
 
 impl Engine {
@@ -261,7 +257,7 @@ mod unified_plan_tests {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("expected query block");
         };
-        assert!(matches!(block.compute, ComputePlan::Project { .. }));
+        assert!(matches!(block.compute, ComputePlan::Project));
 
         let window = one(
             &engine,
@@ -273,7 +269,7 @@ mod unified_plan_tests {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("expected query block");
         };
-        assert!(matches!(block.compute, ComputePlan::Window { .. }));
+        assert!(matches!(block.compute, ComputePlan::Window));
 
         let subquery = one(
             &engine,
@@ -285,7 +281,7 @@ mod unified_plan_tests {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("expected query block");
         };
-        assert!(matches!(block.source, SourcePlan::Subquery { .. }));
+        assert!(matches!(block.from, Some(SourcePlan::Subquery { .. })));
 
         let mutation = one(
             &engine,
@@ -293,7 +289,7 @@ mod unified_plan_tests {
         );
         assert!(matches!(
             mutation,
-            UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update { .. })
+            UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update(_))
         ));
 
         // The cache contains the same IR, not a parsed Statement that could
@@ -319,6 +315,6 @@ mod unified_plan_tests {
         let RelationalPlan::QueryBlock(block) = plan.root else {
             panic!("view must retain a query block");
         };
-        assert!(matches!(block.compute, ComputePlan::Aggregate { .. }));
+        assert!(matches!(block.compute, ComputePlan::Aggregate));
     }
 }

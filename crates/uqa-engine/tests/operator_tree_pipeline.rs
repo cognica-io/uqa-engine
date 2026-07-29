@@ -8,8 +8,7 @@
 //! `WHERE text_match(...)` and the full WHERE-based boolean algebra now
 //! flow through `QueryOptimizer` instead of bypassing the operator tree
 //! entirely. The driver re-uses the engine's existing `text_match` /
-//! `knn_match` helpers so semantics line up with the legacy direct
-//! dispatch path.
+//! `knn_match` leaves so every access path shares one implementation.
 
 use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::operator_tree_bridge::EngineDriver;

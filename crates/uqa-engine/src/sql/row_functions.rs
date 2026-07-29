@@ -9,9 +9,10 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DocId, Value};
+use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::OperatorTree;
-use uqa_sql::ast::{Expr, FromClause};
-use uqa_sql::expr::{eval, value_to_vector, EvalContext};
+use uqa_planner::SourcePlan;
+use uqa_sql::expr::value_to_vector;
 use uqa_sql::registry::{lookup, FunctionKind};
 use uqa_sql::{SQLError, SQLParam};
 
@@ -29,11 +30,11 @@ const SINGLE_FIELD_TEXT_MATCH_FUNCTIONS: [&str; 4] = [
 /// searches before the WHERE reaches either the operator-tree access path
 /// or scalar evaluation in the relational filter node.
 fn walk_text_match_fields(
-    expr: &Expr,
-    validate: &mut dyn FnMut(&Expr, &str) -> Result<(), SQLError>,
+    expr: &ScalarExpr,
+    validate: &mut dyn FnMut(&ScalarExpr, &str) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
     match expr {
-        Expr::Func {
+        ScalarExpr::Func {
             name, args, filter, ..
         } => {
             let lower = name.to_ascii_lowercase();
@@ -61,24 +62,24 @@ fn walk_text_match_fields(
             }
             Ok(())
         }
-        Expr::And(items) | Expr::Or(items) | Expr::Array(items) => {
+        ScalarExpr::And(items) | ScalarExpr::Or(items) | ScalarExpr::Array(items) => {
             for item in items {
                 walk_text_match_fields(item, validate)?;
             }
             Ok(())
         }
-        Expr::Not(inner) => walk_text_match_fields(inner, validate),
-        Expr::Binary { lhs, rhs, .. } => {
+        ScalarExpr::Not(inner) => walk_text_match_fields(inner, validate),
+        ScalarExpr::Binary { lhs, rhs, .. } => {
             walk_text_match_fields(lhs, validate)?;
             walk_text_match_fields(rhs, validate)
         }
-        Expr::IsNull { expr, .. } => walk_text_match_fields(expr, validate),
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::IsNull { expr, .. } => walk_text_match_fields(expr, validate),
+        ScalarExpr::Between { expr, low, high } => {
             walk_text_match_fields(expr, validate)?;
             walk_text_match_fields(low, validate)?;
             walk_text_match_fields(high, validate)
         }
-        Expr::InList { expr, list, .. } => {
+        ScalarExpr::InList { expr, list, .. } => {
             walk_text_match_fields(expr, validate)?;
             for item in list {
                 walk_text_match_fields(item, validate)?;
@@ -92,7 +93,7 @@ fn walk_text_match_fields(
 pub(super) fn validate_expr_text_match_fields(
     engine: &Engine,
     table: &str,
-    expr: &Expr,
+    expr: &ScalarExpr,
 ) -> Result<(), SQLError> {
     walk_text_match_fields(
         expr,
@@ -115,32 +116,34 @@ enum TextMatchField<'a> {
 
 /// The `_all` pseudo-field arrives either as a string literal or as a
 /// bare column reference, depending on how the query was written.
-fn text_match_field_name(field_arg: &Expr) -> Option<TextMatchField<'_>> {
+fn text_match_field_name(field_arg: &ScalarExpr) -> Option<TextMatchField<'_>> {
     match field_arg {
-        Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
+        ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => {
             if name.is_empty() || name == "_all" {
                 Some(TextMatchField::All)
             } else {
                 Some(TextMatchField::Named(name))
             }
         }
-        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(TextMatchField::All),
+        ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => {
+            Some(TextMatchField::All)
+        }
         _ => None,
     }
 }
 
 pub(super) fn validate_joined_expr_text_match_fields(
     engine: &Engine,
-    from: &FromClause,
-    expr: &Expr,
+    from: &SourcePlan,
+    expr: &ScalarExpr,
 ) -> Result<(), SQLError> {
     let mut tables: Vec<(Option<String>, String)> = Vec::new();
     let mut has_opaque_source = false;
     collect_from_tables(from, &mut tables, &mut has_opaque_source);
     walk_text_match_fields(expr, &mut |field_arg, function_name| {
         let (qualifier, column) = match field_arg {
-            Expr::Column(name) => (None, name.as_str()),
-            Expr::QualifiedColumn {
+            ScalarExpr::Column(name) => (None, name.as_str()),
+            ScalarExpr::QualifiedColumn {
                 qualifier, column, ..
             } => (Some(qualifier.as_str()), column.as_str()),
             _ => return Ok(()),
@@ -187,21 +190,21 @@ pub(super) fn validate_joined_expr_text_match_fields(
 /// The `@@` operator doubles as a `JSONPath` match when the right-hand
 /// side is a `$...` path literal; that form evaluates row-level JSON and
 /// needs no text index.
-fn fts_query_is_jsonpath(query_arg: Option<&Expr>) -> bool {
+fn fts_query_is_jsonpath(query_arg: Option<&ScalarExpr>) -> bool {
     matches!(
         query_arg,
-        Some(Expr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
+        Some(ScalarExpr::Literal(Value::Str(path))) if path.trim_start().starts_with('$')
     )
 }
 
 fn collect_from_tables(
-    from: &FromClause,
+    from: &SourcePlan,
     out: &mut Vec<(Option<String>, String)>,
     has_opaque_source: &mut bool,
 ) {
     match from {
-        FromClause::Table { name, alias } => out.push((alias.clone(), name.clone())),
-        FromClause::Join { left, right, .. } => {
+        SourcePlan::Table { name, alias } => out.push((alias.clone(), name.clone())),
+        SourcePlan::Join { left, right, .. } => {
             collect_from_tables(left, out, has_opaque_source);
             collect_from_tables(right, out, has_opaque_source);
         }
@@ -213,7 +216,7 @@ pub(super) fn execute_function(
     engine: &Engine,
     table: &str,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     execute_function_with_top_k(engine, table, name, args, params, None)
@@ -223,7 +226,7 @@ pub(super) fn execute_function_with_top_k(
     engine: &Engine,
     table: &str,
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -299,7 +302,7 @@ pub(super) fn execute_function_with_top_k(
 
 fn run_deep_predict(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 1 {
@@ -309,8 +312,8 @@ fn run_deep_predict(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let name = match eval(&args[0], &ctx)? {
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
+    let name = match eval_scalar(&args[0], &ctx)? {
         Value::Str(s) => s,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -331,10 +334,10 @@ fn run_deep_predict(
 fn run_staged_retrieval(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    if matches!(args.first(), Some(Expr::Func { .. })) && !is_named_arg_expr(&args[0]) {
+    if matches!(args.first(), Some(ScalarExpr::Func { .. })) && !is_named_arg_expr(&args[0]) {
         if args.is_empty() || args.len() % 2 != 0 {
             return Err(SQLError::BadArity {
                 name: "staged_retrieval".into(),
@@ -342,7 +345,7 @@ fn run_staged_retrieval(
                 actual: args.len(),
             });
         }
-        let ctx = EvalContext::new(None, params).with_engine(engine);
+        let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
         let mut current: Option<Vec<ScoredEntry>> = None;
         for pair in args.chunks(2) {
             let rows = run_scored_signal(engine, table, &pair[0], params, "staged_retrieval")?;
@@ -372,13 +375,13 @@ fn run_staged_retrieval(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let mode = crate::ScoringMode::BM25(uqa_scoring::BM25Params::default());
     let n_stages = args.len() / 3;
     let mut current: Option<Vec<ScoredEntry>> = None;
     for i in 0..n_stages {
         let field = expect_column_name(&args[3 * i], "staged_retrieval.field")?;
-        let q = match eval(&args[3 * i + 1], &ctx)? {
+        let q = match eval_scalar(&args[3 * i + 1], &ctx)? {
             Value::Str(s) => s,
             other => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -408,7 +411,7 @@ fn run_staged_retrieval(
 fn run_multi_field_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() < 3 {
@@ -418,7 +421,7 @@ fn run_multi_field_match(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let (fields, queries, weights) = parse_multi_field_match_args(args, &ctx)?;
     for field in &fields {
         validate_text_match_field(engine, table, field, "multi_field_match")?;
@@ -478,18 +481,21 @@ type MultiFieldMatchArgs = (Vec<String>, Vec<String>, Vec<f64>);
 
 enum MultiFieldMatchShape<'a> {
     FieldsThenQuery {
-        fields: Vec<&'a Expr>,
+        fields: Vec<&'a ScalarExpr>,
         query_idx: usize,
     },
     Pairs {
-        fields: Vec<&'a Expr>,
+        fields: Vec<&'a ScalarExpr>,
     },
 }
 
-fn multi_field_match_shape(args: &[Expr]) -> Result<MultiFieldMatchShape<'_>, SQLError> {
-    let first_non_column = args
-        .iter()
-        .position(|arg| !matches!(arg, Expr::Column(_) | Expr::QualifiedColumn { .. }));
+fn multi_field_match_shape(args: &[ScalarExpr]) -> Result<MultiFieldMatchShape<'_>, SQLError> {
+    let first_non_column = args.iter().position(|arg| {
+        !matches!(
+            arg,
+            ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. }
+        )
+    });
     if let Some(query_idx) = first_non_column {
         if query_idx >= 2 {
             return Ok(MultiFieldMatchShape::FieldsThenQuery {
@@ -522,8 +528,8 @@ fn multi_field_match_shape(args: &[Expr]) -> Result<MultiFieldMatchShape<'_>, SQ
 }
 
 fn parse_multi_field_match_args(
-    args: &[Expr],
-    ctx: &EvalContext<'_>,
+    args: &[ScalarExpr],
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<MultiFieldMatchArgs, SQLError> {
     match multi_field_match_shape(args)? {
         MultiFieldMatchShape::FieldsThenQuery {
@@ -574,11 +580,11 @@ fn parse_multi_field_match_args(
 }
 
 fn expect_string_value(
-    expr: &Expr,
+    expr: &ScalarExpr,
     label: &str,
-    ctx: &EvalContext<'_>,
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<String, SQLError> {
-    match eval(expr, ctx)? {
+    match eval_scalar(expr, ctx)? {
         Value::Str(s) => Ok(s),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be string, got {other:?}"
@@ -586,8 +592,12 @@ fn expect_string_value(
     }
 }
 
-fn expect_f64_value(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<f64, SQLError> {
-    match eval(expr, ctx)? {
+fn expect_f64_value(
+    expr: &ScalarExpr,
+    label: &str,
+    ctx: &ScalarEvalContext<'_>,
+) -> Result<f64, SQLError> {
+    match eval_scalar(expr, ctx)? {
         Value::Float(f) => Ok(f),
         Value::Int(i) => Ok(i as f64),
         Value::Decimal(d) => d
@@ -599,8 +609,12 @@ fn expect_f64_value(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<f
     }
 }
 
-fn expect_f64_array(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<Vec<f64>, SQLError> {
-    let Value::List(items) = eval(expr, ctx)? else {
+fn expect_f64_array(
+    expr: &ScalarExpr,
+    label: &str,
+    ctx: &ScalarEvalContext<'_>,
+) -> Result<Vec<f64>, SQLError> {
+    let Value::List(items) = eval_scalar(expr, ctx)? else {
         return Err(SQLError::TypeMismatch(format!(
             "{label} must be a numeric array"
         )));
@@ -659,14 +673,14 @@ fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQ
 
 fn expect_optional_graph_name(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
     function_name: &str,
 ) -> Result<String, SQLError> {
     match args {
         [] => default_graph_name(engine, function_name),
         [arg] => {
-            let ctx = EvalContext::new(None, params).with_engine(engine);
+            let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
             expect_string(arg, &format!("{function_name}.graph"), &ctx)
         }
         _ => Err(SQLError::BadArity {
@@ -747,7 +761,7 @@ fn execute_tree_entries(
 
 fn run_graph_pagerank(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let name = expect_optional_graph_name(engine, args, params, "graph_pagerank")?;
@@ -756,7 +770,7 @@ fn run_graph_pagerank(
 
 fn run_graph_hits(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let name = expect_optional_graph_name(engine, args, params, "graph_hits")?;
@@ -765,7 +779,7 @@ fn run_graph_hits(
 
 fn run_graph_betweenness(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let name = expect_optional_graph_name(engine, args, params, "graph_betweenness")?;
@@ -774,7 +788,7 @@ fn run_graph_betweenness(
 
 fn run_graph_traverse(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
@@ -784,7 +798,7 @@ fn run_graph_traverse(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let name = expect_string(&args[0], "graph_traverse.graph", &ctx)?;
     let start = expect_u64(&args[1], "graph_traverse.start", &ctx)?;
     let label = expect_optional_string(&args[2], "graph_traverse.label", &ctx)?;
@@ -803,7 +817,7 @@ fn run_graph_traverse(
 
 fn run_graph_neighbors(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
@@ -813,7 +827,7 @@ fn run_graph_neighbors(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let name = expect_string(&args[0], "graph_neighbors.graph", &ctx)?;
     let vertex = expect_u64(&args[1], "graph_neighbors.vertex", &ctx)?;
     let label = expect_optional_string(&args[2], "graph_neighbors.label", &ctx)?;
@@ -854,8 +868,17 @@ fn run_graph_neighbors(
 
 pub(super) fn run_graph_create(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
+    run_graph_create_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))
+}
+
+pub(super) fn run_graph_create_with_evaluator(
+    engine: &Engine,
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 1 {
         return Err(SQLError::BadArity {
@@ -864,16 +887,24 @@ pub(super) fn run_graph_create(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let name = expect_string(&args[0], "graph_create.name", &ctx)?;
+    let name = expect_evaluated_string(evaluate(&args[0])?, "graph_create.name")?;
     engine.create_graph(name);
     Ok(Vec::new())
 }
 
 pub(super) fn run_graph_drop(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
+    run_graph_drop_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))
+}
+
+pub(super) fn run_graph_drop_with_evaluator(
+    engine: &Engine,
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if !(1..=2).contains(&args.len()) {
         return Err(SQLError::BadArity {
@@ -882,10 +913,9 @@ pub(super) fn run_graph_drop(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let name = expect_string(&args[0], "graph_drop.name", &ctx)?;
+    let name = expect_evaluated_string(evaluate(&args[0])?, "graph_drop.name")?;
     if let Some(cascade_expr) = args.get(1) {
-        match eval(cascade_expr, &ctx)? {
+        match evaluate(cascade_expr)? {
             Value::Bool(true) => {}
             Value::Bool(false) if engine.has_graph(&name) => {
                 return Err(SQLError::Unsupported(format!(
@@ -914,13 +944,11 @@ fn age_graph_name_is_valid(name: &str) -> bool {
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
-fn eval_age_graph_name(
-    engine: &Engine,
-    expr: &Expr,
-    params: &[SQLParam],
+fn eval_age_graph_name_with(
+    expr: &ScalarExpr,
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<String, SQLError> {
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    match eval(expr, &ctx)? {
+    match evaluate(expr)? {
         Value::Null => Err(SQLError::Unsupported("graph name can not be NULL".into())),
         Value::Str(s) => Ok(s),
         other => Err(SQLError::TypeMismatch(format!(
@@ -931,10 +959,10 @@ fn eval_age_graph_name(
 
 /// `SELECT create_graph('name')` with AGE 1.6.0 semantics: validates
 /// the name, rejects duplicates, and returns void (SQL NULL).
-pub(super) fn run_age_create_graph(
+pub(super) fn run_age_create_graph_with_evaluator(
     engine: &Engine,
-    args: &[Expr],
-    params: &[SQLParam],
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     if args.len() != 1 {
         return Err(SQLError::BadArity {
@@ -943,7 +971,7 @@ pub(super) fn run_age_create_graph(
             actual: args.len(),
         });
     }
-    let name = eval_age_graph_name(engine, &args[0], params)?;
+    let name = eval_age_graph_name_with(&args[0], evaluate)?;
     if !age_graph_name_is_valid(&name) {
         return Err(SQLError::Unsupported("graph name is invalid".into()));
     }
@@ -959,10 +987,10 @@ pub(super) fn run_age_create_graph(
 /// `SELECT drop_graph('name'[, cascade])` with AGE 1.6.0 semantics:
 /// without `cascade => true` the drop always fails (the graph schema
 /// always contains its label tables), and success returns void.
-pub(super) fn run_age_drop_graph(
+pub(super) fn run_age_drop_graph_with_evaluator(
     engine: &Engine,
-    args: &[Expr],
-    params: &[SQLParam],
+    args: &[ScalarExpr],
+    evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
     if !(1..=2).contains(&args.len()) {
         return Err(SQLError::BadArity {
@@ -971,24 +999,21 @@ pub(super) fn run_age_drop_graph(
             actual: args.len(),
         });
     }
-    let name = eval_age_graph_name(engine, &args[0], params)?;
+    let name = eval_age_graph_name_with(&args[0], evaluate)?;
     if !engine.has_graph(&name) {
         return Err(SQLError::Unsupported(format!(
             "graph \"{name}\" does not exist"
         )));
     }
     let cascade = match args.get(1) {
-        Some(expr) => {
-            let ctx = EvalContext::new(None, params).with_engine(engine);
-            match eval(expr, &ctx)? {
-                Value::Bool(b) => b,
-                other => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "drop_graph.cascade must be a boolean, got {other:?}"
-                    )));
-                }
+        Some(expr) => match evaluate(expr)? {
+            Value::Bool(b) => b,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "drop_graph.cascade must be a boolean, got {other:?}"
+                )));
             }
-        }
+        },
         None => false,
     };
     if !cascade {
@@ -1007,7 +1032,7 @@ pub(super) fn run_age_drop_graph(
 /// raw edge weight (`1.0` when no `weight` property is present).
 fn run_graph_edges(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.is_empty() || args.len() > 2 {
@@ -1017,7 +1042,7 @@ fn run_graph_edges(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let name = expect_string(&args[0], "graph_edges.graph", &ctx)?;
     let label = if args.len() == 2 {
         expect_optional_string(&args[1], "graph_edges.label", &ctx)?
@@ -1058,7 +1083,7 @@ fn run_graph_edges(
 /// `OperatorTree` node and executed by `EngineDriver`.
 fn run_temporal_traverse(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 6 {
@@ -1068,12 +1093,12 @@ fn run_temporal_traverse(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let name = expect_string(&args[0], "temporal_traverse.graph", &ctx)?;
     let start = expect_u64(&args[1], "temporal_traverse.start", &ctx)?;
     let label = expect_optional_string(&args[2], "temporal_traverse.label", &ctx)?;
     let max_hops = expect_usize(&args[3], "temporal_traverse.max_hops", &ctx)?;
-    let t_min = match eval(&args[4], &ctx)? {
+    let t_min = match eval_scalar(&args[4], &ctx)? {
         Value::Int(n) => n as f64,
         Value::Float(f) => f,
         Value::Decimal(d) => d.to_f64().ok_or_else(|| {
@@ -1086,7 +1111,7 @@ fn run_temporal_traverse(
             )));
         }
     };
-    let t_max = match eval(&args[5], &ctx)? {
+    let t_max = match eval_scalar(&args[5], &ctx)? {
         Value::Int(n) => n as f64,
         Value::Float(f) => f,
         Value::Decimal(d) => d.to_f64().ok_or_else(|| {
@@ -1119,7 +1144,7 @@ fn run_temporal_traverse(
 /// `Engine.sql("SELECT * FROM rpq(expr, start [, graph])")`.
 fn run_rpq(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if !(2..=3).contains(&args.len()) {
@@ -1129,7 +1154,7 @@ fn run_rpq(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let expr_str = expect_string(&args[0], "rpq.expr", &ctx)?;
     let start = expect_u64(&args[1], "rpq.start", &ctx)?;
     let graph = if args.len() == 3 {
@@ -1147,8 +1172,16 @@ fn run_rpq(
     )
 }
 
-fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SQLError> {
-    match eval(expr, ctx)? {
+fn expect_string(
+    expr: &ScalarExpr,
+    name: &str,
+    ctx: &ScalarEvalContext,
+) -> Result<String, SQLError> {
+    expect_evaluated_string(eval_scalar(expr, ctx)?, name)
+}
+
+fn expect_evaluated_string(value: Value, name: &str) -> Result<String, SQLError> {
+    match value {
         Value::Str(s) => Ok(s),
         other => Err(SQLError::TypeMismatch(format!(
             "{name} must be a string, got {other:?}"
@@ -1157,11 +1190,11 @@ fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, S
 }
 
 fn expect_optional_string(
-    expr: &Expr,
+    expr: &ScalarExpr,
     name: &str,
-    ctx: &EvalContext,
+    ctx: &ScalarEvalContext,
 ) -> Result<Option<String>, SQLError> {
-    match eval(expr, ctx)? {
+    match eval_scalar(expr, ctx)? {
         Value::Null => Ok(None),
         Value::Str(s) if s.is_empty() => Ok(None),
         Value::Str(s) => Ok(Some(s)),
@@ -1171,8 +1204,8 @@ fn expect_optional_string(
     }
 }
 
-fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SQLError> {
-    match eval(expr, ctx)? {
+fn expect_u64(expr: &ScalarExpr, name: &str, ctx: &ScalarEvalContext) -> Result<u64, SQLError> {
+    match eval_scalar(expr, ctx)? {
         Value::Int(n) if n >= 0 => Ok(n as u64),
         other => Err(SQLError::TypeMismatch(format!(
             "{name} must be a non-negative integer, got {other:?}"
@@ -1183,7 +1216,7 @@ fn expect_u64(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u64, SQLErro
 pub(crate) fn run_text_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match(engine, table, args, params, None)
@@ -1192,7 +1225,7 @@ pub(crate) fn run_text_match_public(
 pub(crate) fn run_bayesian_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_bayesian_match(engine, table, args, params, None)
@@ -1201,7 +1234,7 @@ pub(crate) fn run_bayesian_match_public(
 pub(crate) fn run_knn_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_knn_match(engine, table, args, params)
@@ -1210,7 +1243,7 @@ pub(crate) fn run_knn_match_public(
 pub(crate) fn run_bayesian_match_with_prior_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_bayesian_match_with_prior(engine, table, args, params)
@@ -1219,7 +1252,7 @@ pub(crate) fn run_bayesian_match_with_prior_public(
 pub(crate) fn run_calibrated_vector_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_calibrated_vector_match(engine, table, args, params)
@@ -1228,15 +1261,15 @@ pub(crate) fn run_calibrated_vector_match_public(
 pub(crate) fn run_multi_field_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_multi_field_match(engine, table, args, params)
 }
 
-fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLError> {
+fn expect_u32(expr: &ScalarExpr, name: &str, ctx: &ScalarEvalContext) -> Result<u32, SQLError> {
     let max_u32_as_i64: i64 = i64::from(u32::MAX);
-    match eval(expr, ctx)? {
+    match eval_scalar(expr, ctx)? {
         Value::Int(n) if (0..=max_u32_as_i64).contains(&n) => Ok(n as u32),
         other => Err(SQLError::TypeMismatch(format!(
             "{name} must fit in u32, got {other:?}"
@@ -1247,7 +1280,7 @@ fn expect_u32(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<u32, SQLErro
 fn run_text_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -1266,7 +1299,7 @@ fn run_text_match(
 fn run_bayesian_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
@@ -1287,7 +1320,7 @@ fn run_bayesian_match(
 fn run_bayesian_evidence_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match_scored(
@@ -1308,7 +1341,7 @@ fn run_bayesian_evidence_match(
 pub(crate) fn run_bayesian_evidence_match_public(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_bayesian_evidence_match(engine, table, args, params)
@@ -1317,10 +1350,10 @@ pub(crate) fn run_bayesian_evidence_match_public(
 /// The corpus relevance prior a text signal would fold into its
 /// posterior: the field's estimated base rate, or the logit-mean rate
 /// across every text-indexed field for `_all` queries.
-fn text_signal_prior(engine: &Engine, table: &str, field_expr: &Expr) -> Option<f64> {
+fn text_signal_prior(engine: &Engine, table: &str, field_expr: &ScalarExpr) -> Option<f64> {
     let field = match field_expr {
-        Expr::Column(name) => Some(name.as_str()),
-        Expr::QualifiedColumn { column, .. } => Some(column.as_str()),
+        ScalarExpr::Column(name) => Some(name.as_str()),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column.as_str()),
         _ => None,
     };
     let rates: Vec<f64> = match field {
@@ -1389,7 +1422,7 @@ fn validate_text_match_all_fields(
 fn run_text_match_scored(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
     function_name: &str,
     mode_for_field: &dyn Fn(&str) -> crate::ScoringMode,
@@ -1403,9 +1436,9 @@ fn run_text_match_scored(
         });
     }
     let field = match &args[0] {
-        Expr::Column(name) => name.clone(),
-        Expr::QualifiedColumn { column, .. } => column.clone(),
-        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => "_all".to_string(),
+        ScalarExpr::Column(name) => name.clone(),
+        ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
+        ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => "_all".to_string(),
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "{function_name}.field must be a column reference, got {other:?}"
@@ -1417,8 +1450,8 @@ fn run_text_match_scored(
     } else {
         validate_text_match_field(engine, table, &field, function_name)?;
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let query_value = eval(&args[1], &ctx)?;
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
+    let query_value = eval_scalar(&args[1], &ctx)?;
     let query = match query_value {
         Value::Str(s) => s,
         other => {
@@ -1450,7 +1483,7 @@ fn run_text_match_scored(
 fn run_fts_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
@@ -1461,9 +1494,9 @@ fn run_fts_match(
         });
     }
     let default_field = match &args[0] {
-        Expr::Column(name) => Some(name.clone()),
-        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
-        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => None,
+        ScalarExpr::Column(name) => Some(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column.clone()),
+        ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => None,
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "fts_match.field must be a column reference, got {other:?}"
@@ -1478,7 +1511,7 @@ fn run_fts_match(
             _ => validate_text_match_all_fields(engine, table, "fts_match")?,
         }
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let query = expect_string(&args[1], "fts_match.query", &ctx)?;
     let tokenizer = |_field: Option<&str>, phrase: &str| {
         phrase
@@ -1487,7 +1520,7 @@ fn run_fts_match(
             .collect::<Vec<_>>()
     };
     uqa_sql::compile_fts_query_string(&query, default_field.as_deref(), &tokenizer)?;
-    let expr = Expr::Func {
+    let expr = ScalarExpr::Func {
         name: "fts_match".into(),
         args: args.to_vec(),
         distinct: false,
@@ -1503,7 +1536,7 @@ fn run_fts_match(
 fn run_bayesian_match_with_prior(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
@@ -1515,14 +1548,17 @@ fn run_bayesian_match_with_prior(
     }
     let field = expect_column_name(&args[0], "bayesian_match_with_prior.field")?;
     let prior_field = expect_column_name(&args[2], "bayesian_match_with_prior.prior_field")?;
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let query = expect_string(&args[1], "bayesian_match_with_prior.query", &ctx)?;
     let mode = expect_string(&args[3], "bayesian_match_with_prior.mode", &ctx)?;
 
     let base = run_bayesian_match(
         engine,
         table,
-        &[Expr::Column(field), Expr::Literal(Value::Str(query))],
+        &[
+            ScalarExpr::Column(field),
+            ScalarExpr::Literal(Value::Str(query)),
+        ],
         params,
         None,
     )?;
@@ -1555,31 +1591,31 @@ fn combine_probability_with_prior(probability: f64, prior: f64) -> f64 {
     uqa_scoring::sigmoid(uqa_scoring::logit(p) + uqa_scoring::logit(prior))
 }
 
-fn named_arg_expr(expr: &Expr) -> Option<(&str, &Expr)> {
-    let Expr::Func { name, args, .. } = expr else {
+fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
+    let ScalarExpr::Func { name, args, .. } = expr else {
         return None;
     };
     if name != "__named_arg" || args.len() != 2 {
         return None;
     }
-    let Expr::Literal(Value::Str(arg_name)) = &args[0] else {
+    let ScalarExpr::Literal(Value::Str(arg_name)) = &args[0] else {
         return None;
     };
     Some((arg_name.as_str(), &args[1]))
 }
 
-fn is_named_arg_expr(expr: &Expr) -> bool {
+fn is_named_arg_expr(expr: &ScalarExpr) -> bool {
     named_arg_expr(expr).is_some()
 }
 
 fn run_scored_signal(
     engine: &Engine,
     table: &str,
-    expr: &Expr,
+    expr: &ScalarExpr,
     params: &[SQLParam],
     parent: &str,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let Expr::Func {
+    let ScalarExpr::Func {
         name, args: inner, ..
     } = expr
     else {
@@ -1608,7 +1644,7 @@ fn run_attention_fusion(
     engine: &Engine,
     table: &str,
     function_name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() < 2 {
@@ -1626,7 +1662,7 @@ fn run_attention_fusion(
         if is_named_arg_expr(arg) {
             continue;
         }
-        let Expr::Func {
+        let ScalarExpr::Func {
             name, args: inner, ..
         } = arg
         else {
@@ -1704,7 +1740,7 @@ fn non_probability_signal_error(name: &str, parent: &str) -> SQLError {
 fn run_sparse_threshold(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 2 {
@@ -1714,7 +1750,7 @@ fn run_sparse_threshold(
             actual: args.len(),
         });
     }
-    let Expr::Func {
+    let ScalarExpr::Func {
         name, args: inner, ..
     } = &args[0]
     else {
@@ -1738,7 +1774,7 @@ fn run_sparse_threshold(
             )));
         }
     };
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let threshold = expect_f64_value(&args[1], "sparse_threshold.threshold", &ctx)?;
     Ok(rows
         .into_iter()
@@ -1755,7 +1791,7 @@ fn run_sparse_threshold(
 fn run_knn_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 3 {
@@ -1766,8 +1802,8 @@ fn run_knn_match(
         });
     }
     let field = expect_column_name(&args[0], "knn_match.field")?;
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    let vec_value = eval(&args[1], &ctx)?;
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
+    let vec_value = eval_scalar(&args[1], &ctx)?;
     let query_vector = value_to_vector(&vec_value)?;
     let k = expect_usize(&args[2], "knn_match.k", &ctx)?;
     Ok(engine.knn_search(table, &field, query_vector, k))
@@ -1776,7 +1812,7 @@ fn run_knn_match(
 fn run_calibrated_vector_match(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if !(3..=4).contains(&args.len()) {
@@ -1786,9 +1822,9 @@ fn run_calibrated_vector_match(
             actual: args.len(),
         });
     }
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     let field = expect_field_name_or_string(&args[0], "calibrated_vector_match.field", &ctx)?;
-    let query_vector = value_to_vector(&eval(&args[1], &ctx)?)?;
+    let query_vector = value_to_vector(&eval_scalar(&args[1], &ctx)?)?;
     let k = expect_usize(&args[2], "calibrated_vector_match.k", &ctx)?;
     let threshold = if let Some(arg) = args.get(3) {
         Some(expect_f64_value(
@@ -1830,7 +1866,7 @@ fn run_calibrated_vector_match(
 fn run_fuse_log_odds(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() < 2 {
@@ -1849,7 +1885,7 @@ fn run_fuse_log_odds(
         Vec::with_capacity(args.len());
     let mut all_doc_ids = std::collections::BTreeSet::new();
     let mut signal_priors: Vec<f64> = Vec::new();
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
     for arg in args {
         if let Some((name, value_expr)) = named_arg_expr(arg) {
             if name.eq_ignore_ascii_case("alpha") {
@@ -1883,7 +1919,7 @@ fn run_fuse_log_odds(
             continue;
         }
         match arg {
-            Expr::Func {
+            ScalarExpr::Func {
                 name, args: inner, ..
             } => {
                 let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))?;
@@ -1989,20 +2025,20 @@ fn run_fuse_log_odds(
                 }
                 score_maps.push(map);
             }
-            Expr::Literal(Value::Float(v)) => {
+            ScalarExpr::Literal(Value::Float(v)) => {
                 alpha = *v;
             }
-            Expr::Literal(Value::Int(v)) => {
+            ScalarExpr::Literal(Value::Int(v)) => {
                 alpha = *v as f64;
             }
-            Expr::Literal(Value::Decimal(v)) => {
+            ScalarExpr::Literal(Value::Decimal(v)) => {
                 alpha = v.to_f64().ok_or_else(|| {
                     SQLError::TypeMismatch(
                         "fuse_log_odds.alpha decimal is outside f64 range".into(),
                     )
                 })?;
             }
-            Expr::Literal(Value::Str(name)) => {
+            ScalarExpr::Literal(Value::Str(name)) => {
                 gating = uqa_fusion::LogitGating::parse(name).ok_or_else(|| {
                     SQLError::TypeMismatch(format!(
                         "fuse_log_odds.gating has unknown value `{name}`"
@@ -2068,10 +2104,10 @@ fn run_fuse_log_odds(
         .collect())
 }
 
-pub(super) fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SQLError> {
+pub(super) fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLError> {
     match expr {
-        Expr::Column(name) => Ok(name.clone()),
-        Expr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        ScalarExpr::Column(name) => Ok(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be a column reference, got {other:?}"
         ))),
@@ -2079,19 +2115,23 @@ pub(super) fn expect_column_name(expr: &Expr, label: &str) -> Result<String, SQL
 }
 
 fn expect_field_name_or_string(
-    expr: &Expr,
+    expr: &ScalarExpr,
     label: &str,
-    ctx: &EvalContext<'_>,
+    ctx: &ScalarEvalContext<'_>,
 ) -> Result<String, SQLError> {
     match expr {
-        Expr::Column(name) => Ok(name.clone()),
-        Expr::QualifiedColumn { column, .. } => Ok(column.clone()),
+        ScalarExpr::Column(name) => Ok(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
         _ => expect_string(expr, label, ctx),
     }
 }
 
-fn expect_usize(expr: &Expr, label: &str, ctx: &EvalContext<'_>) -> Result<usize, SQLError> {
-    let v = eval(expr, ctx)?;
+fn expect_usize(
+    expr: &ScalarExpr,
+    label: &str,
+    ctx: &ScalarEvalContext<'_>,
+) -> Result<usize, SQLError> {
+    let v = eval_scalar(expr, ctx)?;
     match v {
         Value::Int(n) if n >= 0 => Ok(n as usize),
         Value::Int(_) => Err(SQLError::TypeMismatch(format!("{label} must be >= 0"))),

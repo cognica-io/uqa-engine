@@ -12,21 +12,24 @@ use super::{
 
 impl Engine {
     pub fn register_view(&self, name: &str, body: uqa_sql::ast::SelectStmt) {
-        let plan = uqa_planner::QueryPlan::lower_with(body.clone(), &|aggregate: &str| {
-            self.has_registered_aggregate_function(aggregate)
-        });
-        self.register_view_plan(name, body, plan);
+        let plan = uqa_planner::UnifiedPlan::Query(Box::new(uqa_planner::QueryPlan::lower_with(
+            body,
+            &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
+        )));
+        let plan = uqa_planner::optimizer::optimize_with_aggregates(
+            plan,
+            &uqa_planner::optimizer::OptimizerConfig::default(),
+            &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
+        );
+        let uqa_planner::UnifiedPlan::Query(plan) = plan else {
+            unreachable!("view lowering always produces a query")
+        };
+        self.register_view_plan(name, *plan);
     }
 
-    pub(crate) fn register_view_plan(
-        &self,
-        name: &str,
-        body: uqa_sql::ast::SelectStmt,
-        plan: uqa_planner::QueryPlan,
-    ) {
+    pub(crate) fn register_view_plan(&self, name: &str, plan: uqa_planner::QueryPlan) {
         let name = self.relation_name_for_create(name);
-        self.views.write().insert(name.clone(), body);
-        self.view_plans.write().insert(name.clone(), plan);
+        self.views.write().insert(name, plan);
         self.persist_views();
     }
 
@@ -36,30 +39,18 @@ impl Engine {
         };
         let removed = self.views.write().remove(&name).is_some();
         if removed {
-            self.view_plans.write().remove(&name);
             self.persist_views();
         }
         removed
     }
 
-    pub fn view(&self, name: &str) -> Option<uqa_sql::ast::SelectStmt> {
+    pub fn view(&self, name: &str) -> Option<uqa_planner::QueryPlan> {
         let resolved = self.resolve_view_name(name)?;
         self.views.read().get(&resolved).cloned()
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Option<uqa_planner::QueryPlan> {
-        let resolved = self.resolve_view_name(name)?;
-        if let Some(plan) = self.view_plans.read().get(&resolved).cloned() {
-            return Some(plan);
-        }
-        let definition = self.views.read().get(&resolved).cloned()?;
-        let plan = uqa_planner::QueryPlan::lower_with(definition, &|aggregate: &str| {
-            self.has_registered_aggregate_function(aggregate)
-        });
-        self.view_plans
-            .write()
-            .insert(resolved.clone(), plan.clone());
-        Some(plan)
+        self.view(name)
     }
 
     pub fn list_views(&self) -> Vec<String> {
@@ -84,10 +75,8 @@ impl Engine {
         let Some(json) = catalog.get_metadata(VIEWS_METADATA_KEY)? else {
             return Ok(());
         };
-        if let Ok(views) = serde_json::from_str::<BTreeMap<String, uqa_sql::ast::SelectStmt>>(&json)
-        {
+        if let Ok(views) = serde_json::from_str::<BTreeMap<String, uqa_planner::QueryPlan>>(&json) {
             *self.views.write() = views;
-            self.view_plans.write().clear();
         }
         Ok(())
     }

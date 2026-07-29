@@ -4,21 +4,18 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bridge between the SQL `WHERE` AST and the operator-tree IR.
+//! Bridge between a physical relational predicate and the operator-tree IR.
 //!
-//! The optimizer lowers supported `SELECT ... WHERE ...` predicates into an `OperatorTree`
-//! (boolean / scoring / fusion / filter / index-scan nodes), runs the
-//! tree through `QueryOptimizer` (the 10-pass algebraic / graph-aware
-//! / fusion-reordering optimiser), and only then executes it through
-//! `PlanExecutor`. Until now the UQA-RS implementation had `QueryOptimizer` implemented
-//! 1:1 in `uqa_planner::query_optimizer` but it was dead code - the
-//! engine ran the SQL `SelectStmt` directly without ever building the
-//! operator tree, so none of the optimiser's algebraic / graph-aware
-//! rewrites fired in production.
+//! The plan-native optimizer marks supported `QueryBlockPlan` predicates as
+//! `OperatorTree` or hybrid access paths. This bridge lowers their
+//! [`ScalarExpr`] predicate into boolean, scoring, fusion, filter, and
+//! index-scan nodes, runs the 10-pass algebraic / graph-aware /
+//! fusion-reordering `QueryOptimizer`, and executes the result through
+//! `PlanExecutor`.
 //!
 //! This module wires the two halves together:
 //!
-//! 1. [`lower_where`] turns a SQL `Expr` (the WHERE clause) plus the
+//! 1. [`lower_where`] turns a SQL `ScalarExpr` (the WHERE clause) plus the
 //!    target table into an `OperatorTree`. Boolean connectives map onto
 //!    `Intersect` / `Union` / `Complement`, scoring / KNN / fusion
 //!    function calls map onto the matching `OperatorTree` variants, and
@@ -45,6 +42,7 @@ use uqa_core::{
     DocId, GeneralizedPostingList, PathSegment, Payload, PostingEntry, PostingList, Predicate,
     Value,
 };
+use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::{
     GatingSpec, LogOddsFusionOperator, MultiStageCutoff, MultiStageEntry, OperatorTree,
     TextScoringMode,
@@ -52,8 +50,8 @@ use uqa_operators::{
 use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
-use uqa_sql::ast::{BinaryOp, ColumnType, Expr};
-use uqa_sql::expr::{eval, value_to_vector, EvalContext};
+use uqa_sql::ast::{BinaryOp, ColumnType};
+use uqa_sql::expr::value_to_vector;
 use uqa_sql::SQLParam;
 
 use crate::sql;
@@ -85,16 +83,16 @@ fn malformed_operator_meta(operator: &str, field: &str) -> SQLError {
 /// Lower a SQL `WHERE` expression into an [`OperatorTree`]. Returns
 /// `None` for shapes the operator IR can't represent so the caller can
 /// fall back to the row-evaluator path.
-pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
+pub fn lower_where(expr: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
     match expr {
-        Expr::And(parts) => {
+        ScalarExpr::And(parts) => {
             let mut out: Vec<OperatorTree> = Vec::with_capacity(parts.len());
             for p in parts {
                 out.push(lower_where(p, params)?);
             }
             Some(OperatorTree::Intersect(out))
         }
-        Expr::Or(parts) => {
+        ScalarExpr::Or(parts) => {
             let mut out: Vec<OperatorTree> = Vec::with_capacity(parts.len());
             for p in parts {
                 out.push(lower_where(p, params)?);
@@ -107,12 +105,12 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
         // and keep three-valued semantics through the row-evaluator
         // relational evaluation: `NOT (col = 5)` must not match rows whose `col`
         // is NULL.
-        Expr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => Some(
+        ScalarExpr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => Some(
             OperatorTree::Complement(Box::new(lower_where(inner, params)?)),
         ),
-        Expr::Func { name, args, .. } => lower_function(name, args, params),
-        Expr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, params),
-        Expr::IsNull { expr, negated } => {
+        ScalarExpr::Func { name, args, .. } => lower_function(name, args, params),
+        ScalarExpr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, params),
+        ScalarExpr::IsNull { expr, negated } => {
             let field = column_name(expr)?;
             let predicate = if *negated {
                 Predicate::IsNotNull
@@ -125,7 +123,7 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
                 source: None,
             })
         }
-        Expr::Between { expr, low, high } => {
+        ScalarExpr::Between { expr, low, high } => {
             let field = column_name(expr)?;
             let lo = const_value(low, params)?;
             let hi = const_value(high, params)?;
@@ -135,7 +133,7 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
                 source: None,
             })
         }
-        Expr::InList {
+        ScalarExpr::InList {
             expr,
             list,
             negated,
@@ -183,7 +181,7 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
     }
 }
 
-fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_function(name: &str, args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "text_match" => {
@@ -252,13 +250,16 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
 /// physical implementations.
 pub(crate) fn lower_sql_function(
     name: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     lower_function(name, args, params)
 }
 
-fn lower_bayesian_match_with_prior(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_bayesian_match_with_prior(
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
     if args.len() != 4 {
         return None;
     }
@@ -284,7 +285,7 @@ fn lower_bayesian_match_with_prior(args: &[Expr], params: &[SQLParam]) -> Option
     })
 }
 
-fn lower_calibrated_vector_match(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_calibrated_vector_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     if !(3..=4).contains(&args.len()) {
         return None;
     }
@@ -317,7 +318,7 @@ fn lower_calibrated_vector_match(args: &[Expr], params: &[SQLParam]) -> Option<O
     })
 }
 
-fn lower_multi_field_match(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_multi_field_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     if args.len() < 3 {
         return None;
     }
@@ -372,9 +373,11 @@ fn lower_multi_field_match(args: &[Expr], params: &[SQLParam]) -> Option<Operato
     None
 }
 
-fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_staged_retrieval(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     let mut stages = Vec::new();
-    if matches!(args.first(), Some(Expr::Func { .. })) && named_arg_expr(args.first()?).is_none() {
+    if matches!(args.first(), Some(ScalarExpr::Func { .. }))
+        && named_arg_expr(args.first()?).is_none()
+    {
         if args.is_empty() || args.len() % 2 != 0 {
             return None;
         }
@@ -414,7 +417,11 @@ fn lower_staged_retrieval(args: &[Expr], params: &[SQLParam]) -> Option<Operator
 /// - `knn_match` --> [`OperatorTree::CosineProbability`] wrapping a
 ///   [`OperatorTree::KNN`] child, so cosine scores in `[-1, 1]` get
 ///   rescaled to `(0, 1)` via `(1 + s) / 2`.
-fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_calibrated_signal(
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
     match name {
         "bayesian_match" => {
             let field = column_name(args.first()?)?;
@@ -452,9 +459,9 @@ fn lower_calibrated_signal(name: &str, args: &[Expr], params: &[SQLParam]) -> Op
 /// Lower a function-call argument into a calibrated signal node. Used
 /// by every fusion lowering arm (`fuse_log_odds`, `attention`,
 /// `learned_fusion`) so the rewrite stays consistent across fusers.
-fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_signal_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
     match arg {
-        Expr::Func { name, args, .. } => {
+        ScalarExpr::Func { name, args, .. } => {
             let lower = name.to_ascii_lowercase();
             lower_calibrated_signal(&lower, args, params)
         }
@@ -462,7 +469,7 @@ fn lower_signal_arg(arg: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
     }
 }
 
-fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     // `fuse_log_odds(signal_1, signal_2, ...[, alpha[, gating]])`.
     // The UQA SQL contract defaults alpha to 0.5 when no numeric option is supplied;
     // don't treat the last signal as an alpha argument.
@@ -548,7 +555,7 @@ fn lower_fuse_log_odds(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTre
     })
 }
 
-fn lower_attention_fusion(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_attention_fusion(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     use std::sync::Arc;
     use uqa_fusion::{AttentionFusion, N_QUERY_FEATURES};
     use uqa_operators::tree::AttentionRef;
@@ -573,7 +580,7 @@ fn lower_attention_fusion(args: &[Expr], params: &[SQLParam]) -> Option<Operator
     })
 }
 
-fn lower_learned_fusion(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_learned_fusion(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     use std::sync::Arc;
     use uqa_fusion::LearnedFusion;
     use uqa_operators::tree::LearnedFusionRef;
@@ -591,8 +598,8 @@ fn lower_learned_fusion(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTr
 
 fn lower_comparison(
     op: BinaryOp,
-    lhs: &Expr,
-    rhs: &Expr,
+    lhs: &ScalarExpr,
+    rhs: &ScalarExpr,
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     // Allow either `col OP literal` or `literal OP col` (we normalise).
@@ -623,15 +630,15 @@ fn lower_comparison(
     })
 }
 
-fn column_name(expr: &Expr) -> Option<String> {
+fn column_name(expr: &ScalarExpr) -> Option<String> {
     match expr {
-        Expr::Column(name) => Some(name.clone()),
-        Expr::QualifiedColumn { column, .. } => Some(column.clone()),
+        ScalarExpr::Column(name) => Some(name.clone()),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column.clone()),
         _ => None,
     }
 }
 
-fn field_name_arg(expr: &Expr, params: &[SQLParam]) -> Option<String> {
+fn field_name_arg(expr: &ScalarExpr, params: &[SQLParam]) -> Option<String> {
     column_name(expr).or_else(|| const_string(expr, params))
 }
 
@@ -649,11 +656,13 @@ impl FtsDefaultField {
     }
 }
 
-fn fts_default_field(expr: &Expr) -> Option<FtsDefaultField> {
+fn fts_default_field(expr: &ScalarExpr) -> Option<FtsDefaultField> {
     match expr {
-        Expr::Column(name) => Some(FtsDefaultField::Field(name.clone())),
-        Expr::QualifiedColumn { column, .. } => Some(FtsDefaultField::Field(column.clone())),
-        Expr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => Some(FtsDefaultField::All),
+        ScalarExpr::Column(name) => Some(FtsDefaultField::Field(name.clone())),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(FtsDefaultField::Field(column.clone())),
+        ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => {
+            Some(FtsDefaultField::All)
+        }
         _ => None,
     }
 }
@@ -786,19 +795,19 @@ fn common_text_field(tree: &OperatorTree) -> Option<String> {
     }
 }
 
-fn const_value(expr: &Expr, params: &[SQLParam]) -> Option<Value> {
-    let ctx = EvalContext::new(None, params);
-    eval(expr, &ctx).ok()
+fn const_value(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Value> {
+    let ctx = ScalarEvalContext::new(None, params);
+    eval_scalar(expr, &ctx).ok()
 }
 
-fn const_string(expr: &Expr, params: &[SQLParam]) -> Option<String> {
+fn const_string(expr: &ScalarExpr, params: &[SQLParam]) -> Option<String> {
     match const_value(expr, params)? {
         Value::Str(s) => Some(s),
         _ => None,
     }
 }
 
-fn const_f64(expr: &Expr, params: &[SQLParam]) -> Option<f64> {
+fn const_f64(expr: &ScalarExpr, params: &[SQLParam]) -> Option<f64> {
     match const_value(expr, params)? {
         Value::Int(n) => Some(n as f64),
         Value::Float(f) => Some(f),
@@ -807,16 +816,16 @@ fn const_f64(expr: &Expr, params: &[SQLParam]) -> Option<f64> {
     }
 }
 
-fn const_usize(expr: &Expr, params: &[SQLParam]) -> Option<usize> {
+fn const_usize(expr: &ScalarExpr, params: &[SQLParam]) -> Option<usize> {
     match const_value(expr, params)? {
         Value::Int(n) if n >= 0 => Some(n as usize),
         _ => None,
     }
 }
 
-fn const_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f32>> {
+fn const_vector(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Vec<f32>> {
     match expr {
-        Expr::Array(items) => {
+        ScalarExpr::Array(items) => {
             let mut out: Vec<f32> = Vec::with_capacity(items.len());
             for v in items {
                 out.push(const_f64(v, params)? as f32);
@@ -840,9 +849,9 @@ fn const_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f32>> {
     }
 }
 
-fn const_f64_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f64>> {
+fn const_f64_vector(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Vec<f64>> {
     match expr {
-        Expr::Array(items) => items.iter().map(|value| const_f64(value, params)).collect(),
+        ScalarExpr::Array(items) => items.iter().map(|value| const_f64(value, params)).collect(),
         other => match const_value(other, params)? {
             Value::List(items) => items
                 .into_iter()
@@ -858,7 +867,7 @@ fn const_f64_vector(expr: &Expr, params: &[SQLParam]) -> Option<Vec<f64>> {
     }
 }
 
-fn const_gating(expr: &Expr, params: &[SQLParam]) -> Option<GatingSpec> {
+fn const_gating(expr: &ScalarExpr, params: &[SQLParam]) -> Option<GatingSpec> {
     match const_value(expr, params)? {
         Value::Str(s) if s.eq_ignore_ascii_case("softplus") => Some(GatingSpec::Softplus),
         Value::Str(s) if s.eq_ignore_ascii_case("pass") || s.eq_ignore_ascii_case("none") => {
@@ -874,14 +883,14 @@ fn const_gating(expr: &Expr, params: &[SQLParam]) -> Option<GatingSpec> {
     }
 }
 
-fn named_arg_expr(expr: &Expr) -> Option<(&str, &Expr)> {
-    let Expr::Func { name, args, .. } = expr else {
+fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
+    let ScalarExpr::Func { name, args, .. } = expr else {
         return None;
     };
     if name != "__named_arg" || args.len() != 2 {
         return None;
     }
-    let Expr::Literal(Value::Str(arg_name)) = &args[0] else {
+    let ScalarExpr::Literal(Value::Str(arg_name)) = &args[0] else {
         return None;
     };
     Some((arg_name.as_str(), &args[1]))
@@ -967,10 +976,13 @@ impl<'a> EngineDriver<'a> {
             )
         })?;
         let field_expr = match field {
-            Some(f) => Expr::Column(f.to_string()),
-            None => Expr::Literal(Value::Str(String::new())),
+            Some(f) => ScalarExpr::Column(f.to_string()),
+            None => ScalarExpr::Literal(Value::Str(String::new())),
         };
-        let args = vec![field_expr, Expr::Literal(Value::Str(query.to_string()))];
+        let args = vec![
+            field_expr,
+            ScalarExpr::Literal(Value::Str(query.to_string())),
+        ];
         let result = match scoring {
             TextScoringMode::BM25 => {
                 sql::run_text_match_public(self.engine, self.table, &args, self.params)
@@ -989,16 +1001,16 @@ impl<'a> EngineDriver<'a> {
         field: &str,
     ) -> DriverResult<PostingList> {
         self.require_vector_query(field, query_vector)?;
-        let v_expr = Expr::Array(
+        let v_expr = ScalarExpr::Array(
             query_vector
                 .iter()
-                .map(|x| Expr::Literal(Value::Float(f64::from(*x))))
+                .map(|x| ScalarExpr::Literal(Value::Float(f64::from(*x))))
                 .collect(),
         );
         let args = vec![
-            Expr::Column(field.to_string()),
+            ScalarExpr::Column(field.to_string()),
             v_expr,
-            Expr::Literal(Value::Int(k as i64)),
+            ScalarExpr::Literal(Value::Int(k as i64)),
         ];
         sql::run_knn_match_public(self.engine, self.table, &args, self.params)
             .map(|rows| scored_to_posting_list(&rows))
@@ -1912,16 +1924,16 @@ impl EngineDriver<'_> {
         // Delegate to the row-function implementation like the other
         // leaf nodes, so every lowering of `multi_field_match` shares
         // one pad, one per-field analyzer choice, and one stats source.
-        let mut args: Vec<Expr> = fields
+        let mut args: Vec<ScalarExpr> = fields
             .iter()
-            .map(|field| Expr::Column(field.clone()))
+            .map(|field| ScalarExpr::Column(field.clone()))
             .collect();
-        args.push(Expr::Literal(Value::Str(query.to_string())));
+        args.push(ScalarExpr::Literal(Value::Str(query.to_string())));
         if let Some(weights) = weights {
             args.extend(
                 weights
                     .iter()
-                    .map(|weight| Expr::Literal(Value::Float(*weight))),
+                    .map(|weight| ScalarExpr::Literal(Value::Float(*weight))),
             );
         }
         sql::run_multi_field_match_public(self.engine, self.table, &args, self.params)
@@ -1954,10 +1966,10 @@ impl EngineDriver<'_> {
             return Err(malformed_operator_meta("bayesian_match_with_prior", "mode"));
         };
         let args = vec![
-            Expr::Column(field.clone()),
-            Expr::Literal(Value::Str(query.clone())),
-            Expr::Column(prior_field.clone()),
-            Expr::Literal(Value::Str(mode.clone())),
+            ScalarExpr::Column(field.clone()),
+            ScalarExpr::Literal(Value::Str(query.clone())),
+            ScalarExpr::Column(prior_field.clone()),
+            ScalarExpr::Literal(Value::Str(mode.clone())),
         ];
         sql::run_bayesian_match_with_prior_public(self.engine, self.table, &args, self.params)
             .map(|rows| scored_to_posting_list(&rows))
@@ -1982,12 +1994,18 @@ impl EngineDriver<'_> {
         let physical_query = value_to_vector(&Value::List(query_vector.clone()))?;
         self.require_vector_query(field, &physical_query)?;
         let mut args = vec![
-            Expr::Literal(Value::Str(field.clone())),
-            Expr::Array(query_vector.iter().cloned().map(Expr::Literal).collect()),
-            Expr::Literal(Value::Int(*k)),
+            ScalarExpr::Literal(Value::Str(field.clone())),
+            ScalarExpr::Array(
+                query_vector
+                    .iter()
+                    .cloned()
+                    .map(ScalarExpr::Literal)
+                    .collect(),
+            ),
+            ScalarExpr::Literal(Value::Int(*k)),
         ];
         if let Some(threshold) = meta.get("threshold") {
-            args.push(Expr::Literal(threshold.clone()));
+            args.push(ScalarExpr::Literal(threshold.clone()));
         }
         sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params)
             .map(|rows| scored_to_posting_list(&rows))
@@ -2145,10 +2163,10 @@ impl EngineDriver<'_> {
                 scoring: Some(TextScoringMode::BayesianBM25),
             } => {
                 let field_expr = match field {
-                    Some(f) => Expr::Column(f.clone()),
-                    None => Expr::Literal(Value::Str(String::new())),
+                    Some(f) => ScalarExpr::Column(f.clone()),
+                    None => ScalarExpr::Literal(Value::Str(String::new())),
                 };
-                let args = vec![field_expr, Expr::Literal(Value::Str(query.clone()))];
+                let args = vec![field_expr, ScalarExpr::Literal(Value::Str(query.clone()))];
                 let rows = sql::run_bayesian_evidence_match_public(
                     self.engine,
                     self.table,
@@ -3245,7 +3263,7 @@ fn sparse_threshold_inline(source: &PostingList, threshold: f64) -> PostingList 
 pub fn optimised_tree_for(
     engine: &Engine,
     table: &str,
-    where_expr: &Expr,
+    where_expr: &ScalarExpr,
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     let tree = lower_where(where_expr, params)?;
@@ -3259,7 +3277,7 @@ pub fn optimised_tree_for(
 pub fn run_optimised(
     engine: &Engine,
     table: &str,
-    where_expr: Option<&Expr>,
+    where_expr: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
     let Some(expr) = where_expr else {
@@ -3412,7 +3430,7 @@ pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
 pub(crate) fn run_fts_fusion_signal(
     engine: &Engine,
     table: &str,
-    args: &[Expr],
+    args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Option<ScoredFusionSignal>, SQLError> {
     let Some(tree) = lower_calibrated_signal("fts_match", args, params) else {

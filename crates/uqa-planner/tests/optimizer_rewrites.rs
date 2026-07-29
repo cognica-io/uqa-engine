@@ -13,13 +13,15 @@
 //! - empty `And` collapses to `True`, empty `Or` collapses to `False`,
 //! - **idempotence**: `optimize(optimize(s)) == optimize(s)` (the
 //!   rewriter is a fixed-point operator),
-//! - parse round-trip: `optimize(parse(sql))` produces a `SelectStmt`
-//!   whose textual semantics are unchanged on the small test corpus.
+//! - lowering boundary: optimization consumes `UnifiedPlan` / `ScalarExpr`
+//!   and never reconstructs a parser statement.
 
 use proptest::prelude::*;
 use uqa_core::Value;
-use uqa_planner::{optimize, OptimizerConfig};
-use uqa_sql::ast::{Expr, Projection, SelectStmt};
+use uqa_planner::{
+    optimize, ExpressionPlan, OptimizerConfig, RelationalPlan, ScalarExpr, UnifiedPlan,
+};
+use uqa_sql::ast::{Expr, Projection, SelectStmt, Statement};
 
 fn lit_true() -> Expr {
     Expr::Literal(Value::Bool(true))
@@ -55,15 +57,33 @@ fn select_with_where(filter: Expr) -> SelectStmt {
     }
 }
 
-fn optimized_where(filter: Expr) -> Option<Expr> {
+fn optimize_select(stmt: SelectStmt) -> UnifiedPlan {
     let cfg = OptimizerConfig::default();
-    let stmt = select_with_where(filter);
-    optimize(stmt, &cfg).r#where
+    optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
+}
+
+fn plan_where(plan: &UnifiedPlan) -> Option<&ScalarExpr> {
+    let UnifiedPlan::Query(query) = plan else {
+        return None;
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        return None;
+    };
+    block.r#where.as_ref()
+}
+
+fn optimized_where(filter: Expr) -> Option<ScalarExpr> {
+    let plan = optimize_select(select_with_where(filter));
+    plan_where(&plan).cloned()
+}
+
+fn physical(expression: Expr) -> ScalarExpr {
+    ExpressionPlan::lower(expression).scalar
 }
 
 /// Returns true iff `e` is structurally equal to `other`. We compare
 /// via Debug strings since `Expr` does not implement `PartialEq`.
-fn expr_eq(a: &Expr, b: &Expr) -> bool {
+fn expr_eq(a: &ScalarExpr, b: &ScalarExpr) -> bool {
     format!("{a:?}") == format!("{b:?}")
 }
 
@@ -93,10 +113,10 @@ proptest! {
 
         let cfg = OptimizerConfig::default();
         let stmt = select_with_where(filter);
-        let once = optimize(stmt, &cfg);
+        let once = optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg);
         let twice = optimize(once.clone(), &cfg);
         prop_assert!(
-            expr_eq(once.r#where.as_ref().unwrap(), twice.r#where.as_ref().unwrap()),
+            expr_eq(plan_where(&once).unwrap(), plan_where(&twice).unwrap()),
             "optimize not idempotent",
         );
     }
@@ -108,56 +128,56 @@ proptest! {
 fn and_with_true_drops_the_true() {
     let filter = Expr::And(vec![lit_true(), col("x")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &col("x"));
+    prop_assert_eq_helper(&got, &physical(col("x")));
 }
 
 #[test]
 fn and_with_false_short_circuits() {
     let filter = Expr::And(vec![col("x"), lit_false(), col("y")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &lit_false());
+    prop_assert_eq_helper(&got, &physical(lit_false()));
 }
 
 #[test]
 fn or_with_true_short_circuits() {
     let filter = Expr::Or(vec![col("x"), lit_true(), col("y")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &lit_true());
+    prop_assert_eq_helper(&got, &physical(lit_true()));
 }
 
 #[test]
 fn or_with_false_drops_the_false() {
     let filter = Expr::Or(vec![lit_false(), col("x")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &col("x"));
+    prop_assert_eq_helper(&got, &physical(col("x")));
 }
 
 #[test]
 fn empty_and_collapses_to_true() {
     let filter = Expr::And(vec![]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &lit_true());
+    prop_assert_eq_helper(&got, &physical(lit_true()));
 }
 
 #[test]
 fn empty_or_collapses_to_false() {
     let filter = Expr::Or(vec![]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &lit_false());
+    prop_assert_eq_helper(&got, &physical(lit_false()));
 }
 
 #[test]
 fn single_element_and_collapses() {
     let filter = Expr::And(vec![col("x")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &col("x"));
+    prop_assert_eq_helper(&got, &physical(col("x")));
 }
 
 #[test]
 fn single_element_or_collapses() {
     let filter = Expr::Or(vec![col("x")]);
     let got = optimized_where(filter).unwrap();
-    prop_assert_eq_helper(&got, &col("x"));
+    prop_assert_eq_helper(&got, &physical(col("x")));
 }
 
 #[test]
@@ -174,6 +194,6 @@ fn nested_and_flattens() {
 
 /// Equality helper: panics with a useful message instead of using
 /// proptest macros (these are regular `#[test]` cases).
-fn prop_assert_eq_helper(got: &Expr, expected: &Expr) {
+fn prop_assert_eq_helper(got: &ScalarExpr, expected: &ScalarExpr) {
     assert!(expr_eq(got, expected), "expected {expected:?}, got {got:?}");
 }

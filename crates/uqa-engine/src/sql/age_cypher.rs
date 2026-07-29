@@ -18,15 +18,15 @@
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
+use uqa_execution::ScalarExpr;
 use uqa_graph::agtype;
-use uqa_sql::ast::Expr;
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::Engine;
 
 pub(super) fn build_rows(
     engine: &Engine,
-    args: &[Expr],
+    args: &[ScalarExpr],
     evaluated: &[Value],
     qualifier: Option<&str>,
     column_aliases: &[String],
@@ -219,8 +219,11 @@ fn coerce_bool(value: Value) -> Result<Value, SQLError> {
     }
 }
 
-fn is_valid_parameter_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::Param(_) | Expr::Literal(Value::Null))
+fn is_valid_parameter_expr(expr: &ScalarExpr) -> bool {
+    matches!(
+        expr,
+        ScalarExpr::Param(_) | ScalarExpr::Literal(Value::Null)
+    )
 }
 
 fn parameter_map(value: &Value) -> Result<BTreeMap<String, Value>, SQLError> {

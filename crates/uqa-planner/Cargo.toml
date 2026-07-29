@@ -17,6 +17,7 @@ uqa-storage = { workspace = true }
 uqa-execution = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-joins = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 
 # The browser (emscripten) target runs single-threaded; rayon is
