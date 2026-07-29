@@ -9,11 +9,10 @@
 //! [`GraphPostingList`] so the result composes with the standard
 //! posting-list algebra via [`crate::GraphPostingList::to_posting_list`].
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use uqa_core::{DocId, Edge, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
-
-use std::collections::VecDeque;
+use uqa_operators::PathWeightPredicate;
 
 use crate::pattern::{EdgePattern, GraphPattern, VertexPredicate};
 use crate::posting_list::{GraphPayload, GraphPostingList};
@@ -976,10 +975,202 @@ impl<'a> RegularPathQuery<'a> {
     }
 }
 
+// -------------------------------------------------------------------------
+// WeightedPathQuery
+// -------------------------------------------------------------------------
+
+/// A bounded regular-path walk whose accumulated numeric edge weight must
+/// satisfy a caller-provided predicate.
+///
+/// Unlike reachability-only RPQ evaluation, weighted execution cannot collapse
+/// all visits to the same `(vertex, DFA state)`: two walks can reach that
+/// configuration with different accumulated weights. `max_hops` therefore
+/// makes the walk domain explicit and finite. When several accepted walks end
+/// at the same vertex, the result retains the greatest accumulated weight and
+/// its concrete vertex / edge path.
+pub struct WeightedPathQuery<'a> {
+    pub path: RegularPathExpr,
+    pub graph: &'a str,
+    pub start_vertex: Option<VertexId>,
+    pub weight_property: &'a str,
+    pub default_edge_weight: f64,
+    pub max_hops: usize,
+    pub predicate: PathWeightPredicate,
+    pub score: f64,
+}
+
+impl<'a> WeightedPathQuery<'a> {
+    pub fn new(
+        path: RegularPathExpr,
+        graph: &'a str,
+        weight_property: &'a str,
+        predicate: PathWeightPredicate,
+    ) -> Self {
+        Self {
+            path,
+            graph,
+            start_vertex: None,
+            weight_property,
+            default_edge_weight: 1.0,
+            max_hops: 16,
+            predicate,
+            score: DEFAULT_GRAPH_SCORE,
+        }
+    }
+
+    pub fn from_vertex(mut self, start: VertexId) -> Self {
+        self.start_vertex = Some(start);
+        self
+    }
+
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+        let dfa = subset_construction(&build_nfa(&simplify(&self.path)));
+        let starts: Vec<VertexId> = match self.start_vertex {
+            Some(vertex) => vec![vertex],
+            None => store.vertex_ids_in_graph(self.graph).into_iter().collect(),
+        };
+        let mut accepted = BTreeMap::<VertexId, WeightedPathMatch>::new();
+        for start in starts {
+            self.simulate_from(store, start, &dfa, &mut accepted);
+        }
+
+        let mut entries = Vec::with_capacity(accepted.len());
+        let mut graph_payloads = BTreeMap::new();
+        for (end, path_match) in accepted {
+            let mut fields = BTreeMap::new();
+            fields.insert("_path_weight".to_string(), Value::Float(path_match.weight));
+            entries.push(PostingEntry::new(
+                end,
+                Payload {
+                    score: self.score,
+                    fields,
+                    ..Default::default()
+                },
+            ));
+            graph_payloads.insert(
+                end,
+                GraphPayload {
+                    subgraph_vertices: path_match.vertices,
+                    subgraph_edges: path_match.edges,
+                    graph_name: self.graph.to_string(),
+                    score_override: Some(self.score),
+                },
+            );
+        }
+        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+    }
+
+    fn simulate_from<G: GraphStore>(
+        &self,
+        store: &G,
+        start: VertexId,
+        dfa: &Dfa,
+        accepted: &mut BTreeMap<VertexId, WeightedPathMatch>,
+    ) {
+        let mut queue = VecDeque::from([WeightedWalk {
+            vertex: start,
+            state: dfa.start.clone(),
+            hops: 0,
+            weight: 0.0,
+            vertices: vec![start],
+            edges: Vec::new(),
+        }]);
+        if dfa.accepts.contains(&dfa.start) && (self.predicate)(0.0) {
+            record_weighted_match(accepted, start, 0.0, vec![start], Vec::new());
+        }
+
+        while let Some(walk) = queue.pop_front() {
+            if walk.hops >= self.max_hops {
+                continue;
+            }
+            let Some(transitions) = dfa.transitions.get(&walk.state) else {
+                continue;
+            };
+            for edge_id in store.out_edge_ids(walk.vertex, self.graph) {
+                let Some(edge) = store.get_edge(edge_id) else {
+                    continue;
+                };
+                let Some(next_state) = transitions.get(&edge.label) else {
+                    continue;
+                };
+                let edge_weight = edge
+                    .properties
+                    .get(self.weight_property)
+                    .and_then(value_as_f64)
+                    .filter(|weight| weight.is_finite())
+                    .unwrap_or(self.default_edge_weight);
+                let weight = walk.weight + edge_weight;
+                if !weight.is_finite() {
+                    continue;
+                }
+                let mut vertices = walk.vertices.clone();
+                vertices.push(edge.target_id);
+                let mut edges = walk.edges.clone();
+                edges.push(edge_id);
+                if dfa.accepts.contains(next_state) && (self.predicate)(weight) {
+                    record_weighted_match(
+                        accepted,
+                        edge.target_id,
+                        weight,
+                        vertices.clone(),
+                        edges.clone(),
+                    );
+                }
+                queue.push_back(WeightedWalk {
+                    vertex: edge.target_id,
+                    state: next_state.clone(),
+                    hops: walk.hops + 1,
+                    weight,
+                    vertices,
+                    edges,
+                });
+            }
+        }
+    }
+}
+
+struct WeightedWalk {
+    vertex: VertexId,
+    state: DfaState,
+    hops: usize,
+    weight: f64,
+    vertices: Vec<VertexId>,
+    edges: Vec<EdgeId>,
+}
+
+struct WeightedPathMatch {
+    weight: f64,
+    vertices: Vec<VertexId>,
+    edges: Vec<EdgeId>,
+}
+
+fn record_weighted_match(
+    accepted: &mut BTreeMap<VertexId, WeightedPathMatch>,
+    endpoint: VertexId,
+    weight: f64,
+    vertices: Vec<VertexId>,
+    edges: Vec<EdgeId>,
+) {
+    let replace = accepted
+        .get(&endpoint)
+        .is_none_or(|current| weight.total_cmp(&current.weight).is_gt());
+    if replace {
+        accepted.insert(
+            endpoint,
+            WeightedPathMatch {
+                weight,
+                vertices,
+                edges,
+            },
+        );
+    }
+}
+
 fn value_as_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Int(n) => Some(*n as f64),
         Value::Float(f) => Some(*f),
+        Value::Decimal(value) => value.to_f64(),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }

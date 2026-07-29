@@ -7,7 +7,7 @@
 //! Bridge between the SQL `WHERE` AST and the operator-tree IR.
 //!
 //! The optimizer lowers supported `SELECT ... WHERE ...` predicates into an `OperatorTree`
-//! (boolean / scoring / fusion / graph / index-scan nodes), runs the
+//! (boolean / scoring / fusion / filter / index-scan nodes), runs the
 //! tree through `QueryOptimizer` (the 10-pass algebraic / graph-aware
 //! / fusion-reordering optimiser), and only then executes it through
 //! `PlanExecutor`. Until now the UQA-RS implementation had `QueryOptimizer` implemented
@@ -22,11 +22,13 @@
 //!    target table into an `OperatorTree`. Boolean connectives map onto
 //!    `Intersect` / `Union` / `Complement`, scoring / KNN / fusion
 //!    function calls map onto the matching `OperatorTree` variants, and
-//!    column comparison predicates lower into `Filter` nodes.
-//! 2. [`EngineDriver`] implements [`OperatorTreeDriver`] by calling
-//!    back into the engine's existing `run_text_match` / `run_knn_match`
-//!    / `run_fuse_log_odds` / ... helpers, and combining child posting
-//!    lists with the Boolean algebra in `uqa_core::PostingList`.
+//!    column comparison predicates lower into `Filter` nodes. SQL
+//!    expressions outside that retrieval subset keep the direct SQL
+//!    execution path.
+//! 2. [`EngineDriver`] implements [`OperatorTreeDriver`] with exhaustive
+//!    physical dispatch for every concrete IR variant. Ordinary and graph
+//!    nodes use `PostingList` (with graph Phi payloads); joins retain their
+//!    tuple identity in `GeneralizedPostingList`.
 //!
 //! The integration target is a "lower -> optimise -> execute" pipeline:
 //! [`run_optimised`] does the three-step sequence and returns a
@@ -35,24 +37,52 @@
 //! WHERE expression doesn't fit the operator tree (e.g. arithmetic
 //! across columns), the function returns `None` and the caller falls
 //! back to the legacy `execute_function` / `filter_table_rows` path.
+//! SQL forms outside the IR remain on the relational row executor. That
+//! boundary is distinct from physical dispatch: once a concrete tree exists,
+//! the optimizer and driver execute it or return a typed error.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{DocId, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value};
+use uqa_core::{
+    DocId, GeneralizedPostingList, PathSegment, Payload, PostingEntry, PostingList, Predicate,
+    Value,
+};
 use uqa_operators::{
     GatingSpec, LogOddsFusionOperator, MultiStageCutoff, MultiStageEntry, OperatorTree,
     TextScoringMode,
 };
-use uqa_planner::executor::{OperatorTreeDriver, PlanExecutor};
+use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
-use uqa_planner::query_optimizer::QueryOptimizer;
-use uqa_sql::ast::{BinaryOp, Expr};
-use uqa_sql::expr::{eval, EvalContext};
+use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
+use uqa_sql::ast::{BinaryOp, ColumnType, Expr};
+use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::SQLParam;
 
 use crate::sql;
 use crate::{Engine, ScoredEntry};
 use uqa_sql::SQLError;
+
+type DriverResult<T> = Result<T, SQLError>;
+type ScoredFusionSignal = (Vec<ScoredEntry>, Option<f64>);
+
+#[derive(Clone, Copy)]
+struct WeightedPathExecution<'a> {
+    rpq_source: &'a str,
+    start_vertex: u64,
+    graph: &'a str,
+    weight_property: &'a str,
+    default_edge_weight: f64,
+    max_hops: usize,
+    predicate: &'a uqa_operators::PathWeightPredicate,
+    predicate_selectivity: f64,
+    score: f64,
+}
+
+fn malformed_operator_meta(operator: &str, field: &str) -> SQLError {
+    SQLError::Internal(format!(
+        "malformed {operator} OperatorTree: missing or invalid `{field}` metadata"
+    ))
+}
 
 /// Lower a SQL `WHERE` expression into an [`OperatorTree`]. Returns
 /// `None` for shapes the operator IR can't represent so the caller can
@@ -216,6 +246,18 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
         }
         _ => None,
     }
+}
+
+/// Lower one row-emitting SQL function call into the shared operator
+/// IR. The row-function dispatcher uses this for legacy/non-WHERE call
+/// sites so compositional retrieval functions do not retain duplicate
+/// physical implementations.
+pub(crate) fn lower_sql_function(
+    name: &str,
+    args: &[Expr],
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
+    lower_function(name, args, params)
 }
 
 fn lower_bayesian_match_with_prior(args: &[Expr], params: &[SQLParam]) -> Option<OperatorTree> {
@@ -847,10 +889,9 @@ fn named_arg_expr(expr: &Expr) -> Option<(&str, &Expr)> {
     Some((arg_name.as_str(), &args[1]))
 }
 
-/// `OperatorTreeDriver` backed by the engine's existing per-function
-/// helpers. Each leaf node delegates to `run_*_match`; combinators
-/// operate over the resulting posting lists with `uqa_core` Boolean
-/// algebra.
+/// Physical `OperatorTreeDriver` backed by the engine's table, index, graph,
+/// join, and ML runtimes. Single-document branches compose through the core
+/// posting-list algebra; join branches retain the generalized tuple carrier.
 pub struct EngineDriver<'a> {
     pub engine: &'a Engine,
     pub table: &'a str,
@@ -878,9 +919,42 @@ impl<'a> EngineDriver<'a> {
         self
     }
 
-    fn execute_branches(&self, branches: &[OperatorTree]) -> Vec<PostingList> {
-        let workers: Vec<_> = branches.iter().map(|b| || self.execute_node(b)).collect();
-        self.parallel.execute_branches(&workers)
+    fn execute_posting_node(&self, op: &OperatorTree) -> DriverResult<PostingList> {
+        match self.execute_node(op)? {
+            OperatorOutput::Posting(result) => Ok(result),
+            OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
+                "{} produces tuple rows and cannot feed a single-document operator",
+                uqa_planner::executor::operator_name(op)
+            ))),
+        }
+    }
+
+    fn execute_posting_branches(
+        &self,
+        branches: &[OperatorTree],
+    ) -> DriverResult<Vec<PostingList>> {
+        let workers: Vec<_> = branches
+            .iter()
+            .map(|branch| || self.execute_posting_node(branch))
+            .collect();
+        self.parallel
+            .execute_branches(&workers)
+            .into_iter()
+            .collect()
+    }
+
+    fn execute_output_branches(
+        &self,
+        branches: &[OperatorTree],
+    ) -> DriverResult<Vec<OperatorOutput>> {
+        let workers: Vec<_> = branches
+            .iter()
+            .map(|branch| || self.execute_node(branch))
+            .collect();
+        self.parallel
+            .execute_branches(&workers)
+            .into_iter()
+            .collect()
     }
 
     fn execute_term(
@@ -888,9 +962,12 @@ impl<'a> EngineDriver<'a> {
         query: &str,
         field: Option<&str>,
         scoring: Option<TextScoringMode>,
-    ) -> PostingList {
-        let scoring =
-            scoring.expect("OperatorTree::Term reached EngineDriver without bound text scoring");
+    ) -> DriverResult<PostingList> {
+        let scoring = scoring.ok_or_else(|| {
+            SQLError::Internal(
+                "OperatorTree::Term reached EngineDriver without bound text scoring".into(),
+            )
+        })?;
         let field_expr = match field {
             Some(f) => Expr::Column(f.to_string()),
             None => Expr::Literal(Value::Str(String::new())),
@@ -904,13 +981,16 @@ impl<'a> EngineDriver<'a> {
                 sql::run_bayesian_match_public(self.engine, self.table, &args, self.params)
             }
         };
-        match result {
-            Ok(rows) => scored_to_posting_list(&rows),
-            Err(_) => PostingList::new(),
-        }
+        result.map(|rows| scored_to_posting_list(&rows))
     }
 
-    fn execute_knn(&self, query_vector: &[f32], k: usize, field: &str) -> PostingList {
+    fn execute_knn(
+        &self,
+        query_vector: &[f32],
+        k: usize,
+        field: &str,
+    ) -> DriverResult<PostingList> {
+        self.require_vector_query(field, query_vector)?;
         let v_expr = Expr::Array(
             query_vector
                 .iter()
@@ -922,10 +1002,8 @@ impl<'a> EngineDriver<'a> {
             v_expr,
             Expr::Literal(Value::Int(k as i64)),
         ];
-        match sql::run_knn_match_public(self.engine, self.table, &args, self.params) {
-            Ok(rows) => scored_to_posting_list(&rows),
-            Err(_) => PostingList::new(),
-        }
+        sql::run_knn_match_public(self.engine, self.table, &args, self.params)
+            .map(|rows| scored_to_posting_list(&rows))
     }
 
     fn execute_filter(
@@ -933,19 +1011,27 @@ impl<'a> EngineDriver<'a> {
         field: &str,
         predicate: &Predicate,
         source: Option<&OperatorTree>,
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
+        if !self.engine.has_table(self.table) {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
+        }
+        if !self.engine.table_has_column(self.table, field) {
+            return Err(SQLError::UnknownColumn(field.to_string()));
+        }
         // Indexed columns resolve through the value index in
         // O(log n + k); the index refuses predicates it cannot answer
         // with evaluated-scan semantics, so this never changes results.
         if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate) {
             return match source {
-                Some(child) => self.execute_node(child).intersect_owned(&indexed),
-                None => indexed,
+                Some(child) => self
+                    .execute_posting_node(child)
+                    .map(|posting| posting.intersect_owned(&indexed)),
+                None => Ok(indexed),
             };
         }
         let candidates: Vec<DocId> = match source {
             Some(child) => {
-                let inner = self.execute_node(child);
+                let inner = self.execute_posting_node(child)?;
                 inner.entries().iter().map(|e| e.doc_id).collect()
             }
             None => self.engine.table_doc_ids(self.table),
@@ -960,15 +1046,20 @@ impl<'a> EngineDriver<'a> {
             }
         }
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 }
 
 impl OperatorTreeDriver for EngineDriver<'_> {
+    type Error = SQLError;
+
+    // Keep one exhaustive physical-dispatch match: adding an IR variant must
+    // fail compilation here instead of falling through a category wildcard.
     #[allow(clippy::match_same_arms)]
-    fn execute_node(&self, op: &OperatorTree) -> PostingList {
-        match op {
-            OperatorTree::Empty => PostingList::new(),
+    #[allow(clippy::too_many_lines)]
+    fn execute_node(&self, op: &OperatorTree) -> DriverResult<OperatorOutput> {
+        let posting = match op {
+            OperatorTree::Empty => Ok(PostingList::new()),
             OperatorTree::Term {
                 query,
                 field,
@@ -987,10 +1078,22 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 predicate,
                 source,
             } => self.execute_filter(field, predicate, source.as_deref()),
-            OperatorTree::Intersect(parts) => self.execute_intersect(parts),
-            OperatorTree::Union(parts) => self.execute_union(parts),
+            OperatorTree::Facet { field, source } => self.execute_facet(field, source.as_deref()),
+            OperatorTree::Score {
+                scorer,
+                source,
+                query_terms,
+                field,
+            } => self.execute_score(scorer, source, query_terms, field),
+            OperatorTree::Intersect(parts) => return self.execute_intersect(parts),
+            OperatorTree::Union(parts) => return self.execute_union(parts),
             OperatorTree::Complement(inner) => self.execute_complement(inner),
-            OperatorTree::Composed(parts) => self.execute_composed(parts),
+            OperatorTree::Composed(parts) => return self.execute_composed(parts),
+            OperatorTree::VectorSimilarity {
+                query_vector,
+                threshold,
+                field,
+            } => self.execute_vector_similarity(query_vector, *threshold, field),
             OperatorTree::LogOddsFusion {
                 signals,
                 alpha,
@@ -1018,6 +1121,25 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 field,
                 predicate,
             } => self.execute_index_scan(index_name, field, predicate),
+            OperatorTree::Aggregate {
+                source,
+                field,
+                monoid,
+            } => self.execute_aggregate(source.as_deref(), field, monoid),
+            OperatorTree::GroupBy {
+                source,
+                group_field,
+                agg_field,
+                monoid,
+            } => self.execute_group_by(source, group_field, agg_field, monoid),
+            OperatorTree::HybridTextVector {
+                term_op,
+                vector_op,
+                alpha,
+            } => self.execute_hybrid_text_vector(term_op, vector_op, *alpha),
+            OperatorTree::SemanticFilter { source, vector_op } => {
+                self.execute_semantic_filter(source, vector_op)
+            }
             OperatorTree::VectorExclusion { positive, negative } => {
                 self.execute_vector_exclusion(positive, negative)
             }
@@ -1035,8 +1157,8 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 self.execute_learned_fusion(signals, learned)
             }
             OperatorTree::SparseThreshold { source, threshold } => {
-                let source = self.execute_node(source);
-                sparse_threshold_inline(&source, *threshold)
+                let source = self.execute_posting_node(source)?;
+                Ok(sparse_threshold_inline(&source, *threshold))
             }
             OperatorTree::MultiFieldSearch {
                 fields,
@@ -1044,42 +1166,176 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 weights,
             } => self.execute_multi_field_search(fields, query, weights.as_deref()),
             OperatorTree::MultiStage { stages } => self.execute_multi_stage(stages),
-            OperatorTree::Opaque { kind, meta, .. } if kind == "bayesian_match_with_prior" => {
-                self.execute_bayesian_match_with_prior(meta)
+            OperatorTree::Traverse {
+                start_vertex,
+                graph,
+                label,
+                max_hops,
+                vertex_predicate,
+            } => self.execute_traverse(
+                *start_vertex,
+                graph,
+                label.as_deref(),
+                *max_hops,
+                vertex_predicate.as_ref(),
+            ),
+            OperatorTree::PatternMatch { pattern, graph } => {
+                self.execute_pattern_match(pattern, graph)
             }
-            OperatorTree::Opaque { kind, meta, .. } if kind == "calibrated_vector_match" => {
-                self.execute_calibrated_vector_match(meta)
+            OperatorTree::RegularPathQuery {
+                rpq_source,
+                start_vertex,
+                graph,
+            } => self.execute_regular_path_query(rpq_source, *start_vertex, graph),
+            OperatorTree::GraphJoin {
+                left,
+                right,
+                label,
+                graph,
+            } => {
+                return self
+                    .execute_graph_join(left, right, label.as_deref(), graph)
+                    .map(OperatorOutput::Generalized);
             }
-            // The remaining graph-only IR variants (PatternMatch,
-            // Traverse, RegularPathQuery, WeightedPathQuery,
-            // CypherQuery, ...) need a shared graph store handle to
-            // execute. The engine routes those through dedicated
-            // table-function entry points; if one shows up here we
-            // signal an empty result rather than misreporting matches.
-            _ => PostingList::new(),
-        }
+            OperatorTree::VertexAggregation { source, monoid } => {
+                self.execute_vertex_aggregation(source, monoid)
+            }
+            OperatorTree::WeightedPathQuery {
+                rpq_source,
+                start_vertex,
+                graph,
+                weight_property,
+                default_edge_weight,
+                max_hops,
+                predicate,
+                predicate_selectivity,
+                score,
+            } => self.execute_weighted_path_query(WeightedPathExecution {
+                rpq_source,
+                start_vertex: *start_vertex,
+                graph,
+                weight_property,
+                default_edge_weight: *default_edge_weight,
+                max_hops: *max_hops,
+                predicate,
+                predicate_selectivity: *predicate_selectivity,
+                score: *score,
+            }),
+            OperatorTree::MessagePassing { source } => self.execute_message_passing(source),
+            OperatorTree::GraphEmbedding { source } => self.execute_graph_embedding(source),
+            OperatorTree::PageRank { graph } => self.execute_page_rank(graph),
+            OperatorTree::HITS { graph } => self.execute_hits(graph),
+            OperatorTree::BetweennessCentrality { graph } => {
+                self.execute_betweenness_centrality(graph)
+            }
+            OperatorTree::TextSimilarityJoin {
+                left,
+                right,
+                threshold,
+            } => {
+                return self
+                    .execute_text_similarity_join(left, right, *threshold)
+                    .map(OperatorOutput::Generalized);
+            }
+            OperatorTree::VectorSimilarityJoin {
+                left,
+                right,
+                threshold,
+            } => {
+                return self
+                    .execute_vector_similarity_join(left, right, *threshold)
+                    .map(OperatorOutput::Generalized);
+            }
+            OperatorTree::HybridJoin { left, right } => {
+                return self
+                    .execute_hybrid_join(left, right)
+                    .map(OperatorOutput::Generalized);
+            }
+            OperatorTree::CrossParadigmJoin { left, right } => {
+                return self
+                    .execute_cross_paradigm_join(left, right)
+                    .map(OperatorOutput::Generalized);
+            }
+            OperatorTree::TemporalTraverse {
+                start_vertex,
+                graph,
+                label,
+                max_hops,
+                temporal_filter,
+            } => self.execute_temporal_traverse(
+                *start_vertex,
+                graph,
+                label.as_deref(),
+                *max_hops,
+                temporal_filter.as_ref(),
+            ),
+            OperatorTree::TemporalPatternMatch {
+                pattern,
+                graph,
+                temporal_filter,
+            } => self.execute_temporal_pattern_match(pattern, graph, temporal_filter.as_ref()),
+            OperatorTree::ProgressiveFusion {
+                stages,
+                alpha,
+                gating,
+            } => self.execute_progressive_fusion(stages, *alpha, gating),
+            OperatorTree::DeepFusion {
+                layers,
+                alpha,
+                gating,
+            } => self.execute_deep_fusion(layers, *alpha, gating),
+            OperatorTree::Opaque {
+                kind,
+                children,
+                meta,
+            } => self.execute_opaque(kind, children, meta),
+        }?;
+        Ok(OperatorOutput::Posting(posting))
     }
 }
 
 impl EngineDriver<'_> {
-    fn execute_intersect(&self, parts: &[OperatorTree]) -> PostingList {
-        let mut iter = self.execute_branches(parts).into_iter();
+    fn execute_intersect(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
+        let mut iter = self.execute_output_branches(parts)?.into_iter();
         let Some(first) = iter.next() else {
-            return PostingList::new();
+            return Ok(PostingList::new().into());
         };
-        iter.fold(first, |acc, next| acc.intersect_owned(&next))
+        iter.try_fold(first, |acc, next| match (acc, next) {
+            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
+                Ok(OperatorOutput::Posting(left.intersect_owned(&right)))
+            }
+            (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
+                Ok(OperatorOutput::Generalized(left.intersect(&right)))
+            }
+            _ => Err(SQLError::TypeMismatch(
+                "Intersect operands must use the same posting-list carrier".to_string(),
+            )),
+        })
     }
 
-    fn execute_union(&self, parts: &[OperatorTree]) -> PostingList {
-        let mut iter = self.execute_branches(parts).into_iter();
+    fn execute_union(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
+        let mut iter = self.execute_output_branches(parts)?.into_iter();
         let Some(first) = iter.next() else {
-            return PostingList::new();
+            return Ok(PostingList::new().into());
         };
-        iter.fold(first, |acc, next| acc.union(&next))
+        iter.try_fold(first, |acc, next| match (acc, next) {
+            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
+                Ok(OperatorOutput::Posting(left.union(&right)))
+            }
+            (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
+                Ok(OperatorOutput::Generalized(left.union(&right)))
+            }
+            _ => Err(SQLError::TypeMismatch(
+                "Union operands must use the same posting-list carrier".to_string(),
+            )),
+        })
     }
 
-    fn execute_complement(&self, inner: &OperatorTree) -> PostingList {
-        let inner_pl = self.execute_node(inner);
+    fn execute_complement(&self, inner: &OperatorTree) -> DriverResult<PostingList> {
+        if !self.engine.has_table(self.table) {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
+        }
+        let inner_pl = self.execute_posting_node(inner)?;
         let included: BTreeSet<DocId> = inner_pl.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
         for doc_id in self.engine.table_doc_ids(self.table) {
@@ -1088,19 +1344,536 @@ impl EngineDriver<'_> {
             }
         }
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
-    fn execute_composed(&self, parts: &[OperatorTree]) -> PostingList {
-        let mut iter = parts.iter().map(|p| self.execute_node(p));
-        let Some(first) = iter.next() else {
-            return PostingList::new();
-        };
-        iter.fold(first, |acc, next| acc.intersect_owned(&next))
+    fn execute_composed(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
+        let mut result = OperatorOutput::Posting(PostingList::new());
+        for part in parts {
+            result = self.execute_node(part)?;
+        }
+        Ok(result)
     }
 
-    fn execute_facet_vector(&self, vector_op: &OperatorTree, facet_field: &str) -> PostingList {
-        let vec_pl = self.execute_node(vector_op);
+    fn execute_facet(
+        &self,
+        field: &str,
+        source: Option<&OperatorTree>,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{FacetOperator, Operator};
+
+        self.require_column(field)?;
+        let source = source
+            .map(|child| self.execute_posting_node(child).map(static_operator))
+            .transpose()?;
+        let op = FacetOperator::new(field, source);
+        Ok(op.execute(&self.bridge_context()?))
+    }
+
+    fn execute_score(
+        &self,
+        scorer: &uqa_operators::ScorerRef,
+        source: &OperatorTree,
+        query_terms: &[String],
+        field: &str,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{Operator, ScoreOperator};
+
+        self.require_column(field)?;
+        let source = static_operator(self.execute_posting_node(source)?);
+        let op = ScoreOperator::new(scorer.clone(), source, query_terms.to_vec(), field);
+        Ok(op.execute(&self.bridge_context()?))
+    }
+
+    fn execute_vector_similarity(
+        &self,
+        query_vector: &[f32],
+        threshold: f32,
+        field: &str,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{Operator, VectorSimilarityOperator};
+
+        self.require_vector_query(field, query_vector)?;
+        if !threshold.is_finite() || !(-1.0..=1.0).contains(&threshold) {
+            return Err(SQLError::TypeMismatch(format!(
+                "VectorSimilarity.threshold must be finite and in [-1, 1], got {threshold}"
+            )));
+        }
+        let op = VectorSimilarityOperator::new(query_vector.to_vec(), threshold, field);
+        Ok(op.execute(&self.bridge_context()?))
+    }
+
+    fn execute_aggregate(
+        &self,
+        source: Option<&OperatorTree>,
+        field: &str,
+        monoid: &std::sync::Arc<dyn uqa_operators::AggregationMonoid>,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{AggregateOperator, Operator};
+
+        self.require_column(field)?;
+        let source = source
+            .map(|child| self.execute_posting_node(child).map(static_operator))
+            .transpose()?;
+        let op = AggregateOperator::new(source, field, monoid.clone());
+        Ok(op.execute(&self.bridge_context()?))
+    }
+
+    fn execute_group_by(
+        &self,
+        source: &OperatorTree,
+        group_field: &str,
+        agg_field: &str,
+        monoid: &std::sync::Arc<dyn uqa_operators::AggregationMonoid>,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{GroupByOperator, Operator};
+
+        self.require_column(group_field)?;
+        self.require_column(agg_field)?;
+        let source = static_operator(self.execute_posting_node(source)?);
+        let op = GroupByOperator::new(source, group_field, agg_field, monoid.clone());
+        Ok(op.execute(&self.bridge_context()?))
+    }
+
+    fn execute_hybrid_text_vector(
+        &self,
+        term_op: &OperatorTree,
+        vector_op: &OperatorTree,
+        alpha: f64,
+    ) -> DriverResult<PostingList> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(SQLError::TypeMismatch(format!(
+                "HybridTextVector.alpha must be finite and in [0, 1], got {alpha}"
+            )));
+        }
+        let text = self.execute_posting_node(term_op)?;
+        let vector = self.execute_posting_node(vector_op)?;
+        let text_scores: BTreeMap<DocId, f64> = text
+            .entries()
+            .iter()
+            .map(|entry| (entry.doc_id, entry.payload.score))
+            .collect();
+        let vector_scores: BTreeMap<DocId, f64> = vector
+            .entries()
+            .iter()
+            .map(|entry| (entry.doc_id, entry.payload.score))
+            .collect();
+        let intersection = text.intersect_owned(&vector);
+        Ok(intersection.with_scores(|entry| {
+            let text_score = text_scores.get(&entry.doc_id).copied().unwrap_or_default();
+            let vector_score = vector_scores
+                .get(&entry.doc_id)
+                .copied()
+                .unwrap_or_default();
+            alpha * text_score + (1.0 - alpha) * vector_score
+        }))
+    }
+
+    fn execute_semantic_filter(
+        &self,
+        source: &OperatorTree,
+        vector_op: &OperatorTree,
+    ) -> DriverResult<PostingList> {
+        let source = self.execute_posting_node(source)?;
+        let vector = self.execute_posting_node(vector_op)?;
+        Ok(source.intersect_owned(&vector))
+    }
+
+    fn execute_traverse(
+        &self,
+        start_vertex: u64,
+        graph: &str,
+        label: Option<&str>,
+        max_hops: usize,
+        vertex_predicate: Option<&uqa_operators::VertexPredicate>,
+    ) -> DriverResult<PostingList> {
+        let max_hops = u32::try_from(max_hops).map_err(|_| {
+            SQLError::TypeMismatch(format!("Traverse.max_hops is too large: {max_hops}"))
+        })?;
+        self.with_graph(graph, |store| {
+            let mut op = uqa_graph::Traverse::new(start_vertex, graph).max_hops(max_hops);
+            if let Some(label) = label {
+                op = op.label(label);
+            }
+            if let Some(predicate) = vertex_predicate {
+                op = op.predicate(uqa_graph::VertexPredicate::Custom(predicate.clone()));
+            }
+            op.execute(store).to_posting_list()
+        })
+    }
+
+    fn execute_pattern_match(
+        &self,
+        pattern: &uqa_operators::GraphPatternIR,
+        graph: &str,
+    ) -> DriverResult<PostingList> {
+        let pattern = graph_pattern_from_ir(pattern);
+        self.with_graph(graph, |store| {
+            uqa_graph::GMatch::new(pattern, graph)
+                .execute(store)
+                .to_posting_list()
+        })
+    }
+
+    fn execute_regular_path_query(
+        &self,
+        rpq_source: &str,
+        start_vertex: u64,
+        graph: &str,
+    ) -> DriverResult<PostingList> {
+        let path = parse_rpq(rpq_source)?;
+        self.with_graph(graph, |store| {
+            uqa_graph::RegularPathQuery::new(path, graph)
+                .from_vertex(start_vertex)
+                .execute(store)
+                .to_posting_list()
+        })
+    }
+
+    fn execute_graph_join(
+        &self,
+        left: &OperatorTree,
+        right: &OperatorTree,
+        label: Option<&str>,
+        graph: &str,
+    ) -> DriverResult<GeneralizedPostingList> {
+        let left = self.execute_posting_node(left)?;
+        let right = self.execute_posting_node(right)?;
+        self.with_graph(graph, |store| {
+            let mut op = uqa_joins::GraphJoin::new(left.entries(), right.entries(), store, graph);
+            if let Some(label) = label {
+                op = op.label(label);
+            }
+            op.execute()
+        })
+    }
+
+    fn execute_vertex_aggregation(
+        &self,
+        source: &OperatorTree,
+        monoid: &std::sync::Arc<dyn uqa_operators::AggregationMonoid>,
+    ) -> DriverResult<PostingList> {
+        let source = self.execute_posting_node(source)?;
+        let mut state = monoid.identity();
+        for entry in source.entries() {
+            state = monoid.accumulate(state, &Value::Float(entry.payload.score));
+        }
+        let result = monoid.finalize(state);
+        let score = numeric_score(&result);
+        let mut fields = BTreeMap::new();
+        fields.insert("_vertex_aggregate".to_string(), result);
+        fields.insert(
+            "_vertex_aggregate_count".to_string(),
+            Value::Int(source.len() as i64),
+        );
+        Ok(PostingList::from_sorted_unchecked(vec![PostingEntry::new(
+            0,
+            Payload {
+                score,
+                fields,
+                ..Default::default()
+            },
+        )]))
+    }
+
+    fn execute_weighted_path_query(
+        &self,
+        query: WeightedPathExecution<'_>,
+    ) -> DriverResult<PostingList> {
+        let WeightedPathExecution {
+            rpq_source,
+            start_vertex,
+            graph,
+            weight_property,
+            default_edge_weight,
+            max_hops,
+            predicate,
+            predicate_selectivity,
+            score,
+        } = query;
+        if !predicate_selectivity.is_finite() || !(0.0..=1.0).contains(&predicate_selectivity) {
+            return Err(SQLError::TypeMismatch(format!(
+                "WeightedPathQuery.predicate_selectivity must be finite and in [0, 1], got {predicate_selectivity}"
+            )));
+        }
+        if weight_property.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "WeightedPathQuery.weight_property must not be empty".to_string(),
+            ));
+        }
+        if !default_edge_weight.is_finite() {
+            return Err(SQLError::TypeMismatch(format!(
+                "WeightedPathQuery.default_edge_weight must be finite, got {default_edge_weight}"
+            )));
+        }
+        if !score.is_finite() {
+            return Err(SQLError::TypeMismatch(format!(
+                "WeightedPathQuery.score must be finite, got {score}"
+            )));
+        }
+        let path = parse_rpq(rpq_source)?;
+        self.with_graph(graph, |store| {
+            let mut op = uqa_graph::WeightedPathQuery::new(
+                path,
+                graph,
+                weight_property,
+                std::sync::Arc::clone(predicate),
+            )
+            .from_vertex(start_vertex);
+            op.default_edge_weight = default_edge_weight;
+            op.max_hops = max_hops;
+            op.score = score;
+            op.execute(store).to_posting_list()
+        })
+    }
+
+    fn execute_message_passing(&self, source: &OperatorTree) -> DriverResult<PostingList> {
+        let graph = require_graph_name(source, "MessagePassing.source")?;
+        let source_result = self.execute_posting_node(source)?;
+        let result = self.with_graph(&graph, |store| {
+            uqa_graph::MessagePassing::new(&graph)
+                .execute(store)
+                .to_posting_list()
+        })?;
+        Ok(restrict_result_to_source(&result, &source_result))
+    }
+
+    fn execute_graph_embedding(&self, source: &OperatorTree) -> DriverResult<PostingList> {
+        let graph = require_graph_name(source, "GraphEmbedding.source")?;
+        let source_result = self.execute_posting_node(source)?;
+        let result = self.with_graph(&graph, |store| {
+            uqa_graph::GraphEmbedding::new(&graph)
+                .execute(store)
+                .to_posting_list()
+        })?;
+        Ok(restrict_result_to_source(&result, &source_result))
+    }
+
+    fn execute_page_rank(&self, graph: &str) -> DriverResult<PostingList> {
+        self.with_graph(graph, |store| {
+            uqa_graph::PageRank::new(graph)
+                .execute(store)
+                .to_posting_list()
+        })
+    }
+
+    fn execute_hits(&self, graph: &str) -> DriverResult<PostingList> {
+        self.with_graph(graph, |store| {
+            uqa_graph::HITS::new(graph).execute(store).to_posting_list()
+        })
+    }
+
+    fn execute_betweenness_centrality(&self, graph: &str) -> DriverResult<PostingList> {
+        self.with_graph(graph, |store| {
+            uqa_graph::BetweennessCentrality::new(graph)
+                .execute(store)
+                .to_posting_list()
+        })
+    }
+
+    fn execute_text_similarity_join(
+        &self,
+        left: &OperatorTree,
+        right: &OperatorTree,
+        threshold: f64,
+    ) -> DriverResult<GeneralizedPostingList> {
+        if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+            return Err(SQLError::TypeMismatch(format!(
+                "TextSimilarityJoin.threshold must be finite and in [0, 1], got {threshold}"
+            )));
+        }
+        let left_field = require_text_field(left, "TextSimilarityJoin.left")?;
+        let right_field = require_text_field(right, "TextSimilarityJoin.right")?;
+        let left_source = self.execute_posting_node(left)?;
+        let right_source = self.execute_posting_node(right)?;
+        let left = self.prepare_join_operand(&left_source, &left_field, "_join_text")?;
+        let right = self.prepare_join_operand(&right_source, &right_field, "_join_text")?;
+        Ok(uqa_joins::TextSimilarityJoin::new(
+            left.entries(),
+            right.entries(),
+            "_join_text",
+            "_join_text",
+        )
+        .threshold(threshold)
+        .execute())
+    }
+
+    fn execute_vector_similarity_join(
+        &self,
+        left: &OperatorTree,
+        right: &OperatorTree,
+        threshold: f64,
+    ) -> DriverResult<GeneralizedPostingList> {
+        if !threshold.is_finite() || !(-1.0..=1.0).contains(&threshold) {
+            return Err(SQLError::TypeMismatch(format!(
+                "VectorSimilarityJoin.threshold must be finite and in [-1, 1], got {threshold}"
+            )));
+        }
+        let left_field = require_vector_field(left, "VectorSimilarityJoin.left")?;
+        let right_field = require_vector_field(right, "VectorSimilarityJoin.right")?;
+        let left_source = self.execute_posting_node(left)?;
+        let right_source = self.execute_posting_node(right)?;
+        let left = self.prepare_join_operand(&left_source, &left_field, "_join_vector")?;
+        let right = self.prepare_join_operand(&right_source, &right_field, "_join_vector")?;
+        Ok(uqa_joins::VectorSimilarityJoin::new(
+            left.entries(),
+            right.entries(),
+            "_join_vector",
+            "_join_vector",
+        )
+        .threshold(threshold)
+        .execute())
+    }
+
+    fn execute_hybrid_join(
+        &self,
+        left: &OperatorTree,
+        right: &OperatorTree,
+    ) -> DriverResult<GeneralizedPostingList> {
+        let structured_field = require_shared_structured_field(left, right, "HybridJoin")?;
+        let vector_field = require_shared_vector_field(left, right, "HybridJoin")?;
+        let left_result = self.execute_posting_node(left)?;
+        let right_result = self.execute_posting_node(right)?;
+        let left_keyed =
+            self.prepare_join_operand(&left_result, &structured_field.0, "_join_key")?;
+        let left_result =
+            self.prepare_join_operand(&left_keyed, &vector_field.0, "_join_vector")?;
+        let right_keyed =
+            self.prepare_join_operand(&right_result, &structured_field.1, "_join_key")?;
+        let right_result =
+            self.prepare_join_operand(&right_keyed, &vector_field.1, "_join_vector")?;
+        Ok(uqa_joins::HybridJoin::new(
+            left_result.entries(),
+            right_result.entries(),
+            "_join_key",
+            "_join_vector",
+        )
+        .execute())
+    }
+
+    fn execute_cross_paradigm_join(
+        &self,
+        left: &OperatorTree,
+        right: &OperatorTree,
+    ) -> DriverResult<GeneralizedPostingList> {
+        let graph = require_graph_name(left, "CrossParadigmJoin.left")?;
+        let vertex_field = first_structured_field(left)
+            .or_else(|| first_structured_field(right))
+            .ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "CrossParadigmJoin operands do not identify a join property".to_string(),
+                )
+            })?;
+        let doc_field = first_structured_field(right).unwrap_or_else(|| vertex_field.clone());
+        let left_result = self.execute_posting_node(left)?;
+        let right_source = self.execute_posting_node(right)?;
+        let right_result =
+            self.prepare_join_operand(&right_source, &doc_field, "_join_document")?;
+        self.with_graph(&graph, |store| {
+            uqa_joins::CrossParadigmJoin::new(
+                left_result.entries(),
+                right_result.entries(),
+                store,
+                &vertex_field,
+                "_join_document",
+            )
+            .execute()
+        })
+    }
+
+    fn prepare_join_operand(
+        &self,
+        source: &PostingList,
+        field: &str,
+        alias: &str,
+    ) -> DriverResult<PostingList> {
+        let document_store = self
+            .engine
+            .table(self.table)
+            .map(|table| table.document_store.read().snapshot());
+        let requires_document_lookup = source
+            .entries()
+            .iter()
+            .any(|entry| !entry.payload.fields.contains_key(field));
+        if document_store.is_some() && requires_document_lookup {
+            self.require_column(field)?;
+        }
+        let entries = source
+            .entries()
+            .iter()
+            .map(|entry| {
+                let mut payload = entry.payload.clone();
+                let value = payload.fields.get(field).cloned().or_else(|| {
+                    document_store
+                        .as_ref()
+                        .and_then(|store| store.get_field(entry.doc_id, field))
+                });
+                if let Some(value) = value {
+                    payload.fields.insert(alias.to_string(), value);
+                }
+                PostingEntry::new(entry.doc_id, payload)
+            })
+            .collect();
+        Ok(PostingList::from_sorted_unchecked(entries))
+    }
+
+    fn execute_temporal_traverse(
+        &self,
+        start_vertex: u64,
+        graph: &str,
+        label: Option<&str>,
+        max_hops: usize,
+        temporal_filter: Option<&uqa_operators::TemporalFilterIR>,
+    ) -> DriverResult<PostingList> {
+        let max_hops = u32::try_from(max_hops).map_err(|_| {
+            SQLError::TypeMismatch(format!(
+                "TemporalTraverse.max_hops is too large: {max_hops}"
+            ))
+        })?;
+        let filter = temporal_filter_from_ir(temporal_filter)?;
+        self.with_graph(graph, |store| {
+            let mut op = uqa_graph::TemporalTraverse::new(start_vertex, graph)
+                .max_hops(max_hops)
+                .filter(filter);
+            if let Some(label) = label {
+                op = op.label(label);
+            }
+            op.execute(store).to_posting_list()
+        })
+    }
+
+    fn execute_temporal_pattern_match(
+        &self,
+        pattern: &uqa_operators::GraphPatternIR,
+        graph: &str,
+        temporal_filter: Option<&uqa_operators::TemporalFilterIR>,
+    ) -> DriverResult<PostingList> {
+        let pattern = graph_pattern_from_ir(pattern);
+        let filter = temporal_filter_from_ir(temporal_filter)?;
+        self.with_graph(graph, |store| {
+            uqa_graph::TemporalPatternMatch::new(pattern, graph)
+                .filter(filter)
+                .execute(store)
+                .to_posting_list()
+        })
+    }
+
+    fn with_graph<R>(
+        &self,
+        graph: &str,
+        execute: impl FnOnce(&uqa_graph::MemoryGraphStore) -> R,
+    ) -> DriverResult<R> {
+        self.engine
+            .graph_with(graph, execute)
+            .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
+    }
+
+    fn execute_facet_vector(
+        &self,
+        vector_op: &OperatorTree,
+        facet_field: &str,
+    ) -> DriverResult<PostingList> {
+        let vec_pl = self.execute_posting_node(vector_op)?;
         self.facet_vector_inline(&vec_pl, facet_field)
     }
 
@@ -1108,17 +1881,17 @@ impl EngineDriver<'_> {
         &self,
         signals: &[OperatorTree],
         mode: uqa_operators::ProbBoolMode,
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
         use uqa_operators::base::Operator;
         use uqa_operators::{HybridProbBoolMode, ProbBoolFusionOperator};
         if signals.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
         // Pre-execute every child through the driver, then wrap the
         // results in static signal operators so the fusion operator can
         // consume them without taking a back-reference into the driver.
         let signal_ops: Vec<std::sync::Arc<dyn Operator>> = self
-            .execute_branches(signals)
+            .execute_posting_branches(signals)?
             .into_iter()
             .map(|pl| -> std::sync::Arc<dyn Operator> {
                 std::sync::Arc::new(StaticPostingList { pl })
@@ -1129,7 +1902,7 @@ impl EngineDriver<'_> {
             uqa_operators::ProbBoolMode::Or => HybridProbBoolMode::Or,
         };
         let op = ProbBoolFusionOperator::new(signal_ops, mode);
-        op.execute(&self.bridge_context())
+        Ok(op.execute(&self.bridge_context()?))
     }
 
     fn execute_multi_field_search(
@@ -1137,7 +1910,7 @@ impl EngineDriver<'_> {
         fields: &[String],
         query: &str,
         weights: Option<&[f64]>,
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
         // Delegate to the row-function implementation like the other
         // leaf nodes, so every lowering of `multi_field_match` shares
         // one pad, one per-field analyzer choice, and one stats source.
@@ -1153,24 +1926,34 @@ impl EngineDriver<'_> {
                     .map(|weight| Expr::Literal(Value::Float(*weight))),
             );
         }
-        match sql::run_multi_field_match_public(self.engine, self.table, &args, self.params) {
-            Ok(rows) => scored_to_posting_list(&rows),
-            Err(_) => PostingList::new(),
-        }
+        sql::run_multi_field_match_public(self.engine, self.table, &args, self.params)
+            .map(|rows| scored_to_posting_list(&rows))
     }
 
-    fn execute_bayesian_match_with_prior(&self, meta: &BTreeMap<String, Value>) -> PostingList {
+    fn execute_bayesian_match_with_prior(
+        &self,
+        meta: &BTreeMap<String, Value>,
+    ) -> DriverResult<PostingList> {
         let Some(Value::Str(field)) = meta.get("field") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta(
+                "bayesian_match_with_prior",
+                "field",
+            ));
         };
         let Some(Value::Str(query)) = meta.get("query") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta(
+                "bayesian_match_with_prior",
+                "query",
+            ));
         };
         let Some(Value::Str(prior_field)) = meta.get("prior_field") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta(
+                "bayesian_match_with_prior",
+                "prior_field",
+            ));
         };
         let Some(Value::Str(mode)) = meta.get("mode") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta("bayesian_match_with_prior", "mode"));
         };
         let args = vec![
             Expr::Column(field.clone()),
@@ -1178,23 +1961,28 @@ impl EngineDriver<'_> {
             Expr::Column(prior_field.clone()),
             Expr::Literal(Value::Str(mode.clone())),
         ];
-        match sql::run_bayesian_match_with_prior_public(self.engine, self.table, &args, self.params)
-        {
-            Ok(rows) => scored_to_posting_list(&rows),
-            Err(_) => PostingList::new(),
-        }
+        sql::run_bayesian_match_with_prior_public(self.engine, self.table, &args, self.params)
+            .map(|rows| scored_to_posting_list(&rows))
     }
 
-    fn execute_calibrated_vector_match(&self, meta: &BTreeMap<String, Value>) -> PostingList {
+    fn execute_calibrated_vector_match(
+        &self,
+        meta: &BTreeMap<String, Value>,
+    ) -> DriverResult<PostingList> {
         let Some(Value::Str(field)) = meta.get("field") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta("calibrated_vector_match", "field"));
         };
         let Some(Value::List(query_vector)) = meta.get("query_vector") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta(
+                "calibrated_vector_match",
+                "query_vector",
+            ));
         };
         let Some(Value::Int(k)) = meta.get("k") else {
-            return PostingList::new();
+            return Err(malformed_operator_meta("calibrated_vector_match", "k"));
         };
+        let physical_query = value_to_vector(&Value::List(query_vector.clone()))?;
+        self.require_vector_query(field, &physical_query)?;
         let mut args = vec![
             Expr::Literal(Value::Str(field.clone())),
             Expr::Array(query_vector.iter().cloned().map(Expr::Literal).collect()),
@@ -1203,20 +1991,22 @@ impl EngineDriver<'_> {
         if let Some(threshold) = meta.get("threshold") {
             args.push(Expr::Literal(threshold.clone()));
         }
-        match sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params) {
-            Ok(rows) => scored_to_posting_list(&rows),
-            Err(_) => PostingList::new(),
-        }
+        sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params)
+            .map(|rows| scored_to_posting_list(&rows))
     }
 
-    fn execute_prob_not(&self, signal: &OperatorTree, default_prob: f64) -> PostingList {
+    fn execute_prob_not(
+        &self,
+        signal: &OperatorTree,
+        default_prob: f64,
+    ) -> DriverResult<PostingList> {
         use uqa_operators::base::Operator;
         use uqa_operators::ProbNotOperator;
-        let signal_pl = self.execute_node(signal);
+        let signal_pl = self.execute_posting_node(signal)?;
         let signal_op: std::sync::Arc<dyn Operator> =
             std::sync::Arc::new(StaticPostingList { pl: signal_pl });
         let op = ProbNotOperator::new(signal_op, default_prob);
-        op.execute(&self.bridge_context())
+        Ok(op.execute(&self.bridge_context()?))
     }
 
     fn execute_index_scan(
@@ -1224,23 +2014,53 @@ impl EngineDriver<'_> {
         index_name: &str,
         field: &str,
         predicate: &uqa_core::Predicate,
-    ) -> PostingList {
-        let _ = index_name;
-        // The UQA-RS implementation stores `index_name` as a String; resolving it
-        // to an `Arc<dyn Index>` requires the engine's IndexManager.
-        // Until that hookup lands the driver evaluates the predicate
-        // against the table directly (matches a `Filter { source: None }`
-        // arm).
-        self.execute_filter(field, predicate, None)
+    ) -> DriverResult<PostingList> {
+        self.require_column(field)?;
+        let index = self.engine.catalog_index(index_name).ok_or_else(|| {
+            SQLError::Unsupported(format!("unknown physical index {index_name:?}"))
+        })?;
+        let resolved_table = self
+            .engine
+            .resolve_table_name(self.table)
+            .unwrap_or_else(|| self.table.to_string());
+        if index.table_name != resolved_table {
+            return Err(SQLError::TypeMismatch(format!(
+                "index {index_name:?} belongs to table {:?}, not {:?}",
+                index.table_name, self.table
+            )));
+        }
+        if !index.index_type.eq_ignore_ascii_case("btree") {
+            return Err(SQLError::TypeMismatch(format!(
+                "IndexScan requires a btree index, but {index_name:?} is {:?}",
+                index.index_type
+            )));
+        }
+        let columns: Vec<String> = serde_json::from_str(&index.columns_json).map_err(|error| {
+            SQLError::Internal(format!(
+                "index {index_name:?} has malformed column metadata: {error}"
+            ))
+        })?;
+        if columns.first().is_none_or(|column| column != field) {
+            return Err(SQLError::TypeMismatch(format!(
+                "index {index_name:?} does not cover leading field {field:?}"
+            )));
+        }
+        self.engine
+            .value_index_scan(self.table, field, predicate)
+            .ok_or_else(|| {
+                SQLError::Unsupported(format!(
+                    "index {index_name:?} cannot evaluate predicate {predicate:?}"
+                ))
+            })
     }
 
     fn execute_vector_exclusion(
         &self,
         positive: &OperatorTree,
         negative: &OperatorTree,
-    ) -> PostingList {
-        let pos = self.execute_node(positive);
-        let neg = self.execute_node(negative);
+    ) -> DriverResult<PostingList> {
+        let pos = self.execute_posting_node(positive)?;
+        let neg = self.execute_posting_node(negative)?;
         let neg_ids: BTreeSet<DocId> = neg.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
         for entry in pos.entries() {
@@ -1248,7 +2068,7 @@ impl EngineDriver<'_> {
                 entries.push(entry.clone());
             }
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn execute_log_odds_fusion(
@@ -1259,16 +2079,16 @@ impl EngineDriver<'_> {
         weights: Option<&[f64]>,
         logit_min: Option<&[f64]>,
         logit_max: Option<&[f64]>,
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
         use uqa_operators::base::Operator;
 
         if signals.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
         let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
         let mut signal_priors: Vec<f64> = Vec::new();
         for signal in signals {
-            let (pl, prior) = self.execute_fusion_signal(signal);
+            let (pl, prior) = self.execute_fusion_signal(signal)?;
             signal_ops.push(std::sync::Arc::new(StaticPostingList { pl }));
             if let Some(prior) = prior {
                 signal_priors.push(prior);
@@ -1292,14 +2112,17 @@ impl EngineDriver<'_> {
         if let (Some(logit_min), Some(logit_max)) = (logit_min, logit_max) {
             operator = operator.with_logit_normalization(logit_min.to_vec(), logit_max.to_vec());
         }
-        operator.execute(&self.bridge_context())
+        Ok(operator.execute(&self.bridge_context()?))
     }
 
     /// Execute a fusion child under the probability contract: the
     /// signal contributes prior-free evidence and reports the corpus
     /// relevance prior it would otherwise have folded in, so the
     /// fusion can apply that prior exactly once.
-    fn execute_fusion_signal(&self, signal: &OperatorTree) -> (PostingList, Option<f64>) {
+    fn execute_fusion_signal(
+        &self,
+        signal: &OperatorTree,
+    ) -> DriverResult<(PostingList, Option<f64>)> {
         match signal {
             OperatorTree::BayesianScore { source, field } => {
                 let params = field
@@ -1310,13 +2133,13 @@ impl EngineDriver<'_> {
                     .scaled_for_query_terms(scored_term_count(source));
                 let prior = (params.base_rate > 0.0).then_some(params.base_rate);
                 let evidence_params = params.evidence_params();
-                let raw = self.execute_node(source);
+                let raw = self.execute_posting_node(source)?;
                 let evidence = raw.with_scores(|entry| {
                     uqa_scoring::sigmoid(
                         evidence_params.alpha * (entry.payload.score - evidence_params.beta),
                     )
                 });
-                (evidence, prior)
+                Ok((evidence, prior))
             }
             OperatorTree::Term {
                 query,
@@ -1333,15 +2156,18 @@ impl EngineDriver<'_> {
                     self.table,
                     &args,
                     self.params,
-                )
-                .unwrap_or_default();
-                (
+                )?;
+                Ok((
                     scored_to_posting_list(&rows),
                     self.text_field_prior(field.as_deref()),
-                )
+                ))
             }
-            OperatorTree::CosineProbability(source) => (self.execute_cosine_evidence(source), None),
-            other => (self.execute_node(other), None),
+            OperatorTree::CosineProbability(source) => self
+                .execute_cosine_evidence(source)
+                .map(|posting| (posting, None)),
+            other => self
+                .execute_posting_node(other)
+                .map(|posting| (posting, None)),
         }
     }
 
@@ -1368,10 +2194,10 @@ impl EngineDriver<'_> {
     /// Likelihood-ratio calibrated vector evidence: fit the pool
     /// calibration on the source's cosine similarities and emit
     /// prior-free posteriors (base rate 0.5 contributes zero log-odds).
-    fn execute_cosine_evidence(&self, source: &OperatorTree) -> PostingList {
-        let pl = self.execute_node(source);
+    fn execute_cosine_evidence(&self, source: &OperatorTree) -> DriverResult<PostingList> {
+        let pl = self.execute_posting_node(source)?;
         let distances: Vec<f64> = pl.iter().map(|e| 1.0 - e.payload.score).collect();
-        match uqa_operators::fit_pool_calibration(
+        let calibrated = match uqa_operators::fit_pool_calibration(
             &distances,
             uqa_operators::RelevantSampleSplit::default(),
             0.5,
@@ -1382,10 +2208,11 @@ impl EngineDriver<'_> {
                     .clamp(1e-6, 1.0 - 1e-6)
             }),
             None => pl.with_scores(|_| 0.5),
-        }
+        };
+        Ok(calibrated)
     }
 
-    fn execute_cosine_probability(&self, source: &OperatorTree) -> PostingList {
+    fn execute_cosine_probability(&self, source: &OperatorTree) -> DriverResult<PostingList> {
         // Lift cosine similarities in `[-1, 1]` onto the (0, 1)
         // probability scale via `(1 + s) / 2`. Mirrors
         // [`uqa_operators::CosineProbabilityOperator`] but skips the
@@ -1394,20 +2221,24 @@ impl EngineDriver<'_> {
         // Definition 7.1.2 map; fusion contexts route through
         // [`Self::execute_cosine_evidence`] instead.
         use uqa_scoring::cosine_to_probability;
-        let pl = self.execute_node(source);
-        pl.with_scores(|e| cosine_to_probability(e.payload.score))
+        let pl = self.execute_posting_node(source)?;
+        Ok(pl.with_scores(|e| cosine_to_probability(e.payload.score)))
     }
 
-    fn execute_bayesian_score(&self, source: &OperatorTree, field: Option<&str>) -> PostingList {
-        let raw = self.execute_node(source);
+    fn execute_bayesian_score(
+        &self,
+        source: &OperatorTree,
+        field: Option<&str>,
+    ) -> DriverResult<PostingList> {
+        let raw = self.execute_posting_node(source)?;
         let params = field
             .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
                 self.engine.bayesian_params_for(self.table, field)
             })
             .scaled_for_query_terms(scored_term_count(source));
-        raw.with_scores(|entry| {
+        Ok(raw.with_scores(|entry| {
             uqa_scoring::sigmoid(params.alpha * (entry.payload.score - params.beta))
-        })
+        }))
     }
 
     fn execute_attention_fusion(
@@ -1415,31 +2246,35 @@ impl EngineDriver<'_> {
         signals: &[OperatorTree],
         attention: &uqa_operators::tree::AttentionRef,
         query_features: &[f64],
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
         if signals.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
-        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
+        let posting_lists = self.execute_posting_branches(signals)?;
         let features = self.attention_query_features(signals, query_features);
-        fuse_signals_with(&posting_lists, |probs| attention.fuse(probs, &features))
+        Ok(fuse_signals_with(&posting_lists, |probs| {
+            attention.fuse(probs, &features)
+        }))
     }
 
     fn execute_learned_fusion(
         &self,
         signals: &[OperatorTree],
         learned: &uqa_operators::tree::LearnedFusionRef,
-    ) -> PostingList {
+    ) -> DriverResult<PostingList> {
         if signals.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
-        let posting_lists: Vec<PostingList> = self.execute_branches(signals);
-        fuse_signals_with(&posting_lists, |probs| learned.fuse(probs))
+        let posting_lists = self.execute_posting_branches(signals)?;
+        Ok(fuse_signals_with(&posting_lists, |probs| {
+            learned.fuse(probs)
+        }))
     }
 
-    fn execute_multi_stage(&self, stages: &[MultiStageEntry]) -> PostingList {
+    fn execute_multi_stage(&self, stages: &[MultiStageEntry]) -> DriverResult<PostingList> {
         let mut current: Option<PostingList> = None;
         for stage in stages {
-            let stage_result = self.execute_node(&stage.child);
+            let stage_result = self.execute_posting_node(&stage.child)?;
             let mut entries: Vec<PostingEntry> = if let Some(prior) = &current {
                 let prior_ids: BTreeSet<DocId> = prior.entries().iter().map(|e| e.doc_id).collect();
                 stage_result
@@ -1466,7 +2301,198 @@ impl EngineDriver<'_> {
             entries.sort_by_key(|e| e.doc_id);
             current = Some(PostingList::from_sorted_unchecked(entries));
         }
-        current.unwrap_or_default()
+        Ok(current.unwrap_or_default())
+    }
+
+    fn execute_progressive_fusion(
+        &self,
+        stages: &[uqa_operators::ProgressiveFusionEntry],
+        alpha: f64,
+        gating: &GatingSpec,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::{Operator, ProgressiveFusionOperator};
+
+        if stages.is_empty() {
+            return Ok(PostingList::new());
+        }
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(SQLError::TypeMismatch(format!(
+                "ProgressiveFusion.alpha must be finite and in [0, 1], got {alpha}"
+            )));
+        }
+        let mut runtime_stages = Vec::with_capacity(stages.len());
+        for stage in stages {
+            runtime_stages.push((
+                vec![static_operator(self.execute_posting_node(&stage.signal)?)],
+                stage.k,
+            ));
+        }
+        let gating = match gating {
+            GatingSpec::Softplus => "softplus",
+            GatingSpec::Pass => "pass",
+            GatingSpec::Sigmoid { .. } => "sigmoid",
+            GatingSpec::ReLU => "relu",
+            GatingSpec::Swish => "swish",
+            GatingSpec::Gelu => "gelu",
+        };
+        let operator =
+            ProgressiveFusionOperator::with_gating(runtime_stages, alpha, Some(gating.into()));
+        Ok(operator.execute(&self.bridge_context()?))
+    }
+
+    fn execute_deep_fusion(
+        &self,
+        layers: &[uqa_operators::DeepFusionLayer],
+        alpha: f64,
+        gating: &GatingSpec,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::Operator;
+
+        if layers.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "DeepFusion requires at least one layer".to_string(),
+            ));
+        }
+        if !matches!(
+            layers.first(),
+            Some(uqa_operators::DeepFusionLayer::Signal { .. })
+        ) {
+            return Err(SQLError::TypeMismatch(
+                "DeepFusion's first layer must be Signal".to_string(),
+            ));
+        }
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(SQLError::TypeMismatch(format!(
+                "DeepFusion.alpha must be finite and in [0, 1], got {alpha}"
+            )));
+        }
+
+        let graph_aware = layers.iter().any(|layer| {
+            matches!(
+                layer,
+                uqa_operators::DeepFusionLayer::Propagate { .. }
+                    | uqa_operators::DeepFusionLayer::Conv { .. }
+                    | uqa_operators::DeepFusionLayer::Pool { .. }
+            )
+        });
+        let mut graph_names = BTreeSet::new();
+        for layer in layers {
+            if let uqa_operators::DeepFusionLayer::Signal { signals } = layer {
+                for signal in signals {
+                    collect_graph_names(signal, &mut graph_names);
+                }
+            }
+        }
+        if graph_aware && graph_names.len() != 1 {
+            return Err(SQLError::TypeMismatch(format!(
+                "graph-aware DeepFusion requires exactly one graph-bearing signal, found {graph_names:?}"
+            )));
+        }
+
+        let runtime_layers = layers
+            .iter()
+            .map(|layer| self.lower_deep_layer(layer))
+            .collect::<DriverResult<Vec<_>>>()?;
+        let runtime_gating = deep_runtime_gating(gating);
+        let operator = uqa_ml::DeepFusionOperator::new(runtime_layers, alpha, runtime_gating);
+        let mut context = self.bridge_context()?;
+        if let Some(graph) = graph_names.into_iter().next() {
+            let snapshot = self.with_graph(&graph, |store| {
+                std::sync::Arc::new(GraphNeighborSnapshot::from_store(store, &graph))
+                    as std::sync::Arc<dyn uqa_operators::GraphNeighborLookup>
+            })?;
+            context.graph = Some(snapshot);
+        }
+        Ok(operator.execute(&context))
+    }
+
+    fn lower_deep_layer(
+        &self,
+        layer: &uqa_operators::DeepFusionLayer,
+    ) -> DriverResult<uqa_ml::Layer> {
+        match layer {
+            uqa_operators::DeepFusionLayer::Signal { signals } => Ok(uqa_ml::Layer::Signal(
+                self.execute_posting_branches(signals)?
+                    .into_iter()
+                    .map(static_operator)
+                    .collect(),
+            )),
+            uqa_operators::DeepFusionLayer::Propagate {
+                edge_label,
+                aggregation,
+                direction,
+            } => Ok(uqa_ml::Layer::Propagate {
+                edge_label: edge_label.clone().unwrap_or_default(),
+                aggregation: match aggregation {
+                    uqa_operators::DeepFusionAggregation::Mean => uqa_ml::DeepAggKind::Mean,
+                    uqa_operators::DeepFusionAggregation::Sum => uqa_ml::DeepAggKind::Sum,
+                    uqa_operators::DeepFusionAggregation::Max => uqa_ml::DeepAggKind::Max,
+                },
+                direction: *direction,
+            }),
+            uqa_operators::DeepFusionLayer::Conv {
+                edge_label,
+                hop_weights,
+                direction,
+            } => lower_deep_conv(edge_label.as_deref(), hop_weights, *direction),
+            uqa_operators::DeepFusionLayer::Pool {
+                edge_label,
+                pool_size,
+                method,
+                direction,
+            } => lower_deep_pool(edge_label.as_deref(), *pool_size, *method, *direction),
+            uqa_operators::DeepFusionLayer::Flatten => Ok(uqa_ml::Layer::Flatten),
+            uqa_operators::DeepFusionLayer::Dense {
+                weights,
+                bias,
+                output_channels,
+                input_channels,
+            } => lower_deep_dense(weights, bias, *output_channels, *input_channels),
+            uqa_operators::DeepFusionLayer::Softmax => Ok(uqa_ml::Layer::Softmax),
+            uqa_operators::DeepFusionLayer::BatchNorm { epsilon } => {
+                lower_deep_batch_norm(*epsilon)
+            }
+            uqa_operators::DeepFusionLayer::Dropout { probability } => {
+                lower_deep_dropout(*probability)
+            }
+        }
+    }
+
+    fn execute_opaque(
+        &self,
+        kind: &str,
+        children: &[OperatorTree],
+        meta: &BTreeMap<String, Value>,
+    ) -> DriverResult<PostingList> {
+        match kind {
+            "bayesian_match_with_prior" if children.is_empty() => {
+                self.execute_bayesian_match_with_prior(meta)
+            }
+            "calibrated_vector_match" if children.is_empty() => {
+                self.execute_calibrated_vector_match(meta)
+            }
+            "deep_predict" if children.is_empty() => {
+                let Some(Value::Str(model)) = meta.get("model") else {
+                    return Err(malformed_operator_meta("deep_predict", "model"));
+                };
+                let scores = self
+                    .engine
+                    .deep_predict(model)
+                    .ok_or_else(|| SQLError::Unsupported(format!("unknown model {model:?}")))?;
+                Ok(PostingList::from_unsorted(
+                    scores
+                        .into_iter()
+                        .map(|(doc_id, score)| {
+                            PostingEntry::new(doc_id, Payload::with_score(score))
+                        })
+                        .collect(),
+                ))
+            }
+            "bayesian_match_with_prior" | "calibrated_vector_match" | "deep_predict" => Err(
+                SQLError::Internal(format!("opaque operator {kind:?} must not have children")),
+            ),
+            _ => Err(SQLError::UnknownFunction(format!("operator::{kind}"))),
+        }
     }
 
     /// Build the `n_query_features=6` vector that attention fusers
@@ -1492,20 +2518,74 @@ impl EngineDriver<'_> {
         vec![0.0; uqa_fusion::N_QUERY_FEATURES]
     }
 
-    fn bridge_context(&self) -> uqa_operators::base::ExecutionContext {
-        let mut ctx = uqa_operators::base::ExecutionContext::new();
-        if let Some(state) = self.engine.table(self.table) {
-            ctx.document_store = Some(state.document_store.read().snapshot());
-            ctx.inverted_index = Some(state.inverted_index.read().snapshot());
+    fn require_column(&self, field: &str) -> DriverResult<()> {
+        if !self.engine.has_table(self.table) {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
         }
-        ctx
+        if !self.engine.table_has_column(self.table, field) {
+            return Err(SQLError::UnknownColumn(field.to_string()));
+        }
+        Ok(())
     }
 
-    fn facet_vector_inline(&self, vec_pl: &PostingList, facet_field: &str) -> PostingList {
-        use std::collections::BTreeMap;
-        let Some(state) = self.engine.table(self.table) else {
-            return PostingList::new();
+    fn require_vector_query(&self, field: &str, query_vector: &[f32]) -> DriverResult<()> {
+        self.require_column(field)?;
+        let expected_dimensions = match self.engine.column_type(self.table, field) {
+            Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {
+                dimensions as usize
+            }
+            Some(column_type) => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "vector search requires a VECTOR or TENSOR field, but {field:?} is {column_type:?}"
+                )));
+            }
+            None => return Err(SQLError::UnknownColumn(field.to_string())),
         };
+        if query_vector.len() != expected_dimensions {
+            return Err(SQLError::TypeMismatch(format!(
+                "vector query for {field:?} has {} dimensions, expected {expected_dimensions}",
+                query_vector.len()
+            )));
+        }
+        if query_vector.iter().any(|value| !value.is_finite()) {
+            return Err(SQLError::TypeMismatch(format!(
+                "vector query for {field:?} must contain only finite values"
+            )));
+        }
+        let context = self
+            .engine
+            .snapshot_context(self.table)
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        if !context.vector_indexes.contains_key(field) {
+            return Err(SQLError::Unsupported(format!(
+                "vector field {field:?} has no physical vector index"
+            )));
+        }
+        Ok(())
+    }
+
+    fn bridge_context(&self) -> DriverResult<uqa_operators::base::ExecutionContext> {
+        if self.table.is_empty() {
+            return Ok(uqa_operators::base::ExecutionContext::new());
+        }
+        self.engine
+            .snapshot_context(self.table)
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
+    }
+
+    fn facet_vector_inline(
+        &self,
+        vec_pl: &PostingList,
+        facet_field: &str,
+    ) -> DriverResult<PostingList> {
+        use std::collections::BTreeMap;
+        let state = self
+            .engine
+            .table(self.table)
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        if !self.engine.table_has_column(self.table, facet_field) {
+            return Err(SQLError::UnknownColumn(facet_field.to_string()));
+        }
         let snapshot = state.document_store.read().snapshot();
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for entry in vec_pl.entries() {
@@ -1540,7 +2620,7 @@ impl EngineDriver<'_> {
                 },
             ));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 }
 
@@ -1550,6 +2630,467 @@ impl EngineDriver<'_> {
 /// node and hands the result over as a [`StaticPostingList`].
 struct StaticPostingList {
     pl: PostingList,
+}
+
+fn lower_deep_conv(
+    edge_label: Option<&str>,
+    hop_weights: &[f64],
+    direction: uqa_operators::DeepGraphDirection,
+) -> DriverResult<uqa_ml::Layer> {
+    if hop_weights.is_empty()
+        || hop_weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+        || hop_weights.iter().sum::<f64>() <= 0.0
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "DeepFusion Conv.hop_weights must be a non-empty finite non-negative vector with positive sum, got {hop_weights:?}"
+        )));
+    }
+    Ok(uqa_ml::Layer::Conv {
+        edge_label: edge_label.unwrap_or_default().to_string(),
+        hop_weights: hop_weights.to_vec(),
+        direction,
+    })
+}
+
+fn lower_deep_pool(
+    edge_label: Option<&str>,
+    pool_size: usize,
+    method: uqa_operators::DeepFusionPoolMethod,
+    direction: uqa_operators::DeepGraphDirection,
+) -> DriverResult<uqa_ml::Layer> {
+    if pool_size == 0 {
+        return Err(SQLError::TypeMismatch(
+            "DeepFusion Pool.pool_size must be positive".to_string(),
+        ));
+    }
+    let method = match method {
+        uqa_operators::DeepFusionPoolMethod::Average => uqa_ml::DeepPoolMethod::Avg,
+        uqa_operators::DeepFusionPoolMethod::Max => uqa_ml::DeepPoolMethod::Max,
+    };
+    Ok(uqa_ml::Layer::Pool {
+        edge_label: edge_label.unwrap_or_default().to_string(),
+        pool_size,
+        method,
+        direction,
+    })
+}
+
+fn lower_deep_dense(
+    weights: &[f64],
+    bias: &[f64],
+    output_channels: usize,
+    input_channels: usize,
+) -> DriverResult<uqa_ml::Layer> {
+    let Some(expected_weights) = output_channels.checked_mul(input_channels) else {
+        return Err(SQLError::TypeMismatch(
+            "DeepFusion Dense dimensions overflow usize".to_string(),
+        ));
+    };
+    if output_channels == 0
+        || input_channels == 0
+        || weights.len() != expected_weights
+        || bias.len() != output_channels
+        || weights.iter().chain(bias).any(|value| !value.is_finite())
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "DeepFusion Dense requires positive dimensions, {expected_weights} weights, and {output_channels} biases; got {} weights and {} biases",
+            weights.len(),
+            bias.len()
+        )));
+    }
+    Ok(uqa_ml::Layer::Dense {
+        weights: weights.to_vec(),
+        bias: bias.to_vec(),
+        output_channels,
+        input_channels,
+    })
+}
+
+fn lower_deep_batch_norm(epsilon: f64) -> DriverResult<uqa_ml::Layer> {
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(SQLError::TypeMismatch(format!(
+            "DeepFusion BatchNorm.epsilon must be finite and positive, got {epsilon}"
+        )));
+    }
+    Ok(uqa_ml::Layer::BatchNorm { epsilon })
+}
+
+fn lower_deep_dropout(probability: f64) -> DriverResult<uqa_ml::Layer> {
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+        return Err(SQLError::TypeMismatch(format!(
+            "DeepFusion Dropout.probability must be finite and in [0, 1], got {probability}"
+        )));
+    }
+    Ok(uqa_ml::Layer::Dropout { p: probability })
+}
+
+fn deep_runtime_gating(gating: &GatingSpec) -> uqa_ml::Gating {
+    match gating {
+        GatingSpec::Softplus => uqa_ml::Gating::Softplus,
+        GatingSpec::Pass => uqa_ml::Gating::None,
+        GatingSpec::Sigmoid { .. } => uqa_ml::Gating::Sigmoid,
+        GatingSpec::ReLU => uqa_ml::Gating::ReLU,
+        GatingSpec::Swish => uqa_ml::Gating::Swish,
+        GatingSpec::Gelu => uqa_ml::Gating::Gelu,
+    }
+}
+
+#[derive(Default)]
+struct GraphNeighborSnapshot {
+    out: BTreeMap<u64, Vec<(String, u64)>>,
+    incoming: BTreeMap<u64, Vec<(String, u64)>>,
+}
+
+impl GraphNeighborSnapshot {
+    fn from_store(store: &uqa_graph::MemoryGraphStore, graph: &str) -> Self {
+        use uqa_graph::GraphStore;
+
+        let mut snapshot = Self::default();
+        for edge in store.edges_in_graph(graph) {
+            snapshot
+                .out
+                .entry(edge.source_id)
+                .or_default()
+                .push((edge.label.clone(), edge.target_id));
+            snapshot
+                .incoming
+                .entry(edge.target_id)
+                .or_default()
+                .push((edge.label, edge.source_id));
+        }
+        snapshot
+    }
+}
+
+impl uqa_operators::GraphNeighborLookup for GraphNeighborSnapshot {
+    fn neighbors(
+        &self,
+        vertex: u64,
+        label: &str,
+        direction: uqa_operators::DeepGraphDirection,
+    ) -> Vec<u64> {
+        let mut result = Vec::new();
+        let mut append = |edges: Option<&Vec<(String, u64)>>| {
+            if let Some(edges) = edges {
+                result.extend(
+                    edges
+                        .iter()
+                        .filter(|(edge_label, _)| label.is_empty() || edge_label == label)
+                        .map(|(_, neighbor)| *neighbor),
+                );
+            }
+        };
+        if matches!(
+            direction,
+            uqa_operators::DeepGraphDirection::Out | uqa_operators::DeepGraphDirection::Both
+        ) {
+            append(self.out.get(&vertex));
+        }
+        if matches!(
+            direction,
+            uqa_operators::DeepGraphDirection::In | uqa_operators::DeepGraphDirection::Both
+        ) {
+            append(self.incoming.get(&vertex));
+        }
+        result.sort_unstable();
+        result.dedup();
+        result
+    }
+}
+
+fn static_operator(pl: PostingList) -> std::sync::Arc<dyn uqa_operators::Operator> {
+    std::sync::Arc::new(StaticPostingList { pl })
+}
+
+fn numeric_score(value: &Value) -> f64 {
+    match value {
+        Value::Int(value) => *value as f64,
+        Value::Float(value) => *value,
+        _ => 0.0,
+    }
+}
+
+fn graph_pattern_from_ir(pattern: &uqa_operators::GraphPatternIR) -> uqa_graph::GraphPattern {
+    let mut converted = uqa_graph::GraphPattern::new();
+    for vertex in &pattern.vertex_patterns {
+        let mut converted_vertex = uqa_graph::VertexPattern::new(&vertex.variable);
+        if let Some(label) = &vertex.label {
+            converted_vertex =
+                converted_vertex.with(uqa_graph::VertexPredicate::LabelEq(label.clone()));
+        }
+        for constraint in &vertex.constraints {
+            converted_vertex =
+                converted_vertex.with(uqa_graph::VertexPredicate::Custom(constraint.clone()));
+        }
+        converted = converted.add_vertex(converted_vertex);
+    }
+    for edge in &pattern.edge_patterns {
+        let mut converted_edge = uqa_graph::EdgePattern::new(&edge.source_var, &edge.target_var);
+        if let Some(label) = &edge.label {
+            converted_edge = converted_edge.with_label(label);
+        }
+        for constraint in &edge.constraints {
+            converted_edge =
+                converted_edge.with(uqa_graph::EdgePredicate::Custom(constraint.clone()));
+        }
+        converted = converted.add_edge(converted_edge);
+    }
+    converted
+}
+
+fn parse_rpq(source: &str) -> DriverResult<uqa_graph::RegularPathExpr> {
+    uqa_graph::parse_rpq(source)
+        .map_err(|error| SQLError::TypeMismatch(format!("invalid RPQ {source:?}: {error}")))
+}
+
+fn temporal_filter_from_ir(
+    filter: Option<&uqa_operators::TemporalFilterIR>,
+) -> DriverResult<uqa_graph::TemporalFilter> {
+    let Some(filter) = filter else {
+        return Ok(uqa_graph::TemporalFilter::Any);
+    };
+    if filter.timestamp.is_some_and(f64::is_nan) {
+        return Err(SQLError::TypeMismatch(
+            "temporal timestamp cannot be NaN".to_string(),
+        ));
+    }
+    if let Some((start, end)) = filter.time_range {
+        if start.is_nan() || end.is_nan() || start > end {
+            return Err(SQLError::TypeMismatch(format!(
+                "temporal range must be ordered and non-NaN, got [{start}, {end}]"
+            )));
+        }
+    }
+    match (filter.timestamp, filter.time_range) {
+        (Some(timestamp), Some((start, end))) => Ok(uqa_graph::TemporalFilter::TimestampAndRange(
+            timestamp, start, end,
+        )),
+        (Some(timestamp), None) => Ok(uqa_graph::TemporalFilter::Timestamp(timestamp)),
+        (None, Some((start, end))) => Ok(uqa_graph::TemporalFilter::Range(start, end)),
+        (None, None) => Ok(uqa_graph::TemporalFilter::Any),
+    }
+}
+
+fn restrict_result_to_source(result: &PostingList, source: &PostingList) -> PostingList {
+    let source_by_id: BTreeMap<DocId, &Payload> = source
+        .entries()
+        .iter()
+        .map(|entry| (entry.doc_id, &entry.payload))
+        .collect();
+    let entries = result
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let source_payload = source_by_id.get(&entry.doc_id)?;
+            let mut payload = entry.payload.clone();
+            for (field, value) in &source_payload.fields {
+                payload
+                    .fields
+                    .entry(field.clone())
+                    .or_insert_with(|| value.clone());
+            }
+            Some(PostingEntry::new(entry.doc_id, payload))
+        })
+        .collect();
+    PostingList::from_sorted_unchecked(entries)
+}
+
+fn require_graph_name(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+    let mut names = BTreeSet::new();
+    collect_graph_names(tree, &mut names);
+    match names.len() {
+        1 => Ok(names.into_iter().next().expect("one graph name")),
+        0 => Err(SQLError::TypeMismatch(format!(
+            "{context} does not identify a graph"
+        ))),
+        _ => Err(SQLError::TypeMismatch(format!(
+            "{context} spans multiple graphs: {names:?}"
+        ))),
+    }
+}
+
+fn require_text_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+    first_text_field(tree)
+        .ok_or_else(|| SQLError::TypeMismatch(format!("{context} does not identify a text field")))
+}
+
+fn require_vector_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+    first_vector_field(tree).ok_or_else(|| {
+        SQLError::TypeMismatch(format!("{context} does not identify a vector field"))
+    })
+}
+
+fn require_shared_structured_field(
+    left: &OperatorTree,
+    right: &OperatorTree,
+    context: &str,
+) -> DriverResult<(String, String)> {
+    let left = first_structured_field(left).ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{context}.left does not identify a structured field"
+        ))
+    })?;
+    let right = first_structured_field(right).ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{context}.right does not identify a structured field"
+        ))
+    })?;
+    Ok((left, right))
+}
+
+fn require_shared_vector_field(
+    left: &OperatorTree,
+    right: &OperatorTree,
+    context: &str,
+) -> DriverResult<(String, String)> {
+    Ok((
+        require_vector_field(left, &format!("{context}.left"))?,
+        require_vector_field(right, &format!("{context}.right"))?,
+    ))
+}
+
+fn first_text_field(tree: &OperatorTree) -> Option<String> {
+    match tree {
+        OperatorTree::Term { field, .. } => field.clone(),
+        OperatorTree::Score { field, .. }
+        | OperatorTree::BayesianScore {
+            field: Some(field), ..
+        } => Some(field.clone()),
+        OperatorTree::MultiFieldSearch { fields, .. } if fields.len() == 1 => {
+            fields.first().cloned()
+        }
+        OperatorTree::Opaque { meta, .. } => match meta.get("field") {
+            Some(Value::Str(field)) => Some(field.clone()),
+            _ => first_child(tree).and_then(first_text_field),
+        },
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().find_map(first_text_field),
+        _ => first_child(tree).and_then(first_text_field),
+    }
+}
+
+fn first_vector_field(tree: &OperatorTree) -> Option<String> {
+    match tree {
+        OperatorTree::VectorSimilarity { field, .. } | OperatorTree::KNN { field, .. } => {
+            Some(field.clone())
+        }
+        OperatorTree::GraphEmbedding { .. } => Some("_embedding".to_string()),
+        OperatorTree::Opaque { kind, meta, .. } if kind == "calibrated_vector_match" => {
+            match meta.get("field") {
+                Some(Value::Str(field)) => Some(field.clone()),
+                _ => None,
+            }
+        }
+        OperatorTree::HybridTextVector { vector_op, .. }
+        | OperatorTree::SemanticFilter { vector_op, .. }
+        | OperatorTree::FacetVector { vector_op, .. } => first_vector_field(vector_op),
+        OperatorTree::VectorExclusion { positive, negative } => {
+            first_vector_field(positive).or_else(|| first_vector_field(negative))
+        }
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().find_map(first_vector_field),
+        _ => first_child(tree).and_then(first_vector_field),
+    }
+}
+
+fn first_structured_field(tree: &OperatorTree) -> Option<String> {
+    match tree {
+        OperatorTree::Filter { field, .. }
+        | OperatorTree::Facet { field, .. }
+        | OperatorTree::IndexScan { field, .. }
+        | OperatorTree::Aggregate { field, .. } => Some(field.clone()),
+        OperatorTree::GroupBy { group_field, .. } => Some(group_field.clone()),
+        OperatorTree::Opaque { meta, .. } => match meta.get("field") {
+            Some(Value::Str(field)) => Some(field.clone()),
+            _ => first_child(tree).and_then(first_structured_field),
+        },
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().find_map(first_structured_field),
+        _ => first_child(tree).and_then(first_structured_field),
+    }
+}
+
+fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
+    match tree {
+        OperatorTree::Filter {
+            source: Some(source),
+            ..
+        }
+        | OperatorTree::Facet {
+            source: Some(source),
+            ..
+        }
+        | OperatorTree::Score { source, .. }
+        | OperatorTree::BayesianScore { source, .. }
+        | OperatorTree::Complement(source)
+        | OperatorTree::CosineProbability(source)
+        | OperatorTree::ProbNot { signal: source, .. }
+        | OperatorTree::SparseThreshold { source, .. }
+        | OperatorTree::VertexAggregation { source, .. }
+        | OperatorTree::MessagePassing { source }
+        | OperatorTree::GraphEmbedding { source }
+        | OperatorTree::GroupBy { source, .. }
+        | OperatorTree::SemanticFilter { source, .. }
+        | OperatorTree::Aggregate {
+            source: Some(source),
+            ..
+        }
+        | OperatorTree::GraphJoin { left: source, .. }
+        | OperatorTree::TextSimilarityJoin { left: source, .. }
+        | OperatorTree::VectorSimilarityJoin { left: source, .. }
+        | OperatorTree::HybridJoin { left: source, .. }
+        | OperatorTree::CrossParadigmJoin { left: source, .. }
+        | OperatorTree::HybridTextVector {
+            term_op: source, ..
+        }
+        | OperatorTree::VectorExclusion {
+            positive: source, ..
+        }
+        | OperatorTree::FacetVector {
+            vector_op: source, ..
+        } => Some(source),
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children)
+        | OperatorTree::Opaque { children, .. } => children.first(),
+        OperatorTree::LogOddsFusion { signals, .. }
+        | OperatorTree::ProbBoolFusion { signals, .. }
+        | OperatorTree::AttentionFusion { signals, .. }
+        | OperatorTree::LearnedFusion { signals, .. } => signals.first(),
+        OperatorTree::MultiStage { stages } => stages.first().map(|stage| &stage.child),
+        OperatorTree::ProgressiveFusion { stages, .. } => stages.first().map(|stage| &stage.signal),
+        OperatorTree::DeepFusion { layers, .. } => layers.iter().find_map(|layer| match layer {
+            uqa_operators::DeepFusionLayer::Signal { signals } => signals.first(),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<String>) {
+    tree.visit(&mut |node| {
+        let graph = match node {
+            OperatorTree::Traverse { graph, .. }
+            | OperatorTree::PatternMatch { graph, .. }
+            | OperatorTree::RegularPathQuery { graph, .. }
+            | OperatorTree::WeightedPathQuery { graph, .. }
+            | OperatorTree::GraphJoin { graph, .. }
+            | OperatorTree::PageRank { graph }
+            | OperatorTree::HITS { graph }
+            | OperatorTree::BetweennessCentrality { graph }
+            | OperatorTree::TemporalTraverse { graph, .. }
+            | OperatorTree::TemporalPatternMatch { graph, .. } => Some(graph),
+            _ => None,
+        };
+        if let Some(graph) = graph {
+            names.insert(graph.clone());
+        }
+    });
 }
 
 impl uqa_operators::base::Operator for StaticPostingList {
@@ -1710,12 +3251,7 @@ pub fn optimised_tree_for(
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     let tree = lower_where(where_expr, params)?;
-    let row_count = engine.table_doc_count(table);
-    Some(
-        QueryOptimizer::new()
-            .with_row_count(row_count)
-            .optimize(tree),
-    )
+    Some(engine_query_optimizer(engine, table, &tree).optimize(tree))
 }
 
 /// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
@@ -1732,13 +3268,108 @@ pub fn run_optimised(
     let Some(expr) = where_expr else {
         return Ok(None);
     };
-    let Some(optimised) = optimised_tree_for(engine, table, expr, params) else {
+    let Some(tree) = lower_where(expr, params) else {
         return Ok(None);
     };
+    let pl = expect_posting_output(
+        execute_operator_tree(engine, table, params, &tree)?,
+        "SQL WHERE",
+    )?;
+    Ok(Some(posting_list_to_scored(&pl)))
+}
+
+/// Optimise and execute an already-lowered tree through the same
+/// planner/runtime boundary used by SQL `WHERE` lowering. Graph table
+/// functions use this entry point too, so they do not maintain a
+/// second physical dispatch implementation for nodes represented by
+/// [`OperatorTree`].
+pub(crate) fn execute_operator_tree(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    let optimized = engine_query_optimizer(engine, table, tree).optimize(tree.clone());
     let driver = EngineDriver::new(engine, table, params);
     let mut executor = PlanExecutor::new(&driver);
-    let pl = executor.execute(&optimised);
-    Ok(Some(posting_list_to_scored(&pl)))
+    executor.execute(&optimized)
+}
+
+fn engine_query_optimizer(engine: &Engine, table: &str, tree: &OperatorTree) -> QueryOptimizer {
+    let candidates = engine_index_candidates(engine, table, tree);
+    QueryOptimizer::new()
+        .with_row_count(engine.table_doc_count(table))
+        .with_index_candidates(candidates, table)
+}
+
+fn engine_index_candidates(
+    engine: &Engine,
+    table: &str,
+    tree: &OperatorTree,
+) -> Vec<IndexScanCandidate> {
+    if table.is_empty() || !engine.has_table(table) {
+        return Vec::new();
+    }
+    let resolved_table = engine
+        .resolve_table_name(table)
+        .unwrap_or_else(|| table.to_string());
+    let mut indexes_by_field = BTreeMap::new();
+    for index in engine.list_catalog_indexes() {
+        if index.table_name != resolved_table || !index.index_type.eq_ignore_ascii_case("btree") {
+            continue;
+        }
+        let Ok(columns) = serde_json::from_str::<Vec<String>>(&index.columns_json) else {
+            continue;
+        };
+        if let Some(field) = columns.first() {
+            indexes_by_field
+                .entry(field.clone())
+                .or_insert(index.name.clone());
+        }
+    }
+
+    let mut candidates = Vec::new();
+    tree.visit(&mut |node| {
+        let OperatorTree::Filter {
+            field,
+            predicate,
+            source: None,
+        } = node
+        else {
+            return;
+        };
+        let Some(index_name) = indexes_by_field.get(field) else {
+            return;
+        };
+        let Some(matches) = engine.value_index_scan(table, field, predicate) else {
+            return;
+        };
+        let cardinality = matches.len() as f64;
+        let scan_cost = match predicate {
+            Predicate::Equals(_) => 1.0 + cardinality * 0.1,
+            _ => cardinality.max(1.0),
+        };
+        candidates.push(IndexScanCandidate {
+            index_name: index_name.clone(),
+            table_name: table.to_string(),
+            field: field.clone(),
+            predicate: predicate.clone(),
+            scan_cost,
+        });
+    });
+    candidates
+}
+
+pub(crate) fn expect_posting_output(
+    output: OperatorOutput,
+    context: &str,
+) -> DriverResult<PostingList> {
+    match output {
+        OperatorOutput::Posting(result) => Ok(result),
+        OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
+            "{context} requires single-document rows, but the physical plan produced join tuples"
+        ))),
+    }
 }
 
 /// Combine the corpus priors reported by fusion signals into the single
@@ -1777,19 +3408,22 @@ pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
 
 /// Execute an `fts_match(field, query)` call as a fusion signal:
 /// prior-free evidence rows plus the corpus prior the signal would
-/// otherwise fold in. Returns `None` when the query cannot be lowered
-/// (e.g. non-constant arguments), in which case the caller falls back
-/// to the opaque posterior form.
+/// otherwise fold in. Returns `Ok(None)` when the query cannot be
+/// lowered (e.g. non-constant arguments), in which case the caller
+/// falls back to the opaque posterior form. Execution failures remain
+/// errors.
 pub(crate) fn run_fts_fusion_signal(
     engine: &Engine,
     table: &str,
     args: &[Expr],
     params: &[SQLParam],
-) -> Option<(Vec<ScoredEntry>, Option<f64>)> {
-    let tree = lower_calibrated_signal("fts_match", args, params)?;
+) -> Result<Option<ScoredFusionSignal>, SQLError> {
+    let Some(tree) = lower_calibrated_signal("fts_match", args, params) else {
+        return Ok(None);
+    };
     let driver = EngineDriver::new(engine, table, params);
-    let (pl, prior) = driver.execute_fusion_signal(&tree);
-    Some((posting_list_to_scored(&pl), prior))
+    let (pl, prior) = driver.execute_fusion_signal(&tree)?;
+    Ok(Some((posting_list_to_scored(&pl), prior)))
 }
 
 // `eval_path` lives in storage; expose a shim so we don't pull in the

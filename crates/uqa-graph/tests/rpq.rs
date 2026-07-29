@@ -6,8 +6,12 @@
 
 //! Integration tests for the RPQ operator over `MemoryGraphStore`.
 
-use uqa_core::{Edge, Vertex, VertexId};
-use uqa_graph::{parse_rpq, GraphStore, MemoryGraphStore, RegularPathExpr, RegularPathQuery};
+use std::sync::Arc;
+
+use uqa_core::{DecimalValue, Edge, Value, Vertex, VertexId};
+use uqa_graph::{
+    parse_rpq, GraphStore, MemoryGraphStore, RegularPathExpr, RegularPathQuery, WeightedPathQuery,
+};
 
 fn corpus() -> MemoryGraphStore {
     // 1 -knows-> 2 -knows-> 3 -follows-> 4
@@ -17,8 +21,15 @@ fn corpus() -> MemoryGraphStore {
     for vid in 1..=5 {
         g.add_vertex(Vertex::new(vid, "n"), "g");
     }
-    g.add_edge(Edge::new(10, 1, 2, "knows"), "g");
-    g.add_edge(Edge::new(11, 2, 3, "knows"), "g");
+    let mut first = Edge::new(10, 1, 2, "knows");
+    first.properties.insert(
+        "weight".into(),
+        Value::Decimal(DecimalValue::parse("0.4").unwrap()),
+    );
+    g.add_edge(first, "g");
+    let mut second = Edge::new(11, 2, 3, "knows");
+    second.properties.insert("weight".into(), Value::Float(0.7));
+    g.add_edge(second, "g");
     g.add_edge(Edge::new(12, 3, 4, "follows"), "g");
     g.add_edge(Edge::new(13, 3, 5, "likes"), "g");
     g
@@ -101,4 +112,44 @@ fn rpq_unbounded_start_runs_from_every_vertex() {
     ids.sort_unstable();
     // 1->2 and 2->3 reach 2 and 3.
     assert_eq!(ids, vec![2, 3]);
+}
+
+#[test]
+fn weighted_rpq_evaluates_the_real_path_predicate_and_preserves_path() {
+    let g = corpus();
+    let mut query = WeightedPathQuery::new(
+        parse_rpq("knows/knows").unwrap(),
+        "g",
+        "weight",
+        Arc::new(|weight| weight >= 1.0),
+    )
+    .from_vertex(1);
+    query.max_hops = 2;
+    let result = query.execute(&g);
+
+    assert_eq!(result.inner().doc_ids().collect::<Vec<_>>(), vec![3]);
+    assert_eq!(
+        result.inner().entries()[0]
+            .payload
+            .fields
+            .get("_path_weight"),
+        Some(&Value::Float(1.1))
+    );
+    let payload = result.get_graph_payload(3).unwrap();
+    assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
+    assert_eq!(payload.subgraph_edges, vec![10, 11]);
+}
+
+#[test]
+fn weighted_rpq_honours_the_explicit_walk_bound() {
+    let g = corpus();
+    let mut query = WeightedPathQuery::new(
+        parse_rpq("knows/knows").unwrap(),
+        "g",
+        "weight",
+        Arc::new(|_| true),
+    )
+    .from_vertex(1);
+    query.max_hops = 1;
+    assert!(query.execute(&g).inner().is_empty());
 }

@@ -477,7 +477,8 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
         .with_score(0.8);
     let weighted_predicate = WeightedPathQueryOperator::new(expr, Arc::clone(&graph_store), GRAPH)
         .from_vertex(1)
-        .with_predicate_selectivity(0.5);
+        .with_max_hops(4)
+        .with_predicate(|weight| weight >= 3.0, 0.5);
     let ctx = ExecutionContext::new();
     c.bench_function("graph_weighted_path_sum", |bencher| {
         bencher.iter(|| black_box(weighted.execute(black_box(&ctx)).len()));

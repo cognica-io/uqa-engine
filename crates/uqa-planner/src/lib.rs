@@ -66,7 +66,9 @@ pub use cardinality::{
     Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use executor::{ExecutionStats, OperatorTreeDriver, PlanExecutor, PlannedQuery};
+pub use executor::{
+    ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor, PlannedQuery,
+};
 pub use join_enumerator::{enumerate_dpccp, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph};
 pub use join_order::{
@@ -77,4 +79,6 @@ pub use optimizer::{optimize, OptimizerConfig};
 pub use parallel::{
     run_parallel, ParallelExecutor, DEFAULT_PARALLEL_WORKERS, MIN_PARALLEL_BRANCHES,
 };
-pub use query_optimizer::{OptimizerConfig as TreeOptimizerConfig, QueryOptimizer};
+pub use query_optimizer::{
+    IndexScanCandidate, OptimizerConfig as TreeOptimizerConfig, QueryOptimizer,
+};

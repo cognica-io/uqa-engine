@@ -91,18 +91,26 @@ fn cost_cascading() {
 }
 
 #[test]
-fn gating_forwarded() {
-    let sig1 = op(vec![(1, 0.9)]);
-    let sig2 = op(vec![(1, 0.8)]);
-
-    let op = ProgressiveFusionOperator::with_gating(
-        vec![(vec![sig1, sig2], 1)],
+fn gating_changes_progressive_fusion_scores() {
+    let relu = ProgressiveFusionOperator::with_gating(
+        vec![(vec![op(vec![(1, 0.2)]), op(vec![(1, 0.3)])], 1)],
         0.5,
         Some("relu".into()),
     );
-    assert_eq!(op.gating.as_deref(), Some("relu"));
-    let result = op.execute(&ExecutionContext::new());
-    assert_eq!(result.len(), 1);
+    let pass = ProgressiveFusionOperator::with_gating(
+        vec![(vec![op(vec![(1, 0.2)]), op(vec![(1, 0.3)])], 1)],
+        0.5,
+        Some("pass".into()),
+    );
+
+    let relu_score = relu.execute(&ExecutionContext::new()).entries()[0]
+        .payload
+        .score;
+    let pass_score = pass.execute(&ExecutionContext::new()).entries()[0]
+        .payload
+        .score;
+    assert!((relu_score - 0.5).abs() < 1e-12);
+    assert!(pass_score < 0.5);
 }
 
 #[test]

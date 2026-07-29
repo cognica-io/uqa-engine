@@ -11,8 +11,12 @@
 //! `knn_match` helpers so semantics line up with the legacy direct
 //! dispatch path.
 
-use uqa_core::Value;
+use uqa_core::{Edge, Value, Vertex};
+use uqa_engine::operator_tree_bridge::EngineDriver;
 use uqa_engine::Engine;
+use uqa_operators::{OperatorTree, TextScoringMode};
+use uqa_planner::executor::OperatorTreeDriver;
+use uqa_sql::SQLError;
 
 fn engine_with_corpus() -> Engine {
     let eng = Engine::new();
@@ -133,4 +137,49 @@ fn pure_column_filter_lowers_to_filter_node() {
         })
         .collect();
     assert_eq!(ids, vec![1, 3]);
+}
+
+#[test]
+fn driver_propagates_leaf_failure_through_boolean_branches() {
+    let eng = engine_with_corpus();
+    let driver = EngineDriver::new(&eng, "notes", &[]);
+    let tree = OperatorTree::Union(vec![
+        OperatorTree::Term {
+            query: "tokio".into(),
+            field: Some("missing".into()),
+            scoring: Some(TextScoringMode::BM25),
+        },
+        OperatorTree::Empty,
+    ]);
+
+    match driver.execute_node(&tree) {
+        Err(SQLError::TypeMismatch(message)) => {
+            assert!(message.contains("missing"), "unexpected error: {message}");
+        }
+        other => panic!("expected the search helper error, got {other:?}"),
+    }
+}
+
+#[test]
+fn graph_ir_node_executes_through_the_shared_driver() {
+    let eng = engine_with_corpus();
+    eng.create_graph("social");
+    eng.add_graph_vertex(Vertex::new(1, "Person"), "social");
+    eng.add_graph_vertex(Vertex::new(2, "Person"), "social");
+    eng.add_graph_edge(Edge::new(1, 1, 2, "follows"), "social");
+    let driver = EngineDriver::new(&eng, "notes", &[]);
+
+    let result = driver
+        .execute_node(&OperatorTree::PageRank {
+            graph: "social".into(),
+        })
+        .expect("PageRank must execute through EngineDriver");
+    assert_eq!(
+        result
+            .as_posting()
+            .expect("PageRank produces one posting per vertex")
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }

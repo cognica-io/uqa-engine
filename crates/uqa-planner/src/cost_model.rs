@@ -409,7 +409,7 @@ impl CostModel {
             OperatorTree::VectorSimilarityJoin { .. } => n * n * f64::from(stats.dimensions.max(1)),
             OperatorTree::GraphJoin { .. } | OperatorTree::CrossParadigmJoin { .. } => n * 10.0,
             OperatorTree::HybridJoin { .. } => n + n * f64::from(stats.dimensions.max(1)),
-            OperatorTree::ProgressiveFusion { stages } => {
+            OperatorTree::ProgressiveFusion { stages, .. } => {
                 stages.last().map(|s| s.k as f64).unwrap_or(n)
             }
             OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
@@ -432,15 +432,15 @@ impl CostModel {
                 DeepFusionLayer::Signal { signals } => {
                     cost += signals.iter().map(|s| self.estimate(s, stats)).sum::<f64>();
                 }
-                DeepFusionLayer::Propagate { .. } | DeepFusionLayer::Conv => {
+                DeepFusionLayer::Propagate { .. } | DeepFusionLayer::Conv { .. } => {
                     cost += n;
                 }
                 DeepFusionLayer::Pool { .. }
                 | DeepFusionLayer::Flatten
-                | DeepFusionLayer::Dense
+                | DeepFusionLayer::Dense { .. }
                 | DeepFusionLayer::Softmax
-                | DeepFusionLayer::BatchNorm
-                | DeepFusionLayer::Dropout => {}
+                | DeepFusionLayer::BatchNorm { .. }
+                | DeepFusionLayer::Dropout { .. } => {}
             }
         }
         cost.max(n * 0.1)

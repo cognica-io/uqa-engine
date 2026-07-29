@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use uqa_core::{DocId, Value};
+use uqa_operators::OperatorTree;
 use uqa_sql::ast::{Expr, FromClause};
 use uqa_sql::expr::{eval, value_to_vector, EvalContext};
 use uqa_sql::registry::{lookup, FunctionKind};
@@ -227,6 +228,24 @@ pub(super) fn execute_function_with_top_k(
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
+    if let Some(tree) = crate::operator_tree_bridge::lower_sql_function(name, args, params) {
+        let posting = crate::operator_tree_bridge::expect_posting_output(
+            crate::operator_tree_bridge::execute_operator_tree(engine, table, params, &tree)?,
+            name,
+        )?;
+        let posting = match top_k {
+            Some(k) => posting.top_k(k),
+            None => posting,
+        };
+        return Ok(posting
+            .entries()
+            .iter()
+            .map(|entry| ScoredEntry {
+                doc_id: entry.doc_id,
+                score: entry.payload.score,
+            })
+            .collect());
+    }
     match kind {
         FunctionKind::TextMatch => run_text_match(engine, table, args, params, top_k),
         FunctionKind::BayesianMatch => run_bayesian_match(engine, table, args, params, top_k),
@@ -299,13 +318,14 @@ fn run_deep_predict(
             )));
         }
     };
-    let scores = engine
-        .deep_predict(&name)
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
-    Ok(scores
-        .into_iter()
-        .map(|(doc_id, score)| ScoredEntry { doc_id, score })
-        .collect())
+    execute_tree_entries(
+        engine,
+        &OperatorTree::Opaque {
+            kind: "deep_predict".into(),
+            children: Vec::new(),
+            meta: BTreeMap::from([("model".into(), Value::Str(name))]),
+        },
+    )
 }
 
 fn run_staged_retrieval(
@@ -675,63 +695,54 @@ pub(super) fn graph_pagerank_entries(
     engine: &Engine,
     name: &str,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let entries = engine
-        .graph_with(name, |store| {
-            uqa_graph::PageRank::new(name)
-                .execute(store)
-                .inner()
-                .entries()
-                .iter()
-                .map(|e| ScoredEntry {
-                    doc_id: e.doc_id,
-                    score: e.payload.score,
-                })
-                .collect::<Vec<_>>()
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    Ok(entries)
+    execute_tree_entries(
+        engine,
+        &OperatorTree::PageRank {
+            graph: name.to_string(),
+        },
+    )
 }
 
 pub(super) fn graph_hits_entries(
     engine: &Engine,
     name: &str,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let entries = engine
-        .graph_with(name, |store| {
-            uqa_graph::HITS::new(name)
-                .execute(store)
-                .inner()
-                .entries()
-                .iter()
-                .map(|e| ScoredEntry {
-                    doc_id: e.doc_id,
-                    score: e.payload.score,
-                })
-                .collect::<Vec<_>>()
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    Ok(entries)
+    execute_tree_entries(
+        engine,
+        &OperatorTree::HITS {
+            graph: name.to_string(),
+        },
+    )
 }
 
 pub(super) fn graph_betweenness_entries(
     engine: &Engine,
     name: &str,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let entries = engine
-        .graph_with(name, |store| {
-            uqa_graph::BetweennessCentrality::new(name)
-                .execute(store)
-                .inner()
-                .entries()
-                .iter()
-                .map(|e| ScoredEntry {
-                    doc_id: e.doc_id,
-                    score: e.payload.score,
-                })
-                .collect::<Vec<_>>()
+    execute_tree_entries(
+        engine,
+        &OperatorTree::BetweennessCentrality {
+            graph: name.to_string(),
+        },
+    )
+}
+
+fn execute_tree_entries(
+    engine: &Engine,
+    tree: &OperatorTree,
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let posting = crate::operator_tree_bridge::expect_posting_output(
+        crate::operator_tree_bridge::execute_operator_tree(engine, "", &[], tree)?,
+        "SQL table function",
+    )?;
+    Ok(posting
+        .entries()
+        .iter()
+        .map(|entry| ScoredEntry {
+            doc_id: entry.doc_id,
+            score: entry.payload.score,
         })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    Ok(entries)
+        .collect())
 }
 
 fn run_graph_pagerank(
@@ -778,25 +789,16 @@ fn run_graph_traverse(
     let start = expect_u64(&args[1], "graph_traverse.start", &ctx)?;
     let label = expect_optional_string(&args[2], "graph_traverse.label", &ctx)?;
     let max_hops = expect_u32(&args[3], "graph_traverse.max_hops", &ctx)?;
-    let entries = engine
-        .graph_with(&name, |store| {
-            let mut traverse = uqa_graph::Traverse::new(start, &name).max_hops(max_hops);
-            if let Some(l) = label.as_deref() {
-                traverse = traverse.label(l);
-            }
-            traverse
-                .execute(store)
-                .inner()
-                .entries()
-                .iter()
-                .map(|e| ScoredEntry {
-                    doc_id: e.doc_id,
-                    score: e.payload.score,
-                })
-                .collect::<Vec<_>>()
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    Ok(entries)
+    execute_tree_entries(
+        engine,
+        &OperatorTree::Traverse {
+            start_vertex: start,
+            graph: name,
+            label,
+            max_hops: max_hops as usize,
+            vertex_predicate: None,
+        },
+    )
 }
 
 fn run_graph_neighbors(
@@ -1052,8 +1054,8 @@ fn run_graph_edges(
 
 /// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
 /// -- BFS traversal that respects edge `valid_from` / `valid_to`
-/// properties. Emits `(vertex_id, score)` weighted by hop distance,
-/// matching the canonical UQA behavior's shape.
+/// properties. The parsed call is lowered to the shared temporal
+/// `OperatorTree` node and executed by `EngineDriver`.
 fn run_temporal_traverse(
     engine: &Engine,
     args: &[Expr],
@@ -1097,77 +1099,19 @@ fn run_temporal_traverse(
             )));
         }
     };
-    let traversed = engine
-        .graph_with(
-            &name,
-            |store| -> Result<std::collections::BTreeMap<u64, f64>, SQLError> {
-                use std::collections::VecDeque;
-                use uqa_graph::GraphStore;
-                let mut visited: std::collections::BTreeMap<u64, f64> =
-                    std::collections::BTreeMap::new();
-                let mut queue: VecDeque<(u64, usize)> = VecDeque::new();
-                queue.push_back((start, 0));
-                visited.insert(start, 1.0);
-                while let Some((v, depth)) = queue.pop_front() {
-                    if depth >= max_hops {
-                        continue;
-                    }
-                    let edges = store.out_edge_ids(v, &name);
-                    for eid in edges {
-                        let Some(edge) = store.get_edge(eid) else {
-                            continue;
-                        };
-                        if let Some(target_label) = label.as_deref() {
-                            if edge.label != target_label {
-                                continue;
-                            }
-                        }
-                        // Read the edge's temporal range; fall back to
-                        // unbounded when the property is missing.
-                        let edge_from = match edge.properties.get("valid_from") {
-                            Some(Value::Int(n)) => *n as f64,
-                            Some(Value::Float(f)) => *f,
-                            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
-                                SQLError::TypeMismatch(
-                                    "temporal_traverse.valid_from decimal is outside f64 range"
-                                        .into(),
-                                )
-                            })?,
-                            _ => f64::NEG_INFINITY,
-                        };
-                        let edge_to = match edge.properties.get("valid_to") {
-                            Some(Value::Int(n)) => *n as f64,
-                            Some(Value::Float(f)) => *f,
-                            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
-                                SQLError::TypeMismatch(
-                                    "temporal_traverse.valid_to decimal is outside f64 range"
-                                        .into(),
-                                )
-                            })?,
-                            _ => f64::INFINITY,
-                        };
-                        if edge_to < t_min || edge_from > t_max {
-                            continue;
-                        }
-                        let nbr = edge.target_id;
-                        let score = 1.0 / ((depth + 1) as f64 + 1.0);
-                        if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(nbr)
-                        {
-                            slot.insert(score);
-                            queue.push_back((nbr, depth + 1));
-                        }
-                    }
-                }
-                Ok(visited)
-            },
-        )
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))??;
-    let mut out: Vec<ScoredEntry> = traversed
-        .into_iter()
-        .map(|(v, score)| ScoredEntry { doc_id: v, score })
-        .collect();
-    out.sort_by_key(|e| e.doc_id);
-    Ok(out)
+    execute_tree_entries(
+        engine,
+        &OperatorTree::TemporalTraverse {
+            start_vertex: start,
+            graph: name,
+            label,
+            max_hops,
+            temporal_filter: Some(uqa_operators::TemporalFilterIR {
+                timestamp: None,
+                time_range: Some((t_min, t_max)),
+            }),
+        },
+    )
 }
 
 /// `rpq(expr, start [, graph])` - evaluate a Regular Path Query
@@ -1193,24 +1137,14 @@ fn run_rpq(
     } else {
         default_graph_name(engine, "rpq")?
     };
-    let path =
-        uqa_graph::parse_rpq(&expr_str).map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
-    let entries = engine
-        .graph_with(&graph, |store| {
-            uqa_graph::RegularPathQuery::new(path, &graph)
-                .from_vertex(start)
-                .execute(store)
-                .inner()
-                .entries()
-                .iter()
-                .map(|e| ScoredEntry {
-                    doc_id: e.doc_id,
-                    score: e.payload.score,
-                })
-                .collect::<Vec<_>>()
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?;
-    Ok(entries)
+    execute_tree_entries(
+        engine,
+        &OperatorTree::RegularPathQuery {
+            rpq_source: expr_str,
+            start_vertex: start,
+            graph,
+        },
+    )
 }
 
 fn expect_string(expr: &Expr, name: &str, ctx: &EvalContext) -> Result<String, SQLError> {
@@ -1978,7 +1912,7 @@ fn run_fuse_log_odds(
                     FunctionKind::FTSMatch => {
                         match crate::operator_tree_bridge::run_fts_fusion_signal(
                             engine, table, inner, params,
-                        ) {
+                        )? {
                             Some((rows, prior)) => {
                                 if let Some(prior) = prior {
                                     signal_priors.push(prior);

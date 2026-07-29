@@ -33,6 +33,10 @@ pub enum TemporalFilter {
     Timestamp(f64),
     /// Accept edges whose validity interval overlaps the closed range.
     Range(f64, f64),
+    /// Accept edges that are valid at `timestamp` and whose validity
+    /// interval overlaps the closed range. Keeping the conjunction in
+    /// the physical filter preserves an IR that supplies both bounds.
+    TimestampAndRange(f64, f64, f64),
 }
 
 impl TemporalFilter {
@@ -48,6 +52,9 @@ impl TemporalFilter {
             TemporalFilter::Any => true,
             TemporalFilter::Timestamp(t) => vf <= t && t <= vt,
             TemporalFilter::Range(start, end) => vf <= end && vt >= start,
+            TemporalFilter::TimestampAndRange(t, start, end) => {
+                vf <= t && t <= vt && vf <= end && vt >= start
+            }
         }
     }
 }
@@ -56,6 +63,7 @@ fn numeric(v: Option<&Value>) -> Option<f64> {
     match v {
         Some(Value::Int(n)) => Some(*n as f64),
         Some(Value::Float(f)) => Some(*f),
+        Some(Value::Decimal(value)) => value.to_f64(),
         _ => None,
     }
 }

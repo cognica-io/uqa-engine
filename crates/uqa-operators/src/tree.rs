@@ -25,6 +25,7 @@ use std::sync::Arc;
 use uqa_core::{Predicate, Value};
 
 use crate::aggregation::AggregationMonoid;
+use crate::base::Direction;
 
 /// Reference to a scorer used by a `Score` node. The optimizer only
 /// inspects the field/query-terms of the score node; the scorer is
@@ -39,6 +40,9 @@ pub type LearnedFusionRef = Arc<dyn LearnedFuserDyn>;
 
 /// Function pointer for a vertex predicate (used by graph traverse).
 pub type VertexPredicate = Arc<dyn Fn(&uqa_core::Vertex) -> bool + Send + Sync>;
+
+/// Predicate over the accumulated numeric weight of a matching regular path.
+pub type PathWeightPredicate = Arc<dyn Fn(f64) -> bool + Send + Sync>;
 
 /// Function pointer for a vertex constraint (used by pattern match).
 pub type VertexConstraint = Arc<dyn Fn(&uqa_core::Vertex) -> bool + Send + Sync>;
@@ -136,6 +140,23 @@ pub enum GatingSpec {
     Swish,
     /// GELU gate.
     Gelu,
+}
+
+/// Neighborhood reduction used by a graph-aware deep-fusion propagation
+/// layer. This lives in the algebra crate so the IR does not depend on the ML
+/// runtime crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeepFusionAggregation {
+    Mean,
+    Sum,
+    Max,
+}
+
+/// Element-wise reduction used by a graph-aware deep-fusion pooling layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeepFusionPoolMethod {
+    Average,
+    Max,
 }
 
 /// Text scoring algorithm used by [`OperatorTree::Term`].
@@ -335,12 +356,19 @@ pub enum OperatorTree {
         source: Box<OperatorTree>,
         monoid: Arc<dyn AggregationMonoid>,
     },
-    /// `WeightedPathQueryOperator(rpq, start, graph, predicate)`.
+    /// A bounded regular-path walk filtered by its accumulated edge weight.
+    /// `predicate_selectivity` is a planner estimate only; the physical
+    /// predicate itself is always preserved in `predicate`.
     WeightedPathQuery {
         rpq_source: String,
         start_vertex: u64,
         graph: String,
+        weight_property: String,
+        default_edge_weight: f64,
+        max_hops: usize,
+        predicate: PathWeightPredicate,
         predicate_selectivity: f64,
+        score: f64,
     },
     /// `MessagePassingOperator(source, ...)` -- pass-through cardinality.
     MessagePassing { source: Box<OperatorTree> },
@@ -390,9 +418,13 @@ pub enum OperatorTree {
         graph: String,
         temporal_filter: Option<TemporalFilterIR>,
     },
-    /// `ProgressiveFusionOperator(stages=[(signal, k), ...])`. The
-    /// final stage `k` determines the result cardinality.
-    ProgressiveFusion { stages: Vec<ProgressiveFusionEntry> },
+    /// `ProgressiveFusionOperator(stages=[(signal, k), ...], alpha, gating)`.
+    /// The final stage `k` determines the result cardinality.
+    ProgressiveFusion {
+        stages: Vec<ProgressiveFusionEntry>,
+        alpha: f64,
+        gating: GatingSpec,
+    },
     /// `DeepFusionOperator(layers, alpha, gating)`.
     DeepFusion {
         layers: Vec<DeepFusionLayer>,
@@ -439,15 +471,41 @@ pub struct ProgressiveFusionEntry {
 /// BatchNormLayer, DropoutLayer}`.
 #[derive(Clone)]
 pub enum DeepFusionLayer {
-    Signal { signals: Vec<OperatorTree> },
-    Propagate { edge_label: Option<String> },
-    Conv,
-    Pool { pool_size: f64 },
+    Signal {
+        signals: Vec<OperatorTree>,
+    },
+    Propagate {
+        edge_label: Option<String>,
+        aggregation: DeepFusionAggregation,
+        direction: Direction,
+    },
+    Conv {
+        edge_label: Option<String>,
+        /// Self weight followed by one weight per neighbor hop.
+        hop_weights: Vec<f64>,
+        direction: Direction,
+    },
+    Pool {
+        edge_label: Option<String>,
+        pool_size: usize,
+        method: DeepFusionPoolMethod,
+        direction: Direction,
+    },
     Flatten,
-    Dense,
+    Dense {
+        /// `output_channels x input_channels`, row-major.
+        weights: Vec<f64>,
+        bias: Vec<f64>,
+        output_channels: usize,
+        input_channels: usize,
+    },
     Softmax,
-    BatchNorm,
-    Dropout,
+    BatchNorm {
+        epsilon: f64,
+    },
+    Dropout {
+        probability: f64,
+    },
 }
 
 /// Tree-local view of a temporal filter. Mirrors
@@ -461,6 +519,114 @@ pub struct TemporalFilterIR {
 }
 
 impl OperatorTree {
+    /// Visit this node and every descendant in pre-order.
+    ///
+    /// The match is intentionally exhaustive so adding a child-bearing IR
+    /// variant cannot silently create a traversal boundary in planners or
+    /// engine catalog analysis.
+    pub fn visit(&self, visitor: &mut impl FnMut(&OperatorTree)) {
+        visitor(self);
+        match self {
+            OperatorTree::Filter {
+                source: Some(source),
+                ..
+            }
+            | OperatorTree::Facet {
+                source: Some(source),
+                ..
+            }
+            | OperatorTree::Score { source, .. }
+            | OperatorTree::BayesianScore { source, .. }
+            | OperatorTree::Complement(source)
+            | OperatorTree::CosineProbability(source)
+            | OperatorTree::ProbNot { signal: source, .. }
+            | OperatorTree::SparseThreshold { source, .. }
+            | OperatorTree::VertexAggregation { source, .. }
+            | OperatorTree::MessagePassing { source }
+            | OperatorTree::GraphEmbedding { source }
+            | OperatorTree::GroupBy { source, .. }
+            | OperatorTree::Aggregate {
+                source: Some(source),
+                ..
+            } => source.visit(visitor),
+            OperatorTree::Intersect(children)
+            | OperatorTree::Union(children)
+            | OperatorTree::Composed(children)
+            | OperatorTree::Opaque { children, .. }
+            | OperatorTree::LogOddsFusion {
+                signals: children, ..
+            }
+            | OperatorTree::ProbBoolFusion {
+                signals: children, ..
+            }
+            | OperatorTree::AttentionFusion {
+                signals: children, ..
+            }
+            | OperatorTree::LearnedFusion {
+                signals: children, ..
+            } => visit_operator_slice(children, visitor),
+            OperatorTree::GraphJoin { left, right, .. }
+            | OperatorTree::TextSimilarityJoin { left, right, .. }
+            | OperatorTree::VectorSimilarityJoin { left, right, .. }
+            | OperatorTree::HybridJoin { left, right }
+            | OperatorTree::CrossParadigmJoin { left, right }
+            | OperatorTree::HybridTextVector {
+                term_op: left,
+                vector_op: right,
+                ..
+            }
+            | OperatorTree::SemanticFilter {
+                source: left,
+                vector_op: right,
+            }
+            | OperatorTree::VectorExclusion {
+                positive: left,
+                negative: right,
+            } => {
+                left.visit(visitor);
+                right.visit(visitor);
+            }
+            OperatorTree::FacetVector { vector_op, .. } => vector_op.visit(visitor),
+            OperatorTree::MultiStage { stages } => {
+                for stage in stages {
+                    stage.child.visit(visitor);
+                }
+            }
+            OperatorTree::ProgressiveFusion { stages, .. } => {
+                for stage in stages {
+                    stage.signal.visit(visitor);
+                }
+            }
+            OperatorTree::DeepFusion { layers, .. } => {
+                for layer in layers {
+                    if let DeepFusionLayer::Signal { signals } = layer {
+                        for signal in signals {
+                            signal.visit(visitor);
+                        }
+                    }
+                }
+            }
+            OperatorTree::Empty
+            | OperatorTree::Term { .. }
+            | OperatorTree::Filter { source: None, .. }
+            | OperatorTree::Facet { source: None, .. }
+            | OperatorTree::VectorSimilarity { .. }
+            | OperatorTree::KNN { .. }
+            | OperatorTree::Traverse { .. }
+            | OperatorTree::PatternMatch { .. }
+            | OperatorTree::RegularPathQuery { .. }
+            | OperatorTree::IndexScan { .. }
+            | OperatorTree::Aggregate { source: None, .. }
+            | OperatorTree::MultiFieldSearch { .. }
+            | OperatorTree::WeightedPathQuery { .. }
+            | OperatorTree::PageRank { .. }
+            | OperatorTree::HITS { .. }
+            | OperatorTree::BetweennessCentrality { .. }
+            | OperatorTree::TemporalTraverse { .. }
+            | OperatorTree::TemporalPatternMatch { .. } => {}
+        }
+    }
+
     /// `True` when the operator is structurally empty: an
     /// `Intersect([])` or `Union([])`. Mirrors
     /// `QueryOptimizer._is_empty_operator`.
@@ -481,5 +647,11 @@ impl OperatorTree {
         // payloads will collide; structurally-equal but separately
         // allocated trees won't, matching the canonical UQA implementation's `is` semantics.
         std::ptr::from_ref::<OperatorTree>(self) as usize
+    }
+}
+
+fn visit_operator_slice(children: &[OperatorTree], visitor: &mut impl FnMut(&OperatorTree)) {
+    for child in children {
+        child.visit(visitor);
     }
 }

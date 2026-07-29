@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use uqa_core::PostingList;
+use uqa_core::{GeneralizedPostingList, PostingList};
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 use uqa_sql::ast::SelectStmt;
 
@@ -52,6 +52,65 @@ pub struct ExecutionStats {
     pub children: Vec<ExecutionStats>,
 }
 
+/// Materialised value produced by a physical [`OperatorTree`] node.
+///
+/// Most operators preserve one document id per row and therefore emit a
+/// [`PostingList`]. Join operators preserve an ordered tuple of document ids
+/// and emit a [`GeneralizedPostingList`]. Keeping the two carriers distinct is
+/// important: assigning synthetic scalar ids to join tuples would make later
+/// set operations compare enumeration positions instead of tuple identity.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OperatorOutput {
+    Posting(PostingList),
+    Generalized(GeneralizedPostingList),
+}
+
+impl OperatorOutput {
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Posting(result) => result.len(),
+            Self::Generalized(result) => result.len(),
+        }
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Posting(result) => result.is_empty(),
+            Self::Generalized(result) => result.is_empty(),
+        }
+    }
+
+    #[must_use]
+    pub fn as_posting(&self) -> Option<&PostingList> {
+        match self {
+            Self::Posting(result) => Some(result),
+            Self::Generalized(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_generalized(&self) -> Option<&GeneralizedPostingList> {
+        match self {
+            Self::Posting(_) => None,
+            Self::Generalized(result) => Some(result),
+        }
+    }
+}
+
+impl From<PostingList> for OperatorOutput {
+    fn from(value: PostingList) -> Self {
+        Self::Posting(value)
+    }
+}
+
+impl From<GeneralizedPostingList> for OperatorOutput {
+    fn from(value: GeneralizedPostingList) -> Self {
+        Self::Generalized(value)
+    }
+}
+
 impl ExecutionStats {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -68,7 +127,11 @@ impl ExecutionStats {
 /// child execution, and the runtime context); the planner-side
 /// `PlanExecutor` only wraps root timing and stats collection.
 pub trait OperatorTreeDriver {
-    fn execute_node(&self, op: &OperatorTree) -> PostingList;
+    /// Failure produced by the physical runtime while materialising a
+    /// node or one of its descendants.
+    type Error;
+
+    fn execute_node(&self, op: &OperatorTree) -> Result<OperatorOutput, Self::Error>;
 }
 
 /// Executor wrapper for [`OperatorTree`].
@@ -85,16 +148,18 @@ impl<'d, D: OperatorTreeDriver> PlanExecutor<'d, D> {
         }
     }
 
-    /// Execute `op` and capture stats. The result is the [`PostingList`]
-    /// produced by the root node.
-    pub fn execute(&mut self, op: &OperatorTree) -> PostingList {
+    /// Execute `op` and capture stats. Driver failures are returned to
+    /// the caller instead of being indistinguishable from an empty
+    /// physical result.
+    pub fn execute(&mut self, op: &OperatorTree) -> Result<OperatorOutput, D::Error> {
+        self.last_stats = None;
         let start = Instant::now();
-        let result = self.driver.execute_node(op);
+        let result = self.driver.execute_node(op)?;
         let mut stats = ExecutionStats::new(operator_name(op));
         stats.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         stats.result_count = result.len();
         self.last_stats = Some(stats);
-        result
+        Ok(result)
     }
 
     pub fn last_stats(&self) -> Option<&ExecutionStats> {
@@ -108,7 +173,8 @@ impl<'d, D: OperatorTreeDriver> PlanExecutor<'d, D> {
     }
 }
 
-fn operator_name(op: &OperatorTree) -> String {
+/// Stable human-readable name for an [`OperatorTree`] variant.
+pub fn operator_name(op: &OperatorTree) -> String {
     match op {
         OperatorTree::Empty => "EmptyOp",
         OperatorTree::Term { .. } => "TermOp",
@@ -327,14 +393,33 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
                             explain_recursive(sig, lines, indent + 2);
                         }
                     }
-                    DeepFusionLayer::Propagate { edge_label } => {
-                        lines.push(format!("{prefix}  Layer {i} (propagate={edge_label:?}):"));
+                    DeepFusionLayer::Propagate {
+                        edge_label,
+                        aggregation,
+                        direction,
+                    } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (propagate={edge_label:?}, aggregation={aggregation:?}, direction={direction:?}):"
+                        ));
                     }
-                    DeepFusionLayer::Conv => {
-                        lines.push(format!("{prefix}  Layer {i} (convolve):"));
+                    DeepFusionLayer::Conv {
+                        edge_label,
+                        hop_weights,
+                        direction,
+                    } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (convolve={edge_label:?}, hop_weights={hop_weights:?}, direction={direction:?}):"
+                        ));
                     }
-                    DeepFusionLayer::Pool { pool_size } => {
-                        lines.push(format!("{prefix}  Layer {i} (pool, size={pool_size}):"));
+                    DeepFusionLayer::Pool {
+                        edge_label,
+                        pool_size,
+                        method,
+                        direction,
+                    } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (pool={edge_label:?}, size={pool_size}, method={method:?}, direction={direction:?}):"
+                        ));
                     }
                     DeepFusionLayer::Flatten => {
                         lines.push(format!("{prefix}  Layer {i} (flatten):"));
@@ -342,14 +427,24 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
                     DeepFusionLayer::Softmax => {
                         lines.push(format!("{prefix}  Layer {i} (softmax):"));
                     }
-                    DeepFusionLayer::Dense => {
-                        lines.push(format!("{prefix}  Layer {i} (dense):"));
+                    DeepFusionLayer::Dense {
+                        output_channels,
+                        input_channels,
+                        ..
+                    } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (dense, input={input_channels}, output={output_channels}):"
+                        ));
                     }
-                    DeepFusionLayer::BatchNorm => {
-                        lines.push(format!("{prefix}  Layer {i} (batch_norm):"));
+                    DeepFusionLayer::BatchNorm { epsilon } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (batch_norm, epsilon={epsilon}):"
+                        ));
                     }
-                    DeepFusionLayer::Dropout => {
-                        lines.push(format!("{prefix}  Layer {i} (dropout):"));
+                    DeepFusionLayer::Dropout { probability } => {
+                        lines.push(format!(
+                            "{prefix}  Layer {i} (dropout, probability={probability}):"
+                        ));
                     }
                 }
             }
@@ -373,8 +468,10 @@ mod tests {
 
     struct EmptyDriver;
     impl OperatorTreeDriver for EmptyDriver {
-        fn execute_node(&self, _op: &OperatorTree) -> PostingList {
-            PostingList::new()
+        type Error = std::convert::Infallible;
+
+        fn execute_node(&self, _op: &OperatorTree) -> Result<OperatorOutput, Self::Error> {
+            Ok(PostingList::new().into())
         }
     }
 
@@ -409,7 +506,7 @@ mod tests {
         };
         let driver = EmptyDriver;
         let mut executor = PlanExecutor::new(&driver);
-        let _ = executor.execute(&op);
+        let _ = executor.execute(&op).expect("infallible driver");
         let stats = executor.last_stats().expect("stats");
         assert_eq!(stats.operator_name, "TermOp");
         assert_eq!(stats.result_count, 0);
@@ -423,9 +520,11 @@ mod tests {
         }
 
         impl OperatorTreeDriver for CountingDriver {
-            fn execute_node(&self, _op: &OperatorTree) -> PostingList {
+            type Error = std::convert::Infallible;
+
+            fn execute_node(&self, _op: &OperatorTree) -> Result<OperatorOutput, Self::Error> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
-                PostingList::new()
+                Ok(PostingList::new().into())
             }
         }
 
@@ -446,8 +545,30 @@ mod tests {
         };
         let mut executor = PlanExecutor::new(&driver);
 
-        let _ = executor.execute(&op);
+        let _ = executor.execute(&op).expect("infallible driver");
 
         assert_eq!(driver.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn execute_propagates_driver_errors() {
+        struct FailingDriver;
+
+        impl OperatorTreeDriver for FailingDriver {
+            type Error = &'static str;
+
+            fn execute_node(&self, _op: &OperatorTree) -> Result<OperatorOutput, Self::Error> {
+                Err("storage failure")
+            }
+        }
+
+        let driver = FailingDriver;
+        let mut executor = PlanExecutor::new(&driver);
+        let error = executor
+            .execute(&OperatorTree::Empty)
+            .expect_err("driver failure must be returned");
+
+        assert_eq!(error, "storage failure");
+        assert!(executor.last_stats().is_none());
     }
 }

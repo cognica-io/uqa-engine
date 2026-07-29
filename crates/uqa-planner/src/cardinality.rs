@@ -635,7 +635,7 @@ impl CardinalityEstimator {
                 l * avg_degree * label_sel
             }
 
-            OperatorTree::ProgressiveFusion { stages } => {
+            OperatorTree::ProgressiveFusion { stages, .. } => {
                 stages.last().map(|s| s.k as f64).unwrap_or(n)
             }
 
@@ -681,7 +681,7 @@ impl CardinalityEstimator {
                     let sum: f64 = signals.iter().map(|s| self.estimate(s, stats)).sum();
                     card = card.max(n.min(sum));
                 }
-                DeepFusionLayer::Propagate { edge_label } => {
+                DeepFusionLayer::Propagate { edge_label, .. } => {
                     let avg_degree = self
                         .graph_stats
                         .as_ref()
@@ -694,18 +694,18 @@ impl CardinalityEstimator {
                         .unwrap_or(1.0);
                     card = n.min(card * avg_degree * label_sel);
                 }
-                DeepFusionLayer::Conv => {}
-                DeepFusionLayer::Pool { pool_size } => {
-                    let denom = if *pool_size <= 0.0 { 1.0 } else { *pool_size };
+                DeepFusionLayer::Conv { .. } => {}
+                DeepFusionLayer::Pool { pool_size, .. } => {
+                    let denom = (*pool_size).max(1) as f64;
                     card = (card / denom).max(1.0);
                 }
                 DeepFusionLayer::Flatten => {
                     card = 1.0;
                 }
-                DeepFusionLayer::Dense
+                DeepFusionLayer::Dense { .. }
                 | DeepFusionLayer::Softmax
-                | DeepFusionLayer::BatchNorm
-                | DeepFusionLayer::Dropout => {}
+                | DeepFusionLayer::BatchNorm { .. }
+                | DeepFusionLayer::Dropout { .. } => {}
             }
         }
         card.max(1.0)

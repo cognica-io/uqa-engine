@@ -65,18 +65,27 @@ graph TD
 ```mermaid
 flowchart LR
     SQL["SQL string"] --> Parse["uqa-sql::compile"]
-    Parse --> Plan["AST"]
-    Plan --> Engine["Engine::sql"]
-    Engine --> SinglePath["single-table path"]
-    Engine --> JoinPath["joined path"]
-    SinglePath --> Storage["DocumentStore + InvertedIndex"]
-    JoinPath --> Storage
-    Storage --> Score["BM25 / Bayesian BM25"]
-    Score --> Fuse["LogOddsFusion / Attention / Learned"]
-    Fuse --> Result["SQLResult"]
+    Parse --> Engine["Engine::sql"]
+    Engine --> Lowerable{"lowerable single-table WHERE?"}
+    Lowerable -->|yes| IR["OperatorTree"]
+    Engine --> IRBacked["IR-backed graph / ML functions"]
+    IRBacked --> IR
+    IR --> Optimize["QueryOptimizer (10 passes)"]
+    Optimize --> Execute["PlanExecutor + EngineDriver"]
+    Execute --> Output["OperatorOutput"]
+    Output --> Posting["PostingList"]
+    Output --> Generalized["GeneralizedPostingList"]
+    Lowerable -->|no| Direct["direct dispatch / row execution"]
+    Engine --> Dedicated["non-IR mutation / dedicated APIs"]
+    Posting --> Result["SQLResult"]
+    Generalized --> Result
+    Direct --> Result
+    Dedicated --> Result
 ```
 
-Graph and deep-fusion paths slot in via the SQL function registry: the engine builds an `ExecutionContext`, dispatches to the corresponding operator, and re-emits the resulting `(doc_id, score)` pairs as standard SQL rows.
+`EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent generalized set algebra. Graph payloads retain their subgraph metadata through the `GraphPostingList` Phi encoding. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
+
+The remaining boundary is SQL expressiveness, not missing physical dispatch for IR nodes. Arithmetic expressions, subqueries, windows, mutations, and functions with no equivalent `OperatorTree` node retain the relational row executor or a dedicated API. IR-backed graph functions lower to the same optimizer/driver path; graph inspection and mutation calls without a matching IR node do not pretend to do so.
 
 INNER JOIN takes a hash-join fast path when the `ON` predicate is a clean equality between qualified columns from the two sides; the engine buckets the right side by join key once and probes per left row in `O(left + right)`. Anything else falls back to the nested-loop `cross_filter`. See `try_hash_inner_join` in [`crates/uqa-engine/src/sql.rs`](../../crates/uqa-engine/src/sql.rs).
 

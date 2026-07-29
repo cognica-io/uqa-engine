@@ -4,39 +4,37 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `Operator` trait wrappers for the graph operators that previously
-//! only existed as inherent methods (`execute(&G)`). Matches UQA behavior for
-//! `WeightedPathQueryOperator` and `CypherQueryOperator` so the
-//! engine's [`uqa_operators::Operator`] dispatch can run them through
-//! the standard `EngineDriver` path.
+//! `Operator` trait wrappers for graph operators that previously only
+//! existed as inherent methods (`execute(&G)`). They support generic
+//! [`uqa_operators::Operator`] composition. The engine's exhaustive
+//! `OperatorTree` driver invokes the corresponding graph primitives against
+//! its named graph store; SQL functions represented by those IR nodes use the
+//! same optimized physical path.
 
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, PostingList};
 use uqa_operators::base::{ExecutionContext, Operator};
+use uqa_operators::PathWeightPredicate;
 
 use crate::cypher::{CypherQuery, CypherWriter};
 use crate::memory_store::MemoryGraphStore;
-use crate::operators::{RegularPathQuery, DEFAULT_GRAPH_SCORE};
+use crate::operators::{WeightedPathQuery, DEFAULT_GRAPH_SCORE};
 use crate::rpq::RegularPathExpr;
 
-/// `WeightedPathQueryOperator` — runs a Regular Path Query over a
-/// graph and applies a predicate to the accumulated edge weight along
-/// each matching path. Matches UQA behavior for
-/// `uqa.graph.operators.WeightedPathQueryOperator`.
-///
-/// The UQA-RS implementation today supports the predicate-on-endpoints shape
-/// (start/end vertex match the RPQ): full per-path weight aggregation
-/// requires NFA path tracking that lives in the Rust `RegularPathQuery`.
-/// Until that's threaded through, the operator runs the underlying
-/// RPQ and treats the user-supplied `predicate_selectivity` as a
-/// post-filter scaling factor on the resulting score, matching the
-/// cardinality model in `uqa_planner::cardinality::estimate_rpq`.
+/// `WeightedPathQueryOperator` evaluates bounded DFA walks, sums a numeric
+/// edge property, and keeps endpoints for which the accumulated weight passes
+/// `predicate`. The selectivity value is retained solely for planning; it
+/// never substitutes for physical predicate evaluation.
 pub struct WeightedPathQueryOperator {
     pub path_expr: RegularPathExpr,
     pub graph_store: Arc<MemoryGraphStore>,
     pub graph_name: String,
     pub start_vertex: Option<u64>,
+    pub weight_property: String,
+    pub default_edge_weight: f64,
+    pub max_hops: usize,
+    pub predicate: PathWeightPredicate,
     pub predicate_selectivity: f64,
     pub score: f64,
 }
@@ -53,6 +51,10 @@ impl WeightedPathQueryOperator {
             graph_store,
             graph_name: graph_name.into(),
             start_vertex: None,
+            weight_property: "weight".to_string(),
+            default_edge_weight: 1.0,
+            max_hops: 16,
+            predicate: Arc::new(|_| true),
             predicate_selectivity: 1.0,
             score: DEFAULT_GRAPH_SCORE,
         }
@@ -71,6 +73,35 @@ impl WeightedPathQueryOperator {
     }
 
     #[must_use]
+    pub fn with_predicate(
+        mut self,
+        predicate: impl Fn(f64) -> bool + Send + Sync + 'static,
+        selectivity: f64,
+    ) -> Self {
+        self.predicate = Arc::new(predicate);
+        self.predicate_selectivity = selectivity;
+        self
+    }
+
+    #[must_use]
+    pub fn with_weight_property(mut self, property: impl Into<String>) -> Self {
+        self.weight_property = property.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_default_edge_weight(mut self, weight: f64) -> Self {
+        self.default_edge_weight = weight;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_hops(mut self, max_hops: usize) -> Self {
+        self.max_hops = max_hops;
+        self
+    }
+
+    #[must_use]
     pub fn with_score(mut self, score: f64) -> Self {
         self.score = score;
         self
@@ -79,12 +110,19 @@ impl WeightedPathQueryOperator {
 
 impl Operator for WeightedPathQueryOperator {
     fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        let mut rpq = RegularPathQuery::new(self.path_expr.clone(), &self.graph_name);
-        rpq.score = self.score * self.predicate_selectivity.clamp(0.0, 1.0);
+        let mut query = WeightedPathQuery::new(
+            self.path_expr.clone(),
+            &self.graph_name,
+            &self.weight_property,
+            Arc::clone(&self.predicate),
+        );
+        query.default_edge_weight = self.default_edge_weight;
+        query.max_hops = self.max_hops;
+        query.score = self.score;
         if let Some(v) = self.start_vertex {
-            rpq = rpq.from_vertex(v);
+            query = query.from_vertex(v);
         }
-        rpq.execute(self.graph_store.as_ref()).inner().clone()
+        query.execute(self.graph_store.as_ref()).to_posting_list()
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

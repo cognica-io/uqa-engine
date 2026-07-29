@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_sql::SQLError;
 
 fn engine() -> Engine {
     let engine = Engine::new();
@@ -243,14 +244,20 @@ fn test_empty_query_errors() {
 }
 
 #[test]
-fn test_unknown_field_returns_empty() {
-    let result = engine()
+fn test_unknown_field_returns_error() {
+    let error = engine()
         .sql(
             "SELECT title FROM docs WHERE _all @@ 'nonexistent_field:xyz'",
             &[],
         )
-        .unwrap();
-    assert_eq!(result.rows.len(), 0);
+        .unwrap_err();
+    match error {
+        SQLError::TypeMismatch(message) => {
+            assert!(message.contains("nonexistent_field"));
+            assert!(message.contains("does not exist"));
+        }
+        other => panic!("expected an unknown-field error, got {other:?}"),
+    }
 }
 
 #[test]

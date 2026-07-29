@@ -23,6 +23,8 @@ fn engine_with_corpus() -> Engine {
         &[],
     )
     .unwrap();
+    eng.sql("CREATE INDEX notes_year_idx ON notes (year)", &[])
+        .unwrap();
     eng.sql(
         "INSERT INTO notes (id, title, body, year, author) VALUES \
          (1, 'rust async', 'futures and tokio', 2024, 'a'), \
@@ -110,24 +112,25 @@ fn simplify_algebra_pass_fires_via_recurse_children() {
     let expr = where_of("SELECT id FROM notes WHERE text_match(title, 'rust') AND year = 2024");
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
     // Post-optimisation the Intersect must still produce the same
-    // expected shape — two leaves, one of them a Term, one a Filter.
+    // expected shape — two leaves, one Term and one physical index scan
+    // selected by the final optimizer pass.
     let OperatorTree::Intersect(arms) = optimised else {
         panic!("expected Intersect");
     };
     assert_eq!(arms.len(), 2);
     let has_term = arms.iter().any(|a| matches!(a, OperatorTree::Term { .. }));
-    let has_filter = arms
+    let has_index_scan = arms
         .iter()
-        .any(|a| matches!(a, OperatorTree::Filter { .. }));
-    assert!(has_term && has_filter);
+        .any(|a| matches!(a, OperatorTree::IndexScan { .. }));
+    assert!(has_term && has_index_scan);
 }
 
 #[test]
 fn reorder_intersect_pass_sorts_arms_by_cardinality() {
     // Two arms with different cardinality estimates must come back in
     // ascending cost order. We can't observe the cost directly but we
-    // can confirm that an Intersect of a Term and a Filter survives
-    // the pass intact with both arms present.
+    // can confirm that an Intersect of a Term and the Filter's physical
+    // IndexScan replacement survives with both arms present.
     let eng = engine_with_corpus();
     let expr = where_of("SELECT id FROM notes WHERE text_match(body, 'tokio') AND year = 2024");
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
@@ -137,12 +140,12 @@ fn reorder_intersect_pass_sorts_arms_by_cardinality() {
     assert_eq!(arms.len(), 2);
     // The cost-model favours the cheaper child first. Without a real
     // inverted-index df source the Term cost falls to 0, so it
-    // currently sorts before the Filter; either arm coming first is
+    // currently sorts before the IndexScan; either arm coming first is
     // acceptable for parity. We assert only on shape preservation.
     assert!(arms.iter().any(|a| matches!(a, OperatorTree::Term { .. })));
     assert!(arms
         .iter()
-        .any(|a| matches!(a, OperatorTree::Filter { .. })));
+        .any(|a| matches!(a, OperatorTree::IndexScan { .. })));
 }
 
 #[test]
@@ -161,13 +164,31 @@ fn or_through_optimiser_remains_union() {
 }
 
 #[test]
-fn pure_filter_passes_through_optimiser_unchanged() {
+fn pure_filter_uses_catalog_btree_in_final_optimizer_pass() {
     let eng = engine_with_corpus();
     let expr = where_of("SELECT id FROM notes WHERE year = 2024");
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
-    // No table-level index manager is registered, so apply_index_scan
-    // can't rewrite to IndexScan. The Filter survives as-is.
-    assert!(matches!(optimised, OperatorTree::Filter { .. }));
+    let OperatorTree::IndexScan {
+        index_name, field, ..
+    } = optimised
+    else {
+        panic!("expected the catalog btree to become IndexScan");
+    };
+    assert_eq!(index_name, "notes_year_idx");
+    assert_eq!(field, "year");
+
+    let result = eng
+        .sql("SELECT id FROM notes WHERE year = 2024 ORDER BY id", &[])
+        .expect("physical IndexScan execution");
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(uqa_core::Value::Int(id)) => *id,
+            other => panic!("unexpected id: {other:?}"),
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 3]);
 }
 
 #[test]

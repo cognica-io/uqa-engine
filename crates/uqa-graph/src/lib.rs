@@ -51,7 +51,8 @@ pub use memory_store::{
 pub use message_passing::{AggregationKind, MessagePassing};
 pub use operator_impls::{CypherQueryOperator, WeightedPathQueryOperator};
 pub use operators::{
-    AggFn, GMatch, RegularPathQuery, Traverse, VertexAggregation, VertexMatch, DEFAULT_GRAPH_SCORE,
+    AggFn, GMatch, RegularPathQuery, Traverse, VertexAggregation, VertexMatch, WeightedPathQuery,
+    DEFAULT_GRAPH_SCORE,
 };
 pub use pattern::{EdgePattern, EdgePredicate, GraphPattern, VertexPattern, VertexPredicate};
 pub use posting_list::{GraphPayload, GraphPostingList};

@@ -14,11 +14,9 @@
 //! ```
 //!
 //! The internal channel map keys per-document feature vectors. Each
-//! `Layer` variant updates that map. Layers exposed by this slice
-//! cover the non-graph surface (signal fusion, embedding, fully
-//! connected, flatten, global pool, softmax, batch norm, dropout).
-//! Graph-aware layers (`Propagate`, `Conv`, `Pool`, `Attention`) live
-//! in a follow-up slice.
+//! `Layer` variant updates that map, including signal, dense, convolutional,
+//! recurrent, normalization, attention, and graph-aware propagation / pooling
+//! layers.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -32,8 +30,11 @@ use uqa_operators::{base::Direction, ExecutionContext, Operator};
 pub enum Gating {
     #[default]
     None,
+    Softplus,
+    Sigmoid,
     ReLU,
     Swish,
+    Gelu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,18 +204,7 @@ impl DeepFusionOperator {
     }
 
     fn coverage_default(coverage: usize, total: usize) -> f64 {
-        // Mirrors `_coverage_based_default`: low coverage gets a 0.5
-        // prior; high coverage shrinks toward 0 to reflect the missing
-        // signal.
-        if total == 0 {
-            return 0.5;
-        }
-        let ratio = coverage as f64 / total as f64;
-        // 1.0 coverage -> 0.5 (no info); 0 -> 0.5 too. The UQA
-        // helper interpolates; for our slice we go with a plain 0.5
-        // prior since the calibration improvements happen elsewhere.
-        let _ = ratio;
-        0.5
+        uqa_operators::hybrid::coverage_based_default(coverage, total, 0.01)
     }
 
     pub fn execute_features(
@@ -1300,8 +1290,22 @@ fn safe_logit(p: f64) -> f64 {
 fn apply_gating(x: f64, gating: Gating) -> f64 {
     match gating {
         Gating::None => x,
+        Gating::Softplus => {
+            if x > 20.0 {
+                x
+            } else if x < -20.0 {
+                x.exp()
+            } else {
+                x.exp().ln_1p()
+            }
+        }
+        Gating::Sigmoid => sigmoid(x),
         Gating::ReLU => x.max(0.0),
         Gating::Swish => x * sigmoid(x),
+        Gating::Gelu => {
+            let scaled = (2.0 / std::f64::consts::PI).sqrt() * (x + 0.044_715 * x * x * x);
+            0.5 * x * (1.0 + scaled.tanh())
+        }
     }
 }
 

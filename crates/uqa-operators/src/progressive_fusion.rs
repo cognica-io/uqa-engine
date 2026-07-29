@@ -16,9 +16,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
-use uqa_scoring::prob::log_odds_conjunction_weighted;
+use uqa_fusion::LogitGating;
+use uqa_scoring::{logit, sigmoid};
 
 use crate::base::{ExecutionContext, Operator};
+use crate::hybrid::coverage_based_default;
 
 pub struct ProgressiveFusionOperator {
     pub stages: Vec<(Vec<Arc<dyn Operator>>, usize)>,
@@ -40,6 +42,16 @@ impl ProgressiveFusionOperator {
             !stages.is_empty(),
             "ProgressiveFusionOperator requires at least one stage"
         );
+        assert!(
+            alpha.is_finite() && (0.0..=1.0).contains(&alpha),
+            "ProgressiveFusionOperator alpha must be in [0, 1], got {alpha}"
+        );
+        if let Some(name) = gating.as_deref() {
+            assert!(
+                LogitGating::parse(name).is_some(),
+                "ProgressiveFusionOperator has unknown gating function {name:?}"
+            );
+        }
         Self {
             stages,
             alpha,
@@ -68,37 +80,43 @@ impl Operator for ProgressiveFusionOperator {
                 }
                 signal_lists.push(pl);
             }
-            // Build per-doc score map across all accumulated signals.
-            let mut per_doc: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
-            for (i, pl) in signal_lists.iter().enumerate() {
-                for entry in pl.entries() {
-                    let slot = per_doc.entry(entry.doc_id).or_insert_with(|| {
-                        // 0.5 prior for any signal that has not seen this doc yet.
-                        vec![0.5; signal_lists.len()]
-                    });
-                    if slot.len() < signal_lists.len() {
-                        slot.resize(signal_lists.len(), 0.5);
-                    }
-                    slot[i] = entry.payload.score;
-                }
+            let mut score_maps = Vec::with_capacity(signal_lists.len());
+            let mut all_doc_ids = BTreeSet::new();
+            for posting in &signal_lists {
+                let map: BTreeMap<u64, f64> = posting
+                    .entries()
+                    .iter()
+                    .map(|entry| {
+                        all_doc_ids.insert(entry.doc_id);
+                        (entry.doc_id, entry.payload.score)
+                    })
+                    .collect();
+                score_maps.push(map);
             }
-            // Pad out missing slots so every doc has the full signal vector.
-            for slot in per_doc.values_mut() {
-                if slot.len() < signal_lists.len() {
-                    slot.resize(signal_lists.len(), 0.5);
-                }
-            }
-
+            let total = all_doc_ids.len();
+            let defaults: Vec<f64> = score_maps
+                .iter()
+                .map(|scores| coverage_based_default(scores.len(), total, 0.01))
+                .collect();
             let n = signal_lists.len();
-            let weights = vec![1.0 / n as f64; n];
-            let mut scored: Vec<PostingEntry> = per_doc
+            let confidence = (n as f64).powf(self.alpha);
+            let gating = self
+                .gating
+                .as_deref()
+                .and_then(LogitGating::parse)
+                .unwrap_or(LogitGating::Pass);
+            let mut scored: Vec<PostingEntry> = all_doc_ids
                 .into_iter()
-                .map(|(doc_id, probs)| {
-                    let fused = if probs.len() == 1 {
-                        probs[0]
-                    } else {
-                        log_odds_conjunction_weighted(&probs, &weights, self.alpha).unwrap_or(0.5)
-                    };
+                .map(|doc_id| {
+                    let mean_gated_logit = score_maps
+                        .iter()
+                        .zip(&defaults)
+                        .map(|(scores, default)| {
+                            gating.apply(logit(scores.get(&doc_id).copied().unwrap_or(*default)))
+                        })
+                        .sum::<f64>()
+                        / n as f64;
+                    let fused = sigmoid(confidence * mean_gated_logit);
                     PostingEntry::new(doc_id, Payload::with_score(fused))
                 })
                 .collect();

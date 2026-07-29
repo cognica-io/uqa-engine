@@ -1,12 +1,12 @@
 # UQA-RS
 
-UQA-RS is the Rust workspace for the Unified Query Algebra (UQA): a multi-paradigm database engine that brings relational SQL, text retrieval, vector search, graph traversal, geospatial indexing, probabilistic scoring, learned fusion, and embeddable storage under one execution model.
+UQA-RS is the Rust workspace for the Unified Query Algebra (UQA): a multi-paradigm database engine that gives relational SQL, text retrieval, vector search, graph traversal, geospatial indexing, probabilistic scoring, learned fusion, and embeddable storage a shared algebra and result representation.
 
 The workspace is organized as an embeddable engine plus reusable crates for storage, SQL compilation, scoring, graph processing, ML, APIs, PostgreSQL wire-protocol primitives, and the `usql` interactive shell.
 
 ## Status
 
-The current implementation covers the main UQA stack end to end. Working slices in each crate:
+The current implementation has working slices across the main UQA stack. Coverage by crate:
 
 - **Algebra and storage** (`uqa-core`, `uqa-storage`, `uqa-storage-sqlite`): Boolean posting-list algebra with property tests for the 11 axioms, in-memory storage, SQLite-backed document/inverted/vector indexes, persistent catalogs, SQLCipher catalogs, compressed SQLite containers with zstd or LZ4 codecs, and backend-neutral KeyValue catalog, document, inverted-index, and vector-index implementations. `uqa-storage-sqlite` provides the physical SQLite `KeyValueStore`.
 - **Scoring and fusion** (`uqa-scoring`, `uqa-fusion`): BM25, Bayesian BM25, WAND/BMW, calibration metrics, external priors, multi-field scoring, query features, log-odds fusion, learned fusion, attention fusion, and parameter learning. BMW pruning folds `block_max` over remaining blocks so later-block candidates are not skipped.
@@ -20,6 +20,12 @@ The current implementation covers the main UQA stack end to end. Working slices 
 - **API surface** (`uqa-fdw`, `uqa-api`, `uqa-cli`): Pushdown FDW handler traits, a fluent `QueryBuilder` for text/vector/hybrid/Bayesian/fusion/graph/RPQ/highlight/facet/ML/explain flows, and the `usql` REPL with script execution, persistent history, suggestions, completion, highlighting, meta commands, and encrypted-database support (`--key`, `--key-file`, `UQA_KEY`, interactive prompt, on-disk format auto-detection via `Engine::open_auto`).
 - **Wire protocol** (`uqa-pg-wire`): Network-independent PostgreSQL v3 frontend decoders and backend encoders for startup, SSL/GSSENC negotiation, authentication, parse/bind/execute/describe/close/sync/terminate, row descriptions, data rows, command completion, errors, notices, and ready-for-query status.
 - **Tests and benchmarks**: Golden SQL fixtures, BEIR-style relevance gates, PostgreSQL and Apache AGE compatibility matrices, SQLite KeyValue backend coverage, fuzz targets, and Criterion benches across storage, scoring, operators, fusion, planner, SQL, graph, and relevance workloads.
+
+### Execution boundary
+
+Every concrete `OperatorTree` variant now follows the physical path `OperatorTree -> QueryOptimizer (10 passes) -> PlanExecutor -> EngineDriver`. The result carrier is typed: ordinary, graph, aggregation, fusion, and deep-fusion nodes produce a `PostingList` (graph payloads use the Phi encoding), while join nodes preserve their document-id tuples as a `GeneralizedPostingList`. Deep layers retain their weights, normalization, pooling, and graph-direction parameters in the IR; weighted RPQ nodes evaluate their real bounded path predicate while using selectivity only for planning. The driver has an exhaustive variant match; an unknown `Opaque` kind is an execution error, never an empty result.
+
+This does not mean that every SQL construct has been forced into `OperatorTree`. Lowerable single-table retrieval predicates and the graph/table functions represented by the IR use the shared pipeline. Arithmetic expressions, subqueries, windows, mutations, and functions without an equivalent IR node retain their relational row executor or dedicated API. Those are explicit SQL/IR boundaries, not alternate implementations of an existing `OperatorTree` node.
 
 ## Storage and Persistence
 

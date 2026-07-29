@@ -53,7 +53,8 @@ impl LogitGating {
         }
     }
 
-    fn apply(self, value: f64) -> f64 {
+    /// Apply this gate to a logit-domain value.
+    pub fn apply(self, value: f64) -> f64 {
         match self {
             Self::Softplus => softplus(value),
             Self::Pass => value,
