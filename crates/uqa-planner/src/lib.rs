@@ -59,6 +59,7 @@ pub mod join_order;
 pub mod optimizer;
 pub mod parallel;
 pub mod query_optimizer;
+pub mod unified_plan;
 
 pub use cardinality::{
     column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate,
@@ -66,9 +67,7 @@ pub use cardinality::{
     Selectivity, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY, VECTOR_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
-pub use executor::{
-    ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor, PlannedQuery,
-};
+pub use executor::{ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor};
 pub use join_enumerator::{enumerate_dpccp, JoinPlan};
 pub use join_graph::{JoinEdge, JoinGraph};
 pub use join_order::{
@@ -81,4 +80,9 @@ pub use parallel::{
 };
 pub use query_optimizer::{
     IndexScanCandidate, OptimizerConfig as TreeOptimizerConfig, QueryOptimizer,
+};
+pub use unified_plan::{
+    AggregateClassifier, CommandPlan, ComputePlan, CtePlan, ExpressionPlan, OrderPlan,
+    ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedExecutionStats,
+    UnifiedPlan, UnifiedPlanDriver, UnifiedPlanExecutor,
 };

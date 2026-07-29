@@ -47,6 +47,7 @@ mod catalog;
 mod ddl;
 mod dml;
 mod from_rows;
+mod plan_driver;
 mod plpgsql_exec;
 mod row_functions;
 mod select;
@@ -78,6 +79,7 @@ use from_rows::{
     project_join_row_with_hook, project_join_row_with_hook_and_labels, ColumnPrune,
     QualifierFilters,
 };
+use plan_driver::EngineUnifiedPlanDriver;
 use row_functions::{
     execute_function, execute_function_with_top_k, expect_column_name, expect_optional_graph_value,
     graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries, run_age_create_graph,
@@ -90,9 +92,8 @@ pub(crate) use row_functions::{
     run_multi_field_match_public, run_text_match_public,
 };
 use select::{
-    apply_row_order_limit, build_projection_row, execute_select, expand_star_columns,
-    materialize_cte_list, materialize_ctes, projection_columns, run_explain, run_select,
-    ScopedEngineHook,
+    apply_row_order_limit, build_projection_row, expand_star_columns, materialize_ctes,
+    projection_columns, run_explain, ScopedEngineHook,
 };
 pub(crate) use select::{run_correlated_subquery, CteScope};
 use where_eval::execute_mixed_where;
@@ -143,209 +144,38 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
     // cancellation flag preserved across statements should use
     // [`crate::Engine::reset_cancellation`] explicitly between calls.
     engine.cancellation_token().check()?;
-    let stmts = compile_optimized_statements(engine, sql)?;
-    if stmts.is_empty() {
+    let plans = compile_optimized_plans(engine, sql)?;
+    if plans.is_empty() {
         return Ok(SQLResult::empty());
     }
+    let driver = EngineUnifiedPlanDriver::new(engine, params);
+    let mut executor = uqa_planner::UnifiedPlanExecutor::new(&driver);
     let mut last = SQLResult::empty();
-    for stmt in stmts {
+    for plan in &plans {
         engine.cancellation_token().check()?;
-        last = run_optimized_stmt(engine, stmt, params)?;
+        last = executor.execute(plan)?;
     }
     Ok(last)
 }
 
-fn compile_optimized_statements(engine: &Engine, sql: &str) -> Result<Vec<Statement>, SQLError> {
-    if let Some(statements) = engine.cached_sql_statements(sql) {
-        return Ok(statements);
+fn compile_optimized_plans(
+    engine: &Engine,
+    sql: &str,
+) -> Result<Vec<uqa_planner::UnifiedPlan>, SQLError> {
+    if let Some(plans) = engine.cached_sql_plans(sql) {
+        return Ok(plans);
     }
-    let statements = compile(sql)?
+    let plans = compile(sql)?
         .into_iter()
         .map(optimize_statement)
-        .collect::<Vec<_>>();
-    engine.cache_sql_statements(sql.to_string(), statements.clone());
-    Ok(statements)
-}
-
-fn run_optimized_stmt(
-    engine: &Engine,
-    stmt: Statement,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    match stmt {
-        Statement::CreateTable(c) => run_create_table(engine, c),
-        Statement::CreateIndex(c) => run_create_index(engine, c),
-        Statement::Insert(i) => run_insert(engine, i, params),
-        Statement::Select(s) => run_select(engine, *s, params),
-        Statement::Update(u) => run_update(engine, u, params),
-        Statement::Delete(d) => run_delete(engine, d, params),
-        Statement::Drop(d) => run_drop(engine, d),
-        Statement::AlterTable(a) => run_alter_table(engine, a),
-        Statement::CreateView {
-            name,
-            body,
-            or_replace,
-        } => {
-            if engine.has_table(&name) {
-                return Err(SQLError::Unsupported(format!(
-                    "CREATE VIEW: relation `{name}` already exists as a table"
-                )));
-            }
-            if !or_replace && engine.view(&name).is_some() {
-                return Err(SQLError::Unsupported(format!(
-                    "CREATE VIEW: relation `{name}` already exists"
-                )));
-            }
-            engine.register_view(&name, *body);
-            Ok(SQLResult::empty())
-        }
-        Statement::CreateSchema {
-            name,
-            if_not_exists,
-        } => {
-            engine.register_schema(&name, if_not_exists);
-            Ok(SQLResult::empty())
-        }
-        Statement::Explain { body, .. } => run_explain(engine, *body, params),
-        Statement::SetVariable { name, value } => {
-            engine.set_variable(&name, &value);
-            Ok(SQLResult::empty())
-        }
-        Statement::ShowVariable { name } => {
-            let value = engine.show_variable(&name);
-            let mut row = ResultRow::new();
-            row.insert(name.clone(), Value::Str(value));
-            Ok(SQLResult {
-                columns: vec![name],
-                rows: vec![row],
-                affected_rows: 0,
+        .map(|statement| {
+            uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
+                engine.has_registered_aggregate_function(name)
             })
-        }
-        Statement::Discard { target } => {
-            engine.discard(target);
-            Ok(SQLResult::empty())
-        }
-        Statement::Analyze { table } => {
-            engine.run_analyze(table.as_deref());
-            Ok(SQLResult::empty())
-        }
-        Statement::Truncate { tables, .. } => {
-            for t in &tables {
-                if !engine.has_table(t) {
-                    return Err(SQLError::Unsupported(format!(
-                        "TRUNCATE TABLE: relation `{t}` does not exist"
-                    )));
-                }
-                engine.truncate_table(t)?;
-            }
-            Ok(SQLResult::empty())
-        }
-        Statement::Transaction(tx) => {
-            engine.run_transaction_statement(tx)?;
-            Ok(SQLResult::empty())
-        }
-        Statement::CreateSequence(s) => run_create_sequence(engine, s),
-        Statement::AlterSequence(s) => run_alter_sequence(engine, s),
-        Statement::CreateTableAs {
-            name,
-            if_not_exists,
-            body,
-        } => run_create_table_as(engine, name, if_not_exists, *body, params),
-        Statement::Prepare { name, body } => {
-            if engine.lookup_prepared(&name).is_some() {
-                return Err(SQLError::Unsupported(format!(
-                    "Prepared statement `{name}` already exists"
-                )));
-            }
-            engine.register_prepared(name, optimize_statement(*body));
-            Ok(SQLResult::empty())
-        }
-        Statement::Execute { name, params: ps } => run_execute_prepared(engine, &name, &ps, params),
-        Statement::Deallocate { name } => {
-            if let Some(ref n) = name {
-                if engine.lookup_prepared(n).is_none() {
-                    return Err(SQLError::Unsupported(format!(
-                        "Prepared statement `{n}` does not exist"
-                    )));
-                }
-            }
-            engine.deallocate_prepared(name.as_deref());
-            Ok(SQLResult::empty())
-        }
-        Statement::Values { rows } => run_values(engine, rows, params),
-        Statement::CreateForeignServer(s) => {
-            engine
-                .register_foreign_server(s.name, s.fdw_type, s.options, s.if_not_exists)
-                .map_err(SQLError::Unsupported)?;
-            Ok(SQLResult::empty())
-        }
-        Statement::CreateForeignTable(s) => {
-            engine
-                .register_foreign_table(
-                    s.name,
-                    s.server_name,
-                    s.columns,
-                    s.options,
-                    s.if_not_exists,
-                )
-                .map_err(SQLError::Unsupported)?;
-            Ok(SQLResult::empty())
-        }
-        Statement::Merge(m) => run_merge(engine, m, params),
-        Statement::CreateFunction(def) => plpgsql_exec::run_create_function(engine, *def),
-        Statement::DropFunction(stmt) => plpgsql_exec::run_drop_function(engine, &stmt),
-        Statement::DoBlock { language, body } => {
-            plpgsql_exec::run_do_block(engine, &language, &body)
-        }
-        Statement::Call { name, args } => plpgsql_exec::run_call(engine, &name, &args, params),
-    }
-}
-
-fn run_execute_prepared(
-    engine: &Engine,
-    name: &str,
-    args: &[uqa_sql::ast::Expr],
-    outer_params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let stmt = engine.lookup_prepared(name).ok_or_else(|| {
-        SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
-    })?;
-    let ctx = uqa_sql::expr::EvalContext::new(None, outer_params).with_engine(engine);
-    let mut bound: Vec<SQLParam> = Vec::with_capacity(args.len());
-    for a in args {
-        let v = uqa_sql::expr::eval(a, &ctx)?;
-        bound.push(SQLParam::Scalar(v));
-    }
-    run_optimized_stmt(engine, stmt, &bound)
-}
-
-fn run_values(
-    engine: &Engine,
-    rows: Vec<Vec<uqa_sql::ast::Expr>>,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    use uqa_sql::expr::{eval, EvalContext};
-    let ctx = EvalContext::new(None, params).with_engine(engine);
-    if rows.is_empty() {
-        return Ok(SQLResult::empty());
-    }
-    let columns: Vec<String> = (0..rows[0].len())
-        .map(|i| format!("column{}", i + 1))
-        .collect();
-    let mut out_rows: Vec<uqa_sql::result::ResultRow> = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut r = uqa_sql::result::ResultRow::new();
-        for (i, expr) in row.iter().enumerate() {
-            let v = eval(expr, &ctx)?;
-            r.insert(columns[i].clone(), v);
-        }
-        out_rows.push(r);
-    }
-    Ok(SQLResult {
-        columns,
-        rows: out_rows,
-        affected_rows: 0,
-    })
+        })
+        .collect::<Vec<_>>();
+    engine.cache_sql_plans(sql.to_string(), plans.clone());
+    Ok(plans)
 }
 
 fn optimize_statement(stmt: Statement) -> Statement {
@@ -353,8 +183,28 @@ fn optimize_statement(stmt: Statement) -> Statement {
     let cfg = OptimizerConfig::default();
     match stmt {
         Statement::Select(s) => Statement::Select(Box::new(optimize(*s, &cfg))),
+        Statement::Prepare { name, body } => Statement::Prepare {
+            name,
+            body: Box::new(optimize_statement(*body)),
+        },
         other => other,
     }
+}
+
+/// Lower and execute an already-compiled statement through the same unified
+/// plan entry point used by [`Engine::sql`]. SQL/PLpgSQL routine bodies call
+/// this instead of retaining a private AST dispatcher.
+pub(super) fn execute_compiled_statement(
+    engine: &Engine,
+    statement: Statement,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let statement = optimize_statement(statement);
+    let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    let driver = EngineUnifiedPlanDriver::new(engine, params);
+    uqa_planner::UnifiedPlanExecutor::new(&driver).execute(&plan)
 }
 
 impl Engine {
@@ -385,5 +235,90 @@ impl Engine {
         t.doc_count_cache.store(count, Ordering::Release);
         t.doc_count_dirty.store(false, Ordering::Release);
         count
+    }
+}
+
+#[cfg(test)]
+mod unified_plan_tests {
+    use uqa_planner::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
+
+    use super::{compile_optimized_plans, Engine};
+
+    fn one(engine: &Engine, sql: &str) -> UnifiedPlan {
+        let mut plans = compile_optimized_plans(engine, sql).expect("statement plans");
+        assert_eq!(plans.len(), 1);
+        plans.remove(0)
+    }
+
+    #[test]
+    fn sql_boundaries_are_cached_as_structural_unified_plans() {
+        let engine = Engine::new();
+
+        let arithmetic = one(&engine, "SELECT amount * 2 + 1 AS adjusted FROM ledger");
+        let UnifiedPlan::Query(query) = arithmetic else {
+            panic!("arithmetic SELECT must be a QueryPlan");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("expected query block");
+        };
+        assert!(matches!(block.compute, ComputePlan::Project { .. }));
+
+        let window = one(
+            &engine,
+            "SELECT row_number() OVER (PARTITION BY account ORDER BY amount) FROM ledger",
+        );
+        let UnifiedPlan::Query(query) = window else {
+            panic!("window SELECT must be a QueryPlan");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("expected query block");
+        };
+        assert!(matches!(block.compute, ComputePlan::Window { .. }));
+
+        let subquery = one(
+            &engine,
+            "SELECT q.total FROM (SELECT sum(amount) AS total FROM ledger) AS q",
+        );
+        let UnifiedPlan::Query(query) = subquery else {
+            panic!("subquery SELECT must be a QueryPlan");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("expected query block");
+        };
+        assert!(matches!(block.source, SourcePlan::Subquery { .. }));
+
+        let mutation = one(
+            &engine,
+            "UPDATE ledger SET amount = amount + 1 WHERE amount > 0",
+        );
+        assert!(matches!(
+            mutation,
+            UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update { .. })
+        ));
+
+        // The cache contains the same IR, not a parsed Statement that could
+        // re-enter a separate dispatcher.
+        assert!(engine
+            .cached_sql_plans("SELECT amount * 2 + 1 AS adjusted FROM ledger")
+            .is_some_and(|plans| matches!(plans.as_slice(), [UnifiedPlan::Query(_)])));
+    }
+
+    #[test]
+    fn views_retain_their_compiled_query_plan() {
+        let engine = Engine::new();
+        engine
+            .sql(
+                "CREATE VIEW ledger_totals AS SELECT sum(amount) AS total FROM ledger",
+                &[],
+            )
+            .expect("view definition");
+
+        let plan = engine
+            .view_plan("ledger_totals")
+            .expect("compiled view plan");
+        let RelationalPlan::QueryBlock(block) = plan.root else {
+            panic!("view must retain a query block");
+        };
+        assert!(matches!(block.compute, ComputePlan::Aggregate { .. }));
     }
 }

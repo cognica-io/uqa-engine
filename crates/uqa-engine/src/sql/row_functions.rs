@@ -26,8 +26,8 @@ const SINGLE_FIELD_TEXT_MATCH_FUNCTIONS: [&str; 4] = [
 
 /// Walk an expression tree and hand every text-match field argument to
 /// `validate`. Used by the select runners to reject silently-empty
-/// searches before the WHERE reaches either the operator-tree pipeline
-/// or the legacy dispatch.
+/// searches before the WHERE reaches either the operator-tree access path
+/// or scalar evaluation in the relational filter node.
 fn walk_text_match_fields(
     expr: &Expr,
     validate: &mut dyn FnMut(&Expr, &str) -> Result<(), SQLError>,

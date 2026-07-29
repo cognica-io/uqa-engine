@@ -161,6 +161,26 @@ fn registered_aggregate_function_participates_in_group_by() {
     assert_eq!(res.rows[1]["total"], Value::Int(9));
 }
 
+#[test]
+fn prepared_plan_rebinds_when_aggregate_registry_changes() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE samples (val INTEGER)", &[]).unwrap();
+    eng.sql("INSERT INTO samples (val) VALUES (1), (2)", &[])
+        .unwrap();
+    eng.sql(
+        "PREPARE totals AS SELECT rust_sum_squares(val) AS total FROM samples",
+        &[],
+    )
+    .unwrap();
+
+    eng.register_aggregate_function("rust_sum_squares", SumSquares::default)
+        .unwrap();
+    let result = eng.sql("EXECUTE totals", &[]).unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["total"], Value::Int(5));
+}
+
 #[derive(Default)]
 struct JoinObserved {
     parts: Vec<String>,

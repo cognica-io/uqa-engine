@@ -8,27 +8,33 @@
 
 use super::{
     build_join_rows_with_ctes, build_projection_row, coerce_to_column_type, column_type_name, eval,
-    execute_select, expand_star_columns, materialize_cte_list, prefix_row, projection_columns,
-    validate_vector_dimensions, value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp,
-    ColumnType, CteScope, DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey,
-    ForeignKeyAction, ForeignKeyMatch, InsertStmt, Projection, ResultRow,
-    RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScopedEngineHook, UpdateStmt, Value,
-    DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
+    expand_star_columns, prefix_row, projection_columns, validate_vector_dimensions,
+    value_to_tensor, value_to_vector, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
+    DeleteStmt, DocId, Document, Engine, EvalContext, Expr, ForeignKey, ForeignKeyAction,
+    ForeignKeyMatch, InsertStmt, Projection, ResultRow, RowIndependentUpdateValues, SQLError,
+    SQLParam, SQLResult, ScopedEngineHook, UpdateStmt, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN,
 };
+use uqa_planner::{CtePlan, ExpressionPlan, SourcePlan};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn run_merge(
     engine: &Engine,
     stmt: uqa_sql::ast::MergeStmt,
+    source_plan: SourcePlan,
+    expressions: Vec<ExpressionPlan>,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| run_merge_inner(engine, stmt, params))
+    engine.transaction(move |engine| {
+        run_merge_inner(engine, stmt, &source_plan, &expressions, params)
+    })
 }
 
 #[allow(clippy::too_many_lines)]
 fn run_merge_inner(
     engine: &Engine,
     stmt: uqa_sql::ast::MergeStmt,
+    source_plan: &SourcePlan,
+    expressions: &[ExpressionPlan],
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     use uqa_sql::ast::MergeWhen;
@@ -39,8 +45,16 @@ fn run_merge_inner(
         .clone()
         .unwrap_or_else(|| target_table.clone());
     let mut ctes = CteScope::new();
-    let source_rows = build_join_rows_with_ctes(engine, &stmt.source, params, &mut ctes)?;
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = engine;
+    ctes.install_source_plan(source_plan);
+    for expression in expressions {
+        ctes.install_expression_plan(expression);
+    }
+    let source = source_plan.physical_from().ok_or_else(|| {
+        SQLError::Internal("MERGE source plan does not produce a row source".into())
+    })?;
+    let source_rows = build_join_rows_with_ctes(engine, &source, params, &mut ctes)?;
+    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     let mut affected = 0_u64;
     let mut returning_rows = Vec::new();
 
@@ -324,48 +338,71 @@ fn build_merge_returning_row(
 pub(super) fn run_update(
     engine: &Engine,
     stmt: UpdateStmt,
+    cte_plans: Vec<CtePlan>,
+    source_plan: Option<SourcePlan>,
+    expressions: Vec<ExpressionPlan>,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| run_update_inner(engine, stmt, params))
+    engine.transaction(move |engine| {
+        run_update_inner(
+            engine,
+            stmt,
+            &cte_plans,
+            source_plan.as_ref(),
+            &expressions,
+            params,
+        )
+    })
 }
 
 fn run_update_inner(
     engine: &Engine,
     stmt: UpdateStmt,
+    cte_plans: &[CtePlan],
+    source_plan: Option<&SourcePlan>,
+    expressions: &[ExpressionPlan],
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let mut ctes = CteScope::new();
+    super::select::materialize_plan_ctes(engine, cte_plans, params, &mut ctes)?;
+    if let Some(source) = source_plan {
+        ctes.install_source_plan(source);
+    }
+    for expression in expressions {
+        ctes.install_expression_plan(expression);
+    }
+
     // UPDATE ... FROM other [WHERE ...]: build the joined relation,
     // evaluate the WHERE against each joined row, and apply
     // assignments to the matching target rows. Mirrors the canonical UQA implementation's
     // _compile_update_from.
-    if let Some(from_clause) = stmt.from.as_ref() {
-        return run_update_from(engine, &stmt, from_clause, params);
+    if let Some(source) = source_plan {
+        let from_clause = source.physical_from().ok_or_else(|| {
+            SQLError::Internal("UPDATE source plan does not produce a row source".into())
+        })?;
+        return run_update_from(engine, &stmt, &from_clause, params, &mut ctes);
     }
-    if stmt.with.is_empty() {
+    if stmt.from.is_some() {
+        return Err(SQLError::Internal(
+            "UPDATE reached the mutation runtime without its source plan".into(),
+        ));
+    }
+    let has_runtime_scope =
+        !ctes.rows.is_empty() || !ctes.inlined.is_empty() || !ctes.planned_subqueries.is_empty();
+    if !has_runtime_scope {
         if let Some(result) = try_run_point_update(engine, &stmt, params)? {
             return Ok(result);
         }
     }
-    let mut ctes = CteScope::new();
-    if !stmt.with.is_empty() {
-        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
-    }
-    let scoped_hook = if stmt.with.is_empty() {
-        None
-    } else {
-        Some(ScopedEngineHook::new(engine, &ctes))
-    };
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
-        Some(hook) => hook,
-        None => engine,
-    };
+    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let cancel = engine.cancellation_token();
     // Without CTEs the WHERE clause resolves through the accelerated
     // single-table machinery (value indexes, posting lists) up front;
     // the per-row re-check below is then unnecessary.
-    let preselected = stmt.with.is_empty() && stmt.r#where.is_some();
+    let preselected = !has_runtime_scope && stmt.r#where.is_some();
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
         let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
         super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
@@ -891,21 +928,11 @@ fn run_update_from(
     stmt: &UpdateStmt,
     from_clause: &uqa_sql::ast::FromClause,
     params: &[SQLParam],
+    ctes: &mut CteScope,
 ) -> Result<SQLResult, SQLError> {
-    let mut ctes = CteScope::new();
-    if !stmt.with.is_empty() {
-        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
-    }
-    let from_rows = build_join_rows_with_ctes(engine, from_clause, params, &mut ctes)?;
-    let scoped_hook = if stmt.with.is_empty() {
-        None
-    } else {
-        Some(ScopedEngineHook::new(engine, &ctes))
-    };
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
-        Some(hook) => hook,
-        None => engine,
-    };
+    let from_rows = build_join_rows_with_ctes(engine, from_clause, params, ctes)?;
+    let scoped_hook = ScopedEngineHook::new(engine, ctes);
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     let cancel = engine.cancellation_token();
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
@@ -987,14 +1014,29 @@ fn run_update_from(
 pub(super) fn run_delete(
     engine: &Engine,
     stmt: DeleteStmt,
+    cte_plans: Vec<CtePlan>,
+    source_plan: Option<SourcePlan>,
+    expressions: Vec<ExpressionPlan>,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| run_delete_inner(engine, stmt, params))
+    engine.transaction(move |engine| {
+        run_delete_inner(
+            engine,
+            stmt,
+            &cte_plans,
+            source_plan.as_ref(),
+            &expressions,
+            params,
+        )
+    })
 }
 
 fn run_delete_inner(
     engine: &Engine,
     stmt: DeleteStmt,
+    cte_plans: &[CtePlan],
+    source_plan: Option<&SourcePlan>,
+    expressions: &[ExpressionPlan],
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     let mut affected = 0u64;
@@ -1002,31 +1044,40 @@ fn run_delete_inner(
     let mut to_delete: Vec<uqa_core::DocId> = Vec::new();
     let mut returning_docs: Vec<(uqa_core::DocId, Document)> = Vec::new();
     let mut ctes = CteScope::new();
-    if !stmt.with.is_empty() {
-        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
+    super::select::materialize_plan_ctes(engine, cte_plans, params, &mut ctes)?;
+    if let Some(source) = source_plan {
+        ctes.install_source_plan(source);
+    }
+    for expression in expressions {
+        ctes.install_expression_plan(expression);
     }
     // DELETE FROM t USING other WHERE ... -- materialise the join
     // first, then collect target doc ids whose joined image
     // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
-    let using_rows: Option<Vec<ResultRow>> = match stmt.using.as_ref() {
-        Some(clause) => Some(build_join_rows_with_ctes(
-            engine, clause, params, &mut ctes,
-        )?),
+    let using_rows: Option<Vec<ResultRow>> = match source_plan {
+        Some(source) => {
+            let clause = source.physical_from().ok_or_else(|| {
+                SQLError::Internal("DELETE source plan does not produce a row source".into())
+            })?;
+            Some(build_join_rows_with_ctes(
+                engine, &clause, params, &mut ctes,
+            )?)
+        }
         None => None,
     };
-    let scoped_hook = if stmt.with.is_empty() {
-        None
-    } else {
-        Some(ScopedEngineHook::new(engine, &ctes))
-    };
-    let eval_hook: &dyn uqa_sql::expr::EngineHook = match scoped_hook.as_ref() {
-        Some(hook) => hook,
-        None => engine,
-    };
+    if stmt.using.is_some() != source_plan.is_some() {
+        return Err(SQLError::Internal(
+            "DELETE source plan does not match the compiled statement".into(),
+        ));
+    }
+    let has_runtime_scope =
+        !ctes.rows.is_empty() || !ctes.inlined.is_empty() || !ctes.planned_subqueries.is_empty();
+    let scoped_hook = ScopedEngineHook::new(engine, &ctes);
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     // Plain `DELETE FROM t WHERE ...` resolves the WHERE through the
     // accelerated single-table machinery instead of materialising the
     // whole table.
-    let preselected = stmt.with.is_empty() && stmt.using.is_none() && stmt.r#where.is_some();
+    let preselected = !has_runtime_scope && source_plan.is_none() && stmt.r#where.is_some();
     let doc_ids: Vec<uqa_core::DocId> = if preselected {
         let filter = stmt.r#where.as_ref().expect("preselected requires WHERE");
         super::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
@@ -1050,10 +1101,7 @@ fn run_delete_inner(
             (Some(filter), None) => {
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&doc), params).with_engine(eval_hook);
-                matches!(
-                    uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
-                    Ok(true)
-                )
+                uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?)
             }
             (Some(filter), Some(rows)) => {
                 let mut matched = false;
@@ -1068,10 +1116,7 @@ fn run_delete_inner(
                     }
                     let ctx = uqa_sql::expr::EvalContext::new(Some(&joined), params)
                         .with_engine(eval_hook);
-                    if matches!(
-                        uqa_sql::expr::eval(filter, &ctx).map(|v| uqa_sql::expr::truthy(&v)),
-                        Ok(true)
-                    ) {
+                    if uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
                         matched = true;
                         break;
                     }
@@ -1295,24 +1340,34 @@ fn dml_returning_result(
 pub(super) fn run_insert(
     engine: &Engine,
     stmt: InsertStmt,
+    source_plan: Option<uqa_planner::QueryPlan>,
+    expressions: Vec<ExpressionPlan>,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    engine.transaction(move |engine| run_insert_inner(engine, stmt, params))
+    engine.transaction(move |engine| {
+        run_insert_inner(engine, stmt, source_plan.as_ref(), &expressions, params)
+    })
 }
 
 #[allow(clippy::too_many_lines)]
 fn run_insert_inner(
     engine: &Engine,
     stmt: InsertStmt,
+    source_plan: Option<&uqa_planner::QueryPlan>,
+    expressions: &[ExpressionPlan],
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let mut scope = CteScope::new();
+    for expression in expressions {
+        scope.install_expression_plan(expression);
+    }
+    let scoped_hook = ScopedEngineHook::new(engine, &scope);
+    let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
     // INSERT ... SELECT: materialise the inner SELECT first, then
     // route each row through the standard add_document path under
     // the named columns.
-    if let Some(source) = stmt.select_source.clone() {
-        let mut ctes = CteScope::new();
-        materialize_cte_list(engine, &stmt.with, params, &mut ctes)?;
-        let result = execute_select(engine, &source, params, &mut ctes)?;
+    if let Some(source) = source_plan {
+        let result = super::select::execute_query_plan(engine, source, params)?;
         let columns: Vec<String> = if stmt.columns.is_empty() {
             result.columns.clone()
         } else {
@@ -1385,6 +1440,12 @@ fn run_insert_inner(
         return Ok(SQLResult::from_affected(affected));
     }
 
+    if stmt.select_source.is_some() {
+        return Err(SQLError::Internal(
+            "INSERT SELECT reached the mutation runtime without its QueryPlan child".into(),
+        ));
+    }
+
     let auto_id_col = engine.auto_increment_column(&stmt.table);
     // Resolve the table's primary-key column name. Auto-increment
     // (SERIAL / BIGSERIAL) wins; otherwise the first PRIMARY KEY
@@ -1424,7 +1485,7 @@ fn run_insert_inner(
 
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
     let cancel = engine.cancellation_token();
     for row in &stmt.rows {
         cancel.check()?;
@@ -1500,7 +1561,7 @@ fn run_insert_inner(
         // level CHECK against the row and reject when any returns a
         // non-truthy value.
         for (cname, expr) in engine.check_constraints(&stmt.table) {
-            let row_ctx = EvalContext::new(Some(&document), params).with_engine(engine);
+            let row_ctx = EvalContext::new(Some(&document), params).with_engine(eval_hook);
             let result = eval(&expr, &row_ctx)?;
             if !uqa_sql::expr::truthy(&result) {
                 let label = cname.unwrap_or_else(|| "<unnamed>".into());
@@ -1586,8 +1647,8 @@ fn run_insert_inner(
                         for (col, value) in &document {
                             conflict_ctx_doc.insert(format!("excluded.{col}"), value.clone());
                         }
-                        let row_ctx =
-                            EvalContext::new(Some(&conflict_ctx_doc), params).with_engine(engine);
+                        let row_ctx = EvalContext::new(Some(&conflict_ctx_doc), params)
+                            .with_engine(eval_hook);
                         if let Some(pred) = r#where {
                             let keep = eval(pred, &row_ctx)?;
                             if !uqa_sql::expr::truthy(&keep) {

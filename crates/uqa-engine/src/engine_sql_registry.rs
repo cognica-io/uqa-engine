@@ -62,6 +62,11 @@ impl Engine {
         self.sql_aggregate_functions
             .write()
             .insert(name, Arc::new(function));
+        // Aggregate-vs-projection is a structural choice in `QueryPlan`.
+        // Cached plans compiled before this registration must be rebound.
+        self.clear_sql_statement_cache();
+        self.view_plans.write().clear();
+        self.rebind_prepared_plans();
         Ok(())
     }
 

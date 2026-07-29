@@ -178,6 +178,52 @@ where
     out
 }
 
+/// Error-preserving hash inner join. This is the physical form used when join
+/// keys are expressions rather than direct columns: key evaluation failures
+/// must abort the query instead of being reinterpreted as SQL NULL.
+pub fn try_hash_inner_join<L, R, E>(
+    left: &[ResultRow],
+    right: &[ResultRow],
+    left_key: L,
+    right_key: R,
+) -> Result<Vec<ResultRow>, E>
+where
+    L: Fn(&ResultRow) -> Result<Option<JoinKey>, E>,
+    R: Fn(&ResultRow) -> Result<Option<JoinKey>, E>,
+{
+    let (build_rows, probe_rows, build_is_left) = if left.len() <= right.len() {
+        (left, right, true)
+    } else {
+        (right, left, false)
+    };
+    let build_key_fn: &dyn Fn(&ResultRow) -> Result<Option<JoinKey>, E> =
+        if build_is_left { &left_key } else { &right_key };
+    let probe_key_fn: &dyn Fn(&ResultRow) -> Result<Option<JoinKey>, E> =
+        if build_is_left { &right_key } else { &left_key };
+    let mut index: HashMap<JoinKey, Vec<&ResultRow>> = HashMap::with_capacity(build_rows.len());
+    for row in build_rows {
+        if let Some(key) = build_key_fn(row)? {
+            index.entry(key).or_default().push(row);
+        }
+    }
+    let mut out = Vec::with_capacity(probe_rows.len());
+    for probe in probe_rows {
+        let Some(key) = probe_key_fn(probe)? else {
+            continue;
+        };
+        if let Some(matches) = index.get(&key) {
+            for build_row in matches {
+                out.push(if build_is_left {
+                    merge(build_row, probe)
+                } else {
+                    merge(probe, build_row)
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn left_outer_join<L, R>(
     left: &[ResultRow],
     right: &[ResultRow],

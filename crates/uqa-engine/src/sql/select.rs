@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 use uqa_core::DocId;
 use uqa_joins::row_join::JoinKey;
+use uqa_planner::{ComputePlan, CtePlan, QueryBlockPlan, QueryPlan, RelationalPlan};
 
 use super::{
     aggregate_join_rows, build_aggregate_rows, build_join_rows_with_ctes,
@@ -31,6 +32,255 @@ use super::{
 // -------------------------------------------------------------------------
 // SELECT
 // -------------------------------------------------------------------------
+
+/// Execute the structural relational plan directly. CTEs and set-operation
+/// branches recurse through plan children; only a single query block is
+/// adapted to the existing row-operator configuration.
+pub(super) fn execute_query_plan(
+    engine: &Engine,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let mut ctes = CteScope::new();
+    execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
+}
+
+/// Plan and execute a SELECT AST supplied by a stored view, routine, or
+/// expression subquery. These runtime-produced statements still enter the
+/// unified plan before any physical work begins.
+pub(super) fn execute_select_ast(
+    engine: &Engine,
+    statement: &SelectStmt,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    let mut ctes = CteScope::new();
+    execute_select_ast_with_ctes(engine, statement, params, &mut ctes)
+}
+
+pub(super) fn execute_select_ast_with_ctes(
+    engine: &Engine,
+    statement: &SelectStmt,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+) -> Result<SQLResult, SQLError> {
+    let plan = QueryPlan::lower_with(statement.clone(), &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    execute_query_plan_with_ctes(engine, &plan, params, ctes)
+}
+
+pub(super) fn execute_query_plan_with_ctes(
+    engine: &Engine,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+) -> Result<SQLResult, SQLError> {
+    if !plan.ctes.is_empty() {
+        if let Some(statement) = plan.physical_select() {
+            // Reuse the mature CTE physical optimiser (single-use inlining,
+            // output-filter pushdown, and recursive working-set pruning). Its
+            // child queries re-enter `execute_select_ast_with_ctes`, so this
+            // is a physical planning step rather than an AST execution path.
+            materialize_ctes(engine, &statement, params, ctes)?;
+        } else {
+            materialize_plan_ctes(engine, &plan.ctes, params, ctes)?;
+        }
+    }
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => {
+            execute_query_block_plan(engine, block, params, ctes, None)
+        }
+        RelationalPlan::SetOp {
+            kind,
+            all,
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+        } => {
+            let lhs = execute_query_plan_with_ctes(engine, left, params, ctes)?;
+            let rhs = execute_query_plan_with_ctes(engine, right, params, ctes)?;
+            let mut combined = combine_set_results(*kind, *all, lhs, rhs);
+            if !order_by.is_empty() || limit.is_some() || offset.is_some() {
+                let synthetic = SelectStmt {
+                    projections: Vec::new(),
+                    from: None,
+                    r#where: None,
+                    group_by: Vec::new(),
+                    grouping_sets: Vec::new(),
+                    having: None,
+                    order_by: order_by
+                        .iter()
+                        .map(|order| uqa_sql::ast::OrderBy {
+                            expr: order.expression.expression.clone(),
+                            descending: order.descending,
+                            nulls: order.nulls,
+                        })
+                        .collect(),
+                    limit: limit
+                        .as_ref()
+                        .map(|expression| expression.expression.clone()),
+                    offset: offset
+                        .as_ref()
+                        .map(|expression| expression.expression.clone()),
+                    with: Vec::new(),
+                    set_op: None,
+                    distinct: false,
+                    distinct_on: Vec::new(),
+                };
+                let columns = combined.columns.clone();
+                combined.rows = apply_row_order_limit(combined.rows, &synthetic, engine, params)?;
+                combined.columns = columns;
+            }
+            Ok(combined)
+        }
+        RelationalPlan::Values { rows } => execute_plan_values(engine, rows, params),
+    }
+}
+
+fn execute_query_block_plan(
+    engine: &Engine,
+    block: &QueryBlockPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    prepared_exists_filter: Option<&ExistsMembershipPlan>,
+) -> Result<SQLResult, SQLError> {
+    let saved_subqueries = ctes.planned_subqueries.clone();
+    ctes.install_source_plan(&block.source);
+    for expression in block.expressions() {
+        ctes.install_expression_plan(expression);
+    }
+    let result = (|| {
+        let original = block.physical_select();
+        let defer_distinct_limit = should_defer_distinct_limit(&original);
+        let execution = select_execution_stmt(&original, defer_distinct_limit);
+        let mut result = run_query_block_with_prepared_exists(
+            engine,
+            block,
+            &execution,
+            params,
+            ctes,
+            prepared_exists_filter,
+        )?;
+        result = apply_select_distinct(engine, &original, result, params)?;
+        if defer_distinct_limit {
+            let columns = result.columns.clone();
+            result.rows = apply_limit_offset_only(result.rows, &original, engine, params)?;
+            result.columns = columns;
+        }
+        Ok(result)
+    })();
+    ctes.planned_subqueries = saved_subqueries;
+    result
+}
+
+fn combine_set_results(kind: SetOpKind, all: bool, lhs: SQLResult, rhs: SQLResult) -> SQLResult {
+    match (kind, all) {
+        (SetOpKind::Union, true) => {
+            let mut rows = lhs.rows;
+            rows.extend(rhs.rows);
+            SQLResult::from_rows(lhs.columns, rows)
+        }
+        (SetOpKind::Union, false) => {
+            let mut rows = lhs.rows;
+            rows.extend(rhs.rows);
+            SQLResult::from_rows(lhs.columns, distinct_rows_stable(rows))
+        }
+        (SetOpKind::Intersect, _) => {
+            let mut rows: Vec<ResultRow> = lhs
+                .rows
+                .into_iter()
+                .filter(|row| rhs.rows.iter().any(|candidate| candidate == row))
+                .collect();
+            if !all {
+                rows = distinct_rows_stable(rows);
+            }
+            SQLResult::from_rows(lhs.columns, rows)
+        }
+        (SetOpKind::Except, _) => {
+            let mut rows: Vec<ResultRow> = lhs
+                .rows
+                .into_iter()
+                .filter(|row| !rhs.rows.iter().any(|candidate| candidate == row))
+                .collect();
+            if !all {
+                rows = distinct_rows_stable(rows);
+            }
+            SQLResult::from_rows(lhs.columns, rows)
+        }
+    }
+}
+
+fn execute_plan_values(
+    engine: &Engine,
+    rows: &[Vec<uqa_planner::ExpressionPlan>],
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    if rows.is_empty() {
+        return Ok(SQLResult::empty());
+    }
+    let columns: Vec<String> = (0..rows[0].len())
+        .map(|index| format!("column{}", index + 1))
+        .collect();
+    let mut scope = CteScope::new();
+    for row in rows {
+        for expression in row {
+            scope.install_expression_plan(expression);
+        }
+    }
+    let hook = ScopedEngineHook::new(engine, &scope);
+    let context = EvalContext::new(None, params).with_engine(&hook);
+    let mut output = Vec::with_capacity(rows.len());
+    for source in rows {
+        if source.len() != columns.len() {
+            return Err(SQLError::TypeMismatch(format!(
+                "VALUES row width {} does not match first row width {}",
+                source.len(),
+                columns.len()
+            )));
+        }
+        let mut row = ResultRow::new();
+        for (index, expression) in source.iter().enumerate() {
+            row.insert(
+                columns[index].clone(),
+                eval(&expression.expression, &context)?,
+            );
+        }
+        output.push(row);
+    }
+    Ok(SQLResult::from_rows(columns, output))
+}
+
+pub(super) fn materialize_plan_ctes(
+    engine: &Engine,
+    plans: &[CtePlan],
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+) -> Result<(), SQLError> {
+    for plan in plans {
+        let rows = if plan.recursive {
+            let query = plan.query.physical_select().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "recursive CTE `{}` does not have a SELECT carrier",
+                    plan.name
+                ))
+            })?;
+            let cte = CTE {
+                name: plan.name.clone(),
+                columns: plan.columns.clone(),
+                recursive: true,
+                query: Box::new(query),
+            };
+            materialize_recursive_cte(engine, &cte, params, ctes, None)?
+        } else {
+            let result = execute_query_plan_with_ctes(engine, &plan.query, params, ctes)?;
+            apply_cte_column_aliases(result.rows, &result.columns, &plan.columns)
+        };
+        ctes.insert_materialized(plan.name.clone(), rows);
+    }
+    Ok(())
+}
 
 /// Render the inner statement as an EXPLAIN-style plan result. Mirrors
 /// the canonical UQA implementation's `_explain_plan`: returns a single-column `plan` table with
@@ -92,75 +342,6 @@ fn format_select_plan(stmt: &SelectStmt) -> String {
     s.trim_end().to_string()
 }
 
-pub(super) fn run_select(
-    engine: &Engine,
-    stmt: SelectStmt,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let defer_distinct_limit = should_defer_distinct_limit(&stmt);
-    let exec_stmt = select_execution_stmt(&stmt, defer_distinct_limit);
-
-    if !exec_stmt.with.is_empty() || exec_stmt.set_op.is_some() {
-        let mut ctes = CteScope::new();
-        let result = execute_select(engine, &exec_stmt, params, &mut ctes)?;
-        return finish_select_result(engine, &stmt, result, params, true, defer_distinct_limit);
-    }
-
-    let Some(from) = exec_stmt.from.as_ref() else {
-        // SELECT without FROM -- evaluate the projection list against
-        // an empty single-row context. Mirrors the canonical UQA implementation's standalone
-        // SELECT 1 / SELECT (SELECT ...).
-        let result = run_select_without_from(engine, &exec_stmt, params)?;
-        return finish_select_result(engine, &stmt, result, params, false, defer_distinct_limit);
-    };
-
-    // Single-table FROM with no alias and no window function keeps the
-    // search-aware fast path. JOIN shapes and window queries drop into
-    // the multi-table executor that builds row tuples up-front and
-    // filters them via the expression evaluator.
-    if let FromClause::Table { name, alias } = from {
-        if alias.is_none() && engine.foreign_table(name).is_some() {
-            let result = run_single_foreign_select(engine, name, &exec_stmt, params)?;
-            return finish_select_result(
-                engine,
-                &stmt,
-                result,
-                params,
-                false,
-                defer_distinct_limit,
-            );
-        }
-        // Schema-qualified names (information_schema.tables /
-        // pg_catalog.pg_*) and CTE references skip the search-aware
-        // fast path because they don't correspond to a registered
-        // engine table.
-        let is_virtual = name.contains('.')
-            || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
-        let has_subquery_filter = exec_stmt
-            .r#where
-            .as_ref()
-            .is_some_and(expr_contains_subquery);
-        if alias.is_none()
-            && !has_window(&exec_stmt.projections)
-            && !is_virtual
-            && !has_subquery_filter
-        {
-            let result = run_single_table_select(engine, name, &exec_stmt, params)?;
-            return finish_select_result(
-                engine,
-                &stmt,
-                result,
-                params,
-                false,
-                defer_distinct_limit,
-            );
-        }
-    }
-
-    let result = run_joined_select(engine, from, &exec_stmt, params)?;
-    finish_select_result(engine, &stmt, result, params, false, defer_distinct_limit)
-}
-
 fn should_defer_distinct_limit(stmt: &SelectStmt) -> bool {
     stmt.distinct && (stmt.limit.is_some() || stmt.offset.is_some())
 }
@@ -179,13 +360,15 @@ fn run_select_without_from(
     engine: &Engine,
     stmt: &SelectStmt,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     let row = ResultRow::new();
     let columns = projection_columns(&stmt.projections);
+    let hook = ScopedEngineHook::new(engine, ctes);
     // `SELECT 1 WHERE false` must produce zero rows: the WHERE clause
     // applies even without a FROM (three-valued: NULL filters too).
     if let Some(filter) = stmt.r#where.as_ref() {
-        let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
+        let ctx = EvalContext::new(Some(&row), params).with_engine(&hook);
         let keep = eval(filter, &ctx)?;
         if !uqa_sql::expr::truthy(&keep) {
             return Ok(SQLResult {
@@ -197,10 +380,16 @@ fn run_select_without_from(
     }
     // Set-returning functions in the projection list expand to rows
     // (`SELECT generate_series(1, 3)`).
-    if let Some(result) = expand_projection_srf(engine, stmt, &row, params)? {
+    if let Some(result) = expand_projection_srf(engine, &hook, stmt, &row, params)? {
         return Ok(result);
     }
-    let projected = build_projection_row(Some(engine), &row, &stmt.projections, params)?;
+    let projected = super::from_rows::project_join_row_with_engine_hook(
+        engine,
+        &hook,
+        &row,
+        &stmt.projections,
+        params,
+    )?;
     Ok(SQLResult {
         columns,
         rows: vec![projected],
@@ -214,6 +403,7 @@ fn run_select_without_from(
 /// SRF-in-select-list behavior for the single-SRF case.
 fn expand_projection_srf(
     engine: &Engine,
+    hook: &dyn uqa_sql::expr::EngineHook,
     stmt: &SelectStmt,
     row: &ResultRow,
     params: &[SQLParam],
@@ -231,7 +421,7 @@ fn expand_projection_srf(
     // Object-key extractors return a set of rows in PostgreSQL; the
     // scalar evaluator produces the key list, unpacked here.
     if matches!(lower.as_str(), "json_object_keys" | "jsonb_object_keys") {
-        let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+        let ctx = EvalContext::new(Some(row), params).with_engine(hook);
         let value = eval(&projection.expr, &ctx)?;
         let Value::List(items) = value else {
             return Ok(None);
@@ -264,8 +454,9 @@ fn expand_projection_srf(
     if !is_srf {
         return Ok(None);
     }
+    let context = super::from_rows::TableFunctionEvalContext::new(engine, params, hook);
     let produced =
-        super::from_rows::build_table_function_rows(engine, &lower, args, None, &[], &[], params)?;
+        super::from_rows::build_table_function_rows(&context, &lower, args, None, &[], &[])?;
     let out: Vec<ResultRow> = produced
         .into_iter()
         .map(|produced_row| {
@@ -285,100 +476,6 @@ fn expand_projection_srf(
         rows: out,
         affected_rows: 0,
     }))
-}
-
-/// Execute a SELECT that may carry CTEs and/or set ops, returning the
-/// final result. CTEs are materialized into the `ctes` map first so the
-/// FROM clause can resolve references to them.
-pub(super) fn execute_select(
-    engine: &Engine,
-    stmt: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<SQLResult, SQLError> {
-    materialize_ctes(engine, stmt, params, ctes)?;
-
-    // The parent `SelectStmt` carries the LHS branch's own clauses
-    // (projections / from / where / group-by / ORDER BY / LIMIT /
-    // OFFSET). The set-op-level combined clauses live on
-    // `set_op.combined_*`. The LHS branch executes with its own
-    // clauses applied; the merged result then takes the combined
-    // clauses below.
-    let Some(set_op) = stmt.set_op.as_ref() else {
-        let lhs = run_query_block(engine, stmt, params, ctes)?;
-        let lhs = apply_select_distinct(engine, stmt, lhs, params)?;
-        return Ok(lhs);
-    };
-    let lhs = if let Some(left) = set_op.left.as_deref() {
-        execute_select(engine, left, params, ctes)?
-    } else {
-        let lhs = run_query_block(engine, stmt, params, ctes)?;
-        apply_select_distinct(engine, stmt, lhs, params)?
-    };
-    let rhs = execute_select(engine, &set_op.right, params, ctes)?;
-    let mut combined = match (set_op.kind, set_op.all) {
-        (SetOpKind::Union, true) => {
-            let mut rows = lhs.rows;
-            rows.extend(rhs.rows);
-            SQLResult::from_rows(lhs.columns, rows)
-        }
-        (SetOpKind::Union, false) => {
-            let mut rows = lhs.rows;
-            rows.extend(rhs.rows);
-            SQLResult::from_rows(lhs.columns, distinct_rows_stable(rows))
-        }
-        (SetOpKind::Intersect, _) => {
-            let mut rows: Vec<ResultRow> = lhs
-                .rows
-                .into_iter()
-                .filter(|r| rhs.rows.iter().any(|s| s == r))
-                .collect();
-            if !set_op.all {
-                rows = distinct_rows_stable(rows);
-            }
-            SQLResult::from_rows(lhs.columns, rows)
-        }
-        (SetOpKind::Except, _) => {
-            let mut rows: Vec<ResultRow> = lhs
-                .rows
-                .into_iter()
-                .filter(|r| !rhs.rows.iter().any(|s| s == r))
-                .collect();
-            if !set_op.all {
-                rows = distinct_rows_stable(rows);
-            }
-            SQLResult::from_rows(lhs.columns, rows)
-        }
-    };
-
-    // Apply the union-level ORDER BY / LIMIT / OFFSET to the merged
-    // set-op result. The parent `stmt`'s own clauses already fired
-    // on the LHS branch above; here we use the combined clauses the
-    // compiler stashed on the SetOp.
-    if !set_op.combined_order_by.is_empty()
-        || set_op.combined_limit.is_some()
-        || set_op.combined_offset.is_some()
-    {
-        let synthetic = SelectStmt {
-            projections: Vec::new(),
-            from: None,
-            r#where: None,
-            group_by: Vec::new(),
-            grouping_sets: Vec::new(),
-            having: None,
-            order_by: set_op.combined_order_by.clone(),
-            limit: set_op.combined_limit.clone(),
-            offset: set_op.combined_offset.clone(),
-            with: Vec::new(),
-            set_op: None,
-            distinct: false,
-            distinct_on: Vec::new(),
-        };
-        let columns = combined.columns.clone();
-        combined.rows = apply_row_order_limit(combined.rows, &synthetic, engine, params)?;
-        combined.columns = columns;
-    }
-    Ok(combined)
 }
 
 fn distinct_rows_stable(rows: Vec<ResultRow>) -> Vec<ResultRow> {
@@ -423,25 +520,6 @@ fn apply_select_distinct(
         } else {
             distinct_on_rows(engine, result.rows, &stmt.distinct_on, params)?
         };
-    }
-    Ok(result)
-}
-
-fn finish_select_result(
-    engine: &Engine,
-    stmt: &SelectStmt,
-    mut result: SQLResult,
-    params: &[SQLParam],
-    distinct_already_applied: bool,
-    apply_deferred_limit: bool,
-) -> Result<SQLResult, SQLError> {
-    if !distinct_already_applied {
-        result = apply_select_distinct(engine, stmt, result, params)?;
-    }
-    if apply_deferred_limit {
-        let columns = result.columns.clone();
-        result.rows = apply_limit_offset_only(result.rows, stmt, engine, params)?;
-        result.columns = columns;
     }
     Ok(result)
 }
@@ -527,6 +605,7 @@ type SubqueryCache = BTreeMap<String, (Vec<String>, Vec<ResultRow>)>;
 pub(crate) struct CteScope {
     pub(super) rows: BTreeMap<String, Vec<ResultRow>>,
     pub(super) inlined: BTreeMap<String, SelectStmt>,
+    pub(super) planned_subqueries: BTreeMap<String, QueryPlan>,
 }
 
 impl CteScope {
@@ -542,6 +621,18 @@ impl CteScope {
     pub(super) fn remove_materialized(&mut self, name: &str) -> Option<Vec<ResultRow>> {
         self.remove_prefixed_row_caches(name);
         self.rows.remove(name)
+    }
+
+    pub(super) fn install_expression_plan(&mut self, expression: &uqa_planner::ExpressionPlan) {
+        for (key, query) in expression.subquery_bindings() {
+            self.planned_subqueries.insert(key, query.clone());
+        }
+    }
+
+    pub(super) fn install_source_plan(&mut self, source: &uqa_planner::SourcePlan) {
+        for (key, query) in source.subquery_bindings() {
+            self.planned_subqueries.insert(key, query.clone());
+        }
     }
 
     fn remove_prefixed_row_caches(&mut self, name: &str) {
@@ -563,6 +654,29 @@ impl<'a> ScopedEngineHook<'a> {
             ctes,
             subquery_cache: RefCell::new(BTreeMap::new()),
         }
+    }
+
+    fn execute_subquery(
+        &self,
+        statement: &SelectStmt,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<SQLResult, SQLError> {
+        let correlated = outer_row.is_some() && select_references_outer(statement);
+        if let Some(plan) = self.ctes.planned_subqueries.get(&format!("{statement:?}")) {
+            if correlated {
+                return execute_lateral_query_plan(
+                    self.engine,
+                    plan,
+                    outer_row.expect("correlated subquery has an outer row"),
+                    params,
+                    self.ctes,
+                );
+            }
+            let mut scoped_ctes = self.ctes.clone();
+            return execute_query_plan_with_ctes(self.engine, plan, params, &mut scoped_ctes);
+        }
+        run_correlated_subquery(self.engine, statement, outer_row, params, self.ctes)
     }
 }
 
@@ -628,19 +742,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             if let Some(cached) = self.subquery_cache.borrow().get(&key) {
                 return Ok(cached.clone());
             }
-            let result = run_correlated_subquery(
-                self.engine,
-                stmt,
-                if correlated { outer_row } else { None },
-                params,
-                self.ctes,
-            )
-            .map(|result| (result.columns, result.rows))
-            .map_err(|e| format!("subquery failed: {e}"))?;
+            let result = self
+                .execute_subquery(stmt, if correlated { outer_row } else { None }, params)
+                .map(|result| (result.columns, result.rows))
+                .map_err(|e| format!("subquery failed: {e}"))?;
             self.subquery_cache.borrow_mut().insert(key, result.clone());
             return Ok(result);
         }
-        run_correlated_subquery(self.engine, stmt, outer_row, params, self.ctes)
+        self.execute_subquery(stmt, outer_row, params)
             .map(|result| (result.columns, result.rows))
             .map_err(|e| format!("subquery failed: {e}"))
     }
@@ -654,11 +763,27 @@ pub(crate) fn run_correlated_subquery(
     ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
     if let Some(row) = outer_row {
-        execute_lateral_subquery(engine, stmt, row, params, ctes)
+        let plan = QueryPlan::lower_with(stmt.clone(), &|name: &str| {
+            engine.has_registered_aggregate_function(name)
+        });
+        execute_lateral_query_plan(engine, &plan, row, params, ctes)
     } else {
         let mut scoped_ctes = ctes.clone();
-        execute_select(engine, stmt, params, &mut scoped_ctes)
+        execute_select_ast_with_ctes(engine, stmt, params, &mut scoped_ctes)
     }
+}
+
+fn execute_lateral_query_plan(
+    engine: &Engine,
+    plan: &QueryPlan,
+    outer_row: &ResultRow,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    let physical = plan.physical_select().ok_or_else(|| {
+        SQLError::Internal("correlated subquery is not a SELECT query plan".into())
+    })?;
+    execute_lateral_subquery(engine, &physical, outer_row, params, ctes)
 }
 
 fn select_references_outer(stmt: &SelectStmt) -> bool {
@@ -1034,7 +1159,7 @@ fn prepare_single_exists_membership(
     for row in &inner_rows {
         if let Some(local_filter) = local_filter.as_ref() {
             let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-            if !eval(local_filter, &ctx).is_ok_and(|value| uqa_sql::expr::truthy(&value)) {
+            if !uqa_sql::expr::truthy(&eval(local_filter, &ctx)?) {
                 continue;
             }
         }
@@ -1167,7 +1292,7 @@ fn apply_exists_membership_filter(
     for row in rows {
         let ctx = EvalContext::new(Some(&row), params).with_engine(engine);
         if let Some(residual) = plan.residual.as_ref() {
-            if !eval(residual, &ctx).is_ok_and(|value| uqa_sql::expr::truthy(&value)) {
+            if !uqa_sql::expr::truthy(&eval(residual, &ctx)?) {
                 continue;
             }
         }
@@ -1790,48 +1915,48 @@ fn frame_bound_references_outer(
     }
 }
 
-fn run_query_block(
-    engine: &Engine,
-    stmt: &SelectStmt,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<SQLResult, SQLError> {
-    run_query_block_with_prepared_exists(engine, stmt, params, ctes, None)
-}
-
 fn run_query_block_with_prepared_exists(
     engine: &Engine,
+    block: &QueryBlockPlan,
     stmt: &SelectStmt,
     params: &[SQLParam],
     ctes: &mut CteScope,
     prepared_exists_filter: Option<&ExistsMembershipPlan>,
 ) -> Result<SQLResult, SQLError> {
     let Some(from) = stmt.from.as_ref() else {
-        return run_select_without_from(engine, stmt, params);
+        return run_select_without_from(engine, stmt, params, ctes);
     };
 
-    // `execute_select` is used for set-op branches, CTEs, and
-    // derived-table bodies. Those query blocks still need the same
-    // search-aware single-table path as top-level `run_select`;
+    // Set-op branches, CTEs, and derived-table bodies still need the same
+    // search-aware single-table physical access path as top-level queries;
     // otherwise registry-backed predicates such as
     // `fuse_log_odds(bayesian_match(...), knn_match(...))` fall
     // through to scalar expression evaluation.
     if prepared_exists_filter.is_none() {
         if let FromClause::Table { name, alias } = from {
             if alias.is_none() && engine.foreign_table(name).is_some() {
-                return run_single_foreign_select(engine, name, stmt, params);
+                return run_single_foreign_select(engine, name, block, stmt, params);
             }
             let is_virtual = name.contains('.')
                 || (engine.table(name).is_none() && engine.foreign_table(name).is_none());
             let has_subquery_filter = stmt.r#where.as_ref().is_some_and(expr_contains_subquery);
+            let has_subquery_projection = stmt
+                .projections
+                .iter()
+                .any(|projection| expr_contains_subquery(&projection.expr));
             if alias.is_none()
-                && !has_window(&stmt.projections)
+                && !matches!(&block.compute, ComputePlan::Window { .. })
                 && !is_virtual
                 && !has_subquery_filter
+                && !has_subquery_projection
             {
-                return run_single_table_select(engine, name, stmt, params);
+                return run_single_table_select(engine, name, block, stmt, params);
             }
         }
+    }
+
+    if let Some(filter) = stmt.r#where.as_ref() {
+        super::validate_joined_expr_text_match_fields(engine, from, filter)?;
     }
 
     let column_prune = column_prune_for_stmt(stmt, from);
@@ -1945,7 +2070,7 @@ fn run_query_block_with_prepared_exists(
             for row in joined {
                 let ctx =
                     uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(&scoped_hook);
-                if uqa_sql::expr::eval(&filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
+                if uqa_sql::expr::truthy(&uqa_sql::expr::eval(&filter, &ctx)?) {
                     out.push(row);
                 }
             }
@@ -1955,17 +2080,14 @@ fn run_query_block_with_prepared_exists(
         joined
     };
 
-    if has_aggregate(engine, &stmt.projections)
-        || !stmt.group_by.is_empty()
-        || !stmt.grouping_sets.is_empty()
-    {
+    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    if has_window(&stmt.projections) {
+    if matches!(&block.compute, ComputePlan::Window { .. }) {
         let columns = projection_columns(&stmt.projections);
         let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
         let mut rows: Vec<ResultRow> = windowed
@@ -3103,7 +3225,7 @@ pub(super) fn materialize_ctes(
         let rows = if cte.recursive {
             materialize_recursive_cte(engine, cte, params, ctes, cte_filters.get(&cte.name))?
         } else {
-            let result = execute_select(engine, &cte.query, params, ctes)?;
+            let result = execute_select_ast_with_ctes(engine, &cte.query, params, ctes)?;
             apply_cte_column_aliases(result.rows, &result.columns, &cte.columns)
         };
         ctes.insert_materialized(cte.name.clone(), rows);
@@ -3196,7 +3318,7 @@ pub(super) fn materialize_cte_list(
         let rows = if cte.recursive {
             materialize_recursive_cte(engine, cte, params, ctes, None)?
         } else {
-            let result = execute_select(engine, &cte.query, params, ctes)?;
+            let result = execute_select_ast_with_ctes(engine, &cte.query, params, ctes)?;
             apply_cte_column_aliases(result.rows, &result.columns, &cte.columns)
         };
         ctes.insert_materialized(cte.name.clone(), rows);
@@ -3590,7 +3712,10 @@ fn materialize_recursive_cte(
             anchor_stmt = filtered;
         }
     }
-    let anchor_rows = run_query_block(engine, &anchor_stmt, params, ctes)?.rows;
+    let anchor_plan = QueryPlan::lower_with(anchor_stmt, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    let anchor_rows = execute_query_plan_with_ctes(engine, &anchor_plan, params, ctes)?.rows;
     let anchor_rows =
         apply_cte_column_aliases(anchor_rows, &source_anchor_columns, &anchor_columns);
 
@@ -3617,6 +3742,14 @@ fn materialize_recursive_cte(
         .map(|filter| prepare_exists_membership_filter(engine, filter, params, ctes))
         .transpose()?
         .flatten();
+    let step_plan = QueryPlan::lower_with(step_stmt, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    let RelationalPlan::QueryBlock(step_block) = &step_plan.root else {
+        return Err(SQLError::Internal(
+            "recursive CTE step did not lower to a query block".into(),
+        ));
+    };
 
     const MAX_ITER: usize = 1024;
     if set_op.all {
@@ -3626,9 +3759,9 @@ fn materialize_recursive_cte(
                 break;
             }
             ctes.insert_materialized(cte.name.clone(), working);
-            let new_rows = run_query_block_with_prepared_exists(
+            let new_rows = execute_query_block_plan(
                 engine,
-                &step_stmt,
+                step_block,
                 params,
                 ctes,
                 step_exists_filter.as_ref(),
@@ -3670,9 +3803,9 @@ fn materialize_recursive_cte(
         // column shape so the recursive step's FROM ... <cte> ... sees
         // the same keys it saw on the prior pass.
         ctes.insert_materialized(cte.name.clone(), working);
-        let new_rows = run_query_block_with_prepared_exists(
+        let new_rows = execute_query_block_plan(
             engine,
-            &step_stmt,
+            step_block,
             params,
             ctes,
             step_exists_filter.as_ref(),
@@ -3741,6 +3874,7 @@ fn rename_columns(row: &ResultRow, src: &[String], dst: &[String]) -> ResultRow 
 fn run_single_table_select(
     engine: &Engine,
     table: &str,
+    block: &QueryBlockPlan,
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
@@ -3793,9 +3927,9 @@ fn run_single_table_select(
     // an `OperatorTree`, run `QueryOptimizer` (10 algebraic / graph-
     // aware / fusion-reordering passes - compatibility), then execute
     // through `PlanExecutor` against an `EngineDriver`. The bridge
-    // returns `None` for shapes the operator IR can't represent
-    // (arithmetic across columns, sub-queries, window calls, ...) and
-    // we fall back to the legacy direct dispatch in that case.
+    // returns `None` for shapes that are not posting-list access paths
+    // (arithmetic across columns, subqueries, window calls, ...); those
+    // remain scalar predicates in this relational filter node.
     let optimised = if has_jsonpath_fts_filter {
         None
     } else if let (Some(top_k), Some(Expr::Func { name, args, .. })) =
@@ -3831,10 +3965,7 @@ fn run_single_table_select(
         }
     };
 
-    if has_aggregate(engine, &stmt.projections)
-        || !stmt.group_by.is_empty()
-        || !stmt.grouping_sets.is_empty()
-    {
+    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
         let columns = projection_columns(&stmt.projections);
         let rows = build_aggregate_rows(engine, table, &scored, stmt, params)?;
         let rows = apply_row_order_limit(rows, stmt, engine, params)?;
@@ -3902,6 +4033,7 @@ fn run_single_table_select(
 fn run_single_foreign_select(
     engine: &Engine,
     table: &str,
+    block: &QueryBlockPlan,
     stmt: &SelectStmt,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
@@ -3914,7 +4046,7 @@ fn run_single_foreign_select(
         let mut out = Vec::with_capacity(scanned.len());
         for row in scanned {
             let ctx = uqa_sql::expr::EvalContext::new(Some(&row), params).with_engine(engine);
-            if uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v)) {
+            if uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter, &ctx)?) {
                 out.push(row);
             }
         }
@@ -3923,17 +4055,14 @@ fn run_single_foreign_select(
         scanned
     };
 
-    if has_aggregate(engine, &stmt.projections)
-        || !stmt.group_by.is_empty()
-        || !stmt.grouping_sets.is_empty()
-    {
+    if matches!(&block.compute, ComputePlan::Aggregate { .. }) {
         let columns = projection_columns(&stmt.projections);
         let rows = aggregate_join_rows(engine, stmt, &filtered, params)?;
         let rows = apply_row_order_limit(rows, stmt, engine, params)?;
         return Ok(SQLResult::from_rows(columns, rows));
     }
 
-    if has_window(&stmt.projections) {
+    if matches!(&block.compute, ComputePlan::Window { .. }) {
         let columns = projection_columns(&stmt.projections);
         let windowed = compute_window_columns(engine, &stmt.projections, filtered, params)?;
         let mut rows: Vec<ResultRow> = windowed
@@ -4485,103 +4614,6 @@ fn score_order_top_k(
     let offset = resolve_limit_offset(stmt.offset.as_ref(), engine, params, "OFFSET")?.unwrap_or(0);
     let top_k = usize::try_from(limit.saturating_add(offset)).unwrap_or(usize::MAX);
     Ok(Some(top_k))
-}
-
-/// Multi-table SELECT path. Each input table contributes a row set
-/// keyed by `<alias>.<column>` (the alias falls back to the bare table
-/// name when no `AS` is given). The same key shape feeds the WHERE
-/// expression evaluator, the GROUP BY accumulators, and the projection
-/// resolver.
-fn run_joined_select(
-    engine: &Engine,
-    from: &FromClause,
-    stmt: &SelectStmt,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    if let Some(filter) = stmt.r#where.as_ref() {
-        super::validate_joined_expr_text_match_fields(engine, from, filter)?;
-    }
-    let mut ctes = CteScope::new();
-    let column_prune = column_prune_for_stmt(stmt, from);
-    let qualifier_filters = qualifier_filters_for_stmt(stmt, from);
-    let mut joined = match (column_prune.as_ref(), qualifier_filters.as_ref()) {
-        (Some(prune), Some(filters)) => build_join_rows_with_ctes_pruned_filtered_by_qualifier(
-            engine, from, params, &mut ctes, prune, filters,
-        )?,
-        (Some(prune), None) => {
-            build_join_rows_with_ctes_pruned(engine, from, params, &mut ctes, prune)?
-        }
-        (None, Some(filters)) => build_join_rows_with_ctes_filtered_by_qualifier(
-            engine, from, params, &mut ctes, filters,
-        )?,
-        (None, None) => build_join_rows_with_ctes(engine, from, params, &mut ctes)?,
-    };
-
-    let final_filter =
-        final_filter_after_qualifier_pushdown(stmt, from, qualifier_filters.as_ref());
-    if let Some(filter) = final_filter.as_ref() {
-        if joined.is_empty() {
-            // No row means no row-level predicate evaluation.
-        } else if let Some(exists_filter) =
-            prepare_exists_membership_filter(engine, filter, params, &mut ctes)?
-        {
-            joined = apply_exists_membership_filter(engine, joined, &exists_filter, params)?;
-        } else if expr_contains_subquery(filter) {
-            let filter = precompute_uncorrelated_subqueries(engine, filter, params, &ctes)?;
-            let scoped_hook = ScopedEngineHook {
-                engine,
-                ctes: &ctes,
-                subquery_cache: RefCell::new(BTreeMap::new()),
-            };
-            joined.retain(|row| {
-                let ctx =
-                    uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(&scoped_hook);
-                uqa_sql::expr::eval(&filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
-            });
-        } else {
-            joined.retain(|row| {
-                let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
-                uqa_sql::expr::eval(filter, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v))
-            });
-        }
-    }
-
-    if has_aggregate(engine, &stmt.projections)
-        || !stmt.group_by.is_empty()
-        || !stmt.grouping_sets.is_empty()
-    {
-        let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(engine, stmt, &joined, params)?;
-        let rows = apply_row_order_limit(rows, stmt, engine, params)?;
-        return Ok(SQLResult::from_rows(columns, rows));
-    }
-
-    if has_window(&stmt.projections) {
-        let columns = projection_columns(&stmt.projections);
-        let windowed = compute_window_columns(engine, &stmt.projections, joined, params)?;
-        let mut rows: Vec<ResultRow> = windowed
-            .rows
-            .iter()
-            .map(|src| {
-                project_join_row_with_engine(Some(engine), src, &windowed.projections, params)
-            })
-            .collect::<Result<_, _>>()?;
-        rows = apply_row_order_limit(rows, stmt, engine, params)?;
-        return Ok(SQLResult::from_rows(columns, rows));
-    }
-
-    let mut rows: Vec<ResultRow> = joined
-        .iter()
-        .map(|src| project_join_row_with_engine(Some(engine), src, &stmt.projections, params))
-        .collect::<Result<_, _>>()?;
-    rows = apply_row_order_limit(rows, stmt, engine, params)?;
-    let columns = expand_from_star_columns(
-        engine,
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        from,
-    );
-    Ok(SQLResult::from_rows(columns, rows))
 }
 
 pub(super) fn apply_row_order_limit(

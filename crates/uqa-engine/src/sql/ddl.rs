@@ -7,7 +7,7 @@
 //! SQL DDL execution and column type conversion helpers.
 
 use super::{
-    eval, index_vectors_for_type, run_select, value_to_tensor, value_to_vector, AlterTableAction,
+    eval, index_vectors_for_type, value_to_tensor, value_to_vector, AlterTableAction,
     AlterTableStmt, BTreeMap, ColumnType, CreateIndex, CreateTable, DecimalValue, Document,
     DropKind, DropStmt, Engine, EvalContext, IVFIndexParams, RowUpdateVectors, SQLColumnDef,
     SQLError, SQLParam, SQLResult, TemporalValue, Value,
@@ -41,7 +41,7 @@ pub(super) fn run_create_table_as(
     engine: &Engine,
     name: String,
     if_not_exists: bool,
-    body: uqa_sql::ast::SelectStmt,
+    query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     if engine.table(&name).is_some() {
@@ -52,7 +52,7 @@ pub(super) fn run_create_table_as(
             "Table `{name}` already exists"
         )));
     }
-    let result = run_select(engine, body, params)?;
+    let result = super::select::execute_query_plan(engine, query, params)?;
     let cols: Vec<uqa_sql::ast::ColumnDef> = result
         .columns
         .iter()

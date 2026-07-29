@@ -5,8 +5,8 @@
 //
 
 //! Every lowering of `multi_field_match` must produce the same scores:
-//! the operator-tree pipeline (bare and mixed-predicate shapes) and the
-//! legacy dispatch fallback all delegate to one implementation, so a
+//! the operator-tree access path (bare and mixed-predicate shapes) and the
+//! enclosing relational filter all delegate to one implementation, so a
 //! pass-all ordinary predicate can never change how a match ranks.
 //! Sparse absence must remain consistent across every execution path so
 //! mixed predicates cannot change field-fusion ranking.
@@ -102,9 +102,10 @@ fn every_lowering_of_multi_field_match_scores_identically() {
         )
         .unwrap();
 
-    // Legacy dispatch fallback: column arithmetic cannot lower to the
-    // operator tree, so the whole WHERE runs through the row evaluator.
-    let legacy = eng
+    // Column arithmetic is not a posting-list access path, so the enclosing
+    // relational filter evaluates it while the match child retains its
+    // OperatorTree access path.
+    let relational = eng
         .sql(
             "SELECT id, _score FROM pages \
               WHERE (id + 0) >= 0 \
@@ -122,8 +123,8 @@ fn every_lowering_of_multi_field_match_scores_identically() {
     );
     assert_eq!(
         bare,
-        scored_ids(&legacy),
-        "the operator-tree pipeline and the legacy dispatch must score identically",
+        scored_ids(&relational),
+        "the operator-tree access path and relational filter must score identically",
     );
 }
 

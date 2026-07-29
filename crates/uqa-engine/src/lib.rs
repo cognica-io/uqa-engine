@@ -207,10 +207,11 @@ pub struct Engine {
     /// keyed by signal name. Round-trips through the catalog when the
     /// engine is `SQLite`-backed.
     scoring_params: RwLock<BTreeMap<String, String>>,
-    /// Registered views. Each entry holds the underlying
-    /// `SelectStmt`; the SQL surface re-runs the body on every
-    /// reference (no row caching).
+    /// Persisted view definitions and their compiled relational plans. The
+    /// SQL text remains the catalog representation; execution reads the
+    /// corresponding `QueryPlan` so a view cannot bypass the unified plan.
     views: RwLock<BTreeMap<String, uqa_sql::ast::SelectStmt>>,
+    view_plans: RwLock<BTreeMap<String, uqa_planner::QueryPlan>>,
     /// Registered secondary indexes from `CREATE INDEX`.
     catalog_indexes: RwLock<BTreeMap<String, CatalogIndexRow>>,
     /// Registered schema names. Engine-level schemas are advisory
@@ -241,9 +242,10 @@ pub struct Engine {
     /// Named sequences. Mirrors `_engine._sequences` in the UQA implementation
     /// reference. Each entry tracks `(start, increment, current)`.
     sequences: RwLock<BTreeMap<String, SequenceState>>,
-    /// Prepared statements. Mirrors `_engine._prepared`.
-    prepared: RwLock<BTreeMap<String, uqa_sql::ast::Statement>>,
-    /// Parsed and planner-optimized statements keyed by SQL text.
+    /// Prepared unified execution plans. Mirrors `_engine._prepared` while
+    /// ensuring EXECUTE cannot re-enter an AST-only dispatch path.
+    prepared: RwLock<BTreeMap<String, PreparedStatementPlan>>,
+    /// Fully lowered and planner-optimized plans keyed by SQL text.
     sql_statement_cache: RwLock<SQLStatementCache>,
     /// Named analyzers from `CREATE ANALYZER`. Stores the config
     /// JSON string for `list_analyzers` introspection. Mirrors
@@ -282,16 +284,22 @@ pub struct Engine {
 
 #[derive(Default)]
 struct SQLStatementCache {
-    entries: BTreeMap<String, Vec<uqa_sql::ast::Statement>>,
+    entries: BTreeMap<String, Vec<uqa_planner::UnifiedPlan>>,
     insertion_order: VecDeque<String>,
 }
 
+#[derive(Clone)]
+struct PreparedStatementPlan {
+    definition: uqa_sql::ast::Statement,
+    plan: uqa_planner::UnifiedPlan,
+}
+
 impl SQLStatementCache {
-    fn get(&self, sql: &str) -> Option<Vec<uqa_sql::ast::Statement>> {
+    fn get(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
         self.entries.get(sql).cloned()
     }
 
-    fn insert(&mut self, sql: String, statements: Vec<uqa_sql::ast::Statement>) {
+    fn insert(&mut self, sql: String, statements: Vec<uqa_planner::UnifiedPlan>) {
         if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
             entry.insert(statements);
             return;
@@ -490,6 +498,7 @@ impl Engine {
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
+            view_plans: RwLock::new(BTreeMap::new()),
             catalog_indexes: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),
@@ -514,15 +523,11 @@ impl Engine {
         }
     }
 
-    pub(crate) fn cached_sql_statements(&self, sql: &str) -> Option<Vec<uqa_sql::ast::Statement>> {
+    pub(crate) fn cached_sql_plans(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
         self.sql_statement_cache.read().get(sql)
     }
 
-    pub(crate) fn cache_sql_statements(
-        &self,
-        sql: String,
-        statements: Vec<uqa_sql::ast::Statement>,
-    ) {
+    pub(crate) fn cache_sql_plans(&self, sql: String, statements: Vec<uqa_planner::UnifiedPlan>) {
         self.sql_statement_cache.write().insert(sql, statements);
     }
 

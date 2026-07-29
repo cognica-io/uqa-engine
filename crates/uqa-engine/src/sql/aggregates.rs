@@ -84,8 +84,7 @@ pub(super) fn aggregate_join_rows(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep =
-                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
+                let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, &ctx)?);
                 if !keep {
                     continue;
                 }
@@ -163,8 +162,7 @@ pub(super) fn aggregate_join_rows(
             }
             let ctx =
                 uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
-            let kept =
-                uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
+            let kept = uqa_sql::expr::truthy(&uqa_sql::expr::eval(&resolved, &ctx)?);
             if !kept {
                 continue;
             }
@@ -307,8 +305,7 @@ fn aggregate_join_rows_relaxed(
                 continue;
             };
             if let Some(filter_expr) = filter.as_deref() {
-                let keep =
-                    uqa_sql::expr::eval(filter_expr, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
+                let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, &ctx)?);
                 if !keep {
                     continue;
                 }
@@ -1454,8 +1451,7 @@ fn observe_projected_aggregate_targets(
             continue;
         };
         if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::eval(filter_expr, ctx)
-                .is_ok_and(|value| uqa_sql::expr::truthy(&value));
+            let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, ctx)?);
             if !keep {
                 continue;
             }
@@ -1513,8 +1509,7 @@ fn observe_aggregate_targets(
             continue;
         };
         if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::eval(filter_expr, ctx)
-                .is_ok_and(|value| uqa_sql::expr::truthy(&value));
+            let keep = uqa_sql::expr::truthy(&uqa_sql::expr::eval(filter_expr, ctx)?);
             if !keep {
                 continue;
             }
@@ -2713,8 +2708,7 @@ pub(super) fn build_aggregate_rows(
             }
             let ctx =
                 uqa_sql::expr::EvalContext::new(Some(&having_row), params).with_engine(engine);
-            let kept =
-                uqa_sql::expr::eval(&resolved, &ctx).is_ok_and(|v| uqa_sql::expr::truthy(&v));
+            let kept = uqa_sql::expr::truthy(&uqa_sql::expr::eval(&resolved, &ctx)?);
             if !kept {
                 continue;
             }

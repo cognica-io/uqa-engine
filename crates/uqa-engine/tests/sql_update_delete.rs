@@ -82,3 +82,58 @@ fn delete_without_where_truncates_table() {
     let r = eng.sql("SELECT count(*) AS n FROM items", &[]).unwrap();
     assert_eq!(r.rows[0].get("n"), Some(&Value::Int(0)));
 }
+
+#[test]
+fn delete_filter_errors_propagate_and_roll_back() {
+    let eng = corpus();
+    let error = eng
+        .sql(
+            "WITH marker AS (SELECT 1) \
+             DELETE FROM items WHERE qty / (qty - qty) > 0",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("division by zero"));
+
+    let result = eng.sql("SELECT count(*) AS n FROM items", &[]).unwrap();
+    assert_eq!(result.rows[0].get("n"), Some(&Value::Int(4)));
+}
+
+#[test]
+fn dml_scalar_subqueries_execute_query_plan_children() {
+    let eng = corpus();
+
+    let updated = eng
+        .sql(
+            "UPDATE items SET qty = (SELECT max(qty) FROM items) WHERE id = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.affected_rows, 1);
+
+    let inserted = eng
+        .sql(
+            "INSERT INTO items (id, label, qty) \
+             VALUES (5, 'elderberry', (SELECT max(qty) FROM items))",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(inserted.affected_rows, 1);
+
+    let deleted = eng
+        .sql(
+            "DELETE FROM items WHERE qty < (SELECT max(qty) FROM items)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(deleted.affected_rows, 2);
+
+    let result = eng
+        .sql("SELECT id, qty FROM items ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(result.rows.len(), 3);
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| row.get("qty") == Some(&Value::Int(7))));
+}

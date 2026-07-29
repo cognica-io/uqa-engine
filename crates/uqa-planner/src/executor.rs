@@ -6,10 +6,6 @@
 
 //! Planner-to-physical bridge + plan executor.
 //!
-//! [`PlannedQuery`] wraps the chosen [`JoinPlan`] alongside the
-//! optimised [`SelectStmt`] so the engine can hand the bundle to the
-//! execution layer.
-//!
 //! [`PlanExecutor`] is the planner-side entry point for executing an
 //! [`OperatorTree`] through a runtime driver. It records root timing
 //! statistics and produces an `EXPLAIN`-style tree string.
@@ -18,29 +14,6 @@ use std::time::Instant;
 
 use uqa_core::{GeneralizedPostingList, PostingList};
 use uqa_operators::{DeepFusionLayer, OperatorTree};
-use uqa_sql::ast::SelectStmt;
-
-use crate::join_enumerator::JoinPlan;
-
-#[derive(Debug, Clone)]
-pub struct PlannedQuery {
-    pub stmt: SelectStmt,
-    pub join_plan: Option<JoinPlan>,
-}
-
-impl PlannedQuery {
-    pub fn new(stmt: SelectStmt) -> Self {
-        Self {
-            stmt,
-            join_plan: None,
-        }
-    }
-
-    pub fn with_join_plan(mut self, plan: JoinPlan) -> Self {
-        self.join_plan = Some(plan);
-        self
-    }
-}
 
 /// Statistics from plan execution. Mirrors
 /// `uqa.planner.executor.ExecutionStats`.

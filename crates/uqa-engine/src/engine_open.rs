@@ -131,6 +131,7 @@ impl Engine {
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
+            view_plans: RwLock::new(BTreeMap::new()),
             catalog_indexes: RwLock::new(BTreeMap::new()),
             schemas: RwLock::new(std::collections::BTreeSet::new()),
             search_path: RwLock::new(vec!["public".to_string()]),

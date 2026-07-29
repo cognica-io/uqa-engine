@@ -22,9 +22,9 @@
 //!    target table into an `OperatorTree`. Boolean connectives map onto
 //!    `Intersect` / `Union` / `Complement`, scoring / KNN / fusion
 //!    function calls map onto the matching `OperatorTree` variants, and
-//!    column comparison predicates lower into `Filter` nodes. SQL
-//!    expressions outside that retrieval subset keep the direct SQL
-//!    execution path.
+//!    column comparison predicates lower into `Filter` nodes. Expressions
+//!    outside that retrieval subset stay in the enclosing relational
+//!    `UnifiedPlan` filter node.
 //! 2. [`EngineDriver`] implements [`OperatorTreeDriver`] with exhaustive
 //!    physical dispatch for every concrete IR variant. Ordinary and graph
 //!    nodes use `PostingList` (with graph Phi payloads); joins retain their
@@ -33,12 +33,10 @@
 //! The integration target is a "lower -> optimise -> execute" pipeline:
 //! [`run_optimised`] does the three-step sequence and returns a
 //! [`Vec<ScoredEntry>`] that the caller can project, sort, and limit
-//! through the existing row pipeline. Lowering is best-effort - when a
-//! WHERE expression doesn't fit the operator tree (e.g. arithmetic
-//! across columns), the function returns `None` and the caller falls
-//! back to the legacy `execute_function` / `filter_table_rows` path.
-//! SQL forms outside the IR remain on the relational row executor. That
-//! boundary is distinct from physical dispatch: once a concrete tree exists,
+//! through the relational plan's projection, ordering, and limit nodes.
+//! Lowering is selective: when a predicate is not a posting-list access path
+//! (for example arithmetic across columns), `None` tells the same relational
+//! filter node to evaluate its scalar expression. Once a concrete tree exists,
 //! the optimizer and driver execute it or return a typed error.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -107,7 +105,7 @@ pub fn lower_where(expr: &Expr, params: &[SQLParam]) -> Option<OperatorTree> {
         // NULL for any row (search functions, IS NULL tests). Column
         // comparisons under NOT fall through to the wildcard `None`
         // and keep three-valued semantics through the row-evaluator
-        // fallback: `NOT (col = 5)` must not match rows whose `col`
+        // relational evaluation: `NOT (col = 5)` must not match rows whose `col`
         // is NULL.
         Expr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => Some(
             OperatorTree::Complement(Box::new(lower_where(inner, params)?)),
@@ -249,7 +247,7 @@ fn lower_function(name: &str, args: &[Expr], params: &[SQLParam]) -> Option<Oper
 }
 
 /// Lower one row-emitting SQL function call into the shared operator
-/// IR. The row-function dispatcher uses this for legacy/non-WHERE call
+/// IR. The row-function physical node uses this for non-WHERE call
 /// sites so compositional retrieval functions do not retain duplicate
 /// physical implementations.
 pub(crate) fn lower_sql_function(
@@ -3255,10 +3253,9 @@ pub fn optimised_tree_for(
 }
 
 /// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
-/// WHERE expression maps cleanly onto the operator tree; `None`
-/// signals the caller to fall back to its direct-dispatch path. Any
-/// engine-side failure returned by the helpers it re-uses bubbles up
-/// as `Err`.
+/// WHERE expression maps cleanly onto the operator tree; `None` keeps the
+/// predicate in the enclosing relational filter node. Any engine-side failure
+/// returned by the helpers it re-uses bubbles up as `Err`.
 pub fn run_optimised(
     engine: &Engine,
     table: &str,

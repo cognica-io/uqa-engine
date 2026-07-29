@@ -61,7 +61,7 @@ impl PhysicalOperator for Filter {
             let mut kept = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
                 let ctx = EvalContext::new(Some(&row), &self.params);
-                if eval(&self.predicate, &ctx).is_ok_and(|v| truthy(&v)) {
+                if truthy(&eval(&self.predicate, &ctx)?) {
                     kept.push(row);
                 }
             }
@@ -1080,6 +1080,17 @@ mod tests {
         let mut filt = Filter::new(scan, predicate, vec![]);
         let (_cols, rows) = run_to_rows(&mut filt).unwrap();
         assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn filter_propagates_expression_errors() {
+        let scan = boxed_scan(vec!["x".into()], vec![row([("x", Value::Int(1))])]);
+        let zero = bin(BinaryOp::Subtract, col("x"), col("x"));
+        let division = bin(BinaryOp::Divide, col("x"), zero);
+        let predicate = bin(BinaryOp::Greater, division, Expr::Literal(Value::Int(0)));
+        let mut filter = Filter::new(scan, predicate, vec![]);
+        let error = run_to_rows(&mut filter).unwrap_err();
+        assert!(error.to_string().contains("division by zero"));
     }
 
     #[test]

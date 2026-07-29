@@ -772,3 +772,49 @@ fn distinct_on_applies_limit_after_dedup() {
     assert_eq!(str_col(&r[1], "category"), Some("tools"));
     assert_eq!(str_col(&r[1], "name"), Some("Toolbox"));
 }
+
+#[test]
+fn relational_filter_errors_are_not_empty_results() {
+    let eng = engine();
+    let error = eng
+        .sql(
+            "SELECT id FROM products WHERE quantity / (quantity - quantity) > 0",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("division by zero"));
+}
+
+#[test]
+fn hash_join_key_errors_propagate() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE lhs (id INTEGER)", &[]).unwrap();
+    eng.sql("CREATE TABLE rhs (id INTEGER)", &[]).unwrap();
+    eng.sql("INSERT INTO lhs (id) VALUES (1), (2)", &[])
+        .unwrap();
+    eng.sql("INSERT INTO rhs (id) VALUES (1), (2)", &[])
+        .unwrap();
+
+    // The first row selects the hash-join access path; the second row then
+    // fails while computing that same physical key.
+    let error = eng
+        .sql(
+            "SELECT lhs.id FROM lhs JOIN rhs ON lhs.id / (2 - lhs.id) = rhs.id",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("division by zero"));
+}
+
+#[test]
+fn aggregate_filter_errors_propagate() {
+    let eng = engine();
+    let error = eng
+        .sql(
+            "SELECT SUM(quantity) FILTER (WHERE quantity / (quantity - quantity) > 0) \
+             FROM products",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("division by zero"));
+}

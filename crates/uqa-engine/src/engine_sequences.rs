@@ -154,12 +154,38 @@ impl Engine {
     // Prepared statements. Mirrors `_engine._prepared`.
     // -----------------------------------------------------------------
 
-    pub fn register_prepared(&self, name: String, stmt: uqa_sql::ast::Statement) {
-        self.prepared.write().insert(name, stmt);
+    pub fn register_prepared(&self, name: String, definition: uqa_sql::ast::Statement) {
+        let plan = uqa_planner::UnifiedPlan::lower_with(definition.clone(), &|aggregate: &str| {
+            self.has_registered_aggregate_function(aggregate)
+        });
+        self.register_prepared_plan(name, definition, plan);
     }
 
-    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_sql::ast::Statement> {
-        self.prepared.read().get(name).cloned()
+    pub(crate) fn register_prepared_plan(
+        &self,
+        name: String,
+        definition: uqa_sql::ast::Statement,
+        plan: uqa_planner::UnifiedPlan,
+    ) {
+        self.prepared
+            .write()
+            .insert(name, super::PreparedStatementPlan { definition, plan });
+    }
+
+    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
+        self.prepared
+            .read()
+            .get(name)
+            .map(|entry| entry.plan.clone())
+    }
+
+    pub(crate) fn rebind_prepared_plans(&self) {
+        for prepared in self.prepared.write().values_mut() {
+            prepared.plan = uqa_planner::UnifiedPlan::lower_with(
+                prepared.definition.clone(),
+                &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
+            );
+        }
     }
 
     pub fn deallocate_prepared(&self, name: Option<&str>) {

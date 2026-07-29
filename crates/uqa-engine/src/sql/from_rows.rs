@@ -17,14 +17,16 @@ use uqa_storage::document_store::Document;
 
 use crate::{Engine, SQLTableFunctionResult};
 
-use super::select::{select_contains_volatile_function, CteScope};
+use super::select::{
+    execute_query_plan_with_ctes, execute_select_ast, execute_select_ast_with_ctes,
+    select_contains_volatile_function, CteScope, ScopedEngineHook,
+};
 use super::{
-    age_cypher, aggregate_join_rows, apply_row_order_limit, build_info_schema_rows, execute_select,
+    age_cypher, aggregate_join_rows, apply_row_order_limit, build_info_schema_rows,
     expect_column_name, expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
     graph_pagerank_entries, has_aggregate, json_table_arg, json_table_value_to_text,
     materialize_ctes, projected_value_from_row, projection_columns, run_age_create_graph,
-    run_age_drop_graph, run_graph_create, run_graph_drop, run_select, MERGE_ACTION_COLUMN,
-    SCORE_COLUMN,
+    run_age_drop_graph, run_graph_create, run_graph_drop, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
@@ -284,7 +286,7 @@ fn run_table_select_for_qualifier_filters(
         distinct: false,
         distinct_on: Vec::new(),
     };
-    let result = run_select(engine, stmt, params)?;
+    let result = execute_select_ast(engine, &stmt, params)?;
     Ok(Some(reprefix_rows_pruned(qual, &result.rows, prune)))
 }
 
@@ -1451,17 +1453,43 @@ fn build_join_rows_with_ctes_inner(
                 }
             }
             if let Some(body) = engine.view(name) {
+                let plan = engine.view_plan(name).ok_or_else(|| {
+                    SQLError::Internal(format!("view `{name}` has no compiled QueryPlan"))
+                })?;
                 let local_cte_names = select_cte_names(&body);
                 let is_volatile = select_contains_volatile_function(&body);
                 let specialized =
                     specialize_select_for_qualifier_filters(engine, &body, filters, &qual);
                 let is_specialized = specialized.is_some();
-                let body = specialized.unwrap_or(body);
-                let result = if is_volatile {
+                let result = if let Some(specialized) = specialized {
+                    if is_volatile {
+                        let mut scoped_ctes = ctes.clone();
+                        execute_select_ast_with_ctes(
+                            engine,
+                            &specialized,
+                            params,
+                            &mut scoped_ctes,
+                        )?
+                    } else {
+                        execute_view_with_parent_cache(
+                            engine,
+                            &specialized,
+                            params,
+                            ctes,
+                            &local_cte_names,
+                        )?
+                    }
+                } else if is_volatile {
                     let mut scoped_ctes = ctes.clone();
-                    execute_select(engine, &body, params, &mut scoped_ctes)?
+                    execute_query_plan_with_ctes(engine, &plan, params, &mut scoped_ctes)?
                 } else {
-                    execute_view_with_parent_cache(engine, &body, params, ctes, &local_cte_names)?
+                    execute_view_plan_with_parent_cache(
+                        engine,
+                        &plan,
+                        params,
+                        ctes,
+                        &local_cte_names,
+                    )?
                 };
                 let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
                 let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
@@ -1571,33 +1599,59 @@ fn build_join_rows_with_ctes_inner(
                 right_filter_ref,
             )?;
             let on_expr = on.as_ref();
+            let scoped_hook = ScopedEngineHook::new(engine, ctes);
+            let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
 
             let mut rows = match kind {
                 JoinKind::Inner | JoinKind::Cross => {
                     if matches!(kind, JoinKind::Inner) {
-                        if let Some(rows) =
-                            try_hash_inner_join(engine, &left_rows, &right_rows, on_expr, params)?
-                        {
+                        if let Some(rows) = try_hash_inner_join(
+                            eval_hook,
+                            &left_rows,
+                            &right_rows,
+                            on_expr,
+                            params,
+                        )? {
                             rows
                         } else {
-                            cross_filter(engine, &left_rows, &right_rows, on_expr, params)?
+                            cross_filter(eval_hook, &left_rows, &right_rows, on_expr, params)?
                         }
                     } else {
-                        cross_filter(engine, &left_rows, &right_rows, on_expr, params)?
+                        cross_filter(eval_hook, &left_rows, &right_rows, on_expr, params)?
                     }
                 }
                 JoinKind::Left => {
-                    if let Some(rows) =
-                        try_hash_left_join(engine, &left_rows, &right_rows, right, on_expr, params)?
-                    {
+                    if let Some(rows) = try_hash_left_join(
+                        engine,
+                        eval_hook,
+                        &left_rows,
+                        &right_rows,
+                        right,
+                        on_expr,
+                        params,
+                    )? {
                         rows
                     } else {
-                        left_outer(&left_rows, &right_rows, right, on_expr, params, engine)?
+                        left_outer(
+                            &left_rows,
+                            &right_rows,
+                            right,
+                            on_expr,
+                            params,
+                            engine,
+                            eval_hook,
+                        )?
                     }
                 }
-                JoinKind::Right => {
-                    left_outer(&right_rows, &left_rows, left, on_expr, params, engine)?
-                }
+                JoinKind::Right => left_outer(
+                    &right_rows,
+                    &left_rows,
+                    left,
+                    on_expr,
+                    params,
+                    engine,
+                    eval_hook,
+                )?,
                 JoinKind::Full => full_outer(
                     &left_rows,
                     &right_rows,
@@ -1606,6 +1660,7 @@ fn build_join_rows_with_ctes_inner(
                     on_expr,
                     params,
                     engine,
+                    eval_hook,
                 )?,
             };
             if let Some(filter) = row_filter.as_deref_mut() {
@@ -1617,34 +1672,47 @@ fn build_join_rows_with_ctes_inner(
             rows,
             alias,
             column_aliases,
-        } => Ok(build_values_rows(
-            engine,
-            rows,
-            alias.as_deref(),
-            column_aliases,
-            params,
-        )?),
+        } => {
+            let hook = ScopedEngineHook::new(engine, ctes);
+            Ok(build_values_rows(
+                rows,
+                alias.as_deref(),
+                column_aliases,
+                params,
+                &hook,
+            )?)
+        }
         FromClause::Function {
             name,
             args,
             alias,
             column_aliases,
             column_types,
-        } => Ok(build_table_function_rows(
-            engine,
-            name,
-            args,
-            alias.as_deref(),
-            column_aliases,
-            column_types,
-            params,
-        )?),
+        } => {
+            let hook = ScopedEngineHook::new(engine, ctes);
+            let context = TableFunctionEvalContext::new(engine, params, &hook);
+            Ok(build_table_function_rows(
+                &context,
+                name,
+                args,
+                alias.as_deref(),
+                column_aliases,
+                column_types,
+            )?)
+        }
         FromClause::Subquery {
             body,
             alias,
             column_aliases,
         } => {
-            let result = run_select(engine, (**body).clone(), params)?;
+            let planned = ctes.planned_subqueries.get(&format!("{body:?}")).cloned();
+            let result = if let Some(plan) = planned {
+                let local_cte_names = plan.ctes.iter().map(|cte| cte.name.clone()).collect();
+                execute_view_plan_with_parent_cache(engine, &plan, params, ctes, &local_cte_names)?
+            } else {
+                let local_cte_names = select_cte_names(body);
+                execute_view_with_parent_cache(engine, body, params, ctes, &local_cte_names)?
+            };
             Ok(materialize_subquery_rows(
                 result,
                 alias.as_deref(),
@@ -1662,7 +1730,20 @@ fn execute_view_with_parent_cache(
     local_cte_names: &BTreeSet<String>,
 ) -> Result<SQLResult, SQLError> {
     let saved = save_and_remove_cte_names(ctes, local_cte_names);
-    let result = execute_select(engine, body, params, ctes);
+    let result = execute_select_ast_with_ctes(engine, body, params, ctes);
+    restore_cte_names(ctes, saved);
+    result
+}
+
+fn execute_view_plan_with_parent_cache(
+    engine: &Engine,
+    plan: &uqa_planner::QueryPlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+    local_cte_names: &BTreeSet<String>,
+) -> Result<SQLResult, SQLError> {
+    let saved = save_and_remove_cte_names(ctes, local_cte_names);
+    let result = execute_query_plan_with_ctes(engine, plan, params, ctes);
     restore_cte_names(ctes, saved);
     result
 }
@@ -1761,11 +1842,11 @@ fn materialize_subquery_rows(
 }
 
 fn build_values_rows(
-    engine: &Engine,
     rows: &[Vec<Expr>],
     alias: Option<&str>,
     column_aliases: &[String],
     params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<Vec<ResultRow>, SQLError> {
     use uqa_sql::expr::{eval, EvalContext};
     if rows.is_empty() {
@@ -1780,7 +1861,7 @@ fn build_values_rows(
                 .unwrap_or_else(|| format!("column{}", i + 1))
         })
         .collect();
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
     let mut out: Vec<ResultRow> = Vec::with_capacity(rows.len());
     for row in rows {
         let mut r = ResultRow::new();
@@ -1823,7 +1904,11 @@ fn build_lateral_join_rows(
                 alias,
                 column_aliases,
             } => {
-                let result = execute_lateral_subquery(engine, body, left_row, params, ctes)?;
+                let planned = ctes.planned_subqueries.get(&format!("{body:?}"));
+                let physical = planned
+                    .and_then(uqa_planner::QueryPlan::physical_select)
+                    .unwrap_or_else(|| (**body).clone());
+                let result = execute_lateral_subquery(engine, &physical, left_row, params, ctes)?;
                 materialize_subquery_rows(result, alias.as_deref(), column_aliases)
             }
             FromClause::Function {
@@ -1832,18 +1917,22 @@ fn build_lateral_join_rows(
                 alias,
                 column_aliases,
                 column_types,
-            } => build_table_function_rows_with_row(
-                engine,
-                name,
-                args,
-                alias.as_deref(),
-                column_aliases,
-                column_types,
-                params,
-                Some(left_row),
-            )?,
+            } => {
+                let hook = ScopedEngineHook::new(engine, ctes);
+                let context = TableFunctionEvalContext::new(engine, params, &hook);
+                build_table_function_rows_with_row(
+                    &context,
+                    name,
+                    args,
+                    alias.as_deref(),
+                    column_aliases,
+                    column_types,
+                    Some(left_row),
+                )?
+            }
             _ => build_join_rows_with_ctes(engine, right, params, ctes)?,
         };
+        let scoped_hook = ScopedEngineHook::new(engine, ctes);
         for r_row in &right_rows {
             let mut joined = ResultRow::new();
             for (k, v) in left_row {
@@ -1855,7 +1944,7 @@ fn build_lateral_join_rows(
             let keep = match (on, kind) {
                 (None, _) | (_, JoinKind::Cross) => true,
                 (Some(filter), _) => {
-                    let ctx = EvalContext::new(Some(&joined), params).with_engine(engine);
+                    let ctx = EvalContext::new(Some(&joined), params).with_engine(&scoped_hook);
                     truthy(&eval(filter, &ctx)?)
                 }
             };
@@ -1943,41 +2032,59 @@ fn merge_lateral_scope_rows(outer_row: &ResultRow, inner_row: &ResultRow) -> Res
     merged
 }
 
+pub(super) struct TableFunctionEvalContext<'a> {
+    engine: &'a Engine,
+    params: &'a [SQLParam],
+    eval_hook: &'a dyn uqa_sql::expr::EngineHook,
+}
+
+impl<'a> TableFunctionEvalContext<'a> {
+    pub(super) fn new(
+        engine: &'a Engine,
+        params: &'a [SQLParam],
+        eval_hook: &'a dyn uqa_sql::expr::EngineHook,
+    ) -> Self {
+        Self {
+            engine,
+            params,
+            eval_hook,
+        }
+    }
+}
+
 #[allow(clippy::similar_names)]
 pub(super) fn build_table_function_rows(
-    engine: &Engine,
+    context: &TableFunctionEvalContext<'_>,
     name: &str,
     args: &[Expr],
     alias: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
-    params: &[SQLParam],
 ) -> Result<Vec<ResultRow>, SQLError> {
     build_table_function_rows_with_row(
-        engine,
+        context,
         name,
         args,
         alias,
         column_aliases,
         column_types,
-        params,
         None,
     )
 }
 
-#[allow(clippy::similar_names, clippy::too_many_arguments)]
+#[allow(clippy::similar_names)]
 fn build_table_function_rows_with_row(
-    engine: &Engine,
+    context: &TableFunctionEvalContext<'_>,
     name: &str,
     args: &[Expr],
     alias: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
-    params: &[SQLParam],
     row: Option<&ResultRow>,
 ) -> Result<Vec<ResultRow>, SQLError> {
     use uqa_sql::expr::{evaluate_call_args, unknown_function_error, EvalContext};
-    let ctx = EvalContext::new(row, params).with_engine(engine);
+    let engine = context.engine;
+    let ctx = EvalContext::new(row, context.params).with_engine(context.eval_hook);
     let lower = name.to_ascii_lowercase();
     let call_args = evaluate_call_args(args, &ctx)?;
     let has_named_args = call_args.iter().any(|(name, _)| name.is_some());
@@ -2456,7 +2563,7 @@ fn registered_table_function_rows(
 /// every other shape; the caller then falls back to the nested-loop
 /// cross filter.
 fn try_hash_inner_join(
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
@@ -2472,7 +2579,7 @@ fn try_hash_inner_join(
     let mut right_keys = Vec::with_capacity(equalities.len());
     for (lhs, rhs) in equalities {
         let Some((left_key, right_key)) =
-            decide_join_sides(engine, left_rows, right_rows, lhs, rhs, params)
+            decide_join_sides(eval_hook, left_rows, right_rows, lhs, rhs, params)
         else {
             return Ok(None);
         };
@@ -2483,29 +2590,30 @@ fn try_hash_inner_join(
     // evaluate the picked join keys against each row and lift the
     // result into a hashable `JoinKey`; null-valued keys are skipped
     // so they do not match anything.
-    use uqa_joins::row_join::hash_inner_join;
+    use uqa_joins::row_join::try_hash_inner_join;
     let out = if left_keys.len() == 1 {
         let left_accessor = JoinKeyAccessor::new(left_keys[0]);
         let right_accessor = JoinKeyAccessor::new(right_keys[0]);
-        hash_inner_join(
+        try_hash_inner_join(
             left_rows,
             right_rows,
-            |row| left_accessor.key(row, engine, params),
-            |row| right_accessor.key(row, engine, params),
-        )
+            |row| left_accessor.key(row, eval_hook, params),
+            |row| right_accessor.key(row, eval_hook, params),
+        )?
     } else {
-        hash_inner_join(
+        try_hash_inner_join(
             left_rows,
             right_rows,
-            |row| composite_join_key(&left_keys, row, engine, params),
-            |row| composite_join_key(&right_keys, row, engine, params),
-        )
+            |row| composite_join_key(&left_keys, row, eval_hook, params),
+            |row| composite_join_key(&right_keys, row, eval_hook, params),
+        )?
     };
     Ok(Some(out))
 }
 
 fn try_hash_left_join(
     engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     right_from: &FromClause,
@@ -2525,7 +2633,7 @@ fn try_hash_left_join(
     let mut right_keys = Vec::with_capacity(equalities.len());
     for (lhs, rhs) in equalities {
         let Some((left_key, right_key)) =
-            decide_join_sides(engine, left_rows, right_rows, lhs, rhs, params)
+            decide_join_sides(eval_hook, left_rows, right_rows, lhs, rhs, params)
         else {
             return Ok(None);
         };
@@ -2536,15 +2644,15 @@ fn try_hash_left_join(
     let mut index: std::collections::HashMap<JoinKey, Vec<&ResultRow>> =
         std::collections::HashMap::with_capacity(right_rows.len());
     for row in right_rows {
-        if let Some(key) = join_key_for_exprs(&right_keys, row, engine, params) {
+        if let Some(key) = join_key_for_exprs(&right_keys, row, eval_hook, params)? {
             index.entry(key).or_default().push(row);
         }
     }
 
     let mut out = Vec::with_capacity(left_rows.len());
     for left in left_rows {
-        let matches =
-            join_key_for_exprs(&left_keys, left, engine, params).and_then(|key| index.get(&key));
+        let key = join_key_for_exprs(&left_keys, left, eval_hook, params)?;
+        let matches = key.as_ref().and_then(|key| index.get(key));
         match matches {
             Some(rows) if !rows.is_empty() => {
                 for right in rows {
@@ -2614,18 +2722,23 @@ impl<'a> JoinKeyAccessor<'a> {
         }
     }
 
-    fn key(&self, row: &ResultRow, engine: &Engine, params: &[SQLParam]) -> Option<JoinKey> {
-        match self {
+    fn key(
+        &self,
+        row: &ResultRow,
+        eval_hook: &dyn uqa_sql::expr::EngineHook,
+        params: &[SQLParam],
+    ) -> Result<Option<JoinKey>, SQLError> {
+        Ok(match self {
             Self::Column(name) => value_to_join_key(column_value(row, name)),
             Self::QualifiedColumn(key) => value_to_join_key(row.get(key)),
             Self::Expr(expr) => {
-                let ctx = EvalContext::new(Some(row), params).with_engine(engine);
-                match eval(expr, &ctx) {
-                    Ok(Value::Null) | Err(_) => None,
-                    Ok(value) => Some(JoinKey::new(&value)),
+                let ctx = EvalContext::new(Some(row), params).with_engine(eval_hook);
+                match eval(expr, &ctx)? {
+                    Value::Null => None,
+                    value => Some(JoinKey::new(&value)),
                 }
             }
-        }
+        })
     }
 }
 
@@ -2648,31 +2761,31 @@ fn value_to_join_key(value: Option<&Value>) -> Option<JoinKey> {
 fn composite_join_key(
     exprs: &[&Expr],
     row: &ResultRow,
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     params: &[SQLParam],
-) -> Option<JoinKey> {
-    let ctx = EvalContext::new(Some(row), params).with_engine(engine);
+) -> Result<Option<JoinKey>, SQLError> {
+    let ctx = EvalContext::new(Some(row), params).with_engine(eval_hook);
     let mut values = Vec::with_capacity(exprs.len());
     for expr in exprs {
-        match eval(expr, &ctx) {
-            Ok(Value::Null) | Err(_) => return None,
-            Ok(value) => values.push(value),
+        match eval(expr, &ctx)? {
+            Value::Null => return Ok(None),
+            value => values.push(value),
         }
     }
     let refs: Vec<&Value> = values.iter().collect();
-    Some(JoinKey::composite(&refs))
+    Ok(Some(JoinKey::composite(&refs)))
 }
 
 fn join_key_for_exprs(
     exprs: &[&Expr],
     row: &ResultRow,
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     params: &[SQLParam],
-) -> Option<JoinKey> {
+) -> Result<Option<JoinKey>, SQLError> {
     if exprs.len() == 1 {
-        JoinKeyAccessor::new(exprs[0]).key(row, engine, params)
+        JoinKeyAccessor::new(exprs[0]).key(row, eval_hook, params)
     } else {
-        composite_join_key(exprs, row, engine, params)
+        composite_join_key(exprs, row, eval_hook, params)
     }
 }
 
@@ -2681,7 +2794,7 @@ fn join_key_for_exprs(
 /// `(left_key_expr, right_key_expr)` when one direction works,
 /// `None` when the predicate isn't separable across sides.
 fn decide_join_sides<'a>(
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     lhs: &'a Expr,
@@ -2693,26 +2806,31 @@ fn decide_join_sides<'a>(
     }
     let l_sample = &left_rows[0];
     let r_sample = &right_rows[0];
-    let lhs_on_left = eval_yields_value(engine, l_sample, lhs, params);
-    let rhs_on_right = eval_yields_value(engine, r_sample, rhs, params);
+    let lhs_on_left = eval_yields_value(eval_hook, l_sample, lhs, params);
+    let rhs_on_right = eval_yields_value(eval_hook, r_sample, rhs, params);
     if lhs_on_left && rhs_on_right {
         return Some((lhs, rhs));
     }
-    let rhs_on_left = eval_yields_value(engine, l_sample, rhs, params);
-    let lhs_on_right = eval_yields_value(engine, r_sample, lhs, params);
+    let rhs_on_left = eval_yields_value(eval_hook, l_sample, rhs, params);
+    let lhs_on_right = eval_yields_value(eval_hook, r_sample, lhs, params);
     if rhs_on_left && lhs_on_right {
         return Some((rhs, lhs));
     }
     None
 }
 
-fn eval_yields_value(engine: &Engine, row: &ResultRow, expr: &Expr, params: &[SQLParam]) -> bool {
-    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(engine);
+fn eval_yields_value(
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    row: &ResultRow,
+    expr: &Expr,
+    params: &[SQLParam],
+) -> bool {
+    let ctx = uqa_sql::expr::EvalContext::new(Some(row), params).with_engine(eval_hook);
     matches!(uqa_sql::expr::eval(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
 
 fn cross_filter(
-    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
     left_rows: &[ResultRow],
     right_rows: &[ResultRow],
     on: Option<&Expr>,
@@ -2725,8 +2843,8 @@ fn cross_filter(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx =
-                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
+                        .with_engine(eval_hook);
                     uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
                 }
             };
@@ -2745,6 +2863,7 @@ fn left_outer(
     on: Option<&Expr>,
     params: &[SQLParam],
     engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for l in outer_rows {
@@ -2754,8 +2873,8 @@ fn left_outer(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx =
-                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
+                        .with_engine(eval_hook);
                     uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
                 }
             };
@@ -2784,6 +2903,7 @@ fn full_outer(
     on: Option<&Expr>,
     params: &[SQLParam],
     engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     let mut matched_right = vec![false; right_rows.len()];
@@ -2794,8 +2914,8 @@ fn full_outer(
             let keep = match on {
                 None => true,
                 Some(expr) => {
-                    let ctx =
-                        uqa_sql::expr::EvalContext::new(Some(&merged), params).with_engine(engine);
+                    let ctx = uqa_sql::expr::EvalContext::new(Some(&merged), params)
+                        .with_engine(eval_hook);
                     uqa_sql::expr::truthy(&uqa_sql::expr::eval(expr, &ctx)?)
                 }
             };
@@ -2865,6 +2985,24 @@ pub(super) fn project_join_row_with_hook(
 ) -> Result<ResultRow, SQLError> {
     let labels = projection_columns(projections);
     project_join_row_inner(None, engine, src, projections, &labels, params)
+}
+
+pub(super) fn project_join_row_with_engine_hook(
+    engine: &Engine,
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    src: &ResultRow,
+    projections: &[Projection],
+    params: &[SQLParam],
+) -> Result<ResultRow, SQLError> {
+    let labels = projection_columns(projections);
+    project_join_row_inner(
+        Some(engine),
+        Some(eval_hook),
+        src,
+        projections,
+        &labels,
+        params,
+    )
 }
 
 pub(super) fn project_join_row_with_hook_and_labels(

@@ -12,8 +12,21 @@ use super::{
 
 impl Engine {
     pub fn register_view(&self, name: &str, body: uqa_sql::ast::SelectStmt) {
+        let plan = uqa_planner::QueryPlan::lower_with(body.clone(), &|aggregate: &str| {
+            self.has_registered_aggregate_function(aggregate)
+        });
+        self.register_view_plan(name, body, plan);
+    }
+
+    pub(crate) fn register_view_plan(
+        &self,
+        name: &str,
+        body: uqa_sql::ast::SelectStmt,
+        plan: uqa_planner::QueryPlan,
+    ) {
         let name = self.relation_name_for_create(name);
         self.views.write().insert(name.clone(), body);
+        self.view_plans.write().insert(name.clone(), plan);
         self.persist_views();
     }
 
@@ -23,6 +36,7 @@ impl Engine {
         };
         let removed = self.views.write().remove(&name).is_some();
         if removed {
+            self.view_plans.write().remove(&name);
             self.persist_views();
         }
         removed
@@ -31,6 +45,21 @@ impl Engine {
     pub fn view(&self, name: &str) -> Option<uqa_sql::ast::SelectStmt> {
         let resolved = self.resolve_view_name(name)?;
         self.views.read().get(&resolved).cloned()
+    }
+
+    pub(crate) fn view_plan(&self, name: &str) -> Option<uqa_planner::QueryPlan> {
+        let resolved = self.resolve_view_name(name)?;
+        if let Some(plan) = self.view_plans.read().get(&resolved).cloned() {
+            return Some(plan);
+        }
+        let definition = self.views.read().get(&resolved).cloned()?;
+        let plan = uqa_planner::QueryPlan::lower_with(definition, &|aggregate: &str| {
+            self.has_registered_aggregate_function(aggregate)
+        });
+        self.view_plans
+            .write()
+            .insert(resolved.clone(), plan.clone());
+        Some(plan)
     }
 
     pub fn list_views(&self) -> Vec<String> {
@@ -58,6 +87,7 @@ impl Engine {
         if let Ok(views) = serde_json::from_str::<BTreeMap<String, uqa_sql::ast::SelectStmt>>(&json)
         {
             *self.views.write() = views;
+            self.view_plans.write().clear();
         }
         Ok(())
     }

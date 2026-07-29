@@ -22,7 +22,7 @@ use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 use crate::engine_user_functions::{CompiledFunctionBody, SQLUserFunction};
 use crate::{Engine, SQLTableFunctionResult};
 
-use super::run_optimized_stmt;
+use super::execute_compiled_statement;
 use std::sync::Arc;
 
 use uqa_core::Value;
@@ -83,8 +83,9 @@ pub(super) fn run_call(
     name: &str,
     args: &[Expr],
     params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
 ) -> Result<SQLResult, SQLError> {
-    let ctx = EvalContext::new(None, params).with_engine(engine);
+    let ctx = EvalContext::new(None, params).with_engine(eval_hook);
     let call_args = evaluate_call_args(args, &ctx)?;
     let function = match resolve_routine(engine, name, &call_args, "procedure")? {
         Some(resolved) => resolved,
@@ -481,7 +482,7 @@ fn execute_sql_language(
     let mut last = SQLResult::empty();
     for statement in statements {
         let statement = bind_statement(statement, &mut resolver)?;
-        last = run_optimized_stmt(engine, statement, &[])?;
+        last = execute_compiled_statement(engine, statement, &[])?;
     }
     let out_params = def.output_params();
     let returns_void = matches!(
@@ -813,7 +814,7 @@ impl<'a> Interpreter<'a> {
 
     fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {
         let bound = bind_statement(statement, &mut self.resolver())?;
-        run_optimized_stmt(self.engine, bound, &[])
+        execute_compiled_statement(self.engine, bound, &[])
     }
 
     fn set_found(&mut self, value: bool) {
