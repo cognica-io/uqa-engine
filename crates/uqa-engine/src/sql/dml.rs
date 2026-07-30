@@ -2250,6 +2250,14 @@ pub(super) fn index_vectors_for_type(
     value: &Value,
     ty: &ColumnType,
 ) -> Result<Vec<Vec<f32>>, SQLError> {
+    // SQL VECTOR/TENSOR columns are nullable unless their declaration says
+    // otherwise. A NULL value therefore means that the row has no vectors to
+    // index; it is not a malformed vector. Returning an empty replacement set
+    // also clears any vectors left by an UPDATE ... SET field = NULL while
+    // retaining strict validation for every non-NULL value.
+    if matches!(value, Value::Null) {
+        return Ok(Vec::new());
+    }
     match ty {
         ColumnType::Vector(dim) => {
             let vector = value_to_vector(value)?;

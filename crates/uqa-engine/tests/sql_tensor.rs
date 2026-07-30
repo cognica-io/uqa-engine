@@ -187,6 +187,69 @@ fn tensor_dimension_mismatch_is_rejected() {
 }
 
 #[test]
+fn nullable_vector_and_tensor_values_have_no_index_entries() {
+    let dir = tempdir().unwrap();
+    let engine = Engine::open(&dir.path().join("nullable-vectors.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE docs (\
+               id INTEGER PRIMARY KEY, \
+               embedding VECTOR(2), \
+               chunks TENSOR(2)\
+             )",
+            &[],
+        )
+        .unwrap();
+
+    engine
+        .sql(
+            "INSERT INTO docs (id, embedding, chunks) VALUES (1, NULL, NULL)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "UPDATE docs SET embedding = ARRAY[1.0, 0.0], \
+                             chunks = ARRAY[ARRAY[0.0, 1.0]] \
+             WHERE id = 1",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "UPDATE docs SET embedding = NULL, chunks = NULL WHERE id = 1",
+            &[],
+        )
+        .unwrap();
+
+    let row = engine
+        .sql("SELECT embedding, chunks FROM docs WHERE id = 1", &[])
+        .unwrap()
+        .rows
+        .into_iter()
+        .next()
+        .unwrap();
+    assert_eq!(row.get("embedding"), Some(&Value::Null));
+    assert_eq!(row.get("chunks"), Some(&Value::Null));
+    assert!(engine
+        .sql(
+            "SELECT id FROM docs WHERE knn_match(embedding, ARRAY[1.0, 0.0], 1)",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+    assert!(engine
+        .sql(
+            "SELECT id FROM docs WHERE knn_match(chunks, ARRAY[0.0, 1.0], 1)",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .is_empty());
+}
+
+#[test]
 fn tensor_sql_param_and_sqlite_reopen_preserve_ivf_indexing() {
     let dir = tempdir().unwrap();
     let db = dir.path().join("tensor.db");
