@@ -73,7 +73,7 @@ fn bench_bm25(c: &mut Criterion) {
 }
 
 fn bench_bayesian_bm25(c: &mut Criterion) {
-    let bayesian_scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats());
+    let bayesian_scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats()).unwrap();
     c.bench_function("bayesian_bm25_score_single", |bencher| {
         bencher.iter(|| black_box(bayesian_scorer.score(5, 120, 1_000)));
     });
@@ -130,7 +130,7 @@ fn bench_vector_scoring(c: &mut Criterion) {
         bencher.iter(|| {
             let total: f64 = corpus
                 .iter()
-                .map(|v| VectorScorer::cosine_similarity(&query, v))
+                .map(|v| VectorScorer::cosine_similarity(&query, v).unwrap())
                 .sum();
             black_box(total)
         });
@@ -177,7 +177,10 @@ fn bench_log_odds_fusion(c: &mut Criterion) {
         bencher.iter(|| {
             let total: f64 = samples
                 .iter()
-                .map(|probs| log_odds_conjunction_weighted(probs, &weights, 0.5).unwrap_or(0.5))
+                .map(|probs| {
+                    log_odds_conjunction_weighted(probs, &weights, 0.5)
+                        .expect("batch benchmark probabilities and weights are valid")
+                })
                 .sum();
             black_box(total)
         });

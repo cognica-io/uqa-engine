@@ -52,7 +52,7 @@ fn build_index(docs: &[(DocId, String)]) -> MemoryInvertedIndex {
     for (doc_id, body) in docs {
         let mut fields: BTreeMap<FieldName, String> = BTreeMap::new();
         fields.insert("body".into(), body.clone());
-        idx.add_document(*doc_id, fields);
+        idx.add_document(*doc_id, fields).unwrap();
     }
     idx
 }
@@ -66,7 +66,8 @@ fn exhaustive_top_k(
 ) -> Vec<(DocId, f64)> {
     let mut all_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::default();
     for term in terms {
-        for entry in &idx.get_posting_list("body", term) {
+        let posting = idx.get_posting_list("body", term).unwrap();
+        for entry in &posting {
             all_ids.insert(entry.doc_id);
         }
     }
@@ -74,12 +75,12 @@ fn exhaustive_top_k(
     for doc_id in all_ids {
         let mut term_scores = Vec::new();
         for (i, term) in terms.iter().enumerate() {
-            let tf = idx.get_term_freq(doc_id, &fields[i], term);
+            let tf = idx.get_term_freq(doc_id, &fields[i], term).unwrap();
             if tf == 0 {
                 continue;
             }
-            let df = idx.doc_freq(&fields[i], term);
-            let dl = idx.get_doc_length(doc_id, &fields[i]).max(tf);
+            let df = idx.doc_freq(&fields[i], term).unwrap();
+            let dl = idx.get_doc_length(doc_id, &fields[i]).unwrap().max(tf);
             term_scores.push(scorers[i].term_score(tf, dl, df));
         }
         let total = scorers[0].finalize_score(&term_scores);
@@ -117,7 +118,7 @@ fn assert_top_k_matches(got: &[(DocId, f64)], expected: &[(DocId, f64)]) {
 fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
     let docs = build_corpus();
     let idx = build_index(&docs);
-    let stats = Arc::new(idx.stats());
+    let stats = Arc::new(idx.stats().unwrap());
 
     // Multi-term query: rare ("language") + mid ("rust") + frequent ("the").
     let terms = ["plan", "rust", "crate"]
@@ -127,7 +128,8 @@ fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
     let posting_lists = terms
         .iter()
         .map(|t| idx.get_posting_list("body", t))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
     let scorers = (0..terms.len())
         .map(|_| bm25_scorer(stats.clone()))
         .collect::<Vec<_>>();
@@ -139,8 +141,9 @@ fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
         fields.clone(),
         terms.clone(),
         10,
-    );
-    let result = WANDScorer::new(&q, Some(&idx)).score_top_k();
+    )
+    .unwrap();
+    let result = WANDScorer::new(&q, Some(&idx)).score_top_k().unwrap();
     let mut got: Vec<(DocId, f64)> = result
         .top_k
         .iter()
@@ -169,7 +172,7 @@ fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
 fn bmw_top_k_matches_exhaustive_and_skips_at_least_75pct() {
     let docs = build_corpus();
     let idx = build_index(&docs);
-    let stats = Arc::new(idx.stats());
+    let stats = Arc::new(idx.stats().unwrap());
 
     let terms = ["plan", "rust", "crate"]
         .iter()
@@ -178,17 +181,19 @@ fn bmw_top_k_matches_exhaustive_and_skips_at_least_75pct() {
     let posting_lists = terms
         .iter()
         .map(|t| idx.get_posting_list("body", t))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
     let scorers = (0..terms.len())
         .map(|_| bm25_scorer(stats.clone()))
         .collect::<Vec<_>>();
     let fields = vec![FieldName::from("body"); terms.len()];
 
     // Build BlockMaxIndex over each posting list.
-    let mut bmi = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE);
+    let mut bmi = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE).unwrap();
     for (i, term) in terms.iter().enumerate() {
         let bm25 = BM25Scorer::new(BM25Params::default(), stats.clone());
-        bmi.build(&posting_lists[i], &bm25, "body", term, "articles");
+        bmi.build(&posting_lists[i], &bm25, "body", term, "articles")
+            .unwrap();
     }
 
     let q = WANDQuery::new(
@@ -197,8 +202,11 @@ fn bmw_top_k_matches_exhaustive_and_skips_at_least_75pct() {
         fields.clone(),
         terms.clone(),
         10,
-    );
-    let result = BlockMaxWANDScorer::new(&q, Some(&idx), &bmi, "articles").score_top_k();
+    )
+    .unwrap();
+    let result = BlockMaxWANDScorer::new(&q, Some(&idx), &bmi, "articles")
+        .score_top_k()
+        .unwrap();
     let mut got: Vec<(DocId, f64)> = result
         .top_k
         .iter()
@@ -230,7 +238,7 @@ fn bmw_skip_rate_meets_or_exceeds_wand() {
     // from Theorem 6.2.x in Paper 3.
     let docs = build_corpus();
     let idx = build_index(&docs);
-    let stats = Arc::new(idx.stats());
+    let stats = Arc::new(idx.stats().unwrap());
 
     let terms = ["rust", "crate"]
         .iter()
@@ -239,16 +247,18 @@ fn bmw_skip_rate_meets_or_exceeds_wand() {
     let posting_lists = terms
         .iter()
         .map(|t| idx.get_posting_list("body", t))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
     let scorers = (0..terms.len())
         .map(|_| bm25_scorer(stats.clone()))
         .collect::<Vec<_>>();
     let fields = vec![FieldName::from("body"); terms.len()];
 
-    let mut bmi = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE);
+    let mut bmi = BlockMaxIndex::new(DEFAULT_BLOCK_SIZE).unwrap();
     for (i, term) in terms.iter().enumerate() {
         let bm25 = BM25Scorer::new(BM25Params::default(), stats.clone());
-        bmi.build(&posting_lists[i], &bm25, "body", term, "articles");
+        bmi.build(&posting_lists[i], &bm25, "body", term, "articles")
+            .unwrap();
     }
 
     let q = WANDQuery::new(
@@ -257,10 +267,12 @@ fn bmw_skip_rate_meets_or_exceeds_wand() {
         fields.clone(),
         terms.clone(),
         5,
-    );
-    let wand_stats = WANDScorer::new(&q, Some(&idx)).score_top_k().stats;
+    )
+    .unwrap();
+    let wand_stats = WANDScorer::new(&q, Some(&idx)).score_top_k().unwrap().stats;
     let bmw_stats = BlockMaxWANDScorer::new(&q, Some(&idx), &bmi, "articles")
         .score_top_k()
+        .unwrap()
         .stats;
     assert!(
         bmw_stats.skip_rate() >= wand_stats.skip_rate() - 1e-9,

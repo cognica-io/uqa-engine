@@ -37,7 +37,10 @@ fn on_conflict_do_nothing_skips_existing_row() {
         )
         .unwrap();
     assert_eq!(result.affected_rows, 0);
-    let row = eng.get_document("accounts", 1).unwrap();
+    let row = eng
+        .get_document("accounts", 1)
+        .unwrap()
+        .expect("existing account");
     assert_eq!(row.get("name"), Some(&Value::Str("alice".into())));
     assert_eq!(row.get("balance"), Some(&Value::Int(100)));
 }
@@ -53,7 +56,10 @@ fn on_conflict_do_update_applies_assignments() {
         )
         .unwrap();
     assert_eq!(result.affected_rows, 1);
-    let row = eng.get_document("accounts", 1).unwrap();
+    let row = eng
+        .get_document("accounts", 1)
+        .unwrap()
+        .expect("updated account");
     assert_eq!(row.get("balance"), Some(&Value::Int(200)));
     // The non-targeted column stays the same.
     assert_eq!(row.get("name"), Some(&Value::Str("alice".into())));
@@ -79,7 +85,10 @@ fn on_conflict_do_update_reads_excluded_qualified_columns() {
     )
     .unwrap();
 
-    let row = eng.get_document("engine_meta", 1).unwrap();
+    let row = eng
+        .get_document("engine_meta", 1)
+        .unwrap()
+        .expect("engine metadata row");
     assert_eq!(row.get("value"), Some(&Value::Str("15".into())));
 }
 
@@ -103,7 +112,10 @@ fn on_conflict_do_update_reads_excluded_bound_params() {
     )
     .unwrap();
 
-    let row = eng.get_document("engine_meta", 1).unwrap();
+    let row = eng
+        .get_document("engine_meta", 1)
+        .unwrap()
+        .expect("engine metadata row");
     assert_eq!(row.get("value"), Some(&Value::Str("15".into())));
 }
 
@@ -230,6 +242,183 @@ fn on_conflict_falls_through_to_insert_when_no_match() {
         )
         .unwrap();
     assert_eq!(result.affected_rows, 1);
-    let row = eng.get_document("accounts", 3).unwrap();
+    let row = eng
+        .get_document("accounts", 3)
+        .unwrap()
+        .expect("inserted account");
     assert_eq!(row.get("name"), Some(&Value::Str("carol".into())));
+}
+
+#[test]
+fn composite_conflict_target_matches_declared_key_regardless_of_order() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE labels (
+            id INTEGER PRIMARY KEY,
+            tenant TEXT,
+            slug TEXT,
+            value TEXT,
+            UNIQUE (tenant, slug)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug, value) VALUES (1, 'a', 'one', 'old')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug, value) VALUES (2, 'a', 'one', 'new')
+         ON CONFLICT (slug, tenant) DO UPDATE SET value = EXCLUDED.value",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng.sql("SELECT id, value FROM labels", &[]).unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(1));
+    assert_eq!(result.rows[0]["value"], Value::Str("new".into()));
+}
+
+#[test]
+fn conflict_target_must_match_a_declared_key_and_other_keys_still_apply() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE labels (
+            id INTEGER PRIMARY KEY,
+            tenant TEXT,
+            slug TEXT,
+            external_id TEXT UNIQUE,
+            UNIQUE (tenant, slug)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug, external_id)
+         VALUES (1, 'a', 'one', 'external-1')",
+        &[],
+    )
+    .unwrap();
+
+    let invalid_target = eng
+        .sql(
+            "INSERT INTO labels (id, tenant, slug, external_id)
+             VALUES (2, 'a', 'two', 'external-2')
+             ON CONFLICT (tenant) DO NOTHING",
+            &[],
+        )
+        .unwrap_err();
+    assert!(invalid_target
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("does not match"));
+
+    let other_key = eng
+        .sql(
+            "INSERT INTO labels (id, tenant, slug, external_id)
+             VALUES (3, 'b', 'two', 'external-1')
+             ON CONFLICT (tenant, slug) DO NOTHING",
+            &[],
+        )
+        .unwrap_err();
+    assert!(other_key
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("unique"));
+}
+
+#[test]
+fn insert_select_uses_the_same_composite_conflict_path_as_values() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE labels (
+            id INTEGER PRIMARY KEY,
+            tenant TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            value TEXT,
+            UNIQUE (tenant, slug)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE TABLE incoming (
+            id INTEGER,
+            tenant TEXT,
+            slug TEXT,
+            value TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug, value)
+         VALUES (1, 'a', 'one', 'old')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO incoming (id, tenant, slug, value)
+         VALUES (2, 'a', 'one', 'updated'), (3, 'a', 'two', 'inserted')",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "INSERT INTO labels (id, tenant, slug, value)
+             SELECT id, tenant, slug, value FROM incoming
+             ON CONFLICT (slug, tenant) DO UPDATE SET value = EXCLUDED.value
+             RETURNING id, value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.affected_rows, 2);
+    assert_eq!(result.rows.len(), 2);
+
+    let rows = eng
+        .sql("SELECT id, value FROM labels ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_eq!(rows.rows[0]["id"], Value::Int(1));
+    assert_eq!(rows.rows[0]["value"], Value::Str("updated".into()));
+    assert_eq!(rows.rows[1]["id"], Value::Int(3));
+    assert_eq!(rows.rows[1]["value"], Value::Str("inserted".into()));
+    assert_eq!(
+        eng.get_document("labels", 3)
+            .unwrap()
+            .expect("integer primary key must remain the internal document id")["value"],
+        Value::Str("inserted".into())
+    );
+}
+
+#[test]
+fn conflict_update_returning_reports_a_rewritten_integer_primary_key_doc_id() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE keyed_rows (id INTEGER PRIMARY KEY, value TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO keyed_rows (id, value) VALUES (1, 'before')",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "INSERT INTO keyed_rows (id, value) VALUES (1, 'ignored')
+             ON CONFLICT (id) DO UPDATE SET id = 4, value = EXCLUDED.value
+             RETURNING id, _doc_id, value",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["id"], Value::Int(4));
+    assert_eq!(result.rows[0]["_doc_id"], Value::Int(4));
+    assert_eq!(result.rows[0]["value"], Value::Str("ignored".into()));
+    assert!(eng.get_document("keyed_rows", 1).unwrap().is_none());
+    assert!(eng.get_document("keyed_rows", 4).unwrap().is_some());
 }

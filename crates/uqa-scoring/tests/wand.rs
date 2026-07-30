@@ -138,8 +138,9 @@ proptest! {
             (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
             (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
             k,
-        );
-        let wand_result = WANDScorer::new(&q, None).score_top_k();
+        )
+        .unwrap();
+        let wand_result = WANDScorer::new(&q, None).score_top_k().unwrap();
         let wand_ids: Vec<DocId> = wand_result.top_k.iter().map(|e| e.doc_id).collect();
         let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);
 
@@ -169,10 +170,12 @@ proptest! {
             (0..terms_tfs.len()).map(|_| bm25_scorer(&stats)).collect();
         let k = (corpus_size / 2).clamp(1, 10);
 
-        let mut block_max = BlockMaxIndex::new(8);
+        let mut block_max = BlockMaxIndex::new(8).unwrap();
         for (i, pl) in posting_lists.iter().enumerate() {
             let scorer = BM25Scorer::new(BM25Params::default(), stats.clone());
-            block_max.build(pl, &scorer, FIELD, &format!("term_{i}"), TABLE);
+            block_max
+                .build(pl, &scorer, FIELD, &format!("term_{i}"), TABLE)
+                .unwrap();
         }
 
         let q = WANDQuery::new(
@@ -181,9 +184,10 @@ proptest! {
             (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
             (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
             k,
-        );
+        )
+        .unwrap();
         let bmw = BlockMaxWANDScorer::new(&q, None, &block_max, TABLE);
-        let bmw_result = bmw.score_top_k();
+        let bmw_result = bmw.score_top_k().unwrap();
         let bmw_ids: Vec<DocId> = bmw_result.top_k.iter().map(|e| e.doc_id).collect();
         let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);
 

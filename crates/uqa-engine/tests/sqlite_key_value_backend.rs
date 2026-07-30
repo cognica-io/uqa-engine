@@ -11,9 +11,10 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::Value as JSONValue;
 use tempfile::tempdir;
-use uqa_core::Value;
+use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::{Engine, ScoringMode};
-use uqa_storage::{CatalogFacade, PersistentStorageBackend};
+use uqa_graph::GraphStore as _;
+use uqa_storage::{CatalogFacade, ManagedConnection, PersistentStorageBackend};
 use uqa_storage_sqlite::SQLiteKeyValueStorage;
 
 #[derive(Deserialize)]
@@ -33,10 +34,57 @@ struct GoldenCase {
 }
 
 fn open_key_value_engine(path: &std::path::Path) -> Engine {
+    open_key_value_storage_and_engine(path).1
+}
+
+fn open_key_value_storage_and_engine(path: &std::path::Path) -> (SQLiteKeyValueStorage, Engine) {
     let storage = SQLiteKeyValueStorage::open(path).expect("open SQLite KeyValue storage");
     let catalog: Arc<dyn CatalogFacade> = Arc::new(storage.catalog());
     let backend: Arc<dyn PersistentStorageBackend> = Arc::new(storage.backend());
-    Engine::from_persistent_backends(catalog, backend).expect("open KeyValue engine")
+    let engine = Engine::from_persistent_backends(catalog, backend).expect("open KeyValue engine");
+    (storage, engine)
+}
+
+fn fail_nth_key_value_insert(connection: &ManagedConnection, nth: usize) {
+    assert!(
+        nth > 0,
+        "fault injection requires a positive operation index"
+    );
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(&format!(
+                "DROP TRIGGER IF EXISTS injected_key_value_insert_failure;
+                 CREATE TABLE IF NOT EXISTS _key_value_fault_counter (
+                     remaining INTEGER NOT NULL
+                 );
+                 DELETE FROM _key_value_fault_counter;
+                 INSERT INTO _key_value_fault_counter (remaining) VALUES ({nth});
+                 CREATE TRIGGER injected_key_value_insert_failure
+                 BEFORE INSERT ON _key_value
+                 BEGIN
+                     UPDATE _key_value_fault_counter
+                     SET remaining = remaining - 1;
+                     SELECT CASE
+                         WHEN (SELECT remaining FROM _key_value_fault_counter) = 0
+                         THEN RAISE(FAIL, 'injected KeyValue insert failure')
+                     END;
+                 END;"
+            ))?;
+            Ok(())
+        })
+        .expect("install KeyValue fault trigger");
+}
+
+fn clear_key_value_insert_failure(connection: &ManagedConnection) {
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                "DROP TRIGGER IF EXISTS injected_key_value_insert_failure;
+                 DROP TABLE IF EXISTS _key_value_fault_counter;",
+            )?;
+            Ok(())
+        })
+        .expect("clear KeyValue fault trigger");
 }
 
 fn fixture_path() -> std::path::PathBuf {
@@ -106,21 +154,29 @@ fn engine_runs_text_and_vector_workloads_on_sqlite_key_value_storage() {
             )
             .unwrap();
 
-        let hits = engine.search("articles", "title", "rust", &ScoringMode::default(), 10);
+        let hits = engine
+            .search("articles", "title", "rust", &ScoringMode::default(), 10)
+            .unwrap();
         assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
-        let vector_hits = engine.knn_search("articles", "embedding", vec![1.0, 0.0], 1);
+        let vector_hits = engine
+            .knn_search("articles", "embedding", vec![1.0, 0.0], 1)
+            .unwrap();
         assert_eq!(vector_hits.first().map(|hit| hit.doc_id), Some(1));
     }
 
     let reopened = open_key_value_engine(&path);
-    let got = reopened.get_document("articles", 2).unwrap();
+    let got = reopened.get_document("articles", 2).unwrap().unwrap();
     assert_eq!(
         got.get("title"),
         Some(&uqa_core::Value::Str("sqlite key value".into()))
     );
-    let hits = reopened.search("articles", "title", "sqlite", &ScoringMode::default(), 10);
+    let hits = reopened
+        .search("articles", "title", "sqlite", &ScoringMode::default(), 10)
+        .unwrap();
     assert_eq!(hits.first().map(|hit| hit.doc_id), Some(2));
-    let vector_hits = reopened.knn_search("articles", "embedding", vec![0.0, 1.0], 1);
+    let vector_hits = reopened
+        .knn_search("articles", "embedding", vec![0.0, 1.0], 1)
+        .unwrap();
     assert_eq!(vector_hits.first().map(|hit| hit.doc_id), Some(2));
 }
 
@@ -311,4 +367,255 @@ fn sql_golden_fixture_passes_on_sqlite_key_value_storage() {
             }
         }
     }
+}
+
+#[test]
+fn empty_schema_survives_key_value_engine_reopen() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-schemas.sqlite3");
+    {
+        let engine = open_key_value_engine(&path);
+        engine.sql("CREATE SCHEMA empty_app", &[]).unwrap();
+        assert!(engine.has_schema("public").unwrap());
+        assert!(engine.has_schema("empty_app").unwrap());
+    }
+    let reopened = open_key_value_engine(&path);
+    assert_eq!(
+        reopened.list_schemas().unwrap(),
+        vec!["empty_app".to_string(), "public".to_string()]
+    );
+}
+
+#[test]
+fn key_value_reopen_preserves_every_schema_owned_relation_kind() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-relation-kinds.sqlite3");
+    {
+        let engine = open_key_value_engine(&path);
+        engine.sql("CREATE SCHEMA app", &[]).unwrap();
+        engine
+            .sql("CREATE TABLE app.items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine.sql("INSERT INTO app.items VALUES (1)", &[]).unwrap();
+        engine
+            .sql("CREATE VIEW app.answer AS SELECT 42 AS value", &[])
+            .unwrap();
+        engine
+            .sql("CREATE SEQUENCE app.item_seq START 10", &[])
+            .unwrap();
+        engine
+            .sql(
+                "CREATE SERVER app_mem FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE FOREIGN TABLE app.remote_items (id INTEGER) SERVER app_mem",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let reopened = open_key_value_engine(&path);
+    assert_eq!(
+        reopened.sql("SELECT id FROM app.items", &[]).unwrap().rows[0]["id"],
+        Value::Int(1)
+    );
+    assert_eq!(
+        reopened
+            .sql("SELECT value FROM app.answer", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(42)
+    );
+    assert_eq!(
+        reopened
+            .sql("SELECT nextval('app.item_seq') AS value", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(10)
+    );
+    assert!(reopened
+        .foreign_table("app.remote_items")
+        .unwrap()
+        .is_some());
+    assert!(reopened.drop_schema("app").is_err());
+}
+
+#[test]
+fn key_value_reopen_keeps_quoted_dot_relation_identities_isolated() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-quoted-dot-relations.sqlite3");
+    {
+        let engine = open_key_value_engine(&path);
+        engine.sql("CREATE SCHEMA \"a.b\"", &[]).unwrap();
+        engine.sql("CREATE SCHEMA a", &[]).unwrap();
+        engine
+            .sql("CREATE TABLE \"a.b\".c (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("CREATE TABLE a.\"b.c\" (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine.sql("INSERT INTO \"a.b\".c VALUES (1)", &[]).unwrap();
+        engine.sql("INSERT INTO a.\"b.c\" VALUES (2)", &[]).unwrap();
+        engine
+            .sql("ALTER TABLE \"a.b\".c RENAME TO \"d.e\"", &[])
+            .unwrap();
+        engine
+            .sql(
+                "CREATE VIEW \"a.b\".\"v.one\" AS SELECT id FROM \"a.b\".\"d.e\"",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql("CREATE SEQUENCE a.\"s.one\" START 5", &[])
+            .unwrap();
+    }
+
+    let reopened = open_key_value_engine(&path);
+    assert_eq!(
+        reopened
+            .sql("SELECT id FROM \"a.b\".\"d.e\"", &[])
+            .unwrap()
+            .rows[0]["id"],
+        Value::Int(1)
+    );
+    assert_eq!(
+        reopened.sql("SELECT id FROM a.\"b.c\"", &[]).unwrap().rows[0]["id"],
+        Value::Int(2)
+    );
+    assert_eq!(
+        reopened
+            .sql("SELECT id FROM \"a.b\".\"v.one\"", &[])
+            .unwrap()
+            .rows[0]["id"],
+        Value::Int(1)
+    );
+    assert_eq!(
+        reopened
+            .sql("SELECT nextval('a.\"s.one\"') AS value", &[])
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(5)
+    );
+}
+
+#[test]
+fn failed_key_value_catalog_batch_does_not_leave_an_orphan_relation() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-relation-atomicity.sqlite3");
+    let (storage, engine) = open_key_value_storage_and_engine(&path);
+    let connection = storage.store().connection();
+
+    // Sequence creation first claims the shared relation name and then writes
+    // the sequence payload. Failing the second write must roll both back.
+    fail_nth_key_value_insert(&connection, 2);
+    let error = engine
+        .sql("CREATE SEQUENCE rolled_back_relation START 7", &[])
+        .expect_err("the injected second batch write must abort sequence creation");
+    assert!(error
+        .to_string()
+        .contains("injected KeyValue insert failure"));
+    assert!(engine
+        .sequence_state("rolled_back_relation")
+        .unwrap()
+        .is_none());
+    clear_key_value_insert_failure(&connection);
+
+    // Reusing the same name as another relation kind proves that the first
+    // relation-claim write did not survive the failed batch.
+    engine
+        .sql(
+            "CREATE TABLE rolled_back_relation (id INTEGER PRIMARY KEY)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("INSERT INTO rolled_back_relation VALUES (1)", &[])
+        .unwrap();
+
+    drop(engine);
+    drop(connection);
+    drop(storage);
+    let reopened = open_key_value_engine(&path);
+    assert!(reopened
+        .sequence_state("rolled_back_relation")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        reopened
+            .sql("SELECT id FROM rolled_back_relation", &[])
+            .unwrap()
+            .rows[0]["id"],
+        Value::Int(1)
+    );
+}
+
+#[test]
+fn failed_key_value_graph_replacement_preserves_snapshot_and_path_index() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyvalue-graph-atomicity.sqlite3");
+    let (storage, engine) = open_key_value_storage_and_engine(&path);
+    let connection = storage.store().connection();
+
+    engine.create_graph("g").unwrap();
+    engine
+        .add_graph_vertex(Vertex::new(1, "Person"), "g")
+        .unwrap();
+    engine
+        .add_graph_vertex(Vertex::new(2, "Person"), "g")
+        .unwrap();
+    engine
+        .add_graph_edge(Edge::new(10, 1, 2, "knows"), "g")
+        .unwrap();
+    engine
+        .build_path_index("knows_idx", "g", &[vec!["knows".to_string()]])
+        .unwrap();
+
+    // Graph replacement writes the graph marker, removes old memberships and
+    // dependent path indexes, then writes the replacement snapshot. Failing
+    // its second INSERT proves that the preceding put and deletes are covered
+    // by the same SQLite KeyValue savepoint.
+    fail_nth_key_value_insert(&connection, 2);
+    let error = engine
+        .add_graph_vertex(Vertex::new(3, "Person"), "g")
+        .expect_err("the injected graph snapshot write must abort replacement");
+    assert!(error
+        .to_string()
+        .contains("injected KeyValue insert failure"));
+
+    let live_vertices = engine
+        .graph_with("g", |store| store.vertex_ids_in_graph("g").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(live_vertices.into_iter().collect::<Vec<_>>(), vec![1, 2]);
+    assert!(engine.get_path_index("knows_idx", "g").unwrap().is_some());
+    clear_key_value_insert_failure(&connection);
+
+    drop(engine);
+    drop(connection);
+    drop(storage);
+    let reopened = open_key_value_engine(&path);
+    let reopened_vertices = reopened
+        .graph_with("g", |store| store.vertex_ids_in_graph("g").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reopened_vertices.into_iter().collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    let index = reopened
+        .get_path_index("knows_idx", "g")
+        .unwrap()
+        .expect("rolled-back path index must survive reopen");
+    assert_eq!(
+        index
+            .lookup(&["knows".to_string()])
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![(1, 2)]
+    );
 }

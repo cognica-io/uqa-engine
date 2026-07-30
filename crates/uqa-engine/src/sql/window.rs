@@ -7,21 +7,17 @@
 //! SQL window function evaluation.
 
 use uqa_execution::{
-    eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
-    ScalarSubqueryRunner, ScalarWindowSpec,
+    eval_scalar, Batch, ExecResult, ExternalSort, IndexedSpill, PhysicalOperator, RowSchema,
+    ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner,
+    ScalarWindowSpec, SortKey, SpillBuffer, SpillScan, WindowExecutor,
 };
 use uqa_planner::ProjectionPlan;
 
 use super::scalar::PlanSubqueryArena;
 use super::{
-    aggregate_value, projection_columns, AggregateAccumulator, BTreeMap, CteScope, Engine,
-    ResultRow, SQLError, SQLParam, ScopedEngineHook, Value,
+    aggregate_value, projection_columns, AggregateAccumulator, CteScope, Engine, ResultRow,
+    SQLError, SQLParam, ScopedEngineHook, Value,
 };
-
-pub(super) struct WindowProjectionResult {
-    pub rows: Vec<ResultRow>,
-    pub projections: Vec<ProjectionPlan>,
-}
 
 #[derive(Clone)]
 struct WindowSlot {
@@ -31,20 +27,90 @@ struct WindowSlot {
     spec: ScalarWindowSpec,
 }
 
+pub(super) struct PreparedWindowPlan {
+    slots: Vec<WindowSlot>,
+    projections: Vec<ProjectionPlan>,
+}
+
+impl PreparedWindowPlan {
+    pub(super) fn projections(&self) -> &[ProjectionPlan] {
+        &self.projections
+    }
+
+    pub(super) fn output_columns(&self, input_columns: &[String]) -> Vec<String> {
+        let mut columns = input_columns.to_vec();
+        for slot in &self.slots {
+            if !columns.contains(&slot.key) {
+                columns.push(slot.key.clone());
+            }
+        }
+        columns
+    }
+}
+
+pub(super) struct PhysicalWindowExecutor<'a> {
+    engine: &'a Engine,
+    plan: PreparedWindowPlan,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope,
+    schema: Vec<String>,
+    work_mem_bytes: usize,
+    input: Option<SpillBuffer>,
+}
+
+impl<'a> PhysicalWindowExecutor<'a> {
+    pub(super) fn new(
+        engine: &'a Engine,
+        plan: PreparedWindowPlan,
+        params: &'a [SQLParam],
+        ctes: &'a CteScope,
+        schema: Vec<String>,
+        work_mem_bytes: usize,
+    ) -> Self {
+        Self {
+            engine,
+            plan,
+            params,
+            ctes,
+            schema,
+            work_mem_bytes,
+            input: Some(SpillBuffer::new((work_mem_bytes / 3).max(1))),
+        }
+    }
+}
+
+impl WindowExecutor for PhysicalWindowExecutor<'_> {
+    fn consume(&mut self, batch: Batch) -> ExecResult<()> {
+        self.input
+            .as_mut()
+            .ok_or_else(|| {
+                uqa_execution::ExecError::Other("window executor already finalized".into())
+            })?
+            .push(batch)?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> ExecResult<SpillBuffer> {
+        let input = self.input.take().ok_or_else(|| {
+            uqa_execution::ExecError::Other("window executor already finalized".into())
+        })?;
+        Ok(execute_window_plan(
+            self.engine,
+            &self.plan,
+            input,
+            &self.schema,
+            self.work_mem_bytes,
+            self.params,
+            self.ctes,
+        )?)
+    }
+}
+
 pub(super) fn has_window(projections: &[ProjectionPlan]) -> bool {
     projections.iter().any(|p| expr_has_window(&p.expr))
 }
 
-pub(super) fn compute_window_columns(
-    engine: &Engine,
-    projections: &[ProjectionPlan],
-    rows: Vec<ResultRow>,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<WindowProjectionResult, SQLError> {
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&hook));
-    let mut rows = rows;
+pub(super) fn prepare_window_plan(projections: &[ProjectionPlan]) -> PreparedWindowPlan {
     let labels = projection_columns(projections);
     let mut slots = Vec::new();
     let mut rewritten = Vec::with_capacity(projections.len());
@@ -58,58 +124,659 @@ pub(super) fn compute_window_columns(
         }
         rewritten.push(projection);
     }
-    let output_order_spec = slots
-        .iter()
-        .rev()
-        .find(|slot| !slot.spec.order_by.is_empty() || !slot.spec.partition_by.is_empty())
-        .map(|slot| slot.spec.clone());
-    for slot in slots {
-        let values = evaluate_window(
-            &slot.name,
-            &slot.args,
-            &slot.spec,
-            &rows,
+    PreparedWindowPlan {
+        slots,
+        projections: rewritten,
+    }
+}
+
+fn execute_window_plan(
+    engine: &Engine,
+    plan: &PreparedWindowPlan,
+    mut input: SpillBuffer,
+    input_schema: &[String],
+    work_mem_bytes: usize,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SpillBuffer, SQLError> {
+    let mut schema = input_schema.to_vec();
+    for slot in &plan.slots {
+        input = execute_spilled_window_slot(
+            engine,
+            slot,
+            input,
+            &schema,
+            work_mem_bytes,
             params,
-            &hook,
-            &subquery_arena,
+            ctes,
         )?;
-        for (row, value) in rows.iter_mut().zip(values) {
-            row.insert(slot.key.clone(), value);
+        if !schema.contains(&slot.key) {
+            schema.push(slot.key.clone());
         }
     }
-    // PostgreSQL emits window-query rows in the order of the final
-    // windowing sort (partition keys, then the window ORDER BY) when
-    // no outer ORDER BY overrides it; an outer ORDER BY re-sorts later.
-    if let Some(spec) = output_order_spec {
-        let mut keyed: Vec<(Vec<Value>, Vec<Value>, ResultRow)> = rows
-            .into_iter()
-            .map(|row| -> Result<_, SQLError> {
-                let ctx = ScalarEvalContext::new(Some(&row), params)
+
+    Ok(input)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_spilled_window_slot(
+    engine: &Engine,
+    slot: &WindowSlot,
+    input: SpillBuffer,
+    schema: &[String],
+    work_mem_bytes: usize,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SpillBuffer, SQLError> {
+    use super::select::EngineExpressionEvaluator;
+
+    let scan: Box<dyn PhysicalOperator + '_> = Box::new(SpillScan::new(schema.to_vec(), input));
+    let mut keys = slot
+        .spec
+        .partition_by
+        .iter()
+        .cloned()
+        .map(|expr| SortKey {
+            expr,
+            descending: false,
+            nulls_first: None,
+        })
+        .collect::<Vec<_>>();
+    keys.extend(slot.spec.order_by.iter().map(|order| {
+        SortKey {
+            expr: order.expr.clone(),
+            descending: order.descending,
+            nulls_first: order
+                .nulls
+                .map(|nulls| matches!(nulls, uqa_sql::ast::NullsOrder::First)),
+        }
+    }));
+    let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+    let phase_budget = (work_mem_bytes / 3).max(1);
+    let mut sorted = ExternalSort::new(scan, keys, evaluator, None, phase_budget);
+    sorted.open().map_err(exec_to_sql_error)?;
+
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&hook));
+    let mut partition = IndexedSpill::new().map_err(exec_to_sql_error)?;
+    let mut partition_key: Option<Vec<Value>> = None;
+    let mut output = SpillBuffer::new(phase_budget);
+    let output_schema = RowSchema::new({
+        let mut columns = schema.to_vec();
+        if !columns.contains(&slot.key) {
+            columns.push(slot.key.clone());
+        }
+        columns
+    });
+
+    let execution = (|| -> Result<(), SQLError> {
+        while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
+            for row in batch.rows {
+                let context = ScalarEvalContext::new(Some(&row), params)
                     .with_function_hook(&hook)
                     .with_subquery_runner(&subquery_arena);
-                let partition: Vec<Value> = spec
+                let key = slot
+                    .spec
                     .partition_by
                     .iter()
-                    .map(|e| eval_scalar(e, &ctx))
+                    .map(|expression| eval_scalar(expression, &context))
                     .collect::<Result<Vec<_>, _>>()?;
-                let order: Vec<Value> = spec
-                    .order_by
-                    .iter()
-                    .map(|o| eval_scalar(&o.expr, &ctx))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok((partition, order, row))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        keyed.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| sort_keys(&a.1, &b.1, &spec.order_by))
-        });
-        rows = keyed.into_iter().map(|(_, _, row)| row).collect();
+                if partition_key
+                    .as_ref()
+                    .is_some_and(|current| current != &key)
+                {
+                    emit_window_partition(
+                        slot,
+                        &mut partition,
+                        &output_schema,
+                        &mut output,
+                        params,
+                        &hook,
+                        &subquery_arena,
+                    )?;
+                    partition = IndexedSpill::new().map_err(exec_to_sql_error)?;
+                }
+                partition_key = Some(key);
+                partition.push(&row).map_err(exec_to_sql_error)?;
+            }
+        }
+        if !partition.is_empty() {
+            emit_window_partition(
+                slot,
+                &mut partition,
+                &output_schema,
+                &mut output,
+                params,
+                &hook,
+                &subquery_arena,
+            )?;
+        }
+        Ok(())
+    })();
+    let close = sorted.close().map_err(exec_to_sql_error);
+    combine_execution_and_close(execution, close, "window sort")?;
+    Ok(output)
+}
+
+fn combine_execution_and_close(
+    execution: Result<(), SQLError>,
+    close: Result<(), SQLError>,
+    operator: &str,
+) -> Result<(), SQLError> {
+    match (execution, close) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(execution_error), Err(close_error)) => Err(SQLError::Internal(format!(
+            "{execution_error}; closing {operator} after failure also failed: {close_error}"
+        ))),
     }
-    Ok(WindowProjectionResult {
-        rows,
-        projections: rewritten,
+}
+
+fn exec_to_sql_error(error: uqa_execution::ExecError) -> SQLError {
+    match error {
+        uqa_execution::ExecError::SQL(error) => error,
+        uqa_execution::ExecError::Other(message) => SQLError::Internal(message),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_window_partition(
+    slot: &WindowSlot,
+    partition: &mut IndexedSpill,
+    schema: &RowSchema,
+    output: &mut SpillBuffer,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<(), SQLError> {
+    use uqa_sql::ast::FrameMode;
+
+    let len = partition.len();
+    if len == 0 {
+        return Ok(());
+    }
+    let name = slot.name.to_ascii_lowercase();
+    let first_row = partition.get(0).map_err(exec_to_sql_error)?;
+    let lag_lead = if matches!(name.as_str(), "lag" | "lead") {
+        let target = slot.args.first().ok_or_else(|| SQLError::BadArity {
+            name: name.clone(),
+            expected: ">=1".into(),
+            actual: 0,
+        })?;
+        let offset = match slot.args.get(1) {
+            None => 1,
+            Some(expression) => {
+                match evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)? {
+                    Value::Int(offset) => offset,
+                    value => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "lag/lead offset must be integer, got {value:?}"
+                        )))
+                    }
+                }
+            }
+        };
+        let default = slot.args.get(2).map_or(Ok(Value::Null), |expression| {
+            evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)
+        })?;
+        Some((target.clone(), offset, default))
+    } else {
+        None
+    };
+    let ntile_buckets = if name == "ntile" {
+        match slot.args.first() {
+            Some(expression) => {
+                match evaluate_on_row(expression, &first_row, params, eval_hook, subquery_runner)? {
+                    Value::Int(buckets) if buckets > 0 => {
+                        Some(u64::try_from(buckets).map_err(|_| {
+                            SQLError::TypeMismatch("ntile bucket count exceeds u64".into())
+                        })?)
+                    }
+                    value => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "ntile bucket count must be positive integer, got {value:?}"
+                        )))
+                    }
+                }
+            }
+            None => {
+                return Err(SQLError::BadArity {
+                    name: "ntile".into(),
+                    expected: "1".into(),
+                    actual: 0,
+                })
+            }
+        }
+    } else {
+        None
+    };
+
+    let aggregate_name =
+        matches!(name.as_str(), "sum" | "count" | "avg" | "min" | "max").then_some(name.as_str());
+    let frame = slot.spec.frame.as_ref().map_or_else(
+        || {
+            if slot.spec.order_by.is_empty() {
+                None
+            } else {
+                Some((
+                    FrameMode::Rows,
+                    ScalarFrameBound::UnboundedPreceding,
+                    ScalarFrameBound::CurrentRow,
+                ))
+            }
+        },
+        |frame| Some((frame.mode, frame.start.clone(), frame.end.clone())),
+    );
+    let mut whole_partition_value = None;
+    let mut prefix_accumulator = None;
+    if let Some(aggregate_name) = aggregate_name {
+        if frame.is_none() {
+            let mut accumulator = AggregateAccumulator::builtin(aggregate_name);
+            for index in 0..len {
+                let row = partition.get(index).map_err(exec_to_sql_error)?;
+                let value = window_aggregate_argument(
+                    &name,
+                    &slot.args,
+                    &row,
+                    params,
+                    eval_hook,
+                    subquery_runner,
+                )?;
+                accumulator.observe(&value)?;
+            }
+            whole_partition_value = Some(aggregate_value(aggregate_name, &accumulator)?);
+        } else if matches!(
+            frame,
+            Some((
+                FrameMode::Rows,
+                ScalarFrameBound::UnboundedPreceding,
+                ScalarFrameBound::CurrentRow
+            ))
+        ) {
+            prefix_accumulator = Some(AggregateAccumulator::builtin(aggregate_name));
+        }
+    }
+
+    let mut previous_order_key: Option<Vec<Value>> = None;
+    let mut rank = 0_i64;
+    let mut dense_rank = 0_i64;
+    let mut pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
+    for index in 0..len {
+        let mut row = partition.get(index).map_err(exec_to_sql_error)?;
+        let order_key = evaluate_order_key(
+            &slot.spec.order_by,
+            &row,
+            params,
+            eval_hook,
+            subquery_runner,
+        )?;
+        let value = match name.as_str() {
+            "row_number" => Value::Int(window_position(index, "row_number")?),
+            "rank" => {
+                if previous_order_key.as_ref() != Some(&order_key) {
+                    rank = window_position(index, "rank")?;
+                }
+                Value::Int(rank)
+            }
+            "dense_rank" => {
+                if previous_order_key.as_ref() != Some(&order_key) {
+                    dense_rank = dense_rank.checked_add(1).ok_or_else(|| {
+                        SQLError::TypeMismatch("dense_rank result overflow".into())
+                    })?;
+                }
+                Value::Int(dense_rank)
+            }
+            "lag" | "lead" => {
+                let (target, offset, default) = lag_lead.as_ref().ok_or_else(|| {
+                    SQLError::Internal("lag/lead metadata was not initialized".into())
+                })?;
+                let direction = if name == "lag" { -1_i128 } else { 1_i128 };
+                let target_index = i128::from(index) + direction * i128::from(*offset);
+                if target_index < 0 || target_index >= i128::from(len) {
+                    default.clone()
+                } else {
+                    let target_row = partition
+                        .get(u64::try_from(target_index).map_err(|_| {
+                            SQLError::Internal("lag/lead target index is out of range".into())
+                        })?)
+                        .map_err(exec_to_sql_error)?;
+                    evaluate_on_row(target, &target_row, params, eval_hook, subquery_runner)?
+                }
+            }
+            "ntile" => Value::Int(window_ntile(
+                index,
+                len,
+                ntile_buckets.ok_or_else(|| {
+                    SQLError::Internal("ntile metadata was not initialized".into())
+                })?,
+            )?),
+            "sum" | "count" | "avg" | "min" | "max" => {
+                if let Some(value) = whole_partition_value.as_ref() {
+                    value.clone()
+                } else if let Some(accumulator) = prefix_accumulator.as_mut() {
+                    let value = window_aggregate_argument(
+                        &name,
+                        &slot.args,
+                        &row,
+                        params,
+                        eval_hook,
+                        subquery_runner,
+                    )?;
+                    accumulator.observe(&value)?;
+                    aggregate_value(&name, accumulator)?
+                } else {
+                    let (mode, start, end) = frame.as_ref().ok_or_else(|| {
+                        SQLError::Internal(
+                            "framed aggregate window metadata was not initialized".into(),
+                        )
+                    })?;
+                    evaluate_spilled_window_frame(
+                        &name,
+                        &slot.args,
+                        &slot.spec,
+                        partition,
+                        index,
+                        *mode,
+                        start,
+                        end,
+                        params,
+                        eval_hook,
+                        subquery_runner,
+                    )?
+                }
+            }
+            other => {
+                return Err(SQLError::UnknownFunction(format!(
+                    "window function `{other}` is not supported"
+                )))
+            }
+        };
+        previous_order_key = Some(order_key);
+        row.insert(slot.key.clone(), value);
+        pending.push(row);
+        if pending.len() == uqa_execution::batch::DEFAULT_BATCH_SIZE {
+            output
+                .push(Batch::new(schema.clone(), std::mem::take(&mut pending)))
+                .map_err(exec_to_sql_error)?;
+            pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
+        }
+    }
+    if !pending.is_empty() {
+        output
+            .push(Batch::new(schema.clone(), pending))
+            .map_err(exec_to_sql_error)?;
+    }
+    Ok(())
+}
+
+fn evaluate_on_row(
+    expression: &ScalarExpr,
+    row: &ResultRow,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<Value, SQLError> {
+    let context = ScalarEvalContext::new(Some(row), params)
+        .with_function_hook(eval_hook)
+        .with_subquery_runner(subquery_runner);
+    eval_scalar(expression, &context)
+}
+
+fn evaluate_order_key(
+    order: &[ScalarOrder],
+    row: &ResultRow,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<Vec<Value>, SQLError> {
+    order
+        .iter()
+        .map(|order| evaluate_on_row(&order.expr, row, params, eval_hook, subquery_runner))
+        .collect()
+}
+
+fn window_position(index: u64, function: &str) -> Result<i64, SQLError> {
+    let position = index
+        .checked_add(1)
+        .ok_or_else(|| SQLError::TypeMismatch(format!("{function} result overflow")))?;
+    i64::try_from(position)
+        .map_err(|_| SQLError::TypeMismatch(format!("{function} result exceeds BIGINT")))
+}
+
+fn window_ntile(index: u64, rows: u64, buckets: u64) -> Result<i64, SQLError> {
+    if buckets == 0 {
+        return Err(SQLError::TypeMismatch(
+            "ntile bucket count must be positive".into(),
+        ));
+    }
+    let base = rows / buckets;
+    let extra = rows % buckets;
+    let larger_rows = if extra == 0 {
+        0
+    } else {
+        base.checked_add(1)
+            .and_then(|value| value.checked_mul(extra))
+            .ok_or_else(|| SQLError::TypeMismatch("ntile partition size overflow".into()))?
+    };
+    let bucket = if index < larger_rows {
+        index
+            .checked_div(
+                base.checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("ntile bucket width overflow".into()))?,
+            )
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| SQLError::TypeMismatch("ntile bucket number overflow".into()))?
+    } else if base == 0 {
+        extra.max(1)
+    } else {
+        extra
+            .checked_add(
+                (index - larger_rows)
+                    .checked_div(base)
+                    .ok_or_else(|| SQLError::TypeMismatch("ntile bucket width is zero".into()))?,
+            )
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| SQLError::TypeMismatch("ntile bucket number overflow".into()))?
+    };
+    i64::try_from(bucket)
+        .map_err(|_| SQLError::TypeMismatch("ntile bucket number exceeds BIGINT".into()))
+}
+
+fn window_aggregate_argument(
+    name: &str,
+    args: &[ScalarExpr],
+    row: &ResultRow,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<Value, SQLError> {
+    if name == "count" && (args.is_empty() || matches!(args, [ScalarExpr::Star])) {
+        return Ok(Value::Int(1));
+    }
+    args.first().map_or(Ok(Value::Int(1)), |expression| {
+        evaluate_on_row(expression, row, params, eval_hook, subquery_runner)
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_spilled_window_frame(
+    name: &str,
+    args: &[ScalarExpr],
+    spec: &ScalarWindowSpec,
+    partition: &mut IndexedSpill,
+    current: u64,
+    mode: uqa_sql::ast::FrameMode,
+    start_bound: &ScalarFrameBound,
+    end_bound: &ScalarFrameBound,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<Value, SQLError> {
+    let start = resolve_spilled_frame_bound(
+        partition,
+        current,
+        spec,
+        mode,
+        start_bound,
+        true,
+        params,
+        eval_hook,
+        subquery_runner,
+    )?;
+    let end = resolve_spilled_frame_bound(
+        partition,
+        current,
+        spec,
+        mode,
+        end_bound,
+        false,
+        params,
+        eval_hook,
+        subquery_runner,
+    )?;
+    let mut accumulator = AggregateAccumulator::builtin(name);
+    if start <= end && start < i128::from(partition.len()) && end >= 0 {
+        let max_index = partition.len().checked_sub(1).ok_or_else(|| {
+            SQLError::Internal("non-empty window frame lost its partition row".into())
+        })?;
+        let first = u64::try_from(start.max(0))
+            .map_err(|_| SQLError::TypeMismatch("window frame start is out of range".into()))?;
+        let last = u64::try_from(end.min(i128::from(max_index)))
+            .map_err(|_| SQLError::TypeMismatch("window frame end is out of range".into()))?;
+        for index in first..=last {
+            let row = partition.get(index).map_err(exec_to_sql_error)?;
+            let value =
+                window_aggregate_argument(name, args, &row, params, eval_hook, subquery_runner)?;
+            accumulator.observe(&value)?;
+        }
+    }
+    aggregate_value(name, &accumulator)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_spilled_frame_bound(
+    partition: &mut IndexedSpill,
+    current: u64,
+    spec: &ScalarWindowSpec,
+    mode: uqa_sql::ast::FrameMode,
+    bound: &ScalarFrameBound,
+    is_start: bool,
+    params: &[SQLParam],
+    eval_hook: &dyn uqa_sql::expr::EngineHook,
+    subquery_runner: &dyn ScalarSubqueryRunner,
+) -> Result<i128, SQLError> {
+    use uqa_sql::ast::FrameMode;
+
+    let len = i128::from(partition.len());
+    let current_i128 = i128::from(current);
+    if !matches!(mode, FrameMode::Range) {
+        let row = partition.get(current).map_err(exec_to_sql_error)?;
+        return Ok(match bound {
+            ScalarFrameBound::UnboundedPreceding => 0,
+            ScalarFrameBound::UnboundedFollowing => len - 1,
+            ScalarFrameBound::CurrentRow => current_i128,
+            ScalarFrameBound::Preceding(expression) => {
+                let offset =
+                    eval_frame_offset(expression, &row, params, eval_hook, subquery_runner)?;
+                (current_i128 - i128::from(offset)).max(0)
+            }
+            ScalarFrameBound::Following(expression) => {
+                let offset =
+                    eval_frame_offset(expression, &row, params, eval_hook, subquery_runner)?;
+                (current_i128 + i128::from(offset)).min(len - 1)
+            }
+        });
+    }
+
+    match bound {
+        ScalarFrameBound::UnboundedPreceding => Ok(0),
+        ScalarFrameBound::UnboundedFollowing => Ok(len - 1),
+        ScalarFrameBound::CurrentRow => {
+            let current_row = partition.get(current).map_err(exec_to_sql_error)?;
+            let current_key = evaluate_order_key(
+                &spec.order_by,
+                &current_row,
+                params,
+                eval_hook,
+                subquery_runner,
+            )?;
+            let mut peer = current;
+            if is_start {
+                while peer > 0 {
+                    let row = partition.get(peer - 1).map_err(exec_to_sql_error)?;
+                    if evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?
+                        != current_key
+                    {
+                        break;
+                    }
+                    peer -= 1;
+                }
+            } else {
+                while peer + 1 < partition.len() {
+                    let row = partition.get(peer + 1).map_err(exec_to_sql_error)?;
+                    if evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?
+                        != current_key
+                    {
+                        break;
+                    }
+                    peer += 1;
+                }
+            }
+            Ok(i128::from(peer))
+        }
+        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
+            let current_row = partition.get(current).map_err(exec_to_sql_error)?;
+            let offset =
+                eval_frame_offset(expression, &current_row, params, eval_hook, subquery_runner)?
+                    as f64;
+            let current_key = evaluate_order_key(
+                &spec.order_by,
+                &current_row,
+                params,
+                eval_hook,
+                subquery_runner,
+            )?;
+            let current_value = numeric_value(current_key.first()).ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "RANGE offset frame requires a numeric first ORDER BY key".into(),
+                )
+            })?;
+            let target = if matches!(bound, ScalarFrameBound::Preceding(_)) {
+                current_value - offset
+            } else {
+                current_value + offset
+            };
+            let mut resolved = if is_start { len } else { -1 };
+            for index in 0..partition.len() {
+                let row = partition.get(index).map_err(exec_to_sql_error)?;
+                let key =
+                    evaluate_order_key(&spec.order_by, &row, params, eval_hook, subquery_runner)?;
+                let Some(value) = numeric_value(key.first()) else {
+                    continue;
+                };
+                if is_start {
+                    if value >= target {
+                        resolved = i128::from(index);
+                        break;
+                    }
+                } else if value <= target {
+                    resolved = i128::from(index);
+                } else {
+                    break;
+                }
+            }
+            Ok(resolved)
+        }
+    }
+}
+
+fn numeric_value(value: Option<&Value>) -> Option<f64> {
+    match value {
+        Some(Value::Int(value)) => Some(*value as f64),
+        Some(Value::Float(value)) => Some(*value),
+        Some(Value::Decimal(value)) => value.to_f64(),
+        _ => None,
+    }
 }
 
 fn expr_has_window(expr: &ScalarExpr) -> bool {
@@ -371,532 +1038,6 @@ fn rewrite_window_order_by(
     (rewritten, changed)
 }
 
-fn evaluate_window(
-    name: &str,
-    args: &[ScalarExpr],
-    spec: &ScalarWindowSpec,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-) -> Result<Vec<Value>, SQLError> {
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut partitions: BTreeMap<Vec<Value>, Vec<usize>> = BTreeMap::new();
-    for (i, row) in rows.iter().enumerate() {
-        let ctx = ScalarEvalContext::new(Some(row), params)
-            .with_function_hook(eval_hook)
-            .with_subquery_runner(subquery_runner);
-        let key: Vec<Value> = spec
-            .partition_by
-            .iter()
-            .map(|e| eval_scalar(e, &ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        partitions.entry(key).or_default().push(i);
-    }
-    let mut output = vec![Value::Null; rows.len()];
-    let lower = name.to_ascii_lowercase();
-    for (_, indices) in partitions {
-        let mut indexed: Vec<(usize, Vec<Value>)> = indices
-            .into_iter()
-            .map(|i| -> Result<_, SQLError> {
-                let ctx = ScalarEvalContext::new(Some(&rows[i]), params)
-                    .with_function_hook(eval_hook)
-                    .with_subquery_runner(subquery_runner);
-                let key: Vec<Value> = spec
-                    .order_by
-                    .iter()
-                    .map(|o| eval_scalar(&o.expr, &ctx))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok((i, key))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        indexed.sort_by(|a, b| sort_keys(&a.1, &b.1, &spec.order_by));
-
-        match lower.as_str() {
-            "row_number" => {
-                for (rank, (orig, _)) in indexed.iter().enumerate() {
-                    output[*orig] = Value::Int((rank + 1) as i64);
-                }
-            }
-            "rank" => {
-                let mut last_key: Option<Vec<Value>> = None;
-                let mut last_rank = 0i64;
-                for (i, (orig, key)) in indexed.iter().enumerate() {
-                    let rank = if last_key.as_ref() == Some(key) {
-                        last_rank
-                    } else {
-                        last_key = Some(key.clone());
-                        last_rank = (i + 1) as i64;
-                        last_rank
-                    };
-                    output[*orig] = Value::Int(rank);
-                }
-            }
-            "dense_rank" => {
-                let mut last_key: Option<Vec<Value>> = None;
-                let mut last_rank = 0i64;
-                for (orig, key) in &indexed {
-                    if last_key.as_ref() != Some(key) {
-                        last_rank += 1;
-                        last_key = Some(key.clone());
-                    }
-                    output[*orig] = Value::Int(last_rank);
-                }
-            }
-            "lag" | "lead" => {
-                let direction: i64 = if lower == "lag" { -1 } else { 1 };
-                let target_expr = args.first().ok_or_else(|| SQLError::BadArity {
-                    name: lower.clone(),
-                    expected: ">=1".into(),
-                    actual: 0,
-                })?;
-                let offset_value = match args.get(1) {
-                    None => 1i64,
-                    Some(expr) => {
-                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
-                            .with_function_hook(eval_hook)
-                            .with_subquery_runner(subquery_runner);
-                        match eval_scalar(expr, &ctx)? {
-                            Value::Int(n) => n,
-                            other => {
-                                return Err(SQLError::TypeMismatch(format!(
-                                    "lag/lead offset must be integer, got {other:?}"
-                                )));
-                            }
-                        }
-                    }
-                };
-                let default_value = match args.get(2) {
-                    None => Value::Null,
-                    Some(expr) => {
-                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
-                            .with_function_hook(eval_hook)
-                            .with_subquery_runner(subquery_runner);
-                        eval_scalar(expr, &ctx)?
-                    }
-                };
-                for (i, (orig, _)) in indexed.iter().enumerate() {
-                    let target_idx = i as i64 + direction * offset_value;
-                    let value = if target_idx < 0 || target_idx as usize >= indexed.len() {
-                        default_value.clone()
-                    } else {
-                        let target_orig = indexed[target_idx as usize].0;
-                        let ctx = ScalarEvalContext::new(Some(&rows[target_orig]), params)
-                            .with_function_hook(eval_hook)
-                            .with_subquery_runner(subquery_runner);
-                        eval_scalar(target_expr, &ctx)?
-                    };
-                    output[*orig] = value;
-                }
-            }
-            "ntile" => {
-                let n = match args.first() {
-                    Some(expr) => {
-                        let ctx = ScalarEvalContext::new(Some(&rows[indexed[0].0]), params)
-                            .with_function_hook(eval_hook)
-                            .with_subquery_runner(subquery_runner);
-                        match eval_scalar(expr, &ctx)? {
-                            Value::Int(n) if n > 0 => n,
-                            other => {
-                                return Err(SQLError::TypeMismatch(format!(
-                                    "ntile bucket count must be positive integer, got {other:?}"
-                                )));
-                            }
-                        }
-                    }
-                    None => {
-                        return Err(SQLError::BadArity {
-                            name: "ntile".into(),
-                            expected: "1".into(),
-                            actual: 0,
-                        });
-                    }
-                };
-                let len = indexed.len() as i64;
-                let base = len / n;
-                let extra = len % n;
-                let mut bucket = 1i64;
-                let mut consumed_in_bucket = 0i64;
-                let mut bucket_size = if 1 <= extra { base + 1 } else { base };
-                for (orig, _) in &indexed {
-                    if bucket_size == 0 {
-                        output[*orig] = Value::Int(bucket);
-                        bucket += 1;
-                        continue;
-                    }
-                    output[*orig] = Value::Int(bucket);
-                    consumed_in_bucket += 1;
-                    if consumed_in_bucket == bucket_size {
-                        bucket += 1;
-                        consumed_in_bucket = 0;
-                        bucket_size = if bucket <= extra { base + 1 } else { base };
-                    }
-                }
-            }
-            "sum" | "count" | "avg" | "min" | "max" => {
-                evaluate_window_aggregate(
-                    &lower,
-                    args,
-                    spec,
-                    rows,
-                    params,
-                    &indexed,
-                    &mut output,
-                    eval_hook,
-                    subquery_runner,
-                )?;
-            }
-            other => {
-                return Err(SQLError::UnknownFunction(format!(
-                    "window function `{other}` is not supported"
-                )));
-            }
-        }
-    }
-    Ok(output)
-}
-
-/// Evaluate an aggregate window function (SUM/COUNT/AVG/MIN/MAX) over
-/// each row's frame. Matches UQA behavior for `_compute_framed_aggregate` in
-/// uqa/execution/relational.py.
-#[allow(clippy::too_many_arguments)]
-fn evaluate_window_aggregate(
-    name: &str,
-    args: &[ScalarExpr],
-    spec: &ScalarWindowSpec,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    indexed: &[(usize, Vec<Value>)],
-    output: &mut [Value],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-) -> Result<(), SQLError> {
-    use uqa_sql::ast::FrameMode;
-    let arg_expr = args.first();
-    let n = indexed.len();
-    let materialized: Vec<Value> = match arg_expr {
-        Some(expr) => indexed
-            .iter()
-            .map(|(orig, _)| {
-                let ctx = ScalarEvalContext::new(Some(&rows[*orig]), params)
-                    .with_function_hook(eval_hook)
-                    .with_subquery_runner(subquery_runner);
-                eval_scalar(expr, &ctx)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        None => vec![Value::Int(1); n],
-    };
-    let order_keys: Vec<Vec<Value>> = indexed.iter().map(|(_, k)| k.clone()).collect();
-    let (mode, start_bound, end_bound) = match &spec.frame {
-        Some(f) => (f.mode, f.start.clone(), f.end.clone()),
-        None if spec.order_by.is_empty() => {
-            // No ORDER BY and no explicit frame: aggregate over the
-            // whole partition.
-            let mut acc = AggregateAccumulator::builtin(name);
-            for v in &materialized {
-                acc.observe(v)?;
-            }
-            let result = aggregate_value(name, &acc)?;
-            for (orig, _) in indexed {
-                output[*orig] = result.clone();
-            }
-            return Ok(());
-        }
-        None => (
-            FrameMode::Rows,
-            ScalarFrameBound::UnboundedPreceding,
-            ScalarFrameBound::CurrentRow,
-        ),
-    };
-    if matches!(mode, FrameMode::Rows)
-        && matches!(start_bound, ScalarFrameBound::UnboundedPreceding)
-        && matches!(end_bound, ScalarFrameBound::CurrentRow)
-    {
-        if let Some(values) = prefix_numeric_window_values(name, &materialized) {
-            for ((orig, _), value) in indexed.iter().zip(values) {
-                output[*orig] = value;
-            }
-            return Ok(());
-        }
-        let mut acc = AggregateAccumulator::builtin(name);
-        for (i, (orig, _)) in indexed.iter().enumerate() {
-            acc.observe(&materialized[i])?;
-            output[*orig] = aggregate_value(name, &acc)?;
-        }
-        return Ok(());
-    }
-    for (i, (orig, _)) in indexed.iter().enumerate() {
-        let (start, end) = match mode {
-            FrameMode::Range => (
-                resolve_range_frame_index(
-                    i,
-                    n,
-                    &order_keys,
-                    &start_bound,
-                    /* is_start = */ true,
-                    rows,
-                    params,
-                    eval_hook,
-                    subquery_runner,
-                )?,
-                resolve_range_frame_index(
-                    i,
-                    n,
-                    &order_keys,
-                    &end_bound,
-                    false,
-                    rows,
-                    params,
-                    eval_hook,
-                    subquery_runner,
-                )?,
-            ),
-            // GROUPS mode is rare; treat as ROWS (offset interpreted as
-            // peer groups would require extra plumbing; matches the
-            // fallback which also goes through `_resolve_frame_index`).
-            FrameMode::Rows | FrameMode::Groups => (
-                resolve_rows_frame_index(
-                    i,
-                    n,
-                    &start_bound,
-                    rows,
-                    params,
-                    indexed,
-                    eval_hook,
-                    subquery_runner,
-                )?,
-                resolve_rows_frame_index(
-                    i,
-                    n,
-                    &end_bound,
-                    rows,
-                    params,
-                    indexed,
-                    eval_hook,
-                    subquery_runner,
-                )?,
-            ),
-        };
-        let mut acc = AggregateAccumulator::builtin(name);
-        if start <= end && start < n as i64 && end >= 0 {
-            let lo = start.max(0) as usize;
-            let hi = (end as usize).min(n.saturating_sub(1));
-            for v in &materialized[lo..=hi] {
-                acc.observe(v)?;
-            }
-        }
-        output[*orig] = aggregate_value(name, &acc)?;
-    }
-    Ok(())
-}
-
-fn prefix_numeric_window_values(name: &str, values: &[Value]) -> Option<Vec<Value>> {
-    match name {
-        "count" => {
-            let mut count = 0i64;
-            let mut out = Vec::with_capacity(values.len());
-            for value in values {
-                if !matches!(value, Value::Null) {
-                    count += 1;
-                }
-                out.push(Value::Int(count));
-            }
-            Some(out)
-        }
-        "sum" => {
-            let mut count = 0i64;
-            let mut sum = 0.0f64;
-            let mut all_int = true;
-            let mut out = Vec::with_capacity(values.len());
-            for value in values {
-                match value {
-                    Value::Null => {}
-                    Value::Int(n) => {
-                        count += 1;
-                        sum += *n as f64;
-                    }
-                    Value::Float(f) => {
-                        count += 1;
-                        sum += *f;
-                        all_int = false;
-                    }
-                    _ => return None,
-                }
-                if count == 0 {
-                    out.push(Value::Null);
-                } else if all_int {
-                    out.push(Value::Int(sum as i64));
-                } else {
-                    out.push(Value::Float(sum));
-                }
-            }
-            Some(out)
-        }
-        "avg" => {
-            let mut count = 0i64;
-            let mut sum = 0.0f64;
-            let mut out = Vec::with_capacity(values.len());
-            for value in values {
-                match value {
-                    Value::Null => {}
-                    Value::Int(n) => {
-                        count += 1;
-                        sum += *n as f64;
-                    }
-                    Value::Float(f) => {
-                        count += 1;
-                        sum += *f;
-                    }
-                    _ => return None,
-                }
-                if count == 0 {
-                    out.push(Value::Null);
-                } else {
-                    out.push(Value::Float(sum / count as f64));
-                }
-            }
-            Some(out)
-        }
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_rows_frame_index(
-    current: usize,
-    n: usize,
-    bound: &ScalarFrameBound,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    indexed: &[(usize, Vec<Value>)],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-) -> Result<i64, SQLError> {
-    let n = n as i64;
-    let cur = current as i64;
-    Ok(match bound {
-        ScalarFrameBound::UnboundedPreceding => 0,
-        ScalarFrameBound::UnboundedFollowing => n - 1,
-        ScalarFrameBound::CurrentRow => cur,
-        ScalarFrameBound::Preceding(e) => {
-            let off = eval_frame_offset(
-                e,
-                &rows[indexed[current].0],
-                params,
-                eval_hook,
-                subquery_runner,
-            )?;
-            (cur - off).max(0)
-        }
-        ScalarFrameBound::Following(e) => {
-            let off = eval_frame_offset(
-                e,
-                &rows[indexed[current].0],
-                params,
-                eval_hook,
-                subquery_runner,
-            )?;
-            (cur + off).min(n - 1)
-        }
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_range_frame_index(
-    current: usize,
-    n: usize,
-    order_keys: &[Vec<Value>],
-    bound: &ScalarFrameBound,
-    is_start: bool,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-) -> Result<i64, SQLError> {
-    let key_at = |idx: usize| -> Option<&Value> { order_keys.get(idx).and_then(|k| k.first()) };
-    Ok(match bound {
-        ScalarFrameBound::UnboundedPreceding => 0,
-        ScalarFrameBound::UnboundedFollowing => (n as i64) - 1,
-        ScalarFrameBound::CurrentRow => {
-            let cur_val = key_at(current).cloned().unwrap_or(Value::Null);
-            if is_start {
-                let mut idx = current;
-                while idx > 0 && matches!(key_at(idx - 1), Some(v) if v == &cur_val) {
-                    idx -= 1;
-                }
-                idx as i64
-            } else {
-                let mut idx = current;
-                while idx + 1 < n && matches!(key_at(idx + 1), Some(v) if v == &cur_val) {
-                    idx += 1;
-                }
-                idx as i64
-            }
-        }
-        ScalarFrameBound::Preceding(e) | ScalarFrameBound::Following(e) => {
-            let off = eval_frame_offset(e, &rows[current], params, eval_hook, subquery_runner)?;
-            let cur_val = match key_at(current) {
-                Some(Value::Int(n)) => *n as f64,
-                Some(Value::Float(f)) => *f,
-                _ => {
-                    return Ok(if matches!(bound, ScalarFrameBound::Preceding(_)) {
-                        if is_start {
-                            0
-                        } else {
-                            current as i64
-                        }
-                    } else if is_start {
-                        current as i64
-                    } else {
-                        (n as i64) - 1
-                    });
-                }
-            };
-            let target = if matches!(bound, ScalarFrameBound::Preceding(_)) {
-                cur_val - off as f64
-            } else {
-                cur_val + off as f64
-            };
-            if is_start {
-                let mut idx: i64 = -1;
-                for i in 0..n {
-                    let val = match key_at(i) {
-                        Some(Value::Int(n)) => *n as f64,
-                        Some(Value::Float(f)) => *f,
-                        _ => continue,
-                    };
-                    if val >= target {
-                        idx = i as i64;
-                        break;
-                    }
-                }
-                if idx < 0 {
-                    n as i64
-                } else {
-                    idx
-                }
-            } else {
-                let mut idx: i64 = -1;
-                for i in 0..n {
-                    let val = match key_at(i) {
-                        Some(Value::Int(n)) => *n as f64,
-                        Some(Value::Float(f)) => *f,
-                        _ => continue,
-                    };
-                    if val <= target {
-                        idx = i as i64;
-                    } else {
-                        break;
-                    }
-                }
-                idx
-            }
-        }
-    })
-}
-
 fn eval_frame_offset(
     expr: &ScalarExpr,
     row: &ResultRow,
@@ -908,82 +1049,92 @@ fn eval_frame_offset(
         .with_function_hook(eval_hook)
         .with_subquery_runner(subquery_runner);
     match eval_scalar(expr, &ctx)? {
-        Value::Int(n) => Ok(n),
-        Value::Float(f) => Ok(f as i64),
+        Value::Int(offset) if offset >= 0 => Ok(offset),
+        Value::Float(offset) => float_frame_offset(offset),
         other => Err(SQLError::TypeMismatch(format!(
-            "frame offset must be numeric, got {other:?}"
+            "frame offset must be a non-negative integer, got {other:?}"
         ))),
     }
 }
 
-fn sort_keys(a: &[Value], b: &[Value], order: &[ScalarOrder]) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    use uqa_sql::ast::NullsOrder;
-    for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {
-        let descending = order.get(i).is_some_and(|o| o.descending);
-        // Resolve NULLS FIRST/LAST. Default mirrors PostgreSQL: ASC maps
-        // to NULLS LAST, DESC maps to NULLS FIRST.
-        let nulls_first = match order.get(i).and_then(|o| o.nulls) {
-            Some(NullsOrder::First) => true,
-            Some(NullsOrder::Last) => false,
-            None => descending,
-        };
-        let a_null = matches!(av, Value::Null);
-        let b_null = matches!(bv, Value::Null);
-        if a_null || b_null {
-            let null_cmp = match (a_null, b_null) {
-                (true, true) => Ordering::Equal,
-                (true, false) => {
-                    if nulls_first {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    }
-                }
-                (false, true) => {
-                    if nulls_first {
-                        Ordering::Greater
-                    } else {
-                        Ordering::Less
-                    }
-                }
-                (false, false) => unreachable!(),
-            };
-            if null_cmp != Ordering::Equal {
-                return null_cmp;
-            }
-            continue;
-        }
-        let mut cmp = compare_values(av, bv);
-        if descending {
-            cmp = cmp.reverse();
-        }
-        if cmp != Ordering::Equal {
-            return cmp;
-        }
+fn float_frame_offset(offset: f64) -> Result<i64, SQLError> {
+    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    if !offset.is_finite() || offset < 0.0 || offset.fract() != 0.0 || offset >= I64_UPPER_EXCLUSIVE
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "frame offset must be a finite non-negative integer within BIGINT range, got {offset}"
+        )));
     }
-    Ordering::Equal
+    Ok(offset as i64)
 }
 
-fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    match (a, b) {
-        (Value::Null, Value::Null) => Ordering::Equal,
-        (Value::Null, _) => Ordering::Less,
-        (_, Value::Null) => Ordering::Greater,
-        (Value::Int(x), Value::Int(y)) => x.cmp(y),
-        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
-        (Value::Temporal(x), Value::Str(y)) => x
-            .parse_same_kind(y)
-            .map_or(Ordering::Equal, |parsed| x.cmp(&parsed)),
-        (Value::Str(x), Value::Temporal(y)) => y
-            .parse_same_kind(x)
-            .map_or(Ordering::Equal, |parsed| parsed.cmp(y)),
-        _ => Ordering::Equal,
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn floating_frame_offset_rejects_invalid_and_out_of_range_values() {
+        assert_eq!(float_frame_offset(42.0).unwrap(), 42);
+        for value in [
+            f64::NAN,
+            f64::INFINITY,
+            -1.0,
+            1.5,
+            9_223_372_036_854_775_808.0,
+        ] {
+            assert!(float_frame_offset(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn huge_partition_stays_disk_backed_with_a_tiny_output_budget() {
+        let engine = Engine::new();
+        let ctes = CteScope::new();
+        let hook = ScopedEngineHook::new(&engine, &ctes);
+        let subqueries = Vec::new();
+        let arena = PlanSubqueryArena::new(&subqueries, Some(&hook));
+        let mut partition = IndexedSpill::new().unwrap();
+        for id in 0..4096_i64 {
+            partition
+                .push(&BTreeMap::from([
+                    ("id".into(), Value::Int(id)),
+                    ("v".into(), Value::Int(1)),
+                ]))
+                .unwrap();
+        }
+        assert_eq!(partition.len(), 4096);
+        assert!(partition.encoded_bytes() > 4096 * 8);
+
+        let slot = WindowSlot {
+            key: "total".into(),
+            name: "sum".into(),
+            args: vec![ScalarExpr::Column("v".into())],
+            spec: ScalarWindowSpec {
+                partition_by: Vec::new(),
+                order_by: Vec::new(),
+                frame: None,
+            },
+        };
+        let schema = RowSchema::new(vec!["id".into(), "v".into(), "total".into()]);
+        let mut output = SpillBuffer::new(1);
+        emit_window_partition(
+            &slot,
+            &mut partition,
+            &schema,
+            &mut output,
+            &[],
+            &hook,
+            &arena,
+        )
+        .unwrap();
+
+        assert!(output.has_spilled());
+        assert!(output.in_memory_bytes() <= output.budget_bytes());
+        assert_eq!(output.rows(), 4096);
+        for row in output.drain_rows().unwrap() {
+            assert_eq!(row.unwrap().get("total"), Some(&Value::Int(4096)));
+        }
     }
 }

@@ -14,373 +14,544 @@ use std::sync::Arc;
 
 use uqa_core::{DecimalValue, Value};
 use uqa_execution::{
-    eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, ScalarSubqueryRunner,
+    eval_scalar, AggregateExecutor, Batch, ExecResult, ExternalSort, PhysicalOperator, RowSchema,
+    ScalarEvalContext, ScalarExpr, ScalarOrder, SortKey, SpillBuffer, SpillScan,
 };
 use uqa_planner::{ProjectionPlan, QueryBlockPlan};
-use uqa_sql::ast::BinaryOp;
-use uqa_sql::expr::RowLookup;
 use uqa_sql::{ResultRow, SQLError, SQLParam};
-use uqa_storage::document_store::Document;
 
-use crate::{Engine, SQLAggregateFunction, SQLAggregateState, ScoredEntry};
+use crate::{Engine, SQLAggregateFunction, SQLAggregateState};
 
 use super::scalar::PlanSubqueryArena;
 use super::{core_value_to_json, projection_columns, CteScope, ScopedEngineHook};
 
-const AGGREGATE_SPILL_ROWS: usize = 4096;
+const AGGREGATE_MERGE_FAN_IN: usize = 16;
 
-pub(super) fn aggregate_join_rows(
-    engine: &Engine,
-    stmt: &QueryBlockPlan,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    // GROUPING SETS / ROLLUP / CUBE: run the aggregator once per
-    // grouping set, then concatenate the result rows. Columns that
-    // aren't in the active grouping set come out as NULL.
-    if !stmt.grouping_sets.is_empty() {
-        let mut combined: Vec<ResultRow> = Vec::new();
-        let sets = stmt.grouping_sets.clone();
-        let labels = projection_columns(&stmt.projections);
-        for set in sets {
-            let mut sub = stmt.clone();
-            sub.group_by.clone_from(&set);
-            sub.grouping_sets = Vec::new();
-            let part = aggregate_join_rows_relaxed(engine, &sub, rows, params, ctes)?;
-            // Columns from the parent projection that aren't in the
-            // active grouping set get filled with NULL on every row.
-            for mut row in part {
-                for (idx, proj) in stmt.projections.iter().enumerate() {
-                    let label = labels[idx].clone();
-                    if contains_aggregate(engine, &proj.expr) {
-                        continue;
-                    }
-                    let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
-                    if !in_set {
-                        row.insert(label, Value::Null);
-                    }
-                }
-                combined.push(row);
-            }
-        }
-        return Ok(combined);
-    }
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
-    let agg_targets = aggregate_exprs(engine, &stmt.projections);
-
-    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-
-    for row in rows {
-        let ctx = ScalarEvalContext::new(Some(row), params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&subquery_arena);
-        let group_values: Vec<Value> = stmt
-            .group_by
-            .iter()
-            .map(|g| eval_scalar(g, &ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
-        for (i, expr) in agg_targets.iter().enumerate() {
-            let ScalarExpr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } = expr
-            else {
-                continue;
-            };
-            if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, &ctx)?);
-                if !keep {
-                    continue;
-                }
-            }
-            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
-        }
-    }
-
-    if groups.is_empty() && stmt.group_by.is_empty() {
-        groups.insert(
-            Vec::new(),
-            (
-                new_aggregate_accumulators(engine, &agg_targets)?,
-                Vec::new(),
-            ),
-        );
-    }
-
-    let mut out = Vec::with_capacity(groups.len());
-    let labels = projection_columns(&stmt.projections);
-    for (_, (accs, group_values)) in groups {
-        let mut row = ResultRow::new();
-        let group_row = group_context_row(stmt, &group_values);
-        let mut agg_idx = 0;
-        for (idx, proj) in stmt.projections.iter().enumerate() {
-            let label = labels[idx].clone();
-            if contains_aggregate(engine, &proj.expr) {
-                let resolved =
-                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
-                row.insert(label, eval_scalar(&resolved, &ctx)?);
-            } else {
-                if !expr_references_columns(&proj.expr) {
-                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                        .with_function_hook(&hook)
-                        .with_subquery_runner(&subquery_arena);
-                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
-                    continue;
-                }
-                let mut placed = false;
-                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if exprs_match(&proj.expr, g_expr) {
-                        row.insert(label.clone(), g_value.clone());
-                        placed = true;
-                        break;
-                    }
-                }
-                if !placed {
-                    return Err(SQLError::Unsupported(format!(
-                        "non-aggregated projection `{label}` must appear in GROUP BY"
-                    )));
-                }
-            }
-        }
-        // HAVING filter: evaluated against a synthetic row that
-        // contains the group-by column values plus every projection
-        // alias. Aggregate references inside the HAVING expression
-        // resolve through `eval_aggregate_in_having` which walks the
-        // group rows to recompute the aggregate without re-projecting.
-        if let Some(having_expr) = stmt.having.as_ref() {
-            let resolved = resolve_having(
-                engine,
-                having_expr,
-                &row,
-                stmt,
-                &accs,
-                &group_values,
-                params,
-            )?;
-            // Evaluate HAVING against the group-by column values merged with the projection
-            // aliases, so it can reference grouped columns that are not themselves projected.
-            let mut having_row = group_row.clone();
-            for (key, value) in &row {
-                having_row.insert(key.clone(), value.clone());
-            }
-            let ctx = ScalarEvalContext::new(Some(&having_row), params)
-                .with_function_hook(&hook)
-                .with_subquery_runner(&subquery_arena);
-            let kept = uqa_sql::expr::truthy(&eval_scalar(&resolved, &ctx)?);
-            if !kept {
-                continue;
-            }
-        }
-        out.push(row);
-    }
-    Ok(out)
+/// Engine aggregate adapter with a strict encoded-byte input budget.
+///
+/// Input is fanned out once per grouping set into disk-backed buffers. Each
+/// buffer is externally sorted by its active grouping key and then folded one
+/// group at a time, so neither the complete input nor a high-cardinality group
+/// map is retained in memory.
+pub(super) struct PhysicalAggregateExecutor<'a> {
+    engine: &'a Engine,
+    statement: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope,
+    input_schema: Vec<String>,
+    output_schema: RowSchema,
+    work_mem_bytes: usize,
+    inputs: Vec<SpillBuffer>,
 }
 
-/// Walk a HAVING expression and replace each aggregate-function
-/// reference with its computed value from the group's accumulators.
-/// Non-aggregate sub-expressions (column refs, comparisons, AND / OR)
-/// pass through untouched so the caller can `eval` the result.
+impl<'a> PhysicalAggregateExecutor<'a> {
+    pub(super) fn new(
+        engine: &'a Engine,
+        statement: &'a QueryBlockPlan,
+        params: &'a [SQLParam],
+        ctes: &'a CteScope,
+        schema: Vec<String>,
+        work_mem_bytes: usize,
+    ) -> Self {
+        let set_count = statement.grouping_sets.len().max(1);
+        // One third is reserved for all retained input tails, one third for
+        // external sorting, and one third for the active group's aggregate
+        // state. Integer division is intentionally clamped to one byte so a
+        // tiny test budget still exercises the disk path.
+        let input_budget = (work_mem_bytes / 3 / set_count).max(1);
+        let inputs = (0..set_count)
+            .map(|_| SpillBuffer::new(input_budget))
+            .collect();
+        Self {
+            engine,
+            statement,
+            params,
+            ctes,
+            input_schema: schema,
+            output_schema: RowSchema::new(projection_columns(&statement.projections)),
+            work_mem_bytes,
+            inputs,
+        }
+    }
+}
+
+impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
+    fn consume(&mut self, batch: Batch) -> ExecResult<()> {
+        let Some((last, prefix)) = self.inputs.split_last_mut() else {
+            return Err(uqa_execution::ExecError::Other(
+                "aggregate input fanout is empty".into(),
+            ));
+        };
+        for input in prefix {
+            input.push(batch.clone())?;
+        }
+        last.push(batch)?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> ExecResult<SpillBuffer> {
+        let output_budget = (self.work_mem_bytes / 3).max(1);
+        let mut output = SpillBuffer::new(output_budget);
+        let mut expected_output_rows = 0_usize;
+        let inputs = std::mem::take(&mut self.inputs);
+        for (set_index, input) in inputs.into_iter().enumerate() {
+            let (mut statement, relaxed) = if self.statement.grouping_sets.is_empty() {
+                (self.statement.clone(), false)
+            } else {
+                let mut statement = self.statement.clone();
+                statement
+                    .group_by
+                    .clone_from(&self.statement.grouping_sets[set_index]);
+                statement.grouping_sets.clear();
+                (statement, true)
+            };
+            // ORDER BY/LIMIT belong after aggregation, never inside this
+            // group-folding pass.
+            statement.order_by.clear();
+            statement.limit = None;
+            statement.offset = None;
+            let mut set_output = aggregate_spilled_set(
+                self.engine,
+                &statement,
+                input,
+                &self.input_schema,
+                &self.output_schema,
+                self.params,
+                self.ctes,
+                output_budget,
+                relaxed,
+            )?;
+            let expected_rows = set_output.rows();
+            expected_output_rows =
+                expected_output_rows
+                    .checked_add(expected_rows)
+                    .ok_or_else(|| {
+                        uqa_execution::ExecError::Other(
+                            "aggregate output row count overflow".into(),
+                        )
+                    })?;
+            let mut copied_rows = 0_usize;
+            for batch in set_output.drain()? {
+                let batch = batch?;
+                copied_rows = copied_rows.checked_add(batch.rows.len()).ok_or_else(|| {
+                    uqa_execution::ExecError::Other("aggregate copied row count overflow".into())
+                })?;
+                output.push(batch)?;
+            }
+            if copied_rows != expected_rows {
+                return Err(uqa_execution::ExecError::Other(format!(
+                    "aggregate spill drain returned {copied_rows} rows, expected {expected_rows}"
+                )));
+            }
+        }
+        if output.rows() != expected_output_rows {
+            return Err(uqa_execution::ExecError::Other(format!(
+                "aggregate output retained {} rows, expected {expected_output_rows}",
+                output.rows()
+            )));
+        }
+        Ok(output)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn aggregate_spilled_set(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    input: SpillBuffer,
+    input_schema: &[String],
+    output_schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    phase_budget: usize,
+    relaxed: bool,
+) -> Result<SpillBuffer, SQLError> {
+    use super::select::EngineExpressionEvaluator;
+
+    let scan: Box<dyn PhysicalOperator + '_> =
+        Box::new(SpillScan::new(input_schema.to_vec(), input));
+    let keys = statement
+        .group_by
+        .iter()
+        .cloned()
+        .map(|expr| SortKey {
+            expr,
+            descending: false,
+            nulls_first: None,
+        })
+        .collect();
+    let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+    let mut sorted = ExternalSort::new(scan, keys, evaluator, None, phase_budget);
+    sorted.open().map_err(exec_to_sql_error)?;
+
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(&hook));
+    let aggregate_targets = aggregate_exprs(engine, &statement.projections);
+    let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
+    let mut current_key: Option<Vec<Value>> = None;
+    let mut current_accumulators: Vec<AggregateAccumulator> = Vec::new();
+    let mut output = SpillBuffer::new(phase_budget);
+    let mut pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
+
+    let execution = (|| -> Result<(), SQLError> {
+        while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
+            for row in batch.rows {
+                let context = ScalarEvalContext::new(Some(&row), params)
+                    .with_function_hook(&hook)
+                    .with_subquery_runner(&subquery_arena);
+                let key = statement
+                    .group_by
+                    .iter()
+                    .map(|expr| eval_scalar(expr, &context))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if current_key.as_ref().is_some_and(|current| current != &key) {
+                    let finished_key = current_key.take().ok_or_else(|| {
+                        SQLError::Internal("streaming aggregate lost its current group key".into())
+                    })?;
+                    if let Some(row) = finish_stream_group(
+                        engine,
+                        statement,
+                        std::mem::take(&mut current_accumulators),
+                        &finished_key,
+                        params,
+                        ctes,
+                        relaxed,
+                    )? {
+                        pending.push(row);
+                        if pending.len() == uqa_execution::batch::DEFAULT_BATCH_SIZE {
+                            output
+                                .push(Batch::new(
+                                    output_schema.clone(),
+                                    std::mem::take(&mut pending),
+                                ))
+                                .map_err(exec_to_sql_error)?;
+                            pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
+                        }
+                    }
+                }
+                if current_key.is_none() {
+                    current_key = Some(key);
+                    current_accumulators = new_aggregate_accumulators_with_budget(
+                        engine,
+                        &aggregate_targets,
+                        accumulator_budget,
+                    )?;
+                }
+                for (index, expression) in aggregate_targets.iter().enumerate() {
+                    let ScalarExpr::Func {
+                        name,
+                        args,
+                        distinct,
+                        order_by,
+                        filter,
+                    } = expression
+                    else {
+                        continue;
+                    };
+                    if let Some(filter) = filter.as_deref() {
+                        if !uqa_sql::expr::truthy(&eval_scalar(filter, &context)?) {
+                            continue;
+                        }
+                    }
+                    observe_aggregate(
+                        &mut current_accumulators[index],
+                        name,
+                        args,
+                        *distinct,
+                        order_by,
+                        &context,
+                    )?;
+                }
+            }
+        }
+
+        if let Some(key) = current_key.take() {
+            if let Some(row) = finish_stream_group(
+                engine,
+                statement,
+                current_accumulators,
+                &key,
+                params,
+                ctes,
+                relaxed,
+            )? {
+                pending.push(row);
+            }
+        } else if statement.group_by.is_empty() {
+            let accumulators = new_aggregate_accumulators_with_budget(
+                engine,
+                &aggregate_targets,
+                accumulator_budget,
+            )?;
+            if let Some(row) =
+                finish_stream_group(engine, statement, accumulators, &[], params, ctes, relaxed)?
+            {
+                pending.push(row);
+            }
+        }
+        if !pending.is_empty() {
+            output
+                .push(Batch::new(
+                    output_schema.clone(),
+                    std::mem::take(&mut pending),
+                ))
+                .map_err(exec_to_sql_error)?;
+        }
+        Ok(())
+    })();
+    let close = sorted.close().map_err(exec_to_sql_error);
+    combine_execution_and_close(execution, close, "aggregate sort")?;
+    Ok(output)
+}
+
+fn combine_execution_and_close(
+    execution: Result<(), SQLError>,
+    close: Result<(), SQLError>,
+    operator: &str,
+) -> Result<(), SQLError> {
+    match (execution, close) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(error)) | (Err(error), Ok(())) => Err(error),
+        (Err(execution_error), Err(close_error)) => Err(SQLError::Internal(format!(
+            "{execution_error}; closing {operator} after failure also failed: {close_error}"
+        ))),
+    }
+}
+
+fn exec_to_sql_error(error: uqa_execution::ExecError) -> SQLError {
+    match error {
+        uqa_execution::ExecError::SQL(error) => error,
+        uqa_execution::ExecError::Other(message) => SQLError::Internal(message),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_stream_group(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    accumulators: Vec<AggregateAccumulator>,
+    group_values: &[Value],
+    params: &[SQLParam],
+    ctes: &CteScope,
+    relaxed: bool,
+) -> Result<Option<ResultRow>, SQLError> {
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(&hook));
+    let labels = projection_columns(&statement.projections);
+    let group_row = group_context_row(statement, group_values);
+    let mut row = ResultRow::new();
+    let mut aggregate_index = 0;
+
+    for (index, projection) in statement.projections.iter().enumerate() {
+        let label = labels[index].clone();
+        if contains_aggregate(engine, &projection.expr) {
+            let resolved = replace_aggregates_with_values(
+                engine,
+                &projection.expr,
+                &accumulators,
+                &mut aggregate_index,
+            )?;
+            let context = ScalarEvalContext::new(Some(&group_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&subquery_arena);
+            row.insert(label, eval_scalar(&resolved, &context)?);
+            continue;
+        }
+        if !expr_references_columns(&projection.expr) {
+            let context = ScalarEvalContext::new(Some(&group_row), params)
+                .with_function_hook(&hook)
+                .with_subquery_runner(&subquery_arena);
+            row.insert(label, eval_scalar(&projection.expr, &context)?);
+            continue;
+        }
+        if let Some((_, value)) = statement
+            .group_by
+            .iter()
+            .zip(group_values)
+            .find(|(group, _)| exprs_match(&projection.expr, group))
+        {
+            row.insert(label, value.clone());
+        } else if relaxed {
+            row.insert(label, Value::Null);
+        } else {
+            return Err(SQLError::Unsupported(format!(
+                "non-aggregated projection `{label}` must appear in GROUP BY"
+            )));
+        }
+    }
+
+    if let Some(having) = statement.having.as_ref() {
+        let resolved = resolve_having(
+            engine,
+            having,
+            &row,
+            statement,
+            &accumulators,
+            group_values,
+            params,
+        )?;
+        let mut having_row = group_row;
+        having_row.extend(row.iter().map(|(key, value)| (key.clone(), value.clone())));
+        let context = ScalarEvalContext::new(Some(&having_row), params)
+            .with_function_hook(&hook)
+            .with_subquery_runner(&subquery_arena);
+        if !uqa_sql::expr::truthy(&eval_scalar(&resolved, &context)?) {
+            return Ok(None);
+        }
+    }
+    Ok(Some(row))
+}
+
+/// Replace aggregates referenced by HAVING with the state already finalized
+/// for this group. SQL currently requires a HAVING aggregate to also appear in
+/// the projection, matching the prior executor's explicit boundary.
 fn resolve_having(
     engine: &Engine,
-    expr: &ScalarExpr,
+    expression: &ScalarExpr,
     _projected_row: &ResultRow,
-    stmt: &QueryBlockPlan,
-    accs: &[AggregateAccumulator],
+    statement: &QueryBlockPlan,
+    accumulators: &[AggregateAccumulator],
     _group_values: &[Value],
     _params: &[SQLParam],
 ) -> Result<ScalarExpr, SQLError> {
     fn walk(
         engine: &Engine,
-        e: &ScalarExpr,
-        stmt: &QueryBlockPlan,
-        accs: &[AggregateAccumulator],
+        expression: &ScalarExpr,
+        statement: &QueryBlockPlan,
+        accumulators: &[AggregateAccumulator],
     ) -> Result<ScalarExpr, SQLError> {
-        if is_aggregate(engine, e) {
-            // Find the matching projection so we can pluck the
-            // already-computed accumulator value. Falls back to
-            // matching by aggregate-function shape (name + args).
-            for (idx, agg_expr) in aggregate_exprs(engine, &stmt.projections)
+        if is_aggregate(engine, expression) {
+            for (index, aggregate) in aggregate_exprs(engine, &statement.projections)
                 .into_iter()
                 .enumerate()
             {
-                if exprs_match(agg_expr, e) {
-                    if let ScalarExpr::Func { name, args, .. } = agg_expr {
-                        let v = aggregate_value_with_args(name, &accs[idx], args)?;
-                        return Ok(ScalarExpr::Literal(v));
-                    }
+                if exprs_match(aggregate, expression) {
+                    let ScalarExpr::Func { name, args, .. } = aggregate else {
+                        return Err(SQLError::Internal(
+                            "aggregate classifier returned a non-function expression".into(),
+                        ));
+                    };
+                    let accumulator = accumulators.get(index).ok_or_else(|| {
+                        SQLError::Internal("HAVING aggregate accumulator missing".into())
+                    })?;
+                    return Ok(ScalarExpr::Literal(aggregate_value_with_args(
+                        name,
+                        accumulator,
+                        args,
+                    )?));
                 }
             }
-            // Aggregate appears in HAVING but not in SELECT; reject.
             return Err(SQLError::Unsupported(
                 "HAVING references an aggregate that is not in the SELECT list".into(),
             ));
         }
-        match e {
-            ScalarExpr::And(parts) => Ok(ScalarExpr::And(
-                parts
-                    .iter()
-                    .map(|p| walk(engine, p, stmt, accs))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            ScalarExpr::Or(parts) => Ok(ScalarExpr::Or(
-                parts
-                    .iter()
-                    .map(|p| walk(engine, p, stmt, accs))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            ScalarExpr::Not(inner) => {
-                Ok(ScalarExpr::Not(Box::new(walk(engine, inner, stmt, accs)?)))
-            }
-            ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
-                op: *op,
-                lhs: Box::new(walk(engine, lhs, stmt, accs)?),
-                rhs: Box::new(walk(engine, rhs, stmt, accs)?),
-            }),
-            ScalarExpr::IsNull { expr, negated } => Ok(ScalarExpr::IsNull {
-                expr: Box::new(walk(engine, expr, stmt, accs)?),
-                negated: *negated,
-            }),
-            ScalarExpr::Between { expr, low, high } => Ok(ScalarExpr::Between {
-                expr: Box::new(walk(engine, expr, stmt, accs)?),
-                low: Box::new(walk(engine, low, stmt, accs)?),
-                high: Box::new(walk(engine, high, stmt, accs)?),
-            }),
-            ScalarExpr::InList {
-                expr,
-                list,
-                negated,
-            } => Ok(ScalarExpr::InList {
-                expr: Box::new(walk(engine, expr, stmt, accs)?),
-                list: list
-                    .iter()
-                    .map(|x| walk(engine, x, stmt, accs))
-                    .collect::<Result<Vec<_>, _>>()?,
-                negated: *negated,
-            }),
+
+        Ok(match expression {
             ScalarExpr::Func {
                 name,
                 args,
                 distinct,
                 order_by,
                 filter,
-            } => Ok(ScalarExpr::Func {
+            } => ScalarExpr::Func {
                 name: name.clone(),
                 args: args
                     .iter()
-                    .map(|a| walk(engine, a, stmt, accs))
+                    .map(|argument| walk(engine, argument, statement, accumulators))
                     .collect::<Result<Vec<_>, _>>()?,
                 distinct: *distinct,
                 order_by: order_by.clone(),
                 filter: filter.clone(),
-            }),
-            other => Ok(other.clone()),
-        }
-    }
-    walk(engine, expr, stmt, accs)
-}
-
-/// Variant of [`aggregate_join_rows`] used by the GROUPING SETS
-/// dispatcher: projections that aren't in the active `group_by` are
-/// emitted as NULL (matching `PostgreSQL`'s ROLLUP / CUBE semantics)
-/// instead of raising an error.
-fn aggregate_join_rows_relaxed(
-    engine: &Engine,
-    stmt: &QueryBlockPlan,
-    rows: &[ResultRow],
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
-    let agg_targets = aggregate_exprs(engine, &stmt.projections);
-    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    for row in rows {
-        let ctx = ScalarEvalContext::new(Some(row), params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&subquery_arena);
-        let group_values: Vec<Value> = stmt
-            .group_by
-            .iter()
-            .map(|g| eval_scalar(g, &ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        let bucket = group_bucket(engine, &mut groups, group_values, &agg_targets)?;
-        for (i, expr) in agg_targets.iter().enumerate() {
-            let ScalarExpr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } = expr
-            else {
-                continue;
-            };
-            if let Some(filter_expr) = filter.as_deref() {
-                let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, &ctx)?);
-                if !keep {
-                    continue;
-                }
-            }
-            observe_aggregate(&mut bucket.0[i], name, args, *distinct, order_by, &ctx)?;
-        }
-    }
-    if groups.is_empty() && stmt.group_by.is_empty() {
-        groups.insert(
-            Vec::new(),
-            (
-                new_aggregate_accumulators(engine, &agg_targets)?,
-                Vec::new(),
+            },
+            ScalarExpr::Array(items) => ScalarExpr::Array(
+                items
+                    .iter()
+                    .map(|item| walk(engine, item, statement, accumulators))
+                    .collect::<Result<Vec<_>, _>>()?,
             ),
-        );
-    }
-    let mut out = Vec::with_capacity(groups.len());
-    let labels = projection_columns(&stmt.projections);
-    for (_, (accs, group_values)) in groups {
-        let mut row = ResultRow::new();
-        let group_row = group_context_row(stmt, &group_values);
-        let mut agg_idx = 0;
-        for (idx, proj) in stmt.projections.iter().enumerate() {
-            let label = labels[idx].clone();
-            if contains_aggregate(engine, &proj.expr) {
-                let resolved =
-                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
-                row.insert(label, eval_scalar(&resolved, &ctx)?);
-            } else {
-                if !expr_references_columns(&proj.expr) {
-                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                        .with_function_hook(&hook)
-                        .with_subquery_runner(&subquery_arena);
-                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
-                    continue;
-                }
-                let mut placed = false;
-                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if exprs_match(&proj.expr, g_expr) {
-                        row.insert(label.clone(), g_value.clone());
-                        placed = true;
-                        break;
-                    }
-                }
-                if !placed {
-                    row.insert(label, Value::Null);
-                }
+            ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
+                op: *op,
+                lhs: Box::new(walk(engine, lhs, statement, accumulators)?),
+                rhs: Box::new(walk(engine, rhs, statement, accumulators)?),
+            },
+            ScalarExpr::Not(inner) => {
+                ScalarExpr::Not(Box::new(walk(engine, inner, statement, accumulators)?))
             }
-        }
-        out.push(row);
+            ScalarExpr::And(items) => ScalarExpr::And(
+                items
+                    .iter()
+                    .map(|item| walk(engine, item, statement, accumulators))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            ScalarExpr::Or(items) => ScalarExpr::Or(
+                items
+                    .iter()
+                    .map(|item| walk(engine, item, statement, accumulators))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
+                expr: Box::new(walk(engine, expr, statement, accumulators)?),
+                negated: *negated,
+            },
+            ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
+                expr: Box::new(walk(engine, expr, statement, accumulators)?),
+                low: Box::new(walk(engine, low, statement, accumulators)?),
+                high: Box::new(walk(engine, high, statement, accumulators)?),
+            },
+            ScalarExpr::InList {
+                expr,
+                list,
+                negated,
+            } => ScalarExpr::InList {
+                expr: Box::new(walk(engine, expr, statement, accumulators)?),
+                list: list
+                    .iter()
+                    .map(|item| walk(engine, item, statement, accumulators))
+                    .collect::<Result<Vec<_>, _>>()?,
+                negated: *negated,
+            },
+            ScalarExpr::Case {
+                base,
+                when,
+                else_branch,
+            } => ScalarExpr::Case {
+                base: base
+                    .as_deref()
+                    .map(|expr| walk(engine, expr, statement, accumulators).map(Box::new))
+                    .transpose()?,
+                when: when
+                    .iter()
+                    .map(|(condition, result)| {
+                        Ok((
+                            walk(engine, condition, statement, accumulators)?,
+                            walk(engine, result, statement, accumulators)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()?,
+                else_branch: else_branch
+                    .as_deref()
+                    .map(|expr| walk(engine, expr, statement, accumulators).map(Box::new))
+                    .transpose()?,
+            },
+            ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+                expr: Box::new(walk(engine, expr, statement, accumulators)?),
+                ty: ty.clone(),
+            },
+            ScalarExpr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => ScalarExpr::InSubquery {
+                expr: Box::new(walk(engine, expr, statement, accumulators)?),
+                subquery: *subquery,
+                negated: *negated,
+            },
+            other => other.clone(),
+        })
     }
-    Ok(out)
+
+    walk(engine, expression, statement, accumulators)
 }
 
 fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
@@ -593,1000 +764,6 @@ fn contains_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
 /// `false` when the expression can reach arbitrary fields (`*`,
 /// subqueries, window calls), in which case callers must materialise
 /// whole documents.
-pub(super) fn collect_expr_columns(expr: &ScalarExpr, out: &mut BTreeSet<String>) -> bool {
-    match expr {
-        ScalarExpr::Column(name) => {
-            out.insert(name.clone());
-            true
-        }
-        ScalarExpr::QualifiedColumn { column, .. } => {
-            out.insert(column.clone());
-            true
-        }
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
-        ScalarExpr::Func {
-            args,
-            filter,
-            order_by,
-            ..
-        } => {
-            args.iter().all(|a| collect_expr_columns(a, out))
-                && filter
-                    .as_deref()
-                    .is_none_or(|f| collect_expr_columns(f, out))
-                && order_by.iter().all(|o| collect_expr_columns(&o.expr, out))
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_expr_columns(lhs, out) && collect_expr_columns(rhs, out)
-        }
-        ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-            collect_expr_columns(inner, out)
-        }
-        ScalarExpr::IsNull { expr, .. } => collect_expr_columns(expr, out),
-        ScalarExpr::Between { expr, low, high } => {
-            collect_expr_columns(expr, out)
-                && collect_expr_columns(low, out)
-                && collect_expr_columns(high, out)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            collect_expr_columns(expr, out) && list.iter().all(|i| collect_expr_columns(i, out))
-        }
-        ScalarExpr::And(items) | ScalarExpr::Or(items) | ScalarExpr::Array(items) => {
-            items.iter().all(|i| collect_expr_columns(i, out))
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_deref().is_none_or(|b| collect_expr_columns(b, out))
-                && when.iter().all(|(condition, result)| {
-                    collect_expr_columns(condition, out) && collect_expr_columns(result, out)
-                })
-                && else_branch
-                    .as_deref()
-                    .is_none_or(|e| collect_expr_columns(e, out))
-        }
-        _ => false,
-    }
-}
-
-/// The column set the aggregation pass reads, or `None` when whole
-/// documents are required (`*` expansion, subqueries, ...). `count(*)`
-/// contributes no columns.
-fn aggregation_column_projection(
-    engine: &Engine,
-    stmt: &QueryBlockPlan,
-    agg_targets: &[&ScalarExpr],
-) -> Option<BTreeSet<String>> {
-    fn safe_while_document_store_is_borrowed(expr: &ScalarExpr) -> bool {
-        match expr {
-            ScalarExpr::Literal(_)
-            | ScalarExpr::Param(_)
-            | ScalarExpr::Column(_)
-            | ScalarExpr::QualifiedColumn { .. } => true,
-            ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-                items.iter().all(safe_while_document_store_is_borrowed)
-            }
-            ScalarExpr::Binary { lhs, rhs, .. } => {
-                safe_while_document_store_is_borrowed(lhs)
-                    && safe_while_document_store_is_borrowed(rhs)
-            }
-            ScalarExpr::Not(inner) | ScalarExpr::Cast { expr: inner, .. } => {
-                safe_while_document_store_is_borrowed(inner)
-            }
-            ScalarExpr::IsNull { expr, .. } => safe_while_document_store_is_borrowed(expr),
-            ScalarExpr::Between { expr, low, high } => {
-                safe_while_document_store_is_borrowed(expr)
-                    && safe_while_document_store_is_borrowed(low)
-                    && safe_while_document_store_is_borrowed(high)
-            }
-            ScalarExpr::InList { expr, list, .. } => {
-                safe_while_document_store_is_borrowed(expr)
-                    && list.iter().all(safe_while_document_store_is_borrowed)
-            }
-            ScalarExpr::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref()
-                    .is_none_or(safe_while_document_store_is_borrowed)
-                    && when.iter().all(|(condition, result)| {
-                        safe_while_document_store_is_borrowed(condition)
-                            && safe_while_document_store_is_borrowed(result)
-                    })
-                    && else_branch
-                        .as_deref()
-                        .is_none_or(safe_while_document_store_is_borrowed)
-            }
-            // Functions can re-enter the engine through EngineHook. Keep
-            // their evaluation outside the document-store read guard, along
-            // with every expression form that already requires whole rows.
-            ScalarExpr::Star
-            | ScalarExpr::Func { .. }
-            | ScalarExpr::WindowCall { .. }
-            | ScalarExpr::ScalarSubquery(_)
-            | ScalarExpr::Exists { .. }
-            | ScalarExpr::InSubquery { .. } => false,
-        }
-    }
-
-    let mut columns = BTreeSet::new();
-    for group in &stmt.group_by {
-        if !safe_while_document_store_is_borrowed(group)
-            || !collect_expr_columns(group, &mut columns)
-        {
-            return None;
-        }
-    }
-    for expr in agg_targets {
-        let ScalarExpr::Func {
-            name,
-            args,
-            filter,
-            order_by,
-            ..
-        } = expr
-        else {
-            if !safe_while_document_store_is_borrowed(expr)
-                || !collect_expr_columns(expr, &mut columns)
-            {
-                return None;
-            }
-            continue;
-        };
-        // Registered aggregate states are user code and can re-enter the
-        // engine from `observe`. Materialise their rows so that callback runs
-        // after the document-store read guard has been released.
-        if engine.registered_aggregate_function(name).is_some() {
-            return None;
-        }
-        let count_star =
-            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [ScalarExpr::Star]);
-        if !count_star {
-            for arg in args {
-                if !safe_while_document_store_is_borrowed(arg)
-                    || !collect_expr_columns(arg, &mut columns)
-                {
-                    return None;
-                }
-            }
-        }
-        if let Some(filter_expr) = filter.as_deref() {
-            if !safe_while_document_store_is_borrowed(filter_expr)
-                || !collect_expr_columns(filter_expr, &mut columns)
-            {
-                return None;
-            }
-        }
-        for order in order_by {
-            if !safe_while_document_store_is_borrowed(&order.expr)
-                || !collect_expr_columns(&order.expr, &mut columns)
-            {
-                return None;
-            }
-        }
-    }
-    Some(columns)
-}
-
-struct ProjectedRow<'a> {
-    columns: &'a ProjectedColumns,
-    values: &'a [&'a Value],
-}
-
-const PROJECTED_SLOT_EMPTY: u32 = u32::MAX;
-const PROJECTED_SLOT_COLLISION: u32 = u32::MAX - 1;
-
-struct ProjectedColumns {
-    // `names` is the sorted, complete set collected from every expression that
-    // can be evaluated through this projection. That invariant lets the
-    // single-first-byte case return its slot without repeating a string
-    // comparison in the per-row hot loop.
-    names: Vec<String>,
-    first_byte_slots: [u32; 256],
-}
-
-impl ProjectedColumns {
-    fn new(names: Vec<String>) -> Self {
-        debug_assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
-        let mut first_byte_slots = [PROJECTED_SLOT_EMPTY; 256];
-        for (index, name) in names.iter().enumerate() {
-            let Some(first) = name.as_bytes().first().copied() else {
-                continue;
-            };
-            let slot = &mut first_byte_slots[usize::from(first)];
-            if *slot == PROJECTED_SLOT_EMPTY {
-                *slot = u32::try_from(index).unwrap_or(PROJECTED_SLOT_COLLISION);
-            } else {
-                *slot = PROJECTED_SLOT_COLLISION;
-            }
-        }
-        Self {
-            names,
-            first_byte_slots,
-        }
-    }
-
-    fn index(&self, name: &str) -> Option<usize> {
-        if let Some(first) = name.as_bytes().first().copied() {
-            let slot = self.first_byte_slots[usize::from(first)];
-            if slot < PROJECTED_SLOT_COLLISION {
-                let index = slot as usize;
-                debug_assert_eq!(self.names[index], name);
-                return Some(index);
-            }
-        }
-        self.names
-            .binary_search_by(|candidate| candidate.as_str().cmp(name))
-            .ok()
-    }
-}
-
-fn projected_group_slots(stmt: &QueryBlockPlan, columns: &ProjectedColumns) -> Option<Vec<usize>> {
-    stmt.group_by
-        .iter()
-        .map(|expr| match expr {
-            ScalarExpr::Column(name) => columns.index(name),
-            ScalarExpr::QualifiedColumn { column, .. } => columns.index(column),
-            _ => None,
-        })
-        .collect()
-}
-
-enum ProjectedAggregateInput {
-    Evaluate,
-    Slot(usize),
-    CountOne,
-    Expression {
-        general: ProjectedExpression,
-        integer: Option<ProjectedIntegerExpression>,
-    },
-}
-
-enum ProjectedAggregatePlan {
-    /// No FILTER, DISTINCT, ORDER BY, or NULL-preserving behavior remains to
-    /// dispatch per row; feed the compiled input straight into its accumulator.
-    Direct(ProjectedAggregateInput),
-    General(ProjectedAggregateInput),
-}
-
-enum ProjectedExpression {
-    Slot(usize),
-    Literal(Value),
-    Binary {
-        op: BinaryOp,
-        lhs: Box<ProjectedExpression>,
-        rhs: Box<ProjectedExpression>,
-    },
-}
-
-enum ProjectedExpressionValue<'a> {
-    Borrowed(&'a Value),
-    Owned(Value),
-}
-
-#[derive(Clone, Copy)]
-enum ProjectedIntegerValue {
-    Integer(i64),
-    Null,
-    General,
-}
-
-#[derive(Clone, Copy)]
-enum ProjectedIntegerInstruction {
-    Slot(usize),
-    Literal(Option<i64>),
-    Binary(BinaryOp),
-}
-
-const PROJECTED_INTEGER_STACK_LIMIT: usize = 16;
-
-struct ProjectedIntegerExpression {
-    instructions: Vec<ProjectedIntegerInstruction>,
-}
-
-impl ProjectedExpressionValue<'_> {
-    fn as_value(&self) -> &Value {
-        match self {
-            Self::Borrowed(value) => value,
-            Self::Owned(value) => value,
-        }
-    }
-}
-
-impl ProjectedExpression {
-    fn compile(expr: &ScalarExpr, columns: &ProjectedColumns) -> Option<Self> {
-        match expr {
-            ScalarExpr::Column(name) => Some(Self::Slot(columns.index(name)?)),
-            ScalarExpr::QualifiedColumn { column, .. } => Some(Self::Slot(columns.index(column)?)),
-            ScalarExpr::Literal(value) => Some(Self::Literal(value.clone())),
-            ScalarExpr::Binary { op, lhs, rhs } => Some(Self::Binary {
-                op: *op,
-                lhs: Box::new(Self::compile(lhs, columns)?),
-                rhs: Box::new(Self::compile(rhs, columns)?),
-            }),
-            _ => None,
-        }
-    }
-
-    fn evaluate<'a>(
-        &'a self,
-        values: &'a [&'a Value],
-    ) -> Result<ProjectedExpressionValue<'a>, SQLError> {
-        match self {
-            Self::Slot(slot) => Ok(ProjectedExpressionValue::Borrowed(values[*slot])),
-            Self::Literal(value) => Ok(ProjectedExpressionValue::Borrowed(value)),
-            Self::Binary { op, lhs, rhs } => {
-                let left = lhs.evaluate(values)?;
-                let right = rhs.evaluate(values)?;
-                Ok(ProjectedExpressionValue::Owned(
-                    uqa_sql::expr::eval_binary_values(*op, left.as_value(), right.as_value())?,
-                ))
-            }
-        }
-    }
-}
-
-impl ProjectedIntegerExpression {
-    fn compile(expr: &ScalarExpr, columns: &ProjectedColumns) -> Option<Self> {
-        fn emit(
-            expr: &ScalarExpr,
-            columns: &ProjectedColumns,
-            instructions: &mut Vec<ProjectedIntegerInstruction>,
-            stack_depth: &mut usize,
-            max_stack_depth: &mut usize,
-        ) -> Option<()> {
-            match expr {
-                ScalarExpr::Column(name) => {
-                    instructions.push(ProjectedIntegerInstruction::Slot(columns.index(name)?));
-                    *stack_depth += 1;
-                }
-                ScalarExpr::QualifiedColumn { column, .. } => {
-                    instructions.push(ProjectedIntegerInstruction::Slot(columns.index(column)?));
-                    *stack_depth += 1;
-                }
-                ScalarExpr::Literal(Value::Int(value)) => {
-                    instructions.push(ProjectedIntegerInstruction::Literal(Some(*value)));
-                    *stack_depth += 1;
-                }
-                ScalarExpr::Literal(Value::Null) => {
-                    instructions.push(ProjectedIntegerInstruction::Literal(None));
-                    *stack_depth += 1;
-                }
-                ScalarExpr::Binary { op, lhs, rhs }
-                    if matches!(
-                        op,
-                        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-                    ) =>
-                {
-                    emit(lhs, columns, instructions, stack_depth, max_stack_depth)?;
-                    emit(rhs, columns, instructions, stack_depth, max_stack_depth)?;
-                    instructions.push(ProjectedIntegerInstruction::Binary(*op));
-                    *stack_depth = stack_depth.checked_sub(1)?;
-                }
-                _ => return None,
-            }
-            *max_stack_depth = (*max_stack_depth).max(*stack_depth);
-            Some(())
-        }
-
-        let mut instructions = Vec::new();
-        let mut stack_depth = 0;
-        let mut max_stack_depth = 0;
-        emit(
-            expr,
-            columns,
-            &mut instructions,
-            &mut stack_depth,
-            &mut max_stack_depth,
-        )?;
-        (stack_depth == 1 && max_stack_depth <= PROJECTED_INTEGER_STACK_LIMIT)
-            .then_some(Self { instructions })
-    }
-
-    /// Evaluate a compiled integer analytical expression without recursive dispatch or intermediate `Value`s. Any non-integer input falls back to the canonical evaluator at the caller.
-    fn evaluate(&self, values: &[&Value]) -> Result<ProjectedIntegerValue, SQLError> {
-        let mut stack = [ProjectedIntegerValue::General; PROJECTED_INTEGER_STACK_LIMIT];
-        let mut stack_len = 0;
-        for instruction in &self.instructions {
-            match *instruction {
-                ProjectedIntegerInstruction::Slot(slot) => {
-                    stack[stack_len] = match values[slot] {
-                        Value::Int(value) => ProjectedIntegerValue::Integer(*value),
-                        Value::Null => ProjectedIntegerValue::Null,
-                        _ => return Ok(ProjectedIntegerValue::General),
-                    };
-                    stack_len += 1;
-                }
-                ProjectedIntegerInstruction::Literal(value) => {
-                    stack[stack_len] =
-                        value.map_or(ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer);
-                    stack_len += 1;
-                }
-                ProjectedIntegerInstruction::Binary(op) => {
-                    debug_assert!(stack_len >= 2);
-                    let right = stack[stack_len - 1];
-                    let left = stack[stack_len - 2];
-                    stack_len -= 1;
-                    stack[stack_len - 1] = match (left, right) {
-                        (
-                            ProjectedIntegerValue::Integer(left),
-                            ProjectedIntegerValue::Integer(right),
-                        ) => {
-                            let value = match op {
-                                BinaryOp::Add => left.checked_add(right),
-                                BinaryOp::Subtract => left.checked_sub(right),
-                                BinaryOp::Multiply => left.checked_mul(right),
-                                BinaryOp::Divide if right != 0 => left.checked_div(right),
-                                BinaryOp::Divide => None,
-                                _ => unreachable!("integer analytical expression operator"),
-                            };
-                            if let Some(value) = value {
-                                ProjectedIntegerValue::Integer(value)
-                            } else {
-                                // Reuse the canonical evaluator only on the exceptional path so error type, SQLSTATE, and message remain identical.
-                                let value = uqa_sql::expr::eval_binary_values(
-                                    op,
-                                    &Value::Int(left),
-                                    &Value::Int(right),
-                                )?;
-                                let Value::Int(value) = value else {
-                                    return Ok(ProjectedIntegerValue::General);
-                                };
-                                ProjectedIntegerValue::Integer(value)
-                            }
-                        }
-                        (ProjectedIntegerValue::Null, ProjectedIntegerValue::Null)
-                        | (ProjectedIntegerValue::Null, ProjectedIntegerValue::Integer(_))
-                        | (ProjectedIntegerValue::Integer(_), ProjectedIntegerValue::Null) => {
-                            ProjectedIntegerValue::Null
-                        }
-                        _ => return Ok(ProjectedIntegerValue::General),
-                    };
-                }
-            }
-        }
-        debug_assert_eq!(stack_len, 1);
-        Ok(stack[0])
-    }
-}
-
-fn projected_aggregate_plans(
-    engine: &Engine,
-    agg_targets: &[&ScalarExpr],
-    columns: &ProjectedColumns,
-) -> Vec<ProjectedAggregatePlan> {
-    agg_targets
-        .iter()
-        .map(|expr| {
-            let ScalarExpr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } = expr
-            else {
-                return ProjectedAggregatePlan::General(ProjectedAggregateInput::Evaluate);
-            };
-            if engine.registered_aggregate_function(name).is_some() {
-                return ProjectedAggregatePlan::General(ProjectedAggregateInput::Evaluate);
-            }
-            let input = if name.eq_ignore_ascii_case("count")
-                && (args.is_empty() || matches!(args.as_slice(), [ScalarExpr::Star]))
-            {
-                ProjectedAggregateInput::CountOne
-            } else if is_ordered_set_aggregate(name) || is_json_object_aggregate(name) {
-                ProjectedAggregateInput::Evaluate
-            } else {
-                match args.first() {
-                    Some(ScalarExpr::Column(name)) => columns.index(name).map_or(
-                        ProjectedAggregateInput::Evaluate,
-                        ProjectedAggregateInput::Slot,
-                    ),
-                    Some(ScalarExpr::QualifiedColumn { column, .. }) => {
-                        columns.index(column).map_or(
-                            ProjectedAggregateInput::Evaluate,
-                            ProjectedAggregateInput::Slot,
-                        )
-                    }
-                    Some(expr) => ProjectedExpression::compile(expr, columns).map_or(
-                        ProjectedAggregateInput::Evaluate,
-                        |general| ProjectedAggregateInput::Expression {
-                            general,
-                            integer: ProjectedIntegerExpression::compile(expr, columns),
-                        },
-                    ),
-                    None => ProjectedAggregateInput::Evaluate,
-                }
-            };
-            let direct = filter.is_none()
-                && !*distinct
-                && order_by.is_empty()
-                && !is_json_array_aggregate(name)
-                && !matches!(input, ProjectedAggregateInput::Evaluate);
-            if direct {
-                ProjectedAggregatePlan::Direct(input)
-            } else {
-                ProjectedAggregatePlan::General(input)
-            }
-        })
-        .collect()
-}
-
-impl RowLookup for ProjectedRow<'_> {
-    fn column(&self, name: &str) -> Option<&Value> {
-        self.columns
-            .index(name)
-            .and_then(|index| self.values.get(index).copied())
-    }
-
-    fn qualified_column(&self, _qualifier: &str, column: &str, _key: &str) -> Option<&Value> {
-        // This view is only used by the single-table aggregation path,
-        // whose stored documents carry bare field names.
-        self.column(column)
-    }
-}
-
-/// Feed the selected rows into an aggregate without forcing projected
-/// fields through two whole-result maps. Known column projections are
-/// visited in doc-id order and folded immediately; only expressions
-/// that cannot declare their columns retain the whole-document fallback.
-struct AggregateRuntime<'a> {
-    params: &'a [SQLParam],
-    function_hook: &'a dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &'a dyn ScalarSubqueryRunner,
-}
-
-fn accumulate_table_rows(
-    engine: &Engine,
-    table: &str,
-    scored: &[ScoredEntry],
-    stmt: &QueryBlockPlan,
-    agg_targets: &[&ScalarExpr],
-    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    runtime: &AggregateRuntime<'_>,
-) -> Result<(), SQLError> {
-    if !aggregation_needs_documents(stmt, agg_targets) {
-        let empty_document = Document::new();
-        for _ in scored {
-            accumulate_document(engine, stmt, agg_targets, groups, &empty_document, runtime)?;
-        }
-        return Ok(());
-    }
-    let doc_ids: Vec<uqa_core::DocId> = scored.iter().map(|entry| entry.doc_id).collect();
-    match aggregation_column_projection(engine, stmt, agg_targets) {
-        Some(columns) if !columns.is_empty() => {
-            let columns = ProjectedColumns::new(columns.into_iter().collect());
-            let refs: Vec<&str> = columns.names.iter().map(String::as_str).collect();
-            let group_slots = projected_group_slots(stmt, &columns);
-            let aggregate_plans = projected_aggregate_plans(engine, agg_targets, &columns);
-            let mut group_key_cache = ProjectedGroupCache::Active(Vec::new());
-            let mut error = None;
-            engine.for_each_document_fields_multi_ref(
-                table,
-                &doc_ids,
-                &refs,
-                &mut |_doc_id, values| {
-                    let row = ProjectedRow {
-                        columns: &columns,
-                        values,
-                    };
-                    let ctx = ScalarEvalContext::from_row_lookup(&row, runtime.params)
-                        .with_function_hook(runtime.function_hook)
-                        .with_subquery_runner(runtime.subquery_runner);
-                    let result = match group_slots.as_deref() {
-                        Some(slots) => accumulate_projected_context(
-                            engine,
-                            agg_targets,
-                            groups,
-                            &mut group_key_cache,
-                            &aggregate_plans,
-                            values,
-                            slots,
-                            &ctx,
-                        ),
-                        None => accumulate_context(engine, stmt, agg_targets, groups, &ctx),
-                    };
-                    match result {
-                        Ok(()) => true,
-                        Err(err) => {
-                            error = Some(err);
-                            false
-                        }
-                    }
-                },
-            );
-            if let Some(err) = error {
-                Err(err)
-            } else {
-                flush_projected_group_cache(&mut group_key_cache, groups);
-                Ok(())
-            }
-        }
-        Some(_) => {
-            let empty_document = Document::new();
-            for _ in scored {
-                accumulate_document(engine, stmt, agg_targets, groups, &empty_document, runtime)?;
-            }
-            Ok(())
-        }
-        None => {
-            let documents = engine.get_documents_bulk(table, &doc_ids);
-            let empty_document = Document::new();
-            for entry in scored {
-                let document = documents.get(&entry.doc_id).unwrap_or(&empty_document);
-                accumulate_document(engine, stmt, agg_targets, groups, document, runtime)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-fn accumulate_document(
-    engine: &Engine,
-    stmt: &QueryBlockPlan,
-    agg_targets: &[&ScalarExpr],
-    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    document: &Document,
-    runtime: &AggregateRuntime<'_>,
-) -> Result<(), SQLError> {
-    let ctx = ScalarEvalContext::new(Some(document), runtime.params)
-        .with_function_hook(runtime.function_hook)
-        .with_subquery_runner(runtime.subquery_runner);
-    accumulate_context(engine, stmt, agg_targets, groups, &ctx)
-}
-
-fn accumulate_context(
-    engine: &Engine,
-    stmt: &QueryBlockPlan,
-    agg_targets: &[&ScalarExpr],
-    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    ctx: &ScalarEvalContext<'_>,
-) -> Result<(), SQLError> {
-    let group_values: Vec<Value> = stmt
-        .group_by
-        .iter()
-        .map(|group| eval_scalar(group, ctx))
-        .collect::<Result<Vec<_>, _>>()?;
-    let bucket = group_bucket(engine, groups, group_values, agg_targets)?;
-    observe_aggregate_targets(bucket, agg_targets, ctx)
-}
-
-const PROJECTED_GROUP_CACHE_LIMIT: usize = 32;
-
-struct ProjectedGroupCacheEntry {
-    fingerprint: u64,
-    key: Vec<Value>,
-    bucket: (Vec<AggregateAccumulator>, Vec<Value>),
-}
-
-enum ProjectedGroupCache {
-    Active(Vec<ProjectedGroupCacheEntry>),
-    Disabled,
-}
-
-fn flush_projected_group_cache(
-    cache: &mut ProjectedGroupCache,
-    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-) {
-    let ProjectedGroupCache::Active(entries) =
-        std::mem::replace(cache, ProjectedGroupCache::Disabled)
-    else {
-        return;
-    };
-    for entry in entries {
-        debug_assert!(!groups.contains_key(&entry.key));
-        groups.insert(entry.key, entry.bucket);
-    }
-}
-
-fn projected_group_fingerprint(values: &[&Value], group_slots: &[usize]) -> u64 {
-    let mut fingerprint = 0xcbf2_9ce4_8422_2325;
-    for index in group_slots {
-        fingerprint_value(&mut fingerprint, values[*index]);
-    }
-    fingerprint
-}
-
-fn fingerprint_value(fingerprint: &mut u64, value: &Value) {
-    fn write(fingerprint: &mut u64, bytes: &[u8]) {
-        for byte in bytes {
-            *fingerprint ^= u64::from(*byte);
-            *fingerprint = fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-
-    match value {
-        Value::Null => write(fingerprint, &[0]),
-        // `Value::cmp` compares Bool / Int / Float / Decimal across types.
-        // Give every numeric value one conservative token so values that
-        // compare equal can never land in different fingerprint buckets.
-        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => {
-            write(fingerprint, &[1]);
-        }
-        Value::Str(value) => {
-            write(fingerprint, &[2]);
-            write(fingerprint, &(value.len() as u64).to_le_bytes());
-            write(fingerprint, value.as_bytes());
-        }
-        Value::Bytes(value) => {
-            write(fingerprint, &[3]);
-            write(fingerprint, &(value.len() as u64).to_le_bytes());
-            write(fingerprint, value);
-        }
-        Value::Temporal(_) => write(fingerprint, &[4]),
-        Value::List(values) => {
-            write(fingerprint, &[5]);
-            write(fingerprint, &(values.len() as u64).to_le_bytes());
-            for value in values {
-                fingerprint_value(fingerprint, value);
-            }
-        }
-        Value::Map(values) => {
-            write(fingerprint, &[6]);
-            write(fingerprint, &(values.len() as u64).to_le_bytes());
-            for (key, value) in values {
-                write(fingerprint, &(key.len() as u64).to_le_bytes());
-                write(fingerprint, key.as_bytes());
-                fingerprint_value(fingerprint, value);
-            }
-        }
-    }
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the hot loop passes independent borrowed state without a context wrapper"
-)]
-fn accumulate_projected_context(
-    engine: &Engine,
-    agg_targets: &[&ScalarExpr],
-    groups: &mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    group_key_cache: &mut ProjectedGroupCache,
-    aggregate_plans: &[ProjectedAggregatePlan],
-    values: &[&Value],
-    group_slots: &[usize],
-    ctx: &ScalarEvalContext<'_>,
-) -> Result<(), SQLError> {
-    // A global aggregate has one empty-key bucket. The one-entry B-tree
-    // lookup is cheaper than fingerprinting and probing the bounded cache.
-    if group_slots.is_empty() {
-        if groups.is_empty() {
-            let bucket = group_bucket(engine, groups, Vec::new(), agg_targets)?;
-            return observe_projected_aggregate_targets(
-                bucket,
-                agg_targets,
-                aggregate_plans,
-                values,
-                ctx,
-            );
-        }
-        let bucket = groups
-            .get_mut(&[] as &[Value])
-            .ok_or_else(|| SQLError::Internal("global aggregate bucket missing".into()))?;
-        return observe_projected_aggregate_targets(
-            bucket,
-            agg_targets,
-            aggregate_plans,
-            values,
-            ctx,
-        );
-    }
-
-    if let ProjectedGroupCache::Active(entries) = group_key_cache {
-        let fingerprint = projected_group_fingerprint(values, group_slots);
-        if let Some(index) = entries.iter().position(|entry| {
-            entry.fingerprint == fingerprint
-                && entry.key.len() == group_slots.len()
-                && entry
-                    .key
-                    .iter()
-                    .zip(group_slots)
-                    .all(|(stored, index)| stored.cmp(values[*index]) == Ordering::Equal)
-        }) {
-            return observe_projected_aggregate_targets(
-                &mut entries[index].bucket,
-                agg_targets,
-                aggregate_plans,
-                values,
-                ctx,
-            );
-        }
-
-        if entries.len() < PROJECTED_GROUP_CACHE_LIMIT {
-            let group_values: Vec<Value> = group_slots
-                .iter()
-                .map(|index| values[*index].clone())
-                .collect();
-            let bucket = (
-                new_aggregate_accumulators(engine, agg_targets)?,
-                group_values.clone(),
-            );
-            entries.push(ProjectedGroupCacheEntry {
-                fingerprint,
-                key: group_values,
-                bucket,
-            });
-            return observe_projected_aggregate_targets(
-                &mut entries.last_mut().expect("cached group inserted").bucket,
-                agg_targets,
-                aggregate_plans,
-                values,
-                ctx,
-            );
-        }
-    }
-
-    // A 33rd distinct key makes this a high-cardinality aggregation.
-    // Flush the bounded cache exactly once and retain the general B-tree
-    // path for all remaining rows.
-    flush_projected_group_cache(group_key_cache, groups);
-    let group_values: Vec<Value> = group_slots
-        .iter()
-        .map(|index| values[*index].clone())
-        .collect();
-    let bucket = group_bucket(engine, groups, group_values, agg_targets)?;
-    observe_projected_aggregate_targets(bucket, agg_targets, aggregate_plans, values, ctx)
-}
-
-fn observe_projected_aggregate_targets(
-    bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
-    agg_targets: &[&ScalarExpr],
-    aggregate_plans: &[ProjectedAggregatePlan],
-    values: &[&Value],
-    ctx: &ScalarEvalContext<'_>,
-) -> Result<(), SQLError> {
-    for (index, plan) in aggregate_plans.iter().enumerate() {
-        let ProjectedAggregatePlan::General(input) = plan else {
-            match plan {
-                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Slot(slot)) => {
-                    bucket.0[index].observe_projected(values[*slot])?;
-                }
-                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::CountOne) => {
-                    debug_assert!(matches!(
-                        bucket.0[index].state_plan,
-                        AggregateStatePlan::Count
-                    ));
-                    bucket.0[index].count += 1;
-                }
-                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Expression {
-                    general,
-                    integer,
-                }) => {
-                    match integer
-                        .as_ref()
-                        .map_or(Ok(ProjectedIntegerValue::General), |integer| {
-                            integer.evaluate(values)
-                        })? {
-                        ProjectedIntegerValue::Integer(value) => {
-                            bucket.0[index].observe_projected_integer(value)?;
-                        }
-                        ProjectedIntegerValue::Null => {}
-                        ProjectedIntegerValue::General => {
-                            let value = general.evaluate(values)?;
-                            bucket.0[index].observe_projected(value.as_value())?;
-                        }
-                    }
-                }
-                ProjectedAggregatePlan::Direct(ProjectedAggregateInput::Evaluate)
-                | ProjectedAggregatePlan::General(_) => unreachable!("direct aggregate plan"),
-            }
-            continue;
-        };
-        let Some(expr) = agg_targets.get(index) else {
-            return Err(SQLError::Internal(
-                "projected aggregate plan lost its expression".into(),
-            ));
-        };
-        let ScalarExpr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } = expr
-        else {
-            continue;
-        };
-        if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, ctx)?);
-            if !keep {
-                continue;
-            }
-        }
-        match input {
-            ProjectedAggregateInput::Slot(slot) => observe_builtin_aggregate_value(
-                &mut bucket.0[index],
-                name,
-                values[*slot],
-                *distinct,
-                order_by,
-                ctx,
-            )?,
-            ProjectedAggregateInput::CountOne => observe_builtin_aggregate_value(
-                &mut bucket.0[index],
-                name,
-                &Value::Int(1),
-                *distinct,
-                order_by,
-                ctx,
-            )?,
-            ProjectedAggregateInput::Evaluate => {
-                observe_aggregate(&mut bucket.0[index], name, args, *distinct, order_by, ctx)?;
-            }
-            ProjectedAggregateInput::Expression { general, .. } => {
-                let value = general.evaluate(values)?;
-                observe_builtin_aggregate_value(
-                    &mut bucket.0[index],
-                    name,
-                    value.as_value(),
-                    *distinct,
-                    order_by,
-                    ctx,
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn observe_aggregate_targets(
-    bucket: &mut (Vec<AggregateAccumulator>, Vec<Value>),
-    agg_targets: &[&ScalarExpr],
-    ctx: &ScalarEvalContext<'_>,
-) -> Result<(), SQLError> {
-    for (index, expr) in agg_targets.iter().enumerate() {
-        let ScalarExpr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } = expr
-        else {
-            continue;
-        };
-        if let Some(filter_expr) = filter.as_deref() {
-            let keep = uqa_sql::expr::truthy(&eval_scalar(filter_expr, ctx)?);
-            if !keep {
-                continue;
-            }
-        }
-        observe_aggregate(&mut bucket.0[index], name, args, *distinct, order_by, ctx)?;
-    }
-    Ok(())
-}
-
-/// Whether the aggregation pass has to materialise stored documents.
-/// `count(*)` (with no column-referencing FILTER) and literal-argument
-/// aggregates can run on doc ids alone, which turns `SELECT count(*)
-/// FROM t` into a no-fetch pass over the match list.
-fn aggregation_needs_documents(stmt: &QueryBlockPlan, agg_targets: &[&ScalarExpr]) -> bool {
-    if stmt.group_by.iter().any(expr_references_columns) {
-        return true;
-    }
-    agg_targets.iter().any(|expr| {
-        let ScalarExpr::Func {
-            name,
-            args,
-            filter,
-            order_by,
-            ..
-        } = expr
-        else {
-            return expr_references_columns(expr);
-        };
-        let count_star =
-            name.eq_ignore_ascii_case("count") && matches!(args.as_slice(), [ScalarExpr::Star]);
-        (!count_star && args.iter().any(expr_references_columns))
-            || filter.as_deref().is_some_and(expr_references_columns)
-            || order_by.iter().any(|o| expr_references_columns(&o.expr))
-    })
-}
-
 fn expr_references_columns(expr: &ScalarExpr) -> bool {
     match expr {
         ScalarExpr::Star | ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => true,
@@ -1848,39 +1025,23 @@ fn aggregate_input_values(
         .collect()
 }
 
-fn new_aggregate_accumulators(
+fn new_aggregate_accumulators_with_budget(
     engine: &Engine,
-    agg_targets: &[&ScalarExpr],
+    aggregate_targets: &[&ScalarExpr],
+    budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
-    agg_targets
+    aggregate_targets
         .iter()
-        .map(|expr| match expr {
+        .map(|expression| match expression {
             ScalarExpr::Func { name, .. } => {
                 Ok(engine.registered_aggregate_function(name).map_or_else(
-                    || AggregateAccumulator::builtin(name),
-                    AggregateAccumulator::registered,
+                    || AggregateAccumulator::builtin_with_budget(name, budget_bytes),
+                    |function| AggregateAccumulator::registered_with_budget(function, budget_bytes),
                 ))
             }
-            _ => Ok(AggregateAccumulator::default()),
+            _ => Ok(AggregateAccumulator::with_budget(budget_bytes)),
         })
         .collect()
-}
-
-fn group_bucket<'a>(
-    engine: &Engine,
-    groups: &'a mut BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)>,
-    group_values: Vec<Value>,
-    agg_targets: &[&ScalarExpr],
-) -> Result<&'a mut (Vec<AggregateAccumulator>, Vec<Value>), SQLError> {
-    use std::collections::btree_map::Entry;
-
-    match groups.entry(group_values.clone()) {
-        Entry::Occupied(entry) => Ok(entry.into_mut()),
-        Entry::Vacant(entry) => {
-            let accs = new_aggregate_accumulators(engine, agg_targets)?;
-            Ok(entry.insert((accs, group_values)))
-        }
-    }
 }
 
 fn observe_aggregate(
@@ -1894,8 +1055,8 @@ fn observe_aggregate(
     if acc.registered.is_some() {
         let values = aggregate_input_values(args, ctx)?;
         if distinct {
-            let key = distinct_key(&Value::List(values.clone()));
-            if !acc.distinct.insert(key) {
+            let key = distinct_key(&Value::List(values.clone()))?;
+            if !acc.distinct.insert(key)? {
                 return Ok(());
             }
         }
@@ -1922,8 +1083,8 @@ fn observe_builtin_aggregate_value(
 ) -> Result<(), SQLError> {
     let preserves_null_inputs = is_json_array_aggregate(name);
     if distinct && (preserves_null_inputs || !matches!(value, Value::Null)) {
-        let key = distinct_key(value);
-        if !acc.distinct.insert(key) {
+        let key = distinct_key(value)?;
+        if !acc.distinct.insert(key)? {
             return Ok(());
         }
     }
@@ -1964,25 +1125,66 @@ pub(super) struct AggregateAccumulator {
     sum: f64,
     integer_sum: i128,
     decimal_sum: Option<DecimalValue>,
-    has_decimal: bool,
-    has_float: bool,
+    numeric_inputs: NumericInputKind,
     min: Option<Value>,
     max: Option<Value>,
     /// Distinct-bookkeeping. Filled by the dispatcher when the
     /// aggregate was annotated with `DISTINCT`. Holds canonical-form
     /// keys so `Int(1)` and `Float(1.0)` collapse to the same bucket.
-    distinct: std::collections::BTreeSet<String>,
+    distinct: DistinctTracker,
     /// Only collection, ordered-set, and statistical aggregates need
     /// their complete input. Streaming aggregates keep constant-size
     /// state and must not spill values that their finalizer never reads.
     state_plan: AggregateStatePlan,
     values: AggregateValueBuffer,
-    all_values_int: bool,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
     /// first observation so an empty input set returns `NULL` (matches
     /// `PostgreSQL`).
     bool_and: Option<bool>,
     bool_or: Option<bool>,
+    /// Welford state for variance/stddev. This avoids retaining the complete
+    /// group for statistical aggregates.
+    statistics_count: u64,
+    statistics_mean: f64,
+    statistics_m2: f64,
+    statistics_has_float: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+enum NumericInputKind {
+    #[default]
+    Integers,
+    Decimals,
+    Floats,
+    DecimalsAndFloats,
+}
+
+impl NumericInputKind {
+    fn observe_decimal(&mut self) {
+        *self = match self {
+            Self::Integers | Self::Decimals => Self::Decimals,
+            Self::Floats | Self::DecimalsAndFloats => Self::DecimalsAndFloats,
+        };
+    }
+
+    fn observe_float(&mut self) {
+        *self = match self {
+            Self::Integers | Self::Floats => Self::Floats,
+            Self::Decimals | Self::DecimalsAndFloats => Self::DecimalsAndFloats,
+        };
+    }
+
+    fn all_integers(self) -> bool {
+        matches!(self, Self::Integers)
+    }
+
+    fn decimal_without_float(self) -> bool {
+        matches!(self, Self::Decimals)
+    }
+
+    fn has_decimal(self) -> bool {
+        matches!(self, Self::Decimals | Self::DecimalsAndFloats)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1997,7 +1199,7 @@ enum AggregateStatePlan {
     BoolAnd,
     BoolOr,
     Buffered,
-    BufferedWithCount,
+    Statistics,
 }
 
 impl AggregateStatePlan {
@@ -2010,7 +1212,7 @@ impl AggregateStatePlan {
             "bool_and" => Self::BoolAnd,
             "bool_or" => Self::BoolOr,
             "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
-                Self::BufferedWithCount
+                Self::Statistics
             }
             "string_agg" | "array_agg" | "json_agg" | "jsonb_agg" | "json_object_agg"
             | "jsonb_object_agg" | "percentile_cont" | "percentile_disc" | "mode" => Self::Buffered,
@@ -2019,10 +1221,7 @@ impl AggregateStatePlan {
     }
 
     fn retains_values(self) -> bool {
-        matches!(
-            self,
-            Self::Generic | Self::Buffered | Self::BufferedWithCount
-        )
+        matches!(self, Self::Generic | Self::Buffered)
     }
 }
 
@@ -2036,21 +1235,33 @@ impl Default for AggregateAccumulator {
             sum: 0.0,
             integer_sum: 0,
             decimal_sum: None,
-            has_decimal: false,
-            has_float: false,
+            numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
-            distinct: BTreeSet::new(),
+            distinct: DistinctTracker::default(),
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::default(),
-            all_values_int: true,
             bool_and: None,
             bool_or: None,
+            statistics_count: 0,
+            statistics_mean: 0.0,
+            statistics_m2: 0.0,
+            statistics_has_float: false,
         }
     }
 }
 
 impl AggregateAccumulator {
+    fn with_budget(budget_bytes: usize) -> Self {
+        let component_budget = (budget_bytes / 2).max(1);
+        Self {
+            distinct: DistinctTracker::new(component_budget),
+            values: AggregateValueBuffer::new(component_budget),
+            registered_ordered: RegisteredAggregateBuffer::new(component_budget),
+            ..Self::default()
+        }
+    }
+
     pub(super) fn builtin(name: &str) -> Self {
         Self {
             state_plan: AggregateStatePlan::builtin(name),
@@ -2058,12 +1269,22 @@ impl AggregateAccumulator {
         }
     }
 
-    fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
+    fn builtin_with_budget(name: &str, budget_bytes: usize) -> Self {
+        Self {
+            state_plan: AggregateStatePlan::builtin(name),
+            ..Self::with_budget(budget_bytes)
+        }
+    }
+
+    fn registered_with_budget(
+        function: Arc<dyn SQLAggregateFunction>,
+        budget_bytes: usize,
+    ) -> Self {
         let state = function.create_state();
         Self {
             registered: Some(function),
             registered_state: Some(state),
-            ..Self::default()
+            ..Self::with_budget(budget_bytes)
         }
     }
 
@@ -2078,73 +1299,64 @@ impl AggregateAccumulator {
         Ok(())
     }
 
-    fn observe_projected(&mut self, value: &Value) -> Result<(), SQLError> {
-        match value {
-            Value::Int(value) => self.observe_projected_integer(*value),
-            _ => self.observe(value),
-        }
-    }
-
-    fn observe_projected_integer(&mut self, value: i64) -> Result<(), SQLError> {
-        match self.state_plan {
-            AggregateStatePlan::Count => {
-                self.count += 1;
-                Ok(())
-            }
-            AggregateStatePlan::Sum => {
-                self.count += 1;
-                self.integer_sum = self
-                    .integer_sum
-                    .checked_add(i128::from(value))
-                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
-                if self.has_decimal {
-                    let next = DecimalValue::from_i64(value);
-                    self.decimal_sum = Some(
-                        self.decimal_sum
-                            .as_ref()
-                            .and_then(|sum| sum.checked_add(&next))
-                            .ok_or_else(|| {
-                                SQLError::TypeMismatch("decimal aggregate overflow".into())
-                            })?,
-                    );
-                }
-                if !self.all_values_int {
-                    self.sum += value as f64;
-                }
-                Ok(())
-            }
-            _ => self.observe(&Value::Int(value)),
-        }
-    }
-
     fn observe_state(&mut self, value: &Value) -> Result<(), SQLError> {
         match self.state_plan {
             AggregateStatePlan::Generic => {
-                self.count += 1;
-                self.observe_sum(value)?;
+                self.count = self
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+                if matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
+                    self.observe_sum(value)?;
+                }
                 self.observe_min(value);
                 self.observe_max(value);
-                self.observe_bool_and(value);
-                self.observe_bool_or(value);
+                if matches!(value, Value::Bool(_)) {
+                    self.observe_bool_and(value)?;
+                    self.observe_bool_or(value)?;
+                }
             }
-            AggregateStatePlan::Count => self.count += 1,
+            AggregateStatePlan::Count => {
+                self.count = self
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+            }
             AggregateStatePlan::Sum => {
-                self.count += 1;
+                self.count = self
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
                 self.observe_sum(value)?;
             }
             AggregateStatePlan::Min => self.observe_min(value),
             AggregateStatePlan::Max => self.observe_max(value),
-            AggregateStatePlan::BoolAnd => self.observe_bool_and(value),
-            AggregateStatePlan::BoolOr => self.observe_bool_or(value),
+            AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
+            AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
             AggregateStatePlan::Buffered => {}
-            AggregateStatePlan::BufferedWithCount => self.count += 1,
+            AggregateStatePlan::Statistics => {
+                self.statistics_has_float |= matches!(value, Value::Float(_));
+                let value = value_as_f64(value)?;
+                self.statistics_count = self.statistics_count.checked_add(1).ok_or_else(|| {
+                    SQLError::TypeMismatch("statistical aggregate count overflow".into())
+                })?;
+                let count = self.statistics_count as f64;
+                let delta = value - self.statistics_mean;
+                self.statistics_mean += delta / count;
+                let delta_after = value - self.statistics_mean;
+                self.statistics_m2 += delta * delta_after;
+            }
         }
         Ok(())
     }
 
     fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {
-        if !matches!(value, Value::Int(_)) && self.all_values_int {
-            self.all_values_int = false;
+        if !matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
+            return Err(SQLError::TypeMismatch(format!(
+                "SUM/AVG requires a numeric value, got {value:?}"
+            )));
+        }
+        if !matches!(value, Value::Int(_)) && self.numeric_inputs.all_integers() {
             // Integer-only SUM/AVG finalizers use `integer_sum` directly.
             // Seed the floating accumulator once, at the first non-integer,
             // instead of converting and adding every integer row twice.
@@ -2156,7 +1368,7 @@ impl AggregateAccumulator {
                     .integer_sum
                     .checked_add(i128::from(*n))
                     .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
-                if self.has_decimal {
+                if self.numeric_inputs.has_decimal() {
                     let next = DecimalValue::from_i64(*n);
                     self.decimal_sum = Some(
                         self.decimal_sum
@@ -2177,17 +1389,19 @@ impl AggregateAccumulator {
                 }
                 .ok_or_else(|| SQLError::TypeMismatch("decimal aggregate overflow".into()))?;
                 self.decimal_sum = Some(next);
-                self.has_decimal = true;
+                self.numeric_inputs.observe_decimal();
             }
             Value::Float(_) => {
-                self.has_float = true;
+                self.numeric_inputs.observe_float();
             }
-            _ => {}
+            _ => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "SUM/AVG requires a numeric value, got {value:?}"
+                )))
+            }
         }
-        if !self.all_values_int {
-            if let Ok(f) = value_as_f64(value) {
-                self.sum += f;
-            }
+        if !self.numeric_inputs.all_integers() {
+            self.sum += value_as_f64(value)?;
         }
         Ok(())
     }
@@ -2206,16 +1420,24 @@ impl AggregateAccumulator {
         }
     }
 
-    fn observe_bool_and(&mut self, value: &Value) {
-        if let Value::Bool(b) = value {
-            self.bool_and = Some(self.bool_and.unwrap_or(true) && *b);
-        }
+    fn observe_bool_and(&mut self, value: &Value) -> Result<(), SQLError> {
+        let Value::Bool(value) = value else {
+            return Err(SQLError::TypeMismatch(format!(
+                "BOOL_AND requires a boolean value, got {value:?}"
+            )));
+        };
+        self.bool_and = Some(self.bool_and.unwrap_or(true) && *value);
+        Ok(())
     }
 
-    fn observe_bool_or(&mut self, value: &Value) {
-        if let Value::Bool(b) = value {
-            self.bool_or = Some(self.bool_or.unwrap_or(false) || *b);
-        }
+    fn observe_bool_or(&mut self, value: &Value) -> Result<(), SQLError> {
+        let Value::Bool(value) = value else {
+            return Err(SQLError::TypeMismatch(format!(
+                "BOOL_OR requires a boolean value, got {value:?}"
+            )));
+        };
+        self.bool_or = Some(self.bool_or.unwrap_or(false) || *value);
+        Ok(())
     }
 
     fn observe_with_sort_keys(
@@ -2282,70 +1504,204 @@ struct AggregateValueRecord {
     sequence: u64,
 }
 
-#[derive(Default)]
+struct JsonSpillRun {
+    file: tempfile::NamedTempFile,
+    max_record_bytes: usize,
+}
+
+fn write_json_spill_record(
+    writer: &mut impl Write,
+    value: &impl serde::Serialize,
+    description: &str,
+) -> Result<usize, SQLError> {
+    let payload = serde_json::to_vec(value).map_err(|error| {
+        SQLError::Internal(format!("failed to serialize {description}: {error}"))
+    })?;
+    let record_bytes = payload
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| SQLError::Internal(format!("{description} size overflow")))?;
+    writer
+        .write_all(&payload)
+        .map_err(|error| SQLError::Internal(format!("failed to write {description}: {error}")))?;
+    writer
+        .write_all(b"\n")
+        .map_err(|error| SQLError::Internal(format!("failed to write {description}: {error}")))?;
+    Ok(record_bytes)
+}
+
+fn read_bounded_json_spill_record<R: BufRead>(
+    reader: &mut R,
+    max_record_bytes: usize,
+    description: &str,
+) -> Result<Option<Vec<u8>>, SQLError> {
+    let mut record = Vec::new();
+    loop {
+        let (chunk_len, terminated) = {
+            let available = reader.fill_buf().map_err(|error| {
+                SQLError::Internal(format!("failed to read {description}: {error}"))
+            })?;
+            if available.is_empty() {
+                if record.is_empty() {
+                    return Ok(None);
+                }
+                return Err(SQLError::Internal(format!(
+                    "truncated {description}: missing record delimiter"
+                )));
+            }
+            match available.iter().position(|byte| *byte == b'\n') {
+                Some(index) => (index + 1, true),
+                None => (available.len(), false),
+            }
+        };
+        let next_len = record
+            .len()
+            .checked_add(chunk_len)
+            .ok_or_else(|| SQLError::Internal(format!("{description} length overflow")))?;
+        if next_len > max_record_bytes {
+            return Err(SQLError::Internal(format!(
+                "{description} exceeds recorded maximum of {max_record_bytes} bytes"
+            )));
+        }
+        record.try_reserve(chunk_len).map_err(|error| {
+            SQLError::Internal(format!(
+                "unable to allocate {chunk_len} more bytes for {description}: {error}"
+            ))
+        })?;
+        let available = reader.fill_buf().map_err(|error| {
+            SQLError::Internal(format!("failed to read {description}: {error}"))
+        })?;
+        record.extend_from_slice(&available[..chunk_len]);
+        reader.consume(chunk_len);
+        if terminated {
+            let delimiter = record.pop();
+            debug_assert_eq!(delimiter, Some(b'\n'));
+            return Ok(Some(record));
+        }
+    }
+}
+
 struct AggregateValueBuffer {
     rows: Vec<AggregateValueRecord>,
-    runs: Vec<tempfile::NamedTempFile>,
+    runs: Vec<JsonSpillRun>,
     next_sequence: u64,
-    has_sort_keys: bool,
+    budget_bytes: usize,
+    memory_bytes: usize,
+}
+
+impl Default for AggregateValueBuffer {
+    fn default() -> Self {
+        Self::new(64 * 1024 * 1024)
+    }
 }
 
 impl AggregateValueBuffer {
+    fn new(budget_bytes: usize) -> Self {
+        Self {
+            rows: Vec::new(),
+            runs: Vec::new(),
+            next_sequence: 0,
+            budget_bytes: budget_bytes.max(1),
+            memory_bytes: 0,
+        }
+    }
+
     fn push(&mut self, value: Value, sort_keys: Vec<(Value, bool)>) -> Result<(), SQLError> {
-        self.has_sort_keys |= !sort_keys.is_empty();
-        self.rows.push(AggregateValueRecord {
+        let next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("aggregate value sequence overflow".into()))?;
+        let record = AggregateValueRecord {
             value,
             sort_keys,
             sequence: self.next_sequence,
-        });
-        self.next_sequence = self.next_sequence.saturating_add(1);
-        if self.rows.len() >= AGGREGATE_SPILL_ROWS {
+        };
+        let bytes = serde_json::to_vec(&record)
+            .map_err(|error| {
+                SQLError::Internal(format!("failed to size aggregate value: {error}"))
+            })?
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("aggregate value size overflow".into()))?;
+        if !self.rows.is_empty()
+            && self
+                .memory_bytes
+                .checked_add(bytes)
+                .is_none_or(|total| total > self.budget_bytes)
+        {
+            self.flush_run()?;
+        }
+        let next_memory_bytes = self
+            .memory_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| SQLError::Internal("aggregate value size overflow".into()))?;
+        self.rows.push(record);
+        self.memory_bytes = next_memory_bytes;
+        self.next_sequence = next_sequence;
+        // One value is indivisible. It passes through memory once and is
+        // immediately written when its encoding alone exceeds the budget.
+        if self.memory_bytes > self.budget_bytes {
             self.flush_run()?;
         }
         Ok(())
     }
 
-    fn values(&self) -> Result<Vec<Value>, SQLError> {
-        let mut records = self.records()?;
-        records.sort_by_key(|record| record.sequence);
-        Ok(records.into_iter().map(|record| record.value).collect())
-    }
-
     fn ordered_values(&self) -> Result<Vec<Value>, SQLError> {
-        let mut records = self.records()?;
-        if self.has_sort_keys {
-            records.sort_by(compare_aggregate_value_records);
-        } else {
-            records.sort_by_key(|record| record.sequence);
-        }
-        Ok(records.into_iter().map(|record| record.value).collect())
+        let capacity = usize::try_from(self.next_sequence).map_err(|_| {
+            SQLError::Internal("aggregate value count exceeds address space".into())
+        })?;
+        let mut values = Vec::new();
+        values.try_reserve_exact(capacity).map_err(|error| {
+            SQLError::Internal(format!(
+                "unable to allocate aggregate result for {capacity} values: {error}"
+            ))
+        })?;
+        self.for_each_ordered(|record| {
+            values.push(record.value);
+            Ok(())
+        })?;
+        Ok(values)
     }
 
-    fn records(&self) -> Result<Vec<AggregateValueRecord>, SQLError> {
-        let mut records = Vec::with_capacity(self.rows.len());
-        for run in &self.runs {
-            records.extend(read_aggregate_value_run(run)?);
+    fn for_each_ordered(
+        &self,
+        mut visit: impl FnMut(AggregateValueRecord) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let mut memory = self.rows.clone();
+        memory.sort_by(compare_aggregate_value_records);
+        let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!memory.is_empty()));
+        if !memory.is_empty() {
+            readers.push(AggregateValueRunReader::memory(memory));
         }
-        records.extend(self.rows.iter().cloned());
-        Ok(records)
+        for run in &self.runs {
+            readers.push(AggregateValueRunReader::file(run)?);
+        }
+        while let Some((index, _)) = readers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
+            .min_by(|(_, left), (_, right)| compare_aggregate_value_records(left, right))
+        {
+            visit(readers[index].take_current()?)?;
+        }
+        Ok(())
     }
 
     fn flush_run(&mut self) -> Result<(), SQLError> {
         if self.rows.is_empty() {
             return Ok(());
         }
+        self.rows.sort_by(compare_aggregate_value_records);
         let mut run = tempfile::NamedTempFile::new().map_err(|err| {
             SQLError::Internal(format!("failed to create aggregate spill file: {err}"))
         })?;
+        let mut max_record_bytes = 0;
         {
             let mut writer = BufWriter::new(run.as_file_mut());
             for row in self.rows.drain(..) {
-                serde_json::to_writer(&mut writer, &row).map_err(|err| {
-                    SQLError::Internal(format!("failed to serialize aggregate spill row: {err}"))
-                })?;
-                writer.write_all(b"\n").map_err(|err| {
-                    SQLError::Internal(format!("failed to write aggregate spill row: {err}"))
-                })?;
+                let record_bytes =
+                    write_json_spill_record(&mut writer, &row, "aggregate spill row")?;
+                max_record_bytes = max_record_bytes.max(record_bytes);
             }
             writer.flush().map_err(|err| {
                 SQLError::Internal(format!("failed to flush aggregate spill file: {err}"))
@@ -2354,33 +1710,136 @@ impl AggregateValueBuffer {
         run.as_file_mut().seek(SeekFrom::Start(0)).map_err(|err| {
             SQLError::Internal(format!("failed to rewind aggregate spill file: {err}"))
         })?;
-        self.runs.push(run);
+        self.runs.push(JsonSpillRun {
+            file: run,
+            max_record_bytes,
+        });
+        self.memory_bytes = 0;
+        if self.runs.len() >= AGGREGATE_MERGE_FAN_IN {
+            let inputs = self
+                .runs
+                .drain(..AGGREGATE_MERGE_FAN_IN)
+                .collect::<Vec<_>>();
+            self.runs.push(merge_aggregate_value_runs(inputs)?);
+        }
         Ok(())
     }
 }
 
-fn read_aggregate_value_run(
-    run: &tempfile::NamedTempFile,
-) -> Result<Vec<AggregateValueRecord>, SQLError> {
-    let file = run.reopen().map_err(|err| {
-        SQLError::Internal(format!("failed to reopen aggregate spill file: {err}"))
-    })?;
-    let mut reader = BufReader::new(file);
-    let mut records = Vec::new();
-    loop {
-        let mut line = String::new();
-        let bytes = reader.read_line(&mut line).map_err(|err| {
-            SQLError::Internal(format!("failed to read aggregate spill row: {err}"))
-        })?;
-        if bytes == 0 {
-            break;
-        }
-        let record = serde_json::from_str(line.trim_end()).map_err(|err| {
-            SQLError::Internal(format!("failed to deserialize aggregate spill row: {err}"))
-        })?;
-        records.push(record);
+enum AggregateValueRunReader {
+    Memory {
+        rows: std::vec::IntoIter<AggregateValueRecord>,
+        current: Option<AggregateValueRecord>,
+    },
+    File {
+        reader: BufReader<File>,
+        current: Option<AggregateValueRecord>,
+        max_record_bytes: usize,
+    },
+}
+
+impl AggregateValueRunReader {
+    fn memory(rows: Vec<AggregateValueRecord>) -> Self {
+        let mut rows = rows.into_iter();
+        let current = rows.next();
+        Self::Memory { rows, current }
     }
-    Ok(records)
+
+    fn file(run: &JsonSpillRun) -> Result<Self, SQLError> {
+        let file = run.file.reopen().map_err(|error| {
+            SQLError::Internal(format!("failed to reopen aggregate spill file: {error}"))
+        })?;
+        let mut reader = BufReader::new(file);
+        let current = read_aggregate_value_record(&mut reader, run.max_record_bytes)?;
+        Ok(Self::File {
+            reader,
+            current,
+            max_record_bytes: run.max_record_bytes,
+        })
+    }
+
+    fn current(&self) -> Option<&AggregateValueRecord> {
+        match self {
+            Self::Memory { current, .. } | Self::File { current, .. } => current.as_ref(),
+        }
+    }
+
+    fn take_current(&mut self) -> Result<AggregateValueRecord, SQLError> {
+        match self {
+            Self::Memory { rows, current } => {
+                let record = current
+                    .take()
+                    .ok_or_else(|| SQLError::Internal("aggregate memory run exhausted".into()))?;
+                *current = rows.next();
+                Ok(record)
+            }
+            Self::File {
+                reader,
+                current,
+                max_record_bytes,
+            } => {
+                let record = current
+                    .take()
+                    .ok_or_else(|| SQLError::Internal("aggregate spill run exhausted".into()))?;
+                *current = read_aggregate_value_record(reader, *max_record_bytes)?;
+                Ok(record)
+            }
+        }
+    }
+}
+
+fn read_aggregate_value_record(
+    reader: &mut BufReader<File>,
+    max_record_bytes: usize,
+) -> Result<Option<AggregateValueRecord>, SQLError> {
+    let Some(record) =
+        read_bounded_json_spill_record(reader, max_record_bytes, "aggregate spill row")?
+    else {
+        return Ok(None);
+    };
+    serde_json::from_slice(&record).map(Some).map_err(|error| {
+        SQLError::Internal(format!(
+            "failed to deserialize aggregate spill row: {error}"
+        ))
+    })
+}
+
+fn merge_aggregate_value_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRun, SQLError> {
+    let mut readers = runs
+        .iter()
+        .map(AggregateValueRunReader::file)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = tempfile::NamedTempFile::new().map_err(|error| {
+        SQLError::Internal(format!("failed to create aggregate merge run: {error}"))
+    })?;
+    let mut max_record_bytes = 0;
+    {
+        let mut writer = BufWriter::new(output.as_file_mut());
+        while let Some((index, _)) = readers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
+            .min_by(|(_, left), (_, right)| compare_aggregate_value_records(left, right))
+        {
+            let record = readers[index].take_current()?;
+            let record_bytes =
+                write_json_spill_record(&mut writer, &record, "aggregate merge row")?;
+            max_record_bytes = max_record_bytes.max(record_bytes);
+        }
+        writer.flush().map_err(|error| {
+            SQLError::Internal(format!("failed to flush aggregate merge run: {error}"))
+        })?;
+    }
+    output
+        .as_file_mut()
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| {
+            SQLError::Internal(format!("failed to rewind aggregate merge run: {error}"))
+        })?;
+    Ok(JsonSpillRun {
+        file: output,
+        max_record_bytes,
+    })
 }
 
 fn compare_aggregate_value_records(a: &AggregateValueRecord, b: &AggregateValueRecord) -> Ordering {
@@ -2401,26 +1860,69 @@ struct RegisteredAggregateRecord {
     sequence: u64,
 }
 
-#[derive(Default)]
 struct RegisteredAggregateBuffer {
     rows: Vec<RegisteredAggregateRecord>,
-    runs: Vec<tempfile::NamedTempFile>,
+    runs: Vec<JsonSpillRun>,
     next_sequence: u64,
+    budget_bytes: usize,
+    memory_bytes: usize,
+}
+
+impl Default for RegisteredAggregateBuffer {
+    fn default() -> Self {
+        Self::new(64 * 1024 * 1024)
+    }
 }
 
 impl RegisteredAggregateBuffer {
+    fn new(budget_bytes: usize) -> Self {
+        Self {
+            rows: Vec::new(),
+            runs: Vec::new(),
+            next_sequence: 0,
+            budget_bytes: budget_bytes.max(1),
+            memory_bytes: 0,
+        }
+    }
+
     fn is_empty(&self) -> bool {
         self.rows.is_empty() && self.runs.is_empty()
     }
 
     fn push(&mut self, values: Vec<Value>, sort_keys: Vec<(Value, bool)>) -> Result<(), SQLError> {
-        self.rows.push(RegisteredAggregateRecord {
+        let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
+            SQLError::Internal("registered aggregate value sequence overflow".into())
+        })?;
+        let record = RegisteredAggregateRecord {
             values,
             sort_keys,
             sequence: self.next_sequence,
-        });
-        self.next_sequence = self.next_sequence.saturating_add(1);
-        if self.rows.len() >= AGGREGATE_SPILL_ROWS {
+        };
+        let bytes = serde_json::to_vec(&record)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "failed to size registered aggregate value: {error}"
+                ))
+            })?
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("registered aggregate value size overflow".into()))?;
+        if !self.rows.is_empty()
+            && self
+                .memory_bytes
+                .checked_add(bytes)
+                .is_none_or(|total| total > self.budget_bytes)
+        {
+            self.flush_run()?;
+        }
+        let next_memory_bytes = self
+            .memory_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| SQLError::Internal("registered aggregate value size overflow".into()))?;
+        self.rows.push(record);
+        self.memory_bytes = next_memory_bytes;
+        self.next_sequence = next_sequence;
+        if self.memory_bytes > self.budget_bytes {
             self.flush_run()?;
         }
         Ok(())
@@ -2468,19 +1970,13 @@ impl RegisteredAggregateBuffer {
                 "failed to create registered aggregate spill file: {err}"
             ))
         })?;
+        let mut max_record_bytes = 0;
         {
             let mut writer = BufWriter::new(run.as_file_mut());
             for row in self.rows.drain(..) {
-                serde_json::to_writer(&mut writer, &row).map_err(|err| {
-                    SQLError::Internal(format!(
-                        "failed to serialize registered aggregate spill row: {err}"
-                    ))
-                })?;
-                writer.write_all(b"\n").map_err(|err| {
-                    SQLError::Internal(format!(
-                        "failed to write registered aggregate spill row: {err}"
-                    ))
-                })?;
+                let record_bytes =
+                    write_json_spill_record(&mut writer, &row, "registered aggregate spill row")?;
+                max_record_bytes = max_record_bytes.max(record_bytes);
             }
             writer.flush().map_err(|err| {
                 SQLError::Internal(format!(
@@ -2493,7 +1989,18 @@ impl RegisteredAggregateBuffer {
                 "failed to rewind registered aggregate spill file: {err}"
             ))
         })?;
-        self.runs.push(run);
+        self.runs.push(JsonSpillRun {
+            file: run,
+            max_record_bytes,
+        });
+        self.memory_bytes = 0;
+        if self.runs.len() >= AGGREGATE_MERGE_FAN_IN {
+            let inputs = self
+                .runs
+                .drain(..AGGREGATE_MERGE_FAN_IN)
+                .collect::<Vec<_>>();
+            self.runs.push(merge_registered_aggregate_runs(inputs)?);
+        }
         Ok(())
     }
 }
@@ -2506,6 +2013,7 @@ enum RegisteredAggregateRunReader {
     File {
         reader: BufReader<File>,
         current: Option<RegisteredAggregateRecord>,
+        max_record_bytes: usize,
     },
 }
 
@@ -2516,15 +2024,19 @@ impl RegisteredAggregateRunReader {
         Self::Memory { rows, current }
     }
 
-    fn file(run: &tempfile::NamedTempFile) -> Result<Self, SQLError> {
-        let file = run.reopen().map_err(|err| {
+    fn file(run: &JsonSpillRun) -> Result<Self, SQLError> {
+        let file = run.file.reopen().map_err(|err| {
             SQLError::Internal(format!(
                 "failed to reopen registered aggregate spill file: {err}"
             ))
         })?;
         let mut reader = BufReader::new(file);
-        let current = read_registered_aggregate_record(&mut reader)?;
-        Ok(Self::File { reader, current })
+        let current = read_registered_aggregate_record(&mut reader, run.max_record_bytes)?;
+        Ok(Self::File {
+            reader,
+            current,
+            max_record_bytes: run.max_record_bytes,
+        })
     }
 
     fn current(&self) -> Option<&RegisteredAggregateRecord> {
@@ -2542,11 +2054,15 @@ impl RegisteredAggregateRunReader {
                 *current = rows.next();
                 Ok(record)
             }
-            Self::File { reader, current } => {
+            Self::File {
+                reader,
+                current,
+                max_record_bytes,
+            } => {
                 let record = current.take().ok_or_else(|| {
                     SQLError::Internal("registered aggregate spill run exhausted".into())
                 })?;
-                *current = read_registered_aggregate_record(reader)?;
+                *current = read_registered_aggregate_record(reader, *max_record_bytes)?;
                 Ok(record)
             }
         }
@@ -2555,23 +2071,62 @@ impl RegisteredAggregateRunReader {
 
 fn read_registered_aggregate_record(
     reader: &mut BufReader<File>,
+    max_record_bytes: usize,
 ) -> Result<Option<RegisteredAggregateRecord>, SQLError> {
-    let mut line = String::new();
-    let bytes = reader.read_line(&mut line).map_err(|err| {
+    let Some(record) =
+        read_bounded_json_spill_record(reader, max_record_bytes, "registered aggregate spill row")?
+    else {
+        return Ok(None);
+    };
+    serde_json::from_slice(&record).map(Some).map_err(|err| {
         SQLError::Internal(format!(
-            "failed to read registered aggregate spill row: {err}"
+            "failed to deserialize registered aggregate spill row: {err}"
+        ))
+    })
+}
+
+fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRun, SQLError> {
+    let mut readers = runs
+        .iter()
+        .map(RegisteredAggregateRunReader::file)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut output = tempfile::NamedTempFile::new().map_err(|error| {
+        SQLError::Internal(format!(
+            "failed to create registered aggregate merge run: {error}"
         ))
     })?;
-    if bytes == 0 {
-        return Ok(None);
-    }
-    serde_json::from_str(line.trim_end())
-        .map(Some)
-        .map_err(|err| {
+    let mut max_record_bytes = 0;
+    {
+        let mut writer = BufWriter::new(output.as_file_mut());
+        while let Some((index, _)) = readers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
+            .min_by(|(_, left), (_, right)| compare_registered_aggregate_records(left, right))
+        {
+            let record = readers[index].take_current()?;
+            let record_bytes =
+                write_json_spill_record(&mut writer, &record, "registered aggregate merge row")?;
+            max_record_bytes = max_record_bytes.max(record_bytes);
+        }
+        writer.flush().map_err(|error| {
             SQLError::Internal(format!(
-                "failed to deserialize registered aggregate spill row: {err}"
+                "failed to flush registered aggregate merge run: {error}"
             ))
-        })
+        })?;
+    }
+    output
+        .as_file_mut()
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "failed to rewind registered aggregate merge run: {error}"
+            ))
+        })?;
+    Ok(JsonSpillRun {
+        file: output,
+        max_record_bytes,
+    })
 }
 
 fn compare_registered_aggregate_records(
@@ -2588,20 +2143,176 @@ fn compare_registered_aggregate_records(
     a.sequence.cmp(&b.sequence)
 }
 
-/// Canonical-form key for `DISTINCT` deduplication. Mirrors the
-/// approach in `uqa_execution::relational::distinct_key`.
-fn distinct_key(v: &Value) -> String {
-    match v {
+struct DistinctTracker {
+    memory: BTreeSet<String>,
+    memory_bytes: usize,
+    max_memory_record_bytes: usize,
+    budget_bytes: usize,
+    disk: Option<tempfile::NamedTempFile>,
+    max_disk_record_bytes: usize,
+}
+
+impl Default for DistinctTracker {
+    fn default() -> Self {
+        Self::new(32 * 1024 * 1024)
+    }
+}
+
+impl DistinctTracker {
+    fn new(budget_bytes: usize) -> Self {
+        Self {
+            memory: BTreeSet::new(),
+            memory_bytes: 0,
+            max_memory_record_bytes: 0,
+            budget_bytes: budget_bytes.max(1),
+            disk: None,
+            max_disk_record_bytes: 0,
+        }
+    }
+
+    fn insert(&mut self, key: String) -> Result<bool, SQLError> {
+        if self.memory.contains(&key) || self.disk_contains(&key)? {
+            return Ok(false);
+        }
+        let encoded_bytes = serde_json::to_vec(&key)
+            .map_err(|error| {
+                SQLError::Internal(format!("failed to size aggregate DISTINCT key: {error}"))
+            })?
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
+        self.memory_bytes = self
+            .memory_bytes
+            .checked_add(encoded_bytes)
+            .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
+        self.max_memory_record_bytes = self.max_memory_record_bytes.max(encoded_bytes);
+        self.memory.insert(key);
+        if self.memory_bytes > self.budget_bytes {
+            self.spill()?;
+        }
+        Ok(true)
+    }
+
+    fn disk_contains(&self, wanted: &str) -> Result<bool, SQLError> {
+        let Some(file) = self.disk.as_ref() else {
+            return Ok(false);
+        };
+        let file = file.reopen().map_err(|error| {
+            SQLError::Internal(format!(
+                "failed to reopen aggregate DISTINCT spill: {error}"
+            ))
+        })?;
+        let mut reader = BufReader::new(file);
+        loop {
+            let Some(record) = read_bounded_json_spill_record(
+                &mut reader,
+                self.max_disk_record_bytes,
+                "aggregate DISTINCT spill row",
+            )?
+            else {
+                return Ok(false);
+            };
+            let key: String = serde_json::from_slice(&record).map_err(|error| {
+                SQLError::Internal(format!(
+                    "failed to decode aggregate DISTINCT spill: {error}"
+                ))
+            })?;
+            if key == wanted {
+                return Ok(true);
+            }
+        }
+    }
+
+    fn spill(&mut self) -> Result<(), SQLError> {
+        if self.memory.is_empty() {
+            return Ok(());
+        }
+        if self.disk.is_none() {
+            self.disk = Some(tempfile::NamedTempFile::new().map_err(|error| {
+                SQLError::Internal(format!(
+                    "failed to create aggregate DISTINCT spill: {error}"
+                ))
+            })?);
+        }
+        let file = self.disk.as_mut().ok_or_else(|| {
+            SQLError::Internal("aggregate DISTINCT spill file was not initialized".into())
+        })?;
+        let original_length = file.as_file_mut().seek(SeekFrom::End(0)).map_err(|error| {
+            SQLError::Internal(format!("failed to seek aggregate DISTINCT spill: {error}"))
+        })?;
+        let next_max_disk_record_bytes =
+            self.max_disk_record_bytes.max(self.max_memory_record_bytes);
+        let result = {
+            let mut writer = BufWriter::new(file.as_file_mut());
+            let result = (|| -> Result<(), SQLError> {
+                for key in &self.memory {
+                    serde_json::to_writer(&mut writer, key).map_err(|error| {
+                        SQLError::Internal(format!(
+                            "failed to encode aggregate DISTINCT key: {error}"
+                        ))
+                    })?;
+                    writer.write_all(b"\n").map_err(|error| {
+                        SQLError::Internal(format!(
+                            "failed to write aggregate DISTINCT key: {error}"
+                        ))
+                    })?;
+                }
+                writer.flush().map_err(|error| {
+                    SQLError::Internal(format!("failed to flush aggregate DISTINCT spill: {error}"))
+                })
+            })();
+            drop(writer);
+            result
+        };
+        if let Err(error) = result {
+            file.as_file_mut()
+                .set_len(original_length)
+                .map_err(|rollback| {
+                    SQLError::Internal(format!(
+                        "{error}; failed to roll back aggregate DISTINCT spill: {rollback}"
+                    ))
+                })?;
+            return Err(error);
+        }
+        self.memory.clear();
+        self.memory_bytes = 0;
+        self.max_memory_record_bytes = 0;
+        self.max_disk_record_bytes = next_max_disk_record_bytes;
+        Ok(())
+    }
+}
+
+fn distinct_key(v: &Value) -> Result<String, SQLError> {
+    Ok(match v {
         Value::Null => "\x00".into(),
         Value::Bool(b) => format!("b:{b}"),
         Value::Int(n) => format!("i:{n}"),
-        Value::Float(f) => format!("f:{f}"),
+        Value::Float(f) => format!("f:{:016x}", f.to_bits()),
         Value::Decimal(d) => format!("n:{}", d.to_canonical_string()),
         Value::Str(s) => format!("s:{s}"),
-        Value::Bytes(b) => format!("y:{}", b.len()),
+        Value::Bytes(bytes) => {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let capacity = bytes
+                .len()
+                .checked_mul(2)
+                .and_then(|length| length.checked_add(2))
+                .ok_or_else(|| SQLError::Internal("aggregate DISTINCT key size overflow".into()))?;
+            let mut key = String::new();
+            key.try_reserve_exact(capacity).map_err(|error| {
+                SQLError::Internal(format!(
+                    "unable to allocate aggregate DISTINCT key of {capacity} bytes: {error}"
+                ))
+            })?;
+            key.push_str("y:");
+            for byte in bytes {
+                key.push(char::from(HEX[usize::from(byte >> 4)]));
+                key.push(char::from(HEX[usize::from(byte & 0x0f)]));
+            }
+            key
+        }
         Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
         other => format!("o:{other:?}"),
-    }
+    })
 }
 
 fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
@@ -2642,228 +2353,6 @@ fn value_gt(a: &Value, b: &Value) -> bool {
     value_lt(b, a)
 }
 
-pub(super) fn build_aggregate_rows(
-    engine: &Engine,
-    table: &str,
-    scored: &[ScoredEntry],
-    stmt: &QueryBlockPlan,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    // GROUPING SETS / ROLLUP / CUBE: run the aggregator per set, then
-    // mask out columns not in the active set with NULL.
-    if !stmt.grouping_sets.is_empty() {
-        let mut combined: Vec<ResultRow> = Vec::new();
-        let labels = projection_columns(&stmt.projections);
-        for set in &stmt.grouping_sets {
-            let mut sub = stmt.clone();
-            sub.group_by.clone_from(set);
-            sub.grouping_sets = Vec::new();
-            let part = build_aggregate_rows_relaxed(engine, table, scored, &sub, params, ctes)?;
-            for mut row in part {
-                for (idx, proj) in stmt.projections.iter().enumerate() {
-                    let label = labels[idx].clone();
-                    if contains_aggregate(engine, &proj.expr) {
-                        continue;
-                    }
-                    let in_set = set.iter().any(|g| exprs_match(&proj.expr, g));
-                    if !in_set {
-                        row.insert(label, Value::Null);
-                    }
-                }
-                combined.push(row);
-            }
-        }
-        return Ok(combined);
-    }
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
-    // group_key -> per-aggregate accumulator vector + the raw group key
-    // values used to project the GROUP BY columns.
-    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets = aggregate_exprs(engine, &stmt.projections);
-    let runtime = AggregateRuntime {
-        params,
-        function_hook: &hook,
-        subquery_runner: &subquery_arena,
-    };
-
-    accumulate_table_rows(
-        engine,
-        table,
-        scored,
-        stmt,
-        &agg_targets,
-        &mut groups,
-        &runtime,
-    )?;
-
-    if groups.is_empty() && stmt.group_by.is_empty() {
-        // SELECT count(*) FROM t with no rows still produces a row of
-        // zeros so downstream consumers see a stable shape.
-        groups.insert(
-            Vec::new(),
-            (
-                new_aggregate_accumulators(engine, &agg_targets)?,
-                Vec::new(),
-            ),
-        );
-    }
-
-    let mut rows: Vec<ResultRow> = Vec::with_capacity(groups.len());
-    let labels = projection_columns(&stmt.projections);
-    for (_, (accs, group_values)) in groups {
-        let mut row = ResultRow::new();
-        let group_row = group_context_row(stmt, &group_values);
-        let mut agg_idx = 0;
-        for (idx, proj) in stmt.projections.iter().enumerate() {
-            let label = labels[idx].clone();
-            if contains_aggregate(engine, &proj.expr) {
-                let resolved =
-                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
-                row.insert(label, eval_scalar(&resolved, &ctx)?);
-            } else {
-                if !expr_references_columns(&proj.expr) {
-                    let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                        .with_function_hook(&hook)
-                        .with_subquery_runner(&subquery_arena);
-                    row.insert(label, eval_scalar(&proj.expr, &ctx)?);
-                    continue;
-                }
-                // Match a non-aggregate projection against the GROUP BY
-                // key list using `exprs_match`, which understands both
-                // bare column refs and complex expressions.
-                let mut placed = false;
-                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if exprs_match(&proj.expr, g_expr) {
-                        row.insert(label.clone(), g_value.clone());
-                        placed = true;
-                        break;
-                    }
-                }
-                if !placed {
-                    return Err(SQLError::Unsupported(format!(
-                        "non-aggregated projection `{label}` must appear in GROUP BY"
-                    )));
-                }
-            }
-        }
-        if let Some(having_expr) = stmt.having.as_ref() {
-            let resolved = resolve_having(
-                engine,
-                having_expr,
-                &row,
-                stmt,
-                &accs,
-                &group_values,
-                params,
-            )?;
-            // Evaluate HAVING against the group-by column values merged with the projection
-            // aliases, so it can reference grouped columns that are not themselves projected.
-            let mut having_row = group_row.clone();
-            for (key, value) in &row {
-                having_row.insert(key.clone(), value.clone());
-            }
-            let ctx = ScalarEvalContext::new(Some(&having_row), params)
-                .with_function_hook(&hook)
-                .with_subquery_runner(&subquery_arena);
-            let kept = uqa_sql::expr::truthy(&eval_scalar(&resolved, &ctx)?);
-            if !kept {
-                continue;
-            }
-        }
-        rows.push(row);
-    }
-    Ok(rows)
-}
-
-/// Single-table aggregator variant used by the GROUPING SETS
-/// dispatcher: projections that aren't in the active `group_by` come
-/// out as NULL instead of erroring (`PostgreSQL` ROLLUP / CUBE
-/// semantics).
-fn build_aggregate_rows_relaxed(
-    engine: &Engine,
-    table: &str,
-    scored: &[ScoredEntry],
-    stmt: &QueryBlockPlan,
-    params: &[SQLParam],
-    ctes: &CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let hook = ScopedEngineHook::new(engine, ctes);
-    let subquery_arena = PlanSubqueryArena::new(&stmt.subqueries, Some(&hook));
-    let mut groups: BTreeMap<Vec<Value>, (Vec<AggregateAccumulator>, Vec<Value>)> = BTreeMap::new();
-    let agg_targets = aggregate_exprs(engine, &stmt.projections);
-    let runtime = AggregateRuntime {
-        params,
-        function_hook: &hook,
-        subquery_runner: &subquery_arena,
-    };
-    accumulate_table_rows(
-        engine,
-        table,
-        scored,
-        stmt,
-        &agg_targets,
-        &mut groups,
-        &runtime,
-    )?;
-    if groups.is_empty() && stmt.group_by.is_empty() {
-        groups.insert(
-            Vec::new(),
-            (
-                new_aggregate_accumulators(engine, &agg_targets)?,
-                Vec::new(),
-            ),
-        );
-    }
-    let mut rows: Vec<ResultRow> = Vec::with_capacity(groups.len());
-    let labels = projection_columns(&stmt.projections);
-    for (_, (accs, group_values)) in groups {
-        let mut row = ResultRow::new();
-        let group_row = group_context_row(stmt, &group_values);
-        let mut agg_idx = 0;
-        for (idx, proj) in stmt.projections.iter().enumerate() {
-            let label = labels[idx].clone();
-            if contains_aggregate(engine, &proj.expr) {
-                let resolved =
-                    replace_aggregates_with_values(engine, &proj.expr, &accs, &mut agg_idx)?;
-                let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
-                row.insert(label, eval_scalar(&resolved, &ctx)?);
-            } else if !expr_references_columns(&proj.expr) {
-                let ctx = ScalarEvalContext::new(Some(&group_row), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&subquery_arena);
-                row.insert(label, eval_scalar(&proj.expr, &ctx)?);
-            } else if let ScalarExpr::Column(col) = &proj.expr {
-                let mut placed = false;
-                for (g_expr, g_value) in stmt.group_by.iter().zip(&group_values) {
-                    if let ScalarExpr::Column(g_col) = g_expr {
-                        if g_col == col {
-                            row.insert(label.clone(), g_value.clone());
-                            placed = true;
-                            break;
-                        }
-                    }
-                }
-                if !placed {
-                    row.insert(label, Value::Null);
-                }
-            } else {
-                // Complex non-aggregate projections in ROLLUP / CUBE
-                // also fall back to NULL.
-                row.insert(label, Value::Null);
-            }
-        }
-        rows.push(row);
-    }
-    Ok(rows)
-}
-
 pub(super) fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Result<Value, SQLError> {
     aggregate_value_with_args(name, acc, &[])
 }
@@ -2879,18 +2368,19 @@ fn aggregate_value_with_args(
     let lname = name.to_ascii_lowercase();
 
     let value = match lname.as_str() {
-        "count" => Value::Int(acc.count as i64),
+        "count" => Value::Int(
+            i64::try_from(acc.count)
+                .map_err(|_| SQLError::TypeMismatch("aggregate count exceeds BIGINT".into()))?,
+        ),
         "sum" => {
             if acc.count == 0 {
                 Value::Null
-            } else if acc.has_decimal && !acc.has_float {
+            } else if acc.numeric_inputs.decimal_without_float() {
                 acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
-            } else if acc.all_values_int {
-                Value::Int(
-                    acc.integer_sum
-                        .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
-                        as i64,
-                )
+            } else if acc.numeric_inputs.all_integers() {
+                Value::Int(i64::try_from(acc.integer_sum).map_err(|_| {
+                    SQLError::TypeMismatch("integer aggregate result exceeds BIGINT".into())
+                })?)
             } else {
                 Value::Float(acc.sum)
             }
@@ -2898,13 +2388,17 @@ fn aggregate_value_with_args(
         "avg" => {
             if acc.count == 0 {
                 Value::Null
-            } else if acc.has_decimal && !acc.has_float {
-                let divisor = DecimalValue::from_i64(acc.count as i64);
-                acc.decimal_sum
+            } else if acc.numeric_inputs.decimal_without_float() {
+                let divisor = DecimalValue::from_i64(i64::try_from(acc.count).map_err(|_| {
+                    SQLError::TypeMismatch("aggregate count exceeds BIGINT".into())
+                })?);
+                let average = acc
+                    .decimal_sum
                     .as_ref()
                     .and_then(|sum| sum.checked_div(&divisor))
-                    .map_or(Value::Null, Value::Decimal)
-            } else if acc.all_values_int {
+                    .ok_or_else(|| SQLError::TypeMismatch("decimal AVG overflow".into()))?;
+                Value::Decimal(average)
+            } else if acc.numeric_inputs.all_integers() {
                 Value::Float(acc.integer_sum as f64 / acc.count as f64)
             } else {
                 Value::Float(acc.sum / acc.count as f64)
@@ -2924,15 +2418,23 @@ fn aggregate_value_with_args(
             };
             let parts: Vec<String> = ordered_values
                 .iter()
-                .filter_map(|v| match v {
-                    Value::Str(s) => Some(s.clone()),
-                    Value::Int(n) => Some(n.to_string()),
-                    Value::Float(f) => Some(f.to_string()),
-                    Value::Decimal(d) => Some(d.to_sql_string()),
-                    Value::Bool(b) => Some(b.to_string()),
-                    Value::Temporal(t) => Some(t.to_sql_string()),
-                    _ => None,
+                .map(|v| match v {
+                    Value::Null => Ok(None),
+                    Value::Str(s) => Ok(Some(s.clone())),
+                    Value::Int(n) => Ok(Some(n.to_string())),
+                    Value::Float(f) => Ok(Some(f.to_string())),
+                    Value::Decimal(d) => Ok(Some(d.to_sql_string())),
+                    Value::Bool(b) => Ok(Some(b.to_string())),
+                    Value::Temporal(t) => Ok(Some(t.to_sql_string())),
+                    Value::Bytes(_) | Value::List(_) | Value::Map(_) => {
+                        Err(SQLError::TypeMismatch(format!(
+                            "string_agg requires a text-coercible value, got {v:?}"
+                        )))
+                    }
                 })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
                 .collect();
             Value::Str(parts.join(&sep))
         }
@@ -2955,10 +2457,19 @@ fn aggregate_value_with_args(
             let mut map = BTreeMap::new();
             for value in ordered_values {
                 let Value::List(pair) = value else {
-                    continue;
+                    return Err(SQLError::Internal(
+                        "JSON object aggregate retained a non-pair value".into(),
+                    ));
                 };
-                if pair.len() != 2 || matches!(pair[0], Value::Null) {
-                    continue;
+                if pair.len() != 2 {
+                    return Err(SQLError::Internal(
+                        "JSON object aggregate retained a malformed pair".into(),
+                    ));
+                }
+                if matches!(pair[0], Value::Null) {
+                    return Err(SQLError::TypeMismatch(
+                        "JSON object aggregate key must not be NULL".into(),
+                    ));
                 }
                 map.insert(aggregate_json_key(&pair[0]), pair[1].clone());
             }
@@ -2977,62 +2488,75 @@ fn aggregate_value_with_args(
             None => Value::Null,
         },
         "stddev" | "stddev_samp" => {
-            if acc.count < 2 {
+            if acc.statistics_count < 2 {
                 return Ok(Value::Null);
             }
-            let values = acc.values.values()?;
-            statistical_aggregate_value(&values, stddev_samp(&values))
+            statistical_value(
+                acc,
+                (acc.statistics_m2 / (acc.statistics_count as f64 - 1.0)).sqrt(),
+            )
         }
         "stddev_pop" => {
-            if acc.count == 0 {
+            if acc.statistics_count == 0 {
                 return Ok(Value::Null);
             }
-            let values = acc.values.values()?;
-            statistical_aggregate_value(&values, stddev_pop(&values))
+            statistical_value(
+                acc,
+                (acc.statistics_m2 / acc.statistics_count as f64).sqrt(),
+            )
         }
         "variance" | "var_samp" => {
-            if acc.count < 2 {
+            if acc.statistics_count < 2 {
                 return Ok(Value::Null);
             }
-            let values = acc.values.values()?;
-            statistical_aggregate_value(&values, variance_samp(&values))
+            statistical_value(acc, acc.statistics_m2 / (acc.statistics_count as f64 - 1.0))
         }
         "var_pop" => {
-            if acc.count == 0 {
+            if acc.statistics_count == 0 {
                 return Ok(Value::Null);
             }
-            let values = acc.values.values()?;
-            statistical_aggregate_value(&values, variance_pop(&values))
+            statistical_value(acc, acc.statistics_m2 / acc.statistics_count as f64)
         }
         "percentile_cont" => {
-            let ordered_values = acc.values.ordered_values()?;
-            if ordered_values.is_empty() {
-                return Ok(Value::Null);
-            }
-            let frac = percentile_fraction(args);
-            Value::Float(percentile_cont(&ordered_values, frac))
+            let frac = percentile_fraction(args)?;
+            percentile_cont(&acc.values, frac)?.map_or(Value::Null, Value::Float)
         }
         "percentile_disc" => {
-            let ordered_values = acc.values.ordered_values()?;
-            if ordered_values.is_empty() {
-                return Ok(Value::Null);
-            }
-            let frac = percentile_fraction(args);
-            percentile_disc(&ordered_values, frac)
+            let frac = percentile_fraction(args)?;
+            percentile_disc(&acc.values, frac)?.unwrap_or(Value::Null)
         }
-        "mode" => mode_value(&acc.values.ordered_values()?),
-        _ => Value::Null,
+        "mode" => mode_value(&acc.values)?,
+        _ => return Err(SQLError::UnknownFunction(format!("aggregate `{name}`"))),
     };
     Ok(value)
 }
 
-fn percentile_fraction(args: &[ScalarExpr]) -> f64 {
-    match args.first() {
+fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQLError> {
+    let fraction = match args.first() {
         Some(ScalarExpr::Literal(Value::Float(f))) => *f,
         Some(ScalarExpr::Literal(Value::Int(n))) => *n as f64,
-        Some(ScalarExpr::Literal(Value::Decimal(d))) => d.to_f64().unwrap_or(0.5),
-        _ => 0.5,
+        Some(ScalarExpr::Literal(Value::Decimal(d))) => d.to_f64().ok_or_else(|| {
+            SQLError::TypeMismatch("percentile fraction is outside floating-point range".into())
+        })?,
+        Some(value) => {
+            return Err(SQLError::TypeMismatch(format!(
+                "percentile fraction must be a numeric literal, got {value:?}"
+            )))
+        }
+        None => {
+            return Err(SQLError::BadArity {
+                name: "percentile".into(),
+                expected: "fraction argument".into(),
+                actual: 0,
+            })
+        }
+    };
+    if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+        return Err(SQLError::TypeMismatch(format!(
+            "percentile fraction must be between 0 and 1, got {fraction}"
+        )));
     }
+    Ok(fraction)
 }
 
 fn aggregate_json_key(value: &Value) -> String {
@@ -3050,107 +2574,102 @@ fn aggregate_json_key(value: &Value) -> String {
     }
 }
 
-fn mean(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
-    if nums.is_empty() {
-        0.0
-    } else {
-        nums.iter().sum::<f64>() / nums.len() as f64
-    }
-}
-
 /// Statistical aggregates (`variance`, `stddev_*`) return `numeric`
 /// for integer / numeric inputs in `PostgreSQL` (rendering with a
 /// decimal point, e.g. `1.00000...`), and `double precision` only for
 /// float inputs.
-fn statistical_aggregate_value(values: &[Value], computed: f64) -> Value {
-    let float_input = values.iter().any(|v| matches!(v, Value::Float(_)));
-    if float_input || !computed.is_finite() {
+fn statistical_value(accumulator: &AggregateAccumulator, computed: f64) -> Value {
+    if accumulator.statistics_has_float || !computed.is_finite() {
         return Value::Float(computed);
     }
     uqa_core::DecimalValue::parse(&format!("{computed:.16}"))
         .map_or(Value::Float(computed), Value::Decimal)
 }
 
-fn variance_samp(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
-    if nums.len() < 2 {
-        return 0.0;
+fn percentile_cont(values: &AggregateValueBuffer, frac: f64) -> Result<Option<f64>, SQLError> {
+    if values.next_sequence == 0 {
+        return Ok(None);
     }
-    let m = mean(values);
-    let total: f64 = nums.iter().map(|x| (x - m).powi(2)).sum();
-    total / (nums.len() as f64 - 1.0)
+    let position = frac * (values.next_sequence as f64 - 1.0);
+    let low = position.floor() as u64;
+    let high = position.ceil() as u64;
+    let mut low_value = None;
+    let mut high_value = None;
+    let mut index = 0_u64;
+    values.for_each_ordered(|record| {
+        if index == low {
+            low_value = Some(value_as_f64(&record.value)?);
+        }
+        if index == high {
+            high_value = Some(value_as_f64(&record.value)?);
+        }
+        index = index
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("percentile aggregate index overflow".into()))?;
+        Ok(())
+    })?;
+    let low_value = low_value.ok_or_else(|| {
+        SQLError::Internal("percentile lower value missing from aggregate spill".into())
+    })?;
+    let high_value = high_value.ok_or_else(|| {
+        SQLError::Internal("percentile upper value missing from aggregate spill".into())
+    })?;
+    let weight = position - low as f64;
+    Ok(Some(low_value * (1.0 - weight) + high_value * weight))
 }
 
-fn variance_pop(values: &[Value]) -> f64 {
-    let nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
-    if nums.is_empty() {
-        return 0.0;
+fn percentile_disc(values: &AggregateValueBuffer, frac: f64) -> Result<Option<Value>, SQLError> {
+    if values.next_sequence == 0 {
+        return Ok(None);
     }
-    let m = mean(values);
-    let total: f64 = nums.iter().map(|x| (x - m).powi(2)).sum();
-    total / nums.len() as f64
+    let rank = ((frac * values.next_sequence as f64).ceil() as u64)
+        .max(1)
+        .min(values.next_sequence);
+    let mut value = None;
+    let mut index = 0_u64;
+    values.for_each_ordered(|record| {
+        index = index
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("percentile aggregate index overflow".into()))?;
+        if index == rank {
+            value = Some(record.value);
+        }
+        Ok(())
+    })?;
+    Ok(value)
 }
 
-fn stddev_samp(values: &[Value]) -> f64 {
-    variance_samp(values).sqrt()
-}
-
-fn stddev_pop(values: &[Value]) -> f64 {
-    variance_pop(values).sqrt()
-}
-
-fn percentile_cont(values: &[Value], frac: f64) -> f64 {
-    let mut nums: Vec<f64> = values.iter().filter_map(|v| value_as_f64(v).ok()).collect();
-    if nums.is_empty() {
-        return 0.0;
+fn mode_value(values: &AggregateValueBuffer) -> Result<Value, SQLError> {
+    if values.next_sequence == 0 {
+        return Ok(Value::Null);
     }
-    nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let frac = frac.clamp(0.0, 1.0);
-    let pos = frac * (nums.len() as f64 - 1.0);
-    let lo = pos.floor() as usize;
-    let hi = pos.ceil() as usize;
-    if lo == hi {
-        return nums[lo];
+    let mut current_key = None;
+    let mut current_value = Value::Null;
+    let mut current_count = 0_u64;
+    let mut best_value = Value::Null;
+    let mut best_count = 0_u64;
+    values.for_each_ordered(|record| {
+        let key = distinct_key(&record.value)?;
+        if current_key.as_ref().is_some_and(|current| current != &key) {
+            if current_count >= best_count {
+                best_count = current_count;
+                best_value = current_value.clone();
+            }
+            current_count = 0;
+        }
+        if current_key.as_ref() != Some(&key) {
+            current_key = Some(key);
+            current_value = record.value;
+        }
+        current_count = current_count
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal("mode aggregate count overflow".into()))?;
+        Ok(())
+    })?;
+    if current_count >= best_count {
+        best_value = current_value;
     }
-    let weight = pos - lo as f64;
-    nums[lo] * (1.0 - weight) + nums[hi] * weight
-}
-
-fn percentile_disc(values: &[Value], frac: f64) -> Value {
-    let mut sorted: Vec<&Value> = values.iter().collect();
-    sorted.sort();
-    if sorted.is_empty() {
-        return Value::Null;
-    }
-    let frac = frac.clamp(0.0, 1.0);
-    // PostgreSQL: smallest rank where cumulative cum_dist >= frac.
-    let n = sorted.len();
-    let mut idx = (frac * n as f64).ceil() as usize;
-    if idx == 0 {
-        idx = 1;
-    }
-    if idx > n {
-        idx = n;
-    }
-    sorted[idx - 1].clone()
-}
-
-fn mode_value(values: &[Value]) -> Value {
-    use std::collections::BTreeMap;
-    if values.is_empty() {
-        return Value::Null;
-    }
-    let mut counts: BTreeMap<String, (Value, u64)> = BTreeMap::new();
-    for v in values {
-        let key = distinct_key(v);
-        let entry = counts.entry(key).or_insert((v.clone(), 0));
-        entry.1 += 1;
-    }
-    counts
-        .into_values()
-        .max_by_key(|(_, n)| *n)
-        .map_or(Value::Null, |(v, _)| v)
+    Ok(best_value)
 }
 
 /// Compute a projection's output column name. `PostgreSQL` reports
@@ -3173,44 +2692,23 @@ pub(super) fn projection_label_at(proj: &ProjectionPlan) -> String {
 mod tests {
     use super::*;
 
-    #[derive(Default)]
-    struct NoopRegisteredAggregate;
-
-    impl SQLAggregateState for NoopRegisteredAggregate {
-        fn observe(&mut self, _args: &[Value]) -> Result<(), SQLError> {
-            Ok(())
-        }
-
-        fn finish(&self) -> Result<Value, SQLError> {
-            Ok(Value::Null)
-        }
-    }
-
     #[test]
-    fn registered_aggregates_do_not_run_under_the_document_store_guard() {
-        let engine = Engine::new();
-        engine
-            .register_aggregate_function("registered_agg", NoopRegisteredAggregate::default)
-            .unwrap();
-        let mut statements = uqa_sql::compile("SELECT registered_agg(value) FROM samples").unwrap();
-        let uqa_sql::ast::Statement::Select(stmt) = statements.remove(0) else {
-            panic!("expected SELECT");
-        };
-        let plan = uqa_planner::QueryPlan::lower_with(*stmt, &|name: &str| {
-            engine.has_registered_aggregate_function(name)
-        });
-        let uqa_planner::RelationalPlan::QueryBlock(block) = &plan.root else {
-            panic!("expected query block");
-        };
-        let agg_targets = aggregate_exprs(&engine, &block.projections);
+    fn aggregate_spill_record_reader_rejects_oversized_and_truncated_records() {
+        let mut oversized = std::io::Cursor::new(b"12345\n".to_vec());
+        let error = read_bounded_json_spill_record(&mut oversized, 5, "test aggregate spill row")
+            .unwrap_err();
+        assert!(error.to_string().contains("exceeds recorded maximum"));
 
-        assert!(aggregation_column_projection(&engine, block, &agg_targets).is_none());
+        let mut truncated = std::io::Cursor::new(b"12345".to_vec());
+        let error = read_bounded_json_spill_record(&mut truncated, 6, "test aggregate spill row")
+            .unwrap_err();
+        assert!(error.to_string().contains("missing record delimiter"));
     }
 
     #[test]
     fn streaming_aggregate_does_not_retain_or_spill_inputs() {
         let mut accumulator = AggregateAccumulator::builtin("sum");
-        let end = AGGREGATE_SPILL_ROWS as i64 + 1;
+        let end = 4097_i64;
         for value in 0..end {
             accumulator.observe(&Value::Int(value)).unwrap();
         }
@@ -3237,6 +2735,99 @@ mod tests {
             aggregate_value("array_agg", &accumulator).unwrap(),
             Value::List(vec![Value::Int(7)])
         );
+    }
+
+    #[test]
+    fn ordered_aggregate_buffers_reject_sequence_overflow_without_appending() {
+        let mut builtin = AggregateValueBuffer::new(1024);
+        builtin.next_sequence = u64::MAX;
+        let error = builtin.push(Value::Int(1), Vec::new()).unwrap_err();
+        assert!(error.to_string().contains("sequence overflow"));
+        assert!(builtin.rows.is_empty());
+
+        let mut registered = RegisteredAggregateBuffer::new(1024);
+        registered.next_sequence = u64::MAX;
+        let error = registered
+            .push(vec![Value::Int(1)], Vec::new())
+            .unwrap_err();
+        assert!(error.to_string().contains("sequence overflow"));
+        assert!(registered.rows.is_empty());
+    }
+
+    #[test]
+    fn streaming_aggregate_counts_report_overflow() {
+        let mut count = AggregateAccumulator::builtin("count");
+        count.count = u64::MAX;
+        let error = count.observe(&Value::Int(1)).unwrap_err();
+        assert!(error.to_string().contains("count overflow"));
+
+        let mut statistics = AggregateAccumulator::builtin("stddev_pop");
+        statistics.statistics_count = u64::MAX;
+        let error = statistics.observe(&Value::Int(1)).unwrap_err();
+        assert!(error.to_string().contains("count overflow"));
+    }
+
+    #[test]
+    fn tiny_budget_collection_aggregate_spills_and_merge_streams_exact_order() {
+        let mut accumulator = AggregateAccumulator::builtin_with_budget("array_agg", 2);
+        for value in (0..512_i64).rev() {
+            accumulator
+                .observe_with_sort_keys(&Value::Int(value), vec![(Value::Int(value), false)])
+                .unwrap();
+        }
+
+        assert!(!accumulator.values.runs.is_empty());
+        assert!(accumulator.values.runs.len() < AGGREGATE_MERGE_FAN_IN);
+        assert!(accumulator.values.memory_bytes <= accumulator.values.budget_bytes);
+        let expected = Value::List((0..512_i64).map(Value::Int).collect());
+        assert_eq!(
+            aggregate_value("array_agg", &accumulator).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
+        let mut values = AggregateValueBuffer::new(1);
+        values
+            .push(Value::Int(1), vec![(Value::Int(1), false)])
+            .unwrap();
+        let run = values.runs.first_mut().unwrap();
+        run.file.as_file_mut().seek(SeekFrom::End(0)).unwrap();
+        run.file
+            .as_file_mut()
+            .write_all(&vec![b'x'; run.max_record_bytes])
+            .unwrap();
+        run.file.as_file_mut().write_all(b"\n").unwrap();
+        run.file.as_file_mut().flush().unwrap();
+
+        let error = values.ordered_values().unwrap_err();
+        assert!(error.to_string().contains("exceeds recorded maximum"));
+    }
+
+    #[test]
+    fn tiny_budget_distinct_tracker_migrates_to_disk() {
+        let mut tracker = DistinctTracker::new(1);
+        assert!(tracker.insert("alpha".into()).unwrap());
+        assert!(tracker.disk.is_some());
+        assert!(tracker.memory.is_empty());
+        assert!(!tracker.insert("alpha".into()).unwrap());
+        assert!(tracker.insert("beta".into()).unwrap());
+    }
+
+    #[test]
+    fn distinct_tracker_rejects_a_spill_record_larger_than_writer_metadata() {
+        let mut tracker = DistinctTracker::new(1);
+        assert!(tracker.insert("alpha".into()).unwrap());
+        let file = tracker.disk.as_mut().unwrap().as_file_mut();
+        file.seek(SeekFrom::End(0)).unwrap();
+        file.write_all(&vec![b'x'; tracker.max_disk_record_bytes])
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+        file.flush().unwrap();
+
+        let error = tracker.insert("missing".into()).unwrap_err();
+        assert!(error.to_string().contains("exceeds recorded maximum"));
     }
 
     #[test]
@@ -3271,15 +2862,16 @@ mod tests {
     }
 
     #[test]
-    fn statistical_aggregate_counts_and_retains_without_unrelated_state() {
+    fn statistical_aggregate_uses_constant_welford_state() {
         let mut accumulator = AggregateAccumulator::builtin("stddev_pop");
         accumulator.observe(&Value::Int(7)).unwrap();
 
-        assert_eq!(accumulator.count, 1);
+        assert_eq!(accumulator.statistics_count, 1);
         assert_eq!(accumulator.decimal_sum, None);
         assert_eq!(accumulator.min, None);
         assert_eq!(accumulator.max, None);
-        assert_eq!(accumulator.values.rows.len(), 1);
+        assert!(accumulator.values.rows.is_empty());
+        assert!(accumulator.values.runs.is_empty());
     }
 
     #[test]
@@ -3332,65 +2924,32 @@ mod tests {
     }
 
     #[test]
-    fn projected_columns_use_direct_unique_slots_and_collision_fallback() {
-        let columns =
-            ProjectedColumns::new(vec!["amount".into(), "apple".into(), "quantity".into()]);
+    fn aggregate_finalizers_report_integer_width_overflow() {
+        let mut count = AggregateAccumulator::builtin("count");
+        count.count = i64::MAX as u64 + 1;
+        assert!(aggregate_value("count", &count)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds BIGINT"));
 
-        assert_eq!(columns.index("amount"), Some(0));
-        assert_eq!(columns.index("apple"), Some(1));
-        assert_eq!(columns.index("quantity"), Some(2));
-        assert_eq!(columns.index("missing"), None);
+        let mut sum = AggregateAccumulator::builtin("sum");
+        sum.count = 1;
+        sum.integer_sum = i128::from(i64::MAX) + 1;
+        assert!(aggregate_value("sum", &sum)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds BIGINT"));
     }
 
     #[test]
-    fn projected_expression_reuses_sql_binary_semantics() {
-        let columns = ProjectedColumns::new(vec!["discount".into(), "price".into()]);
-        let expression = ScalarExpr::Binary {
-            op: BinaryOp::Divide,
-            lhs: Box::new(ScalarExpr::Binary {
-                op: BinaryOp::Multiply,
-                lhs: Box::new(ScalarExpr::Column("price".into())),
-                rhs: Box::new(ScalarExpr::Binary {
-                    op: BinaryOp::Subtract,
-                    lhs: Box::new(ScalarExpr::Literal(Value::Int(100))),
-                    rhs: Box::new(ScalarExpr::Column("discount".into())),
-                }),
-            }),
-            rhs: Box::new(ScalarExpr::Literal(Value::Int(100))),
-        };
-        let plan = ProjectedExpression::compile(&expression, &columns).unwrap();
-        let discount = Value::Int(10);
-        let price = Value::Int(10_000);
-
-        assert_eq!(
-            plan.evaluate(&[&discount, &price]).unwrap().as_value(),
-            &Value::Int(9_000)
-        );
-
-        let null = Value::Null;
-        assert_eq!(
-            plan.evaluate(&[&null, &price]).unwrap().as_value(),
-            &Value::Null
-        );
-    }
-
-    #[test]
-    fn group_fingerprint_preserves_cross_numeric_comparison_equivalence() {
-        fn fingerprint(value: &Value) -> u64 {
-            projected_group_fingerprint(&[value], &[0])
+    fn percentile_fraction_rejects_missing_and_out_of_range_values() {
+        assert!(percentile_fraction(&[]).is_err());
+        for fraction in [-0.1, 1.1, f64::NAN] {
+            assert!(percentile_fraction(&[ScalarExpr::Literal(Value::Float(fraction))]).is_err());
         }
-
-        let int = Value::Int(1);
-        let float = Value::Float(1.0);
-        let decimal = Value::Decimal(DecimalValue::from_i64(1));
-        let boolean = Value::Bool(true);
-        assert_eq!(int.cmp(&float), Ordering::Equal);
-        assert_eq!(fingerprint(&int), fingerprint(&float));
-        assert_eq!(fingerprint(&int), fingerprint(&decimal));
-        assert_eq!(fingerprint(&int), fingerprint(&boolean));
-        assert_ne!(
-            fingerprint(&Value::Str("A".into())),
-            fingerprint(&Value::Str("R".into()))
+        assert_eq!(
+            percentile_fraction(&[ScalarExpr::Literal(Value::Float(0.25))]).unwrap(),
+            0.25
         );
     }
 }

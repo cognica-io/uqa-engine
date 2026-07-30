@@ -51,27 +51,123 @@ pub type VertexConstraint = Arc<dyn Fn(&uqa_core::Vertex) -> bool + Send + Sync>
 pub type EdgeConstraint = Arc<dyn Fn(&uqa_core::Edge) -> bool + Send + Sync>;
 
 pub trait AttentionFuserDyn: Send + Sync {
-    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> f64;
+    fn validate_inputs(
+        &self,
+        signal_count: usize,
+        query_feature_count: usize,
+    ) -> Result<(), &'static str>;
+    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> Result<f64, &'static str>;
+
+    fn fuse_batch(
+        &self,
+        probabilities: &[Vec<f64>],
+        query_features: &[f64],
+    ) -> Result<Vec<f64>, &'static str> {
+        probabilities
+            .iter()
+            .map(|sample| self.fuse(sample, query_features))
+            .collect()
+    }
+
+    /// Number of independently trained attention heads represented by this
+    /// physical fuser. Exposed as immutable IR metadata for explain/testing.
+    fn head_count(&self) -> usize;
+    fn normalize(&self) -> bool;
+    fn alpha(&self) -> f64;
+    fn base_rate(&self) -> Option<f64>;
 }
 
 pub trait LearnedFuserDyn: Send + Sync {
-    fn fuse(&self, probs: &[f64]) -> f64;
+    fn validate_inputs(&self, signal_count: usize) -> Result<(), &'static str>;
+    fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str>;
 }
 
 impl AttentionFuserDyn for uqa_fusion::AttentionFusion {
-    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> f64 {
+    fn validate_inputs(
+        &self,
+        signal_count: usize,
+        query_feature_count: usize,
+    ) -> Result<(), &'static str> {
+        uqa_fusion::AttentionFusion::validate_inputs(self, signal_count, query_feature_count)
+    }
+
+    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> Result<f64, &'static str> {
         uqa_fusion::AttentionFusion::fuse(self, probs, query_features)
+    }
+
+    fn fuse_batch(
+        &self,
+        probabilities: &[Vec<f64>],
+        query_features: &[f64],
+    ) -> Result<Vec<f64>, &'static str> {
+        uqa_fusion::AttentionFusion::fuse_batch(self, probabilities, query_features)
+    }
+
+    fn head_count(&self) -> usize {
+        1
+    }
+
+    fn normalize(&self) -> bool {
+        self.normalize
+    }
+
+    fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    fn base_rate(&self) -> Option<f64> {
+        self.base_rate
     }
 }
 
 impl AttentionFuserDyn for uqa_fusion::MultiHeadAttentionFusion {
-    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> f64 {
+    fn validate_inputs(
+        &self,
+        signal_count: usize,
+        query_feature_count: usize,
+    ) -> Result<(), &'static str> {
+        uqa_fusion::MultiHeadAttentionFusion::validate_inputs(
+            self,
+            signal_count,
+            query_feature_count,
+        )
+    }
+
+    fn fuse(&self, probs: &[f64], query_features: &[f64]) -> Result<f64, &'static str> {
         uqa_fusion::MultiHeadAttentionFusion::fuse(self, probs, query_features)
+    }
+
+    fn fuse_batch(
+        &self,
+        probabilities: &[Vec<f64>],
+        query_features: &[f64],
+    ) -> Result<Vec<f64>, &'static str> {
+        uqa_fusion::MultiHeadAttentionFusion::fuse_batch(self, probabilities, query_features)
+    }
+
+    fn head_count(&self) -> usize {
+        uqa_fusion::MultiHeadAttentionFusion::n_heads(self)
+    }
+
+    fn normalize(&self) -> bool {
+        uqa_fusion::MultiHeadAttentionFusion::normalize(self)
+    }
+
+    fn alpha(&self) -> f64 {
+        uqa_fusion::MultiHeadAttentionFusion::alpha(self).unwrap_or(f64::NAN)
+    }
+
+    fn base_rate(&self) -> Option<f64> {
+        None
     }
 }
 
 impl LearnedFuserDyn for uqa_fusion::LearnedFusion {
-    fn fuse(&self, probs: &[f64]) -> f64 {
+    fn validate_inputs(&self, signal_count: usize) -> Result<(), &'static str> {
+        uqa_fusion::LearnedFusion::validate_inputs(self, signal_count)
+    }
+
+    fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str> {
         uqa_fusion::LearnedFusion::fuse(self, probs)
     }
 }
@@ -160,10 +256,21 @@ pub enum DeepFusionPoolMethod {
 }
 
 /// Text scoring algorithm used by [`OperatorTree::Term`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TextScoringMode {
     BM25,
     BayesianBM25,
+    /// Explicit parameters supplied through the public engine API.
+    CustomBM25(uqa_scoring::BM25Params),
+    /// Explicit Bayesian calibration supplied through the public engine API.
+    CustomBayesianBM25(uqa_scoring::BayesianBM25Params),
+}
+
+/// External document prior used by [`OperatorTree::BayesianMatchWithPrior`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExternalPriorMode {
+    Authority,
+    Recency,
 }
 
 /// Concrete operator tree mirroring `uqa/operators` operator class hierarchy.
@@ -207,6 +314,14 @@ pub enum OperatorTree {
         source: Box<OperatorTree>,
         field: Option<String>,
     },
+    /// Bayesian text retrieval combined with a document authority or recency
+    /// prior stored in another field.
+    BayesianMatchWithPrior {
+        field: String,
+        query: String,
+        prior_field: String,
+        mode: ExternalPriorMode,
+    },
 
     /// `IntersectOperator([...])`.
     Intersect(Vec<OperatorTree>),
@@ -229,6 +344,14 @@ pub enum OperatorTree {
         k: usize,
         field: String,
     },
+    /// Pool-calibrated KNN retrieval exposed by
+    /// `calibrated_vector_match`.
+    CalibratedVectorMatch {
+        query_vector: Vec<f32>,
+        k: usize,
+        field: String,
+        threshold: Option<f64>,
+    },
     /// `CosineProbabilityOperator(source)` -- wraps a KNN child with a
     /// calibrated probability projection.
     CosineProbability(Box<OperatorTree>),
@@ -241,6 +364,8 @@ pub enum OperatorTree {
         weights: Option<Vec<f64>>,
         logit_min: Option<Vec<f64>>,
         logit_max: Option<Vec<f64>>,
+        /// Derive weights from the score spread of this invocation.
+        adaptive_weights: bool,
     },
     /// `ProbBoolFusionOperator(signals, mode)`.
     ProbBoolFusion {
@@ -276,6 +401,22 @@ pub enum OperatorTree {
         label: Option<String>,
         max_hops: usize,
         vertex_predicate: Option<VertexPredicate>,
+    },
+    /// One-hop graph neighborhood without including the start vertex.
+    /// This is separate from `Traverse(max_hops=1)` because SQL
+    /// `graph_neighbors` also carries an explicit edge direction and has
+    /// different start-vertex semantics.
+    GraphNeighbors {
+        vertex: u64,
+        graph: String,
+        label: Option<String>,
+        direction: Direction,
+    },
+    /// Emit graph edges as posting entries keyed by edge id. The payload
+    /// score carries the optional numeric edge weight.
+    GraphEdges {
+        graph: String,
+        label: Option<String>,
     },
     /// `PatternMatchOperator(pattern, graph)`.
     PatternMatch {
@@ -324,10 +465,10 @@ pub enum OperatorTree {
     /// `MultiStageOperator(stages=[(child, cutoff), ...])`. The cutoff
     /// determines the cardinality at the final stage.
     MultiStage { stages: Vec<MultiStageEntry> },
-    /// `MultiFieldSearchOperator(fields, query, weights)`.
+    /// `MultiFieldSearchOperator(fields, queries, weights)`.
     MultiFieldSearch {
         fields: Vec<String>,
-        query: String,
+        queries: Vec<String>,
         weights: Option<Vec<f64>>,
     },
     /// `HybridTextVectorOperator(term_op, vector_op, alpha)`.
@@ -432,6 +573,9 @@ pub enum OperatorTree {
         gating: GatingSpec,
     },
 
+    /// Execute a registered deep model and emit its document scores.
+    DeepPredict { model: String },
+
     /// Catch-all for opaque operators the optimizer should not rewrite.
     Opaque {
         kind: String,
@@ -524,6 +668,7 @@ impl OperatorTree {
     /// The match is intentionally exhaustive so adding a child-bearing IR
     /// variant cannot silently create a traversal boundary in planners or
     /// engine catalog analysis.
+    #[allow(clippy::too_many_lines)]
     pub fn visit(&self, visitor: &mut impl FnMut(&OperatorTree)) {
         visitor(self);
         match self {
@@ -608,11 +753,15 @@ impl OperatorTree {
             }
             OperatorTree::Empty
             | OperatorTree::Term { .. }
+            | OperatorTree::BayesianMatchWithPrior { .. }
             | OperatorTree::Filter { source: None, .. }
             | OperatorTree::Facet { source: None, .. }
             | OperatorTree::VectorSimilarity { .. }
             | OperatorTree::KNN { .. }
+            | OperatorTree::CalibratedVectorMatch { .. }
             | OperatorTree::Traverse { .. }
+            | OperatorTree::GraphNeighbors { .. }
+            | OperatorTree::GraphEdges { .. }
             | OperatorTree::PatternMatch { .. }
             | OperatorTree::RegularPathQuery { .. }
             | OperatorTree::IndexScan { .. }
@@ -623,17 +772,20 @@ impl OperatorTree {
             | OperatorTree::HITS { .. }
             | OperatorTree::BetweennessCentrality { .. }
             | OperatorTree::TemporalTraverse { .. }
-            | OperatorTree::TemporalPatternMatch { .. } => {}
+            | OperatorTree::TemporalPatternMatch { .. }
+            | OperatorTree::DeepPredict { .. } => {}
         }
     }
 
-    /// `True` when the operator is structurally empty: an
-    /// `Intersect([])` or `Union([])`. Mirrors
-    /// `QueryOptimizer._is_empty_operator`.
+    /// `True` when the operator is structurally empty. The explicit empty
+    /// node and zero-operand boolean/composition nodes all execute to an
+    /// empty posting list, so the optimizer must give them the same meaning.
     pub fn is_empty(&self) -> bool {
         match self {
             OperatorTree::Empty => true,
-            OperatorTree::Intersect(v) | OperatorTree::Union(v) => v.is_empty(),
+            OperatorTree::Intersect(v) | OperatorTree::Union(v) | OperatorTree::Composed(v) => {
+                v.is_empty()
+            }
             _ => false,
         }
     }

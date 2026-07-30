@@ -22,10 +22,11 @@ fn chain_graph() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
     g.create_graph("g");
     for v in 1..=N {
-        g.add_vertex(Vertex::new(v, "n"), "g");
+        g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
     for v in 1..N {
-        g.add_edge(Edge::new(v + 10_000, v, v + 1, "knows"), "g");
+        g.add_edge(Edge::new(v + 10_000, v, v + 1, "knows"), "g")
+            .unwrap();
     }
     g
 }
@@ -37,7 +38,8 @@ fn bench_rpq_kleene_star_from_vertex(c: &mut Criterion) {
         bencher.iter(|| {
             let pl = RegularPathQuery::new(expr.clone(), "g")
                 .from_vertex(1)
-                .execute(&g);
+                .execute(&g)
+                .unwrap();
             black_box(pl.inner().len())
         });
     });
@@ -50,7 +52,8 @@ fn bench_rpq_concat(c: &mut Criterion) {
         bencher.iter(|| {
             let pl = RegularPathQuery::new(expr.clone(), "g")
                 .from_vertex(1)
-                .execute(&g);
+                .execute(&g)
+                .unwrap();
             black_box(pl.inner().len())
         });
     });

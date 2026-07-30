@@ -15,7 +15,7 @@ fn approx_eq(a: f64, b: f64, tol: f64) {
 #[test]
 fn ece_perfect_calibration() {
     approx_eq(
-        CalibrationMetrics::ece(&[0.0, 0.0, 1.0, 1.0], &[0, 0, 1, 1], 10),
+        CalibrationMetrics::ece(&[0.0, 0.0, 1.0, 1.0], &[0, 0, 1, 1], 10).unwrap(),
         0.0,
         1e-6,
     );
@@ -23,19 +23,19 @@ fn ece_perfect_calibration() {
 
 #[test]
 fn ece_imperfect_calibration() {
-    assert!(CalibrationMetrics::ece(&[0.9, 0.9, 0.1, 0.1], &[0, 0, 1, 1], 10) > 0.0);
+    assert!(CalibrationMetrics::ece(&[0.9, 0.9, 0.1, 0.1], &[0, 0, 1, 1], 10).unwrap() > 0.0);
 }
 
 #[test]
 fn ece_returns_float() {
-    let result = CalibrationMetrics::ece(&[0.5, 0.5, 0.5, 0.5], &[0, 1, 0, 1], 10);
+    let result = CalibrationMetrics::ece(&[0.5, 0.5, 0.5, 0.5], &[0, 1, 0, 1], 10).unwrap();
     assert!(result.is_finite());
 }
 
 #[test]
 fn brier_perfect_predictions() {
     approx_eq(
-        CalibrationMetrics::brier(&[0.0, 0.0, 1.0, 1.0], &[0, 0, 1, 1]),
+        CalibrationMetrics::brier(&[0.0, 0.0, 1.0, 1.0], &[0, 0, 1, 1]).unwrap(),
         0.0,
         1e-6,
     );
@@ -44,7 +44,7 @@ fn brier_perfect_predictions() {
 #[test]
 fn brier_worst_predictions() {
     approx_eq(
-        CalibrationMetrics::brier(&[1.0, 1.0, 0.0, 0.0], &[0, 0, 1, 1]),
+        CalibrationMetrics::brier(&[1.0, 1.0, 0.0, 0.0], &[0, 0, 1, 1]).unwrap(),
         1.0,
         1e-6,
     );
@@ -53,7 +53,7 @@ fn brier_worst_predictions() {
 #[test]
 fn brier_uniform_predictions() {
     approx_eq(
-        CalibrationMetrics::brier(&[0.5, 0.5, 0.5, 0.5], &[0, 1, 0, 1]),
+        CalibrationMetrics::brier(&[0.5, 0.5, 0.5, 0.5], &[0, 1, 0, 1]).unwrap(),
         0.25,
         1e-6,
     );
@@ -61,18 +61,18 @@ fn brier_uniform_predictions() {
 
 #[test]
 fn brier_returns_float() {
-    assert!(CalibrationMetrics::brier(&[0.5], &[1]).is_finite());
+    assert!(CalibrationMetrics::brier(&[0.5], &[1]).unwrap().is_finite());
 }
 
 #[test]
 fn report_returns_struct() {
-    let report = CalibrationMetrics::report(&[0.1, 0.4, 0.6, 0.9], &[0, 0, 1, 1], 10);
+    let report = CalibrationMetrics::report(&[0.1, 0.4, 0.6, 0.9], &[0, 0, 1, 1], 10).unwrap();
     assert!(report.ece >= 0.0);
 }
 
 #[test]
 fn report_contains_metrics() {
-    let report = CalibrationMetrics::report(&[0.1, 0.4, 0.6, 0.9], &[0, 0, 1, 1], 10);
+    let report = CalibrationMetrics::report(&[0.1, 0.4, 0.6, 0.9], &[0, 0, 1, 1], 10).unwrap();
     assert!(report.ece >= 0.0);
     assert!(report.brier >= 0.0);
 }
@@ -83,7 +83,8 @@ fn reliability_diagram_returns_list() {
         &[0.1, 0.2, 0.3, 0.7, 0.8, 0.9],
         &[0, 0, 0, 1, 1, 1],
         10,
-    );
+    )
+    .unwrap();
     assert!(!diagram.is_empty());
 }
 
@@ -93,7 +94,8 @@ fn reliability_diagram_tuple_structure() {
         &[0.1, 0.2, 0.3, 0.7, 0.8, 0.9],
         &[0, 0, 0, 1, 1, 1],
         5,
-    );
+    )
+    .unwrap();
     for bin in diagram {
         assert!(bin.avg_predicted.is_finite());
         assert!(bin.avg_actual.is_finite());
@@ -103,18 +105,19 @@ fn reliability_diagram_tuple_structure() {
 #[test]
 fn reliability_diagram_n_bins() {
     let diagram =
-        CalibrationMetrics::reliability_diagram(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0, 0, 1, 1, 1], 5);
+        CalibrationMetrics::reliability_diagram(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0, 0, 1, 1, 1], 5)
+            .unwrap();
     assert!(diagram.len() <= 5);
 }
 
 #[test]
 fn ece_with_many_bins() {
-    let ece = CalibrationMetrics::ece(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0, 0, 1, 1, 1], 20);
+    let ece = CalibrationMetrics::ece(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0, 0, 1, 1, 1], 20).unwrap();
     assert!(ece >= 0.0);
 }
 
 #[test]
 fn brier_score_range() {
-    let score = CalibrationMetrics::brier(&[0.3, 0.7, 0.2, 0.8], &[0, 1, 0, 1]);
+    let score = CalibrationMetrics::brier(&[0.3, 0.7, 0.2, 0.8], &[0, 1, 0, 1]).unwrap();
     assert!((0.0..=1.0).contains(&score));
 }

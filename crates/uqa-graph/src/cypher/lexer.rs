@@ -171,7 +171,7 @@ fn scan_two_char_symbol(source: &str, i: usize) -> Option<(Token, usize)> {
     };
     // The match above only succeeds when both bytes are ASCII, so
     // building a 2-char ASCII string from them is safe.
-    let value = String::from_utf8(vec![pair.0, pair.1]).expect("ASCII bytes");
+    let value = String::from_iter([char::from(pair.0), char::from(pair.1)]);
     Some((
         Token {
             kind,

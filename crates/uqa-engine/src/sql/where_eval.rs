@@ -9,12 +9,34 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::DocId;
-use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
+use uqa_execution::ScalarExpr;
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{Engine, ScoredEntry};
 
 use super::row_functions::execute_function;
+use super::select::{execute_filter_rows, CteScope};
+
+fn filter_documents(
+    engine: &Engine,
+    filter: &ScalarExpr,
+    params: &[SQLParam],
+    documents: Vec<uqa_storage::document_store::Document>,
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    let scope = CteScope::new();
+    let rows = execute_filter_rows(engine, documents, filter.clone(), params, &scope)?;
+    rows.into_iter()
+        .map(|row| match row.get(super::DOC_ID_COLUMN) {
+            Some(uqa_core::Value::Int(doc_id)) if *doc_id >= 0 => Ok(ScoredEntry {
+                doc_id: *doc_id as DocId,
+                score: 0.0,
+            }),
+            _ => Err(SQLError::Internal(
+                "physical table filter lost its document id".into(),
+            )),
+        })
+        .collect()
+}
 
 fn filter_table_rows(
     engine: &Engine,
@@ -22,7 +44,7 @@ fn filter_table_rows(
     filter: &ScalarExpr,
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let doc_ids = engine.table_doc_ids(table);
+    let doc_ids = engine.table_doc_ids(table)?;
     // When the predicate reads a known column set, evaluate it against
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document.
@@ -30,33 +52,34 @@ fn filter_table_rows(
     if filter.collect_columns(&mut columns) {
         let names: Vec<String> = columns.into_iter().collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs);
-        let mut out = Vec::new();
-        let empty: Vec<uqa_core::Value> = Vec::new();
+        let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs)?;
+        let mut documents = Vec::with_capacity(doc_ids.len());
         for doc_id in doc_ids {
-            let values = field_values.get(&doc_id).unwrap_or(&empty);
+            let values = field_values.get(&doc_id).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
+                ))
+            })?;
             let mut document = uqa_storage::document_store::Document::new();
             for (name, value) in names.iter().zip(values) {
                 document.insert(name.clone(), value.clone());
             }
-            let ctx = ScalarEvalContext::new(Some(&document), params).with_function_hook(engine);
-            let v = eval_scalar(filter, &ctx)?;
-            if uqa_sql::expr::truthy(&v) {
-                out.push(ScoredEntry { doc_id, score: 0.0 });
-            }
+            document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
+            documents.push(document);
         }
-        return Ok(out);
+        return filter_documents(engine, filter, params, documents);
     }
-    let mut out = Vec::new();
+    let mut documents = Vec::with_capacity(doc_ids.len());
     for doc_id in doc_ids {
-        let document = engine.get_document(table, doc_id).unwrap_or_default();
-        let ctx = ScalarEvalContext::new(Some(&document), params).with_function_hook(engine);
-        let v = eval_scalar(filter, &ctx)?;
-        if uqa_sql::expr::truthy(&v) {
-            out.push(ScoredEntry { doc_id, score: 0.0 });
-        }
+        let mut document = engine.get_document(table, doc_id)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
+            ))
+        })?;
+        document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
+        documents.push(document);
     }
-    Ok(out)
+    filter_documents(engine, filter, params, documents)
 }
 
 pub(super) fn execute_mixed_where(
@@ -115,7 +138,7 @@ fn execute_mixed_where_expr(
         ScalarExpr::And(parts) => {
             let mut iter = parts.iter();
             let Some(first) = iter.next() else {
-                return Ok(all_table_rows(engine, table));
+                return all_table_rows(engine, table);
             };
             let mut out = execute_mixed_where_expr(engine, table, first, params)?;
             for part in iter {
@@ -136,11 +159,11 @@ fn execute_mixed_where_expr(
         // definite match sets). Column predicates go through the
         // row evaluator so `NOT (col = 5)` keeps SQL three-valued
         // semantics: rows where `col` is NULL match neither side.
-        ScalarExpr::Not(inner) if expr_is_null_free(inner) => Ok(complement_scored(
+        ScalarExpr::Not(inner) if expr_is_null_free(inner) => complement_scored(
             engine,
             table,
             execute_mixed_where_expr(engine, table, inner, params)?,
-        )),
+        ),
         ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
             if is_jsonpath_fts_match(name, args) {
                 filter_table_rows(engine, table, filter, params)
@@ -176,12 +199,12 @@ pub(crate) fn expr_is_null_free(expr: &ScalarExpr) -> bool {
     }
 }
 
-fn all_table_rows(engine: &Engine, table: &str) -> Vec<ScoredEntry> {
-    engine
-        .table_doc_ids(table)
+fn all_table_rows(engine: &Engine, table: &str) -> Result<Vec<ScoredEntry>, SQLError> {
+    Ok(engine
+        .table_doc_ids(table)?
         .into_iter()
         .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
-        .collect()
+        .collect())
 }
 
 fn intersect_scored(left: Vec<ScoredEntry>, right: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
@@ -210,12 +233,16 @@ fn union_scored(left: Vec<ScoredEntry>, right: Vec<ScoredEntry>) -> Vec<ScoredEn
         .collect()
 }
 
-fn complement_scored(engine: &Engine, table: &str, rows: Vec<ScoredEntry>) -> Vec<ScoredEntry> {
+fn complement_scored(
+    engine: &Engine,
+    table: &str,
+    rows: Vec<ScoredEntry>,
+) -> Result<Vec<ScoredEntry>, SQLError> {
     let excluded: BTreeSet<DocId> = rows.into_iter().map(|e| e.doc_id).collect();
-    engine
-        .table_doc_ids(table)
+    Ok(engine
+        .table_doc_ids(table)?
         .into_iter()
         .filter(|doc_id| !excluded.contains(doc_id))
         .map(|doc_id| ScoredEntry { doc_id, score: 0.0 })
-        .collect()
+        .collect())
 }

@@ -80,7 +80,7 @@ unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<sys::napi_va
             Value::Null => Null::to_napi_value(env, Null),
             Value::Bool(value) => bool::to_napi_value(env, value),
             Value::Int(value) => {
-                if value.abs() <= MAX_SAFE_INTEGER {
+                if value.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {
                     i64::to_napi_value(env, value)
                 } else {
                     BigInt::to_napi_value(env, BigInt::from(value))
@@ -111,11 +111,7 @@ fn value_from_unknown(value: &Unknown<'_>) -> Result<Value> {
         ValueType::Boolean => Ok(Value::Bool(unsafe { value.cast::<bool>() }?)),
         ValueType::Number => {
             let number = unsafe { value.cast::<f64>() }?;
-            if number.fract() == 0.0 && number.abs() <= MAX_SAFE_INTEGER as f64 {
-                Ok(Value::Int(number as i64))
-            } else {
-                Ok(Value::Float(number))
-            }
+            value_from_js_number(number)
         }
         ValueType::BigInt => {
             let bigint = unsafe { value.cast::<BigInt>() }?;
@@ -178,6 +174,18 @@ fn value_from_unknown(value: &Unknown<'_>) -> Result<Value> {
     }
 }
 
+fn value_from_js_number(number: f64) -> Result<Value> {
+    if number.is_finite() && number.fract() == 0.0 {
+        if number.abs() > MAX_SAFE_INTEGER as f64 {
+            return Err(Error::from_reason(format!(
+                "integer-valued JavaScript Number {number} is outside the safe integer range; pass a BigInt"
+            )));
+        }
+        return Ok(Value::Int(number as i64));
+    }
+    Ok(Value::Float(number))
+}
+
 fn document_from_js(document: BTreeMap<String, JSValue>) -> BTreeMap<String, Value> {
     document
         .into_iter()
@@ -196,9 +204,11 @@ pub struct SQLResult {
     pub affected_rows: i64,
 }
 
-impl From<CoreSQLResult> for SQLResult {
-    fn from(result: CoreSQLResult) -> Self {
-        Self {
+impl TryFrom<CoreSQLResult> for SQLResult {
+    type Error = Error;
+
+    fn try_from(result: CoreSQLResult) -> Result<Self> {
+        Ok(Self {
             columns: result.columns,
             rows: result
                 .rows
@@ -209,8 +219,8 @@ impl From<CoreSQLResult> for SQLResult {
                         .collect()
                 })
                 .collect(),
-            affected_rows: result.affected_rows as i64,
-        }
+            affected_rows: js_number_from_u64(result.affected_rows, "affected row count")?,
+        })
     }
 }
 
@@ -235,12 +245,14 @@ pub struct SearchHit {
     pub score: f64,
 }
 
-fn search_hits(entries: Vec<ScoredEntry>) -> Vec<SearchHit> {
+fn search_hits(entries: Vec<ScoredEntry>) -> Result<Vec<SearchHit>> {
     entries
         .into_iter()
-        .map(|entry| SearchHit {
-            doc_id: entry.doc_id as i64,
-            score: entry.score,
+        .map(|entry| {
+            Ok(SearchHit {
+                doc_id: js_number_from_u64(entry.doc_id, "search result document ID")?,
+                score: entry.score,
+            })
         })
         .collect()
 }
@@ -266,22 +278,26 @@ pub struct CalibrationReport {
     pub bins: Vec<ReliabilityBin>,
 }
 
-impl From<CoreCalibrationReport> for CalibrationReport {
-    fn from(report: CoreCalibrationReport) -> Self {
-        Self {
+impl TryFrom<CoreCalibrationReport> for CalibrationReport {
+    type Error = Error;
+
+    fn try_from(report: CoreCalibrationReport) -> Result<Self> {
+        Ok(Self {
             ece: report.ece,
             brier: report.brier,
             log_loss: report.log_loss,
             bins: report
                 .bins
                 .into_iter()
-                .map(|bin| ReliabilityBin {
-                    avg_predicted: bin.avg_predicted,
-                    avg_actual: bin.avg_actual,
-                    count: bin.count as i64,
+                .map(|bin| {
+                    Ok(ReliabilityBin {
+                        avg_predicted: bin.avg_predicted,
+                        avg_actual: bin.avg_actual,
+                        count: js_number_from_usize(bin.count, "calibration bin count")?,
+                    })
                 })
-                .collect(),
-        }
+                .collect::<Result<Vec<_>>>()?,
+        })
     }
 }
 
@@ -307,28 +323,51 @@ pub struct MigrationReport {
     pub column_stats: i64,
 }
 
-impl From<PythonMigrationReport> for MigrationReport {
-    fn from(report: PythonMigrationReport) -> Self {
-        Self {
+impl TryFrom<PythonMigrationReport> for MigrationReport {
+    type Error = Error;
+
+    fn try_from(report: PythonMigrationReport) -> Result<Self> {
+        Ok(Self {
             source_path: report.source_path.to_string_lossy().into_owned(),
             destination_path: report.destination_path.to_string_lossy().into_owned(),
-            tables: report.tables as i64,
-            documents: report.documents as i64,
-            fts_fields: report.fts_fields as i64,
-            vector_fields: report.vector_fields as i64,
-            indexes: report.indexes as i64,
-            analyzers: report.analyzers as i64,
-            table_field_analyzers: report.table_field_analyzers as i64,
-            foreign_servers: report.foreign_servers as i64,
-            foreign_tables: report.foreign_tables as i64,
-            graphs: report.graphs as i64,
-            graph_vertices: report.graph_vertices as i64,
-            graph_edges: report.graph_edges as i64,
-            path_indexes: report.path_indexes as i64,
-            scoring_params: report.scoring_params as i64,
-            models: report.models as i64,
-            column_stats: report.column_stats as i64,
-        }
+            tables: js_number_from_usize(report.tables, "migrated table count")?,
+            documents: js_number_from_usize(report.documents, "migrated document count")?,
+            fts_fields: js_number_from_usize(report.fts_fields, "migrated FTS field count")?,
+            vector_fields: js_number_from_usize(
+                report.vector_fields,
+                "migrated vector field count",
+            )?,
+            indexes: js_number_from_usize(report.indexes, "migrated index count")?,
+            analyzers: js_number_from_usize(report.analyzers, "migrated analyzer count")?,
+            table_field_analyzers: js_number_from_usize(
+                report.table_field_analyzers,
+                "migrated table-field analyzer count",
+            )?,
+            foreign_servers: js_number_from_usize(
+                report.foreign_servers,
+                "migrated foreign server count",
+            )?,
+            foreign_tables: js_number_from_usize(
+                report.foreign_tables,
+                "migrated foreign table count",
+            )?,
+            graphs: js_number_from_usize(report.graphs, "migrated graph count")?,
+            graph_vertices: js_number_from_usize(
+                report.graph_vertices,
+                "migrated graph vertex count",
+            )?,
+            graph_edges: js_number_from_usize(report.graph_edges, "migrated graph edge count")?,
+            path_indexes: js_number_from_usize(report.path_indexes, "migrated path index count")?,
+            scoring_params: js_number_from_usize(
+                report.scoring_params,
+                "migrated scoring parameter count",
+            )?,
+            models: js_number_from_usize(report.models, "migrated model count")?,
+            column_stats: js_number_from_usize(
+                report.column_stats,
+                "migrated column-statistics count",
+            )?,
+        })
     }
 }
 
@@ -359,30 +398,75 @@ impl SQLParam {
     }
 
     #[napi(factory)]
-    pub fn vector(values: Either<Float32Array, Vec<f64>>) -> SQLParam {
-        Self {
-            inner: CoreSQLParam::vector(vector_from_input(values)),
-        }
+    pub fn vector(values: Either<Float32Array, Vec<f64>>) -> Result<SQLParam> {
+        Ok(Self {
+            inner: CoreSQLParam::vector(vector_from_input(values, "SQL vector parameter")?),
+        })
     }
 
     #[napi(factory)]
-    pub fn tensor(values: Vec<Vec<f64>>) -> SQLParam {
-        Self {
-            inner: CoreSQLParam::tensor(
-                values
-                    .into_iter()
-                    .map(|row| row.into_iter().map(|value| value as f32).collect())
-                    .collect(),
-            ),
-        }
+    pub fn tensor(values: Vec<Vec<f64>>) -> Result<SQLParam> {
+        Ok(Self {
+            inner: CoreSQLParam::tensor(tensor_from_f64(values, "SQL tensor parameter")?),
+        })
     }
 }
 
-fn vector_from_input(values: Either<Float32Array, Vec<f64>>) -> Vec<f32> {
+fn vector_from_input(values: Either<Float32Array, Vec<f64>>, context: &str) -> Result<Vec<f32>> {
     match values {
-        Either::A(values) => values.to_vec(),
-        Either::B(values) => values.into_iter().map(|value| value as f32).collect(),
+        Either::A(values) => values
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, value)| finite_f32(value, &format!("{context}[{index}]")))
+            .collect(),
+        Either::B(values) => vector_from_f64(values, context),
     }
+}
+
+fn vector_from_f64(values: Vec<f64>, context: &str) -> Result<Vec<f32>> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| f32_from_f64(value, &format!("{context}[{index}]")))
+        .collect()
+}
+
+fn tensor_from_f64(values: Vec<Vec<f64>>, context: &str) -> Result<Vec<Vec<f32>>> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(row, values)| vector_from_f64(values, &format!("{context}[{row}]")))
+        .collect()
+}
+
+fn finite_f32(value: f32, context: &str) -> Result<f32> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(Error::from_reason(format!(
+            "{context} must be finite, got {value}"
+        )))
+    }
+}
+
+fn f32_from_f64(value: f64, context: &str) -> Result<f32> {
+    if !value.is_finite() {
+        return Err(Error::from_reason(format!(
+            "{context} must be finite, got {value}"
+        )));
+    }
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(Error::from_reason(format!(
+            "{context} is outside the f32 range: {value}"
+        )));
+    }
+    Ok(value as f32)
+}
+
+fn usize_from_u32(value: u32, context: &str) -> Result<usize> {
+    usize::try_from(value)
+        .map_err(|_| Error::from_reason(format!("{context} exceeds the platform usize range")))
 }
 
 type ParamInput<'env> = Either<ClassInstance<'env, SQLParam>, Unknown<'env>>;
@@ -405,13 +489,36 @@ fn labels_from_input(labels: Vec<u32>) -> Result<Vec<u8>> {
             if label > 1 {
                 Err(Error::from_reason("labels must contain only 0 or 1"))
             } else {
-                Ok(label as u8)
+                u8::try_from(label).map_err(|_| Error::from_reason("label exceeds the u8 bridge"))
             }
         })
         .collect()
 }
 
+fn js_number_from_u64(value: u64, label: &str) -> Result<i64> {
+    if value > MAX_SAFE_INTEGER as u64 {
+        return Err(Error::from_reason(format!(
+            "{label} exceeds JavaScript's safe integer range"
+        )));
+    }
+    i64::try_from(value).map_err(|_| Error::from_reason(format!("{label} exceeds the i64 bridge")))
+}
+
+fn js_number_from_usize(value: usize, label: &str) -> Result<i64> {
+    let value = u64::try_from(value)
+        .map_err(|_| Error::from_reason(format!("{label} exceeds the u64 bridge")))?;
+    js_number_from_u64(value, label)
+}
+
 fn doc_id_from_input(doc_id: i64) -> Result<u64> {
+    if doc_id < 0 {
+        return Err(Error::from_reason("docId must be non-negative"));
+    }
+    if doc_id > MAX_SAFE_INTEGER {
+        return Err(Error::from_reason(
+            "docId exceeds JavaScript's safe integer range",
+        ));
+    }
     u64::try_from(doc_id).map_err(|_| Error::from_reason("docId must be non-negative"))
 }
 
@@ -436,7 +543,7 @@ impl Task for SQLTask {
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(output.into())
+        output.try_into()
     }
 }
 
@@ -459,7 +566,7 @@ impl Task for SQLBatchTask {
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(output.into_iter().map(Into::into).collect())
+        output.into_iter().map(SQLResult::try_from).collect()
     }
 }
 
@@ -478,13 +585,13 @@ impl Task for SearchTask {
 
     fn compute(&mut self) -> Result<Self::Output> {
         let mode = scoring_mode(&self.engine, &self.table, &self.field, &self.scoring)?;
-        Ok(self
-            .engine
-            .search(&self.table, &self.field, &self.query, &mode, self.top_k))
+        self.engine
+            .search(&self.table, &self.field, &self.query, &mode, self.top_k)
+            .map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(search_hits(output))
+        search_hits(output)
     }
 }
 
@@ -501,13 +608,13 @@ impl Task for KNNSearchTask {
     type JsValue = Vec<SearchHit>;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        Ok(self
-            .engine
-            .knn_search(&self.table, &self.field, &self.vector, self.top_k))
+        self.engine
+            .knn_search(&self.table, &self.field, &self.vector, self.top_k)
+            .map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(search_hits(output))
+        search_hits(output)
     }
 }
 
@@ -524,16 +631,18 @@ impl Task for VectorSimilarityTask {
     type JsValue = Vec<SearchHit>;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        Ok(self.engine.vector_similarity_search(
-            &self.table,
-            &self.field,
-            self.vector.clone(),
-            self.threshold,
-        ))
+        self.engine
+            .vector_similarity_search(
+                &self.table,
+                &self.field,
+                self.vector.clone(),
+                self.threshold,
+            )
+            .map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(search_hits(output))
+        search_hits(output)
     }
 }
 
@@ -564,11 +673,11 @@ impl Task for HybridSearchTask {
             alpha: self.alpha,
             top_k: self.top_k,
         };
-        Ok(self.engine.hybrid_search(&params))
+        self.engine.hybrid_search(&params).map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(search_hits(output))
+        search_hits(output)
     }
 }
 
@@ -666,7 +775,7 @@ impl Task for CalibrationReportTask {
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
-        Ok(output.into())
+        output.try_into()
     }
 }
 
@@ -694,6 +803,14 @@ impl Engine {
     pub fn open(path: String) -> Result<Engine> {
         Ok(Engine {
             inner: Arc::new(CoreEngine::open(Path::new(&path)).map_err(runtime_error)?),
+        })
+    }
+
+    /// Create an independent SQL session over this persistent database.
+    #[napi]
+    pub fn new_session(&self) -> Result<Engine> {
+        Ok(Engine {
+            inner: Arc::new(self.inner.new_session().map_err(runtime_error)?),
         })
     }
 
@@ -766,11 +883,10 @@ impl Engine {
     #[napi]
     pub fn sql_sync(&self, query: String, params: Option<Vec<ParamInput>>) -> Result<SQLResult> {
         let params = params_from_input(params)?;
-        Ok(self
-            .inner
+        self.inner
             .sql(&query, &params)
             .map_err(runtime_error)?
-            .into())
+            .try_into()
     }
 
     #[napi(ts_return_type = "Promise<Array<SQLResult>>")]
@@ -794,23 +910,31 @@ impl Engine {
             .iter()
             .map(|(sql, params)| (sql.as_str(), params.as_slice()))
             .collect();
-        Ok(self
-            .inner
+        self.inner
             .sql_batch(&borrowed)
             .map_err(runtime_error)?
             .into_iter()
-            .map(Into::into)
-            .collect())
+            .map(SQLResult::try_from)
+            .collect()
     }
 
     #[napi]
-    pub fn create_default_table(&self, name: String, fts_fields: Vec<String>) {
-        self.inner.create_default_table(&name, fts_fields);
+    pub fn create_default_table(&self, name: String, fts_fields: Vec<String>) -> Result<()> {
+        self.inner
+            .create_default_table(&name, fts_fields)
+            .map_err(runtime_error)
     }
 
     #[napi]
-    pub fn create_vector_field(&self, table: String, field: String, dimensions: u32) -> bool {
-        self.inner.create_vector_field(&table, &field, dimensions)
+    pub fn create_vector_field(
+        &self,
+        table: String,
+        field: String,
+        dimensions: u32,
+    ) -> Result<bool> {
+        self.inner
+            .create_vector_field(&table, &field, dimensions)
+            .map_err(runtime_error)
     }
 
     #[napi]
@@ -842,16 +966,13 @@ impl Engine {
             .map(|(field, values)| {
                 let rows = match values {
                     Either::A(single) => {
-                        vec![single.into_iter().map(|value| value as f32).collect()]
+                        vec![vector_from_f64(single, &format!("vector field `{field}`"))?]
                     }
-                    Either::B(rows) => rows
-                        .into_iter()
-                        .map(|row| row.into_iter().map(|value| value as f32).collect())
-                        .collect(),
+                    Either::B(rows) => tensor_from_f64(rows, &format!("vector field `{field}`"))?,
                 };
-                (field, rows)
+                Ok((field, rows))
             })
-            .collect();
+            .collect::<Result<BTreeMap<_, _>>>()?;
         self.inner
             .add_document_with_vector_values(
                 &table,
@@ -870,12 +991,14 @@ impl Engine {
         field: String,
         vector: Either<Float32Array, Vec<f64>>,
     ) -> Result<bool> {
-        Ok(self.inner.add_vector(
-            &table,
-            doc_id_from_input(doc_id)?,
-            &field,
-            vector_from_input(vector),
-        ))
+        self.inner
+            .add_vector(
+                &table,
+                doc_id_from_input(doc_id)?,
+                &field,
+                vector_from_input(vector, &format!("vector field `{field}`"))?,
+            )
+            .map_err(runtime_error)
     }
 
     #[napi]
@@ -886,15 +1009,14 @@ impl Engine {
         field: String,
         vectors: Vec<Vec<f64>>,
     ) -> Result<bool> {
-        Ok(self.inner.add_vector_values(
-            &table,
-            doc_id_from_input(doc_id)?,
-            &field,
-            vectors
-                .into_iter()
-                .map(|row| row.into_iter().map(|value| value as f32).collect())
-                .collect(),
-        ))
+        self.inner
+            .add_vector_values(
+                &table,
+                doc_id_from_input(doc_id)?,
+                &field,
+                tensor_from_f64(vectors, &format!("vector field `{field}`"))?,
+            )
+            .map_err(runtime_error)
     }
 
     #[napi]
@@ -906,6 +1028,7 @@ impl Engine {
         Ok(self
             .inner
             .get_document(&table, doc_id_from_input(doc_id)?)
+            .map_err(runtime_error)?
             .map(|document| {
                 document
                     .into_iter()
@@ -922,8 +1045,11 @@ impl Engine {
     }
 
     #[napi]
-    pub fn document_count(&self, table: String) -> i64 {
-        self.inner.document_count(&table) as i64
+    pub fn document_count(&self, table: String) -> Result<i64> {
+        js_number_from_u64(
+            self.inner.document_count(&table).map_err(runtime_error)?,
+            "document count",
+        )
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
@@ -934,15 +1060,15 @@ impl Engine {
         query: String,
         top_k: Option<u32>,
         scoring: Option<String>,
-    ) -> AsyncTask<SearchTask> {
-        AsyncTask::new(SearchTask {
+    ) -> Result<AsyncTask<SearchTask>> {
+        Ok(AsyncTask::new(SearchTask {
             engine: self.inner.clone(),
             table,
             field,
             query,
-            top_k: top_k.unwrap_or(10) as usize,
+            top_k: usize_from_u32(top_k.unwrap_or(10), "topK")?,
             scoring: scoring.unwrap_or_else(|| "bm25".to_string()),
-        })
+        }))
     }
 
     #[napi]
@@ -956,13 +1082,17 @@ impl Engine {
     ) -> Result<Vec<SearchHit>> {
         let scoring = scoring.unwrap_or_else(|| "bm25".to_string());
         let mode = scoring_mode(&self.inner, &table, &field, &scoring)?;
-        Ok(search_hits(self.inner.search(
-            &table,
-            &field,
-            &query,
-            &mode,
-            top_k.unwrap_or(10) as usize,
-        )))
+        search_hits(
+            self.inner
+                .search(
+                    &table,
+                    &field,
+                    &query,
+                    &mode,
+                    usize_from_u32(top_k.unwrap_or(10), "topK")?,
+                )
+                .map_err(runtime_error)?,
+        )
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
@@ -972,14 +1102,14 @@ impl Engine {
         field: String,
         vector: Either<Float32Array, Vec<f64>>,
         top_k: Option<u32>,
-    ) -> AsyncTask<KNNSearchTask> {
-        AsyncTask::new(KNNSearchTask {
+    ) -> Result<AsyncTask<KNNSearchTask>> {
+        Ok(AsyncTask::new(KNNSearchTask {
             engine: self.inner.clone(),
             table,
             field,
-            vector: vector_from_input(vector),
-            top_k: top_k.unwrap_or(10) as usize,
-        })
+            vector: vector_from_input(vector, "KNN query vector")?,
+            top_k: usize_from_u32(top_k.unwrap_or(10), "topK")?,
+        }))
     }
 
     #[napi]
@@ -989,13 +1119,17 @@ impl Engine {
         field: String,
         vector: Either<Float32Array, Vec<f64>>,
         top_k: Option<u32>,
-    ) -> Vec<SearchHit> {
-        search_hits(self.inner.knn_search(
-            &table,
-            &field,
-            vector_from_input(vector),
-            top_k.unwrap_or(10) as usize,
-        ))
+    ) -> Result<Vec<SearchHit>> {
+        search_hits(
+            self.inner
+                .knn_search(
+                    &table,
+                    &field,
+                    vector_from_input(vector, "KNN query vector")?,
+                    usize_from_u32(top_k.unwrap_or(10), "topK")?,
+                )
+                .map_err(runtime_error)?,
+        )
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
@@ -1005,14 +1139,14 @@ impl Engine {
         field: String,
         vector: Either<Float32Array, Vec<f64>>,
         threshold: f64,
-    ) -> AsyncTask<VectorSimilarityTask> {
-        AsyncTask::new(VectorSimilarityTask {
+    ) -> Result<AsyncTask<VectorSimilarityTask>> {
+        Ok(AsyncTask::new(VectorSimilarityTask {
             engine: self.inner.clone(),
             table,
             field,
-            vector: vector_from_input(vector),
-            threshold: threshold as f32,
-        })
+            vector: vector_from_input(vector, "vector-similarity query vector")?,
+            threshold: f32_from_f64(threshold, "vector-similarity threshold")?,
+        }))
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
@@ -1027,20 +1161,29 @@ impl Engine {
         top_k: Option<u32>,
         knn_pool: Option<u32>,
         alpha: Option<f64>,
-    ) -> AsyncTask<HybridSearchTask> {
-        let top_k = top_k.unwrap_or(10) as usize;
-        AsyncTask::new(HybridSearchTask {
+    ) -> Result<AsyncTask<HybridSearchTask>> {
+        let top_k = usize_from_u32(top_k.unwrap_or(10), "topK")?;
+        let knn_pool = match knn_pool {
+            Some(pool) => usize_from_u32(pool, "knnPool")?,
+            None => top_k.checked_mul(4).ok_or_else(|| {
+                Error::from_reason("default knnPool overflows the platform usize range")
+            })?,
+        };
+        let alpha = alpha.unwrap_or(1.0);
+        if !alpha.is_finite() {
+            return Err(Error::from_reason("alpha must be finite"));
+        }
+        Ok(AsyncTask::new(HybridSearchTask {
             engine: self.inner.clone(),
             table,
             text_field,
             text_query,
             vector_field,
-            query_vector: vector_from_input(query_vector),
+            query_vector: vector_from_input(query_vector, "hybrid query vector")?,
             top_k,
-            knn_pool: knn_pool
-                .map_or_else(|| top_k.saturating_mul(4).max(top_k), |pool| pool as usize),
-            alpha: alpha.unwrap_or(1.0),
-        })
+            knn_pool,
+            alpha,
+        }))
     }
 
     #[napi(ts_return_type = "Promise<Record<string, number>>")]
@@ -1051,15 +1194,15 @@ impl Engine {
         n_samples: Option<u32>,
         tokens_per_query: Option<u32>,
         seed: Option<i64>,
-    ) -> AsyncTask<EstimateScoringParamsTask> {
-        AsyncTask::new(EstimateScoringParamsTask {
+    ) -> Result<AsyncTask<EstimateScoringParamsTask>> {
+        Ok(AsyncTask::new(EstimateScoringParamsTask {
             engine: self.inner.clone(),
             table,
             field,
-            n_samples: n_samples.unwrap_or(50) as usize,
-            tokens_per_query: tokens_per_query.unwrap_or(5) as usize,
+            n_samples: usize_from_u32(n_samples.unwrap_or(50), "nSamples")?,
+            tokens_per_query: usize_from_u32(tokens_per_query.unwrap_or(5), "tokensPerQuery")?,
             seed: seed.unwrap_or(42),
-        })
+        }))
     }
 
     #[napi(ts_return_type = "Promise<Record<string, number>>")]
@@ -1123,6 +1266,7 @@ impl Engine {
     pub fn load_scoring_params(&self, name: String) -> Result<Option<BTreeMap<String, f64>>> {
         self.inner
             .load_scoring_params(&name)
+            .map_err(runtime_error)?
             .map(|json| parse_scoring_params(&name, &json))
             .transpose()
     }
@@ -1131,6 +1275,7 @@ impl Engine {
     pub fn load_all_scoring_params(&self) -> Result<BTreeMap<String, BTreeMap<String, f64>>> {
         self.inner
             .load_all_scoring_params()
+            .map_err(runtime_error)?
             .into_iter()
             .map(|(name, json)| {
                 let params = parse_scoring_params(&name, &json)?;
@@ -1140,8 +1285,8 @@ impl Engine {
     }
 
     #[napi]
-    pub fn drop_scoring_params(&self, name: String) -> bool {
-        self.inner.drop_scoring_params(&name)
+    pub fn drop_scoring_params(&self, name: String) -> Result<bool> {
+        self.inner.drop_scoring_params(&name).map_err(runtime_error)
     }
 
     #[napi(ts_return_type = "Promise<SQLResult>")]
@@ -1175,58 +1320,60 @@ impl Engine {
     }
 
     #[napi]
-    pub fn create_graph(&self, name: String) {
-        self.inner.create_graph(&name);
+    pub fn create_graph(&self, name: String) -> Result<bool> {
+        self.inner.create_graph(&name).map_err(runtime_error)
     }
 
     #[napi]
-    pub fn drop_graph(&self, name: String) {
-        self.inner.drop_graph(&name);
+    pub fn drop_graph(&self, name: String) -> Result<bool> {
+        self.inner.drop_graph(&name).map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_graphs(&self) -> Vec<String> {
-        self.inner.list_graphs()
+    pub fn list_graphs(&self) -> Result<Vec<String>> {
+        self.inner.list_graphs().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_path_indexes(&self) -> Vec<String> {
-        self.inner.list_path_indexes()
+    pub fn list_path_indexes(&self) -> Result<Vec<String>> {
+        self.inner.list_path_indexes().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn table_names(&self) -> Vec<String> {
-        self.inner.table_names()
+    pub fn table_names(&self) -> Result<Vec<String>> {
+        self.inner.table_names().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_views(&self) -> Vec<String> {
-        self.inner.list_views()
+    pub fn list_views(&self) -> Result<Vec<String>> {
+        self.inner.list_views().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_schemas(&self) -> Vec<String> {
-        self.inner.list_schemas()
+    pub fn list_schemas(&self) -> Result<Vec<String>> {
+        self.inner.list_schemas().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_sequences(&self) -> Vec<String> {
-        self.inner.list_sequences()
+    pub fn list_sequences(&self) -> Result<Vec<String>> {
+        self.inner
+            .list_sequences()
+            .map_err(|err| Error::from_reason(format!("list sequences: {err}")))
     }
 
     #[napi]
-    pub fn list_named_analyzers(&self) -> Vec<String> {
-        self.inner.list_named_analyzers()
+    pub fn list_named_analyzers(&self) -> Result<Vec<String>> {
+        self.inner.list_named_analyzers().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_foreign_servers(&self) -> Vec<String> {
-        self.inner.list_foreign_servers()
+    pub fn list_foreign_servers(&self) -> Result<Vec<String>> {
+        self.inner.list_foreign_servers().map_err(runtime_error)
     }
 
     #[napi]
-    pub fn list_foreign_tables(&self) -> Vec<String> {
-        self.inner.list_foreign_tables()
+    pub fn list_foreign_tables(&self) -> Result<Vec<String>> {
+        self.inner.list_foreign_tables().map_err(runtime_error)
     }
 
     #[napi(js_name = "takeSQLNotices")]
@@ -1239,13 +1386,17 @@ impl Engine {
     }
 
     #[napi(js_name = "sqlFunctionDepthLimit")]
-    pub fn sql_function_depth_limit(&self) -> u32 {
-        self.inner.sql_function_depth_limit() as u32
+    pub fn sql_function_depth_limit(&self) -> Result<u32> {
+        u32::try_from(self.inner.sql_function_depth_limit()).map_err(|_| {
+            Error::from_reason("SQL function depth limit exceeds the Node.js u32 bridge")
+        })
     }
 
     #[napi(js_name = "setSQLFunctionDepthLimit")]
-    pub fn set_sql_function_depth_limit(&self, limit: u32) {
-        self.inner.set_sql_function_depth_limit(limit as usize);
+    pub fn set_sql_function_depth_limit(&self, limit: u32) -> Result<()> {
+        self.inner
+            .set_sql_function_depth_limit(usize_from_u32(limit, "SQL function depth limit")?);
+        Ok(())
     }
 
     #[napi]
@@ -1254,8 +1405,10 @@ impl Engine {
     }
 
     #[napi]
-    pub fn close(&self) {
-        self.inner.close();
+    pub fn close(&self) -> Result<()> {
+        self.inner
+            .close()
+            .map_err(|err| Error::from_reason(format!("close engine: {err}")))
     }
 }
 
@@ -1298,20 +1451,20 @@ pub fn detect_database_file(path: String) -> Result<String> {
 }
 
 #[napi]
-pub fn vector(values: Either<Float32Array, Vec<f64>>) -> SQLParam {
+pub fn vector(values: Either<Float32Array, Vec<f64>>) -> Result<SQLParam> {
     SQLParam::vector(values)
 }
 
 #[napi]
-pub fn tensor(values: Vec<Vec<f64>>) -> SQLParam {
+pub fn tensor(values: Vec<Vec<f64>>) -> Result<SQLParam> {
     SQLParam::tensor(values)
 }
 
 #[napi(js_name = "migratePythonDB")]
 pub fn migrate_python_db(source: String, destination: String) -> Result<MigrationReport> {
     migrate_python_database(Path::new(&source), Path::new(&destination))
-        .map(Into::into)
-        .map_err(runtime_error)
+        .map_err(runtime_error)?
+        .try_into()
 }
 
 // ---------------------------------------------------------------------
@@ -1365,7 +1518,9 @@ fn scoring_mode(
     match scoring.to_ascii_lowercase().as_str() {
         "bm25" => Ok(ScoringMode::BM25(BM25Params::default())),
         "bayesian" | "bayesian_bm25" => Ok(ScoringMode::BayesianBM25(
-            engine.bayesian_params_for(table, field),
+            engine
+                .bayesian_params_for(table, field)
+                .map_err(runtime_error)?,
         )),
         other => Err(Error::from_reason(format!(
             "unsupported scoring mode `{other}`"
@@ -1393,4 +1548,29 @@ fn parse_scoring_params(name: &str, json: &str) -> Result<BTreeMap<String, f64>>
 
 fn runtime_error(error: impl std::fmt::Display) -> Error {
     Error::from_reason(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_integer_numbers_require_bigint() {
+        let error = value_from_js_number((MAX_SAFE_INTEGER + 1) as f64)
+            .expect_err("unsafe integer-valued Numbers must not become approximate floats");
+        assert!(error.to_string().contains("pass a BigInt"));
+        assert_eq!(
+            value_from_js_number(MAX_SAFE_INTEGER as f64).unwrap(),
+            Value::Int(MAX_SAFE_INTEGER)
+        );
+    }
+
+    #[test]
+    fn fractional_and_non_finite_numbers_remain_floats() {
+        assert_eq!(value_from_js_number(1.5).unwrap(), Value::Float(1.5));
+        assert!(matches!(
+            value_from_js_number(f64::NAN).unwrap(),
+            Value::Float(value) if value.is_nan()
+        ));
+    }
 }

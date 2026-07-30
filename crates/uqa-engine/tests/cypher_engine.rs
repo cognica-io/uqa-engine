@@ -217,7 +217,7 @@ fn apache_age_drop_graph_requires_cascade() {
         .sql("SELECT drop_graph('social', true) AS ok", &[])
         .unwrap();
     assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Null));
-    assert!(!eng.has_graph("social"));
+    assert!(!eng.has_graph("social").unwrap());
 
     // Dropping a missing graph reports it does not exist.
     let err = eng

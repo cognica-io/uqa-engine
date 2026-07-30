@@ -64,7 +64,7 @@ export declare function tensor(values: Array<Float32Array | number[]>): SQLParam
 export declare const UQA: {
   /** Preload the WASM module and restore persisted databases. */
   load(): Promise<void>;
-  /** Flush every persistent database to IndexedDB (browser only). */
+  /** Flush every persistent database to IndexedDB; rejects when IndexedDB is unavailable. */
   persist(): Promise<void>;
   /** Directory on the virtual filesystem that persists to IndexedDB. */
   persistDir: string;
@@ -84,6 +84,9 @@ export declare class Engine {
   static open(path: string): Promise<Engine>;
   static openAuto(path: string): Promise<Engine>;
   static openCompressed(path: string, options?: CompressionOptions): Promise<Engine>;
+
+  /** Create an independent SQL session over the same persistent database. */
+  newSession(): Promise<Engine>;
 
   sql(query: string, params?: ParamInput[]): Promise<SQLResult>;
   sqlBatch(statements: Array<[string, ParamInput[]]>): Promise<SQLResult[]>;
@@ -155,8 +158,8 @@ export declare class Engine {
   loadAllScoringParams(): Promise<Record<string, Record<string, number>>>;
   dropScoringParams(name: string): Promise<boolean>;
   runCypher(graph: string, query: string, params?: Record<string, JSValue>): Promise<SQLResult>;
-  createGraph(name: string): Promise<void>;
-  dropGraph(name: string): Promise<void>;
+  createGraph(name: string): Promise<boolean>;
+  dropGraph(name: string): Promise<boolean>;
   listGraphs(): Promise<string[]>;
   listPathIndexes(): Promise<string[]>;
   tableNames(): Promise<string[]>;

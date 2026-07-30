@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{EdgeId, VertexId};
 
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct LabelIndex {
@@ -26,13 +26,13 @@ pub struct LabelIndex {
 }
 
 impl LabelIndex {
-    pub fn build<G: GraphStore>(store: &G, graph: &str) -> Self {
+    pub fn build<G: GraphStore>(store: &G, graph: &str) -> GraphStoreResult<Self> {
         let mut idx = Self::default();
-        for vid in store.vertex_ids_in_graph(graph) {
-            for eid in store.out_edge_ids(vid, graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+        for vid in store.vertex_ids_in_graph(graph)? {
+            for eid in store.out_edge_ids(vid, graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing indexed edge {eid}"))
+                })?;
                 idx.label_to_edges
                     .entry(edge.label.clone())
                     .or_default()
@@ -46,7 +46,7 @@ impl LabelIndex {
             edges.sort_unstable();
             edges.dedup();
         }
-        idx
+        Ok(idx)
     }
 
     pub fn edges_by_label(&self, label: &str) -> &[EdgeId] {
@@ -76,20 +76,24 @@ pub struct PathIndex {
 }
 
 impl PathIndex {
-    pub fn build<G: GraphStore>(store: &G, graph: &str, label_sequences: &[Vec<String>]) -> Self {
+    pub fn build<G: GraphStore>(
+        store: &G,
+        graph: &str,
+        label_sequences: &[Vec<String>],
+    ) -> GraphStoreResult<Self> {
         let mut idx = Self::default();
         for seq in label_sequences {
             let key = seq.join("/");
             let mut pairs: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
-            for start in store.vertex_ids_in_graph(graph) {
-                let ends = follow_path(store, graph, start, seq);
+            for start in store.vertex_ids_in_graph(graph)? {
+                let ends = follow_path(store, graph, start, seq)?;
                 for end in ends {
                     pairs.insert((start, end));
                 }
             }
             idx.path_pairs.insert(key, pairs);
         }
-        idx
+        Ok(idx)
     }
 
     pub fn lookup(&self, label_sequence: &[String]) -> Option<&BTreeSet<(VertexId, VertexId)>> {
@@ -112,16 +116,17 @@ fn follow_path<G: GraphStore>(
     graph: &str,
     start: VertexId,
     labels: &[String],
-) -> BTreeSet<VertexId> {
+) -> GraphStoreResult<BTreeSet<VertexId>> {
     let mut current: BTreeSet<VertexId> = BTreeSet::from([start]);
     for label in labels {
         let mut next_set: BTreeSet<VertexId> = BTreeSet::new();
         for vid in &current {
-            for eid in store.out_edge_ids(*vid, graph) {
-                if let Some(edge) = store.get_edge(eid) {
-                    if &edge.label == label {
-                        next_set.insert(edge.target_id);
-                    }
+            for eid in store.out_edge_ids(*vid, graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing path-index edge {eid}"))
+                })?;
+                if &edge.label == label {
+                    next_set.insert(edge.target_id);
                 }
             }
         }
@@ -130,5 +135,5 @@ fn follow_path<G: GraphStore>(
             break;
         }
     }
-    current
+    Ok(current)
 }

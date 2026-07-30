@@ -252,11 +252,8 @@ fn test_unknown_field_returns_error() {
         )
         .unwrap_err();
     match error {
-        SQLError::TypeMismatch(message) => {
-            assert!(message.contains("nonexistent_field"));
-            assert!(message.contains("does not exist"));
-        }
-        other => panic!("expected an unknown-field error, got {other:?}"),
+        SQLError::UnknownColumn(column) => assert_eq!(column, "nonexistent_field"),
+        other => panic!("expected an unknown-column error, got {other:?}"),
     }
 }
 

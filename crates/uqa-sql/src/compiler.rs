@@ -30,17 +30,142 @@ use tree::{
 
 pub(super) fn range_var_name(r: &RangeVar) -> String {
     if r.schemaname.is_empty() {
-        r.relname.clone()
+        render_relation_component(&r.relname)
     } else {
-        format!("{}.{}", r.schemaname, r.relname)
+        format!(
+            "{}.{}",
+            render_relation_component(&r.schemaname),
+            render_relation_component(&r.relname)
+        )
     }
+}
+
+/// Reject relation qualifiers that the durable catalog cannot faithfully
+/// represent.  `PostgreSQL` records temporary/unlogged persistence separately;
+/// silently storing either as a permanent relation would change restart
+/// semantics.
+pub(super) fn validate_durable_create_relation(relation: &RangeVar, statement: &str) -> Result<()> {
+    if !relation.catalogname.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: cross-database relation names are not supported"
+        )));
+    }
+    match relation.relpersistence.as_str() {
+        "" | "p" => Ok(()),
+        "t" => Err(SQLError::Unsupported(format!(
+            "{statement}: TEMPORARY relations are not supported"
+        ))),
+        "u" => Err(SQLError::Unsupported(format!(
+            "{statement}: UNLOGGED relations are not supported"
+        ))),
+        other => Err(SQLError::Unsupported(format!(
+            "{statement}: relation persistence `{other}` is not supported"
+        ))),
+    }
+}
+
+pub(super) fn validate_create_table_envelope(
+    stmt: &pg_query::protobuf::CreateStmt,
+    statement: &str,
+) -> Result<()> {
+    use pg_query::protobuf::OnCommitAction;
+
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal(format!("{statement} without relation")))?;
+    validate_durable_create_relation(relation, statement)?;
+    if !stmt.inh_relations.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: INHERITS is not supported"
+        )));
+    }
+    if stmt.partbound.is_some() || stmt.partspec.is_some() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: partitioning is not supported"
+        )));
+    }
+    if stmt.of_typename.is_some() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: typed tables are not supported"
+        )));
+    }
+    if !stmt.constraints.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: out-of-line constraint payloads are not supported"
+        )));
+    }
+    if !stmt.options.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: table storage options are not supported"
+        )));
+    }
+    if !matches!(
+        stmt.oncommit(),
+        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
+    ) {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: ON COMMIT is not supported"
+        )));
+    }
+    if !stmt.tablespacename.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: TABLESPACE is not supported"
+        )));
+    }
+    if !stmt.access_method.is_empty() {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: USING access methods are not supported"
+        )));
+    }
+    Ok(())
+}
+
+fn render_relation_component(component: &str) -> String {
+    let can_render_bare = component
+        .bytes()
+        .enumerate()
+        .all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'_' => true,
+            b'0'..=b'9' | b'$' => index != 0,
+            _ => false,
+        });
+    if can_render_bare && !component.is_empty() {
+        component.to_string()
+    } else {
+        format!("\"{}\"", component.replace('"', "\"\""))
+    }
+}
+
+pub(super) fn compile_qualified_name(parts: &[Node], statement: &str) -> Result<String> {
+    let parts = parts
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if parts.is_empty() {
+        return Err(SQLError::Internal(format!(
+            "{statement} without a routine name"
+        )));
+    }
+    if parts.len() > 2 {
+        return Err(SQLError::Unsupported(format!(
+            "{statement}: cross-database routine names are not supported"
+        )));
+    }
+    Ok(parts
+        .iter()
+        .map(|part| render_relation_component(part))
+        .collect::<Vec<_>>()
+        .join("."))
 }
 
 pub fn compile(sql: &str) -> Result<Vec<Statement>> {
     let parsed = pg_query::parse(sql)?;
     let mut out = Vec::with_capacity(parsed.protobuf.stmts.len());
     for raw in parsed.protobuf.stmts {
-        let Some(node) = raw.stmt else { continue };
+        let node = raw
+            .stmt
+            .ok_or_else(|| SQLError::Internal("parser returned an empty statement".into()))?;
         out.push(compile_stmt(&node)?);
     }
     Ok(out)
@@ -62,7 +187,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
                 let mut rows: Vec<Vec<Expr>> = Vec::new();
                 for r in &stmt.values_lists {
                     let Some(NodeEnum::List(list)) = r.node.as_ref() else {
-                        continue;
+                        return Err(SQLError::Internal("VALUES contains a malformed row".into()));
                     };
                     let row: Vec<Expr> = list
                         .items
@@ -83,12 +208,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
         NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
         NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),
-        NodeEnum::VacuumStmt(_) => {
-            // Treat ANALYZE / VACUUM ANALYZE the same way: ask the
-            // engine to refresh stats. The canonical UQA behavior parses
-            // ANALYZE through the same node.
-            Ok(Statement::Analyze { table: None })
-        }
+        NodeEnum::VacuumStmt(stmt) => compile_analyze(stmt),
         NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),
         NodeEnum::TransactionStmt(stmt) => compile_transaction(stmt),
         NodeEnum::CreateSeqStmt(stmt) => {
@@ -116,7 +236,7 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
             name: stmt.name.clone(),
         }),
         NodeEnum::DiscardStmt(stmt) => Ok(Statement::Discard {
-            target: discard_target(stmt.target),
+            target: discard_target(stmt.target)?,
         }),
         other => Err(SQLError::Unsupported(format!(
             "{}",
@@ -127,14 +247,73 @@ fn compile_stmt(node: &Node) -> Result<Statement> {
 
 /// Map `pg_query`'s `DiscardMode` enum (1=ALL, 2=PLANS, 3=SEQUENCES,
 /// 4=TEMP) to the AST's [`DiscardTarget`].
-fn discard_target(mode: i32) -> crate::ast::DiscardTarget {
+fn discard_target(mode: i32) -> Result<crate::ast::DiscardTarget> {
     use crate::ast::DiscardTarget;
     match mode {
-        2 => DiscardTarget::Plans,
-        3 => DiscardTarget::Sequences,
-        4 => DiscardTarget::Temp,
-        _ => DiscardTarget::All,
+        1 => Ok(DiscardTarget::All),
+        2 => Ok(DiscardTarget::Plans),
+        3 => Ok(DiscardTarget::Sequences),
+        4 => Ok(DiscardTarget::Temp),
+        other => Err(SQLError::Internal(format!(
+            "unknown DISCARD target {other}"
+        ))),
     }
+}
+
+fn compile_analyze(stmt: &pg_query::protobuf::VacuumStmt) -> Result<Statement> {
+    if stmt.is_vacuumcmd {
+        return Err(SQLError::Unsupported(
+            "VACUUM is not implemented; VACUUM must not be treated as ANALYZE".into(),
+        ));
+    }
+
+    if !stmt.options.is_empty() {
+        return Err(SQLError::Unsupported(
+            "ANALYZE options are not implemented".into(),
+        ));
+    }
+
+    let table = match stmt.rels.as_slice() {
+        [] => None,
+        [node] => {
+            let Some(NodeEnum::VacuumRelation(relation)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "ANALYZE contains a malformed relation".into(),
+                ));
+            };
+            if relation.oid != 0 {
+                return Err(SQLError::Unsupported(
+                    "OID-targeted ANALYZE is not implemented".into(),
+                ));
+            }
+            if !relation.va_cols.is_empty() {
+                return Err(SQLError::Unsupported(
+                    "ANALYZE column lists are not implemented".into(),
+                ));
+            }
+            let range = relation.relation.as_ref().ok_or_else(|| {
+                SQLError::Internal("ANALYZE relation is missing its table name".into())
+            })?;
+            if !range.catalogname.is_empty() {
+                return Err(SQLError::Unsupported(
+                    "cross-database ANALYZE is not implemented".into(),
+                ));
+            }
+            if range.relname.is_empty() {
+                return Err(SQLError::Internal(
+                    "ANALYZE relation has an empty table name".into(),
+                ));
+            }
+            Some(range_var_name(range))
+        }
+        _ => {
+            return Err(SQLError::Unsupported(
+                "ANALYZE of multiple tables is not implemented".into(),
+            ));
+        }
+    };
+
+    Ok(Statement::Analyze { table })
 }
 
 fn compile_variable_set(stmt: &pg_query::protobuf::VariableSetStmt) -> Result<Statement> {
@@ -142,33 +321,69 @@ fn compile_variable_set(stmt: &pg_query::protobuf::VariableSetStmt) -> Result<St
     // SET search_path TO a, b, c arrives as a list of A_Const nodes.
     let mut parts: Vec<String> = Vec::new();
     for arg in &stmt.args {
-        if let Some(node) = arg.node.as_ref() {
-            match node {
-                NodeEnum::AConst(c) => match c.val.as_ref() {
-                    Some(pg_query::protobuf::a_const::Val::Sval(sval)) => {
-                        parts.push(sval.sval.clone());
-                    }
-                    Some(pg_query::protobuf::a_const::Val::Ival(iv)) => {
-                        parts.push(iv.ival.to_string());
-                    }
-                    _ => {}
-                },
-                NodeEnum::TypeCast(tc) => {
-                    if let Some(NodeEnum::AConst(c)) = tc.arg.as_ref().and_then(|a| a.node.as_ref())
-                    {
-                        if let Some(pg_query::protobuf::a_const::Val::Sval(sval)) = c.val.as_ref() {
-                            parts.push(sval.sval.clone());
-                        }
-                    }
+        let node = arg
+            .node
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("SET contains an empty argument".into()))?;
+        match node {
+            NodeEnum::AConst(constant) => match constant.val.as_ref() {
+                Some(pg_query::protobuf::a_const::Val::Sval(value)) => {
+                    parts.push(value.sval.clone());
                 }
-                NodeEnum::String(s) => parts.push(s.sval.clone()),
-                _ => {}
+                Some(pg_query::protobuf::a_const::Val::Ival(value)) => {
+                    parts.push(value.ival.to_string());
+                }
+                Some(pg_query::protobuf::a_const::Val::Fval(value)) => {
+                    parts.push(value.fval.clone());
+                }
+                Some(pg_query::protobuf::a_const::Val::Boolval(value)) => {
+                    parts.push(value.boolval.to_string());
+                }
+                None if constant.isnull => parts.push("NULL".into()),
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "SET argument {other:?} is not supported"
+                    )));
+                }
+            },
+            NodeEnum::TypeCast(cast) => {
+                let Some(NodeEnum::AConst(constant)) = cast
+                    .arg
+                    .as_ref()
+                    .and_then(|argument| argument.node.as_ref())
+                else {
+                    return Err(SQLError::Unsupported(
+                        "SET type-cast argument must contain a literal".into(),
+                    ));
+                };
+                let Some(pg_query::protobuf::a_const::Val::Sval(value)) = constant.val.as_ref()
+                else {
+                    return Err(SQLError::Unsupported(
+                        "SET type-cast argument must contain a string literal".into(),
+                    ));
+                };
+                parts.push(value.sval.clone());
+            }
+            NodeEnum::String(value) => parts.push(value.sval.clone()),
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "SET argument {other:?} is not supported"
+                )));
             }
         }
     }
+    let value = if stmt.name.eq_ignore_ascii_case("search_path") {
+        parts
+            .iter()
+            .map(|part| render_relation_component(part))
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        parts.join(",")
+    };
     Ok(Statement::SetVariable {
         name: stmt.name.clone(),
-        value: parts.join(","),
+        value,
     })
 }
 
@@ -176,33 +391,44 @@ fn compile_create_sequence(
     stmt: &pg_query::protobuf::CreateSeqStmt,
 ) -> Result<crate::ast::CreateSequence> {
     use crate::ast::CreateSequence;
-    let name = stmt
+    let relation = stmt
         .sequence
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE SEQUENCE without name".into()))?;
-    let mut start = 1_i64;
+    validate_durable_create_relation(relation, "CREATE SEQUENCE")?;
+    if stmt.owner_id != 0 || stmt.for_identity {
+        return Err(SQLError::Unsupported(
+            "CREATE SEQUENCE: identity-owned sequences are not supported".into(),
+        ));
+    }
+    let name = range_var_name(relation);
+    let mut start = None;
     let mut increment = 1_i64;
     for opt in &stmt.options {
-        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
-            let key = elem.defname.to_ascii_lowercase();
-            let v = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                Some(NodeEnum::Integer(i)) => i64::from(i.ival),
-                Some(NodeEnum::Float(f)) => f.fval.parse::<f64>().unwrap_or(0.0) as i64,
-                Some(NodeEnum::String(s)) => s.sval.parse::<i64>().unwrap_or(0),
-                _ => continue,
-            };
-            match key.as_str() {
-                "start" => start = v,
-                "increment" => increment = v,
-                _ => {}
+        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "CREATE SEQUENCE contains a malformed option".into(),
+            ));
+        };
+        let key = elem.defname.to_ascii_lowercase();
+        let value = compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
+        match key.as_str() {
+            "start" => start = Some(value),
+            "increment" => increment = value,
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE SEQUENCE option `{other}` is not supported"
+                )));
             }
         }
     }
     Ok(CreateSequence {
         name,
         if_not_exists: stmt.if_not_exists,
-        start,
+        // With the unsupported MINVALUE/MAXVALUE clauses excluded above,
+        // the SQL defaults are 1 for ascending sequences and -1 for
+        // descending sequences.
+        start: start.unwrap_or(if increment > 0 { 1 } else { -1 }),
         increment,
     })
 }
@@ -210,7 +436,12 @@ fn compile_create_sequence(
 fn compile_alter_sequence(
     stmt: &pg_query::protobuf::AlterSeqStmt,
 ) -> Result<crate::ast::AlterSequence> {
-    use crate::ast::AlterSequence;
+    use crate::ast::{AlterSequence, SequenceRestart};
+    if stmt.for_identity {
+        return Err(SQLError::Unsupported(
+            "ALTER SEQUENCE: identity-owned sequences are not supported".into(),
+        ));
+    }
     let name = stmt
         .sequence
         .as_ref()
@@ -218,38 +449,131 @@ fn compile_alter_sequence(
         .ok_or_else(|| SQLError::Internal("ALTER SEQUENCE without name".into()))?;
     let mut alter = AlterSequence {
         name,
+        if_exists: stmt.missing_ok,
         ..Default::default()
     };
     for opt in &stmt.options {
-        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
-            let key = elem.defname.to_ascii_lowercase();
-            let v_opt: Option<i64> = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                Some(NodeEnum::Integer(i)) => Some(i64::from(i.ival)),
-                Some(NodeEnum::Float(f)) => Some(f.fval.parse::<f64>().unwrap_or(0.0) as i64),
-                Some(NodeEnum::String(s)) => s.sval.parse::<i64>().ok(),
-                _ => None,
-            };
-            match key.as_str() {
-                "restart" => alter.restart = Some(v_opt),
-                "increment" => alter.increment = v_opt,
-                "start" => alter.start = v_opt,
-                _ => {}
+        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "ALTER SEQUENCE contains a malformed option".into(),
+            ));
+        };
+        let key = elem.defname.to_ascii_lowercase();
+        let value = if elem.arg.is_none() && key == "restart" {
+            None
+        } else {
+            Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?)
+        };
+        match key.as_str() {
+            "restart" => {
+                alter.restart = value.map_or(SequenceRestart::FromStart, SequenceRestart::With);
+            }
+            "increment" => alter.increment = value,
+            "start" => alter.start = value,
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER SEQUENCE option `{other}` is not supported"
+                )));
             }
         }
     }
     Ok(alter)
 }
 
+fn compile_sequence_integer_option(
+    elem: &pg_query::protobuf::DefElem,
+    statement: &str,
+) -> Result<i64> {
+    let raw = match elem
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    {
+        Some(NodeEnum::Integer(value)) => return Ok(i64::from(value.ival)),
+        Some(NodeEnum::Float(value)) => value.fval.as_str(),
+        Some(NodeEnum::String(value)) => value.sval.as_str(),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "{statement} option `{}` expects an integer, got {other:?}",
+                elem.defname
+            )));
+        }
+    };
+    raw.parse::<i64>().map_err(|_| {
+        SQLError::TypeMismatch(format!(
+            "{statement} option `{}` expects an integer, got `{raw}`",
+            elem.defname
+        ))
+    })
+}
+
 fn compile_create_table_as(stmt: &pg_query::protobuf::CreateTableAsStmt) -> Result<Statement> {
+    use pg_query::protobuf::{ObjectType, OnCommitAction};
+
+    match stmt.objtype() {
+        ObjectType::ObjectTable => {}
+        ObjectType::ObjectMatview => {
+            return Err(SQLError::Unsupported(
+                "CREATE MATERIALIZED VIEW is not supported".into(),
+            ));
+        }
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE TABLE AS object type {other:?} is not supported"
+            )));
+        }
+    }
+    if stmt.is_select_into {
+        return Err(SQLError::Unsupported("SELECT INTO is not supported".into()));
+    }
     let into = stmt
         .into
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS without target".into()))?;
-    let name = into
+    let relation = into
         .rel
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE TABLE AS target has no name".into()))?;
+    validate_durable_create_relation(relation, "CREATE TABLE AS")?;
+    if !into.col_names.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS column-name lists are not supported".into(),
+        ));
+    }
+    if !into.access_method.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS USING access methods are not supported".into(),
+        ));
+    }
+    if !into.options.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS storage options are not supported".into(),
+        ));
+    }
+    if !matches!(
+        into.on_commit(),
+        OnCommitAction::Undefined | OnCommitAction::OncommitNoop
+    ) {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS ON COMMIT is not supported".into(),
+        ));
+    }
+    if !into.table_space_name.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS TABLESPACE is not supported".into(),
+        ));
+    }
+    if into.view_query.is_some() {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS view-query payloads are not supported".into(),
+        ));
+    }
+    if into.skip_data {
+        return Err(SQLError::Unsupported(
+            "CREATE TABLE AS WITH NO DATA is not supported".into(),
+        ));
+    }
+    let name = range_var_name(relation);
     let body = stmt
         .query
         .as_deref()
@@ -311,7 +635,7 @@ fn compile_create_foreign_server(
     Ok(CreateForeignServer {
         name: stmt.servername.clone(),
         fdw_type: stmt.fdwname.clone(),
-        options: collect_def_elem_options(&stmt.options),
+        options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: stmt.if_not_exists,
     })
 }
@@ -324,6 +648,7 @@ fn compile_create_foreign_table(
         .base_stmt
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without base".into()))?;
+    validate_create_table_envelope(base, "CREATE FOREIGN TABLE")?;
     let name = base
         .relation
         .as_ref()
@@ -331,15 +656,18 @@ fn compile_create_foreign_table(
         .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without name".into()))?;
     let mut columns: Vec<ColumnDef> = Vec::new();
     for elt in &base.table_elts {
-        if let Some(NodeEnum::ColumnDef(col)) = elt.node.as_ref() {
-            columns.push(compile_column_def(col)?);
-        }
+        let Some(NodeEnum::ColumnDef(col)) = elt.node.as_ref() else {
+            return Err(SQLError::Unsupported(
+                "CREATE FOREIGN TABLE supports column definitions only".into(),
+            ));
+        };
+        columns.push(compile_column_def(col)?);
     }
     Ok(CreateForeignTable {
         name,
         server_name: stmt.servername.clone(),
         columns,
-        options: collect_def_elem_options(&stmt.options),
+        options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: base.if_not_exists,
     })
 }
@@ -350,7 +678,7 @@ fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::Mer
     let target = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("MERGE without target".into()))?;
     let target_alias = stmt
         .relation
@@ -372,21 +700,43 @@ fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::Mer
     let mut when_clauses: Vec<MergeWhen> = Vec::with_capacity(stmt.merge_when_clauses.len());
     for clause in &stmt.merge_when_clauses {
         let Some(NodeEnum::MergeWhenClause(w)) = clause.node.as_ref() else {
-            continue;
+            return Err(SQLError::Internal(
+                "MERGE contains a malformed WHEN clause".into(),
+            ));
         };
         let condition = w
             .condition
             .as_deref()
             .map(|c| compile_expr(c))
             .transpose()?;
-        let matched = matches!(w.match_kind(), MergeMatchKind::MergeWhenMatched);
+        let matched = match w.match_kind() {
+            MergeMatchKind::MergeWhenMatched => true,
+            MergeMatchKind::MergeWhenNotMatchedByTarget => false,
+            MergeMatchKind::MergeWhenNotMatchedBySource => {
+                return Err(SQLError::Unsupported(
+                    "MERGE WHEN NOT MATCHED BY SOURCE is not supported".into(),
+                ));
+            }
+            MergeMatchKind::Undefined => {
+                return Err(SQLError::Internal(
+                    "MERGE WHEN clause has no match kind".into(),
+                ));
+            }
+        };
         let cmd = w.command_type();
         match cmd {
             CmdType::CmdUpdate => {
+                if !matched {
+                    return Err(SQLError::Internal(
+                        "MERGE UPDATE is only valid for WHEN MATCHED".into(),
+                    ));
+                }
                 let mut assignments: Vec<(String, Expr)> = Vec::new();
                 for tgt in &w.target_list {
                     let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
-                        continue;
+                        return Err(SQLError::Internal(
+                            "MERGE UPDATE contains a malformed assignment".into(),
+                        ));
                     };
                     let val = rt
                         .val
@@ -398,17 +748,29 @@ fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::Mer
                     condition,
                     assignments,
                 });
-                let _ = matched; // Update only legal after MATCHED.
             }
             CmdType::CmdDelete => {
+                if !matched {
+                    return Err(SQLError::Internal(
+                        "MERGE DELETE is only valid for WHEN MATCHED".into(),
+                    ));
+                }
                 when_clauses.push(MergeWhen::DeleteMatched { condition });
             }
             CmdType::CmdInsert => {
+                if matched {
+                    return Err(SQLError::Internal(
+                        "MERGE INSERT is only valid for WHEN NOT MATCHED".into(),
+                    ));
+                }
                 let mut columns: Vec<String> = Vec::with_capacity(w.target_list.len());
                 for tgt in &w.target_list {
-                    if let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() {
-                        columns.push(rt.name.clone());
-                    }
+                    let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
+                        return Err(SQLError::Internal(
+                            "MERGE INSERT contains a malformed target column".into(),
+                        ));
+                    };
+                    columns.push(rt.name.clone());
                 }
                 let values: Vec<Expr> = w
                     .values
@@ -447,28 +809,60 @@ fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::Mer
     })
 }
 
-pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Vec<(String, String)> {
+pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Result<Vec<(String, String)>> {
     let mut out: Vec<(String, String)> = Vec::new();
     for opt in nodes {
-        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
-            let value = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-                Some(NodeEnum::String(s)) => s.sval.clone(),
-                Some(NodeEnum::Integer(i)) => i.ival.to_string(),
-                Some(NodeEnum::Float(f)) => f.fval.clone(),
-                _ => String::new(),
-            };
-            out.push((elem.defname.clone(), value));
-        }
+        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
+            return Err(SQLError::Internal("malformed option node".into()));
+        };
+        let value = match elem
+            .arg
+            .as_ref()
+            .and_then(|argument| argument.node.as_ref())
+        {
+            Some(NodeEnum::String(value)) => value.sval.clone(),
+            Some(NodeEnum::Integer(value)) => value.ival.to_string(),
+            Some(NodeEnum::Float(value)) => value.fval.clone(),
+            Some(NodeEnum::Boolean(value)) => value.boolval.to_string(),
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "option `{}` expects a scalar value, got {other:?}",
+                    elem.defname
+                )));
+            }
+        };
+        out.push((elem.defname.clone(), value));
     }
-    out
+    Ok(out)
 }
 
 fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement> {
-    let name = stmt
+    use pg_query::protobuf::ViewCheckOption;
+
+    let relation = stmt
         .view
         .as_ref()
-        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("CREATE VIEW without name".into()))?;
+    validate_durable_create_relation(relation, "CREATE VIEW")?;
+    if !stmt.aliases.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE VIEW column aliases are not supported".into(),
+        ));
+    }
+    if !stmt.options.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE VIEW options are not supported".into(),
+        ));
+    }
+    if !matches!(
+        stmt.with_check_option(),
+        ViewCheckOption::Undefined | ViewCheckOption::NoCheckOption
+    ) {
+        return Err(SQLError::Unsupported(
+            "CREATE VIEW WITH CHECK OPTION is not supported".into(),
+        ));
+    }
+    let name = range_var_name(relation);
     let body = stmt
         .query
         .as_deref()
@@ -493,6 +887,16 @@ fn compile_create_view(stmt: &pg_query::protobuf::ViewStmt) -> Result<Statement>
 }
 
 fn compile_create_schema(stmt: &pg_query::protobuf::CreateSchemaStmt) -> Result<Statement> {
+    if stmt.authrole.is_some() {
+        return Err(SQLError::Unsupported(
+            "CREATE SCHEMA AUTHORIZATION is not supported".into(),
+        ));
+    }
+    if !stmt.schema_elts.is_empty() {
+        return Err(SQLError::Unsupported(
+            "CREATE SCHEMA containing schema elements is not supported".into(),
+        ));
+    }
     let name = if stmt.schemaname.is_empty() {
         return Err(SQLError::Internal("CREATE SCHEMA without name".into()));
     } else {
@@ -507,14 +911,18 @@ fn compile_create_schema(stmt: &pg_query::protobuf::CreateSchemaStmt) -> Result<
 /// Last non-`pg_catalog` segment of a `TypeName`, lower-cased, with
 /// `%TYPE` and array-bound suffixes preserved so the executor can
 /// treat them as uncastable (best-effort) types.
-fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> String {
+fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> Result<String> {
     let mut last = String::new();
     for n in &t.names {
-        if let Some(NodeEnum::String(s)) = n.node.as_ref() {
-            if s.sval != "pg_catalog" {
-                last.clone_from(&s.sval);
-            }
+        let name = extract_string(n)?;
+        if name != "pg_catalog" {
+            last = name;
         }
+    }
+    if last.is_empty() {
+        return Err(SQLError::Internal(
+            "function type has no name components".into(),
+        ));
     }
     // `setof` is inspected separately by the caller; the name itself
     // stays scalar.
@@ -525,14 +933,17 @@ fn compile_function_type_name(t: &pg_query::protobuf::TypeName) -> String {
     for _ in &t.array_bounds {
         name.push_str("[]");
     }
-    name
+    Ok(name)
 }
 
 /// String payload of a `DefElem` argument.
-fn def_elem_string(elem: &pg_query::protobuf::DefElem) -> Option<String> {
+fn def_elem_string(elem: &pg_query::protobuf::DefElem) -> Result<String> {
     match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
-        Some(NodeEnum::String(s)) => Some(s.sval.clone()),
-        _ => None,
+        Some(NodeEnum::String(s)) => Ok(s.sval.clone()),
+        other => Err(SQLError::TypeMismatch(format!(
+            "option `{}` expects a string, got {other:?}",
+            elem.defname
+        ))),
     }
 }
 
@@ -550,16 +961,7 @@ fn compile_create_function(
     } else {
         "CREATE FUNCTION"
     };
-    let name = stmt
-        .funcname
-        .iter()
-        .filter_map(|n| match n.node.as_ref() {
-            Some(NodeEnum::String(s)) => Some(s.sval.clone()),
-            _ => None,
-        })
-        .next_back()
-        .ok_or_else(|| SQLError::Internal(format!("{keyword} without a name")))?
-        .to_ascii_lowercase();
+    let name = compile_qualified_name(&stmt.funcname, keyword)?;
 
     let mut params: Vec<FunctionParam> = Vec::with_capacity(stmt.parameters.len());
     let mut has_table_param = false;
@@ -594,6 +996,7 @@ fn compile_create_function(
             .arg_type
             .as_ref()
             .map(compile_function_type_name)
+            .transpose()?
             .ok_or_else(|| SQLError::Internal(format!("{keyword}: parameter without type")))?;
         let default = match fp.defexpr.as_ref() {
             Some(node) => Some(compile_expr(node)?),
@@ -629,7 +1032,7 @@ fn compile_create_function(
         match stmt.return_type.as_ref() {
             None => FunctionReturns::None,
             Some(t) => {
-                let type_name = compile_function_type_name(t);
+                let type_name = compile_function_type_name(t)?;
                 if t.setof {
                     FunctionReturns::SetOf { type_name }
                 } else {
@@ -645,42 +1048,50 @@ fn compile_create_function(
     let mut source: Option<String> = None;
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
-            continue;
+            return Err(SQLError::Internal(format!("{keyword}: malformed option")));
         };
         match elem.defname.to_ascii_lowercase().as_str() {
             "language" => {
-                language = def_elem_string(elem)
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
+                language = def_elem_string(elem)?.to_ascii_lowercase();
             }
             "volatility" => {
-                volatility = match def_elem_string(elem).unwrap_or_default().as_str() {
+                volatility = match def_elem_string(elem)?.as_str() {
                     "immutable" => FunctionVolatility::Immutable,
                     "stable" => FunctionVolatility::Stable,
-                    _ => FunctionVolatility::Volatile,
+                    "volatile" => FunctionVolatility::Volatile,
+                    other => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "{keyword}: invalid volatility `{other}`"
+                        )));
+                    }
                 };
             }
             "strict" => {
-                strict = matches!(
-                    elem.arg.as_ref().and_then(|a| a.node.as_ref()),
-                    Some(NodeEnum::Boolean(b)) if b.boolval
-                );
+                strict = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                    Some(NodeEnum::Boolean(value)) => value.boolval,
+                    other => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "{keyword}: STRICT expects a boolean, got {other:?}"
+                        )));
+                    }
+                };
             }
             "as" => {
                 let items: Vec<String> = match elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
                     Some(NodeEnum::List(list)) => list
                         .items
                         .iter()
-                        .filter_map(|n| match n.node.as_ref() {
-                            Some(NodeEnum::String(s)) => Some(s.sval.clone()),
-                            _ => None,
-                        })
-                        .collect(),
+                        .map(extract_string)
+                        .collect::<Result<Vec<_>>>()?,
                     Some(NodeEnum::String(s)) => vec![s.sval.clone()],
-                    _ => Vec::new(),
+                    other => {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "{keyword}: AS expects a string body, got {other:?}"
+                        )));
+                    }
                 };
                 match items.len() {
-                    1 => source = Some(items.into_iter().next().unwrap_or_default()),
+                    1 => source = items.into_iter().next(),
                     _ => {
                         return Err(SQLError::Unsupported(format!(
                             "{keyword}: AS 'obj_file', 'link_symbol' bodies"
@@ -695,7 +1106,11 @@ fn compile_create_function(
             }
             // Planner / execution hints without engine semantics:
             // COST, ROWS, PARALLEL, SECURITY, LEAKPROOF, SET, SUPPORT.
-            _ => {}
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "{keyword}: option `{other}` is not supported"
+                )));
+            }
         }
     }
 
@@ -753,9 +1168,9 @@ fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
         NodeEnum::List(list) => {
             let mut out = Vec::with_capacity(list.items.len());
             for item in &list.items {
-                let Some(item_inner) = item.node.as_ref() else {
-                    continue;
-                };
+                let item_inner = item.node.as_ref().ok_or_else(|| {
+                    SQLError::Internal("SQL function body contains an empty statement".into())
+                })?;
                 match item_inner {
                     // BEGIN ATOMIC wraps each statement in a nested list.
                     NodeEnum::List(stmts) => {
@@ -805,16 +1220,18 @@ fn compile_do(stmt: &pg_query::protobuf::DoStmt) -> Result<Statement> {
     let mut body: Option<String> = None;
     for arg in &stmt.args {
         let Some(NodeEnum::DefElem(elem)) = arg.node.as_ref() else {
-            continue;
+            return Err(SQLError::Internal("DO contains a malformed option".into()));
         };
         match elem.defname.to_ascii_lowercase().as_str() {
-            "as" => body = def_elem_string(elem),
+            "as" => body = Some(def_elem_string(elem)?),
             "language" => {
-                if let Some(lang) = def_elem_string(elem) {
-                    language = lang.to_ascii_lowercase();
-                }
+                language = def_elem_string(elem)?.to_ascii_lowercase();
             }
-            _ => {}
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "DO option `{other}` is not supported"
+                )));
+            }
         }
     }
     let body = body.ok_or_else(|| SQLError::Internal("DO without a body".into()))?;
@@ -826,16 +1243,7 @@ fn compile_call(stmt: &pg_query::protobuf::CallStmt) -> Result<Statement> {
         .funccall
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CALL without a function".into()))?;
-    let name = call
-        .funcname
-        .iter()
-        .filter_map(|n| match n.node.as_ref() {
-            Some(NodeEnum::String(s)) => Some(s.sval.clone()),
-            _ => None,
-        })
-        .next_back()
-        .ok_or_else(|| SQLError::Internal("CALL without a procedure name".into()))?
-        .to_ascii_lowercase();
+    let name = compile_qualified_name(&call.funcname, "CALL")?;
     let args = call
         .args
         .iter()
@@ -853,19 +1261,28 @@ fn compile_explain(stmt: &pg_query::protobuf::ExplainStmt) -> Result<Statement> 
     let mut verbose = false;
     let mut format: Option<String> = None;
     for opt in &stmt.options {
-        if let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() {
-            let name = elem.defname.to_ascii_lowercase();
-            match name.as_str() {
-                "analyze" => analyze = true,
-                "verbose" => verbose = true,
-                "format" => {
-                    if let Some(NodeEnum::String(s)) =
-                        elem.arg.as_ref().and_then(|a| a.node.as_ref())
-                    {
-                        format = Some(s.sval.clone());
-                    }
+        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "EXPLAIN contains a malformed option".into(),
+            ));
+        };
+        let name = elem.defname.to_ascii_lowercase();
+        match name.as_str() {
+            "analyze" => analyze = compile_explain_bool_option(elem, "ANALYZE")?,
+            "verbose" => verbose = compile_explain_bool_option(elem, "VERBOSE")?,
+            "format" => {
+                if let Some(NodeEnum::String(s)) = elem.arg.as_ref().and_then(|a| a.node.as_ref()) {
+                    format = Some(s.sval.clone());
+                } else {
+                    return Err(SQLError::TypeMismatch(
+                        "EXPLAIN FORMAT expects a format name".into(),
+                    ));
                 }
-                _ => {}
+            }
+            _ => {
+                return Err(SQLError::Unsupported(format!(
+                    "EXPLAIN option `{name}` is not supported"
+                )));
             }
         }
     }
@@ -878,12 +1295,42 @@ fn compile_explain(stmt: &pg_query::protobuf::ExplainStmt) -> Result<Statement> 
     })
 }
 
+fn compile_explain_bool_option(elem: &pg_query::protobuf::DefElem, name: &str) -> Result<bool> {
+    let Some(argument) = elem
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    else {
+        return Ok(true);
+    };
+    match argument {
+        NodeEnum::Boolean(value) => Ok(value.boolval),
+        NodeEnum::Integer(value) => Ok(value.ival != 0),
+        NodeEnum::String(value) => match value.sval.to_ascii_lowercase().as_str() {
+            "true" | "on" | "yes" | "1" => Ok(true),
+            "false" | "off" | "no" | "0" => Ok(false),
+            _ => Err(SQLError::TypeMismatch(format!(
+                "EXPLAIN {name} expects a boolean value"
+            ))),
+        },
+        _ => Err(SQLError::TypeMismatch(format!(
+            "EXPLAIN {name} expects a boolean value"
+        ))),
+    }
+}
+
 fn compile_truncate(stmt: &pg_query::protobuf::TruncateStmt) -> Result<Statement> {
     let mut tables = Vec::new();
-    for r in &stmt.relations {
-        if let Some(NodeEnum::RangeVar(rv)) = r.node.as_ref() {
-            tables.push(rv.relname.clone());
-        }
+    for relation in &stmt.relations {
+        let Some(NodeEnum::RangeVar(range)) = relation.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "TRUNCATE contains a malformed table target".into(),
+            ));
+        };
+        tables.push(range_var_name(range));
+    }
+    if tables.is_empty() {
+        return Err(SQLError::Internal("TRUNCATE without a table".into()));
     }
     let cascade = matches!(
         stmt.behavior(),
@@ -920,20 +1367,24 @@ fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<UpdateStmt> {
     let table = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("UPDATE without relation".into()))?;
     let mut assignments = Vec::new();
     for target_node in &stmt.target_list {
-        let Some(inner) = target_node.node.as_ref() else {
-            continue;
+        let inner = target_node
+            .node
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("UPDATE contains an empty assignment".into()))?;
+        let NodeEnum::ResTarget(rt) = inner else {
+            return Err(SQLError::Internal(format!(
+                "UPDATE expected ResTarget, got {inner:?}"
+            )));
         };
-        if let NodeEnum::ResTarget(rt) = inner {
-            let value = rt
-                .val
-                .as_ref()
-                .ok_or_else(|| SQLError::Internal("UPDATE assignment without value".into()))?;
-            assignments.push((rt.name.clone(), compile_expr(value)?));
-        }
+        let value = rt
+            .val
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("UPDATE assignment without value".into()))?;
+        assignments.push((rt.name.clone(), compile_expr(value)?));
     }
     let r#where = stmt
         .where_clause
@@ -963,7 +1414,7 @@ fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<DeleteStmt> {
     let table = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("DELETE without relation".into()))?;
     let r#where = stmt
         .where_clause
@@ -1004,8 +1455,8 @@ pub(super) fn other_node_label(node: &NodeEnum) -> &'static str {
 
 /// Lower `DROP FUNCTION` / `DROP PROCEDURE`. Each target arrives as
 /// an `ObjectWithArgs`; the argument type list (when spelled) is
-/// reduced to an arity because the engine resolves user-defined
-/// routines by `(name, argument count)`.
+/// preserved as a typed signature because routine identity includes
+/// `(schema, name, argument types)`.
 fn compile_drop_function(
     stmt: &pg_query::protobuf::DropStmt,
     is_procedure: bool,
@@ -1018,15 +1469,14 @@ fn compile_drop_function(
                 "DROP FUNCTION target is not a function signature".into(),
             ));
         };
-        let name = owa
-            .objname
-            .iter()
-            .filter_map(|n| match n.node.as_ref() {
-                Some(NodeEnum::String(s)) => Some(s.sval.clone()),
-                _ => None,
-            })
-            .next_back()
-            .ok_or_else(|| SQLError::Internal("DROP FUNCTION without a name".into()))?;
+        let name = compile_qualified_name(
+            &owa.objname,
+            if is_procedure {
+                "DROP PROCEDURE"
+            } else {
+                "DROP FUNCTION"
+            },
+        )?;
         let arg_types = if owa.args_unspecified {
             None
         } else {
@@ -1034,7 +1484,7 @@ fn compile_drop_function(
                 owa.objargs
                     .iter()
                     .map(|arg| match arg.node.as_ref() {
-                        Some(NodeEnum::TypeName(t)) => Ok(compile_function_type_name(t)),
+                        Some(NodeEnum::TypeName(t)) => compile_function_type_name(t),
                         other => Err(SQLError::Unsupported(format!(
                             "DROP FUNCTION argument type node {other:?}"
                         ))),
@@ -1042,10 +1492,7 @@ fn compile_drop_function(
                     .collect::<Result<Vec<_>>>()?,
             )
         };
-        items.push(DropFunctionItem {
-            name: name.to_ascii_lowercase(),
-            arg_types,
-        });
+        items.push(DropFunctionItem { name, arg_types });
     }
     if items.is_empty() {
         return Err(SQLError::Internal("DROP FUNCTION without target".into()));
@@ -1053,6 +1500,10 @@ fn compile_drop_function(
     Ok(Statement::DropFunction(DropFunctionStmt {
         is_procedure,
         if_exists: stmt.missing_ok,
+        cascade: matches!(
+            stmt.behavior(),
+            pg_query::protobuf::DropBehavior::DropCascade
+        ),
         items,
     }))
 }
@@ -1074,18 +1525,35 @@ fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statement> {
     };
     let mut names = Vec::new();
     for object in &stmt.objects {
-        let Some(inner) = object.node.as_ref() else {
-            continue;
-        };
+        let inner = object
+            .node
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("DROP contains an empty target".into()))?;
         match inner {
             NodeEnum::List(list) => {
-                let parts: Vec<String> = list
+                let parts = list
                     .items
                     .iter()
-                    .filter_map(|n| extract_string(n).ok())
-                    .collect();
-                if let Some(last) = parts.last() {
-                    names.push(last.clone());
+                    .map(extract_string)
+                    .collect::<Result<Vec<_>>>()?;
+                if parts.is_empty() {
+                    return Err(SQLError::Internal("DROP target has no name".into()));
+                }
+                if matches!(kind, DropKind::Table | DropKind::View) {
+                    if parts.len() > 2 {
+                        return Err(SQLError::Unsupported(
+                            "cross-database DROP targets are not supported".into(),
+                        ));
+                    }
+                    names.push(
+                        parts
+                            .iter()
+                            .map(|part| render_relation_component(part))
+                            .collect::<Vec<_>>()
+                            .join("."),
+                    );
+                } else {
+                    names.push(parts.last().cloned().unwrap_or_default());
                 }
             }
             NodeEnum::String(s) => names.push(s.sval.clone()),
@@ -1117,7 +1585,7 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
     let table = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("ALTER TABLE without relation".into()))?;
     let if_exists = stmt.missing_ok;
     let cmd = stmt
@@ -1217,7 +1685,7 @@ fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStm
     let table = stmt
         .relation
         .as_ref()
-        .map(|r| r.relname.clone())
+        .map(range_var_name)
         .ok_or_else(|| SQLError::Internal("RENAME without relation".into()))?;
     let action = match stmt.rename_type() {
         ObjectType::ObjectColumn => AlterTableAction::RenameColumn {
@@ -1225,7 +1693,7 @@ fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<AlterTableStm
             to: stmt.newname.clone(),
         },
         ObjectType::ObjectTable => AlterTableAction::RenameTable {
-            to: stmt.newname.clone(),
+            to: render_relation_component(&stmt.newname),
         },
         other => {
             return Err(SQLError::Unsupported(format!(
@@ -1247,12 +1715,82 @@ pub fn plan_only_for_test(sql: &str) -> Result<Vec<Statement>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{ColumnType, FromClause};
+    use crate::ast::{ColumnType, FromClause, TableKeyConstraintKind};
 
     fn first(sql: &str) -> Statement {
         let mut v = compile(sql).unwrap();
         assert_eq!(v.len(), 1, "expected 1 stmt");
         v.remove(0)
+    }
+
+    fn null_literal_node() -> Node {
+        Node {
+            node: Some(NodeEnum::AConst(pg_query::protobuf::AConst {
+                isnull: true,
+                ..Default::default()
+            })),
+        }
+    }
+
+    #[test]
+    fn analyze_preserves_its_relation_and_rejects_dropped_semantics() {
+        let Statement::Analyze { table } = first("ANALYZE app.docs") else {
+            panic!("not ANALYZE");
+        };
+        assert_eq!(table.as_deref(), Some("app.docs"));
+        let Statement::Analyze { table } = first("ANALYZE") else {
+            panic!("not ANALYZE");
+        };
+        assert!(table.is_none());
+
+        for (sql, expected) in [
+            ("ANALYZE docs (title)", "column lists"),
+            ("ANALYZE (VERBOSE) docs", "options"),
+            ("VACUUM docs", "VACUUM"),
+        ] {
+            let error = compile(sql).expect_err(sql);
+            assert!(
+                matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+                "unexpected error for {sql}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_type_cast_never_degrades_to_the_uncast_expression() {
+        let cast = Node {
+            node: Some(NodeEnum::TypeCast(Box::new(pg_query::protobuf::TypeCast {
+                arg: Some(Box::new(null_literal_node())),
+                type_name: None,
+                ..Default::default()
+            }))),
+        };
+
+        let error = compile_expr(&cast).unwrap_err();
+        assert!(error.to_string().contains("without a target type"));
+    }
+
+    #[test]
+    fn malformed_operator_name_is_not_silently_discarded() {
+        let expression = Node {
+            node: Some(NodeEnum::AExpr(Box::new(pg_query::protobuf::AExpr {
+                kind: pg_query::protobuf::AExprKind::AexprOp as i32,
+                name: vec![Node::default()],
+                lexpr: Some(Box::new(null_literal_node())),
+                rexpr: Some(Box::new(null_literal_node())),
+                ..Default::default()
+            }))),
+        };
+
+        let error = compile_expr(&expression).unwrap_err();
+        assert!(error.to_string().contains("missing string node"));
+    }
+
+    #[test]
+    fn sequence_options_do_not_truncate_or_ignore_values() {
+        assert!(compile("CREATE SEQUENCE s START 1.5").is_err());
+        let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
+        assert!(error.to_string().contains("not supported"));
     }
 
     #[test]
@@ -1268,6 +1806,151 @@ mod tests {
         assert!(ct.columns[0].primary_key);
         assert!(matches!(ct.columns[1].ty, ColumnType::Text));
         assert!(matches!(ct.columns[2].ty, ColumnType::Vector(4)));
+    }
+
+    #[test]
+    fn create_table_preserves_boolean_column_type() {
+        let Statement::CreateTable(table) = first("CREATE TABLE flags (enabled BOOLEAN)") else {
+            panic!("not CREATE TABLE");
+        };
+        assert!(matches!(table.columns[0].ty, ColumnType::Boolean));
+    }
+
+    #[test]
+    fn create_table_preserves_array_element_types_and_dimensions() {
+        let Statement::CreateTable(table) =
+            first("CREATE TABLE arrays (tags TEXT[], matrix INTEGER[][])")
+        else {
+            panic!("not CREATE TABLE");
+        };
+        assert_eq!(
+            table.columns[0].ty,
+            ColumnType::Array(Box::new(ColumnType::Text))
+        );
+        assert_eq!(
+            table.columns[1].ty,
+            ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer))))
+        );
+    }
+
+    #[test]
+    fn create_table_preserves_typed_composite_keys_and_null_policy() {
+        let Statement::CreateTable(table) = first(
+            "CREATE TABLE memberships (
+                tenant TEXT,
+                member TEXT,
+                email TEXT,
+                CONSTRAINT memberships_pkey PRIMARY KEY (tenant, member),
+                CONSTRAINT memberships_email_key UNIQUE NULLS NOT DISTINCT (tenant, email)
+            )",
+        ) else {
+            panic!("not CREATE TABLE");
+        };
+
+        assert_eq!(table.key_constraints.len(), 2);
+        assert_eq!(
+            table.key_constraints[0].kind,
+            TableKeyConstraintKind::PrimaryKey
+        );
+        assert_eq!(table.key_constraints[0].columns, vec!["tenant", "member"]);
+        assert_eq!(
+            table.key_constraints[0].name.as_deref(),
+            Some("memberships_pkey")
+        );
+        assert_eq!(
+            table.key_constraints[1].kind,
+            TableKeyConstraintKind::Unique
+        );
+        assert_eq!(table.key_constraints[1].columns, vec!["tenant", "email"]);
+        assert!(table.key_constraints[1].nulls_not_distinct);
+
+        assert!(table.columns[0].not_null);
+        assert!(table.columns[1].not_null);
+        assert!(!table.columns[0].primary_key);
+        assert!(!table.columns[1].primary_key);
+    }
+
+    #[test]
+    fn create_table_preserves_named_column_keys() {
+        let Statement::CreateTable(table) = first(
+            "CREATE TABLE users (
+                id INTEGER CONSTRAINT users_pkey PRIMARY KEY,
+                email TEXT CONSTRAINT users_email_key UNIQUE
+            )",
+        ) else {
+            panic!("not CREATE TABLE");
+        };
+        assert_eq!(table.key_constraints.len(), 2);
+        assert_eq!(table.key_constraints[0].name.as_deref(), Some("users_pkey"));
+        assert_eq!(
+            table.key_constraints[1].name.as_deref(),
+            Some("users_email_key")
+        );
+        assert!(table.columns[0].not_null);
+    }
+
+    #[test]
+    fn create_table_rejects_invalid_key_declarations() {
+        for sql in [
+            "CREATE TABLE t (a INTEGER, CONSTRAINT same UNIQUE (a), CONSTRAINT same CHECK (a > 0))",
+            "CREATE TABLE t (a INTEGER, UNIQUE (missing))",
+            "CREATE TABLE t (a INTEGER, UNIQUE (a, a))",
+            "CREATE TABLE t (a INTEGER PRIMARY KEY, b INTEGER, PRIMARY KEY (b))",
+        ] {
+            assert!(compile(sql).is_err(), "expected invalid DDL to fail: {sql}");
+        }
+    }
+
+    #[test]
+    fn explicit_grouping_sets_preserve_every_key_expression() {
+        let Statement::Select(select) =
+            first("SELECT g, v, count(*) FROM spill_data GROUP BY GROUPING SETS ((g), (v), ())")
+        else {
+            panic!("not SELECT");
+        };
+        assert_eq!(
+            select.grouping_sets.len(),
+            3,
+            "compiled grouping sets: {:?}",
+            select.grouping_sets
+        );
+        assert_eq!(select.grouping_sets[0].len(), 1);
+        assert_eq!(select.grouping_sets[1].len(), 1);
+        assert!(select.grouping_sets[2].is_empty());
+    }
+
+    #[test]
+    fn rollup_cube_and_multiple_grouping_items_expand_without_dropping_keys() {
+        let Statement::Select(rollup) =
+            first("SELECT g, v, count(*) FROM t GROUP BY ROLLUP (g, v)")
+        else {
+            panic!("not SELECT");
+        };
+        assert_eq!(
+            rollup
+                .grouping_sets
+                .iter()
+                .map(Vec::len)
+                .collect::<Vec<_>>(),
+            vec![2, 1, 0]
+        );
+
+        let Statement::Select(cube) = first("SELECT g, v, count(*) FROM t GROUP BY CUBE (g, v)")
+        else {
+            panic!("not SELECT");
+        };
+        let mut cube_widths = cube.grouping_sets.iter().map(Vec::len).collect::<Vec<_>>();
+        cube_widths.sort_unstable();
+        assert_eq!(cube_widths, vec![0, 1, 1, 2]);
+
+        let Statement::Select(product) = first(
+            "SELECT a, b, c, d, count(*) FROM t \
+             GROUP BY GROUPING SETS ((a), (b)), GROUPING SETS ((c), (d))",
+        ) else {
+            panic!("not SELECT");
+        };
+        assert_eq!(product.grouping_sets.len(), 4);
+        assert!(product.grouping_sets.iter().all(|set| set.len() == 2));
     }
 
     #[test]
@@ -1288,6 +1971,41 @@ mod tests {
         assert_eq!(ci.table, "docs");
         assert_eq!(ci.access_method, "gin");
         assert_eq!(ci.columns, vec!["body"]);
+    }
+
+    #[test]
+    fn table_commands_preserve_qualified_relation_names() {
+        let stmt = first("ALTER TABLE app.docs ADD COLUMN version INTEGER");
+        let Statement::AlterTable(alter) = stmt else {
+            panic!("not ALTER TABLE");
+        };
+        assert_eq!(alter.table, "app.docs");
+
+        let stmt = first("ALTER TABLE app.docs RENAME TO archived_docs");
+        let Statement::AlterTable(rename) = stmt else {
+            panic!("not ALTER TABLE RENAME");
+        };
+        assert_eq!(rename.table, "app.docs");
+
+        let Statement::Update(update) = first("UPDATE app.docs SET version = 2") else {
+            panic!("not UPDATE");
+        };
+        assert_eq!(update.table, "app.docs");
+
+        let Statement::Delete(delete) = first("DELETE FROM app.docs") else {
+            panic!("not DELETE");
+        };
+        assert_eq!(delete.table, "app.docs");
+
+        let Statement::Truncate { tables, .. } = first("TRUNCATE app.docs") else {
+            panic!("not TRUNCATE");
+        };
+        assert_eq!(tables, vec!["app.docs"]);
+
+        let Statement::Insert(insert) = first("INSERT INTO app.docs (version) VALUES (1)") else {
+            panic!("not INSERT");
+        };
+        assert_eq!(insert.table, "app.docs");
     }
 
     #[test]
@@ -1339,6 +2057,189 @@ mod tests {
         match &s.limit {
             Some(Expr::Literal(uqa_core::Value::Int(5))) => {}
             other => panic!("expected LIMIT 5, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unsupported_select_clauses_fail_instead_of_losing_semantics() {
+        for (sql, expected) in [
+            ("SELECT 1 INTO created_by_select", "SELECT INTO"),
+            (
+                "SELECT department, count(*) FROM employees GROUP BY DISTINCT department",
+                "GROUP BY DISTINCT",
+            ),
+            (
+                "SELECT row_number() OVER named_window FROM employees WINDOW named_window AS (ORDER BY id)",
+                "named WINDOW",
+            ),
+            (
+                "SELECT * FROM employees ORDER BY id FETCH FIRST 1 ROW WITH TIES",
+                "WITH TIES",
+            ),
+            ("SELECT * FROM employees FOR UPDATE", "row-locking"),
+        ] {
+            let error = compile(sql).expect_err(sql);
+            assert!(
+                matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+                "unexpected error for {sql}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_from_forms_fail_instead_of_becoming_cross_joins() {
+        for (sql, expected) in [
+            (
+                "SELECT * FROM left_table NATURAL JOIN right_table",
+                "NATURAL JOIN",
+            ),
+            (
+                "SELECT * FROM left_table JOIN right_table USING (id)",
+                "JOIN USING",
+            ),
+            (
+                "SELECT * FROM ROWS FROM (generate_series(1, 2), generate_series(3, 4)) AS f(a, b)",
+                "ROWS FROM",
+            ),
+            (
+                "SELECT * FROM generate_series(1, 2) WITH ORDINALITY",
+                "WITH ORDINALITY",
+            ),
+        ] {
+            let error = compile(sql).expect_err(sql);
+            assert!(
+                matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+                "unexpected error for {sql}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_cte_control_clauses_fail_explicitly() {
+        let not_materialized =
+            compile("WITH c AS NOT MATERIALIZED (SELECT 1) SELECT * FROM c").unwrap_err();
+        assert!(matches!(
+            not_materialized,
+            SQLError::Unsupported(message) if message.contains("NOT MATERIALIZED")
+        ));
+
+        let search = compile(
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 3) \
+             SEARCH DEPTH FIRST BY n SET ordering SELECT * FROM t",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            search,
+            SQLError::Unsupported(message) if message.contains("SEARCH")
+        ));
+
+        let cycle = compile(
+            "WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM t WHERE n < 3) \
+             CYCLE n SET is_cycle USING path SELECT * FROM t",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            cycle,
+            SQLError::Unsupported(message) if message.contains("CYCLE")
+        ));
+    }
+
+    #[test]
+    fn quoted_dots_preserve_range_var_component_boundaries() {
+        let Statement::CreateTable(table) = first("CREATE TABLE \"a.b\".c (id INTEGER)") else {
+            panic!("expected CREATE TABLE");
+        };
+        assert_eq!(table.name, "\"a.b\".c");
+
+        let Statement::Select(select) = first("SELECT * FROM a.\"b.c\"") else {
+            panic!("expected SELECT");
+        };
+        assert!(matches!(
+            select.from,
+            Some(FromClause::Table { name, .. }) if name == "a.\"b.c\""
+        ));
+
+        let Statement::AlterTable(alter) = first("ALTER TABLE \"a.b\".c RENAME TO \"d.e\"") else {
+            panic!("expected ALTER TABLE");
+        };
+        assert!(matches!(
+            alter.action,
+            AlterTableAction::RenameTable { to } if to == "\"d.e\""
+        ));
+
+        let Statement::Drop(drop) = first("DROP TABLE \"a.b\".\"d.e\"") else {
+            panic!("expected DROP TABLE");
+        };
+        assert_eq!(drop.names, vec!["\"a.b\".\"d.e\"".to_string()]);
+    }
+
+    #[test]
+    fn alter_sequence_preserves_if_exists() {
+        let Statement::AlterSequence(sequence) =
+            first("ALTER SEQUENCE IF EXISTS absent RESTART WITH 7")
+        else {
+            panic!("expected ALTER SEQUENCE");
+        };
+        assert!(sequence.if_exists);
+        assert_eq!(sequence.restart, crate::ast::SequenceRestart::With(7));
+    }
+
+    #[test]
+    fn unsupported_create_ddl_never_loses_lifecycle_semantics() {
+        for (sql, expected) in [
+            ("CREATE TEMP TABLE temp_t (id INTEGER)", "TEMPORARY"),
+            ("CREATE UNLOGGED TABLE unlogged_t (id INTEGER)", "UNLOGGED"),
+            (
+                "CREATE TABLE inherited (id INTEGER) INHERITS (parent)",
+                "INHERITS",
+            ),
+            (
+                "CREATE TABLE optioned (id INTEGER) WITH (fillfactor = 70)",
+                "storage options",
+            ),
+            (
+                "CREATE TABLE spaced (id INTEGER) TABLESPACE fastspace",
+                "TABLESPACE",
+            ),
+            (
+                "CREATE TABLE accessed (id INTEGER) USING heap",
+                "access methods",
+            ),
+            (
+                "CREATE SCHEMA owned AUTHORIZATION CURRENT_USER",
+                "AUTHORIZATION",
+            ),
+            (
+                "CREATE SCHEMA bundled CREATE TABLE child (id INTEGER)",
+                "schema elements",
+            ),
+            ("CREATE TEMP VIEW temp_v AS SELECT 1", "TEMPORARY"),
+            ("CREATE VIEW aliased(value) AS SELECT 1", "column aliases"),
+            (
+                "CREATE VIEW checked AS SELECT 1 WITH LOCAL CHECK OPTION",
+                "CHECK OPTION",
+            ),
+            (
+                "CREATE VIEW optioned_v WITH (security_barrier = true) AS SELECT 1",
+                "options",
+            ),
+            (
+                "CREATE MATERIALIZED VIEW materialized AS SELECT 1",
+                "MATERIALIZED VIEW",
+            ),
+            ("CREATE TEMP TABLE temp_as AS SELECT 1", "TEMPORARY"),
+            ("CREATE TABLE named(value) AS SELECT 1", "column-name lists"),
+            (
+                "CREATE TABLE no_data AS SELECT 1 WITH NO DATA",
+                "WITH NO DATA",
+            ),
+            ("CREATE TEMP SEQUENCE temp_sequence", "TEMPORARY"),
+        ] {
+            let error = compile(sql).expect_err(sql);
+            assert!(
+                matches!(&error, SQLError::Unsupported(message) if message.contains(expected)),
+                "unexpected error for {sql}: {error}"
+            );
         }
     }
 }

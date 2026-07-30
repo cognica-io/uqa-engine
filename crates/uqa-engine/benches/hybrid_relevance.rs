@@ -173,12 +173,27 @@ fn dcg(relevances: &[f64], k: usize) -> f64 {
 /// would hide recall regressions.
 fn true_ideal_ndcg(relevances: &[f64], judgments: &BTreeMap<u64, f64>, k: usize) -> f64 {
     let mut ideal: Vec<f64> = judgments.values().copied().collect();
-    ideal.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    assert!(
+        ideal.iter().all(|score| score.is_finite()),
+        "judgments must contain only finite scores"
+    );
+    ideal.sort_by(|a, b| b.total_cmp(a));
     let idcg = dcg(&ideal, k);
     if idcg == 0.0 {
         return 0.0;
     }
     dcg(relevances, k) / idcg
+}
+
+fn create_corpus_engine() -> Engine {
+    let engine = Engine::new();
+    engine
+        .create_default_table("articles", vec!["title".into()])
+        .unwrap();
+    engine
+        .create_vector_field("articles", "embedding", DIM as u32)
+        .unwrap();
+    engine
 }
 
 fn build_corpus(spec: &RegimeSpec) -> Corpus {
@@ -216,9 +231,7 @@ fn build_corpus(spec: &RegimeSpec) -> Corpus {
         emb
     };
 
-    let engine = Engine::new();
-    engine.create_default_table("articles", vec!["title".into()]);
-    engine.create_vector_field("articles", "embedding", DIM as u32);
+    let engine = create_corpus_engine();
 
     let mut docs: Vec<DocSpec> = Vec::new();
     let mut doc_id: u64 = 0;
@@ -370,6 +383,7 @@ fn bench_hybrid_relevance(c: &mut Criterion) {
             corpus
                 .engine
                 .hybrid_search(&hybrid_params(query))
+                .expect("hybrid relevance search")
                 .into_iter()
                 .map(|hit| hit.doc_id)
                 .collect()
@@ -384,6 +398,7 @@ fn bench_hybrid_relevance(c: &mut Criterion) {
                     &ScoringMode::BM25(BM25Params::default()),
                     K,
                 )
+                .expect("text relevance search")
                 .into_iter()
                 .map(|hit| hit.doc_id)
                 .collect()
@@ -392,6 +407,7 @@ fn bench_hybrid_relevance(c: &mut Criterion) {
             corpus
                 .engine
                 .knn_search("articles", "embedding", &query.query_vector, K)
+                .expect("vector relevance search")
                 .into_iter()
                 .map(|hit| hit.doc_id)
                 .collect()
@@ -449,7 +465,8 @@ fn bench_hybrid_relevance(c: &mut Criterion) {
                 for query in &corpus.queries {
                     let hits = corpus
                         .engine
-                        .hybrid_search(black_box(&hybrid_params(query)));
+                        .hybrid_search(black_box(&hybrid_params(query)))
+                        .expect("hybrid benchmark search");
                     black_box(hits.len());
                 }
             });

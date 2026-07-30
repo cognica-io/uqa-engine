@@ -205,6 +205,33 @@ fn rejects_malformed_frontend_lengths() {
 }
 
 #[test]
+fn rejects_negative_execute_limits_and_mismatched_bind_formats() {
+    let mut execute_body = Vec::new();
+    execute_body.extend_from_slice(b"portal\0");
+    execute_body.extend_from_slice(&(-1_i32).to_be_bytes());
+    assert_eq!(
+        decode_frontend(&frontend_packet(b'E', &execute_body)),
+        Err(PgWireError::NegativeValue {
+            context: "Execute max rows",
+        })
+    );
+
+    let mut bind_body = Vec::new();
+    bind_body.extend_from_slice(b"portal\0stmt\0");
+    bind_body.extend_from_slice(&2_i16.to_be_bytes());
+    bind_body.extend_from_slice(&0_i16.to_be_bytes());
+    bind_body.extend_from_slice(&1_i16.to_be_bytes());
+    bind_body.extend_from_slice(&1_i16.to_be_bytes());
+    assert_eq!(
+        decode_frontend(&frontend_packet(b'B', &bind_body)),
+        Err(PgWireError::ParameterFormatCountMismatch {
+            format_count: 2,
+            parameter_count: 1,
+        })
+    );
+}
+
+#[test]
 fn encodes_startup_backend_messages() {
     let messages = [
         BackendMessage::Authentication(Authentication::Ok),
@@ -222,6 +249,20 @@ fn encodes_startup_backend_messages() {
             b'R', 0, 0, 0, 8, 0, 0, 0, 0, b'K', 0, 0, 0, 12, 0, 0, 0, 12, 0, 0, 0, 34, b'Z', 0, 0,
             0, 5, b'I',
         ]
+    );
+}
+
+#[test]
+fn preserves_failed_transaction_status_on_the_wire() {
+    assert_eq!(
+        BackendMessage::ReadyForQuery(TransactionStatus::Failed)
+            .encode()
+            .expect("failed transaction status encodes"),
+        [b'Z', 0, 0, 0, 5, b'E']
+    );
+    assert_eq!(
+        TransactionStatus::from_byte(b'E').expect("failed status decodes"),
+        TransactionStatus::Failed
     );
 }
 
@@ -267,6 +308,32 @@ fn encodes_error_response_fields() {
     assert!(encoded.windows(6).any(|window| window == b"SERROR"));
     assert!(encoded.windows(6).any(|window| window == b"C42601"));
     assert!(encoded.ends_with(&[0, 0]));
+}
+
+#[test]
+fn backend_encoding_rejects_truncating_nuls_and_invalid_sqlstates() {
+    assert_eq!(
+        BackendMessage::CommandComplete("SELECT\0 1".to_owned()).encode(),
+        Err(PgWireError::EmbeddedNul {
+            context: "CommandComplete tag",
+        })
+    );
+
+    let invalid_code = ErrorOrNotice::error("XX", "engine failure");
+    assert_eq!(
+        BackendMessage::ErrorResponse(invalid_code).encode(),
+        Err(PgWireError::InvalidSqlState {
+            code: "XX".to_owned(),
+        })
+    );
+
+    let invalid_message = ErrorOrNotice::error(sqlstate::INTERNAL_ERROR, "engine\0failure");
+    assert_eq!(
+        BackendMessage::ErrorResponse(invalid_message).encode(),
+        Err(PgWireError::EmbeddedNul {
+            context: "error message",
+        })
+    );
 }
 
 #[test]

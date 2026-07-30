@@ -4,6 +4,8 @@ export declare class Engine {
   /** Create an in-memory engine. */
   constructor()
   static open(path: string): Engine
+  /** Create an independent SQL session over this persistent database. */
+  newSession(): Engine
   static openEncrypted(path: string, key: string): Engine
   static openAuto(path: string, key?: string | undefined | null): Engine
   static openCompressed(path: string, options?: CompressionOptions | undefined | null): Engine
@@ -38,8 +40,8 @@ export declare class Engine {
   dropScoringParams(name: string): boolean
   runCypher(graph: string, query: string, params?: Record<string, JSValue> | undefined | null): Promise<SQLResult>
   runCypherSync(graph: string, query: string, params?: Record<string, JSValue> | undefined | null): SQLResult
-  createGraph(name: string): void
-  dropGraph(name: string): void
+  createGraph(name: string): boolean
+  dropGraph(name: string): boolean
   listGraphs(): Array<string>
   listPathIndexes(): Array<string>
   tableNames(): Array<string>

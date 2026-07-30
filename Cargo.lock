@@ -3438,6 +3438,8 @@ version = "0.1.0"
 dependencies = [
  "parking_lot",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-sql",
@@ -3505,6 +3507,7 @@ dependencies = [
  "uqa-core",
  "uqa-operators",
  "uqa-scoring",
+ "uqa-storage",
 ]
 
 [[package]]
@@ -3581,6 +3584,7 @@ dependencies = [
  "criterion",
  "proptest",
  "serde_json",
+ "thiserror 1.0.69",
  "uqa-analysis",
  "uqa-core",
  "uqa-storage",

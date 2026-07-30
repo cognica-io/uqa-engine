@@ -37,6 +37,7 @@ use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 static ENGINES: Mutex<BTreeMap<i32, Arc<Engine>>> = Mutex::new(BTreeMap::new());
 static NEXT_HANDLE: AtomicI32 = AtomicI32::new(1);
+const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 fn main() {}
 
@@ -55,9 +56,17 @@ pub extern "C" fn uqa_call(handle: i32, request: *const c_char) -> *mut c_char {
         Err(message) => json!({ "error": message }),
     };
     let text = response.to_string();
-    CString::new(text)
-        .unwrap_or_else(|_| CString::new("{\"error\":\"interior NUL in response\"}").unwrap())
-        .into_raw()
+    response_c_string(text)
+}
+
+fn response_c_string(text: String) -> *mut c_char {
+    match CString::new(text) {
+        Ok(response) => response.into_raw(),
+        Err(_) => match CString::new("{\"error\":\"interior NUL in response\"}") {
+            Ok(response) => response.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+    }
 }
 
 /// Release a string returned by [`uqa_call`].
@@ -99,43 +108,57 @@ fn dispatch(handle: i32, method: &str, args: &JSON) -> Result<JSON, String> {
         .cloned()
         .ok_or_else(|| format!("unknown engine handle {handle}"))?;
     if method == "close" {
-        ENGINES.lock().remove(&handle);
-        engine.close();
+        engine.close().map_err(|err| err.to_string())?;
+        ENGINES
+            .lock()
+            .remove(&handle)
+            .ok_or_else(|| format!("engine handle {handle} was closed concurrently"))?;
         return Ok(JSON::Null);
+    }
+    if method == "newSession" {
+        return register(engine.new_session().map_err(|err| err.to_string())?);
     }
     dispatch_engine(&engine, method, args)
 }
 
-fn register(engine: Engine) -> JSON {
-    let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    ENGINES.lock().insert(handle, Arc::new(engine));
-    json!(handle)
+fn register(engine: Engine) -> Result<JSON, String> {
+    let handle = NEXT_HANDLE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1).filter(|next| *next > 0)
+        })
+        .map_err(|_| "engine handle space is exhausted".to_string())?;
+    let mut engines = ENGINES.lock();
+    match engines.entry(handle) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(Arc::new(engine));
+        }
+        std::collections::btree_map::Entry::Occupied(_) => {
+            return Err(format!("engine handle collision for {handle}"));
+        }
+    }
+    Ok(json!(handle))
 }
 
 fn dispatch_static(method: &str, args: &JSON) -> Result<JSON, String> {
     match method {
-        "new" => Ok(register(Engine::new())),
+        "new" => register(Engine::new()),
         "open" => {
             let path = req_str(args, "path")?;
-            Ok(register(
-                Engine::open(Path::new(&path)).map_err(|err| err.to_string())?,
-            ))
+            register(Engine::open(Path::new(&path)).map_err(|err| err.to_string())?)
         }
         "openAuto" => {
             if args.get("key").is_some_and(|key| !key.is_null()) {
                 return Err(ENCRYPTION_UNAVAILABLE.to_string());
             }
             let path = req_str(args, "path")?;
-            Ok(register(
-                Engine::open_auto(Path::new(&path), None).map_err(|err| err.to_string())?,
-            ))
+            register(Engine::open_auto(Path::new(&path), None).map_err(|err| err.to_string())?)
         }
         "openCompressed" => {
             let path = req_str(args, "path")?;
-            Ok(register(
+            register(
                 Engine::open_compressed(Path::new(&path), compression_options(args)?)
                     .map_err(|err| err.to_string())?,
-            ))
+            )
         }
         "openEncrypted" | "openCompressedEncrypted" => Err(ENCRYPTION_UNAVAILABLE.to_string()),
         "detectDatabaseFile" => {
@@ -155,7 +178,7 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
             let query = req_str(args, "query")?;
             let params = params_from_json(args.get("params"))?;
             let result = engine.sql(&query, &params).map_err(|err| err.to_string())?;
-            Ok(sql_result_to_json(result))
+            sql_result_to_json(result)
         }
         "sqlBatch" => {
             let statements = args
@@ -179,25 +202,34 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .map(|(sql, params)| (sql.as_str(), params.as_slice()))
                 .collect();
             let results = engine.sql_batch(&borrowed).map_err(|err| err.to_string())?;
-            Ok(JSON::Array(
-                results.into_iter().map(sql_result_to_json).collect(),
-            ))
+            results
+                .into_iter()
+                .map(sql_result_to_json)
+                .collect::<Result<Vec<_>, _>>()
+                .map(JSON::Array)
         }
         "createDefaultTable" => {
-            engine.create_default_table(&req_str(args, "name")?, req_str_list(args, "ftsFields")?);
+            engine
+                .create_default_table(&req_str(args, "name")?, req_str_list(args, "ftsFields")?)
+                .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
         }
-        "createVectorField" => Ok(json!(engine.create_vector_field(
-            &req_str(args, "table")?,
-            &req_str(args, "field")?,
-            req_u64(args, "dimensions")? as u32,
-        ))),
+        "createVectorField" => Ok(json!(engine
+            .create_vector_field(
+                &req_str(args, "table")?,
+                &req_str(args, "field")?,
+                req_u32(args, "dimensions")?,
+            )
+            .map_err(|err| err.to_string())?)),
         "addDocument" => {
             engine
                 .add_document(
                     &req_str(args, "table")?,
                     req_u64(args, "docId")?,
-                    document_from_json(args.get("document"))?,
+                    document_from_json(
+                        args.get("document")
+                            .ok_or("addDocument needs a `document` object")?,
+                    )?,
                 )
                 .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
@@ -207,92 +239,133 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .add_document_with_vector_values(
                     &req_str(args, "table")?,
                     req_u64(args, "docId")?,
-                    document_from_json(args.get("document"))?,
-                    vector_values_from_json(args.get("vectors"))?,
+                    document_from_json(
+                        args.get("document")
+                            .ok_or("addDocumentWithVectors needs a `document` object")?,
+                    )?,
+                    vector_values_from_json(
+                        args.get("vectors")
+                            .ok_or("addDocumentWithVectors needs a `vectors` object")?,
+                    )?,
                 )
                 .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
         }
-        "addVector" => Ok(json!(engine.add_vector(
-            &req_str(args, "table")?,
-            req_u64(args, "docId")?,
-            &req_str(args, "field")?,
-            req_f32_list(args, "vector")?,
-        ))),
-        "addVectorValues" => Ok(json!(engine.add_vector_values(
-            &req_str(args, "table")?,
-            req_u64(args, "docId")?,
-            &req_str(args, "field")?,
-            req_f32_rows(args, "vectors")?,
-        ))),
-        "getDocument" => Ok(engine
+        "addVector" => Ok(json!(engine
+            .add_vector(
+                &req_str(args, "table")?,
+                req_u64(args, "docId")?,
+                &req_str(args, "field")?,
+                req_f32_list(args, "vector")?,
+            )
+            .map_err(|err| err.to_string())?)),
+        "addVectorValues" => Ok(json!(engine
+            .add_vector_values(
+                &req_str(args, "table")?,
+                req_u64(args, "docId")?,
+                &req_str(args, "field")?,
+                req_f32_rows(args, "vectors")?,
+            )
+            .map_err(|err| err.to_string())?)),
+        "getDocument" => match engine
             .get_document(&req_str(args, "table")?, req_u64(args, "docId")?)
-            .map_or(JSON::Null, |document| {
-                JSON::Object(
-                    document
-                        .into_iter()
-                        .map(|(key, value)| (key, value_to_json(value)))
-                        .collect(),
-                )
-            })),
+            .map_err(|err| err.to_string())?
+        {
+            Some(document) => document
+                .into_iter()
+                .map(|(key, value)| Ok((key, value_to_json(value)?)))
+                .collect::<Result<JSONMap<_, _>, String>>()
+                .map(JSON::Object),
+            None => Ok(JSON::Null),
+        },
         "deleteDocument" => {
             engine
                 .delete_document(&req_str(args, "table")?, req_u64(args, "docId")?)
                 .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
         }
-        "documentCount" => Ok(json!(engine.document_count(&req_str(args, "table")?))),
+        "documentCount" => json_u64(
+            engine
+                .document_count(&req_str(args, "table")?)
+                .map_err(|err| err.to_string())?,
+            "document count",
+        ),
         "search" => {
             let table = req_str(args, "table")?;
             let field = req_str(args, "field")?;
-            let scoring = opt_str(args, "scoring").unwrap_or_else(|| "bm25".to_string());
+            let scoring = opt_str(args, "scoring")?.unwrap_or_else(|| "bm25".to_string());
             let mode = scoring_mode(engine, &table, &field, &scoring)?;
-            Ok(hits_to_json(engine.search(
-                &table,
-                &field,
-                &req_str(args, "query")?,
-                &mode,
-                opt_u64(args, "topK")?.unwrap_or(10) as usize,
-            )))
+            hits_to_json(
+                engine
+                    .search(
+                        &table,
+                        &field,
+                        &req_str(args, "query")?,
+                        &mode,
+                        opt_usize(args, "topK")?.unwrap_or(10),
+                    )
+                    .map_err(|err| err.to_string())?,
+            )
         }
-        "knnSearch" => Ok(hits_to_json(engine.knn_search(
-            &req_str(args, "table")?,
-            &req_str(args, "field")?,
-            req_f32_list(args, "vector")?,
-            opt_u64(args, "topK")?.unwrap_or(10) as usize,
-        ))),
-        "vectorSimilaritySearch" => Ok(hits_to_json(engine.vector_similarity_search(
-            &req_str(args, "table")?,
-            &req_str(args, "field")?,
-            req_f32_list(args, "vector")?,
-            req_f64(args, "threshold")? as f32,
-        ))),
+        "knnSearch" => hits_to_json(
+            engine
+                .knn_search(
+                    &req_str(args, "table")?,
+                    &req_str(args, "field")?,
+                    req_f32_list(args, "vector")?,
+                    opt_usize(args, "topK")?.unwrap_or(10),
+                )
+                .map_err(|err| err.to_string())?,
+        ),
+        "vectorSimilaritySearch" => hits_to_json(
+            engine
+                .vector_similarity_search(
+                    &req_str(args, "table")?,
+                    &req_str(args, "field")?,
+                    req_f32_list(args, "vector")?,
+                    f32_from_f64(req_f64(args, "threshold")?, "threshold")?,
+                )
+                .map_err(|err| err.to_string())?,
+        ),
         "hybridSearch" => {
-            let top_k = opt_u64(args, "topK")?.unwrap_or(10) as usize;
+            let top_k = opt_usize(args, "topK")?.unwrap_or(10);
+            let knn_pool = match opt_usize(args, "knnPool")? {
+                Some(pool) => pool,
+                None => top_k
+                    .checked_mul(4)
+                    .ok_or("default knnPool exceeds this build's addressable range")?,
+            };
+            let alpha = opt_f64(args, "alpha")?.unwrap_or(1.0);
+            if !alpha.is_finite() {
+                return Err("alpha must be finite".to_string());
+            }
             let params = HybridSearchParams {
                 table: &req_str(args, "table")?,
                 text_field: &req_str(args, "textField")?,
                 text_query: &req_str(args, "textQuery")?,
                 vector_field: &req_str(args, "vectorField")?,
                 query_vector: req_f32_list(args, "queryVector")?,
-                knn_pool: opt_u64(args, "knnPool")?
-                    .map_or_else(|| top_k.saturating_mul(4).max(top_k), |pool| pool as usize),
-                alpha: opt_f64(args, "alpha")?.unwrap_or(1.0),
+                knn_pool,
+                alpha,
                 top_k,
             };
-            Ok(hits_to_json(engine.hybrid_search(&params)))
+            hits_to_json(
+                engine
+                    .hybrid_search(&params)
+                    .map_err(|err| err.to_string())?,
+            )
         }
         "estimateScoringParams" => {
             let params = engine
                 .estimate_scoring_params(
                     &req_str(args, "table")?,
                     &req_str(args, "field")?,
-                    opt_u64(args, "nSamples")?.unwrap_or(50) as usize,
-                    opt_u64(args, "tokensPerQuery")?.unwrap_or(5) as usize,
+                    opt_usize(args, "nSamples")?.unwrap_or(50),
+                    opt_usize(args, "tokensPerQuery")?.unwrap_or(5),
                     opt_i64(args, "seed")?.unwrap_or(42),
                 )
                 .map_err(|err| err.to_string())?;
-            Ok(float_map_to_json(&params))
+            float_map_to_json(&params)
         }
         "learnScoringParams" => {
             let params = engine
@@ -303,19 +376,16 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                     &req_labels(args)?,
                 )
                 .map_err(|err| err.to_string())?;
-            Ok(float_map_to_json(&params))
+            float_map_to_json(&params)
         }
         "updateScoringParams" => {
-            let label = req_u64(args, "label")?;
-            if label > 1 {
-                return Err("label must be 0 or 1".to_string());
-            }
+            let label = binary_label(req_u64(args, "label")?)?;
             engine
                 .update_scoring_params(
                     &req_str(args, "table")?,
                     &req_str(args, "field")?,
                     req_f64(args, "score")?,
-                    label as u8,
+                    label,
                 )
                 .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
@@ -329,7 +399,7 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                     &req_labels(args)?,
                 )
                 .map_err(|err| err.to_string())?;
-            Ok(calibration_report_to_json(&report))
+            calibration_report_to_json(&report)
         }
         "saveScoringParams" => {
             let params = args
@@ -350,42 +420,65 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .map_err(|err| err.to_string())?;
             Ok(JSON::Null)
         }
-        "loadScoringParams" => match engine.load_scoring_params(&req_str(args, "name")?) {
+        "loadScoringParams" => match engine
+            .load_scoring_params(&req_str(args, "name")?)
+            .map_err(|err| err.to_string())?
+        {
             Some(json) => parse_scoring_params(&json),
             None => Ok(JSON::Null),
         },
         "loadAllScoringParams" => {
             let mut out = JSONMap::new();
-            for (name, json) in engine.load_all_scoring_params() {
+            for (name, json) in engine
+                .load_all_scoring_params()
+                .map_err(|err| err.to_string())?
+            {
                 out.insert(name, parse_scoring_params(&json)?);
             }
             Ok(JSON::Object(out))
         }
-        "dropScoringParams" => Ok(json!(engine.drop_scoring_params(&req_str(args, "name")?))),
+        "dropScoringParams" => Ok(json!(engine
+            .drop_scoring_params(&req_str(args, "name")?)
+            .map_err(|err| err.to_string())?)),
         "runCypher" => {
-            let params = document_from_json(args.get("params").filter(|p| !p.is_null()))?;
+            let params = args
+                .get("params")
+                .filter(|params| !params.is_null())
+                .map(document_from_json)
+                .transpose()?
+                .unwrap_or_default();
             let (columns, rows) = engine
                 .run_cypher(&req_str(args, "graph")?, &req_str(args, "query")?, params)
                 .map_err(|err| err.to_string())?;
-            Ok(rows_result_to_json(columns, rows, 0))
+            rows_result_to_json(columns, rows, 0)
         }
-        "createGraph" => {
-            engine.create_graph(&req_str(args, "name")?);
-            Ok(JSON::Null)
-        }
-        "dropGraph" => {
-            engine.drop_graph(&req_str(args, "name")?);
-            Ok(JSON::Null)
-        }
-        "listGraphs" => Ok(json!(engine.list_graphs())),
-        "listPathIndexes" => Ok(json!(engine.list_path_indexes())),
-        "tableNames" => Ok(json!(engine.table_names())),
-        "listViews" => Ok(json!(engine.list_views())),
-        "listSchemas" => Ok(json!(engine.list_schemas())),
-        "listSequences" => Ok(json!(engine.list_sequences())),
-        "listNamedAnalyzers" => Ok(json!(engine.list_named_analyzers())),
-        "listForeignServers" => Ok(json!(engine.list_foreign_servers())),
-        "listForeignTables" => Ok(json!(engine.list_foreign_tables())),
+        "createGraph" => Ok(json!(engine
+            .create_graph(&req_str(args, "name")?)
+            .map_err(|err| err.to_string())?)),
+        "dropGraph" => Ok(json!(engine
+            .drop_graph(&req_str(args, "name")?)
+            .map_err(|err| err.to_string())?)),
+        "listGraphs" => Ok(json!(engine.list_graphs().map_err(|err| err.to_string())?)),
+        "listPathIndexes" => Ok(json!(engine
+            .list_path_indexes()
+            .map_err(|err| err.to_string())?)),
+        "tableNames" => Ok(json!(engine.table_names().map_err(|err| err.to_string())?)),
+        "listViews" => Ok(json!(engine.list_views().map_err(|err| err.to_string())?)),
+        "listSchemas" => Ok(json!(engine
+            .list_schemas()
+            .map_err(|err| err.to_string())?)),
+        "listSequences" => Ok(json!(engine
+            .list_sequences()
+            .map_err(|err| err.to_string())?)),
+        "listNamedAnalyzers" => Ok(json!(engine
+            .list_named_analyzers()
+            .map_err(|err| err.clone())?)),
+        "listForeignServers" => Ok(json!(engine
+            .list_foreign_servers()
+            .map_err(|err| err.clone())?)),
+        "listForeignTables" => Ok(json!(engine
+            .list_foreign_tables()
+            .map_err(|err| err.clone())?)),
         "takeSQLNotices" => Ok(JSON::Array(
             engine
                 .take_sql_notices()
@@ -393,9 +486,13 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .map(|(level, message)| json!({ "level": level, "message": message }))
                 .collect(),
         )),
-        "sqlFunctionDepthLimit" => Ok(json!(engine.sql_function_depth_limit())),
+        "sqlFunctionDepthLimit" => json_u64(
+            u64::try_from(engine.sql_function_depth_limit())
+                .map_err(|_| "SQL function depth limit exceeds the u64 bridge")?,
+            "SQL function depth limit",
+        ),
         "setSQLFunctionDepthLimit" => {
-            engine.set_sql_function_depth_limit(req_u64(args, "limit")? as usize);
+            engine.set_sql_function_depth_limit(req_usize(args, "limit")?);
             Ok(JSON::Null)
         }
         "cancel" => {
@@ -419,8 +516,15 @@ fn req_str(args: &JSON, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing string argument `{key}`"))
 }
 
-fn opt_str(args: &JSON, key: &str) -> Option<String> {
-    args.get(key).and_then(JSON::as_str).map(str::to_string)
+fn opt_str(args: &JSON, key: &str) -> Result<Option<String>, String> {
+    match args.get(key) {
+        None | Some(JSON::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(str::to_string)
+            .map(Some)
+            .ok_or_else(|| format!("`{key}` must be a string")),
+    }
 }
 
 fn req_str_list(args: &JSON, key: &str) -> Result<Vec<String>, String> {
@@ -440,28 +544,68 @@ fn req_str_list(args: &JSON, key: &str) -> Result<Vec<String>, String> {
 }
 
 fn req_u64(args: &JSON, key: &str) -> Result<u64, String> {
-    args.get(key)
+    let value = args
+        .get(key)
         .and_then(JSON::as_u64)
-        .ok_or_else(|| format!("missing non-negative integer argument `{key}`"))
+        .ok_or_else(|| format!("missing non-negative integer argument `{key}`"))?;
+    if value > JS_MAX_SAFE_INTEGER {
+        return Err(format!(
+            "`{key}` exceeds JavaScript's maximum safe integer ({JS_MAX_SAFE_INTEGER})"
+        ));
+    }
+    Ok(value)
+}
+
+fn req_u32(args: &JSON, key: &str) -> Result<u32, String> {
+    u32::try_from(req_u64(args, key)?)
+        .map_err(|_| format!("`{key}` exceeds the maximum 32-bit unsigned integer"))
+}
+
+fn req_usize(args: &JSON, key: &str) -> Result<usize, String> {
+    usize::try_from(req_u64(args, key)?)
+        .map_err(|_| format!("`{key}` exceeds this WebAssembly build's addressable range"))
 }
 
 fn opt_u64(args: &JSON, key: &str) -> Result<Option<u64>, String> {
     match args.get(key) {
         None | Some(JSON::Null) => Ok(None),
-        Some(value) => value
-            .as_u64()
-            .map(Some)
-            .ok_or_else(|| format!("`{key}` must be a non-negative integer")),
+        Some(value) => {
+            let value = value
+                .as_u64()
+                .ok_or_else(|| format!("`{key}` must be a non-negative integer"))?;
+            if value > JS_MAX_SAFE_INTEGER {
+                return Err(format!(
+                    "`{key}` exceeds JavaScript's maximum safe integer ({JS_MAX_SAFE_INTEGER})"
+                ));
+            }
+            Ok(Some(value))
+        }
     }
+}
+
+fn opt_usize(args: &JSON, key: &str) -> Result<Option<usize>, String> {
+    opt_u64(args, key)?
+        .map(|value| {
+            usize::try_from(value)
+                .map_err(|_| format!("`{key}` exceeds this WebAssembly build's addressable range"))
+        })
+        .transpose()
 }
 
 fn opt_i64(args: &JSON, key: &str) -> Result<Option<i64>, String> {
     match args.get(key) {
         None | Some(JSON::Null) => Ok(None),
-        Some(value) => value
-            .as_i64()
-            .map(Some)
-            .ok_or_else(|| format!("`{key}` must be an integer")),
+        Some(value) => {
+            let value = value
+                .as_i64()
+                .ok_or_else(|| format!("`{key}` must be an integer"))?;
+            if value.unsigned_abs() > JS_MAX_SAFE_INTEGER {
+                return Err(format!(
+                    "`{key}` exceeds JavaScript's safe integer range: {value}"
+                ));
+            }
+            Ok(Some(value))
+        }
     }
 }
 
@@ -504,11 +648,29 @@ fn f32_list(value: &JSON, key: &str) -> Result<Vec<f32>, String> {
         .ok_or_else(|| format!("`{key}` must be an array of numbers"))?
         .iter()
         .map(|item| {
-            item.as_f64()
-                .map(|number| number as f32)
-                .ok_or_else(|| format!("`{key}` must contain numbers"))
+            let number = item
+                .as_f64()
+                .ok_or_else(|| format!("`{key}` must contain numbers"))?;
+            f32_from_f64(number, key)
         })
         .collect()
+}
+
+fn f32_from_f64(value: f64, context: &str) -> Result<f32, String> {
+    if !value.is_finite() {
+        return Err(format!("`{context}` must be finite, got {value}"));
+    }
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(format!("`{context}` is outside the f32 range: {value}"));
+    }
+    Ok(value as f32)
+}
+
+fn binary_label(value: u64) -> Result<u8, String> {
+    match value {
+        0 | 1 => u8::try_from(value).map_err(|_| "label exceeds the u8 bridge".to_string()),
+        _ => Err("label must be 0 or 1".to_string()),
+    }
 }
 
 fn req_labels(args: &JSON) -> Result<Vec<u8>, String> {
@@ -516,9 +678,12 @@ fn req_labels(args: &JSON) -> Result<Vec<u8>, String> {
         .and_then(JSON::as_array)
         .ok_or("missing `labels` array")?
         .iter()
-        .map(|label| match label.as_u64() {
-            Some(value @ (0 | 1)) => Ok(value as u8),
-            _ => Err("labels must contain only 0 or 1".to_string()),
+        .map(|label| {
+            binary_label(
+                label
+                    .as_u64()
+                    .ok_or_else(|| "labels must contain only 0 or 1".to_string())?,
+            )
         })
         .collect()
 }
@@ -527,23 +692,26 @@ fn req_labels(args: &JSON) -> Result<Vec<u8>, String> {
 // Value / result conversion
 // ---------------------------------------------------------------------
 
-fn value_to_json(value: Value) -> JSON {
+fn value_to_json(value: Value) -> Result<JSON, String> {
     match value {
-        Value::Null => JSON::Null,
-        Value::Bool(value) => json!(value),
-        Value::Int(value) => json!(value),
-        Value::Float(value) => serde_json::Number::from_f64(value).map_or(JSON::Null, JSON::Number),
-        Value::Decimal(value) => json!(value.to_sql_string()),
-        Value::Str(value) => json!(value),
-        Value::Bytes(value) => json!({ "$bytes": BASE64.encode(value) }),
-        Value::Temporal(value) => json!(value.to_sql_string()),
-        Value::List(values) => JSON::Array(values.into_iter().map(value_to_json).collect()),
-        Value::Map(values) => JSON::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, value_to_json(value)))
-                .collect(),
-        ),
+        Value::Null => Ok(JSON::Null),
+        Value::Bool(value) => Ok(json!(value)),
+        Value::Int(value) => json_i64(value, "SQL integer"),
+        Value::Float(value) => json_number(value, "SQL float"),
+        Value::Decimal(value) => Ok(json!(value.to_sql_string())),
+        Value::Str(value) => Ok(json!(value)),
+        Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
+        Value::Temporal(value) => Ok(json!(value.to_sql_string())),
+        Value::List(values) => values
+            .into_iter()
+            .map(value_to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(JSON::Array),
+        Value::Map(values) => values
+            .into_iter()
+            .map(|(key, value)| Ok((key, value_to_json(value)?)))
+            .collect::<Result<JSONMap<_, _>, String>>()
+            .map(JSON::Object),
     }
 }
 
@@ -569,13 +737,17 @@ fn value_from_json(value: &JSON) -> Result<Value, String> {
         )),
         JSON::Object(map) => {
             if map.len() == 1 {
-                if let Some(encoded) = map.get("$bytes").and_then(JSON::as_str) {
+                if let Some(encoded) = map.get("$bytes") {
+                    let encoded = encoded
+                        .as_str()
+                        .ok_or("$bytes payload must be a base64 string")?;
                     return BASE64
                         .decode(encoded)
                         .map(Value::Bytes)
                         .map_err(|err| format!("invalid $bytes payload: {err}"));
                 }
-                if let Some(text) = map.get("$decimal").and_then(JSON::as_str) {
+                if let Some(text) = map.get("$decimal") {
+                    let text = text.as_str().ok_or("$decimal payload must be a string")?;
                     return DecimalValue::parse(text)
                         .map(Value::Decimal)
                         .ok_or_else(|| format!("invalid $decimal value {text}"));
@@ -590,10 +762,7 @@ fn value_from_json(value: &JSON) -> Result<Value, String> {
     }
 }
 
-fn document_from_json(document: Option<&JSON>) -> Result<BTreeMap<String, Value>, String> {
-    let Some(document) = document else {
-        return Ok(BTreeMap::new());
-    };
+fn document_from_json(document: &JSON) -> Result<BTreeMap<String, Value>, String> {
     let map = document.as_object().ok_or("expected a JSON object")?;
     let mut out = BTreeMap::new();
     for (key, value) in map {
@@ -602,22 +771,15 @@ fn document_from_json(document: Option<&JSON>) -> Result<BTreeMap<String, Value>
     Ok(out)
 }
 
-fn vector_values_from_json(
-    vectors: Option<&JSON>,
-) -> Result<BTreeMap<String, Vec<Vec<f32>>>, String> {
-    let Some(vectors) = vectors else {
-        return Ok(BTreeMap::new());
-    };
+fn vector_values_from_json(vectors: &JSON) -> Result<BTreeMap<String, Vec<Vec<f32>>>, String> {
     let map = vectors.as_object().ok_or("expected a vectors object")?;
     let mut out = BTreeMap::new();
     for (field, value) in map {
-        let rows = if value
+        let rows = if let Some(items) = value
             .as_array()
-            .is_some_and(|items| items.first().is_some_and(JSON::is_array))
+            .filter(|items| items.first().is_some_and(JSON::is_array))
         {
-            value
-                .as_array()
-                .unwrap()
+            items
                 .iter()
                 .map(|row| f32_list(row, field))
                 .collect::<Result<Vec<_>, _>>()?
@@ -650,7 +812,10 @@ fn param_from_json(param: &JSON) -> Result<SQLParam, String> {
             if let Some(vector) = map.get("$vector") {
                 return Ok(SQLParam::vector(f32_list(vector, "$vector")?));
             }
-            if let Some(tensor) = map.get("$tensor").and_then(JSON::as_array) {
+            if let Some(tensor) = map.get("$tensor") {
+                let tensor = tensor
+                    .as_array()
+                    .ok_or("$tensor payload must be an array of vectors")?;
                 let rows = tensor
                     .iter()
                     .map(|row| f32_list(row, "$tensor"))
@@ -662,7 +827,7 @@ fn param_from_json(param: &JSON) -> Result<SQLParam, String> {
     Ok(SQLParam::scalar(value_from_json(param)?))
 }
 
-fn sql_result_to_json(result: SQLResult) -> JSON {
+fn sql_result_to_json(result: SQLResult) -> Result<JSON, String> {
     rows_result_to_json(result.columns, result.rows, result.affected_rows)
 }
 
@@ -670,86 +835,121 @@ fn rows_result_to_json(
     columns: Vec<String>,
     rows: Vec<BTreeMap<String, Value>>,
     affected_rows: u64,
-) -> JSON {
-    json!({
+) -> Result<JSON, String> {
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|(key, value)| Ok((key, value_to_json(value)?)))
+                .collect::<Result<JSONMap<_, _>, String>>()
+                .map(JSON::Object)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({
         "columns": JSON::from(columns),
-        "rows": rows
-            .into_iter()
-            .map(|row| {
-                JSON::Object(
-                    row.into_iter()
-                        .map(|(key, value)| (key, value_to_json(value)))
-                        .collect(),
-                )
-            })
-            .collect::<Vec<_>>(),
-        "affectedRows": affected_rows,
-    })
+        "rows": rows,
+        "affectedRows": json_u64(affected_rows, "affected row count")?,
+    }))
 }
 
-fn hits_to_json(entries: Vec<ScoredEntry>) -> JSON {
-    JSON::Array(
-        entries
-            .into_iter()
-            .map(|entry| json!({ "docId": entry.doc_id, "score": entry.score }))
-            .collect(),
-    )
+fn hits_to_json(entries: Vec<ScoredEntry>) -> Result<JSON, String> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            Ok(json!({
+                "docId": json_u64(entry.doc_id, "search document id")?,
+                "score": json_number(entry.score, "search score")?,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map(JSON::Array)
 }
 
-fn float_map_to_json(params: &BTreeMap<String, f64>) -> JSON {
-    JSON::Object(
-        params
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    serde_json::Number::from_f64(*value).map_or(JSON::Null, JSON::Number),
-                )
-            })
-            .collect(),
-    )
+fn float_map_to_json(params: &BTreeMap<String, f64>) -> Result<JSON, String> {
+    params
+        .iter()
+        .map(|(key, value)| {
+            Ok((
+                key.clone(),
+                json_number(*value, &format!("scoring parameter `{key}`"))?,
+            ))
+        })
+        .collect::<Result<JSONMap<_, _>, String>>()
+        .map(JSON::Object)
 }
 
-fn calibration_report_to_json(report: &CalibrationReport) -> JSON {
-    json!({
-        "ece": report.ece,
-        "brier": report.brier,
-        "logLoss": report.log_loss,
-        "bins": report
-            .bins
-            .iter()
-            .map(|bin| {
-                json!({
-                    "avgPredicted": bin.avg_predicted,
-                    "avgActual": bin.avg_actual,
-                    "count": bin.count,
-                })
-            })
-            .collect::<Vec<_>>(),
-    })
+fn calibration_report_to_json(report: &CalibrationReport) -> Result<JSON, String> {
+    let bins = report
+        .bins
+        .iter()
+        .map(|bin| {
+            Ok(json!({
+                "avgPredicted": json_number(bin.avg_predicted, "calibration avgPredicted")?,
+                "avgActual": json_number(bin.avg_actual, "calibration avgActual")?,
+                "count": json_u64(
+                    u64::try_from(bin.count)
+                        .map_err(|_| "calibration bin count exceeds the u64 bridge")?,
+                    "calibration bin count",
+                )?,
+            }))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(json!({
+        "ece": json_number(report.ece, "calibration ece")?,
+        "brier": json_number(report.brier, "calibration brier")?,
+        "logLoss": json_number(report.log_loss, "calibration logLoss")?,
+        "bins": bins,
+    }))
 }
 
 fn parse_scoring_params(json: &str) -> Result<JSON, String> {
     let map: BTreeMap<String, f64> = serde_json::from_str(json)
         .map_err(|err| format!("scoring params are not a map of floats: {err}"))?;
-    Ok(float_map_to_json(&map))
+    float_map_to_json(&map)
+}
+
+fn json_number(value: f64, context: &str) -> Result<JSON, String> {
+    serde_json::Number::from_f64(value)
+        .map(JSON::Number)
+        .ok_or_else(|| format!("{context} is not a finite JSON number: {value}"))
+}
+
+fn json_u64(value: u64, context: &str) -> Result<JSON, String> {
+    if value > JS_MAX_SAFE_INTEGER {
+        return Err(format!(
+            "{context} exceeds JavaScript's maximum safe integer ({JS_MAX_SAFE_INTEGER}): {value}"
+        ));
+    }
+    Ok(json!(value))
+}
+
+fn json_i64(value: i64, context: &str) -> Result<JSON, String> {
+    if value.unsigned_abs() > JS_MAX_SAFE_INTEGER {
+        return Err(format!(
+            "{context} exceeds JavaScript's safe integer range: {value}"
+        ));
+    }
+    Ok(json!(value))
 }
 
 fn compression_options(args: &JSON) -> Result<SQLiteCompressionOptions, String> {
-    let codec = opt_str(args, "codec").unwrap_or_else(|| "zstd".to_string());
+    let codec = opt_str(args, "codec")?.unwrap_or_else(|| "zstd".to_string());
     let mut options = match codec.to_ascii_lowercase().as_str() {
         "zstd" => SQLiteCompressionOptions::zstd(),
         "lz4" => SQLiteCompressionOptions::lz4(),
         other => return Err(format!("unsupported compression codec `{other}`")),
     };
     if let Some(value) = opt_u64(args, "pageSize")? {
-        options.page_size = value as u32;
+        options.page_size = u32::try_from(value)
+            .map_err(|_| "`pageSize` exceeds the maximum 32-bit unsigned integer".to_string())?;
     }
     if let Some(value) = opt_u64(args, "chunkPages")? {
-        options.chunk_pages = value as u32;
+        options.chunk_pages = u32::try_from(value)
+            .map_err(|_| "`chunkPages` exceeds the maximum 32-bit unsigned integer".to_string())?;
     }
     if let Some(value) = opt_i64(args, "level")? {
-        options.level = value as i32;
+        options.level = i32::try_from(value)
+            .map_err(|_| "`level` exceeds the signed 32-bit integer range".to_string())?;
     }
     options.validate()
 }
@@ -763,7 +963,9 @@ fn scoring_mode(
     match scoring.to_ascii_lowercase().as_str() {
         "bm25" => Ok(ScoringMode::BM25(BM25Params::default())),
         "bayesian" | "bayesian_bm25" => Ok(ScoringMode::BayesianBM25(
-            engine.bayesian_params_for(table, field),
+            engine
+                .bayesian_params_for(table, field)
+                .map_err(|err| err.to_string())?,
         )),
         other => Err(format!("unsupported scoring mode `{other}`")),
     }
@@ -776,5 +978,64 @@ fn database_file_format_name(format: DatabaseFileFormat) -> &'static str {
         DatabaseFileFormat::CompressedContainer { encrypted: false } => "compressed",
         DatabaseFileFormat::CompressedContainer { encrypted: true } => "compressed_encrypted",
         DatabaseFileFormat::Unrecognized => "unrecognized",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_bridge_rejects_values_it_cannot_represent_losslessly() {
+        assert!(value_to_json(Value::Float(f64::NAN)).is_err());
+        assert!(json_u64(JS_MAX_SAFE_INTEGER + 1, "test integer").is_err());
+        assert!(json_i64(-(JS_MAX_SAFE_INTEGER as i64) - 1, "test integer").is_err());
+    }
+
+    #[test]
+    fn numeric_arguments_do_not_truncate() {
+        let args = json!({ "dimensions": u64::from(u32::MAX) + 1 });
+        assert!(req_u32(&args, "dimensions").is_err());
+    }
+
+    #[test]
+    fn malformed_optional_and_tagged_values_are_not_defaulted() {
+        assert!(opt_str(&json!({ "scoring": 7 }), "scoring").is_err());
+        assert!(value_from_json(&json!({ "$bytes": 7 })).is_err());
+        assert!(param_from_json(&json!({ "$tensor": "not-a-tensor" })).is_err());
+
+        let engine = Engine::new();
+        let args = json!({ "table": "docs", "docId": 1 });
+        assert!(dispatch_engine(&engine, "addDocument", &args).is_err());
+    }
+
+    #[test]
+    fn graph_mutation_status_is_preserved() {
+        let engine = Engine::new();
+        let args = json!({ "name": "g" });
+        assert_eq!(
+            dispatch_engine(&engine, "createGraph", &args).unwrap(),
+            json!(true)
+        );
+        assert_eq!(
+            dispatch_engine(&engine, "createGraph", &args).unwrap(),
+            json!(false)
+        );
+        assert_eq!(
+            dispatch_engine(&engine, "dropGraph", &args).unwrap(),
+            json!(true)
+        );
+        assert_eq!(
+            dispatch_engine(&engine, "dropGraph", &args).unwrap(),
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn sql_execution_errors_cross_the_dispatch_boundary() {
+        let engine = Engine::new();
+        let args = json!({ "query": "SELECT * FROM missing_table" });
+        let error = dispatch_engine(&engine, "sql", &args).unwrap_err();
+        assert!(error.contains("missing_table"), "{error}");
     }
 }

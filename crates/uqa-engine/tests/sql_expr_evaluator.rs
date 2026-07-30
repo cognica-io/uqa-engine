@@ -651,6 +651,55 @@ fn mixed_computed_with_order_by() {
 }
 
 #[test]
+fn order_by_output_alias_wins_over_same_named_input_column() {
+    let eng = engine();
+    let r = rows(
+        &eng,
+        "SELECT name, quantity AS price FROM products ORDER BY price ASC",
+    );
+    assert_eq!(str_col(&r[0], "name"), Some("Gadget"));
+    assert_eq!(str_col(&r[2], "name"), Some("Doohickey"));
+}
+
+#[test]
+fn order_by_can_use_ordinal_or_unselected_input_column() {
+    let eng = engine();
+    let ordinal = rows(&eng, "SELECT name, quantity FROM products ORDER BY 2 DESC");
+    assert_eq!(str_col(&ordinal[0], "name"), Some("Doohickey"));
+
+    let unselected = rows(&eng, "SELECT name FROM products ORDER BY quantity DESC");
+    assert_eq!(str_col(&unselected[0], "name"), Some("Doohickey"));
+    assert_eq!(unselected[0].len(), 1);
+}
+
+#[test]
+fn order_by_rejects_an_out_of_range_ordinal() {
+    let eng = engine();
+    let error = eng
+        .sql("SELECT name FROM products ORDER BY 0", &[])
+        .unwrap_err();
+    assert!(error.to_string().contains("ORDER BY position 0"), "{error}");
+    let error = eng
+        .sql("SELECT name FROM products ORDER BY 2", &[])
+        .unwrap_err();
+    assert!(error.to_string().contains("ORDER BY position 2"), "{error}");
+}
+
+#[test]
+fn order_by_alias_does_not_re_evaluate_volatile_projection() {
+    let eng = engine();
+    eng.sql("CREATE SEQUENCE order_eval_seq START 1", &[])
+        .unwrap();
+    let r = rows(
+        &eng,
+        "SELECT nextval('order_eval_seq') AS n FROM products ORDER BY n DESC",
+    );
+    assert_eq!(int_col(&r[0], "n"), Some(3));
+    assert_eq!(int_col(&r[2], "n"), Some(1));
+    assert_eq!(eng.currval("order_eval_seq").unwrap(), 3);
+}
+
+#[test]
 fn mixed_computed_with_limit() {
     let eng = engine();
     let r = rows(&eng, "SELECT name, price * 2 AS dp FROM products LIMIT 2");

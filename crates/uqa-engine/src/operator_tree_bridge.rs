@@ -44,22 +44,21 @@ use uqa_core::{
 };
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::{
-    GatingSpec, LogOddsFusionOperator, MultiStageCutoff, MultiStageEntry, OperatorTree,
-    TextScoringMode,
+    DeepGraphDirection, ExternalPriorMode, GatingSpec, LogOddsFusionOperator, MultiStageCutoff,
+    MultiStageEntry, OperatorTree, TextScoringMode,
 };
 use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
 use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
 use uqa_sql::ast::{BinaryOp, ColumnType};
-use uqa_sql::expr::value_to_vector;
 use uqa_sql::SQLParam;
+use uqa_storage::StorageBackendError;
 
 use crate::sql;
 use crate::{Engine, ScoredEntry};
 use uqa_sql::SQLError;
 
 type DriverResult<T> = Result<T, SQLError>;
-type ScoredFusionSignal = (Vec<ScoredEntry>, Option<f64>);
 
 #[derive(Clone, Copy)]
 struct WeightedPathExecution<'a> {
@@ -74,10 +73,37 @@ struct WeightedPathExecution<'a> {
     score: f64,
 }
 
-fn malformed_operator_meta(operator: &str, field: &str) -> SQLError {
-    SQLError::Internal(format!(
-        "malformed {operator} OperatorTree: missing or invalid `{field}` metadata"
-    ))
+#[derive(Clone, Copy)]
+struct LogOddsExecution<'a> {
+    signals: &'a [OperatorTree],
+    alpha: f64,
+    gating: &'a GatingSpec,
+    weights: Option<&'a [f64]>,
+    logit_min: Option<&'a [f64]>,
+    logit_max: Option<&'a [f64]>,
+    adaptive_weights: bool,
+}
+
+enum OptionalStringConstant {
+    Null,
+    Value(String),
+}
+
+impl OptionalStringConstant {
+    fn into_option(self) -> Option<String> {
+        match self {
+            Self::Null => None,
+            Self::Value(value) => Some(value),
+        }
+    }
+}
+
+fn operator_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
+    SQLError::Internal(format!("execute {operator}: {error}"))
+}
+
+fn graph_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
+    SQLError::Internal(format!("execute {operator}: {error}"))
 }
 
 /// Lower a SQL `WHERE` expression into an [`OperatorTree`]. Returns
@@ -185,137 +211,584 @@ fn lower_function(name: &str, args: &[ScalarExpr], params: &[SQLParam]) -> Optio
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "text_match" => {
-            let field = column_name(args.first()?)?;
-            let query = const_string(args.get(1)?, params)?;
-            Some(OperatorTree::Term {
-                query,
-                field: Some(field),
-                scoring: Some(TextScoringMode::BM25),
-            })
+            try_lower_text_match("text_match", args, params, TextScoringMode::BM25).ok()
         }
-        "bayesian_match" => {
-            let field = column_name(args.first()?)?;
-            let query = const_string(args.get(1)?, params)?;
-            Some(OperatorTree::Term {
-                query,
-                field: Some(field),
-                scoring: Some(TextScoringMode::BayesianBM25),
-            })
-        }
-        "fts_match" => {
-            let default_field = fts_default_field(args.first()?)?;
-            let query = const_string(args.get(1)?, params)?;
-            compile_fts_query(&query, default_field.as_deref()).map(prepare_fts_probability_tree)
-        }
+        "bayesian_match" => try_lower_text_match(
+            "bayesian_match",
+            args,
+            params,
+            TextScoringMode::BayesianBM25,
+        )
+        .ok(),
+        "fts_match" => try_lower_fts_match(args, params).ok(),
         "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
         "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
-        "knn_match" => {
-            // Standalone knn_match preserves raw cosine similarities;
-            // calibration to (0, 1) only fires inside fusion contexts.
-            // (mirrors `_compile_calibrated_signal` semantics from the
-            // canonical UQA behavior: only fusion arms see calibrated KNN).
-            let field = column_name(args.first()?)?;
-            let vec_expr = args.get(1)?;
-            let query_vector = const_vector(vec_expr, params)?;
-            let k = const_usize(args.get(2)?, params)?;
-            Some(OperatorTree::KNN {
-                query_vector,
-                k,
-                field,
-            })
-        }
+        // Standalone knn_match preserves raw cosine similarities;
+        // calibration to (0, 1) only fires inside fusion contexts.
+        "knn_match" => try_lower_knn_match(args, params).ok(),
         "fuse_log_odds" => lower_fuse_log_odds(args, params),
         "multi_field_match" => lower_multi_field_match(args, params),
         "staged_retrieval" => lower_staged_retrieval(args, params),
-        "attention" | "fuse_attention" | "fuse_multihead" => lower_attention_fusion(args, params),
+        "attention" | "fuse_attention" | "fuse_multihead" => {
+            try_lower_attention_fusion(&lower, args, params).ok()
+        }
         "learned_fusion" | "fuse_learned" => lower_learned_fusion(args, params),
         "sparse_threshold" => {
             if args.len() != 2 {
                 return None;
             }
-            let source = lower_signal_arg(args.first()?, params)?;
+            let source = lower_operator_arg(args.first()?, params)?;
             let threshold = const_f64(args.get(1)?, params)?;
             Some(OperatorTree::SparseThreshold {
                 source: Box::new(source),
                 threshold,
             })
         }
-        _ => None,
+        _ => lower_graph_function(&lower, args, params),
     }
 }
 
-/// Lower one row-emitting SQL function call into the shared operator
-/// IR. The row-function physical node uses this for non-WHERE call
-/// sites so compositional retrieval functions do not retain duplicate
-/// physical implementations.
-pub(crate) fn lower_sql_function(
+fn lower_graph_function(
     name: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
-    lower_function(name, args, params)
+    match name {
+        "graph_traverse" | "traverse_match" => {
+            if args.len() != 4 {
+                return None;
+            }
+            let graph = const_string(args.first()?, params)?;
+            let start_vertex = u64::try_from(const_usize(args.get(1)?, params)?).ok()?;
+            let label = const_optional_string(args.get(2)?, params)?.into_option();
+            let max_hops = const_usize(args.get(3)?, params)?;
+            Some(OperatorTree::Traverse {
+                start_vertex,
+                graph,
+                label,
+                max_hops,
+                vertex_predicate: None,
+            })
+        }
+        "graph_neighbors" => {
+            if args.len() != 4 {
+                return None;
+            }
+            let graph = const_string(args.first()?, params)?;
+            let vertex = u64::try_from(const_usize(args.get(1)?, params)?).ok()?;
+            let label = const_optional_string(args.get(2)?, params)?.into_option();
+            let direction = match const_string(args.get(3)?, params)?
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "out" => DeepGraphDirection::Out,
+                "in" => DeepGraphDirection::In,
+                "both" => DeepGraphDirection::Both,
+                _ => return None,
+            };
+            Some(OperatorTree::GraphNeighbors {
+                vertex,
+                graph,
+                label,
+                direction,
+            })
+        }
+        "graph_edges" => {
+            if !(1..=2).contains(&args.len()) {
+                return None;
+            }
+            Some(OperatorTree::GraphEdges {
+                graph: const_string(args.first()?, params)?,
+                label: match args.get(1) {
+                    Some(label) => const_optional_string(label, params)?.into_option(),
+                    None => None,
+                },
+            })
+        }
+        "temporal_traverse" => {
+            if args.len() != 6 {
+                return None;
+            }
+            Some(OperatorTree::TemporalTraverse {
+                graph: const_string(args.first()?, params)?,
+                start_vertex: u64::try_from(const_usize(args.get(1)?, params)?).ok()?,
+                label: const_optional_string(args.get(2)?, params)?.into_option(),
+                max_hops: const_usize(args.get(3)?, params)?,
+                temporal_filter: Some(uqa_operators::TemporalFilterIR {
+                    timestamp: None,
+                    time_range: Some((
+                        const_temporal_bound(args.get(4)?, params, f64::NEG_INFINITY)?,
+                        const_temporal_bound(args.get(5)?, params, f64::INFINITY)?,
+                    )),
+                }),
+            })
+        }
+        "rpq" if args.len() == 3 => Some(OperatorTree::RegularPathQuery {
+            rpq_source: const_string(args.first()?, params)?,
+            start_vertex: u64::try_from(const_usize(args.get(1)?, params)?).ok()?,
+            graph: const_string(args.get(2)?, params)?,
+        }),
+        "deep_predict" if args.len() == 1 => Some(OperatorTree::DeepPredict {
+            model: const_string(args.first()?, params)?,
+        }),
+        "graph_pagerank" | "pagerank" if args.len() == 1 => Some(OperatorTree::PageRank {
+            graph: const_string(args.first()?, params)?,
+        }),
+        "graph_hits" | "hits" if args.len() == 1 => Some(OperatorTree::HITS {
+            graph: const_string(args.first()?, params)?,
+        }),
+        "graph_betweenness" | "betweenness" if args.len() == 1 => {
+            Some(OperatorTree::BetweennessCentrality {
+                graph: const_string(args.first()?, params)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Bind runtime scalar arguments, then require a concrete operator node.
+///
+/// The optimizer-side lowerer is intentionally pure and therefore only
+/// folds literals and SQL parameters.  Row-emitting calls can also contain
+/// deterministic scalar expressions (for example a concatenated query
+/// string).  Evaluate those expressions once at the physical boundary and
+/// retry the same lowerer.  A registered retrieval function must never fall
+/// through to a second row-function implementation merely because one of its
+/// arguments needed runtime binding.
+pub(crate) fn lower_sql_function_bound(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<OperatorTree> {
+    validate_operator_function_arity(name, args.len())?;
+    validate_probability_signal_contract(name, args)?;
+    let mut bound = args
+        .iter()
+        .map(|argument| bind_operator_argument(engine, argument, params))
+        .collect::<Result<Vec<_>, _>>()?;
+    match name.to_ascii_lowercase().as_str() {
+        "rpq" if bound.len() == 2 => bound.push(ScalarExpr::Literal(Value::Str(
+            default_operator_graph(engine, "rpq")?,
+        ))),
+        "graph_pagerank" | "pagerank" | "graph_hits" | "hits" | "graph_betweenness"
+        | "betweenness"
+            if bound.is_empty() =>
+        {
+            bound.push(ScalarExpr::Literal(Value::Str(default_operator_graph(
+                engine, name,
+            )?)));
+        }
+        _ => {}
+    }
+    validate_checked_retrieval_call_tree(name, &bound, &[])?;
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "attention" | "fuse_attention" | "fuse_multihead"
+    ) {
+        return try_lower_attention_fusion(name, &bound, &[]);
+    }
+    lower_function(name, &bound, &[]).ok_or_else(|| {
+        SQLError::TypeMismatch(format!(
+            "{name} arguments cannot be lowered to the shared operator IR"
+        ))
+    })
+}
+
+fn default_operator_graph(engine: &Engine, function_name: &str) -> DriverResult<String> {
+    let graphs = engine
+        .list_graphs()
+        .map_err(|error| SQLError::Internal(format!("read graph catalog: {error}")))?;
+    match graphs.as_slice() {
+        [graph] => Ok(graph.clone()),
+        [] => Err(SQLError::Unsupported(format!(
+            "{function_name} requires a graph argument because no graph is registered"
+        ))),
+        _ => Err(SQLError::Unsupported(format!(
+            "{function_name} requires a graph argument because multiple graphs are registered: {}",
+            graphs.join(", ")
+        ))),
+    }
+}
+
+fn try_lower_checked_retrieval(
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Option<DriverResult<OperatorTree>> {
+    match name.to_ascii_lowercase().as_str() {
+        "text_match" => Some(try_lower_text_match(
+            "text_match",
+            args,
+            params,
+            TextScoringMode::BM25,
+        )),
+        "bayesian_match" => Some(try_lower_text_match(
+            "bayesian_match",
+            args,
+            params,
+            TextScoringMode::BayesianBM25,
+        )),
+        "fts_match" => Some(try_lower_fts_match(args, params)),
+        "bayesian_match_with_prior" => Some(try_lower_bayesian_match_with_prior(args, params)),
+        "knn_match" => Some(try_lower_knn_match(args, params)),
+        "calibrated_vector_match" => Some(try_lower_calibrated_vector_match(args, params)),
+        _ => None,
+    }
+}
+
+fn validate_checked_retrieval_call_tree(
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<()> {
+    if let Some(result) = try_lower_checked_retrieval(name, args, params) {
+        result?;
+    }
+    for argument in args {
+        if let ScalarExpr::Func {
+            name: child_name,
+            args: child_args,
+            ..
+        } = argument
+        {
+            validate_checked_retrieval_call_tree(child_name, child_args, params)?;
+        }
+    }
+    Ok(())
+}
+
+fn checked_retrieval_call_tree_present(name: &str, args: &[ScalarExpr]) -> bool {
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "text_match"
+            | "bayesian_match"
+            | "fts_match"
+            | "bayesian_match_with_prior"
+            | "knn_match"
+            | "calibrated_vector_match"
+    ) {
+        return true;
+    }
+    args.iter().any(|argument| {
+        let ScalarExpr::Func {
+            name: child_name,
+            args: child_args,
+            ..
+        } = argument
+        else {
+            return false;
+        };
+        checked_retrieval_call_tree_present(child_name, child_args)
+    })
+}
+
+fn bind_operator_argument(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+) -> DriverResult<ScalarExpr> {
+    match expression {
+        ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => Ok(expression.clone()),
+        ScalarExpr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } if name == "__named_arg" || uqa_sql::registry::lookup(name).is_some() => {
+            if *distinct || !order_by.is_empty() || filter.is_some() {
+                return Err(SQLError::TypeMismatch(format!(
+                    "operator function `{name}` does not accept aggregate modifiers"
+                )));
+            }
+            Ok(ScalarExpr::Func {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|argument| bind_operator_argument(engine, argument, params))
+                    .collect::<Result<Vec<_>, _>>()?,
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            })
+        }
+        other => {
+            let context = ScalarEvalContext::new(None, params).with_function_hook(engine);
+            eval_scalar(other, &context).map(ScalarExpr::Literal)
+        }
+    }
+}
+
+fn validate_operator_function_arity(name: &str, actual: usize) -> DriverResult<()> {
+    let lower = name.to_ascii_lowercase();
+    let expected = match lower.as_str() {
+        "text_match" | "bayesian_match" | "fts_match" | "sparse_threshold" => {
+            (actual != 2).then_some("2")
+        }
+        "bayesian_match_with_prior" | "graph_traverse" | "traverse_match" | "graph_neighbors" => {
+            (actual != 4).then_some("4")
+        }
+        "knn_match" => (actual != 3).then_some("3"),
+        "rpq" => (!(2..=3).contains(&actual)).then_some("2..=3"),
+        "calibrated_vector_match" => (!(3..=4).contains(&actual)).then_some("3..=4"),
+        "graph_edges" => (!(1..=2).contains(&actual)).then_some("1..=2"),
+        "temporal_traverse" => (actual != 6).then_some("6"),
+        "deep_predict" => (actual != 1).then_some("1"),
+        "graph_pagerank" | "pagerank" | "graph_hits" | "hits" | "graph_betweenness"
+        | "betweenness" => (actual > 1).then_some("0..=1"),
+        "fuse_log_odds" | "attention" | "fuse_attention" | "fuse_multihead" | "learned_fusion"
+        | "fuse_learned" | "staged_retrieval" => (actual < 2).then_some(">=2"),
+        "multi_field_match" => (actual < 3).then_some(">=3"),
+        _ => None,
+    };
+    if let Some(expected) = expected {
+        return Err(SQLError::BadArity {
+            name: lower,
+            expected: expected.into(),
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn validate_probability_signal_contract(name: &str, args: &[ScalarExpr]) -> DriverResult<()> {
+    if !matches!(
+        name.to_ascii_lowercase().as_str(),
+        "fuse_log_odds"
+            | "attention"
+            | "fuse_attention"
+            | "fuse_multihead"
+            | "learned_fusion"
+            | "fuse_learned"
+    ) {
+        return Ok(());
+    }
+    if args.iter().any(|argument| {
+        matches!(
+            argument,
+            ScalarExpr::Func { name, .. } if name.eq_ignore_ascii_case("text_match")
+        )
+    }) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} requires probability-valued signals; text_match returns raw BM25 scores, use bayesian_match instead"
+        )));
+    }
+    Ok(())
+}
+
+fn bad_operator_arity(name: &str, expected: &str, actual: usize) -> SQLError {
+    SQLError::BadArity {
+        name: name.to_string(),
+        expected: expected.to_string(),
+        actual,
+    }
+}
+
+fn try_lower_text_match(
+    function_name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+    scoring: TextScoringMode,
+) -> DriverResult<OperatorTree> {
+    if args.len() != 2 {
+        return Err(bad_operator_arity(function_name, "2", args.len()));
+    }
+    let field = match &args[0] {
+        ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. }
+            if name.is_empty() || name == "_all" =>
+        {
+            None
+        }
+        ScalarExpr::Column(name) | ScalarExpr::QualifiedColumn { column: name, .. } => {
+            Some(name.clone())
+        }
+        ScalarExpr::Literal(Value::Str(name)) if name.is_empty() || name == "_all" => None,
+        _ => {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function_name}.field must be a column reference, '_all', or an empty string"
+            )))
+        }
+    };
+    let query = const_string(&args[1], params).ok_or_else(|| {
+        SQLError::TypeMismatch(format!("{function_name}.query must be a constant string"))
+    })?;
+    Ok(OperatorTree::Term {
+        query,
+        field,
+        scoring: Some(scoring),
+    })
+}
+
+fn try_lower_fts_match(args: &[ScalarExpr], params: &[SQLParam]) -> DriverResult<OperatorTree> {
+    const FUNCTION_NAME: &str = "fts_match";
+    if args.len() != 2 {
+        return Err(bad_operator_arity(FUNCTION_NAME, "2", args.len()));
+    }
+    let default_field = fts_default_field(&args[0]).ok_or_else(|| {
+        SQLError::TypeMismatch(
+            "fts_match.field must be a column reference, '_all', or an empty string".into(),
+        )
+    })?;
+    let query = const_string(&args[1], params).ok_or_else(|| {
+        SQLError::TypeMismatch("fts_match.query must be a constant string".into())
+    })?;
+    let tokenizer = |_field: Option<&str>, phrase: &str| {
+        phrase
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+    };
+    let tree = uqa_sql::compile_fts_query_string(&query, default_field.as_deref(), &tokenizer)
+        .map_err(|error| SQLError::TypeMismatch(format!("fts_match.query: {error}")))?;
+    Ok(prepare_fts_probability_tree(tree))
+}
+
+fn try_lower_bayesian_match_with_prior(
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<OperatorTree> {
+    const FUNCTION_NAME: &str = "bayesian_match_with_prior";
+    if args.len() != 4 {
+        return Err(bad_operator_arity(FUNCTION_NAME, "4", args.len()));
+    }
+    let field = column_name(&args[0]).ok_or_else(|| {
+        SQLError::TypeMismatch("bayesian_match_with_prior.field must be a column reference".into())
+    })?;
+    let query = const_string(&args[1], params).ok_or_else(|| {
+        SQLError::TypeMismatch("bayesian_match_with_prior.query must be a constant string".into())
+    })?;
+    let prior_field = column_name(&args[2]).ok_or_else(|| {
+        SQLError::TypeMismatch(
+            "bayesian_match_with_prior.prior_field must be a column reference".into(),
+        )
+    })?;
+    let mode_name = const_string(&args[3], params).ok_or_else(|| {
+        SQLError::TypeMismatch("bayesian_match_with_prior.mode must be a constant string".into())
+    })?;
+    let mode = match mode_name.to_ascii_lowercase().as_str() {
+        "authority" => ExternalPriorMode::Authority,
+        "recency" => ExternalPriorMode::Recency,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "Unknown prior mode: {other}"
+            )))
+        }
+    };
+    Ok(OperatorTree::BayesianMatchWithPrior {
+        field,
+        query,
+        prior_field,
+        mode,
+    })
 }
 
 fn lower_bayesian_match_with_prior(
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
-    if args.len() != 4 {
-        return None;
+    try_lower_bayesian_match_with_prior(args, params).ok()
+}
+
+fn try_lower_knn_match(args: &[ScalarExpr], params: &[SQLParam]) -> DriverResult<OperatorTree> {
+    const FUNCTION_NAME: &str = "knn_match";
+    if args.len() != 3 {
+        return Err(bad_operator_arity(FUNCTION_NAME, "3", args.len()));
     }
-    let mut meta = BTreeMap::new();
-    meta.insert("field".to_string(), Value::Str(column_name(args.first()?)?));
-    meta.insert(
-        "query".to_string(),
-        Value::Str(const_string(args.get(1)?, params)?),
-    );
-    meta.insert(
-        "prior_field".to_string(),
-        Value::Str(column_name(args.get(2)?)?),
-    );
-    let mode = const_string(args.get(3)?, params)?;
-    if !matches!(mode.to_ascii_lowercase().as_str(), "authority" | "recency") {
-        return None;
+    let field = column_name(&args[0]).ok_or_else(|| {
+        SQLError::TypeMismatch("knn_match.field must be a column reference".into())
+    })?;
+    if field.trim().is_empty() {
+        return Err(SQLError::TypeMismatch(
+            "knn_match.field cannot be empty".into(),
+        ));
     }
-    meta.insert("mode".to_string(), Value::Str(mode));
-    Some(OperatorTree::Opaque {
-        kind: "bayesian_match_with_prior".to_string(),
-        children: Vec::new(),
-        meta,
+    let query_vector = const_vector(&args[1], params).ok_or_else(|| {
+        SQLError::TypeMismatch("knn_match.vector must be a constant numeric vector".into())
+    })?;
+    if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
+        return Err(SQLError::TypeMismatch(
+            "knn_match.vector must be non-empty and contain only finite values".into(),
+        ));
+    }
+    let k = const_usize(&args[2], params).ok_or_else(|| {
+        SQLError::TypeMismatch("knn_match.k must be a non-negative integer".into())
+    })?;
+    if k == 0 || i64::try_from(k).is_err() {
+        return Err(SQLError::TypeMismatch(format!(
+            "knn_match.k must be positive and fit in a SQL BIGINT, got {k}"
+        )));
+    }
+    Ok(OperatorTree::KNN {
+        query_vector,
+        k,
+        field,
+    })
+}
+
+fn try_lower_calibrated_vector_match(
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<OperatorTree> {
+    const FUNCTION_NAME: &str = "calibrated_vector_match";
+    if !(3..=4).contains(&args.len()) {
+        return Err(bad_operator_arity(FUNCTION_NAME, "3..=4", args.len()));
+    }
+    let field = field_name_arg(&args[0], params).ok_or_else(|| {
+        SQLError::TypeMismatch(
+            "calibrated_vector_match.field must be a column reference or constant string".into(),
+        )
+    })?;
+    if field.trim().is_empty() {
+        return Err(SQLError::TypeMismatch(
+            "calibrated_vector_match.field cannot be empty".into(),
+        ));
+    }
+    let query_vector = const_vector(&args[1], params).ok_or_else(|| {
+        SQLError::TypeMismatch(
+            "calibrated_vector_match.vector must be a constant numeric vector".into(),
+        )
+    })?;
+    if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
+        return Err(SQLError::TypeMismatch(
+            "calibrated_vector_match.vector must be non-empty and contain only finite values"
+                .into(),
+        ));
+    }
+    let k = const_usize(&args[2], params).ok_or_else(|| {
+        SQLError::TypeMismatch("calibrated_vector_match.k must be a non-negative integer".into())
+    })?;
+    if k == 0 || i64::try_from(k).is_err() {
+        return Err(SQLError::TypeMismatch(format!(
+            "calibrated_vector_match.k must be positive and fit in a SQL BIGINT, got {k}"
+        )));
+    }
+    let threshold = args
+        .get(3)
+        .map(|argument| {
+            const_f64(argument, params).ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "calibrated_vector_match.threshold must be a constant number".into(),
+                )
+            })
+        })
+        .transpose()?;
+    if threshold.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+        return Err(SQLError::TypeMismatch(format!(
+            "calibrated_vector_match.threshold must be finite and in [0, 1], got {}",
+            threshold.expect("checked Some above")
+        )));
+    }
+    Ok(OperatorTree::CalibratedVectorMatch {
+        field,
+        query_vector,
+        k,
+        threshold,
     })
 }
 
 fn lower_calibrated_vector_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
-    if !(3..=4).contains(&args.len()) {
-        return None;
-    }
-    let mut meta = BTreeMap::new();
-    meta.insert(
-        "field".to_string(),
-        Value::Str(field_name_arg(args.first()?, params)?),
-    );
-    meta.insert(
-        "query_vector".to_string(),
-        Value::List(
-            const_vector(args.get(1)?, params)?
-                .into_iter()
-                .map(|v| Value::Float(f64::from(v)))
-                .collect(),
-        ),
-    );
-    meta.insert(
-        "k".to_string(),
-        Value::Int(const_usize(args.get(2)?, params)? as i64),
-    );
-    if args.len() == 4 {
-        let threshold = const_f64(args.get(3)?, params)?;
-        meta.insert("threshold".to_string(), Value::Float(threshold));
-    }
-    Some(OperatorTree::Opaque {
-        kind: "calibrated_vector_match".to_string(),
-        children: Vec::new(),
-        meta,
-    })
+    try_lower_calibrated_vector_match(args, params).ok()
 }
 
 fn lower_multi_field_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
@@ -346,7 +819,7 @@ fn lower_multi_field_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<O
             };
             return Some(OperatorTree::MultiFieldSearch {
                 fields,
-                query,
+                queries: vec![query; query_idx],
                 weights,
             });
         }
@@ -362,15 +835,11 @@ fn lower_multi_field_match(args: &[ScalarExpr], params: &[SQLParam]) -> Option<O
         fields.push(column_name(&args[2 * i])?);
         queries.push(const_string(&args[2 * i + 1], params)?);
     }
-    let first_query = queries.first()?.clone();
-    if queries.iter().all(|query| query == &first_query) {
-        return Some(OperatorTree::MultiFieldSearch {
-            fields,
-            query: first_query,
-            weights: None,
-        });
-    }
-    None
+    Some(OperatorTree::MultiFieldSearch {
+        fields,
+        queries,
+        weights: None,
+    })
 }
 
 fn lower_staged_retrieval(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
@@ -423,34 +892,18 @@ fn lower_calibrated_signal(
     params: &[SQLParam],
 ) -> Option<OperatorTree> {
     match name {
-        "bayesian_match" => {
-            let field = column_name(args.first()?)?;
-            let query = const_string(args.get(1)?, params)?;
-            Some(OperatorTree::Term {
-                query,
-                field: Some(field),
-                scoring: Some(TextScoringMode::BayesianBM25),
-            })
-        }
-        "fts_match" => {
-            let default_field = fts_default_field(args.first()?)?;
-            let query = const_string(args.get(1)?, params)?;
-            compile_fts_query(&query, default_field.as_deref()).map(prepare_fts_probability_tree)
-        }
+        "bayesian_match" => try_lower_text_match(
+            "bayesian_match",
+            args,
+            params,
+            TextScoringMode::BayesianBM25,
+        )
+        .ok(),
+        "fts_match" => try_lower_fts_match(args, params).ok(),
         "bayesian_match_with_prior" => lower_bayesian_match_with_prior(args, params),
-        "knn_match" => {
-            let field = column_name(args.first()?)?;
-            let vec_expr = args.get(1)?;
-            let query_vector = const_vector(vec_expr, params)?;
-            let k = const_usize(args.get(2)?, params)?;
-            Some(OperatorTree::CosineProbability(Box::new(
-                OperatorTree::KNN {
-                    query_vector,
-                    k,
-                    field,
-                },
-            )))
-        }
+        "knn_match" => try_lower_knn_match(args, params)
+            .ok()
+            .map(|tree| OperatorTree::CosineProbability(Box::new(tree))),
         "calibrated_vector_match" => lower_calibrated_vector_match(args, params),
         _ => None,
     }
@@ -467,6 +920,16 @@ fn lower_signal_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTre
         }
         _ => None,
     }
+}
+
+/// Lower any registered posting-list function used as an operator input.
+/// Unlike fusion signals, sparse thresholding accepts raw BM25 scores, so
+/// this path intentionally does not require probability calibration.
+fn lower_operator_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
+    let ScalarExpr::Func { name, args, .. } = arg else {
+        return None;
+    };
+    lower_function(name, args, params)
 }
 
 fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
@@ -552,28 +1015,183 @@ fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Opera
         weights,
         logit_min,
         logit_max,
+        adaptive_weights: false,
     })
 }
 
-fn lower_attention_fusion(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
+struct AttentionLoweringOptions<'a> {
+    signal_args: Vec<&'a ScalarExpr>,
+    alpha: f64,
+    normalized: bool,
+    base_rate: Option<f64>,
+    n_heads: usize,
+    multi_head: bool,
+}
+
+fn parse_attention_options<'a>(
+    function_name: &str,
+    args: &'a [ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<AttentionLoweringOptions<'a>> {
+    let multi_head = function_name.eq_ignore_ascii_case("fuse_multihead");
+    let valid_options: &[&str] = if multi_head {
+        &["n_heads", "normalized", "alpha"]
+    } else {
+        &["normalized", "alpha", "base_rate"]
+    };
+    let mut options = AttentionLoweringOptions {
+        signal_args: Vec::new(),
+        alpha: 0.5,
+        normalized: false,
+        base_rate: None,
+        n_heads: 4,
+        multi_head,
+    };
+    let mut seen_options = BTreeSet::new();
+    let mut saw_option = false;
+
+    for argument in args {
+        if let Some((option_name, value)) = named_arg_expr(argument) {
+            saw_option = true;
+            let option_name = option_name.to_ascii_lowercase();
+            if !valid_options.contains(&option_name.as_str()) {
+                return Err(SQLError::TypeMismatch(format!(
+                    "unknown option `{option_name}` for {function_name}; valid options: {}",
+                    valid_options.join(", ")
+                )));
+            }
+            if !seen_options.insert(option_name.clone()) {
+                return Err(SQLError::TypeMismatch(format!(
+                    "duplicate option `{option_name}` for {function_name}"
+                )));
+            }
+            match option_name.as_str() {
+                "alpha" => {
+                    options.alpha = const_f64(value, params).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "{function_name}.alpha must be a constant number"
+                        ))
+                    })?;
+                }
+                "normalized" => {
+                    options.normalized = const_bool(value, params).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "{function_name}.normalized must be a constant boolean"
+                        ))
+                    })?;
+                }
+                "base_rate" => {
+                    options.base_rate = Some(const_f64(value, params).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "{function_name}.base_rate must be a constant number"
+                        ))
+                    })?);
+                }
+                "n_heads" => {
+                    options.n_heads = const_usize(value, params).ok_or_else(|| {
+                        SQLError::TypeMismatch(format!(
+                            "{function_name}.n_heads must be a constant non-negative integer"
+                        ))
+                    })?;
+                }
+                _ => unreachable!("valid attention option was matched above"),
+            }
+        } else {
+            if matches!(argument, ScalarExpr::Func { name, .. } if name == "__named_arg") {
+                return Err(SQLError::TypeMismatch(format!(
+                    "malformed named option for {function_name}"
+                )));
+            }
+            if saw_option {
+                return Err(SQLError::TypeMismatch(format!(
+                    "{function_name} signal arguments must precede named options"
+                )));
+            }
+            options.signal_args.push(argument);
+        }
+    }
+
+    validate_attention_options(function_name, &options)?;
+    Ok(options)
+}
+
+fn validate_attention_options(
+    function_name: &str,
+    options: &AttentionLoweringOptions<'_>,
+) -> DriverResult<()> {
+    if options.signal_args.len() < 2 {
+        return Err(SQLError::BadArity {
+            name: function_name.to_string(),
+            expected: ">=2 signals".to_string(),
+            actual: options.signal_args.len(),
+        });
+    }
+    if !options.alpha.is_finite() || !(0.0..=1.0).contains(&options.alpha) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}.alpha must be finite and in [0, 1], got {}",
+            options.alpha
+        )));
+    }
+    if options
+        .base_rate
+        .is_some_and(|rate| !rate.is_finite() || rate <= 0.0 || rate >= 1.0)
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "{function_name}.base_rate must be finite and in (0, 1), got {}",
+            options.base_rate.expect("checked Some above")
+        )));
+    }
+    if options.multi_head && options.n_heads == 0 {
+        return Err(SQLError::TypeMismatch(
+            "fuse_multihead.n_heads must be greater than zero".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn try_lower_attention_fusion(
+    function_name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<OperatorTree> {
     use std::sync::Arc;
-    use uqa_fusion::{AttentionFusion, N_QUERY_FEATURES};
+    use uqa_fusion::{AttentionFusion, MultiHeadAttentionFusion, N_QUERY_FEATURES};
     use uqa_operators::tree::AttentionRef;
 
-    let mut signals: Vec<OperatorTree> = Vec::new();
-    for a in args {
-        signals.push(lower_signal_arg(a, params)?);
+    let options = parse_attention_options(function_name, args, params)?;
+
+    let mut signals = Vec::with_capacity(options.signal_args.len());
+    for (index, argument) in options.signal_args.into_iter().enumerate() {
+        signals.push(lower_signal_arg(argument, params).ok_or_else(|| {
+            SQLError::TypeMismatch(format!(
+                "{function_name} signal {} cannot be lowered to a probability-valued operator",
+                index + 1
+            ))
+        })?);
     }
-    if signals.len() < 2 {
-        return None;
-    }
-    // `attention(signal_1, signal_2, ...)` defaults: alpha=0.5,
-    // n_query_features=6 (matches UQA behavior `_make_attention_fusion_op`).
-    // Query features are filled in lazily at execute time from the
-    // engine snapshot, so the IR carries an empty explicit vector.
-    let attention: AttentionRef =
-        Arc::new(AttentionFusion::new(signals.len(), N_QUERY_FEATURES, 0.5));
-    Some(OperatorTree::AttentionFusion {
+
+    let attention: AttentionRef = if options.multi_head {
+        Arc::new(
+            MultiHeadAttentionFusion::try_new(
+                options.n_heads,
+                signals.len(),
+                N_QUERY_FEATURES,
+                options.alpha,
+                options.normalized,
+            )
+            .map_err(|error| SQLError::TypeMismatch(format!("{function_name}: {error}")))?,
+        )
+    } else {
+        Arc::new(
+            AttentionFusion::new(signals.len(), N_QUERY_FEATURES, options.alpha)
+                .with_options(options.normalized, options.base_rate)
+                .map_err(|error| SQLError::TypeMismatch(format!("{function_name}: {error}")))?,
+        )
+    };
+
+    // Query features are filled in lazily at execute time from the engine
+    // snapshot, so the IR carries an empty explicit vector.
+    Ok(OperatorTree::AttentionFusion {
         signals,
         attention,
         query_features: Vec::new(),
@@ -585,14 +1203,24 @@ fn lower_learned_fusion(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Oper
     use uqa_fusion::LearnedFusion;
     use uqa_operators::tree::LearnedFusionRef;
 
-    let mut signals: Vec<OperatorTree> = Vec::new();
-    for a in args {
-        signals.push(lower_signal_arg(a, params)?);
+    let mut signal_end = args.len();
+    let mut alpha = 0.5;
+    if let Some((name, value)) = args.last().and_then(named_arg_expr) {
+        if !name.eq_ignore_ascii_case("alpha") {
+            return None;
+        }
+        alpha = const_f64(value, params)?;
+        signal_end -= 1;
     }
-    if signals.len() < 2 {
+    if signal_end < 2 || !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
         return None;
     }
-    let learned: LearnedFusionRef = Arc::new(LearnedFusion::new(signals.len(), 0.5));
+
+    let mut signals: Vec<OperatorTree> = Vec::with_capacity(signal_end);
+    for a in &args[..signal_end] {
+        signals.push(lower_signal_arg(a, params)?);
+    }
+    let learned: LearnedFusionRef = Arc::new(LearnedFusion::new(signals.len(), alpha));
     Some(OperatorTree::LearnedFusion { signals, learned })
 }
 
@@ -667,16 +1295,6 @@ fn fts_default_field(expr: &ScalarExpr) -> Option<FtsDefaultField> {
     }
 }
 
-fn compile_fts_query(query: &str, default_field: Option<&str>) -> Option<OperatorTree> {
-    let tokenizer = |_field: Option<&str>, phrase: &str| {
-        phrase
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>()
-    };
-    uqa_sql::compile_fts_query_string(query, default_field, &tokenizer).ok()
-}
-
 fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
     if is_text_query_tree(&tree) {
         let field = common_text_field(&tree);
@@ -718,6 +1336,7 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             weights,
             logit_min,
             logit_max,
+            adaptive_weights,
         } => OperatorTree::LogOddsFusion {
             signals: signals
                 .into_iter()
@@ -728,6 +1347,7 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             weights,
             logit_min,
             logit_max,
+            adaptive_weights,
         },
         OperatorTree::CosineProbability(child) => OperatorTree::CosineProbability(child),
         other => other,
@@ -807,6 +1427,24 @@ fn const_string(expr: &ScalarExpr, params: &[SQLParam]) -> Option<String> {
     }
 }
 
+fn const_optional_string(expr: &ScalarExpr, params: &[SQLParam]) -> Option<OptionalStringConstant> {
+    match const_value(expr, params)? {
+        Value::Null => Some(OptionalStringConstant::Null),
+        Value::Str(value) => Some(OptionalStringConstant::Value(value)),
+        _ => None,
+    }
+}
+
+fn const_temporal_bound(expr: &ScalarExpr, params: &[SQLParam], null_default: f64) -> Option<f64> {
+    match const_value(expr, params)? {
+        Value::Null => Some(null_default),
+        Value::Int(value) => Some(value as f64),
+        Value::Float(value) => Some(value),
+        Value::Decimal(value) => value.to_f64(),
+        _ => None,
+    }
+}
+
 fn const_f64(expr: &ScalarExpr, params: &[SQLParam]) -> Option<f64> {
     match const_value(expr, params)? {
         Value::Int(n) => Some(n as f64),
@@ -816,9 +1454,16 @@ fn const_f64(expr: &ScalarExpr, params: &[SQLParam]) -> Option<f64> {
     }
 }
 
+fn const_bool(expr: &ScalarExpr, params: &[SQLParam]) -> Option<bool> {
+    match const_value(expr, params)? {
+        Value::Bool(value) => Some(value),
+        _ => None,
+    }
+}
+
 fn const_usize(expr: &ScalarExpr, params: &[SQLParam]) -> Option<usize> {
     match const_value(expr, params)? {
-        Value::Int(n) if n >= 0 => Some(n as usize),
+        Value::Int(n) if n >= 0 => usize::try_from(n).ok(),
         _ => None,
     }
 }
@@ -839,6 +1484,7 @@ fn const_vector(expr: &ScalarExpr, params: &[SQLParam]) -> Option<Vec<f32>> {
                     match v {
                         Value::Int(n) => out.push(n as f32),
                         Value::Float(f) => out.push(f as f32),
+                        Value::Decimal(d) => out.push(d.to_f64()? as f32),
                         _ => return None,
                     }
                 }
@@ -899,11 +1545,18 @@ fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
 /// Physical `OperatorTreeDriver` backed by the engine's table, index, graph,
 /// join, and ML runtimes. Single-document branches compose through the core
 /// posting-list algebra; join branches retain the generalized tuple carrier.
+#[derive(Clone, Copy)]
+enum DriverExecution {
+    Public,
+    InExecution,
+}
+
 pub struct EngineDriver<'a> {
     pub engine: &'a Engine,
     pub table: &'a str,
     pub params: &'a [SQLParam],
     pub parallel: ParallelExecutor,
+    execution: DriverExecution,
 }
 
 impl<'a> EngineDriver<'a> {
@@ -914,6 +1567,21 @@ impl<'a> EngineDriver<'a> {
             table,
             params,
             parallel: ParallelExecutor::default(),
+            execution: DriverExecution::Public,
+        }
+    }
+
+    fn new_in_execution(
+        engine: &'a Engine,
+        table: &'a str,
+        params: &'a [SQLParam],
+    ) -> EngineDriver<'a> {
+        Self {
+            engine,
+            table,
+            params,
+            parallel: ParallelExecutor::default(),
+            execution: DriverExecution::InExecution,
         }
     }
 
@@ -924,6 +1592,15 @@ impl<'a> EngineDriver<'a> {
     pub fn with_parallel(mut self, par: ParallelExecutor) -> Self {
         self.parallel = par;
         self
+    }
+
+    fn bayesian_params_for(&self, field: &str) -> DriverResult<uqa_scoring::BayesianBM25Params> {
+        match self.execution {
+            DriverExecution::Public => self.engine.bayesian_params_for(self.table, field),
+            DriverExecution::InExecution => self
+                .engine
+                .bayesian_params_for_in_execution(self.table, field),
+        }
     }
 
     fn execute_posting_node(&self, op: &OperatorTree) -> DriverResult<PostingList> {
@@ -975,23 +1652,68 @@ impl<'a> EngineDriver<'a> {
                 "OperatorTree::Term reached EngineDriver without bound text scoring".into(),
             )
         })?;
-        let field_expr = match field {
-            Some(f) => ScalarExpr::Column(f.to_string()),
-            None => ScalarExpr::Literal(Value::Str(String::new())),
-        };
-        let args = vec![
-            field_expr,
-            ScalarExpr::Literal(Value::Str(query.to_string())),
-        ];
-        let result = match scoring {
-            TextScoringMode::BM25 => {
-                sql::run_text_match_public(self.engine, self.table, &args, self.params)
+        if let Some(field) = field {
+            self.engine.validate_text_search_field(self.table, field)?;
+            let mode = match scoring {
+                TextScoringMode::BM25 => crate::ScoringMode::BM25(crate::BM25Params::default()),
+                TextScoringMode::BayesianBM25 => {
+                    crate::ScoringMode::BayesianBM25(self.bayesian_params_for(field)?)
+                }
+                TextScoringMode::CustomBM25(params) => crate::ScoringMode::BM25(params),
+                TextScoringMode::CustomBayesianBM25(params) => {
+                    crate::ScoringMode::BayesianBM25(params)
+                }
+            };
+            return self
+                .engine
+                .search_leaf(self.table, field, query, &mode, usize::MAX)
+                .map(|rows| scored_to_posting_list(&rows));
+        }
+        if matches!(
+            scoring,
+            TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_)
+        ) {
+            return Err(SQLError::TypeMismatch(
+                "explicit text scoring parameters require one concrete field".into(),
+            ));
+        }
+        let fields = self.engine.fts_fields_for_table(self.table)?;
+        if fields.is_empty() {
+            return Err(SQLError::TypeMismatch(format!(
+                "text search: table `{}` has no text-indexed columns",
+                self.table
+            )));
+        }
+        let mut by_document = BTreeMap::<DocId, f64>::new();
+        for field in fields {
+            let mode = match scoring {
+                TextScoringMode::BM25 => crate::ScoringMode::BM25(crate::BM25Params::default()),
+                TextScoringMode::BayesianBM25 => {
+                    crate::ScoringMode::BayesianBM25(self.bayesian_params_for(&field)?)
+                }
+                TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_) => {
+                    return Err(SQLError::Internal(
+                        "custom all-field scoring passed validation without a concrete field"
+                            .into(),
+                    ));
+                }
+            };
+            for entry in self
+                .engine
+                .search_leaf(self.table, &field, query, &mode, usize::MAX)?
+            {
+                by_document
+                    .entry(entry.doc_id)
+                    .and_modify(|score| *score = score.max(entry.score))
+                    .or_insert(entry.score);
             }
-            TextScoringMode::BayesianBM25 => {
-                sql::run_bayesian_match_public(self.engine, self.table, &args, self.params)
-            }
-        };
-        result.map(|rows| scored_to_posting_list(&rows))
+        }
+        Ok(scored_to_posting_list(
+            &by_document
+                .into_iter()
+                .map(|(doc_id, score)| ScoredEntry { doc_id, score })
+                .collect::<Vec<_>>(),
+        ))
     }
 
     fn execute_knn(
@@ -1001,18 +1723,8 @@ impl<'a> EngineDriver<'a> {
         field: &str,
     ) -> DriverResult<PostingList> {
         self.require_vector_query(field, query_vector)?;
-        let v_expr = ScalarExpr::Array(
-            query_vector
-                .iter()
-                .map(|x| ScalarExpr::Literal(Value::Float(f64::from(*x))))
-                .collect(),
-        );
-        let args = vec![
-            ScalarExpr::Column(field.to_string()),
-            v_expr,
-            ScalarExpr::Literal(Value::Int(k as i64)),
-        ];
-        sql::run_knn_match_public(self.engine, self.table, &args, self.params)
+        self.engine
+            .knn_search_leaf(self.table, field, query_vector, k)
             .map(|rows| scored_to_posting_list(&rows))
     }
 
@@ -1022,16 +1734,11 @@ impl<'a> EngineDriver<'a> {
         predicate: &Predicate,
         source: Option<&OperatorTree>,
     ) -> DriverResult<PostingList> {
-        if !self.engine.has_table(self.table) {
-            return Err(SQLError::UnknownTable(self.table.to_string()));
-        }
-        if !self.engine.table_has_column(self.table, field) {
-            return Err(SQLError::UnknownColumn(field.to_string()));
-        }
+        self.require_column(field)?;
         // Indexed columns resolve through the value index in
         // O(log n + k); the index refuses predicates it cannot answer
         // with evaluated-scan semantics, so this never changes results.
-        if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate) {
+        if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate)? {
             return match source {
                 Some(child) => self
                     .execute_posting_node(child)
@@ -1044,14 +1751,20 @@ impl<'a> EngineDriver<'a> {
                 let inner = self.execute_posting_node(child)?;
                 inner.entries().iter().map(|e| e.doc_id).collect()
             }
-            None => self.engine.table_doc_ids(self.table),
+            None => self.engine.table_doc_ids(self.table)?,
         };
         let values = self
             .engine
-            .get_document_fields(self.table, &candidates, field);
+            .get_document_fields(self.table, &candidates, field)?;
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(candidates.len());
         for doc_id in candidates {
-            if predicate.evaluate(values.get(&doc_id)) {
+            let Some(value) = values.get(&doc_id) else {
+                return Err(SQLError::Internal(format!(
+                    "Filter consistency error: candidate {doc_id} is missing from the document-field snapshot for table `{}`",
+                    self.table
+                )));
+            };
+            if predicate.evaluate(Some(value)) {
                 entries.push(PostingEntry::new(doc_id, Payload::default()));
             }
         }
@@ -1078,11 +1791,23 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             OperatorTree::BayesianScore { source, field } => {
                 self.execute_bayesian_score(source, field.as_deref())
             }
+            OperatorTree::BayesianMatchWithPrior {
+                field,
+                query,
+                prior_field,
+                mode,
+            } => self.execute_bayesian_match_with_prior(field, query, prior_field, *mode),
             OperatorTree::KNN {
                 query_vector,
                 k,
                 field,
             } => self.execute_knn(query_vector, *k, field),
+            OperatorTree::CalibratedVectorMatch {
+                query_vector,
+                k,
+                field,
+                threshold,
+            } => self.execute_calibrated_vector_match(field, query_vector, *k, *threshold),
             OperatorTree::Filter {
                 field,
                 predicate,
@@ -1111,14 +1836,16 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 weights,
                 logit_min,
                 logit_max,
-            } => self.execute_log_odds_fusion(
+                adaptive_weights,
+            } => self.execute_log_odds_fusion(LogOddsExecution {
                 signals,
-                *alpha,
+                alpha: *alpha,
                 gating,
-                weights.as_deref(),
-                logit_min.as_deref(),
-                logit_max.as_deref(),
-            ),
+                weights: weights.as_deref(),
+                logit_min: logit_min.as_deref(),
+                logit_max: logit_max.as_deref(),
+                adaptive_weights: *adaptive_weights,
+            }),
             OperatorTree::ProbBoolFusion { signals, mode } => {
                 self.execute_prob_bool_fusion(signals, *mode)
             }
@@ -1168,13 +1895,13 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             }
             OperatorTree::SparseThreshold { source, threshold } => {
                 let source = self.execute_posting_node(source)?;
-                Ok(sparse_threshold_inline(&source, *threshold))
+                sparse_threshold_inline(&source, *threshold)
             }
             OperatorTree::MultiFieldSearch {
                 fields,
-                query,
+                queries,
                 weights,
-            } => self.execute_multi_field_search(fields, query, weights.as_deref()),
+            } => self.execute_multi_field_search(fields, queries, weights.as_deref()),
             OperatorTree::MultiStage { stages } => self.execute_multi_stage(stages),
             OperatorTree::Traverse {
                 start_vertex,
@@ -1189,6 +1916,15 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 *max_hops,
                 vertex_predicate.as_ref(),
             ),
+            OperatorTree::GraphNeighbors {
+                vertex,
+                graph,
+                label,
+                direction,
+            } => self.execute_graph_neighbors(*vertex, graph, label.as_deref(), *direction),
+            OperatorTree::GraphEdges { graph, label } => {
+                self.execute_graph_edges(graph, label.as_deref())
+            }
             OperatorTree::PatternMatch { pattern, graph } => {
                 self.execute_pattern_match(pattern, graph)
             }
@@ -1294,11 +2030,12 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 alpha,
                 gating,
             } => self.execute_deep_fusion(layers, *alpha, gating),
+            OperatorTree::DeepPredict { model } => self.execute_deep_predict(model),
             OperatorTree::Opaque {
                 kind,
                 children,
                 meta,
-            } => self.execute_opaque(kind, children, meta),
+            } => Self::execute_opaque(kind, children, meta),
         }?;
         Ok(OperatorOutput::Posting(posting))
     }
@@ -1342,13 +2079,17 @@ impl EngineDriver<'_> {
     }
 
     fn execute_complement(&self, inner: &OperatorTree) -> DriverResult<PostingList> {
-        if !self.engine.has_table(self.table) {
+        if !self
+            .engine
+            .has_table(self.table)
+            .map_err(|error| operator_execution_error("resolve complement table", error))?
+        {
             return Err(SQLError::UnknownTable(self.table.to_string()));
         }
         let inner_pl = self.execute_posting_node(inner)?;
         let included: BTreeSet<DocId> = inner_pl.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
-        for doc_id in self.engine.table_doc_ids(self.table) {
+        for doc_id in self.engine.table_doc_ids(self.table)? {
             if !included.contains(&doc_id) {
                 entries.push(PostingEntry::new(doc_id, Payload::default()));
             }
@@ -1377,7 +2118,8 @@ impl EngineDriver<'_> {
             .map(|child| self.execute_posting_node(child).map(static_operator))
             .transpose()?;
         let op = FacetOperator::new(field, source);
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("Facet", error))
     }
 
     fn execute_score(
@@ -1392,7 +2134,8 @@ impl EngineDriver<'_> {
         self.require_column(field)?;
         let source = static_operator(self.execute_posting_node(source)?);
         let op = ScoreOperator::new(scorer.clone(), source, query_terms.to_vec(), field);
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("Score", error))
     }
 
     fn execute_vector_similarity(
@@ -1410,7 +2153,8 @@ impl EngineDriver<'_> {
             )));
         }
         let op = VectorSimilarityOperator::new(query_vector.to_vec(), threshold, field);
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("VectorSimilarity", error))
     }
 
     fn execute_aggregate(
@@ -1426,7 +2170,8 @@ impl EngineDriver<'_> {
             .map(|child| self.execute_posting_node(child).map(static_operator))
             .transpose()?;
         let op = AggregateOperator::new(source, field, monoid.clone());
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("Aggregate", error))
     }
 
     fn execute_group_by(
@@ -1442,7 +2187,8 @@ impl EngineDriver<'_> {
         self.require_column(agg_field)?;
         let source = static_operator(self.execute_posting_node(source)?);
         let op = GroupByOperator::new(source, group_field, agg_field, monoid.clone());
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("GroupBy", error))
     }
 
     fn execute_hybrid_text_vector(
@@ -1469,14 +2215,31 @@ impl EngineDriver<'_> {
             .map(|entry| (entry.doc_id, entry.payload.score))
             .collect();
         let intersection = text.intersect_owned(&vector);
-        Ok(intersection.with_scores(|entry| {
-            let text_score = text_scores.get(&entry.doc_id).copied().unwrap_or_default();
-            let vector_score = vector_scores
+        let entries = intersection
+            .entries()
+            .iter()
+            .map(|entry| {
+                let text_score = text_scores.get(&entry.doc_id).copied().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "HybridTextVector consistency error: intersection candidate {} is missing from the text score map",
+                        entry.doc_id
+                    ))
+                })?;
+                let vector_score = vector_scores
                 .get(&entry.doc_id)
                 .copied()
-                .unwrap_or_default();
-            alpha * text_score + (1.0 - alpha) * vector_score
-        }))
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "HybridTextVector consistency error: intersection candidate {} is missing from the vector score map",
+                            entry.doc_id
+                        ))
+                    })?;
+                let mut scored = entry.clone();
+                scored.payload.score = alpha * text_score + (1.0 - alpha) * vector_score;
+                Ok(scored)
+            })
+            .collect::<DriverResult<Vec<_>>>()?;
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn execute_semantic_filter(
@@ -1508,8 +2271,74 @@ impl EngineDriver<'_> {
             if let Some(predicate) = vertex_predicate {
                 op = op.predicate(uqa_graph::VertexPredicate::Custom(predicate.clone()));
             }
-            op.execute(store).to_posting_list()
+            op.execute(store)
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("Traverse", error))
         })
+    }
+
+    fn execute_graph_neighbors(
+        &self,
+        vertex: u64,
+        graph: &str,
+        label: Option<&str>,
+        direction: DeepGraphDirection,
+    ) -> DriverResult<PostingList> {
+        let direction = match direction {
+            DeepGraphDirection::Out => uqa_graph::Direction::Out,
+            DeepGraphDirection::In => uqa_graph::Direction::In,
+            DeepGraphDirection::Both => uqa_graph::Direction::Both,
+        };
+        let neighbors = self.with_graph(graph, |store| {
+            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::neighbors(
+                store, vertex, label, direction, graph,
+            )
+            .map_err(|error| graph_execution_error("GraphNeighbors", error))
+        })?;
+        let entries = neighbors
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|doc_id| {
+                PostingEntry::new(
+                    doc_id,
+                    Payload {
+                        score: 1.0,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        Ok(PostingList::from_sorted_unchecked(entries))
+    }
+
+    fn execute_graph_edges(&self, graph: &str, label: Option<&str>) -> DriverResult<PostingList> {
+        let edges = self.with_graph(graph, |store| {
+            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::edges_in_graph(store, graph)
+                .map_err(|error| graph_execution_error("GraphEdges", error))
+        })?;
+        let mut entries = Vec::new();
+        for edge in edges {
+            if label.is_some_and(|label| edge.label != label) {
+                continue;
+            }
+            let score = match edge.properties.get("weight") {
+                Some(Value::Float(value)) => *value,
+                Some(Value::Int(value)) => *value as f64,
+                Some(Value::Decimal(value)) => value.to_f64().ok_or_else(|| {
+                    SQLError::TypeMismatch("GraphEdges.weight decimal is outside f64 range".into())
+                })?,
+                _ => 1.0,
+            };
+            entries.push(PostingEntry::new(
+                edge.edge_id,
+                Payload {
+                    score,
+                    ..Default::default()
+                },
+            ));
+        }
+        Ok(PostingList::from_unsorted(entries))
     }
 
     fn execute_pattern_match(
@@ -1521,7 +2350,8 @@ impl EngineDriver<'_> {
         self.with_graph(graph, |store| {
             uqa_graph::GMatch::new(pattern, graph)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("PatternMatch", error))
         })
     }
 
@@ -1536,7 +2366,8 @@ impl EngineDriver<'_> {
             uqa_graph::RegularPathQuery::new(path, graph)
                 .from_vertex(start_vertex)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("RegularPathQuery", error))
         })
     }
 
@@ -1555,6 +2386,7 @@ impl EngineDriver<'_> {
                 op = op.label(label);
             }
             op.execute()
+                .map_err(|error| graph_execution_error("GraphJoin", error))
         })
     }
 
@@ -1566,15 +2398,24 @@ impl EngineDriver<'_> {
         let source = self.execute_posting_node(source)?;
         let mut state = monoid.identity();
         for entry in source.entries() {
-            state = monoid.accumulate(state, &Value::Float(entry.payload.score));
+            state = monoid
+                .accumulate(state, &Value::Float(entry.payload.score))
+                .map_err(|error| operator_execution_error("VertexAggregation", error))?;
         }
-        let result = monoid.finalize(state);
+        let result = monoid
+            .finalize(state)
+            .map_err(|error| operator_execution_error("VertexAggregation", error))?;
         let score = numeric_score(&result);
         let mut fields = BTreeMap::new();
         fields.insert("_vertex_aggregate".to_string(), result);
         fields.insert(
             "_vertex_aggregate_count".to_string(),
-            Value::Int(source.len() as i64),
+            Value::Int(i64::try_from(source.len()).map_err(|_| {
+                SQLError::Internal(format!(
+                    "vertex aggregate input count {} exceeds the SQL BIGINT range",
+                    source.len()
+                ))
+            })?),
         );
         Ok(PostingList::from_sorted_unchecked(vec![PostingEntry::new(
             0,
@@ -1633,7 +2474,9 @@ impl EngineDriver<'_> {
             op.default_edge_weight = default_edge_weight;
             op.max_hops = max_hops;
             op.score = score;
-            op.execute(store).to_posting_list()
+            op.execute(store)
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("WeightedPathQuery", error))
         })
     }
 
@@ -1643,7 +2486,8 @@ impl EngineDriver<'_> {
         let result = self.with_graph(&graph, |store| {
             uqa_graph::MessagePassing::new(&graph)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("MessagePassing", error))
         })?;
         Ok(restrict_result_to_source(&result, &source_result))
     }
@@ -1654,7 +2498,8 @@ impl EngineDriver<'_> {
         let result = self.with_graph(&graph, |store| {
             uqa_graph::GraphEmbedding::new(&graph)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("GraphEmbedding", error))
         })?;
         Ok(restrict_result_to_source(&result, &source_result))
     }
@@ -1663,13 +2508,17 @@ impl EngineDriver<'_> {
         self.with_graph(graph, |store| {
             uqa_graph::PageRank::new(graph)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("PageRank", error))
         })
     }
 
     fn execute_hits(&self, graph: &str) -> DriverResult<PostingList> {
         self.with_graph(graph, |store| {
-            uqa_graph::HITS::new(graph).execute(store).to_posting_list()
+            uqa_graph::HITS::new(graph)
+                .execute(store)
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("HITS", error))
         })
     }
 
@@ -1677,7 +2526,8 @@ impl EngineDriver<'_> {
         self.with_graph(graph, |store| {
             uqa_graph::BetweennessCentrality::new(graph)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("BetweennessCentrality", error))
         })
     }
 
@@ -1698,14 +2548,15 @@ impl EngineDriver<'_> {
         let right_source = self.execute_posting_node(right)?;
         let left = self.prepare_join_operand(&left_source, &left_field, "_join_text")?;
         let right = self.prepare_join_operand(&right_source, &right_field, "_join_text")?;
-        Ok(uqa_joins::TextSimilarityJoin::new(
+        uqa_joins::TextSimilarityJoin::new(
             left.entries(),
             right.entries(),
             "_join_text",
             "_join_text",
         )
         .threshold(threshold)
-        .execute())
+        .execute()
+        .map_err(|error| SQLError::Internal(format!("execute TextSimilarityJoin: {error}")))
     }
 
     fn execute_vector_similarity_join(
@@ -1725,14 +2576,15 @@ impl EngineDriver<'_> {
         let right_source = self.execute_posting_node(right)?;
         let left = self.prepare_join_operand(&left_source, &left_field, "_join_vector")?;
         let right = self.prepare_join_operand(&right_source, &right_field, "_join_vector")?;
-        Ok(uqa_joins::VectorSimilarityJoin::new(
+        uqa_joins::VectorSimilarityJoin::new(
             left.entries(),
             right.entries(),
             "_join_vector",
             "_join_vector",
         )
         .threshold(threshold)
-        .execute())
+        .execute()
+        .map_err(|error| SQLError::Internal(format!("execute VectorSimilarityJoin: {error}")))
     }
 
     fn execute_hybrid_join(
@@ -1752,13 +2604,14 @@ impl EngineDriver<'_> {
             self.prepare_join_operand(&right_result, &structured_field.1, "_join_key")?;
         let right_result =
             self.prepare_join_operand(&right_keyed, &vector_field.1, "_join_vector")?;
-        Ok(uqa_joins::HybridJoin::new(
+        uqa_joins::HybridJoin::new(
             left_result.entries(),
             right_result.entries(),
             "_join_key",
             "_join_vector",
         )
-        .execute())
+        .execute()
+        .map_err(|error| SQLError::Internal(format!("execute HybridJoin: {error}")))
     }
 
     fn execute_cross_paradigm_join(
@@ -1788,6 +2641,7 @@ impl EngineDriver<'_> {
                 "_join_document",
             )
             .execute()
+            .map_err(|error| SQLError::Internal(format!("execute CrossParadigmJoin: {error}")))
         })
     }
 
@@ -1800,30 +2654,55 @@ impl EngineDriver<'_> {
         let document_store = self
             .engine
             .table(self.table)
-            .map(|table| table.document_store.read().snapshot());
+            .map_err(|error| operator_execution_error("resolve join table", error))?
+            .map(|table| {
+                table
+                    .document_store
+                    .read()
+                    .snapshot()
+                    .map_err(|error| operator_execution_error("document snapshot", error))
+            })
+            .transpose()?;
         let requires_document_lookup = source
             .entries()
             .iter()
             .any(|entry| !entry.payload.fields.contains_key(field));
-        if document_store.is_some() && requires_document_lookup {
+        if requires_document_lookup && document_store.is_none() {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
+        }
+        if requires_document_lookup {
             self.require_column(field)?;
         }
-        let entries = source
-            .entries()
-            .iter()
-            .map(|entry| {
-                let mut payload = entry.payload.clone();
-                let value = payload.fields.get(field).cloned().or_else(|| {
-                    document_store
-                        .as_ref()
-                        .and_then(|store| store.get_field(entry.doc_id, field))
-                });
-                if let Some(value) = value {
-                    payload.fields.insert(alias.to_string(), value);
+        let mut entries = Vec::with_capacity(source.len());
+        for entry in source.entries() {
+            let mut payload = entry.payload.clone();
+            let value = if let Some(value) = payload.fields.get(field) {
+                Some(value.clone())
+            } else if let Some(store) = document_store.as_ref() {
+                let value = store
+                    .get_field(entry.doc_id, field)
+                    .map_err(|error| operator_execution_error("document field lookup", error))?;
+                if value.is_none()
+                    && !store
+                        .contains_doc_id(entry.doc_id)
+                        .map_err(|error| operator_execution_error("document lookup", error))?
+                {
+                    return Err(SQLError::Internal(format!(
+                        "join operand references document {} missing from table `{}`",
+                        entry.doc_id, self.table
+                    )));
                 }
-                PostingEntry::new(entry.doc_id, payload)
-            })
-            .collect();
+                value
+            } else {
+                return Err(SQLError::Internal(
+                    "join document store disappeared after validation".to_string(),
+                ));
+            };
+            if let Some(value) = value {
+                payload.fields.insert(alias.to_string(), value);
+            }
+            entries.push(PostingEntry::new(entry.doc_id, payload));
+        }
         Ok(PostingList::from_sorted_unchecked(entries))
     }
 
@@ -1848,7 +2727,9 @@ impl EngineDriver<'_> {
             if let Some(label) = label {
                 op = op.label(label);
             }
-            op.execute(store).to_posting_list()
+            op.execute(store)
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("TemporalTraverse", error))
         })
     }
 
@@ -1864,18 +2745,20 @@ impl EngineDriver<'_> {
             uqa_graph::TemporalPatternMatch::new(pattern, graph)
                 .filter(filter)
                 .execute(store)
-                .to_posting_list()
+                .map(|result| result.to_posting_list())
+                .map_err(|error| graph_execution_error("TemporalPatternMatch", error))
         })
     }
 
     fn with_graph<R>(
         &self,
         graph: &str,
-        execute: impl FnOnce(&uqa_graph::MemoryGraphStore) -> R,
+        execute: impl FnOnce(&uqa_graph::MemoryGraphStore) -> DriverResult<R>,
     ) -> DriverResult<R> {
         self.engine
             .graph_with(graph, execute)
-            .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
+            .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+            .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?
     }
 
     fn execute_facet_vector(
@@ -1895,7 +2778,9 @@ impl EngineDriver<'_> {
         use uqa_operators::base::Operator;
         use uqa_operators::{HybridProbBoolMode, ProbBoolFusionOperator};
         if signals.is_empty() {
-            return Ok(PostingList::new());
+            return Err(SQLError::TypeMismatch(
+                "ProbBoolFusion requires at least one signal".to_string(),
+            ));
         }
         // Pre-execute every child through the driver, then wrap the
         // results in static signal operators so the fusion operator can
@@ -1912,23 +2797,47 @@ impl EngineDriver<'_> {
             uqa_operators::ProbBoolMode::Or => HybridProbBoolMode::Or,
         };
         let op = ProbBoolFusionOperator::new(signal_ops, mode);
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("ProbBoolFusion", error))
     }
 
     fn execute_multi_field_search(
         &self,
         fields: &[String],
-        query: &str,
+        queries: &[String],
         weights: Option<&[f64]>,
     ) -> DriverResult<PostingList> {
         // Delegate to the row-function implementation like the other
         // leaf nodes, so every lowering of `multi_field_match` shares
         // one pad, one per-field analyzer choice, and one stats source.
-        let mut args: Vec<ScalarExpr> = fields
-            .iter()
-            .map(|field| ScalarExpr::Column(field.clone()))
-            .collect();
-        args.push(ScalarExpr::Literal(Value::Str(query.to_string())));
+        if fields.len() != queries.len() {
+            return Err(SQLError::Internal(format!(
+                "multi-field IR has {} fields but {} queries",
+                fields.len(),
+                queries.len()
+            )));
+        }
+        let all_queries_equal = queries
+            .first()
+            .is_none_or(|first| queries.iter().all(|query| query == first));
+        let mut args = Vec::new();
+        if all_queries_equal {
+            args.extend(fields.iter().cloned().map(ScalarExpr::Column));
+            if let Some(query) = queries.first() {
+                args.push(ScalarExpr::Literal(Value::Str(query.clone())));
+            }
+        } else {
+            if weights.is_some() {
+                return Err(SQLError::Internal(
+                    "multi-field IR cannot attach one weight vector to distinct per-field queries"
+                        .to_string(),
+                ));
+            }
+            for (field, query) in fields.iter().zip(queries) {
+                args.push(ScalarExpr::Column(field.clone()));
+                args.push(ScalarExpr::Literal(Value::Str(query.clone())));
+            }
+        }
         if let Some(weights) = weights {
             args.extend(
                 weights
@@ -1936,79 +2845,77 @@ impl EngineDriver<'_> {
                     .map(|weight| ScalarExpr::Literal(Value::Float(*weight))),
             );
         }
-        sql::run_multi_field_match_public(self.engine, self.table, &args, self.params)
-            .map(|rows| scored_to_posting_list(&rows))
+        let run = match self.execution {
+            DriverExecution::Public => sql::run_multi_field_match_public,
+            DriverExecution::InExecution => sql::run_multi_field_match_in_execution,
+        };
+        run(self.engine, self.table, &args, self.params).map(|rows| scored_to_posting_list(&rows))
     }
 
     fn execute_bayesian_match_with_prior(
         &self,
-        meta: &BTreeMap<String, Value>,
+        field: &str,
+        query: &str,
+        prior_field: &str,
+        mode: ExternalPriorMode,
     ) -> DriverResult<PostingList> {
-        let Some(Value::Str(field)) = meta.get("field") else {
-            return Err(malformed_operator_meta(
-                "bayesian_match_with_prior",
-                "field",
-            ));
-        };
-        let Some(Value::Str(query)) = meta.get("query") else {
-            return Err(malformed_operator_meta(
-                "bayesian_match_with_prior",
-                "query",
-            ));
-        };
-        let Some(Value::Str(prior_field)) = meta.get("prior_field") else {
-            return Err(malformed_operator_meta(
-                "bayesian_match_with_prior",
-                "prior_field",
-            ));
-        };
-        let Some(Value::Str(mode)) = meta.get("mode") else {
-            return Err(malformed_operator_meta("bayesian_match_with_prior", "mode"));
-        };
         let args = vec![
-            ScalarExpr::Column(field.clone()),
-            ScalarExpr::Literal(Value::Str(query.clone())),
-            ScalarExpr::Column(prior_field.clone()),
-            ScalarExpr::Literal(Value::Str(mode.clone())),
+            ScalarExpr::Column(field.to_string()),
+            ScalarExpr::Literal(Value::Str(query.to_string())),
+            ScalarExpr::Column(prior_field.to_string()),
+            ScalarExpr::Literal(Value::Str(
+                match mode {
+                    ExternalPriorMode::Authority => "authority",
+                    ExternalPriorMode::Recency => "recency",
+                }
+                .to_string(),
+            )),
         ];
-        sql::run_bayesian_match_with_prior_public(self.engine, self.table, &args, self.params)
-            .map(|rows| scored_to_posting_list(&rows))
+        let run = match self.execution {
+            DriverExecution::Public => sql::run_bayesian_match_with_prior_public,
+            DriverExecution::InExecution => sql::run_bayesian_match_with_prior_in_execution,
+        };
+        run(self.engine, self.table, &args, self.params).map(|rows| scored_to_posting_list(&rows))
     }
 
     fn execute_calibrated_vector_match(
         &self,
-        meta: &BTreeMap<String, Value>,
+        field: &str,
+        query_vector: &[f32],
+        k: usize,
+        threshold: Option<f64>,
     ) -> DriverResult<PostingList> {
-        let Some(Value::Str(field)) = meta.get("field") else {
-            return Err(malformed_operator_meta("calibrated_vector_match", "field"));
-        };
-        let Some(Value::List(query_vector)) = meta.get("query_vector") else {
-            return Err(malformed_operator_meta(
-                "calibrated_vector_match",
-                "query_vector",
-            ));
-        };
-        let Some(Value::Int(k)) = meta.get("k") else {
-            return Err(malformed_operator_meta("calibrated_vector_match", "k"));
-        };
-        let physical_query = value_to_vector(&Value::List(query_vector.clone()))?;
-        self.require_vector_query(field, &physical_query)?;
+        self.require_vector_query(field, query_vector)?;
         let mut args = vec![
-            ScalarExpr::Literal(Value::Str(field.clone())),
+            ScalarExpr::Literal(Value::Str(field.to_string())),
             ScalarExpr::Array(
                 query_vector
                     .iter()
-                    .cloned()
-                    .map(ScalarExpr::Literal)
+                    .map(|value| ScalarExpr::Literal(Value::Float(f64::from(*value))))
                     .collect(),
             ),
-            ScalarExpr::Literal(Value::Int(*k)),
+            ScalarExpr::Literal(Value::Int(i64::try_from(k).map_err(|_| {
+                SQLError::TypeMismatch(format!("calibrated vector k is too large: {k}"))
+            })?)),
         ];
-        if let Some(threshold) = meta.get("threshold") {
-            args.push(ScalarExpr::Literal(threshold.clone()));
+        if let Some(threshold) = threshold {
+            args.push(ScalarExpr::Literal(Value::Float(threshold)));
         }
         sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params)
             .map(|rows| scored_to_posting_list(&rows))
+    }
+
+    fn execute_deep_predict(&self, model: &str) -> DriverResult<PostingList> {
+        let scores = self
+            .engine
+            .deep_predict_leaf(model)?
+            .ok_or_else(|| SQLError::Unsupported(format!("unknown model {model:?}")))?;
+        Ok(PostingList::from_unsorted(
+            scores
+                .into_iter()
+                .map(|(doc_id, score)| PostingEntry::new(doc_id, Payload::with_score(score)))
+                .collect(),
+        ))
     }
 
     fn execute_prob_not(
@@ -2022,7 +2929,8 @@ impl EngineDriver<'_> {
         let signal_op: std::sync::Arc<dyn Operator> =
             std::sync::Arc::new(StaticPostingList { pl: signal_pl });
         let op = ProbNotOperator::new(signal_op, default_prob);
-        Ok(op.execute(&self.bridge_context()?))
+        op.execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("ProbNot", error))
     }
 
     fn execute_index_scan(
@@ -2032,12 +2940,17 @@ impl EngineDriver<'_> {
         predicate: &uqa_core::Predicate,
     ) -> DriverResult<PostingList> {
         self.require_column(field)?;
-        let index = self.engine.catalog_index(index_name).ok_or_else(|| {
-            SQLError::Unsupported(format!("unknown physical index {index_name:?}"))
-        })?;
+        let index = self
+            .engine
+            .catalog_index(index_name)
+            .map_err(|error| operator_execution_error("resolve physical index", error))?
+            .ok_or_else(|| {
+                SQLError::Unsupported(format!("unknown physical index {index_name:?}"))
+            })?;
         let resolved_table = self
             .engine
             .resolve_table_name(self.table)
+            .map_err(|error| operator_execution_error("resolve index table", error))?
             .unwrap_or_else(|| self.table.to_string());
         if index.table_name != resolved_table {
             return Err(SQLError::TypeMismatch(format!(
@@ -2062,7 +2975,7 @@ impl EngineDriver<'_> {
             )));
         }
         self.engine
-            .value_index_scan(self.table, field, predicate)
+            .value_index_scan(self.table, field, predicate)?
             .ok_or_else(|| {
                 SQLError::Unsupported(format!(
                     "index {index_name:?} cannot evaluate predicate {predicate:?}"
@@ -2089,17 +3002,24 @@ impl EngineDriver<'_> {
 
     fn execute_log_odds_fusion(
         &self,
-        signals: &[OperatorTree],
-        alpha: f64,
-        gating: &GatingSpec,
-        weights: Option<&[f64]>,
-        logit_min: Option<&[f64]>,
-        logit_max: Option<&[f64]>,
+        execution: LogOddsExecution<'_>,
     ) -> DriverResult<PostingList> {
         use uqa_operators::base::Operator;
 
+        let LogOddsExecution {
+            signals,
+            alpha,
+            gating,
+            weights,
+            logit_min,
+            logit_max,
+            adaptive_weights,
+        } = execution;
+
         if signals.is_empty() {
-            return Ok(PostingList::new());
+            return Err(SQLError::TypeMismatch(
+                "LogOddsFusion requires at least one signal".to_string(),
+            ));
         }
         let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
         let mut signal_priors: Vec<f64> = Vec::new();
@@ -2119,6 +3039,9 @@ impl EngineDriver<'_> {
             GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
         };
         let mut operator = LogOddsFusionOperator::new(signal_ops, alpha).with_gating(logit_gating);
+        if adaptive_weights {
+            operator = operator.with_adaptive_weights();
+        }
         if let Some(base_rate) = combine_signal_priors(&signal_priors) {
             operator = operator.with_base_rate(base_rate);
         }
@@ -2128,7 +3051,9 @@ impl EngineDriver<'_> {
         if let (Some(logit_min), Some(logit_max)) = (logit_min, logit_max) {
             operator = operator.with_logit_normalization(logit_min.to_vec(), logit_max.to_vec());
         }
-        Ok(operator.execute(&self.bridge_context()?))
+        operator
+            .execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("LogOddsFusion", error))
     }
 
     /// Execute a fusion child under the probability contract: the
@@ -2141,12 +3066,11 @@ impl EngineDriver<'_> {
     ) -> DriverResult<(PostingList, Option<f64>)> {
         match signal {
             OperatorTree::BayesianScore { source, field } => {
-                let params = field
-                    .as_deref()
-                    .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
-                        self.engine.bayesian_params_for(self.table, field)
-                    })
-                    .scaled_for_query_terms(scored_term_count(source));
+                let params = match field.as_deref() {
+                    Some(field) => self.bayesian_params_for(field)?,
+                    None => uqa_scoring::BayesianBM25Params::default(),
+                }
+                .scaled_for_query_terms(scored_term_count(source));
                 let prior = (params.base_rate > 0.0).then_some(params.base_rate);
                 let evidence_params = params.evidence_params();
                 let raw = self.execute_posting_node(source)?;
@@ -2167,15 +3091,14 @@ impl EngineDriver<'_> {
                     None => ScalarExpr::Literal(Value::Str(String::new())),
                 };
                 let args = vec![field_expr, ScalarExpr::Literal(Value::Str(query.clone()))];
-                let rows = sql::run_bayesian_evidence_match_public(
-                    self.engine,
-                    self.table,
-                    &args,
-                    self.params,
-                )?;
+                let run = match self.execution {
+                    DriverExecution::Public => sql::run_bayesian_evidence_match_public,
+                    DriverExecution::InExecution => sql::run_bayesian_evidence_match_in_execution,
+                };
+                let rows = run(self.engine, self.table, &args, self.params)?;
                 Ok((
                     scored_to_posting_list(&rows),
-                    self.text_field_prior(field.as_deref()),
+                    self.text_field_prior(field.as_deref())?,
                 ))
             }
             OperatorTree::CosineProbability(source) => self
@@ -2189,22 +3112,22 @@ impl EngineDriver<'_> {
 
     /// The corpus relevance prior of a text field, or the logit-mean
     /// prior across every text-indexed field for `_all` queries.
-    fn text_field_prior(&self, field: Option<&str>) -> Option<f64> {
-        let priors: Vec<f64> = match field {
-            Some(field) => vec![self.engine.bayesian_params_for(self.table, field).base_rate],
-            None => self
-                .engine
-                .fts_fields_for_table(self.table)
-                .iter()
-                .map(|field| self.engine.bayesian_params_for(self.table, field).base_rate)
-                .collect(),
+    fn text_field_prior(&self, field: Option<&str>) -> DriverResult<Option<f64>> {
+        let priors: Vec<f64> = if let Some(field) = field {
+            vec![self.bayesian_params_for(field)?.base_rate]
+        } else {
+            let mut priors = Vec::new();
+            for field in self.engine.fts_fields_for_table(self.table)? {
+                priors.push(self.bayesian_params_for(&field)?.base_rate);
+            }
+            priors
         };
-        combine_signal_priors(
+        Ok(combine_signal_priors(
             &priors
                 .into_iter()
                 .filter(|rate| *rate > 0.0)
                 .collect::<Vec<_>>(),
-        )
+        ))
     }
 
     /// Likelihood-ratio calibrated vector evidence: fit the pool
@@ -2217,12 +3140,31 @@ impl EngineDriver<'_> {
             &distances,
             uqa_operators::RelevantSampleSplit::default(),
             0.5,
-        ) {
-            Some(transform) => pl.with_scores(|e| {
-                transform
-                    .calibrate_one(1.0 - e.payload.score)
-                    .clamp(1e-6, 1.0 - 1e-6)
-            }),
+        )
+        .map_err(|error| operator_execution_error("CosineEvidence", error))?
+        {
+            Some(transform) => {
+                let mut calibrated = Vec::with_capacity(pl.len());
+                for entry in &pl {
+                    let score = transform
+                        .calibrate_one(1.0 - entry.payload.score)
+                        .map_err(|error| {
+                            operator_execution_error(
+                                "CosineEvidence",
+                                StorageBackendError::Other(error.to_string()),
+                            )
+                        })?
+                        .clamp(1e-6, 1.0 - 1e-6);
+                    calibrated.push(PostingEntry::new(
+                        entry.doc_id,
+                        Payload {
+                            score,
+                            ..entry.payload.clone()
+                        },
+                    ));
+                }
+                PostingList::from_sorted_unchecked(calibrated)
+            }
             None => pl.with_scores(|_| 0.5),
         };
         Ok(calibrated)
@@ -2247,11 +3189,11 @@ impl EngineDriver<'_> {
         field: Option<&str>,
     ) -> DriverResult<PostingList> {
         let raw = self.execute_posting_node(source)?;
-        let params = field
-            .map_or_else(uqa_scoring::BayesianBM25Params::default, |field| {
-                self.engine.bayesian_params_for(self.table, field)
-            })
-            .scaled_for_query_terms(scored_term_count(source));
+        let params = match field {
+            Some(field) => self.bayesian_params_for(field)?,
+            None => uqa_scoring::BayesianBM25Params::default(),
+        }
+        .scaled_for_query_terms(scored_term_count(source));
         Ok(raw.with_scores(|entry| {
             uqa_scoring::sigmoid(params.alpha * (entry.payload.score - params.beta))
         }))
@@ -2264,13 +3206,20 @@ impl EngineDriver<'_> {
         query_features: &[f64],
     ) -> DriverResult<PostingList> {
         if signals.is_empty() {
-            return Ok(PostingList::new());
+            return Err(SQLError::TypeMismatch(
+                "AttentionFusion requires at least one signal".to_string(),
+            ));
         }
+        let features = self.attention_query_features(signals, query_features)?;
+        attention
+            .validate_inputs(signals.len(), features.len())
+            .map_err(|error| SQLError::TypeMismatch(format!("AttentionFusion: {error}")))?;
         let posting_lists = self.execute_posting_branches(signals)?;
-        let features = self.attention_query_features(signals, query_features);
-        Ok(fuse_signals_with(&posting_lists, |probs| {
-            attention.fuse(probs, &features)
-        }))
+        fuse_signal_batches_with(&posting_lists, |probabilities| {
+            attention
+                .fuse_batch(probabilities, &features)
+                .map_err(|error| SQLError::TypeMismatch(format!("AttentionFusion: {error}")))
+        })
     }
 
     fn execute_learned_fusion(
@@ -2279,15 +3228,27 @@ impl EngineDriver<'_> {
         learned: &uqa_operators::tree::LearnedFusionRef,
     ) -> DriverResult<PostingList> {
         if signals.is_empty() {
-            return Ok(PostingList::new());
+            return Err(SQLError::TypeMismatch(
+                "LearnedFusion requires at least one signal".to_string(),
+            ));
         }
+        learned
+            .validate_inputs(signals.len())
+            .map_err(|error| SQLError::TypeMismatch(format!("LearnedFusion: {error}")))?;
         let posting_lists = self.execute_posting_branches(signals)?;
-        Ok(fuse_signals_with(&posting_lists, |probs| {
-            learned.fuse(probs)
-        }))
+        fuse_signals_with(&posting_lists, |probs| {
+            learned
+                .fuse(probs)
+                .map_err(|error| SQLError::TypeMismatch(format!("LearnedFusion: {error}")))
+        })
     }
 
     fn execute_multi_stage(&self, stages: &[MultiStageEntry]) -> DriverResult<PostingList> {
+        if stages.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "MultiStage requires at least one stage".to_string(),
+            ));
+        }
         let mut current: Option<PostingList> = None;
         for stage in stages {
             let stage_result = self.execute_posting_node(&stage.child)?;
@@ -2305,19 +3266,30 @@ impl EngineDriver<'_> {
             entries.sort_by(|a, b| {
                 b.payload
                     .score
-                    .partial_cmp(&a.payload.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .total_cmp(&a.payload.score)
                     .then_with(|| a.doc_id.cmp(&b.doc_id))
             });
             let keep = match stage.cutoff {
                 MultiStageCutoff::TopK(k) => k,
-                MultiStageCutoff::Ratio(r) => ((entries.len() as f64) * r).ceil() as usize,
+                MultiStageCutoff::Ratio(r) => {
+                    if !r.is_finite() || !(0.0..=1.0).contains(&r) {
+                        return Err(SQLError::TypeMismatch(format!(
+                            "MultiStage ratio must be finite and in [0, 1], got {r}"
+                        )));
+                    }
+                    ((entries.len() as f64) * r).ceil() as usize
+                }
             };
             entries.truncate(keep);
             entries.sort_by_key(|e| e.doc_id);
             current = Some(PostingList::from_sorted_unchecked(entries));
         }
-        Ok(current.unwrap_or_default())
+        current.ok_or_else(|| {
+            SQLError::Internal(
+                "MultiStage invariant violated: non-empty stages produced no final posting list"
+                    .to_string(),
+            )
+        })
     }
 
     fn execute_progressive_fusion(
@@ -2329,7 +3301,9 @@ impl EngineDriver<'_> {
         use uqa_operators::{Operator, ProgressiveFusionOperator};
 
         if stages.is_empty() {
-            return Ok(PostingList::new());
+            return Err(SQLError::TypeMismatch(
+                "ProgressiveFusion requires at least one stage".to_string(),
+            ));
         }
         if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
             return Err(SQLError::TypeMismatch(format!(
@@ -2353,7 +3327,9 @@ impl EngineDriver<'_> {
         };
         let operator =
             ProgressiveFusionOperator::with_gating(runtime_stages, alpha, Some(gating.into()));
-        Ok(operator.execute(&self.bridge_context()?))
+        operator
+            .execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("ProgressiveFusion", error))
     }
 
     fn execute_deep_fusion(
@@ -2410,16 +3386,21 @@ impl EngineDriver<'_> {
             .map(|layer| self.lower_deep_layer(layer))
             .collect::<DriverResult<Vec<_>>>()?;
         let runtime_gating = deep_runtime_gating(gating);
-        let operator = uqa_ml::DeepFusionOperator::new(runtime_layers, alpha, runtime_gating);
+        let operator = uqa_ml::DeepFusionOperator::new(runtime_layers, alpha, runtime_gating)
+            .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
         let mut context = self.bridge_context()?;
         if let Some(graph) = graph_names.into_iter().next() {
             let snapshot = self.with_graph(&graph, |store| {
-                std::sync::Arc::new(GraphNeighborSnapshot::from_store(store, &graph))
-                    as std::sync::Arc<dyn uqa_operators::GraphNeighborLookup>
+                Ok(
+                    std::sync::Arc::new(GraphNeighborSnapshot::from_store(store, &graph)?)
+                        as std::sync::Arc<dyn uqa_operators::GraphNeighborLookup>,
+                )
             })?;
             context.graph = Some(snapshot);
         }
-        Ok(operator.execute(&context))
+        operator
+            .execute(&context)
+            .map_err(|error| operator_execution_error("DeepFusion", error))
     }
 
     fn lower_deep_layer(
@@ -2475,40 +3456,11 @@ impl EngineDriver<'_> {
     }
 
     fn execute_opaque(
-        &self,
         kind: &str,
-        children: &[OperatorTree],
-        meta: &BTreeMap<String, Value>,
+        _children: &[OperatorTree],
+        _meta: &BTreeMap<String, Value>,
     ) -> DriverResult<PostingList> {
-        match kind {
-            "bayesian_match_with_prior" if children.is_empty() => {
-                self.execute_bayesian_match_with_prior(meta)
-            }
-            "calibrated_vector_match" if children.is_empty() => {
-                self.execute_calibrated_vector_match(meta)
-            }
-            "deep_predict" if children.is_empty() => {
-                let Some(Value::Str(model)) = meta.get("model") else {
-                    return Err(malformed_operator_meta("deep_predict", "model"));
-                };
-                let scores = self
-                    .engine
-                    .deep_predict(model)
-                    .ok_or_else(|| SQLError::Unsupported(format!("unknown model {model:?}")))?;
-                Ok(PostingList::from_unsorted(
-                    scores
-                        .into_iter()
-                        .map(|(doc_id, score)| {
-                            PostingEntry::new(doc_id, Payload::with_score(score))
-                        })
-                        .collect(),
-                ))
-            }
-            "bayesian_match_with_prior" | "calibrated_vector_match" | "deep_predict" => Err(
-                SQLError::Internal(format!("opaque operator {kind:?} must not have children")),
-            ),
-            _ => Err(SQLError::UnknownFunction(format!("operator::{kind}"))),
-        }
+        Err(SQLError::UnknownFunction(format!("operator::{kind}")))
     }
 
     /// Build the `n_query_features=6` vector that attention fusers
@@ -2517,46 +3469,111 @@ impl EngineDriver<'_> {
     /// `[mean_idf, max_idf, min_idf, coverage, query_length,
     /// vocab_overlap]` vector from the table's inverted-index stats
     /// against the first text-bearing signal it can find.
-    fn attention_query_features(&self, signals: &[OperatorTree], explicit: &[f64]) -> Vec<f64> {
+    fn attention_query_features(
+        &self,
+        signals: &[OperatorTree],
+        explicit: &[f64],
+    ) -> DriverResult<Vec<f64>> {
         if !explicit.is_empty() {
-            return explicit.to_vec();
+            return Ok(explicit.to_vec());
         }
-        let Some(table_state) = self.engine.table(self.table) else {
-            return vec![0.0; uqa_fusion::N_QUERY_FEATURES];
+        let Some(table_state) = self
+            .engine
+            .table(self.table)
+            .map_err(|error| operator_execution_error("resolve attention table", error))?
+        else {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
         };
         let idx_guard = table_state.inverted_index.read();
-        let index_stats = idx_guard.stats();
+        let index_stats = idx_guard
+            .stats()
+            .map_err(|error| operator_execution_error("index statistics", error))?;
         if let Some((field, query)) = first_text_signal(signals) {
             let analyzer = idx_guard.get_search_analyzer(&field);
-            let terms = analyzer.analyze(&query);
-            return uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field)).to_vec();
+            let terms = analyzer
+                .analyze(&query)
+                .map_err(|error| operator_execution_error("attention query analysis", error))?;
+            return Ok(
+                uqa_fusion::extract_query_features(&index_stats, &terms, Some(&field)).to_vec(),
+            );
         }
-        vec![0.0; uqa_fusion::N_QUERY_FEATURES]
+        Ok(vec![0.0; uqa_fusion::N_QUERY_FEATURES])
     }
 
     fn require_column(&self, field: &str) -> DriverResult<()> {
-        if !self.engine.has_table(self.table) {
+        let columns = self
+            .engine
+            .describe_table(self.table)
+            .map_err(|error| operator_execution_error("resolve operator table", error))?;
+        let Some(columns) = columns else {
             return Err(SQLError::UnknownTable(self.table.to_string()));
-        }
-        if !self.engine.table_has_column(self.table, field) {
+        };
+        // `create_default_table` intentionally creates a schema-less dynamic
+        // document table: its registered FTS fields and arbitrary stored
+        // fields remain valid operator inputs. SQL-created typed tables have
+        // a non-empty declared schema and retain strict unknown-column errors.
+        if !columns.is_empty() && !columns.iter().any(|column| column.name == field) {
             return Err(SQLError::UnknownColumn(field.to_string()));
         }
         Ok(())
     }
 
     fn require_vector_query(&self, field: &str, query_vector: &[f32]) -> DriverResult<()> {
-        self.require_column(field)?;
-        let expected_dimensions = match self.engine.column_type(self.table, field) {
-            Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {
-                dimensions as usize
-            }
-            Some(column_type) => {
+        if !self
+            .engine
+            .has_table(self.table)
+            .map_err(|error| operator_execution_error("resolve vector table", error))?
+        {
+            return Err(SQLError::UnknownTable(self.table.to_string()));
+        }
+        let declared_type = self
+            .engine
+            .column_type(self.table, field)
+            .map_err(|error| operator_execution_error("resolve vector column", error))?;
+        if let Some(column_type) = declared_type.as_ref() {
+            if !matches!(column_type, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
                 return Err(SQLError::TypeMismatch(format!(
                     "vector search requires a VECTOR or TENSOR field, but {field:?} is {column_type:?}"
                 )));
             }
-            None => return Err(SQLError::UnknownColumn(field.to_string())),
+        }
+        let context = self
+            .engine
+            .snapshot_context(self.table)?
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        let index =
+            context
+                .vector_indexes
+                .get(field)
+                .ok_or_else(|| match declared_type.as_ref() {
+                    Some(ColumnType::Vector(_) | ColumnType::Tensor(_)) => SQLError::Unsupported(
+                        format!("vector field {field:?} has no physical vector index"),
+                    ),
+                    Some(column_type) => SQLError::Internal(format!(
+                    "non-vector field {field:?} with type {column_type:?} passed vector validation"
+                )),
+                    None => SQLError::UnknownColumn(field.to_string()),
+                })?;
+        let indexed_dimensions = index.dimensions() as usize;
+        let expected_dimensions = match declared_type.as_ref() {
+            Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {
+                *dimensions as usize
+            }
+            Some(column_type) => {
+                return Err(SQLError::Internal(format!(
+                    "non-vector field {field:?} with type {column_type:?} passed vector validation"
+                )))
+            }
+            // `create_default_table` is the intentionally schema-less
+            // embedded API. In that mode the registered vector index is
+            // the field's durable schema declaration.
+            None => indexed_dimensions,
         };
+        if expected_dimensions != indexed_dimensions {
+            return Err(SQLError::Internal(format!(
+                "vector schema for {field:?} declares {expected_dimensions} dimensions but its index has {indexed_dimensions}"
+            )));
+        }
         if query_vector.len() != expected_dimensions {
             return Err(SQLError::TypeMismatch(format!(
                 "vector query for {field:?} has {} dimensions, expected {expected_dimensions}",
@@ -2568,15 +3585,6 @@ impl EngineDriver<'_> {
                 "vector query for {field:?} must contain only finite values"
             )));
         }
-        let context = self
-            .engine
-            .snapshot_context(self.table)
-            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
-        if !context.vector_indexes.contains_key(field) {
-            return Err(SQLError::Unsupported(format!(
-                "vector field {field:?} has no physical vector index"
-            )));
-        }
         Ok(())
     }
 
@@ -2585,7 +3593,7 @@ impl EngineDriver<'_> {
             return Ok(uqa_operators::base::ExecutionContext::new());
         }
         self.engine
-            .snapshot_context(self.table)
+            .snapshot_context(self.table)?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
     }
 
@@ -2598,14 +3606,30 @@ impl EngineDriver<'_> {
         let state = self
             .engine
             .table(self.table)
+            .map_err(|error| operator_execution_error("resolve facet table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
-        if !self.engine.table_has_column(self.table, facet_field) {
-            return Err(SQLError::UnknownColumn(facet_field.to_string()));
-        }
-        let snapshot = state.document_store.read().snapshot();
+        self.require_column(facet_field)?;
+        let snapshot = state
+            .document_store
+            .read()
+            .snapshot()
+            .map_err(|error| operator_execution_error("document snapshot", error))?;
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for entry in vec_pl.entries() {
-            if let Some(value) = snapshot.get_field(entry.doc_id, facet_field) {
+            let value = snapshot
+                .get_field(entry.doc_id, facet_field)
+                .map_err(|error| operator_execution_error("facet field lookup", error))?;
+            if value.is_none()
+                && !snapshot
+                    .contains_doc_id(entry.doc_id)
+                    .map_err(|error| operator_execution_error("facet document lookup", error))?
+            {
+                return Err(SQLError::Internal(format!(
+                    "vector facet candidate {} is missing from table `{}`",
+                    entry.doc_id, self.table
+                )));
+            }
+            if let Some(value) = value {
                 if !matches!(value, Value::Null) {
                     let key = match value {
                         Value::Str(s) => s,
@@ -2614,21 +3638,39 @@ impl EngineDriver<'_> {
                         Value::Bool(b) => b.to_string(),
                         other => format!("{other:?}"),
                     };
-                    *counts.entry(key).or_insert(0) += 1;
+                    let count = counts.entry(key).or_insert(0);
+                    *count = count.checked_add(1).ok_or_else(|| {
+                        SQLError::Internal("vector facet count overflowed u64".to_string())
+                    })?;
                 }
             }
         }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(counts.len());
         for (i, (value, count)) in counts.into_iter().enumerate() {
+            let count_value = i64::try_from(count).map_err(|_| {
+                SQLError::Internal(format!(
+                    "vector facet count {count} exceeds the SQL BIGINT range"
+                ))
+            })?;
+            if count > 9_007_199_254_740_992 {
+                return Err(SQLError::Internal(format!(
+                    "vector facet count {count} cannot be represented exactly as an f64 score"
+                )));
+            }
+            let bucket_id = DocId::try_from(i).map_err(|_| {
+                SQLError::Internal(format!(
+                    "vector facet bucket index {i} exceeds the document-id range"
+                ))
+            })?;
             let mut fields = std::collections::BTreeMap::new();
             fields.insert(
                 "_facet_field".to_string(),
                 Value::Str(facet_field.to_string()),
             );
             fields.insert("_facet_value".to_string(), Value::Str(value));
-            fields.insert("_facet_count".to_string(), Value::Int(count as i64));
+            fields.insert("_facet_count".to_string(), Value::Int(count_value));
             entries.push(PostingEntry::new(
-                i as DocId,
+                bucket_id,
                 Payload {
                     positions: Vec::new(),
                     score: count as f64,
@@ -2755,16 +3797,26 @@ fn deep_runtime_gating(gating: &GatingSpec) -> uqa_ml::Gating {
 
 #[derive(Default)]
 struct GraphNeighborSnapshot {
+    vertices: BTreeSet<u64>,
     out: BTreeMap<u64, Vec<(String, u64)>>,
     incoming: BTreeMap<u64, Vec<(String, u64)>>,
 }
 
 impl GraphNeighborSnapshot {
-    fn from_store(store: &uqa_graph::MemoryGraphStore, graph: &str) -> Self {
+    fn from_store(store: &uqa_graph::MemoryGraphStore, graph: &str) -> DriverResult<Self> {
         use uqa_graph::GraphStore;
 
-        let mut snapshot = Self::default();
-        for edge in store.edges_in_graph(graph) {
+        let vertices = store
+            .vertex_ids_in_graph(graph)
+            .map_err(|error| graph_execution_error("DeepFusion graph snapshot", error))?;
+        let mut snapshot = Self {
+            vertices,
+            ..Self::default()
+        };
+        for edge in store
+            .edges_in_graph(graph)
+            .map_err(|error| graph_execution_error("DeepFusion graph snapshot", error))?
+        {
             snapshot
                 .out
                 .entry(edge.source_id)
@@ -2776,7 +3828,7 @@ impl GraphNeighborSnapshot {
                 .or_default()
                 .push((edge.label, edge.source_id));
         }
-        snapshot
+        Ok(snapshot)
     }
 }
 
@@ -2786,7 +3838,12 @@ impl uqa_operators::GraphNeighborLookup for GraphNeighborSnapshot {
         vertex: u64,
         label: &str,
         direction: uqa_operators::DeepGraphDirection,
-    ) -> Vec<u64> {
+    ) -> uqa_storage::StorageBackendResult<Vec<u64>> {
+        if !self.vertices.contains(&vertex) {
+            return Err(StorageBackendError::Other(format!(
+                "graph-aware DeepFusion input vertex {vertex} is not a member of the selected graph"
+            )));
+        }
         let mut result = Vec::new();
         let mut append = |edges: Option<&Vec<(String, u64)>>| {
             if let Some(edges) = edges {
@@ -2812,7 +3869,7 @@ impl uqa_operators::GraphNeighborLookup for GraphNeighborSnapshot {
         }
         result.sort_unstable();
         result.dedup();
-        result
+        Ok(result)
     }
 }
 
@@ -2916,9 +3973,10 @@ fn restrict_result_to_source(result: &PostingList, source: &PostingList) -> Post
 fn require_graph_name(tree: &OperatorTree, context: &str) -> DriverResult<String> {
     let mut names = BTreeSet::new();
     collect_graph_names(tree, &mut names);
-    match names.len() {
-        1 => Ok(names.into_iter().next().expect("one graph name")),
-        0 => Err(SQLError::TypeMismatch(format!(
+    let mut iter = names.iter();
+    match (iter.next(), iter.next()) {
+        (Some(name), None) => Ok(name.clone()),
+        (None, _) => Err(SQLError::TypeMismatch(format!(
             "{context} does not identify a graph"
         ))),
         _ => Err(SQLError::TypeMismatch(format!(
@@ -2973,14 +4031,11 @@ fn first_text_field(tree: &OperatorTree) -> Option<String> {
         OperatorTree::Score { field, .. }
         | OperatorTree::BayesianScore {
             field: Some(field), ..
-        } => Some(field.clone()),
+        }
+        | OperatorTree::BayesianMatchWithPrior { field, .. } => Some(field.clone()),
         OperatorTree::MultiFieldSearch { fields, .. } if fields.len() == 1 => {
             fields.first().cloned()
         }
-        OperatorTree::Opaque { meta, .. } => match meta.get("field") {
-            Some(Value::Str(field)) => Some(field.clone()),
-            _ => first_child(tree).and_then(first_text_field),
-        },
         OperatorTree::Intersect(children)
         | OperatorTree::Union(children)
         | OperatorTree::Composed(children) => children.iter().find_map(first_text_field),
@@ -2990,16 +4045,10 @@ fn first_text_field(tree: &OperatorTree) -> Option<String> {
 
 fn first_vector_field(tree: &OperatorTree) -> Option<String> {
     match tree {
-        OperatorTree::VectorSimilarity { field, .. } | OperatorTree::KNN { field, .. } => {
-            Some(field.clone())
-        }
+        OperatorTree::VectorSimilarity { field, .. }
+        | OperatorTree::KNN { field, .. }
+        | OperatorTree::CalibratedVectorMatch { field, .. } => Some(field.clone()),
         OperatorTree::GraphEmbedding { .. } => Some("_embedding".to_string()),
-        OperatorTree::Opaque { kind, meta, .. } if kind == "calibrated_vector_match" => {
-            match meta.get("field") {
-                Some(Value::Str(field)) => Some(field.clone()),
-                _ => None,
-            }
-        }
         OperatorTree::HybridTextVector { vector_op, .. }
         | OperatorTree::SemanticFilter { vector_op, .. }
         | OperatorTree::FacetVector { vector_op, .. } => first_vector_field(vector_op),
@@ -3018,12 +4067,10 @@ fn first_structured_field(tree: &OperatorTree) -> Option<String> {
         OperatorTree::Filter { field, .. }
         | OperatorTree::Facet { field, .. }
         | OperatorTree::IndexScan { field, .. }
-        | OperatorTree::Aggregate { field, .. } => Some(field.clone()),
+        | OperatorTree::Aggregate { field, .. }
+        | OperatorTree::BayesianMatchWithPrior { field, .. }
+        | OperatorTree::CalibratedVectorMatch { field, .. } => Some(field.clone()),
         OperatorTree::GroupBy { group_field, .. } => Some(group_field.clone()),
-        OperatorTree::Opaque { meta, .. } => match meta.get("field") {
-            Some(Value::Str(field)) => Some(field.clone()),
-            _ => first_child(tree).and_then(first_structured_field),
-        },
         OperatorTree::Intersect(children)
         | OperatorTree::Union(children)
         | OperatorTree::Composed(children) => children.iter().find_map(first_structured_field),
@@ -3110,8 +4157,11 @@ fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<String>) {
 }
 
 impl uqa_operators::base::Operator for StaticPostingList {
-    fn execute(&self, _ctx: &uqa_operators::base::ExecutionContext) -> PostingList {
-        self.pl.clone()
+    fn execute(
+        &self,
+        _ctx: &uqa_operators::base::ExecutionContext,
+    ) -> uqa_operators::base::OperatorResult {
+        Ok(self.pl.clone())
     }
 }
 
@@ -3132,13 +4182,7 @@ fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
 fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
         OperatorTree::Term { query, field, .. } => field.clone().map(|f| (f, query.clone())),
-        OperatorTree::Opaque { kind, meta, .. } if kind == "bayesian_match_with_prior" => {
-            let Some(Value::Str(field)) = meta.get("field") else {
-                return None;
-            };
-            let Some(Value::Str(query)) = meta.get("query") else {
-                return None;
-            };
+        OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
             Some((field.clone(), query.clone()))
         }
         OperatorTree::Score {
@@ -3172,11 +4216,48 @@ fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
 /// for one document and returns the fused score. Mirrors the
 /// `collect_score_maps` + per-doc loop in
 /// `uqa_operators::fusion_wrappers`.
-fn fuse_signals_with<F>(posting_lists: &[PostingList], fuse: F) -> PostingList
+fn fuse_signals_with<F>(posting_lists: &[PostingList], fuse: F) -> DriverResult<PostingList>
 where
-    F: Fn(&[f64]) -> f64,
+    F: Fn(&[f64]) -> DriverResult<f64>,
 {
-    use std::collections::{BTreeMap, BTreeSet};
+    fuse_signal_batches_with(posting_lists, |probabilities| {
+        probabilities.iter().map(|sample| fuse(sample)).collect()
+    })
+}
+
+fn fuse_signal_batches_with<F>(posting_lists: &[PostingList], fuse: F) -> DriverResult<PostingList>
+where
+    F: Fn(&[Vec<f64>]) -> DriverResult<Vec<f64>>,
+{
+    let (candidate_ids, probabilities) = fusion_probability_matrix(posting_lists);
+    if candidate_ids.is_empty() {
+        return Ok(PostingList::new());
+    }
+    let fused = fuse(&probabilities)?;
+    if fused.len() != candidate_ids.len() {
+        return Err(SQLError::Internal(format!(
+            "fusion returned {} scores for {} candidates",
+            fused.len(),
+            candidate_ids.len()
+        )));
+    }
+    let entries = candidate_ids
+        .into_iter()
+        .zip(fused)
+        .map(|(doc_id, score)| {
+            PostingEntry::new(
+                doc_id,
+                Payload {
+                    score,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    Ok(PostingList::from_sorted_unchecked(entries))
+}
+
+fn fusion_probability_matrix(posting_lists: &[PostingList]) -> (Vec<DocId>, Vec<Vec<f64>>) {
     let mut maps: Vec<BTreeMap<DocId, f64>> = Vec::with_capacity(posting_lists.len());
     let mut all_ids: BTreeSet<DocId> = BTreeSet::new();
     for pl in posting_lists {
@@ -3189,29 +4270,24 @@ where
     }
     let total = all_ids.len();
     if total == 0 {
-        return PostingList::new();
+        return (Vec::new(), Vec::new());
     }
     let defaults: Vec<f64> = maps
         .iter()
         .map(|m| uqa_operators::hybrid::coverage_based_default(m.len(), total, 0.01))
         .collect();
-    let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
+    let mut candidate_ids = Vec::with_capacity(total);
+    let mut probabilities = Vec::with_capacity(total);
     for doc_id in all_ids {
         let probs: Vec<f64> = maps
             .iter()
             .enumerate()
             .map(|(j, m)| *m.get(&doc_id).unwrap_or(&defaults[j]))
             .collect();
-        let fused = fuse(&probs);
-        entries.push(PostingEntry::new(
-            doc_id,
-            Payload {
-                score: fused,
-                ..Default::default()
-            },
-        ));
+        candidate_ids.push(doc_id);
+        probabilities.push(probs);
     }
-    PostingList::from_sorted_unchecked(entries)
+    (candidate_ids, probabilities)
 }
 
 fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {
@@ -3233,41 +4309,209 @@ fn posting_list_to_scored(pl: &PostingList) -> Vec<ScoredEntry> {
         .collect()
 }
 
-fn sparse_threshold_inline(source: &PostingList, threshold: f64) -> PostingList {
+fn sparse_threshold_inline(source: &PostingList, threshold: f64) -> DriverResult<PostingList> {
+    if !threshold.is_finite() {
+        return Err(SQLError::TypeMismatch(format!(
+            "sparse threshold must be finite, got {threshold}"
+        )));
+    }
     let entries = source
         .iter()
-        .filter_map(|entry| {
+        .map(|entry| {
+            if !entry.payload.score.is_finite() {
+                return Err(SQLError::Internal(format!(
+                    "sparse threshold source produced non-finite score {} for document {}",
+                    entry.payload.score, entry.doc_id
+                )));
+            }
             let adjusted = entry.payload.score - threshold;
+            if !adjusted.is_finite() {
+                return Err(SQLError::Internal(format!(
+                    "sparse threshold produced non-finite score for document {}",
+                    entry.doc_id
+                )));
+            }
             if adjusted > 0.0 {
-                Some(PostingEntry::new(
+                Ok(Some(PostingEntry::new(
                     entry.doc_id,
                     Payload {
                         positions: entry.payload.positions.clone(),
                         score: adjusted,
                         fields: entry.payload.fields.clone(),
                     },
-                ))
+                )))
             } else {
-                None
+                Ok(None)
             }
         })
+        .collect::<DriverResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
         .collect();
-    PostingList::from_unsorted(entries)
+    Ok(PostingList::from_unsorted(entries))
 }
 
 /// Lower a WHERE expression and run [`QueryOptimizer`] over the
 /// resulting tree without executing it. Useful for tests and
 /// `EXPLAIN`-style diagnostics that want to inspect the rewritten
 /// shape before any posting list is materialised.
-#[must_use]
 pub fn optimised_tree_for(
     engine: &Engine,
     table: &str,
     where_expr: &ScalarExpr,
     params: &[SQLParam],
-) -> Option<OperatorTree> {
-    let tree = lower_where(where_expr, params)?;
-    Some(engine_query_optimizer(engine, table, &tree).optimize(tree))
+) -> DriverResult<Option<OperatorTree>> {
+    let Some(tree) = lower_where_bound(engine, where_expr, params)? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        engine_query_optimizer(engine, table, &tree)?.optimize(tree),
+    ))
+}
+
+fn centrality_kind(name: &str) -> Option<&'static str> {
+    match name {
+        "graph_pagerank" | "pagerank" => Some("pagerank"),
+        "graph_hits" | "hits" => Some("hits"),
+        "graph_betweenness" | "betweenness" => Some("betweenness"),
+        _ => None,
+    }
+}
+
+fn lower_bound_centrality(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    kind: &str,
+) -> DriverResult<OperatorTree> {
+    let graph = match args {
+        [] => default_operator_graph(engine, name)?,
+        [_] => {
+            return Err(SQLError::TypeMismatch(format!(
+                "{name}.graph must be a constant string"
+            )))
+        }
+        _ => {
+            return Err(SQLError::BadArity {
+                name: name.to_string(),
+                expected: "0..=1".into(),
+                actual: args.len(),
+            })
+        }
+    };
+    Ok(match kind {
+        "pagerank" => OperatorTree::PageRank { graph },
+        "hits" => OperatorTree::HITS { graph },
+        _ => OperatorTree::BetweennessCentrality { graph },
+    })
+}
+
+fn lower_bound_rpq(
+    engine: &Engine,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<OperatorTree> {
+    let graph = default_operator_graph(engine, "rpq")?;
+    let rpq_source = const_string(&args[0], params)
+        .ok_or_else(|| SQLError::TypeMismatch("rpq.expr must be a constant string".into()))?;
+    let start_vertex = const_usize(&args[1], params)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| SQLError::TypeMismatch("rpq.start must be a non-negative integer".into()))?;
+    Ok(OperatorTree::RegularPathQuery {
+        rpq_source,
+        start_vertex,
+        graph,
+    })
+}
+
+fn lower_bound_function(
+    engine: &Engine,
+    name: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> DriverResult<Option<OperatorTree>> {
+    validate_operator_function_arity(name, args.len())?;
+    validate_probability_signal_contract(name, args)?;
+
+    let bound;
+    let (lowering_args, lowering_params): (&[ScalarExpr], &[SQLParam]) =
+        if checked_retrieval_call_tree_present(name, args) {
+            bound = args
+                .iter()
+                .map(|argument| bind_operator_argument(engine, argument, params))
+                .collect::<Result<Vec<_>, _>>()?;
+            (&bound, &[])
+        } else {
+            (args, params)
+        };
+    validate_checked_retrieval_call_tree(name, lowering_args, lowering_params)?;
+
+    if let Some(tree) = lower_function(name, lowering_args, lowering_params) {
+        return Ok(Some(tree));
+    }
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "attention" | "fuse_attention" | "fuse_multihead"
+    ) {
+        return try_lower_attention_fusion(name, lowering_args, lowering_params).map(Some);
+    }
+    let lower_name = name.to_ascii_lowercase();
+    if let Some(kind) = centrality_kind(&lower_name) {
+        return lower_bound_centrality(engine, name, lowering_args, kind).map(Some);
+    }
+    if lower_name == "rpq" && lowering_args.len() == 2 {
+        return lower_bound_rpq(engine, lowering_args, lowering_params).map(Some);
+    }
+    if matches!(
+        lower_name.as_str(),
+        "graph_traverse"
+            | "traverse_match"
+            | "graph_neighbors"
+            | "graph_edges"
+            | "temporal_traverse"
+            | "rpq"
+            | "deep_predict"
+    ) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} arguments must be execution-time constants of the documented types"
+        )));
+    }
+    Ok(None)
+}
+
+fn lower_where_bound(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    params: &[SQLParam],
+) -> Result<Option<OperatorTree>, SQLError> {
+    match expression {
+        ScalarExpr::And(parts) => {
+            let mut children = Vec::with_capacity(parts.len());
+            for part in parts {
+                let Some(child) = lower_where_bound(engine, part, params)? else {
+                    return Ok(None);
+                };
+                children.push(child);
+            }
+            Ok(Some(OperatorTree::Intersect(children)))
+        }
+        ScalarExpr::Or(parts) => {
+            let mut children = Vec::with_capacity(parts.len());
+            for part in parts {
+                let Some(child) = lower_where_bound(engine, part, params)? else {
+                    return Ok(None);
+                };
+                children.push(child);
+            }
+            Ok(Some(OperatorTree::Union(children)))
+        }
+        ScalarExpr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => {
+            Ok(lower_where_bound(engine, inner, params)?
+                .map(|child| OperatorTree::Complement(Box::new(child))))
+        }
+        ScalarExpr::Func { name, args, .. } => lower_bound_function(engine, name, args, params),
+        _ => Ok(lower_where(expression, params)),
+    }
 }
 
 /// The "lower -> optimise -> execute" pipeline. `Some(rows)` when the
@@ -3283,11 +4527,11 @@ pub fn run_optimised(
     let Some(expr) = where_expr else {
         return Ok(None);
     };
-    let Some(tree) = lower_where(expr, params) else {
+    let Some(tree) = lower_where_bound(engine, expr, params)? else {
         return Ok(None);
     };
     let pl = expect_posting_output(
-        execute_operator_tree(engine, table, params, &tree)?,
+        execute_operator_tree_in_execution(engine, table, params, &tree)?,
         "SQL WHERE",
     )?;
     Ok(Some(posting_list_to_scored(&pl)))
@@ -3304,38 +4548,135 @@ pub(crate) fn execute_operator_tree(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    let optimized = engine_query_optimizer(engine, table, tree).optimize(tree.clone());
-    let driver = EngineDriver::new(engine, table, params);
+    let _statement = engine.statement_gate.lock();
+    execute_operator_tree_gated(engine, table, params, tree)
+}
+
+fn execute_operator_tree_gated(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    // Bayesian auto-calibration is a catalog write even though the enclosing
+    // operator is a retrieval node. Direct API calls have no SQL statement
+    // classifier to open a write transaction, and memory engines also need a
+    // writable snapshot so a later physical-node failure cannot leave the
+    // calibration behind. Existing SQL/user transactions already own the
+    // appropriate frame and must not be nested here.
+    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        return engine
+            .transaction(|engine| execute_operator_tree_inner(engine, table, params, tree));
+    }
+    execute_operator_tree_inner(engine, table, params, tree)
+}
+
+/// Execute below a SQL/direct statement boundary that already owns the
+/// statement gate. Rayon workers use this entry point so they do not try to
+/// acquire a thread-affine reentrant lock held by their coordinator.
+pub(crate) fn execute_operator_tree_in_execution(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        return Err(SQLError::Internal(
+            "calibrating operator execution requires an active statement transaction".into(),
+        ));
+    }
+    execute_operator_tree_inner(engine, table, params, tree)
+}
+
+fn execute_operator_tree_inner(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
+    let driver = EngineDriver::new_in_execution(engine, table, params);
     let mut executor = PlanExecutor::new(&driver);
     executor.execute(&optimized)
 }
 
-fn engine_query_optimizer(engine: &Engine, table: &str, tree: &OperatorTree) -> QueryOptimizer {
-    let candidates = engine_index_candidates(engine, table, tree);
-    QueryOptimizer::new()
-        .with_row_count(engine.table_doc_count(table))
-        .with_index_candidates(candidates, table)
+fn tree_may_persist_calibration(tree: &OperatorTree) -> bool {
+    let mut may_persist = false;
+    tree.visit(&mut |node| {
+        may_persist |= matches!(
+            node,
+            OperatorTree::BayesianScore { .. }
+                | OperatorTree::Term {
+                    scoring: Some(TextScoringMode::BayesianBM25),
+                    ..
+                }
+                | OperatorTree::BayesianMatchWithPrior { .. }
+                | OperatorTree::MultiFieldSearch { .. }
+        );
+    });
+    may_persist
+}
+
+/// Execute a concrete retrieval tree through the optimizer/plan-executor
+/// boundary and convert its posting carrier for public engine APIs.
+pub(crate) fn execute_scored_tree(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<Vec<ScoredEntry>> {
+    let output = execute_operator_tree(engine, table, params, tree)?;
+    let posting = expect_posting_output(output, "retrieval API")?;
+    Ok(posting_list_to_scored(&posting))
+}
+
+fn engine_query_optimizer(
+    engine: &Engine,
+    table: &str,
+    tree: &OperatorTree,
+) -> DriverResult<QueryOptimizer> {
+    let candidates = engine_index_candidates(engine, table, tree)?;
+    let row_count = if table.is_empty() {
+        0
+    } else {
+        engine.table_doc_count(table)?
+    };
+    Ok(QueryOptimizer::new()
+        .with_row_count(row_count)
+        .with_index_candidates(candidates, table))
 }
 
 fn engine_index_candidates(
     engine: &Engine,
     table: &str,
     tree: &OperatorTree,
-) -> Vec<IndexScanCandidate> {
-    if table.is_empty() || !engine.has_table(table) {
-        return Vec::new();
+) -> DriverResult<Vec<IndexScanCandidate>> {
+    if table.is_empty()
+        || !engine
+            .has_table(table)
+            .map_err(|error| operator_execution_error("resolve index candidate table", error))?
+    {
+        return Ok(Vec::new());
     }
     let resolved_table = engine
         .resolve_table_name(table)
+        .map_err(|error| operator_execution_error("resolve index candidate table", error))?
         .unwrap_or_else(|| table.to_string());
     let mut indexes_by_field = BTreeMap::new();
-    for index in engine.list_catalog_indexes() {
+    for index in engine
+        .list_catalog_indexes()
+        .map_err(|error| operator_execution_error("list index candidates", error))?
+    {
         if index.table_name != resolved_table || !index.index_type.eq_ignore_ascii_case("btree") {
             continue;
         }
-        let Ok(columns) = serde_json::from_str::<Vec<String>>(&index.columns_json) else {
-            continue;
-        };
+        let columns =
+            serde_json::from_str::<Vec<String>>(&index.columns_json).map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode catalog index `{}` columns: {error}",
+                    index.name
+                ))
+            })?;
         if let Some(field) = columns.first() {
             indexes_by_field
                 .entry(field.clone())
@@ -3343,7 +4684,7 @@ fn engine_index_candidates(
         }
     }
 
-    let mut candidates = Vec::new();
+    let mut predicates = Vec::new();
     tree.visit(&mut |node| {
         let OperatorTree::Filter {
             field,
@@ -3353,11 +4694,16 @@ fn engine_index_candidates(
         else {
             return;
         };
-        let Some(index_name) = indexes_by_field.get(field) else {
-            return;
+        predicates.push((field.clone(), predicate.clone()));
+    });
+
+    let mut candidates = Vec::new();
+    for (field, predicate) in predicates {
+        let Some(index_name) = indexes_by_field.get(&field) else {
+            continue;
         };
-        let Some(matches) = engine.value_index_scan(table, field, predicate) else {
-            return;
+        let Some(matches) = engine.value_index_scan(table, &field, &predicate)? else {
+            continue;
         };
         let cardinality = matches.len() as f64;
         let scan_cost = match predicate {
@@ -3367,12 +4713,12 @@ fn engine_index_candidates(
         candidates.push(IndexScanCandidate {
             index_name: index_name.clone(),
             table_name: table.to_string(),
-            field: field.clone(),
-            predicate: predicate.clone(),
+            field,
+            predicate,
             scan_cost,
         });
-    });
-    candidates
+    }
+    Ok(candidates)
 }
 
 pub(crate) fn expect_posting_output(
@@ -3421,26 +4767,6 @@ pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
     Some(uqa_scoring::sigmoid(mean_logit))
 }
 
-/// Execute an `fts_match(field, query)` call as a fusion signal:
-/// prior-free evidence rows plus the corpus prior the signal would
-/// otherwise fold in. Returns `Ok(None)` when the query cannot be
-/// lowered (e.g. non-constant arguments), in which case the caller
-/// falls back to the opaque posterior form. Execution failures remain
-/// errors.
-pub(crate) fn run_fts_fusion_signal(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Option<ScoredFusionSignal>, SQLError> {
-    let Some(tree) = lower_calibrated_signal("fts_match", args, params) else {
-        return Ok(None);
-    };
-    let driver = EngineDriver::new(engine, table, params);
-    let (pl, prior) = driver.execute_fusion_signal(&tree)?;
-    Ok(Some((posting_list_to_scored(&pl), prior)))
-}
-
 // `eval_path` lives in storage; expose a shim so we don't pull in the
 // trait at the lowering layer just for this helper.
 #[allow(dead_code)]
@@ -3454,4 +4780,73 @@ fn lookup_path(value: &Value, path: &[PathSegment]) -> Option<Value> {
         };
     }
     Some(current)
+}
+
+#[cfg(test)]
+mod transaction_boundary_tests {
+    use super::*;
+
+    fn populate_calibration_fixture(engine: &Engine) {
+        engine
+            .sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
+            .unwrap();
+        engine
+            .sql("CREATE INDEX docs_fts ON docs USING gin (body)", &[])
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO docs (id, body) VALUES \
+                 (1, 'rust search engine'), \
+                 (2, 'rust database query'), \
+                 (3, 'search ranking calibration')",
+                &[],
+            )
+            .unwrap();
+    }
+
+    fn calibration_then_failure() -> OperatorTree {
+        OperatorTree::Composed(vec![
+            OperatorTree::Term {
+                query: "rust".into(),
+                field: Some("body".into()),
+                scoring: Some(TextScoringMode::BayesianBM25),
+            },
+            OperatorTree::KNN {
+                query_vector: vec![1.0],
+                k: 1,
+                field: "missing_embedding".into(),
+            },
+        ])
+    }
+
+    fn assert_failed_tree_rolls_back_calibration(engine: &Engine) {
+        assert!(engine.load_scoring_params("docs.body").unwrap().is_none());
+        execute_operator_tree(engine, "docs", &[], &calibration_then_failure())
+            .expect_err("the malformed downstream vector leaf must fail");
+        assert!(
+            engine.load_scoring_params("docs.body").unwrap().is_none(),
+            "failed operator execution leaked auto-calibration state"
+        );
+        assert_eq!(engine.transaction_depth(), 0);
+    }
+
+    #[test]
+    fn failed_calibrating_tree_rolls_back_memory_state() {
+        let engine = Engine::new();
+        populate_calibration_fixture(&engine);
+        assert_failed_tree_rolls_back_calibration(&engine);
+    }
+
+    #[test]
+    fn failed_calibrating_tree_rolls_back_catalog_and_reopen_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("calibration.sqlite");
+        let engine = Engine::open(&path).unwrap();
+        populate_calibration_fixture(&engine);
+        assert_failed_tree_rolls_back_calibration(&engine);
+        drop(engine);
+
+        let reopened = Engine::open(&path).unwrap();
+        assert!(reopened.load_scoring_params("docs.body").unwrap().is_none());
+    }
 }

@@ -14,14 +14,28 @@
 
 use std::collections::BTreeMap;
 
-use uqa_analysis::analyzer::standard_analyzer;
+use uqa_analysis::{analyzer::standard_analyzer, AnalysisError};
 use uqa_core::{Edge, Payload, PostingEntry, PostingList, Value, Vertex, VertexId};
 
 use crate::memory_store::MemoryGraphStore;
-use crate::operators::{GMatch, Traverse, DEFAULT_GRAPH_SCORE};
+use crate::operators::{GMatch, Traverse};
 use crate::pattern::GraphPattern;
 use crate::posting_list::{GraphPayload, GraphPostingList};
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreError};
+
+#[derive(Debug, thiserror::Error)]
+pub enum CrossParadigmError {
+    #[error(transparent)]
+    Analysis(#[from] AnalysisError),
+    #[error(transparent)]
+    GraphStore(#[from] GraphStoreError),
+    #[error("invalid cross-paradigm input: {0}")]
+    InvalidInput(String),
+    #[error("cross-paradigm arithmetic overflow: {0}")]
+    ArithmeticOverflow(String),
+}
+
+pub type CrossParadigmResult<T> = Result<T, CrossParadigmError>;
 
 /// A simple document representation for `ToGraph` / `TextToGraph`.
 #[derive(Debug, Clone, Default)]
@@ -63,7 +77,7 @@ impl ToGraph {
         self
     }
 
-    pub fn execute(self) -> MemoryGraphStore {
+    pub fn execute(self) -> CrossParadigmResult<MemoryGraphStore> {
         let mut graph = MemoryGraphStore::new();
         graph.create_graph("default");
         for doc in &self.documents {
@@ -76,7 +90,7 @@ impl ToGraph {
                     properties: props,
                 },
                 "default",
-            );
+            )?;
         }
         let mut edge_counter = 1u64;
         for doc in &self.documents {
@@ -84,23 +98,36 @@ impl ToGraph {
                 continue;
             };
             let Value::List(items) = targets else {
-                continue;
+                return Err(CrossParadigmError::InvalidInput(format!(
+                    "document {} field {:?} must be a list of integer vertex ids",
+                    doc.doc_id, self.edge_field
+                )));
             };
             for target in items {
                 let Value::Int(target_id) = target else {
-                    continue;
+                    return Err(CrossParadigmError::InvalidInput(format!(
+                        "document {} field {:?} contains a non-integer vertex id",
+                        doc.doc_id, self.edge_field
+                    )));
                 };
-                if *target_id < 0 {
-                    continue;
-                }
+                let target_id = VertexId::try_from(*target_id).map_err(|_| {
+                    CrossParadigmError::InvalidInput(format!(
+                        "document {} field {:?} contains negative vertex id {target_id}",
+                        doc.doc_id, self.edge_field
+                    ))
+                })?;
                 graph.add_edge(
-                    Edge::new(edge_counter, doc.doc_id, *target_id as VertexId, "link"),
+                    Edge::new(edge_counter, doc.doc_id, target_id, "link"),
                     "default",
-                );
-                edge_counter += 1;
+                )?;
+                edge_counter = edge_counter.checked_add(1).ok_or_else(|| {
+                    CrossParadigmError::ArithmeticOverflow(
+                        "document link edge id counter overflow".to_string(),
+                    )
+                })?;
             }
         }
-        graph
+        Ok(graph)
     }
 }
 
@@ -144,7 +171,7 @@ impl TextToGraph {
         self
     }
 
-    pub fn execute(self) -> MemoryGraphStore {
+    pub fn execute(self) -> CrossParadigmResult<MemoryGraphStore> {
         let analyzer = standard_analyzer(&self.language);
         let mut token_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut cooccurrences: BTreeMap<(String, String), u64> = BTreeMap::new();
@@ -154,7 +181,7 @@ impl TextToGraph {
                 Some(Value::Str(s)) => s.clone(),
                 _ => String::new(),
             };
-            let tokens = analyzer.analyze(&text);
+            let tokens = analyzer.analyze(&text)?;
             for token in &tokens {
                 token_set.insert(token.clone());
             }
@@ -165,12 +192,15 @@ impl TextToGraph {
                 for i in 0..unique.len() {
                     for j in (i + 1)..unique.len() {
                         let pair = (unique[i].clone(), unique[j].clone());
-                        *cooccurrences.entry(pair).or_insert(0) += 1;
+                        increment_cooccurrence(&mut cooccurrences, pair)?;
                     }
                 }
             } else {
                 for i in 0..tokens.len() {
-                    let end = (i + self.window_size + 1).min(tokens.len());
+                    let end = i
+                        .saturating_add(self.window_size)
+                        .saturating_add(1)
+                        .min(tokens.len());
                     for j in (i + 1)..end {
                         if tokens[i] == tokens[j] {
                             continue;
@@ -180,7 +210,7 @@ impl TextToGraph {
                         } else {
                             (tokens[j].clone(), tokens[i].clone())
                         };
-                        *cooccurrences.entry((a, b)).or_insert(0) += 1;
+                        increment_cooccurrence(&mut cooccurrences, (a, b))?;
                     }
                 }
             }
@@ -190,7 +220,14 @@ impl TextToGraph {
         graph.create_graph("default");
         let mut token_to_id: BTreeMap<String, VertexId> = BTreeMap::new();
         for (idx, token) in token_set.iter().enumerate() {
-            let vid = (idx + 1) as VertexId;
+            let vid = VertexId::try_from(idx)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| {
+                    CrossParadigmError::ArithmeticOverflow(
+                        "token vertex id counter overflow".to_string(),
+                    )
+                })?;
             token_to_id.insert(token.clone(), vid);
             let mut props = BTreeMap::new();
             props.insert("token".into(), Value::Str(token.clone()));
@@ -201,17 +238,33 @@ impl TextToGraph {
                     properties: props,
                 },
                 "default",
-            );
+            )?;
         }
-        for (edge_counter, ((t1, t2), weight)) in (1u64..).zip(cooccurrences) {
-            let src = token_to_id[&t1];
-            let tgt = token_to_id[&t2];
+        for (index, ((t1, t2), weight)) in cooccurrences.into_iter().enumerate() {
+            let edge_counter = u64::try_from(index)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| {
+                    CrossParadigmError::ArithmeticOverflow(
+                        "co-occurrence edge id counter overflow".to_string(),
+                    )
+                })?;
+            let src = token_to_id.get(&t1).copied().ok_or_else(|| {
+                CrossParadigmError::InvalidInput(format!("missing token vertex for {t1:?}"))
+            })?;
+            let tgt = token_to_id.get(&t2).copied().ok_or_else(|| {
+                CrossParadigmError::InvalidInput(format!("missing token vertex for {t2:?}"))
+            })?;
             let mut edge = Edge::new(edge_counter, src, tgt, "co_occurs");
-            edge.properties
-                .insert("weight".into(), Value::Int(weight as i64));
-            graph.add_edge(edge, "default");
+            let weight = i64::try_from(weight).map_err(|_| {
+                CrossParadigmError::ArithmeticOverflow(format!(
+                    "co-occurrence weight {weight} exceeds i64"
+                ))
+            })?;
+            edge.properties.insert("weight".into(), Value::Int(weight));
+            graph.add_edge(edge, "default")?;
         }
-        graph
+        Ok(graph)
     }
 }
 
@@ -245,23 +298,28 @@ impl<'a> VertexEmbedding<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> PostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> CrossParadigmResult<PostingList> {
+        validate_vector_query(&self.query_vector, self.threshold)?;
         let mut entries: Vec<PostingEntry> = Vec::new();
-        let mut ids: Vec<VertexId> = store.vertex_ids_in_graph(self.graph).into_iter().collect();
+        let mut ids: Vec<VertexId> = store.vertex_ids_in_graph(self.graph)?.into_iter().collect();
         ids.sort_unstable();
         for vid in ids {
             let Some(vertex) = store.get_vertex(vid) else {
+                return Err(GraphStoreError::CorruptGraph(format!(
+                    "graph {:?} references missing vertex {vid}",
+                    self.graph
+                ))
+                .into());
+            };
+            let Some(vec) = read_vector(&vertex.properties, &self.vector_field)? else {
                 continue;
             };
-            let Some(vec) = read_vector(&vertex.properties, &self.vector_field) else {
-                continue;
-            };
-            let sim = cosine_similarity(&self.query_vector, &vec);
+            let sim = cosine_similarity(&self.query_vector, &vec)?;
             if sim >= self.threshold {
                 entries.push(PostingEntry::new(vid, Payload::with_score(sim)));
             }
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 }
 
@@ -311,22 +369,27 @@ impl<'a> SemanticGraphSearch<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> CrossParadigmResult<GraphPostingList> {
+        validate_vector_query(&self.query_vector, self.threshold)?;
         let mut traverse = Traverse::new(self.start_vertex, self.graph).max_hops(self.max_hops);
         if let Some(l) = self.label {
             traverse = traverse.label(l);
         }
-        let gpl = traverse.execute(store);
+        let gpl = traverse.execute(store)?;
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<VertexId, GraphPayload> = BTreeMap::new();
         for entry in gpl.inner().entries() {
             let Some(vertex) = store.get_vertex(entry.doc_id) else {
+                return Err(GraphStoreError::CorruptGraph(format!(
+                    "traversal returned missing vertex {}",
+                    entry.doc_id
+                ))
+                .into());
+            };
+            let Some(vec) = read_vector(&vertex.properties, &self.vector_field)? else {
                 continue;
             };
-            let Some(vec) = read_vector(&vertex.properties, &self.vector_field) else {
-                continue;
-            };
-            let sim = cosine_similarity(&self.query_vector, &vec);
+            let sim = cosine_similarity(&self.query_vector, &vec)?;
             if sim < self.threshold {
                 continue;
             }
@@ -337,7 +400,10 @@ impl<'a> SemanticGraphSearch<'a> {
                 graph_payloads.insert(entry.doc_id, copy);
             }
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 }
 
@@ -381,23 +447,33 @@ impl<'a> VectorEnhancedMatch<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> CrossParadigmResult<GraphPostingList> {
+        validate_vector_query(&self.query_vector, self.threshold)?;
         let match_op = GMatch::new(self.pattern.clone(), self.graph);
-        let result = match_op.execute(store);
+        let result = match_op.execute(store)?;
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<VertexId, GraphPayload> = BTreeMap::new();
         for entry in result.inner().entries() {
             let Some(Value::Int(vid_i)) = entry.payload.fields.get(&self.score_variable) else {
                 continue;
             };
-            let vid = *vid_i as VertexId;
+            let vid = VertexId::try_from(*vid_i).map_err(|_| {
+                CrossParadigmError::InvalidInput(format!(
+                    "match variable {:?} contains invalid vertex id {vid_i}",
+                    self.score_variable
+                ))
+            })?;
             let Some(vertex) = store.get_vertex(vid) else {
+                return Err(GraphStoreError::CorruptGraph(format!(
+                    "match variable {:?} references missing vertex {vid}",
+                    self.score_variable
+                ))
+                .into());
+            };
+            let Some(vec) = read_vector(&vertex.properties, &self.vector_field)? else {
                 continue;
             };
-            let Some(vec) = read_vector(&vertex.properties, &self.vector_field) else {
-                continue;
-            };
-            let sim = cosine_similarity(&self.query_vector, &vec);
+            let sim = cosine_similarity(&self.query_vector, &vec)?;
             if sim < self.threshold {
                 continue;
             }
@@ -415,41 +491,96 @@ impl<'a> VectorEnhancedMatch<'a> {
                 graph_payloads.insert(entry.doc_id, copy);
             }
         }
-        let _ = DEFAULT_GRAPH_SCORE;
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 }
 
-fn read_vector(properties: &BTreeMap<String, Value>, field: &str) -> Option<Vec<f64>> {
-    let Value::List(items) = properties.get(field)? else {
-        return None;
+fn increment_cooccurrence(
+    cooccurrences: &mut BTreeMap<(String, String), u64>,
+    pair: (String, String),
+) -> CrossParadigmResult<()> {
+    let count = cooccurrences.entry(pair).or_insert(0);
+    *count = count.checked_add(1).ok_or_else(|| {
+        CrossParadigmError::ArithmeticOverflow("co-occurrence counter overflow".to_string())
+    })?;
+    Ok(())
+}
+
+fn validate_vector_query(query: &[f64], threshold: f64) -> CrossParadigmResult<()> {
+    if query.is_empty() {
+        return Err(CrossParadigmError::InvalidInput(
+            "query vector must not be empty".to_string(),
+        ));
+    }
+    if query.iter().any(|value| !value.is_finite()) || !threshold.is_finite() {
+        return Err(CrossParadigmError::InvalidInput(
+            "query vector and threshold must be finite".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_vector(
+    properties: &BTreeMap<String, Value>,
+    field: &str,
+) -> CrossParadigmResult<Option<Vec<f64>>> {
+    let Some(value) = properties.get(field) else {
+        return Ok(None);
+    };
+    let Value::List(items) = value else {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "vector field {field:?} must be a list"
+        )));
     };
     let mut out = Vec::with_capacity(items.len());
     for v in items {
         match v {
-            Value::Float(f) => out.push(*f),
-            Value::Int(n) => out.push(*n as f64),
-            _ => return None,
+            Value::Float(f) if f.is_finite() => out.push(*f),
+            Value::Int(n) if n.unsigned_abs() <= (1_u64 << 53) => out.push(*n as f64),
+            Value::Int(n) => {
+                return Err(CrossParadigmError::InvalidInput(format!(
+                    "integer vector component {n} cannot be represented exactly as f64"
+                )));
+            }
+            _ => {
+                return Err(CrossParadigmError::InvalidInput(format!(
+                    "vector field {field:?} contains a non-numeric or non-finite component"
+                )));
+            }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
-fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
-    let len = a.len().min(b.len());
-    if len == 0 {
-        return 0.0;
+fn cosine_similarity(a: &[f64], b: &[f64]) -> CrossParadigmResult<f64> {
+    if a.len() != b.len() || a.is_empty() {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "cosine vectors must have the same non-zero dimension ({} != {})",
+            a.len(),
+            b.len()
+        )));
     }
     let mut dot = 0.0;
     let mut na = 0.0;
     let mut nb = 0.0;
-    for i in 0..len {
+    for i in 0..a.len() {
         dot += a[i] * b[i];
         na += a[i] * a[i];
         nb += b[i] * b[i];
     }
     if na == 0.0 || nb == 0.0 {
-        return 0.0;
+        return Err(CrossParadigmError::InvalidInput(
+            "cosine vectors must have non-zero norm".to_string(),
+        ));
     }
-    dot / (na.sqrt() * nb.sqrt())
+    let similarity = dot / (na.sqrt() * nb.sqrt());
+    if !similarity.is_finite() {
+        return Err(CrossParadigmError::InvalidInput(
+            "cosine similarity is non-finite".to_string(),
+        ));
+    }
+    Ok(similarity)
 }

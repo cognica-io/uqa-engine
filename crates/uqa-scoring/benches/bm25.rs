@@ -56,7 +56,7 @@ fn bench_bm25(c: &mut Criterion) {
 fn bench_bayesian_bm25(c: &mut Criterion) {
     let corpus = build_corpus();
     let stats = build_stats();
-    let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats);
+    let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats).unwrap();
     c.bench_function("bayesian_bm25_score_100k", |bencher| {
         bencher.iter(|| {
             let mut total = 0.0f64;

@@ -24,11 +24,39 @@
 //! here is deliberate and BEIR-validated: with prior-free evidence the
 //! floor is the prior, which Lucene's posterior-fed softplus lacked.
 
+use std::fmt;
+
 use uqa_scoring::{logit as prior_logit, sigmoid};
 
 const CLAMP_MIN: f64 = 1e-7;
 const CLAMP_MAX: f64 = 1.0 - CLAMP_MIN;
 const WEIGHT_SUM_TOLERANCE: f64 = 1e-3;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogOddsFusionError {
+    InvalidAlpha(f64),
+    InvalidBaseRate(f64),
+    UnknownGating(String),
+}
+
+impl fmt::Display for LogOddsFusionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidAlpha(alpha) => {
+                write!(formatter, "alpha must be finite and in [0, 1], got {alpha}")
+            }
+            Self::InvalidBaseRate(base_rate) => write!(
+                formatter,
+                "base_rate must be finite and in (0, 1), got {base_rate}"
+            ),
+            Self::UnknownGating(name) => {
+                write!(formatter, "unknown logit gating function: {name}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LogOddsFusionError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogitGating {
@@ -80,48 +108,55 @@ impl LogitGating {
 /// signals must be prior-free evidence.
 #[derive(Debug, Clone, Copy)]
 pub struct LogOddsFusion {
-    pub alpha: f64,
-    pub gating: LogitGating,
-    pub base_rate: Option<f64>,
+    alpha: f64,
+    gating: LogitGating,
+    base_rate: Option<f64>,
 }
 
 impl Default for LogOddsFusion {
     fn default() -> Self {
-        Self::new(0.5)
-    }
-}
-
-impl LogOddsFusion {
-    pub fn new(alpha: f64) -> Self {
-        assert!(
-            alpha.is_finite() && (0.0..=1.0).contains(&alpha),
-            "alpha must be in [0, 1], got {alpha}"
-        );
         Self {
-            alpha,
+            alpha: 0.5,
             gating: LogitGating::Softplus,
             base_rate: None,
         }
     }
+}
 
-    pub fn with_gating(alpha: f64, gating: Option<&str>) -> Self {
-        let mut fusion = Self::new(alpha);
+impl LogOddsFusion {
+    pub fn new(alpha: f64) -> Result<Self, LogOddsFusionError> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(LogOddsFusionError::InvalidAlpha(alpha));
+        }
+        Ok(Self {
+            alpha,
+            gating: LogitGating::Softplus,
+            base_rate: None,
+        })
+    }
+
+    pub fn with_gating(alpha: f64, gating: Option<&str>) -> Result<Self, LogOddsFusionError> {
+        let mut fusion = Self::new(alpha)?;
         if let Some(name) = gating {
             fusion.gating = LogitGating::parse(name)
-                .unwrap_or_else(|| panic!("unknown logit gating function: {name}"));
+                .ok_or_else(|| LogOddsFusionError::UnknownGating(name.to_string()))?;
         }
-        fusion
+        Ok(fusion)
+    }
+
+    pub fn with_logit_gating(mut self, gating: LogitGating) -> Self {
+        self.gating = gating;
+        self
     }
 
     /// Fusion-level relevance prior, applied exactly once. Signals fed
     /// into a prior-configured fusion must be prior-free evidence.
-    pub fn with_base_rate(mut self, base_rate: f64) -> Self {
-        assert!(
-            base_rate.is_finite() && base_rate > 0.0 && base_rate < 1.0,
-            "base_rate must be in (0, 1), got {base_rate}"
-        );
+    pub fn with_base_rate(mut self, base_rate: f64) -> Result<Self, LogOddsFusionError> {
+        if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
+            return Err(LogOddsFusionError::InvalidBaseRate(base_rate));
+        }
         self.base_rate = Some(base_rate);
-        self
+        Ok(self)
     }
 
     fn logit_base_rate(&self) -> f64 {
@@ -142,8 +177,7 @@ impl LogOddsFusion {
     }
 
     pub fn fuse_sparse(&self, probabilities: &[Option<f64>]) -> f64 {
-        self.fuse_configured(probabilities, None, None, None)
-            .expect("uniform fusion configuration is valid")
+        self.fuse_validated(probabilities, None, None, None)
     }
 
     pub fn fuse_weighted(
@@ -171,8 +205,18 @@ impl LogOddsFusion {
         logit_max: Option<&[f64]>,
     ) -> Result<f64, &'static str> {
         self.validate_configuration(probabilities.len(), weights, logit_min, logit_max)?;
+        Ok(self.fuse_validated(probabilities, weights, logit_min, logit_max))
+    }
+
+    fn fuse_validated(
+        &self,
+        probabilities: &[Option<f64>],
+        weights: Option<&[f64]>,
+        logit_min: Option<&[f64]>,
+        logit_max: Option<&[f64]>,
+    ) -> f64 {
         if probabilities.is_empty() {
-            return Ok(self.base_rate.unwrap_or(0.5));
+            return self.base_rate.unwrap_or(0.5);
         }
 
         // The single-signal identity (Proposition 4.3.2) only holds for
@@ -180,7 +224,7 @@ impl LogOddsFusion {
         // prior must still enter once, and explicit logit bounds are a
         // learned per-signal transform that must not be bypassed.
         if probabilities.len() == 1 && self.base_rate.is_none() && logit_min.is_none() {
-            return Ok(probabilities[0].unwrap_or(0.5));
+            return probabilities[0].unwrap_or(0.5);
         }
 
         let mut logit_sum = 0.0;
@@ -206,9 +250,7 @@ impl LogOddsFusion {
         } else {
             logit_sum / signal_count
         };
-        Ok(sigmoid(
-            aggregate * signal_count.powf(self.alpha) + self.logit_base_rate(),
-        ))
+        sigmoid(aggregate * signal_count.powf(self.alpha) + self.logit_base_rate())
     }
 
     pub fn validate_configuration(
@@ -360,8 +402,9 @@ impl AdaptiveLogOddsFusion {
                     return Err("computed weights sum to zero");
                 }
                 let normalized: Vec<f64> = raw.iter().map(|weight| weight / total).collect();
-                let mut inner = LogOddsFusion::new(self.base_alpha);
-                inner.gating = self.gating;
+                let inner = LogOddsFusion::new(self.base_alpha)
+                    .map_err(|_| "base alpha must be finite and in [0, 1]")?
+                    .with_logit_gating(self.gating);
                 inner.fuse_weighted(probabilities, &normalized)
             }
         }
@@ -390,8 +433,24 @@ mod tests {
     }
 
     #[test]
+    fn malformed_constructor_configuration_returns_typed_errors() {
+        assert!(matches!(
+            LogOddsFusion::new(f64::NAN),
+            Err(LogOddsFusionError::InvalidAlpha(alpha)) if alpha.is_nan()
+        ));
+        assert!(matches!(
+            LogOddsFusion::with_gating(0.5, Some("typo")),
+            Err(LogOddsFusionError::UnknownGating(name)) if name == "typo"
+        ));
+        assert!(matches!(
+            LogOddsFusion::new(0.5).unwrap().with_base_rate(1.0),
+            Err(LogOddsFusionError::InvalidBaseRate(1.0))
+        ));
+    }
+
+    #[test]
     fn default_matches_lucene_formula_without_a_prior() {
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let probabilities = [0.8, 0.6];
         let gated_sum = probabilities
             .iter()
@@ -403,7 +462,7 @@ mod tests {
 
     #[test]
     fn pass_gating_preserves_evidence_sign() {
-        let fusion = LogOddsFusion::with_gating(0.5, Some("pass"));
+        let fusion = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
         let probabilities = [0.8, 0.6];
         let logit_sum = probabilities
             .iter()
@@ -416,7 +475,7 @@ mod tests {
 
     #[test]
     fn absent_signal_contributes_zero_but_remains_in_denominator() {
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let expected = sigmoid((softplus(lucene_logit(0.8)) / 2.0) * 2.0_f64.sqrt());
         approx_eq(fusion.fuse_sparse(&[Some(0.8), None]), expected);
     }
@@ -426,16 +485,22 @@ mod tests {
         // Softplus floors match evidence at zero, so with a configured
         // prior even the weakest match cannot fall below the prior;
         // pass gating lets weak evidence sink beneath it.
-        let fusion = LogOddsFusion::new(0.5).with_base_rate(0.05);
+        let fusion = LogOddsFusion::new(0.5)
+            .unwrap()
+            .with_base_rate(0.05)
+            .unwrap();
         approx_eq(fusion.fuse_sparse(&[None, None]), 0.05);
         assert!(fusion.fuse_sparse(&[Some(0.1), None]) >= 0.05);
-        let signed = LogOddsFusion::with_gating(0.5, Some("pass")).with_base_rate(0.05);
+        let signed = LogOddsFusion::with_gating(0.5, Some("pass"))
+            .unwrap()
+            .with_base_rate(0.05)
+            .unwrap();
         assert!(signed.fuse_sparse(&[Some(0.1), None]) < 0.05);
     }
 
     #[test]
     fn weighted_fusion_uses_weighted_sum_without_mean_division() {
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let weights = [0.75, 0.25];
         let expected = sigmoid(
@@ -452,7 +517,10 @@ mod tests {
 
     #[test]
     fn base_rate_enters_once_after_confidence_scaling() {
-        let fusion = LogOddsFusion::new(0.5).with_base_rate(0.05);
+        let fusion = LogOddsFusion::new(0.5)
+            .unwrap()
+            .with_base_rate(0.05)
+            .unwrap();
         let probabilities = [0.8, 0.6];
         let gated_sum = softplus(lucene_logit(0.8)) + softplus(lucene_logit(0.6));
         let prior = (0.05_f64 / 0.95).ln();
@@ -462,7 +530,10 @@ mod tests {
 
     #[test]
     fn base_rate_applies_even_to_a_single_signal() {
-        let fusion = LogOddsFusion::new(0.5).with_base_rate(0.05);
+        let fusion = LogOddsFusion::new(0.5)
+            .unwrap()
+            .with_base_rate(0.05)
+            .unwrap();
         let prior = (0.05_f64 / 0.95).ln();
         approx_eq(
             fusion.fuse(&[0.8]),
@@ -474,13 +545,16 @@ mod tests {
 
     #[test]
     fn neutral_evidence_returns_the_prior_under_pass_gating() {
-        let fusion = LogOddsFusion::with_gating(0.5, Some("pass")).with_base_rate(0.1);
+        let fusion = LogOddsFusion::with_gating(0.5, Some("pass"))
+            .unwrap()
+            .with_base_rate(0.1)
+            .unwrap();
         approx_eq(fusion.fuse(&[0.5, 0.5]), 0.1);
     }
 
     #[test]
     fn logit_normalization_replaces_gating() {
-        let fusion = LogOddsFusion::new(0.0);
+        let fusion = LogOddsFusion::new(0.0).unwrap();
         let probabilities = [Some(0.5), Some(0.8)];
         let minimums = [-1.0, 0.0];
         let maximums = [1.0, lucene_logit(0.8)];
@@ -495,7 +569,7 @@ mod tests {
 
     #[test]
     fn partial_logit_bounds_are_rejected() {
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let minimums = [-1.0, 0.0];
         assert_eq!(
@@ -510,7 +584,7 @@ mod tests {
 
     #[test]
     fn degenerate_logit_bounds_are_rejected() {
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let inverted = ([0.0, 1.0], [1.0, 1.0]);
         assert_eq!(
@@ -533,7 +607,7 @@ mod tests {
     fn single_signal_with_bounds_applies_normalization() {
         // Explicit logit bounds are a learned per-signal transform, so
         // the single-signal identity must not bypass them.
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).unwrap();
         let minimums = [0.0];
         let maximums = [2.0 * lucene_logit(0.8)];
         let expected = sigmoid(0.5);

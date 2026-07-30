@@ -25,8 +25,8 @@ use uqa_storage::{InvertedIndex, MemoryInvertedIndex, MemoryVectorIndex, VectorI
 struct LiteralOperator(Vec<PostingEntry>);
 
 impl Operator for LiteralOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        PostingList::from_sorted_unchecked(self.0.clone())
+    fn execute(&self, _ctx: &ExecutionContext) -> uqa_storage::StorageBackendResult<PostingList> {
+        Ok(PostingList::from_sorted_unchecked(self.0.clone()))
     }
 }
 
@@ -48,7 +48,9 @@ fn bench_sparse_threshold(c: &mut Criterion) {
         let ctx = ExecutionContext::new();
         size_group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&op).execute(black_box(&ctx));
+                let result = black_box(&op)
+                    .execute(black_box(&ctx))
+                    .expect("benchmark operator execution");
                 black_box(result.len())
             });
         });
@@ -64,7 +66,9 @@ fn bench_sparse_threshold(c: &mut Criterion) {
             &threshold,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&op).execute(black_box(&ctx));
+                    let result = black_box(&op)
+                        .execute(black_box(&ctx))
+                        .expect("benchmark operator execution");
                     black_box(result.len())
                 });
             },
@@ -90,7 +94,9 @@ fn bench_attention_and_learned_operators(c: &mut Criterion) {
             &n_signals,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&op).execute(black_box(&ctx));
+                    let result = black_box(&op)
+                        .execute(black_box(&ctx))
+                        .expect("benchmark operator execution");
                     black_box(result.len())
                 });
             },
@@ -109,7 +115,9 @@ fn bench_attention_and_learned_operators(c: &mut Criterion) {
             &n_signals,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&op).execute(black_box(&ctx));
+                    let result = black_box(&op)
+                        .execute(black_box(&ctx))
+                        .expect("benchmark operator execution");
                     black_box(result.len())
                 });
             },
@@ -125,10 +133,13 @@ fn bench_multi_stage(c: &mut Criterion) {
         let op = MultiStageOperator::new(vec![
             (literal(size, 0), Cutoff::TopK((size / 2) as usize)),
             (literal(size, 0), Cutoff::TopK((size / 4) as usize)),
-        ]);
+        ])
+        .expect("benchmark stages are non-empty");
         size_group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&op).execute(black_box(&ctx));
+                let result = black_box(&op)
+                    .execute(black_box(&ctx))
+                    .expect("benchmark operator execution");
                 black_box(result.len())
             });
         });
@@ -139,10 +150,13 @@ fn bench_multi_stage(c: &mut Criterion) {
         (literal(1_000, 0), Cutoff::TopK(500)),
         (literal(1_000, 0), Cutoff::Threshold(0.4)),
         (literal(1_000, 0), Cutoff::TopK(100)),
-    ]);
+    ])
+    .expect("benchmark stages are non-empty");
     c.bench_function("multi_stage_three_stage", |bencher| {
         bencher.iter(|| {
-            let result = black_box(&op).execute(black_box(&ctx));
+            let result = black_box(&op)
+                .execute(black_box(&ctx))
+                .expect("benchmark operator execution");
             black_box(result.len())
         });
     });
@@ -159,7 +173,9 @@ fn bench_progressive_fusion(c: &mut Criterion) {
     );
     c.bench_function("progressive_fusion_two_stage", |bencher| {
         bencher.iter(|| {
-            let result = black_box(&op).execute(black_box(&ctx));
+            let result = black_box(&op)
+                .execute(black_box(&ctx))
+                .expect("benchmark operator execution");
             black_box(result.len())
         });
     });
@@ -174,9 +190,10 @@ fn multi_field_context(n_docs: u64) -> ExecutionContext {
             "body".to_string(),
             format!("bayesian vector fusion graph query planner {doc_id}"),
         );
-        idx.add_document(doc_id, fields);
+        idx.add_document(doc_id, fields)
+            .expect("populate benchmark inverted index");
     }
-    ExecutionContext::new().with_inverted_index(idx.snapshot())
+    ExecutionContext::new().with_inverted_index(idx.snapshot().expect("snapshot inverted index"))
 }
 
 fn bench_multi_field_operator(c: &mut Criterion) {
@@ -193,7 +210,9 @@ fn bench_multi_field_operator(c: &mut Criterion) {
             &n_fields,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&op).execute(black_box(&ctx));
+                    let result = black_box(&op)
+                        .execute(black_box(&ctx))
+                        .expect("benchmark operator execution");
                     black_box(result.len())
                 });
             },
@@ -208,9 +227,11 @@ fn vector_context(n_docs: u64) -> ExecutionContext {
         let vector: Vec<f32> = (0..16)
             .map(|d| ((doc_id + d as u64 * 17) % 101) as f32 / 101.0)
             .collect();
-        idx.add(doc_id, vector);
+        idx.add(doc_id, vector)
+            .expect("populate benchmark vector index");
     }
-    ExecutionContext::new().with_vector_index("embedding", idx.snapshot())
+    ExecutionContext::new()
+        .with_vector_index("embedding", idx.snapshot().expect("snapshot vector index"))
 }
 
 fn bench_calibrated_vector(c: &mut Criterion) {
@@ -221,13 +242,17 @@ fn bench_calibrated_vector(c: &mut Criterion) {
         .with_split(RelevantSampleSplit::DistanceGap);
     c.bench_function("calibrated_vector_uniform", |bencher| {
         bencher.iter(|| {
-            let result = black_box(&uniform).execute(black_box(&ctx));
+            let result = black_box(&uniform)
+                .execute(black_box(&ctx))
+                .expect("benchmark operator execution");
             black_box(result.len())
         });
     });
     c.bench_function("calibrated_vector_distance_gap", |bencher| {
         bencher.iter(|| {
-            let result = black_box(&gap).execute(black_box(&ctx));
+            let result = black_box(&gap)
+                .execute(black_box(&ctx))
+                .expect("benchmark operator execution");
             black_box(result.len())
         });
     });

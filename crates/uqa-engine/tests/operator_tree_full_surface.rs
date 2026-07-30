@@ -49,14 +49,14 @@ fn fixture() -> Engine {
         )
         .unwrap();
 
-    engine.create_graph("social");
+    engine.create_graph("social").unwrap();
     for (id, category, value) in [(1, "A", 10), (2, "A", 20), (3, "B", 30)] {
         let mut vertex = Vertex::new(id, "Person");
         vertex
             .properties
             .insert("category".into(), Value::Str(category.into()));
         vertex.properties.insert("value".into(), Value::Int(value));
-        engine.add_graph_vertex(vertex, "social");
+        engine.add_graph_vertex(vertex, "social").unwrap();
     }
     let mut first = Edge::new(1, 1, 2, "follows");
     first
@@ -66,7 +66,7 @@ fn fixture() -> Engine {
         .properties
         .insert("valid_to".into(), Value::Float(10.0));
     first.properties.insert("weight".into(), Value::Float(0.7));
-    engine.add_graph_edge(first, "social");
+    engine.add_graph_edge(first, "social").unwrap();
     let mut second = Edge::new(2, 2, 3, "follows");
     second
         .properties
@@ -75,8 +75,10 @@ fn fixture() -> Engine {
         .properties
         .insert("valid_to".into(), Value::Float(20.0));
     second.properties.insert("weight".into(), Value::Float(0.4));
-    engine.add_graph_edge(second, "social");
-    engine.add_graph_edge(Edge::new(3, 1, 3, "likes"), "social");
+    engine.add_graph_edge(second, "social").unwrap();
+    engine
+        .add_graph_edge(Edge::new(3, 1, 3, "likes"), "social")
+        .unwrap();
     engine
 }
 
@@ -562,10 +564,7 @@ fn layered_fusion_nodes_execute_physically() {
     assert_eq!(deep.len(), 1);
 }
 
-#[test]
-fn malformed_physical_nodes_are_errors_not_empty_results() {
-    let engine = fixture();
-    let driver = EngineDriver::new(&engine, "docs", &[]);
+fn assert_unknown_and_invalid_layer_errors(driver: &EngineDriver<'_>) {
     let error = driver
         .execute_node(&OperatorTree::Opaque {
             kind: "unregistered_physical_operator".into(),
@@ -593,7 +592,9 @@ fn malformed_physical_nodes_are_errors_not_empty_results() {
         })
         .expect_err("invalid physical layer parameters must fail");
     assert!(matches!(invalid_dense, uqa_sql::SQLError::TypeMismatch(_)));
+}
 
+fn assert_invalid_vector_queries_are_errors(driver: &EngineDriver<'_>) {
     let non_vector_field = driver
         .execute_node(&OperatorTree::VectorSimilarity {
             query_vector: vec![1.0, 0.0],
@@ -617,7 +618,79 @@ fn malformed_physical_nodes_are_errors_not_empty_results() {
         wrong_dimensions,
         uqa_sql::SQLError::TypeMismatch(_)
     ));
+}
 
+fn assert_missing_graph_starts_are_errors(driver: &EngineDriver<'_>) {
+    for graph_node in [
+        OperatorTree::GraphNeighbors {
+            vertex: 999,
+            graph: "social".into(),
+            label: None,
+            direction: DeepGraphDirection::Out,
+        },
+        OperatorTree::Traverse {
+            start_vertex: 999,
+            graph: "social".into(),
+            label: None,
+            max_hops: 0,
+            vertex_predicate: None,
+        },
+        OperatorTree::RegularPathQuery {
+            rpq_source: "follows*".into(),
+            start_vertex: 999,
+            graph: "social".into(),
+        },
+        OperatorTree::TemporalTraverse {
+            start_vertex: 999,
+            graph: "social".into(),
+            label: None,
+            max_hops: 0,
+            temporal_filter: None,
+        },
+    ] {
+        let error = driver
+            .execute_node(&graph_node)
+            .expect_err("a missing start vertex must not look like an empty graph result");
+        assert!(
+            matches!(error, uqa_sql::SQLError::Internal(ref message) if message.contains("not a member")),
+            "unexpected graph error: {error}"
+        );
+    }
+}
+
+fn assert_graph_aware_fusion_rejects_non_members(driver: &EngineDriver<'_>) {
+    let graph_aware_missing_vertex = driver
+        .execute_node(&OperatorTree::DeepFusion {
+            layers: vec![
+                DeepFusionLayer::Signal {
+                    signals: vec![
+                        page_rank(),
+                        OperatorTree::VertexAggregation {
+                            source: Box::new(page_rank()),
+                            // VertexAggregation emits its scalar at document 0.
+                            // Keep that deliberately missing graph id while
+                            // preserving DeepFusion's probability contract.
+                            monoid: Arc::new(MaxMonoid),
+                        },
+                    ],
+                },
+                DeepFusionLayer::Propagate {
+                    edge_label: None,
+                    aggregation: DeepFusionAggregation::Mean,
+                    direction: DeepGraphDirection::Out,
+                },
+            ],
+            alpha: 0.5,
+            gating: GatingSpec::Pass,
+        })
+        .expect_err("graph-aware fusion must reject signal ids outside graph membership");
+    assert!(
+        matches!(graph_aware_missing_vertex, uqa_sql::SQLError::Internal(ref message) if message.contains("input vertex 0")),
+        "unexpected graph-aware fusion error: {graph_aware_missing_vertex}"
+    );
+}
+
+fn assert_valid_vertex_aggregation_still_executes(driver: &EngineDriver<'_>) {
     let max = driver
         .execute_node(&OperatorTree::VertexAggregation {
             source: Box::new(page_rank()),
@@ -625,4 +698,16 @@ fn malformed_physical_nodes_are_errors_not_empty_results() {
         })
         .unwrap();
     assert!(posting(&max).entries()[0].payload.score.is_finite());
+}
+
+#[test]
+fn malformed_physical_nodes_are_errors_not_empty_results() {
+    let engine = fixture();
+    let driver = EngineDriver::new(&engine, "docs", &[]);
+
+    assert_unknown_and_invalid_layer_errors(&driver);
+    assert_invalid_vector_queries_are_errors(&driver);
+    assert_missing_graph_starts_are_errors(&driver);
+    assert_graph_aware_fusion_rejects_non_members(&driver);
+    assert_valid_vertex_aggregation_still_executes(&driver);
 }

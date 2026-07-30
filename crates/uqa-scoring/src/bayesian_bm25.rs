@@ -11,14 +11,16 @@ use std::sync::Arc;
 use uqa_core::IndexStats;
 
 use crate::bm25::{BM25Params, BM25Scorer};
+use crate::error::invalid_input;
 use crate::prob::{logit, sigmoid};
+use crate::ScoringResult;
 
 /// Floor on the scaled score spread, as a fraction of the reference
 /// spread, so extrapolating to very short queries cannot drive `sigma`
 /// to zero and explode `alpha` into a step function.
 const MIN_SIGMA_SCALE: f64 = 0.25;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BayesianBM25Params {
     pub bm25: BM25Params,
     pub alpha: f64,
@@ -111,26 +113,12 @@ pub struct BayesianBM25Scorer {
 }
 
 impl BayesianBM25Scorer {
-    pub fn new(params: BayesianBM25Params, stats: Arc<IndexStats>) -> Self {
-        assert!(
-            params.alpha.is_finite() && params.alpha > 0.0,
-            "alpha must be a positive finite value, got {}",
-            params.alpha
-        );
-        assert!(
-            params.beta.is_finite(),
-            "beta must be a finite value, got {}",
-            params.beta
-        );
-        assert!(
-            params.base_rate.is_finite() && params.base_rate >= 0.0 && params.base_rate < 1.0,
-            "base_rate must be in [0, 1), got {}",
-            params.base_rate
-        );
-        Self {
+    pub fn new(params: BayesianBM25Params, stats: Arc<IndexStats>) -> ScoringResult<Self> {
+        validate_params(params, &stats)?;
+        Ok(Self {
             params,
             bm25: BM25Scorer::new(params.bm25, stats),
-        }
+        })
     }
 
     pub fn idf(&self, doc_freq: u64) -> f64 {
@@ -173,6 +161,64 @@ impl BayesianBM25Scorer {
     }
 }
 
+fn validate_params(params: BayesianBM25Params, stats: &IndexStats) -> ScoringResult<()> {
+    if !params.alpha.is_finite() || params.alpha <= 0.0 {
+        return Err(invalid_input(format!(
+            "alpha must be a positive finite value, got {}",
+            params.alpha
+        )));
+    }
+    if !params.beta.is_finite() {
+        return Err(invalid_input(format!(
+            "beta must be a finite value, got {}",
+            params.beta
+        )));
+    }
+    if !params.base_rate.is_finite() || !(0.0..1.0).contains(&params.base_rate) {
+        return Err(invalid_input(format!(
+            "base_rate must be in [0, 1), got {}",
+            params.base_rate
+        )));
+    }
+    if !params.calibration_tokens.is_finite() || params.calibration_tokens < 0.0 {
+        return Err(invalid_input(format!(
+            "calibration_tokens must be finite and non-negative, got {}",
+            params.calibration_tokens
+        )));
+    }
+    if !params.beta_slope.is_finite() || !params.sigma_slope.is_finite() {
+        return Err(invalid_input(
+            "Bayesian BM25 calibration slopes must be finite".to_string(),
+        ));
+    }
+    let bm25 = params.bm25;
+    if !bm25.k1.is_finite() || bm25.k1 <= 0.0 {
+        return Err(invalid_input(format!(
+            "BM25 k1 must be a positive finite value, got {}",
+            bm25.k1
+        )));
+    }
+    if !bm25.b.is_finite() || !(0.0..=1.0).contains(&bm25.b) {
+        return Err(invalid_input(format!(
+            "BM25 b must be finite and in [0, 1], got {}",
+            bm25.b
+        )));
+    }
+    if !bm25.boost.is_finite() || bm25.boost < 0.0 {
+        return Err(invalid_input(format!(
+            "BM25 boost must be finite and non-negative, got {}",
+            bm25.boost
+        )));
+    }
+    if !stats.avg_doc_length.is_finite() || stats.avg_doc_length < 0.0 {
+        return Err(invalid_input(format!(
+            "average document length must be finite and non-negative, got {}",
+            stats.avg_doc_length
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,15 +233,37 @@ mod tests {
     #[test]
     fn score_in_unit_interval() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone()).unwrap();
         let p = scorer.score(3, 10, 50);
         assert!(p > 0.0 && p < 1.0, "got {p}");
     }
 
     #[test]
+    fn constructor_rejects_invalid_parameters_and_statistics() {
+        let invalid_alpha = BayesianBM25Params {
+            alpha: f64::NAN,
+            ..BayesianBM25Params::default()
+        };
+        assert!(BayesianBM25Scorer::new(invalid_alpha, stats(1000, 10.0)).is_err());
+
+        let invalid_bm25 = BayesianBM25Params {
+            bm25: BM25Params {
+                k1: 0.0,
+                ..BM25Params::default()
+            },
+            ..BayesianBM25Params::default()
+        };
+        assert!(BayesianBM25Scorer::new(invalid_bm25, stats(1000, 10.0)).is_err());
+        assert!(
+            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, f64::INFINITY),)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn score_monotone_in_tf() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone()).unwrap();
         let mut last = scorer.score(0, 10, 50);
         for tf in 1..20 {
             let cur = scorer.score(tf, 10, 50);
@@ -207,7 +275,7 @@ mod tests {
     #[test]
     fn upper_bound_dominates_observed_scores() {
         let s = stats(1000, 10.0);
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone());
+        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), s.clone()).unwrap();
         let ub = scorer.upper_bound(50);
         for tf in [1, 5, 10, 100] {
             for dl in [1, 5, 50, 500] {
@@ -219,14 +287,16 @@ mod tests {
 
     #[test]
     fn query_level_calibration_uses_the_bm25_sum() {
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+        let scorer =
+            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
         let combined = scorer.combine_scores(&[0.7, 0.4]);
         assert!((combined - sigmoid(1.1)).abs() < 1e-12);
     }
 
     #[test]
     fn query_level_calibration_preserves_raw_ranking() {
-        let scorer = BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+        let scorer =
+            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
         let lower = scorer.combine_scores(&[0.7, 0.4]);
         let higher = scorer.combine_scores(&[0.8, 0.5]);
         assert!(higher > lower, "{higher} must exceed {lower}");
@@ -240,9 +310,10 @@ mod tests {
                 ..BayesianBM25Params::default()
             },
             stats(1000, 10.0),
-        );
+        )
+        .unwrap();
         let without_prior =
-            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0));
+            BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
         let combined = with_prior.combine_scores(&[0.7, 0.4]);
         assert!((combined - without_prior.combine_scores(&[0.7, 0.4])).abs() < 1e-12);
         assert!((combined - sigmoid(1.1)).abs() < 1e-12);
@@ -309,8 +380,9 @@ mod tests {
             base_rate: 0.05,
             ..BayesianBM25Params::default()
         };
-        let posterior_scorer = BayesianBM25Scorer::new(params, stats(1000, 10.0));
-        let evidence_scorer = BayesianBM25Scorer::new(params.evidence_params(), stats(1000, 10.0));
+        let posterior_scorer = BayesianBM25Scorer::new(params, stats(1000, 10.0)).unwrap();
+        let evidence_scorer =
+            BayesianBM25Scorer::new(params.evidence_params(), stats(1000, 10.0)).unwrap();
         for raw in [0.0, 1.5, 3.0, 6.0] {
             let posterior = posterior_scorer.calibrate_raw_score(raw);
             let evidence = evidence_scorer.calibrate_raw_score(raw);

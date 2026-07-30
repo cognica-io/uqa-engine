@@ -9,6 +9,7 @@
 
 pub mod analyzer;
 pub mod char_filter;
+pub mod error;
 pub mod highlight;
 pub mod porter;
 pub mod registry;
@@ -19,9 +20,10 @@ pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
 };
 pub use char_filter::CharFilter;
+pub use error::{AnalysisError, AnalysisResult};
 pub use highlight::{highlight, HighlightOptions};
 pub use registry::{
     drop_analyzer, get_analyzer, list_analyzers, register_analyzer, DEFAULT_ANALYZER_NAME,
 };
-pub use token_filter::TokenFilter;
+pub use token_filter::{SynonymFileError, TokenFilter};
 pub use tokenizer::Tokenizer;

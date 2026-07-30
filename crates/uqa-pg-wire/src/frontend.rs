@@ -253,6 +253,12 @@ fn parse_bind(reader: &mut Reader<'_>) -> Result<Bind, PgWireError> {
     }
 
     let parameter_count = read_count(reader, "Bind parameter count")?;
+    if parameter_format_count > 1 && parameter_format_count != parameter_count {
+        return Err(PgWireError::ParameterFormatCountMismatch {
+            format_count: parameter_format_count,
+            parameter_count,
+        });
+    }
     let mut parameters = Vec::with_capacity(parameter_count);
     for _ in 0..parameter_count {
         let value = match reader.read_len_i32("Bind parameter value length")? {
@@ -293,6 +299,11 @@ fn parse_describe(reader: &mut Reader<'_>) -> Result<DescribeTarget, PgWireError
 fn parse_execute(reader: &mut Reader<'_>) -> Result<Execute, PgWireError> {
     let portal = reader.read_cstring("Execute portal name")?;
     let max_rows = reader.read_i32("Execute max rows")?;
+    if max_rows < 0 {
+        return Err(PgWireError::NegativeValue {
+            context: "Execute max rows",
+        });
+    }
     reader.ensure_empty("Execute")?;
     Ok(Execute { portal, max_rows })
 }

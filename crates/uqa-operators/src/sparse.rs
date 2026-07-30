@@ -14,8 +14,9 @@
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
+use uqa_storage::StorageBackendError;
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{require_finite_score, ExecutionContext, Operator, OperatorResult};
 
 pub struct SparseThresholdOperator {
     pub source: Arc<dyn Operator>,
@@ -29,8 +30,16 @@ impl SparseThresholdOperator {
 }
 
 impl Operator for SparseThresholdOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let pl = self.source.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if !self.threshold.is_finite() {
+            return Err(StorageBackendError::Other(
+                "sparse threshold must be finite".to_string(),
+            ));
+        }
+        let pl = self.source.execute(ctx)?;
+        for entry in pl.entries() {
+            require_finite_score(entry.payload.score, "sparse threshold")?;
+        }
         let entries: Vec<PostingEntry> = pl
             .entries()
             .iter()
@@ -50,7 +59,7 @@ impl Operator for SparseThresholdOperator {
                 }
             })
             .collect();
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -65,8 +74,8 @@ mod tests {
     struct ConstOperator(Vec<PostingEntry>);
 
     impl Operator for ConstOperator {
-        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-            PostingList::from_sorted_unchecked(self.0.clone())
+        fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+            Ok(PostingList::from_sorted_unchecked(self.0.clone()))
         }
     }
 
@@ -78,7 +87,7 @@ mod tests {
             PostingEntry::new(3, Payload::with_score(0.5)),
         ])) as Arc<dyn Operator>;
         let op = SparseThresholdOperator::new(source, 0.4);
-        let out = op.execute(&ExecutionContext::new());
+        let out = op.execute(&ExecutionContext::new()).unwrap();
         let entries: Vec<(u64, f64)> = out
             .entries()
             .iter()

@@ -23,29 +23,31 @@ enum Shape {
 fn graph(shape: Shape, n: usize) -> JoinGraph {
     let mut graph = JoinGraph::new();
     for i in 0..n {
-        graph.add_relation(format!("t{i}"), 1_000.0 + i as f64 * 100.0);
+        graph
+            .add_relation(format!("t{i}"), 1_000.0 + i as f64 * 100.0)
+            .unwrap();
     }
     match shape {
         Shape::Chain => {
             for i in 0..n.saturating_sub(1) {
-                graph.add_edge(i, i + 1, 0.01);
+                graph.add_edge(i, i + 1, 0.01).unwrap();
             }
         }
         Shape::Star => {
             for i in 1..n {
-                graph.add_edge(0, i, 0.01);
+                graph.add_edge(0, i, 0.01).unwrap();
             }
         }
         Shape::Clique => {
             for i in 0..n {
                 for j in (i + 1)..n {
-                    graph.add_edge(i, j, 0.01);
+                    graph.add_edge(i, j, 0.01).unwrap();
                 }
             }
         }
         Shape::Cycle => {
             for i in 0..n {
-                graph.add_edge(i, (i + 1) % n, 0.01);
+                graph.add_edge(i, (i + 1) % n, 0.01).unwrap();
             }
         }
     }

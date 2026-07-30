@@ -15,5 +15,7 @@ pub mod query_features;
 pub use attention::{AttentionFusion, AttentionFusionState, MultiHeadAttentionFusion};
 pub use boolean::ProbabilisticBoolean;
 pub use learned::{LearnedFusion, LearnedFusionState};
-pub use log_odds::{AdaptiveLogOddsFusion, LogOddsFusion, LogitGating, SignalQuality};
+pub use log_odds::{
+    AdaptiveLogOddsFusion, LogOddsFusion, LogOddsFusionError, LogitGating, SignalQuality,
+};
 pub use query_features::{extract_query_features, QueryFeatureExtractor, N_QUERY_FEATURES};

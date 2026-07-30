@@ -10,18 +10,67 @@ use super::{
 };
 
 impl Engine {
-    pub(crate) fn fts_fields_for_table(&self, name: &str) -> Vec<FieldName> {
-        self.table(name)
-            .map_or_else(Vec::new, |table| table.fts_fields())
+    pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
+        Ok(self
+            .try_table(name)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
+            .map_or_else(Vec::new, |table| table.fts_fields()))
     }
 
-    pub fn fts_index_stats(&self, table_filter: Option<&str>) -> Vec<FtsIndexStat> {
+    /// Validate the physical text-search contract for one concrete field.
+    /// A declared TEXT column is not searchable until it has been registered
+    /// in a GIN/FTS index; treating that state as an empty posting list hides a
+    /// schema/configuration error from both the public search API and the
+    /// operator-tree executor.
+    pub(crate) fn validate_text_search_field(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> Result<(), SQLError> {
+        let Some(table_state) = self
+            .try_table(table)
+            .map_err(|error| SQLError::Internal(format!("resolve text-search table: {error}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        if table_state
+            .fts_fields()
+            .iter()
+            .any(|indexed| indexed == field)
+        {
+            return Ok(());
+        }
+
+        let columns = table_state.columns.read();
+        if !columns.is_empty() && !columns.iter().any(|column| column.name == field) {
+            return Err(SQLError::UnknownColumn(field.to_string()));
+        }
+        Err(SQLError::TypeMismatch(format!(
+            "text search: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})"
+        )))
+    }
+
+    pub fn fts_index_stats(
+        &self,
+        table_filter: Option<&str>,
+    ) -> Result<Vec<FtsIndexStat>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
+        let resolved_filter = table_filter
+            .map(|name| self.try_resolve_table_name(name))
+            .transpose()
+            .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
+            .flatten();
         let mut tables: Vec<(String, Arc<TableState>)> = self
             .tables
             .read()
             .iter()
-            .filter(|(name, _)| table_filter.is_none_or(|target| name.as_str() == target))
-            .map(|(name, table)| (name.clone(), table.clone()))
+            .filter(|(name, _)| {
+                resolved_filter
+                    .as_ref()
+                    .is_none_or(|target| name.qualified_name() == *target)
+            })
+            .map(|(name, table)| (name.qualified_name(), table.clone()))
             .collect();
         tables.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -31,50 +80,65 @@ impl Engine {
             fields.sort();
             let index = table.inverted_index.read();
             for field in fields {
-                let analyzer = self.table_field_analyzer(&table_name, &field).map_or_else(
-                    || analyzer_registry::DEFAULT_ANALYZER_NAME.to_string(),
-                    |(name, _)| name,
-                );
-                let doc_length_count = index.doc_length_count(Some(&field));
+                let analyzer = self
+                    .table_field_analyzer(&table_name, &field)
+                    .map_err(SQLError::Internal)?
+                    .map_or_else(
+                        || analyzer_registry::DEFAULT_ANALYZER_NAME.to_string(),
+                        |(name, _)| name,
+                    );
+                let doc_length_count = index.doc_length_count(Some(&field)).map_err(|error| {
+                    SQLError::Internal(format!("read FTS document-length count: {error}"))
+                })?;
                 out.push(FtsIndexStat {
                     table_name: table_name.clone(),
                     field: field.clone(),
                     analyzer,
-                    posting_count: index.posting_count(Some(&field)),
+                    posting_count: index.posting_count(Some(&field)).map_err(|error| {
+                        SQLError::Internal(format!("read FTS posting count: {error}"))
+                    })?,
                     doc_length_count,
                     indexed_doc_count: doc_length_count,
-                    term_count: index.term_count(Some(&field)),
-                    total_field_length: index.total_field_length(&field),
+                    term_count: index.term_count(Some(&field)).map_err(|error| {
+                        SQLError::Internal(format!("read FTS term count: {error}"))
+                    })?,
+                    total_field_length: index.total_field_length(&field).map_err(|error| {
+                        SQLError::Internal(format!("read FTS field length: {error}"))
+                    })?,
                 });
             }
         }
-        out
+        Ok(out)
     }
 
     pub(crate) fn rebuild_fts_index(t: &Arc<TableState>) -> Result<(), String> {
         let fts_fields = t.fts_fields();
         let indexed_docs = {
             let store = t.document_store.read();
-            let doc_ids = store.doc_ids();
+            let doc_ids = store.doc_ids().map_err(|error| error.to_string())?;
             let fields: Vec<&str> = fts_fields.iter().map(String::as_str).collect();
             let mut indexed_docs = Vec::with_capacity(doc_ids.len());
-            store.for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
-                let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-                for (field, value) in fts_fields.iter().zip(projected_values) {
-                    if let Value::Str(text) = value {
-                        text_fields.insert(field.clone(), text.clone());
+            store
+                .for_each_fields_multi_ref(&doc_ids, &fields, &mut |doc_id, projected_values| {
+                    let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
+                    for (field, value) in fts_fields.iter().zip(projected_values) {
+                        if let Value::Str(text) = value {
+                            text_fields.insert(field.clone(), text.clone());
+                        }
                     }
-                }
-                if !text_fields.is_empty() {
-                    indexed_docs.push((doc_id, text_fields));
-                }
-                true
-            });
+                    if !text_fields.is_empty() {
+                        indexed_docs.push((doc_id, text_fields));
+                    }
+                    true
+                })
+                .map_err(|error| error.to_string())?;
             indexed_docs
         };
         {
             let mut index = t.inverted_index.write();
-            index.try_rebuild_documents(indexed_docs)?;
+            index
+                .try_rebuild_documents(indexed_docs)
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
@@ -85,34 +149,29 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
-        self.add_document_impl(table, doc_id, document, false)
+        self.with_implicit_transaction(|engine| {
+            engine.add_document_impl(table, doc_id, document, false)
+        })
     }
 
-    /// [`Engine::add_document`] for a document id the caller has proven
-    /// absent (a fresh id from the allocator, or an INSERT whose
-    /// uniqueness validation already ran). Skips the per-row old-value
-    /// lookup that value-index maintenance needs for replacements.
-    pub(crate) fn add_document_known_new(
-        &self,
-        table: &str,
-        doc_id: DocId,
-        document: Document,
-    ) -> Result<(), SQLError> {
-        self.add_document_impl(table, doc_id, document, true)
-    }
-
-    fn add_document_impl(
+    pub(crate) fn add_document_impl(
         &self,
         table: &str,
         doc_id: DocId,
         document: Document,
         known_new: bool,
     ) -> Result<(), SQLError> {
-        let Some(table_name) = self.resolve_table_name(table) else {
-            return Ok(());
+        let Some(table_name) = self
+            .try_resolve_table_name(table)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let Some(t) = self.table(table) else {
-            return Ok(());
+        let Some(t) = self
+            .try_table(table)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
         };
         // Index the FTS fields whose values are strings.
         let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
@@ -121,9 +180,14 @@ impl Engine {
                 text_fields.insert(name.clone(), s.clone());
             }
         }
-        if !text_fields.is_empty() {
-            t.inverted_index.write().add_document(doc_id, text_fields);
-        }
+        // Replacement is one atomic inverted-index operation even when the
+        // new document has no indexed text. Skipping an empty field map would
+        // leave stale postings from the previous version; remove-then-add
+        // would expose a destructive failure window when analysis fails.
+        t.inverted_index
+            .write()
+            .add_document(doc_id, text_fields)
+            .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so
@@ -134,7 +198,7 @@ impl Engine {
         let (old_indexed, indexed_fields) = if known_new {
             (None, Self::value_indexes_built_fields(&t))
         } else {
-            let old = Self::value_indexes_old_values(&t, doc_id);
+            let old = Self::value_indexes_old_values(&t, doc_id)?;
             let fields = old
                 .as_ref()
                 .map(|old| old.keys().cloned().collect::<Vec<String>>());
@@ -150,7 +214,7 @@ impl Engine {
                 .collect()
         });
         let persistent_indexed =
-            self.persistent_value_index_document_values(&table_name, &document);
+            self.persistent_value_index_document_values(&table_name, &document)?;
         let mut store = t.document_store.write();
         store
             .put(doc_id, document)
@@ -162,11 +226,13 @@ impl Engine {
             Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));
         }
         drop(store);
-        self.mark_column_stats_dirty(&table_name, &t);
+        self.mark_column_stats_dirty(&table_name, &t)
+            .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         // Keep the auto-id watermark monotonic over manual inserts as well.
         let mut nx = t.next_id.lock();
-        if doc_id >= *nx {
-            *nx = doc_id + 1;
+        let next = u128::from(doc_id) + 1;
+        if next > *nx {
+            *nx = next;
         }
         Ok(())
     }

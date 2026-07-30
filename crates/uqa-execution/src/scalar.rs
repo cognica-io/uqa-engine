@@ -12,7 +12,7 @@ use uqa_sql::expr::{
     cast_value, eval_binary_values, eval_function_call, truthy, EngineHook, EvalContext, RowLookup,
     NAMED_ARG_FUNCTION,
 };
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 /// Index into the query children owned by the enclosing expression plan.
 pub type SubqueryId = usize;
@@ -317,7 +317,24 @@ pub trait ScalarSubqueryRunner {
         subquery: SubqueryId,
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
-    ) -> Result<SQLResult, SQLError>;
+    ) -> Result<SubqueryResult, SQLError>;
+}
+
+/// Pull-based scalar-subquery result. Scalar, EXISTS, and IN consumers never
+/// need to materialize the complete child relation: they respectively inspect
+/// at most two rows, one row, or one row at a time.
+pub struct SubqueryResult {
+    pub columns: Vec<String>,
+    pub rows: Box<dyn Iterator<Item = Result<ResultRow, SQLError>> + Send>,
+}
+
+impl SubqueryResult {
+    pub fn from_rows(columns: Vec<String>, rows: Vec<ResultRow>) -> Self {
+        Self {
+            columns,
+            rows: Box::new(rows.into_iter().map(Ok)),
+        }
+    }
 }
 
 pub struct ScalarEvalContext<'a> {
@@ -440,11 +457,11 @@ pub fn eval_scalar(
             cast_value(&value, ty)
         }
         ScalarExpr::ScalarSubquery(subquery) => {
-            let result = execute_subquery(*subquery, context)?;
-            if result.rows.is_empty() {
+            let mut result = execute_subquery(*subquery, context)?;
+            let Some(first_row) = result.rows.next().transpose()? else {
                 return Ok(Value::Null);
-            }
-            if result.rows.len() > 1 {
+            };
+            if result.rows.next().transpose()?.is_some() {
                 return Err(SQLError::TypeMismatch(
                     "scalar subquery returned more than one row".into(),
                 ));
@@ -452,13 +469,11 @@ pub fn eval_scalar(
             let first_column = result.columns.first().ok_or_else(|| {
                 SQLError::TypeMismatch("scalar subquery returned no columns".into())
             })?;
-            Ok(result.rows[0]
-                .get(first_column)
-                .cloned()
-                .unwrap_or(Value::Null))
+            Ok(first_row.get(first_column).cloned().unwrap_or(Value::Null))
         }
         ScalarExpr::Exists { subquery, negated } => {
-            let exists = !execute_subquery(*subquery, context)?.rows.is_empty();
+            let mut result = execute_subquery(*subquery, context)?;
+            let exists = result.rows.next().transpose()?.is_some();
             Ok(Value::Bool(if *negated { !exists } else { exists }))
         }
         ScalarExpr::InSubquery {
@@ -471,17 +486,24 @@ pub fn eval_scalar(
             let Some(first_column) = result.columns.first() else {
                 return Ok(Value::Bool(*negated));
             };
-            let found = result
-                .rows
-                .iter()
-                .any(|row| row.get(first_column).is_some_and(|value| value == &needle));
+            let mut found = false;
+            for row in result.rows {
+                let row = row?;
+                if row.get(first_column).is_some_and(|value| value == &needle) {
+                    found = true;
+                    break;
+                }
+            }
             Ok(Value::Bool(if *negated { !found } else { found }))
         }
     }
 }
 
 fn eval_parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {
-    match params.get(index.saturating_sub(1)) {
+    match index
+        .checked_sub(1)
+        .and_then(|parameter_index| params.get(parameter_index))
+    {
         Some(SQLParam::Scalar(value)) => Ok(value.clone()),
         Some(SQLParam::Vector(vector)) => Ok(Value::List(
             vector
@@ -640,7 +662,7 @@ fn eval_case(
 fn execute_subquery(
     subquery: SubqueryId,
     context: &ScalarEvalContext<'_>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<SubqueryResult, SQLError> {
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
@@ -652,6 +674,7 @@ mod tests {
     use super::{eval_scalar, ScalarEvalContext, ScalarExpr};
     use uqa_core::Value;
     use uqa_sql::ast::BinaryOp;
+    use uqa_sql::{SQLError, SQLParam};
 
     #[test]
     fn arithmetic_does_not_require_parser_ast() {
@@ -664,5 +687,17 @@ mod tests {
             eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap(),
             Value::Int(21)
         );
+    }
+
+    #[test]
+    fn parameter_zero_is_not_aliased_to_parameter_one() {
+        let params = [SQLParam::Scalar(Value::Str("secret".into()))];
+        assert!(matches!(
+            eval_scalar(
+                &ScalarExpr::Param(0),
+                &ScalarEvalContext::new(None, &params)
+            ),
+            Err(SQLError::MissingParam(0))
+        ));
     }
 }

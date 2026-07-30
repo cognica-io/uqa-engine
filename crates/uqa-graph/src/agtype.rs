@@ -26,6 +26,18 @@ use std::collections::BTreeMap;
 
 use uqa_core::{Edge, Value, Vertex};
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AgtypeConversionError {
+    #[error("graph id {id} cannot be represented as an agtype integer")]
+    GraphIdOutOfRange { id: u64 },
+}
+
+fn graph_id_value(id: u64) -> Result<Value, AgtypeConversionError> {
+    i64::try_from(id)
+        .map(Value::Int)
+        .map_err(|_| AgtypeConversionError::GraphIdOutOfRange { id })
+}
+
 /// Reserved map key that tags a [`Value::Map`] as a graph-entity
 /// envelope. The key cannot be produced by Cypher map literals (map
 /// keys are identifiers or quoted names without `@` in this dialect).
@@ -44,25 +56,25 @@ pub enum EntityKind {
 }
 
 /// Wrap a [`Vertex`] into its agtype envelope value.
-pub fn vertex_to_value(vertex: &Vertex) -> Value {
+pub fn vertex_to_value(vertex: &Vertex) -> Result<Value, AgtypeConversionError> {
     let mut map = BTreeMap::new();
     map.insert(AGTYPE_KIND_KEY.into(), Value::Str(KIND_VERTEX.into()));
-    map.insert("id".into(), Value::Int(vertex.vertex_id as i64));
+    map.insert("id".into(), graph_id_value(vertex.vertex_id)?);
     map.insert("label".into(), Value::Str(vertex.label.clone()));
     map.insert("properties".into(), Value::Map(vertex.properties.clone()));
-    Value::Map(map)
+    Ok(Value::Map(map))
 }
 
 /// Wrap an [`Edge`] into its agtype envelope value.
-pub fn edge_to_value(edge: &Edge) -> Value {
+pub fn edge_to_value(edge: &Edge) -> Result<Value, AgtypeConversionError> {
     let mut map = BTreeMap::new();
     map.insert(AGTYPE_KIND_KEY.into(), Value::Str(KIND_EDGE.into()));
-    map.insert("id".into(), Value::Int(edge.edge_id as i64));
+    map.insert("id".into(), graph_id_value(edge.edge_id)?);
     map.insert("label".into(), Value::Str(edge.label.clone()));
-    map.insert("start_id".into(), Value::Int(edge.source_id as i64));
-    map.insert("end_id".into(), Value::Int(edge.target_id as i64));
+    map.insert("start_id".into(), graph_id_value(edge.source_id)?);
+    map.insert("end_id".into(), graph_id_value(edge.target_id)?);
     map.insert("properties".into(), Value::Map(edge.properties.clone()));
-    Value::Map(map)
+    Ok(Value::Map(map))
 }
 
 /// Wrap an ordered vertex/edge element sequence into a path envelope.
@@ -213,17 +225,21 @@ pub fn format_float_pg(f: f64) -> String {
     // `{:e}` prints the shortest round-trip mantissa in scientific
     // form (`-3.25e-2`); re-shape it into PostgreSQL conventions.
     let sci = format!("{f:e}");
-    let (mantissa, exp) = sci
-        .split_once('e')
-        .expect("`{:e}` always contains an exponent");
-    let exp: i32 = exp.parse().expect("`{:e}` exponent is an integer");
+    let Some((mantissa, exp)) = sci.split_once('e') else {
+        return sci;
+    };
+    let Ok(exp) = exp.parse::<i32>() else {
+        return sci;
+    };
     let negative = mantissa.starts_with('-');
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     let sign = if negative { "-" } else { "" };
 
     if (-4..15).contains(&exp) {
         if exp >= 0 {
-            let int_len = (exp + 1) as usize;
+            let Ok(int_len) = usize::try_from(exp + 1) else {
+                return sci;
+            };
             if digits.len() > int_len {
                 format!("{sign}{}.{}", &digits[..int_len], &digits[int_len..])
             } else {
@@ -231,7 +247,10 @@ pub fn format_float_pg(f: f64) -> String {
                 format!("{sign}{digits}{zeros}")
             }
         } else {
-            let zeros = "0".repeat((-exp - 1) as usize);
+            let Ok(zero_count) = usize::try_from(-exp - 1) else {
+                return sci;
+            };
+            let zeros = "0".repeat(zero_count);
             format!("{sign}0.{zeros}{digits}")
         }
     } else {
@@ -470,28 +489,7 @@ fn is_number(v: &Value) -> bool {
 }
 
 fn cmp_numbers(a: &Value, b: &Value) -> Ordering {
-    if let (Value::Int(x), Value::Int(y)) = (a, b) {
-        return x.cmp(y);
-    }
-    let x = number_as_f64(a);
-    let y = number_as_f64(b);
-    // PostgreSQL float semantics: NaN sorts greater than every other
-    // number and equal to itself.
-    match (x.is_nan(), y.is_nan()) {
-        (true, true) => Ordering::Equal,
-        (true, false) => Ordering::Greater,
-        (false, true) => Ordering::Less,
-        (false, false) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
-    }
-}
-
-fn number_as_f64(v: &Value) -> f64 {
-    match v {
-        Value::Int(n) => *n as f64,
-        Value::Float(f) => *f,
-        Value::Decimal(d) => d.to_f64().unwrap_or(f64::NAN),
-        _ => f64::NAN,
-    }
+    a.cmp(b)
 }
 
 /// agtype equality (`=` / `<>` with non-null operands): numbers
@@ -524,7 +522,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            render(&vertex_to_value(&v)),
+            render(&vertex_to_value(&v).unwrap()),
             "{\"id\": 844424930131969, \"label\": \"Person\", \
              \"properties\": {\"age\": 30, \"name\": \"Alice\"}}::vertex"
         );
@@ -540,7 +538,7 @@ mod tests {
         );
         e.properties.insert("since".into(), Value::Int(2020));
         assert_eq!(
-            render(&edge_to_value(&e)),
+            render(&edge_to_value(&e).unwrap()),
             "{\"id\": 1125899906842625, \"label\": \"KNOWS\", \
              \"end_id\": 844424930131970, \"start_id\": 844424930131969, \
              \"properties\": {\"since\": 2020}}::edge"
@@ -553,9 +551,9 @@ mod tests {
         let b = vertex(2, "B", &[]);
         let e = Edge::new(10, 1, 2, "R");
         let path = path_to_value(vec![
-            vertex_to_value(&a),
-            edge_to_value(&e),
-            vertex_to_value(&b),
+            vertex_to_value(&a).unwrap(),
+            edge_to_value(&e).unwrap(),
+            vertex_to_value(&b).unwrap(),
         ]);
         let text = render(&path);
         assert!(text.starts_with("[{\"id\": 1, \"label\": \"A\""));
@@ -625,9 +623,9 @@ mod tests {
 
     #[test]
     fn total_order_matches_age_type_ranks() {
-        let vertex_value = vertex_to_value(&vertex(1, "A", &[]));
-        let edge_value = edge_to_value(&Edge::new(2, 1, 1, "R"));
-        let path_value = path_to_value(vec![vertex_to_value(&vertex(1, "A", &[]))]);
+        let vertex_value = vertex_to_value(&vertex(1, "A", &[])).unwrap();
+        let edge_value = edge_to_value(&Edge::new(2, 1, 1, "R")).unwrap();
+        let path_value = path_to_value(vec![vertex_to_value(&vertex(1, "A", &[])).unwrap()]);
         let mut values = vec![
             Value::Null,
             Value::Float(2.5),

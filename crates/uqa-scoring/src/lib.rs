@@ -12,6 +12,7 @@ pub mod bayesian_bm25;
 pub mod bayesian_estimator;
 pub mod bm25;
 pub mod calibration;
+pub mod error;
 pub mod external_prior;
 pub mod fusion_wand;
 pub mod metrics;
@@ -29,6 +30,7 @@ pub use bm25::{BM25Params, BM25Scorer};
 pub use calibration::{
     CalibrationMetrics, CalibrationReport, ReliabilityBin, VectorProbabilityTransform,
 };
+pub use error::{ScoringError, ScoringResult};
 pub use external_prior::{authority_prior, recency_prior, ExternalPriorScorer, PriorFn};
 pub use fusion_wand::{FusionWANDScorer, TightenedFusionWANDScorer};
 pub use metrics::{average_precision_at_k, dcg_at_k, mean_average_precision_at_k, ndcg_at_k};

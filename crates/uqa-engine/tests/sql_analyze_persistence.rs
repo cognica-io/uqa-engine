@@ -11,10 +11,15 @@
 //! histogram and MCV payloads must survive an `Engine::open` round trip
 //! so the planner keeps its selectivity inputs after restart.
 
+use std::sync::Arc;
+
 use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::sqlite::{Catalog, ManagedConnection};
+use uqa_storage::{
+    sqlite::{Catalog, ManagedConnection},
+    ColumnStatsInput, SQLiteStorageBackend,
+};
 
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
@@ -32,17 +37,12 @@ fn insert_skewed_rows(engine: &Engine) {
 
 fn write_persisted_row_count(db_path: &std::path::Path, row_count: i64) {
     let conn = ManagedConnection::open(db_path).unwrap();
-    conn.with(|c| {
-        c.execute(
-            "INSERT OR REPLACE INTO _column_stats
-                (table_name, column_name, distinct_count, null_count, min_value, max_value,
-                 row_count, histogram, mcv_values, mcv_frequencies)
-             VALUES ('t', 'val', 1, 0, NULL, NULL, ?1, '[]', '[]', '[]')",
-            [row_count],
-        )?;
-        Ok(())
-    })
-    .unwrap();
+    let catalog = Catalog::open(conn).unwrap();
+    catalog
+        .save_column_stats(ColumnStatsInput::basic(
+            "public.t", "val", 1, 0, None, None, row_count,
+        ))
+        .unwrap();
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn analyze_histogram_and_mcv_survive_engine_reopen() {
         insert_skewed_rows(&engine);
         exec(&engine, "ANALYZE t");
 
-        let stats = engine.column_stats("t");
+        let stats = engine.column_stats("t").unwrap();
         let val = stats.get("val").expect("val stats");
         assert!(val.histogram.len() >= 2);
         assert_eq!(val.histogram.first(), Some(&Value::Int(1)));
@@ -77,7 +77,7 @@ fn analyze_histogram_and_mcv_survive_engine_reopen() {
     };
 
     let reopened = Engine::open(&db_path).unwrap();
-    let restored = reopened.column_stats("t");
+    let restored = reopened.column_stats("t").unwrap();
     assert_eq!(restored["val"].histogram, original["val"].histogram);
     assert_eq!(restored["cat"].mcv_values, original["cat"].mcv_values);
     assert_eq!(
@@ -87,7 +87,7 @@ fn analyze_histogram_and_mcv_survive_engine_reopen() {
 }
 
 #[test]
-fn persisted_column_stats_load_on_first_read_not_open() {
+fn persisted_column_stats_are_loaded_during_open() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("uqa.sqlite3");
 
@@ -101,11 +101,45 @@ fn persisted_column_stats_load_on_first_read_not_open() {
     }
 
     write_persisted_row_count(&db_path, 999);
-    let reopened = Engine::open(&db_path).unwrap();
+    // Exercise the storage-neutral open boundary directly. `Engine::open`
+    // attaches an external-commit monitor after this restore; that monitor is
+    // intentionally allowed to replace the cache when the write below
+    // commits, which would mask whether the restore itself was eager.
+    let connection = ManagedConnection::open(&db_path).unwrap();
+    let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
+    let backend = Arc::new(SQLiteStorageBackend::new(connection));
+    let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
     write_persisted_row_count(&db_path, 123);
 
-    let stats = reopened.column_stats("t");
-    assert_eq!(stats["val"].row_count, 123);
+    let stats = reopened.column_stats("t").unwrap();
+    assert_eq!(stats["val"].row_count, 999);
+}
+
+#[test]
+fn analyze_persists_stats_only_under_the_canonical_relation_name() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("uqa.sqlite3");
+
+    {
+        let engine = Engine::open(&db_path).unwrap();
+        exec(&engine, "CREATE SCHEMA app");
+        exec(&engine, "SET search_path TO app");
+        exec(
+            &engine,
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
+        );
+        exec(&engine, "INSERT INTO t (id, val) VALUES (1, 10), (2, 20)");
+        exec(&engine, "ANALYZE t");
+    }
+
+    let conn = ManagedConnection::open(&db_path).unwrap();
+    let catalog = Catalog::open(conn).unwrap();
+    assert!(catalog.load_column_stats("t").unwrap().is_empty());
+    assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
+    let stats = catalog.load_column_stats("app.t").unwrap();
+    assert_eq!(stats.len(), 2);
+    assert_eq!(stats[0].row_count, 2);
+    assert_eq!(stats[1].row_count, 2);
 }
 
 #[test]
@@ -129,8 +163,23 @@ fn analyze_without_table_name_persists_every_table() {
     }
 
     let reopened = Engine::open(&db_path).unwrap();
-    assert_eq!(reopened.column_stats("a")["x"].row_count, 2);
-    assert_eq!(reopened.column_stats("b")["y"].distinct_count, 2);
+    assert_eq!(reopened.column_stats("a").unwrap()["x"].row_count, 2);
+    assert_eq!(reopened.column_stats("b").unwrap()["y"].distinct_count, 2);
+}
+
+#[test]
+fn analyze_named_missing_table_is_an_error() {
+    let engine = Engine::new();
+
+    let direct = engine
+        .run_analyze(Some("missing"))
+        .expect_err("direct ANALYZE must not silently ignore a missing target");
+    assert!(direct.to_string().contains("does not exist"));
+
+    let sql = engine
+        .sql("ANALYZE missing", &[])
+        .expect_err("SQL ANALYZE must not report success for a missing target");
+    assert!(sql.to_string().contains("does not exist"));
 }
 
 #[test]
@@ -145,12 +194,12 @@ fn column_stats_refresh_lazily_after_dml_without_manual_analyze() {
         "INSERT INTO t (id, val, cat) VALUES (1, 10, 'A'), (2, 20, 'B')",
     );
 
-    let stats = engine.column_stats("t");
+    let stats = engine.column_stats("t").unwrap();
     assert_eq!(stats["val"].row_count, 2);
     assert_eq!(stats["cat"].distinct_count, 2);
 
     exec(&engine, "INSERT INTO t (id, val, cat) VALUES (3, 30, 'B')");
-    let stats = engine.column_stats("t");
+    let stats = engine.column_stats("t").unwrap();
     assert_eq!(stats["val"].row_count, 3);
     assert_eq!(
         stats["cat"].mcv_values.first(),
@@ -158,12 +207,12 @@ fn column_stats_refresh_lazily_after_dml_without_manual_analyze() {
     );
 
     exec(&engine, "UPDATE t SET cat = 'A' WHERE id = 3");
-    let stats = engine.column_stats("t");
+    let stats = engine.column_stats("t").unwrap();
     assert_eq!(stats["cat"].distinct_count, 2);
     assert!(stats["cat"].mcv_values.contains(&Value::Str("A".into())));
 
     exec(&engine, "DELETE FROM t WHERE id = 2");
-    let stats = engine.column_stats("t");
+    let stats = engine.column_stats("t").unwrap();
     assert_eq!(stats["val"].row_count, 2);
     assert_eq!(stats["cat"].distinct_count, 1);
 }
@@ -180,13 +229,13 @@ fn dirty_column_stats_do_not_survive_reopen_as_stale_catalog_rows() {
             "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
         );
         exec(&engine, "INSERT INTO t (id, val) VALUES (1, 10), (2, 20)");
-        assert_eq!(engine.column_stats("t")["val"].row_count, 2);
+        assert_eq!(engine.column_stats("t").unwrap()["val"].row_count, 2);
 
         exec(&engine, "INSERT INTO t (id, val) VALUES (3, 30)");
     }
 
     let reopened = Engine::open(&db_path).unwrap();
-    let stats = reopened.column_stats("t");
+    let stats = reopened.column_stats("t").unwrap();
     assert_eq!(stats["val"].row_count, 3);
     assert_eq!(stats["val"].max_value, Some(Value::Int(30)));
 }
@@ -204,11 +253,35 @@ fn drop_table_removes_persisted_column_stats() {
         );
         insert_skewed_rows(&engine);
         exec(&engine, "ANALYZE t");
-        assert!(!engine.column_stats("t").is_empty());
+        assert!(!engine.column_stats("t").unwrap().is_empty());
         exec(&engine, "DROP TABLE t");
     }
 
     let conn = ManagedConnection::open(&db_path).unwrap();
     let catalog = Catalog::open(conn).unwrap();
-    assert!(catalog.load_column_stats("t").unwrap().is_empty());
+    assert!(catalog.load_column_stats("public.t").unwrap().is_empty());
+}
+
+#[test]
+fn truncate_invalidates_stats_under_the_resolved_schema_name() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("uqa.sqlite3");
+
+    {
+        let engine = Engine::open(&db_path).unwrap();
+        exec(&engine, "CREATE SCHEMA app");
+        exec(&engine, "SET search_path TO app");
+        exec(
+            &engine,
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
+        );
+        exec(&engine, "INSERT INTO t VALUES (1, 10), (2, 20)");
+        exec(&engine, "ANALYZE t");
+        assert_eq!(engine.column_stats("t").unwrap()["val"].row_count, 2);
+        exec(&engine, "TRUNCATE t");
+    }
+
+    let reopened = Engine::open(&db_path).unwrap();
+    exec(&reopened, "SET search_path TO app");
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 0);
 }

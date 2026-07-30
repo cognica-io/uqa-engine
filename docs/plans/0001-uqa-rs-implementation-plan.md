@@ -74,7 +74,7 @@ The public SQL and API surface includes:
 - Search-aware functions such as `text_match`, `knn_match`, `fuse_log_odds`, `adaptive_fuse`, `attention_fuse`, `multi_field_match`, `staged_retrieval`, `sparse_threshold`, `deep_predict`, and `deep_learn`.
 - Graph functions and table functions including `cypher`, `traverse_match`, RPQ traversal, centrality, message passing, and graph embeddings.
 - FDW/table-function integration for Arrow, DuckDB, Parquet, CSV, JSON, and PostgreSQL-compatible sources.
-- QueryBuilder methods that render the same UQA surface without requiring handwritten SQL.
+- QueryBuilder helpers for common read and retrieval flows. Validated helpers return errors before emitting invalid SQL, retrieval and fusion helpers render shared-IR `WHERE` predicates, and callers use `Engine::sql` for SQL shapes the builder does not model.
 
 ## 6. ML contract
 

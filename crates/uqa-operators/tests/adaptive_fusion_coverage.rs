@@ -29,8 +29,8 @@ impl ConstantOperator {
 }
 
 impl Operator for ConstantOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        self.pl.clone()
+    fn execute(&self, _ctx: &ExecutionContext) -> uqa_storage::StorageBackendResult<PostingList> {
+        Ok(self.pl.clone())
     }
 }
 
@@ -44,7 +44,7 @@ fn adaptive_operator_basic() {
     let pl2 = op(vec![(1, 0.9), (2, 0.3)]);
 
     let op = AdaptiveLogOddsFusionOperator::new(vec![pl1, pl2], 0.5, None);
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
 
     assert_eq!(result.len(), 3);
     assert_eq!(result.doc_ids().collect::<Vec<_>>(), vec![1, 2, 3]);
@@ -55,10 +55,10 @@ fn adaptive_operator_basic() {
 }
 
 #[test]
-fn adaptive_operator_empty() {
+fn adaptive_operator_rejects_missing_signals() {
     let op = AdaptiveLogOddsFusionOperator::new(Vec::new(), 0.5, None);
-    let result = op.execute(&ExecutionContext::new());
-    assert_eq!(result.len(), 0);
+    let error = op.execute(&ExecutionContext::new()).unwrap_err();
+    assert!(error.to_string().contains("at least one signal"));
 }
 
 #[test]

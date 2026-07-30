@@ -48,8 +48,8 @@ fn create_node_and_read_back() {
 #[test]
 fn create_relationship_between_existing_nodes() {
     let mut g = fresh();
-    g.add_vertex(Vertex::new(1, "Person"), "g");
-    g.add_vertex(Vertex::new(2, "Person"), "g");
+    g.add_vertex(Vertex::new(1, "Person"), "g").unwrap();
+    g.add_vertex(Vertex::new(2, "Person"), "g").unwrap();
     run_write(
         &mut g,
         "MATCH (a:Person), (b:Person) WHERE id(a) = 1 AND id(b) = 2 \
@@ -121,7 +121,7 @@ fn set_property_assign_and_update() {
     let mut g = fresh();
     let mut v = Vertex::new(1, "Person");
     v.properties.insert("age".into(), Value::Int(30));
-    g.add_vertex(v, "g");
+    g.add_vertex(v, "g").unwrap();
     run_write(
         &mut g,
         "MATCH (n:Person) WHERE id(n) = 1 SET n.age = 31, n.name = 'alice'",
@@ -134,8 +134,8 @@ fn set_property_assign_and_update() {
 #[test]
 fn delete_vertex_with_no_edges() {
     let mut g = fresh();
-    g.add_vertex(Vertex::new(1, "Person"), "g");
-    g.add_vertex(Vertex::new(2, "Person"), "g");
+    g.add_vertex(Vertex::new(1, "Person"), "g").unwrap();
+    g.add_vertex(Vertex::new(2, "Person"), "g").unwrap();
     run_write(&mut g, "MATCH (n:Person) WHERE id(n) = 1 DELETE n");
     let (_, rows) = run_read(&g, "MATCH (n:Person) RETURN n.name AS name");
     assert_eq!(rows.len(), 1);
@@ -144,9 +144,9 @@ fn delete_vertex_with_no_edges() {
 #[test]
 fn delete_with_incident_edges_fails_without_detach() {
     let mut g = fresh();
-    g.add_vertex(Vertex::new(1, "Person"), "g");
-    g.add_vertex(Vertex::new(2, "Person"), "g");
-    g.add_edge(Edge::new(10, 1, 2, "KNOWS"), "g");
+    g.add_vertex(Vertex::new(1, "Person"), "g").unwrap();
+    g.add_vertex(Vertex::new(2, "Person"), "g").unwrap();
+    g.add_edge(Edge::new(10, 1, 2, "KNOWS"), "g").unwrap();
     let mut writer = CypherWriter::new(&mut g, "g");
     let query = parse_cypher("MATCH (n:Person) WHERE id(n) = 1 DELETE n").unwrap();
     let result = writer.execute(&query);
@@ -156,9 +156,9 @@ fn delete_with_incident_edges_fails_without_detach() {
 #[test]
 fn detach_delete_removes_vertex_and_edges() {
     let mut g = fresh();
-    g.add_vertex(Vertex::new(1, "Person"), "g");
-    g.add_vertex(Vertex::new(2, "Person"), "g");
-    g.add_edge(Edge::new(10, 1, 2, "KNOWS"), "g");
+    g.add_vertex(Vertex::new(1, "Person"), "g").unwrap();
+    g.add_vertex(Vertex::new(2, "Person"), "g").unwrap();
+    g.add_edge(Edge::new(10, 1, 2, "KNOWS"), "g").unwrap();
     run_write(&mut g, "MATCH (n:Person) WHERE id(n) = 1 DETACH DELETE n");
     let (_, vrows) = run_read(&g, "MATCH (n:Person) RETURN id(n) AS i");
     assert_eq!(vrows.len(), 1);

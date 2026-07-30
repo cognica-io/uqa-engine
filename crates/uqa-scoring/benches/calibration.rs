@@ -71,7 +71,8 @@ fn bench_reliability_diagram(c: &mut Criterion) {
                     black_box(&probs[..*n]),
                     black_box(&labels[..*n]),
                     black_box(10),
-                );
+                )
+                .unwrap();
                 black_box(result.len())
             });
         });
@@ -89,7 +90,8 @@ fn bench_report(c: &mut Criterion) {
                     black_box(&probs[..*n]),
                     black_box(&labels[..*n]),
                     black_box(10),
-                );
+                )
+                .unwrap();
                 black_box(report.ece + report.brier + report.log_loss)
             });
         });
@@ -111,13 +113,15 @@ fn bench_parameter_learner(c: &mut Criterion) {
         let (scores, labels) = learner_dataset(n);
         fit_group.bench_with_input(BenchmarkId::from_parameter(n), &n, |bencher, _| {
             bencher.iter(|| {
-                let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5));
-                let params = learner.fit(
-                    black_box(&scores),
-                    black_box(&labels),
-                    black_box(0.1),
-                    black_box(10),
-                );
+                let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5)).unwrap();
+                let params = learner
+                    .fit(
+                        black_box(&scores),
+                        black_box(&labels),
+                        black_box(0.1),
+                        black_box(10),
+                    )
+                    .unwrap();
                 black_box(params.len())
             });
         });
@@ -126,8 +130,10 @@ fn bench_parameter_learner(c: &mut Criterion) {
 
     c.bench_function("parameter_learner_update_single", |bencher| {
         bencher.iter(|| {
-            let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5));
-            learner.update(black_box(5.0), black_box(1.0), black_box(0.01));
+            let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5)).unwrap();
+            learner
+                .update(black_box(5.0), black_box(1.0), black_box(0.01))
+                .unwrap();
             black_box(learner.alpha())
         });
     });
@@ -135,9 +141,9 @@ fn bench_parameter_learner(c: &mut Criterion) {
     let (scores, labels) = learner_dataset(1_000);
     c.bench_function("parameter_learner_update_stream_1000", |bencher| {
         bencher.iter(|| {
-            let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5));
+            let mut learner = ParameterLearner::new(0.5, 0.0, Some(0.5)).unwrap();
             for (&score, &label) in scores.iter().zip(labels.iter()) {
-                learner.update(score, label, 0.01);
+                learner.update(score, label, 0.01).unwrap();
             }
             black_box(learner.alpha())
         });

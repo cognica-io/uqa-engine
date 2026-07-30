@@ -87,14 +87,17 @@ fn parse_mode(name: &str) -> ScoringMode {
 fn engine_matches_text_search_fixture() {
     let fx = load_fixture();
     let eng = Engine::new();
-    eng.create_default_table("articles", vec!["title".into(), "body".into()]);
+    eng.create_default_table("articles", vec!["title".into(), "body".into()])
+        .unwrap();
     for c in &fx.corpus {
         eng.add_document("articles", c.id, into_doc(c)).unwrap();
     }
 
     for case in &fx.queries {
         let mode = parse_mode(&case.scoring);
-        let hits = eng.search("articles", &case.field, &case.query, &mode, case.top_k);
+        let hits = eng
+            .search("articles", &case.field, &case.query, &mode, case.top_k)
+            .unwrap();
         let expected = &case.expected;
 
         assert_eq!(

@@ -37,7 +37,7 @@ fn build_graph(n: u64) -> MemoryGraphStore {
         vertex
             .properties
             .insert("group".to_string(), Value::Str(format!("g{}", id % 10)));
-        g.add_vertex(vertex, GRAPH);
+        g.add_vertex(vertex, GRAPH).unwrap();
     }
     let mut edge_id = 1_u64;
     for id in 1..n {
@@ -49,12 +49,13 @@ fn build_graph(n: u64) -> MemoryGraphStore {
             .insert("valid_from".to_string(), Value::Int(0));
         edge.properties
             .insert("valid_to".to_string(), Value::Int(1_000));
-        g.add_edge(edge, GRAPH);
+        g.add_edge(edge, GRAPH).unwrap();
         edge_id += 1;
     }
     for id in 1..n.saturating_sub(10) {
         if id % 10 == 0 {
-            g.add_edge(Edge::new(edge_id, id, id + 10, "knows"), GRAPH);
+            g.add_edge(Edge::new(edge_id, id, id + 10, "knows"), GRAPH)
+                .unwrap();
             edge_id += 1;
         }
     }
@@ -66,7 +67,10 @@ fn bfs(store: &MemoryGraphStore, start: u64, depth: u32, label: Option<&str>) ->
     if let Some(label) = label {
         op = op.label(label);
     }
-    op.execute(store).inner().len()
+    op.execute(store)
+        .expect("traversal benchmark")
+        .inner()
+        .len()
 }
 
 fn person_knows_pattern() -> GraphPattern {
@@ -82,9 +86,9 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
             let mut g = MemoryGraphStore::new();
             g.create_graph(GRAPH);
             for id in 0..1_000 {
-                g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH);
+                g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH).unwrap();
             }
-            black_box(g.vertices_in_graph(GRAPH).len())
+            black_box(g.vertices_in_graph(GRAPH).expect("benchmark graph").len())
         });
     });
 
@@ -93,12 +97,13 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
             let mut g = MemoryGraphStore::new();
             g.create_graph(GRAPH);
             for id in 0..1_001 {
-                g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH);
+                g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH).unwrap();
             }
             for id in 0..1_000 {
-                g.add_edge(Edge::new(id + 1, id + 1, id + 2, "knows"), GRAPH);
+                g.add_edge(Edge::new(id + 1, id + 1, id + 2, "knows"), GRAPH)
+                    .unwrap();
             }
-            black_box(g.edges_in_graph(GRAPH).len())
+            black_box(g.edges_in_graph(GRAPH).expect("benchmark graph").len())
         });
     });
 
@@ -106,13 +111,13 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
     c.bench_function("graph_store_neighbors", |bencher| {
         bencher.iter(|| {
             let result = store.neighbors(black_box(1), None, Direction::Out, GRAPH);
-            black_box(result.len())
+            black_box(result.expect("benchmark neighbors").len())
         });
     });
     c.bench_function("graph_store_neighbors_with_label", |bencher| {
         bencher.iter(|| {
             let result = store.neighbors(black_box(1), Some("knows"), Direction::Out, GRAPH);
-            black_box(result.len())
+            black_box(result.expect("benchmark neighbors").len())
         });
     });
 
@@ -136,14 +141,15 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
     c.bench_function("graph_vertices_by_label", |bencher| {
         bencher.iter(|| {
             let result = store.vertices_by_label(black_box("Person"), GRAPH);
-            black_box(result.len())
+            black_box(result.expect("benchmark label lookup").len())
         });
     });
     c.bench_function("graph_vertex_match_label", |bencher| {
         bencher.iter(|| {
             let result = VertexMatch::new(GRAPH)
                 .label(black_box("Person"))
-                .execute(&store);
+                .execute(&store)
+                .unwrap();
             black_box(result.len())
         });
     });
@@ -155,13 +161,13 @@ fn bench_pattern_rpq_cypher(c: &mut Criterion) {
     c.bench_function("graph_pattern_single_edge", |bencher| {
         bencher.iter(|| {
             let result = GMatch::new(black_box(pattern.clone()), GRAPH).execute(black_box(&store));
-            black_box(result.inner().len())
+            black_box(result.expect("pattern benchmark").inner().len())
         });
     });
     c.bench_function("graph_pattern_labeled_edge", |bencher| {
         bencher.iter(|| {
             let result = GMatch::new(black_box(pattern.clone()), GRAPH).execute(black_box(&store));
-            black_box(result.inner().len())
+            black_box(result.expect("pattern benchmark").inner().len())
         });
     });
 
@@ -186,7 +192,7 @@ fn bench_pattern_rpq_cypher(c: &mut Criterion) {
             let result = RegularPathQuery::new(black_box(expr.clone()), GRAPH)
                 .from_vertex(1)
                 .execute(black_box(&store));
-            black_box(result.inner().len())
+            black_box(result.expect("RPQ benchmark").inner().len())
         });
     });
 
@@ -212,7 +218,7 @@ fn bench_graph_path_index(c: &mut Criterion) {
         path_group.bench_with_input(BenchmarkId::from_parameter(depth), &depth, |bencher, _| {
             bencher.iter(|| {
                 let idx = PathIndex::build(black_box(&store), GRAPH, black_box(&sequences));
-                black_box(idx.indexed_paths().len())
+                black_box(idx.expect("path index build").indexed_paths().len())
             });
         });
     }
@@ -225,7 +231,8 @@ fn bench_graph_path_index(c: &mut Criterion) {
             vec!["knows".to_string()],
             vec!["knows".to_string(), "knows".to_string()],
         ],
-    );
+    )
+    .expect("path index build");
     c.bench_function("graph_path_index_lookup", |bencher| {
         let seq = vec!["knows".to_string()];
         bencher.iter(|| black_box(idx.lookup(black_box(&seq)).map(BTreeSet::len)));
@@ -239,11 +246,17 @@ fn bench_graph_path_index(c: &mut Criterion) {
                 black_box(std::slice::from_ref(&pattern)),
                 GRAPH,
             );
-            black_box(index.indexed_patterns().len())
+            black_box(
+                index
+                    .expect("subgraph index build")
+                    .indexed_patterns()
+                    .len(),
+            )
         });
     });
 
-    let subgraph_index = SubgraphIndex::build(&store, std::slice::from_ref(&pattern), GRAPH);
+    let subgraph_index = SubgraphIndex::build(&store, std::slice::from_ref(&pattern), GRAPH)
+        .expect("subgraph index build");
     c.bench_function("graph_subgraph_index_lookup", |bencher| {
         bencher.iter(|| {
             black_box(
@@ -260,6 +273,7 @@ fn bench_graph_path_index(c: &mut Criterion) {
                 || {
                     GMatch::new(black_box(pattern.clone()), GRAPH)
                         .execute(black_box(&store))
+                        .expect("pattern benchmark")
                         .inner()
                         .len()
                 },
@@ -282,7 +296,7 @@ fn bench_graph_delta(c: &mut Criterion) {
                 for id in 0..*size {
                     delta.add_vertex(Vertex::new(id + 1, "Person"));
                 }
-                let version = versioned.apply(delta);
+                let version = versioned.apply(delta).unwrap();
                 black_box(version)
             });
         });
@@ -302,7 +316,7 @@ fn bench_graph_delta(c: &mut Criterion) {
                     for version in 0..*depth {
                         let mut delta = GraphDelta::new();
                         delta.add_vertex(Vertex::new(version + 1, "Person"));
-                        versioned.apply(delta);
+                        versioned.apply(delta).unwrap();
                     }
                     versioned.rollback(0).expect("rollback");
                     black_box(versioned.version())
@@ -327,7 +341,7 @@ fn bench_graph_temporal_message_embedding(c: &mut Criterion) {
                         .max_hops(*depth)
                         .filter(TemporalFilter::Timestamp(100.0))
                         .execute(black_box(&store));
-                    black_box(result.inner().len())
+                    black_box(result.expect("temporal traversal benchmark").inner().len())
                 });
             },
         );
@@ -346,7 +360,7 @@ fn bench_graph_temporal_message_embedding(c: &mut Criterion) {
                         .k_layers(*layers)
                         .aggregation(AggregationKind::Mean)
                         .execute(black_box(&store));
-                    black_box(result.inner().len())
+                    black_box(result.expect("message-passing benchmark").inner().len())
                 });
             },
         );
@@ -364,7 +378,7 @@ fn bench_graph_temporal_message_embedding(c: &mut Criterion) {
                         .dimensions(*dimensions)
                         .k_layers(2)
                         .execute(black_box(&store));
-                    black_box(result.inner().len())
+                    black_box(result.expect("embedding benchmark").inner().len())
                 });
             },
         );
@@ -382,7 +396,7 @@ fn edge_weight(edge: &Edge) -> f64 {
 
 fn weighted_two_hop_max(store: &MemoryGraphStore, start: u64) -> BTreeMap<u64, f64> {
     let mut out = BTreeMap::new();
-    for first_id in store.out_edge_ids(start, GRAPH) {
+    for first_id in store.out_edge_ids(start, GRAPH).expect("benchmark graph") {
         let Some(first) = store.get_edge(first_id) else {
             continue;
         };
@@ -390,7 +404,10 @@ fn weighted_two_hop_max(store: &MemoryGraphStore, start: u64) -> BTreeMap<u64, f
             continue;
         }
         let first_weight = edge_weight(first);
-        for second_id in store.out_edge_ids(first.target_id, GRAPH) {
+        for second_id in store
+            .out_edge_ids(first.target_id, GRAPH)
+            .expect("benchmark graph")
+        {
             let Some(second) = store.get_edge(second_id) else {
                 continue;
             };
@@ -410,13 +427,14 @@ fn weighted_two_hop_max(store: &MemoryGraphStore, start: u64) -> BTreeMap<u64, f
     out
 }
 
-fn bench_centrality_and_weighted_path(c: &mut Criterion) {
+fn bench_centrality(c: &mut Criterion) {
     let store = build_graph(500);
     c.bench_function("graph_pagerank_default", |bencher| {
         bencher.iter(|| {
             black_box(
                 PageRank::new(GRAPH)
                     .execute(black_box(&store))
+                    .expect("PageRank benchmark")
                     .inner()
                     .len(),
             )
@@ -429,6 +447,7 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
                     .damping(0.95)
                     .max_iterations(50)
                     .execute(black_box(&store))
+                    .expect("PageRank benchmark")
                     .inner()
                     .len(),
             )
@@ -440,13 +459,22 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
                 PageRank::new(GRAPH)
                     .max_iterations(10)
                     .execute(black_box(&store))
+                    .expect("PageRank benchmark")
                     .inner()
                     .len(),
             )
         });
     });
     c.bench_function("graph_hits_default", |bencher| {
-        bencher.iter(|| black_box(HITS::new(GRAPH).execute(black_box(&store)).inner().len()));
+        bencher.iter(|| {
+            black_box(
+                HITS::new(GRAPH)
+                    .execute(black_box(&store))
+                    .expect("HITS benchmark")
+                    .inner()
+                    .len(),
+            )
+        });
     });
     c.bench_function("graph_hits_low_iterations", |bencher| {
         bencher.iter(|| {
@@ -454,6 +482,7 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
                 HITS::new(GRAPH)
                     .max_iterations(10)
                     .execute(black_box(&store))
+                    .expect("HITS benchmark")
                     .inner()
                     .len(),
             )
@@ -464,12 +493,15 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
             black_box(
                 BetweennessCentrality::new(GRAPH)
                     .execute(black_box(&store))
+                    .expect("betweenness benchmark")
                     .inner()
                     .len(),
             )
         });
     });
+}
 
+fn bench_weighted_path(c: &mut Criterion) {
     let graph_store = Arc::new(build_graph(500));
     let expr = uqa_graph::parse_rpq("knows{2,4}").expect("bounded rpq");
     let weighted = WeightedPathQueryOperator::new(expr.clone(), Arc::clone(&graph_store), GRAPH)
@@ -481,14 +513,28 @@ fn bench_centrality_and_weighted_path(c: &mut Criterion) {
         .with_predicate(|weight| weight >= 3.0, 0.5);
     let ctx = ExecutionContext::new();
     c.bench_function("graph_weighted_path_sum", |bencher| {
-        bencher.iter(|| black_box(weighted.execute(black_box(&ctx)).len()));
+        bencher.iter(|| {
+            black_box(
+                weighted
+                    .execute(black_box(&ctx))
+                    .expect("weighted path benchmark should execute")
+                    .len(),
+            )
+        });
     });
     let max_store = build_graph(500);
     c.bench_function("graph_weighted_path_max", |bencher| {
         bencher.iter(|| black_box(weighted_two_hop_max(black_box(&max_store), black_box(1)).len()));
     });
     c.bench_function("graph_weighted_path_with_predicate", |bencher| {
-        bencher.iter(|| black_box(weighted_predicate.execute(black_box(&ctx)).len()));
+        bencher.iter(|| {
+            black_box(
+                weighted_predicate
+                    .execute(black_box(&ctx))
+                    .expect("weighted path predicate benchmark should execute")
+                    .len(),
+            )
+        });
     });
 }
 
@@ -504,7 +550,7 @@ fn bench_named_graphs(c: &mut Criterion) {
     });
 
     let mut store = build_graph(1_000);
-    store.copy_graph(GRAPH, "copy");
+    store.copy_graph(GRAPH, "copy").unwrap();
     c.bench_function("named_graph_traverse_1hop", |bencher| {
         bencher.iter(|| {
             black_box(bfs(
@@ -534,7 +580,7 @@ fn bench_named_graphs(c: &mut Criterion) {
             .add_edge(EdgePattern::new("b", "c").with_label("knows"));
         bencher.iter(|| {
             let result = GMatch::new(black_box(pattern.clone()), GRAPH).execute(black_box(&store));
-            black_box(result.inner().len())
+            black_box(result.expect("pattern benchmark").inner().len())
         });
     });
     c.bench_function("named_graph_rpq_kleene", |bencher| {
@@ -543,29 +589,29 @@ fn bench_named_graphs(c: &mut Criterion) {
             let result = RegularPathQuery::new(black_box(expr.clone()), GRAPH)
                 .from_vertex(1)
                 .execute(black_box(&store));
-            black_box(result.inner().len())
+            black_box(result.expect("RPQ benchmark").inner().len())
         });
     });
     c.bench_function("named_graph_union_graphs", |bencher| {
         bencher.iter(|| {
             let mut g = build_graph(500);
-            g.copy_graph(GRAPH, "copy");
-            g.union_graphs(GRAPH, "copy", "unioned");
-            black_box(g.vertices_in_graph("unioned").len())
+            g.copy_graph(GRAPH, "copy").unwrap();
+            g.union_graphs(GRAPH, "copy", "unioned").unwrap();
+            black_box(g.vertices_in_graph("unioned").unwrap().len())
         });
     });
     c.bench_function("named_graph_intersect_graphs", |bencher| {
         bencher.iter(|| {
             let mut g = build_graph(500);
-            g.copy_graph(GRAPH, "copy");
-            g.intersect_graphs(GRAPH, "copy", "intersected");
-            black_box(g.vertices_in_graph("intersected").len())
+            g.copy_graph(GRAPH, "copy").unwrap();
+            g.intersect_graphs(GRAPH, "copy", "intersected").unwrap();
+            black_box(g.vertices_in_graph("intersected").unwrap().len())
         });
     });
     c.bench_function("named_graph_property_index_build", |bencher| {
         bencher.iter(|| {
             let mut index: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-            for vertex in store.vertices_in_graph(GRAPH) {
+            for vertex in store.vertices_in_graph(GRAPH).unwrap() {
                 if let Some(Value::Str(group)) = vertex.properties.get("group") {
                     index
                         .entry(group.clone())
@@ -581,8 +627,8 @@ fn bench_named_graphs(c: &mut Criterion) {
             let mut g = MemoryGraphStore::new();
             g.create_graph("a");
             g.create_graph("b");
-            g.add_vertex(Vertex::new(1, "Person"), "a");
-            g.add_vertex(Vertex::new(1, "Person"), "b");
+            g.add_vertex(Vertex::new(1, "Person"), "a").unwrap();
+            g.add_vertex(Vertex::new(1, "Person"), "b").unwrap();
             black_box(g.vertex_graphs(1).len())
         });
     });
@@ -593,15 +639,17 @@ fn bench_incremental_match(c: &mut Criterion) {
         let mut store = build_graph(200);
         let pattern = person_knows_pattern();
         let mut matcher = IncrementalPatternMatcher::new(pattern, GRAPH);
-        matcher.seed(&store);
-        store.add_vertex(Vertex::new(500, "Person"), GRAPH);
-        store.add_edge(Edge::new(10_000, 200, 500, "knows"), GRAPH);
+        matcher.seed(&store).unwrap();
+        store.add_vertex(Vertex::new(500, "Person"), GRAPH).unwrap();
+        store
+            .add_edge(Edge::new(10_000, 200, 500, "knows"), GRAPH)
+            .unwrap();
         let mut delta = GraphDelta::new();
         delta.add_vertex(Vertex::new(500, "Person"));
         delta.add_edge(Edge::new(10_000, 200, 500, "knows"));
         bencher.iter(|| {
             let result = matcher.update(&store, &delta);
-            black_box(result.len())
+            black_box(result.expect("incremental match benchmark").len())
         });
     });
 
@@ -609,13 +657,13 @@ fn bench_incremental_match(c: &mut Criterion) {
         let mut store = build_graph(200);
         let pattern = person_knows_pattern();
         let mut matcher = IncrementalPatternMatcher::new(pattern, GRAPH);
-        matcher.seed(&store);
-        store.remove_vertex(2, GRAPH);
+        matcher.seed(&store).unwrap();
+        store.remove_vertex(2, GRAPH).unwrap();
         let mut delta = GraphDelta::new();
         delta.remove_vertex(2);
         bencher.iter(|| {
             let result = matcher.update(&store, &delta);
-            black_box(result.len())
+            black_box(result.expect("incremental match benchmark").len())
         });
     });
 }
@@ -627,7 +675,8 @@ criterion_group!(
     bench_graph_path_index,
     bench_graph_delta,
     bench_graph_temporal_message_embedding,
-    bench_centrality_and_weighted_path,
+    bench_centrality,
+    bench_weighted_path,
     bench_named_graphs,
     bench_incremental_match
 );

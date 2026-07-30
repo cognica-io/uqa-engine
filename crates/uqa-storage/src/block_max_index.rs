@@ -18,6 +18,8 @@ use rusqlite::params;
 
 use uqa_core::PostingList;
 
+use crate::{StorageBackendError, StorageBackendResult};
+
 pub const DEFAULT_BLOCK_SIZE: usize = 128;
 
 /// Trait every scorer used to seed a block-max index implements. Only
@@ -35,28 +37,43 @@ pub struct BlockMaxIndex {
 
 impl Default for BlockMaxIndex {
     fn default() -> Self {
-        Self::new(DEFAULT_BLOCK_SIZE)
+        Self {
+            block_size: DEFAULT_BLOCK_SIZE,
+            block_maxes: BTreeMap::new(),
+        }
     }
 }
 
 impl BlockMaxIndex {
-    pub fn new(block_size: usize) -> Self {
-        debug_assert!(block_size > 0, "block_size must be > 0");
-        Self {
+    pub fn new(block_size: usize) -> StorageBackendResult<Self> {
+        if block_size == 0 {
+            return Err(StorageBackendError::Other(
+                "block-max block size must be greater than zero".to_string(),
+            ));
+        }
+        Ok(Self {
             block_size,
             block_maxes: BTreeMap::new(),
-        }
+        })
     }
 
     pub fn block_size(&self) -> usize {
         self.block_size
     }
 
-    pub fn set_block_maxes(&mut self, table: &str, field: &str, term: &str, scores: Vec<f64>) {
+    pub fn set_block_maxes(
+        &mut self,
+        table: &str,
+        field: &str,
+        term: &str,
+        scores: Vec<f64>,
+    ) -> StorageBackendResult<()> {
+        validate_scores(&scores)?;
         self.block_maxes.insert(
             (table.to_string(), field.to_string(), term.to_string()),
             scores,
         );
+        Ok(())
     }
 
     /// Compute and store per-block maxima for `posting_list`. Each
@@ -70,14 +87,21 @@ impl BlockMaxIndex {
         field: &str,
         term: &str,
         table: &str,
-    ) {
+    ) -> StorageBackendResult<()> {
+        if self.block_size == 0 {
+            return Err(StorageBackendError::Other(
+                "block-max block size must be greater than zero".to_string(),
+            ));
+        }
         let entries = posting_list.entries();
         let key = (table.to_string(), field.to_string(), term.to_string());
         if entries.is_empty() {
             self.block_maxes.insert(key, Vec::new());
-            return;
+            return Ok(());
         }
-        let df = entries.len() as u64;
+        let df = u64::try_from(entries.len()).map_err(|_| {
+            StorageBackendError::Other("posting-list length exceeds u64".to_string())
+        })?;
         let mut blocks = Vec::with_capacity(entries.len().div_ceil(self.block_size));
         for chunk in entries.chunks(self.block_size) {
             let mut max_score = 0.0_f64;
@@ -86,9 +110,12 @@ impl BlockMaxIndex {
                 let tf = if positions.is_empty() {
                     1
                 } else {
-                    positions.len() as u64
+                    u64::try_from(positions.len()).map_err(|_| {
+                        StorageBackendError::Other("term position count exceeds u64".to_string())
+                    })?
                 };
                 let s = scorer.score(tf, tf, df);
+                validate_score(s)?;
                 if s > max_score {
                     max_score = s;
                 }
@@ -96,6 +123,7 @@ impl BlockMaxIndex {
             blocks.push(max_score);
         }
         self.block_maxes.insert(key, blocks);
+        Ok(())
     }
 
     pub fn block_max(&self, table: &str, field: &str, term: &str, block_idx: usize) -> f64 {
@@ -112,8 +140,13 @@ impl BlockMaxIndex {
     }
 
     /// Block index for a given posting-list cursor position.
-    pub fn block_index_for(&self, position: usize) -> usize {
-        position / self.block_size
+    pub fn block_index_for(&self, position: usize) -> StorageBackendResult<usize> {
+        if self.block_size == 0 {
+            return Err(StorageBackendError::Other(
+                "block-max block size must be greater than zero".to_string(),
+            ));
+        }
+        Ok(position / self.block_size)
     }
 
     pub fn clear(&mut self) {
@@ -121,24 +154,29 @@ impl BlockMaxIndex {
     }
 
     pub fn save_to_sqlite(&self, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+        for scores in self.block_maxes.values() {
+            validate_scores(scores).map_err(storage_error_to_sqlite)?;
+        }
         ensure_global_blockmax_shape(conn)?;
-        conn.execute("DELETE FROM _global_blockmax", [])?;
+        let transaction = conn.unchecked_transaction()?;
+        transaction.execute("DELETE FROM _global_blockmax", [])?;
         for ((table, field, term), scores) in &self.block_maxes {
             for (block_idx, score) in scores.iter().enumerate() {
-                conn.execute(
+                let block_idx = i64::try_from(block_idx)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                transaction.execute(
                     "INSERT INTO _global_blockmax
                         (table_name, field, term, block_idx, max_score)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![table, field, term, block_idx as i64, *score],
+                    params![table, field, term, block_idx, *score],
                 )?;
             }
         }
-        Ok(())
+        transaction.commit()
     }
 
     pub fn load_from_sqlite(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         ensure_global_blockmax_shape(conn)?;
-        self.clear();
         let mut stmt = conn.prepare(
             "SELECT table_name, field, term, block_idx, max_score
              FROM _global_blockmax
@@ -153,17 +191,52 @@ impl BlockMaxIndex {
                 row.get::<_, f64>(4)?,
             ))
         })?;
+        let mut loaded = BTreeMap::<(String, String, String), Vec<f64>>::new();
         for row in rows {
             let (table, field, term, block_idx, score) = row?;
-            let entry = self.block_maxes.entry((table, field, term)).or_default();
-            let idx = block_idx.max(0) as usize;
-            if entry.len() <= idx {
-                entry.resize(idx + 1, 0.0);
+            validate_score(score).map_err(storage_error_to_sqlite)?;
+            let idx = usize::try_from(block_idx)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(3, block_idx))?;
+            let entry = loaded.entry((table, field, term)).or_default();
+            if idx != entry.len() {
+                return Err(rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Integer,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "invalid block-max ordinal sequence: expected {}, found {idx}",
+                            entry.len()
+                        ),
+                    )),
+                ));
             }
-            entry[idx] = score;
+            entry.push(score);
         }
+        self.block_maxes = loaded;
         Ok(())
     }
+}
+
+fn validate_scores(scores: &[f64]) -> StorageBackendResult<()> {
+    for &score in scores {
+        validate_score(score)?;
+    }
+    Ok(())
+}
+
+fn validate_score(score: f64) -> StorageBackendResult<()> {
+    if score.is_finite() && score >= 0.0 {
+        Ok(())
+    } else {
+        Err(StorageBackendError::Other(format!(
+            "block-max score must be finite and non-negative, got {score}"
+        )))
+    }
+}
+
+fn storage_error_to_sqlite(error: StorageBackendError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
 
 fn ensure_global_blockmax_shape(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
@@ -206,6 +279,13 @@ mod tests {
         }
     }
 
+    struct InvalidScorer(f64);
+    impl BlockMaxScorer for InvalidScorer {
+        fn score(&self, _term_freq: u64, _doc_length: u64, _doc_freq: u64) -> f64 {
+            self.0
+        }
+    }
+
     fn pl_with_tfs(tfs: &[u32]) -> PostingList {
         let entries: Vec<PostingEntry> = tfs
             .iter()
@@ -213,7 +293,7 @@ mod tests {
             .map(|(i, &tf)| {
                 let positions = (0..tf).collect();
                 PostingEntry::new(
-                    (i as u64) + 1,
+                    u64::try_from(i).unwrap() + 1,
                     Payload {
                         positions,
                         score: 0.0,
@@ -227,9 +307,10 @@ mod tests {
 
     #[test]
     fn block_max_records_per_block_maximum() {
-        let mut idx = BlockMaxIndex::new(2);
+        let mut idx = BlockMaxIndex::new(2).unwrap();
         let pl = pl_with_tfs(&[1, 5, 3, 7, 2]);
-        idx.build(&pl, &LinearScorer, "title", "rust", "articles");
+        idx.build(&pl, &LinearScorer, "title", "rust", "articles")
+            .unwrap();
         // Blocks of size 2: [1, 5] [3, 7] [2] -> maxes 5, 7, 2
         assert_eq!(idx.num_blocks("articles", "title", "rust"), 3);
         assert!((idx.block_max("articles", "title", "rust", 0) - 5.0).abs() < 1e-12);
@@ -239,18 +320,96 @@ mod tests {
 
     #[test]
     fn empty_posting_list_records_no_blocks() {
-        let mut idx = BlockMaxIndex::new(4);
-        idx.build(&PostingList::new(), &LinearScorer, "title", "rust", "t");
+        let mut idx = BlockMaxIndex::new(4).unwrap();
+        idx.build(&PostingList::new(), &LinearScorer, "title", "rust", "t")
+            .unwrap();
         assert_eq!(idx.num_blocks("t", "title", "rust"), 0);
         assert!((idx.block_max("t", "title", "rust", 0) - 0.0).abs() < 1e-12);
     }
 
     #[test]
     fn block_index_for_position() {
-        let idx = BlockMaxIndex::new(4);
-        assert_eq!(idx.block_index_for(0), 0);
-        assert_eq!(idx.block_index_for(3), 0);
-        assert_eq!(idx.block_index_for(4), 1);
-        assert_eq!(idx.block_index_for(9), 2);
+        let idx = BlockMaxIndex::new(4).unwrap();
+        assert_eq!(idx.block_index_for(0).unwrap(), 0);
+        assert_eq!(idx.block_index_for(3).unwrap(), 0);
+        assert_eq!(idx.block_index_for(4).unwrap(), 1);
+        assert_eq!(idx.block_index_for(9).unwrap(), 2);
+    }
+
+    #[test]
+    fn rejects_zero_block_size_and_invalid_scores_without_replacing_state() {
+        assert!(BlockMaxIndex::new(0).is_err());
+
+        let mut index = BlockMaxIndex::new(2).unwrap();
+        index
+            .set_block_maxes("docs", "body", "term", vec![3.0])
+            .unwrap();
+        let postings = pl_with_tfs(&[1, 2]);
+        assert!(index
+            .build(&postings, &InvalidScorer(f64::NAN), "body", "term", "docs")
+            .is_err());
+        assert_eq!(index.block_max("docs", "body", "term", 0), 3.0);
+        assert!(index
+            .set_block_maxes("docs", "body", "term", vec![-1.0])
+            .is_err());
+        assert_eq!(index.block_max("docs", "body", "term", 0), 3.0);
+    }
+
+    #[test]
+    fn corrupt_persisted_ordinal_does_not_replace_loaded_state() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_global_blockmax_shape(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO _global_blockmax
+                    (table_name, field, term, block_idx, max_score)
+                 VALUES ('docs', 'body', 'bad', -1, 9.0)",
+                [],
+            )
+            .unwrap();
+        let mut index = BlockMaxIndex::default();
+        index
+            .set_block_maxes("old", "body", "term", vec![1.0])
+            .unwrap();
+
+        assert!(index.load_from_sqlite(&connection).is_err());
+        assert_eq!(index.block_max("old", "body", "term", 0), 1.0);
+    }
+
+    #[test]
+    fn failed_save_rolls_back_deleted_snapshot() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_global_blockmax_shape(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO _global_blockmax
+                    (table_name, field, term, block_idx, max_score)
+                 VALUES ('old', 'body', 'term', 0, 1.0)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_blockmax_insert
+                 BEFORE INSERT ON _global_blockmax
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected block-max failure');
+                 END;",
+            )
+            .unwrap();
+        let mut index = BlockMaxIndex::default();
+        index
+            .set_block_maxes("new", "body", "term", vec![2.0])
+            .unwrap();
+
+        assert!(index.save_to_sqlite(&connection).is_err());
+        let persisted: (String, f64) = connection
+            .query_row(
+                "SELECT table_name, max_score FROM _global_blockmax",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(persisted, ("old".to_string(), 1.0));
     }
 }

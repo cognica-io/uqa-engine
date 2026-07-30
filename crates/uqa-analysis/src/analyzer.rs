@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::char_filter::CharFilter;
+use crate::error::AnalysisResult;
 use crate::token_filter::TokenFilter;
 use crate::tokenizer::Tokenizer;
 
@@ -53,16 +54,33 @@ impl Analyzer {
         }
     }
 
-    pub fn analyze(&self, text: &str) -> Vec<String> {
+    pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {
         let mut filtered: String = text.to_owned();
         for cf in &self.char_filters {
-            filtered = cf.filter(&filtered);
+            filtered = cf.filter(&filtered)?;
         }
-        let mut tokens = self.tokenizer.tokenize(&filtered);
+        let mut tokens = self.tokenizer.tokenize(&filtered)?;
         for tf in &self.token_filters {
-            tokens = tf.filter(tokens);
+            tokens = tf.filter(tokens)?;
         }
-        tokens
+        Ok(tokens)
+    }
+
+    /// Validate every configured stage without consuming input.
+    ///
+    /// Registration paths should call this to fail before persistence. Each
+    /// execution method remains independently fallible because analyzer values
+    /// can come from legacy persisted data and external synonym files can
+    /// become unreadable after validation.
+    pub fn validate(&self) -> AnalysisResult<()> {
+        for char_filter in &self.char_filters {
+            char_filter.validate()?;
+        }
+        self.tokenizer.validate()?;
+        for token_filter in &self.token_filters {
+            token_filter.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -132,19 +150,22 @@ mod tests {
         // -> ascii_fold same
         // -> stop ["running"]
         // -> porter_stem ["run"]
-        assert_eq!(a.analyze("The Running"), vec!["run"]);
+        assert_eq!(a.analyze("The Running").unwrap(), vec!["run"]);
     }
 
     #[test]
     fn whitespace_pipeline_just_lowers() {
         let a = whitespace_analyzer();
-        assert_eq!(a.analyze("Hello WORLD"), vec!["hello", "world"]);
+        assert_eq!(a.analyze("Hello WORLD").unwrap(), vec!["hello", "world"]);
     }
 
     #[test]
     fn keyword_pipeline_emits_whole_input() {
         let a = keyword_analyzer();
-        assert_eq!(a.analyze("the quick brown"), vec!["the quick brown"]);
+        assert_eq!(
+            a.analyze("the quick brown").unwrap(),
+            vec!["the quick brown"]
+        );
     }
 
     #[test]
@@ -152,6 +173,9 @@ mod tests {
         let a = standard_analyzer("english");
         let s = serde_json::to_string(&a).unwrap();
         let back: Analyzer = serde_json::from_str(&s).unwrap();
-        assert_eq!(back.analyze("The Running"), a.analyze("The Running"));
+        assert_eq!(
+            back.analyze("The Running").unwrap(),
+            a.analyze("The Running").unwrap()
+        );
     }
 }

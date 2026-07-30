@@ -34,15 +34,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Top 5 hits for 'rust async':");
     for row in &result.rows {
-        let id = row.get("id").map(|v| format!("{v:?}")).unwrap_or_default();
-        let title = row
-            .get("title")
-            .map(|v| format!("{v:?}"))
-            .unwrap_or_default();
-        let score = row
-            .get("_score")
-            .map(|v| format!("{v:?}"))
-            .unwrap_or_default();
+        let required = |column: &str| {
+            row.get(column)
+                .map(|value| format!("{value:?}"))
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("search result is missing required column `{column}`"),
+                    )
+                })
+        };
+        let id = required("id")?;
+        let title = required("title")?;
+        let score = required("_score")?;
         println!("  id={id} title={title} score={score}");
     }
     Ok(())

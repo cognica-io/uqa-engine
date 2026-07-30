@@ -51,24 +51,58 @@ fn show_server_version_reports_postgresql_17_compatibility() {
 fn show_builtin_runtime_parameters_are_case_insensitive() {
     let eng = Engine::new();
     assert_eq!(
-        eng.show_variable("TimeZone"),
+        eng.show_variable("TimeZone").unwrap(),
         "UTC",
         "TimeZone should expose PostgreSQL-compatible default"
     );
     eng.sql("SET TimeZone TO 'Asia/Seoul'", &[]).unwrap();
     assert_eq!(
-        eng.show_variable("timezone"),
+        eng.show_variable("timezone").unwrap(),
         "Asia/Seoul",
         "session override lookup should be case-insensitive"
+    );
+    let settings = eng
+        .sql(
+            "SELECT setting FROM pg_catalog.pg_settings WHERE name = 'TimeZone'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        settings.rows[0].get("setting"),
+        Some(&Value::Str("Asia/Seoul".into()))
     );
 }
 
 #[test]
-fn show_unknown_variable_returns_empty_string() {
+fn registered_defaults_and_read_only_parameters_are_explicit() {
     let eng = Engine::new();
-    let r = eng.sql("SHOW some_unknown_var", &[]).unwrap();
-    let v = r.rows[0].get("some_unknown_var").unwrap();
-    assert_eq!(v, &Value::Str(String::new()));
+    let work_mem = eng.sql("SHOW work_mem", &[]).unwrap();
+    assert_eq!(
+        work_mem.rows[0].get("work_mem"),
+        Some(&Value::Str("64MB".into()))
+    );
+
+    let err = eng.sql("SET server_version TO 'pretend'", &[]).unwrap_err();
+    assert_eq!(err.sqlstate(), Some("55P02"));
+    assert!(err.to_string().contains("cannot be changed"));
+
+    let err = eng.sql("SET work_mem TO 'unbounded'", &[]).unwrap_err();
+    assert!(err.to_string().contains("positive byte size"));
+}
+
+#[test]
+fn show_unknown_variable_is_an_error() {
+    let eng = Engine::new();
+    let err = eng.sql("SHOW some_unknown_var", &[]).unwrap_err();
+    assert_eq!(err.sqlstate(), Some("42704"));
+    assert!(err
+        .to_string()
+        .contains("unrecognized configuration parameter"));
+
+    let err = eng
+        .sql("SET some_unknown_var TO 'ignored'", &[])
+        .unwrap_err();
+    assert_eq!(err.sqlstate(), Some("42704"));
 }
 
 #[test]
@@ -91,7 +125,7 @@ fn discard_all_clears_session_state() {
     eng.sql("DISCARD ALL", &[]).unwrap();
     let r = eng.sql("SHOW work_mem", &[]).unwrap();
     let v = r.rows[0].get("work_mem").unwrap();
-    assert_eq!(v, &Value::Str(String::new()));
+    assert_eq!(v, &Value::Str("64MB".into()));
     let search_path = eng.sql("SHOW search_path", &[]).unwrap();
     assert_eq!(
         search_path.rows[0].get("search_path"),
@@ -106,6 +140,13 @@ fn discard_plans_drops_prepared_only() {
         .unwrap();
     eng.sql("PREPARE p1 AS SELECT id FROM t", &[]).unwrap();
     assert!(eng.lookup_prepared("p1").is_some());
-    eng.discard(DiscardTarget::Plans);
+    eng.discard(DiscardTarget::Plans).unwrap();
     assert!(eng.lookup_prepared("p1").is_none());
+}
+
+#[test]
+fn discard_temp_is_not_reported_as_success_without_temp_table_support() {
+    let eng = Engine::new();
+    let err = eng.sql("DISCARD TEMP", &[]).unwrap_err();
+    assert!(err.to_string().contains("temporary-table support"));
 }

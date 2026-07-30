@@ -92,7 +92,9 @@ fn queries() -> Vec<Query> {
 
 fn engine_with_corpus() -> Engine {
     let engine = Engine::new();
-    engine.create_default_table("docs", vec!["title".into(), "body".into()]);
+    engine
+        .create_default_table("docs", vec!["title".into(), "body".into()])
+        .unwrap();
     for doc in corpus() {
         let mut d = Document::new();
         d.insert("title".into(), Value::Str(doc.title.into()));
@@ -118,8 +120,12 @@ fn bayesian_bm25_preserves_bm25_ranking_and_ndcg() {
     let bm25_mode = ScoringMode::BM25(BM25Params::default());
     let bayesian_mode = ScoringMode::BayesianBM25(BayesianBM25Params::default());
     for q in queries() {
-        let bm25_hits = engine.search("docs", "body", q.text, &bm25_mode, NDCG_K);
-        let bayesian_hits = engine.search("docs", "body", q.text, &bayesian_mode, NDCG_K);
+        let bm25_hits = engine
+            .search("docs", "body", q.text, &bm25_mode, NDCG_K)
+            .unwrap();
+        let bayesian_hits = engine
+            .search("docs", "body", q.text, &bayesian_mode, NDCG_K)
+            .unwrap();
         assert_eq!(
             bm25_hits.iter().map(|hit| hit.doc_id).collect::<Vec<_>>(),
             bayesian_hits
@@ -161,7 +167,7 @@ fn map_clears_floor() {
     let mut sum = 0.0;
     let mut n: i32 = 0;
     for q in queries() {
-        let hits = engine.search("docs", "body", q.text, &mode, MAP_K);
+        let hits = engine.search("docs", "body", q.text, &mode, MAP_K).unwrap();
         let relevant_ids: std::collections::BTreeSet<u64> = q
             .judgments
             .iter()

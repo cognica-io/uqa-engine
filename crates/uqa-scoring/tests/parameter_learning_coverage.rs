@@ -18,7 +18,7 @@ fn init_default_params() {
 
 #[test]
 fn init_custom_params() {
-    let params = ParameterLearner::new(2.0, 0.5, Some(0.3)).params();
+    let params = ParameterLearner::new(2.0, 0.5, Some(0.3)).unwrap().params();
     assert_eq!(params["alpha"], 2.0);
     assert_eq!(params["beta"], 0.5);
     assert_eq!(params["base_rate"], 0.3);
@@ -27,7 +27,9 @@ fn init_custom_params() {
 #[test]
 fn fit_returns_params() {
     let mut learner = ParameterLearner::default();
-    let result = learner.fit_with_options(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0.0, 0.0, 0.0, 1.0, 1.0]);
+    let result = learner
+        .fit_with_options(&[0.1, 0.3, 0.5, 0.7, 0.9], &[0.0, 0.0, 0.0, 1.0, 1.0])
+        .unwrap();
     assert!(result.contains_key("alpha"));
     assert!(result.contains_key("beta"));
     assert!(result.contains_key("base_rate"));
@@ -37,7 +39,9 @@ fn fit_returns_params() {
 fn fit_changes_params() {
     let mut learner = ParameterLearner::default();
     let initial = learner.params();
-    let fitted_params = learner.fit_with_options(&[0.1, 0.2, 0.8, 0.9], &[0.0, 0.0, 1.0, 1.0]);
+    let fitted_params = learner
+        .fit_with_options(&[0.1, 0.2, 0.8, 0.9], &[0.0, 0.0, 1.0, 1.0])
+        .unwrap();
     assert!(
         (fitted_params["alpha"] - initial["alpha"]).abs() > 1e-6
             || (fitted_params["beta"] - initial["beta"]).abs() > 1e-6
@@ -48,14 +52,18 @@ fn fit_changes_params() {
 #[test]
 fn fit_with_mode_shape() {
     let mut learner = ParameterLearner::default();
-    let result = learner.fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0]);
+    let result = learner
+        .fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0])
+        .unwrap();
     assert!(result.contains_key("alpha"));
 }
 
 #[test]
 fn fit_uses_complete_raw_query_scores() {
     let mut learner = ParameterLearner::default();
-    let result = learner.fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0]);
+    let result = learner
+        .fit_with_options(&[0.1, 0.3, 0.7, 0.9], &[0.0, 0.0, 1.0, 1.0])
+        .unwrap();
     assert!(result.contains_key("alpha"));
 }
 
@@ -64,8 +72,8 @@ fn update_modifies_params() {
     let mut learner = ParameterLearner::default();
     let initial = learner.params();
     for _ in 0..100 {
-        learner.update(0.9, 1.0, 0.1);
-        learner.update(0.1, 0.0, 0.1);
+        learner.update(0.9, 1.0, 0.1).unwrap();
+        learner.update(0.1, 0.0, 0.1).unwrap();
     }
     let updated = learner.params();
     assert!(
@@ -77,7 +85,7 @@ fn update_modifies_params() {
 #[test]
 fn update_accepts_a_raw_query_score() {
     let mut learner = ParameterLearner::default();
-    learner.update(0.5, 1.0, 0.1);
+    learner.update(0.5, 1.0, 0.1).unwrap();
     assert!(learner.params().contains_key("alpha"));
 }
 

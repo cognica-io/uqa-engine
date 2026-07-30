@@ -10,7 +10,8 @@ use tempfile::tempdir;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
+use uqa_storage::RelationIdentity;
 
 fn int_column(row: &uqa_sql::ResultRow, column: &str) -> i64 {
     match row.get(column) {
@@ -103,12 +104,15 @@ fn tensor_ivf_backfill_trains_on_all_chunk_vectors_not_tensor_rows() {
     }
 
     let conn = Connection::open(&db).unwrap();
+    let table = RelationIdentity::from_legacy_name("docs")
+        .unwrap()
+        .qualified_name();
     let (state, trained_size, vector_count, train_threshold): (String, i64, i64, i64) = conn
         .query_row(
             "SELECT state, trained_size, vector_count, train_threshold
                FROM _ivf_indexes
-              WHERE table_name = 'docs' AND field = 'chunks'",
-            [],
+              WHERE table_name = ?1 AND field = ?2",
+            params![table, "chunks"],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .unwrap();
@@ -120,8 +124,8 @@ fn tensor_ivf_backfill_trains_on_all_chunk_vectors_not_tensor_rows() {
         .query_row(
             "SELECT COUNT(*)
                FROM _ivf_assignments
-              WHERE table_name = 'docs' AND field = 'chunks'",
-            [],
+              WHERE table_name = ?1 AND field = ?2",
+            params![table, "chunks"],
             |row| row.get(0),
         )
         .unwrap();

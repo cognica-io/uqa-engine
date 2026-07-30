@@ -58,7 +58,7 @@ fn put_and_get() {
             ]),
         )
         .unwrap();
-    let got = store.get(1).unwrap();
+    let got = store.get(1).unwrap().unwrap();
     assert_eq!(got["id"], Value::Int(1));
     assert_eq!(got["name"], Value::Str("alice".into()));
     assert_eq!(got["score"], Value::Float(9.5));
@@ -68,7 +68,7 @@ fn put_and_get() {
 #[test]
 fn get_missing_returns_none() {
     let (_dir, _conn, store) = make_store("t1");
-    assert!(store.get(999).is_none());
+    assert!(store.get(999).unwrap().is_none());
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn delete() {
         )
         .unwrap();
     store.delete(1).unwrap();
-    assert!(store.get(1).is_none());
+    assert!(store.get(1).unwrap().is_none());
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn overwrite_same_doc_id() {
             ]),
         )
         .unwrap();
-    let got = store.get(1).unwrap();
+    let got = store.get(1).unwrap().unwrap();
     assert_eq!(got["name"], Value::Str("bob".into()));
     assert_eq!(got["score"], Value::Float(8.0));
 }
@@ -122,7 +122,7 @@ fn overwrite_same_doc_id() {
 fn integer_column() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, doc([("val", Value::Int(42))])).unwrap();
-    assert_eq!(store.get_field(1, "val"), Some(Value::Int(42)));
+    assert_eq!(store.get_field(1, "val").unwrap(), Some(Value::Int(42)));
 }
 
 #[test]
@@ -131,7 +131,10 @@ fn text_column() {
     store
         .put(1, doc([("val", Value::Str("hello".into()))]))
         .unwrap();
-    assert_eq!(store.get_field(1, "val"), Some(Value::Str("hello".into())));
+    assert_eq!(
+        store.get_field(1, "val").unwrap(),
+        Some(Value::Str("hello".into()))
+    );
 }
 
 #[test]
@@ -140,7 +143,10 @@ fn real_column() {
     store
         .put(1, doc([("val", Value::Float(TEST_FLOAT))]))
         .unwrap();
-    assert_eq!(store.get_field(1, "val"), Some(Value::Float(TEST_FLOAT)));
+    assert_eq!(
+        store.get_field(1, "val").unwrap(),
+        Some(Value::Float(TEST_FLOAT))
+    );
 }
 
 #[test]
@@ -148,8 +154,8 @@ fn boolean_stored_as_integer() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, doc([("val", Value::Int(1))])).unwrap();
     store.put(2, doc([("val", Value::Int(0))])).unwrap();
-    assert_eq!(store.get_field(1, "val"), Some(Value::Int(1)));
-    assert_eq!(store.get_field(2, "val"), Some(Value::Int(0)));
+    assert_eq!(store.get_field(1, "val").unwrap(), Some(Value::Int(1)));
+    assert_eq!(store.get_field(2, "val").unwrap(), Some(Value::Int(0)));
 }
 
 #[test]
@@ -159,7 +165,7 @@ fn blob_column() {
     store
         .put(1, doc([("val", Value::Bytes(data.clone()))]))
         .unwrap();
-    assert_eq!(store.get_field(1, "val"), Some(Value::Bytes(data)));
+    assert_eq!(store.get_field(1, "val").unwrap(), Some(Value::Bytes(data)));
 }
 
 #[test]
@@ -171,7 +177,7 @@ fn serial_maps_to_integer() {
             doc([("pk", Value::Int(1)), ("name", Value::Str("row1".into()))]),
         )
         .unwrap();
-    assert_eq!(store.get_field(1, "pk"), Some(Value::Int(1)));
+    assert_eq!(store.get_field(1, "pk").unwrap(), Some(Value::Int(1)));
 }
 
 #[test]
@@ -183,7 +189,7 @@ fn missing_field_stored_as_null() {
             doc([("id", Value::Int(1)), ("name", Value::Str("alice".into()))]),
         )
         .unwrap();
-    let got = store.get(1).unwrap();
+    let got = store.get(1).unwrap().unwrap();
     assert!(!got.contains_key("score"));
     assert!(!got.contains_key("active"));
 }
@@ -202,7 +208,7 @@ fn explicit_none_stored_as_null() {
             ]),
         )
         .unwrap();
-    let got = store.get(1).unwrap();
+    let got = store.get(1).unwrap().unwrap();
     assert!(!got.contains_key("name"));
     assert!(!got.contains_key("score"));
 }
@@ -211,13 +217,13 @@ fn explicit_none_stored_as_null() {
 fn get_field_null_returns_none() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
-    assert_eq!(store.get_field(1, "name"), None);
+    assert_eq!(store.get_field(1, "name").unwrap(), None);
 }
 
 #[test]
 fn doc_ids_empty_store() {
     let (_dir, _conn, store) = make_store("t1");
-    assert!(store.doc_ids().is_empty());
+    assert!(store.doc_ids().unwrap().is_empty());
 }
 
 #[test]
@@ -241,7 +247,7 @@ fn doc_ids_after_inserts() {
             doc([("id", Value::Int(30)), ("name", Value::Str("c".into()))]),
         )
         .unwrap();
-    assert_eq!(store.doc_ids(), vec![10, 20, 30]);
+    assert_eq!(store.doc_ids().unwrap(), vec![10, 20, 30]);
 }
 
 #[test]
@@ -250,13 +256,13 @@ fn doc_ids_after_delete() {
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
     store.put(2, doc([("id", Value::Int(2))])).unwrap();
     store.delete(1).unwrap();
-    assert_eq!(store.doc_ids(), vec![2]);
+    assert_eq!(store.doc_ids().unwrap(), vec![2]);
 }
 
 #[test]
 fn len_empty() {
     let (_dir, _conn, store) = make_store("t1");
-    assert_eq!(store.len(), 0);
+    assert_eq!(store.len().unwrap(), 0);
 }
 
 #[test]
@@ -264,7 +270,7 @@ fn len_after_inserts() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
     store.put(2, doc([("id", Value::Int(2))])).unwrap();
-    assert_eq!(store.len(), 2);
+    assert_eq!(store.len().unwrap(), 2);
 }
 
 #[test]
@@ -273,20 +279,20 @@ fn len_after_delete() {
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
     store.put(2, doc([("id", Value::Int(2))])).unwrap();
     store.delete(1).unwrap();
-    assert_eq!(store.len(), 1);
+    assert_eq!(store.len().unwrap(), 1);
 }
 
 #[test]
 fn max_doc_id_empty_returns_zero() {
     let (_dir, _conn, store) = make_store("t1");
-    assert_eq!(store.max_doc_id(), 0);
+    assert_eq!(store.max_doc_id().unwrap(), 0);
 }
 
 #[test]
 fn max_doc_id_single_row() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(7, doc([("id", Value::Int(7))])).unwrap();
-    assert_eq!(store.max_doc_id(), 7);
+    assert_eq!(store.max_doc_id().unwrap(), 7);
 }
 
 #[test]
@@ -295,7 +301,7 @@ fn max_doc_id_multiple_rows() {
     store.put(3, doc([("id", Value::Int(3))])).unwrap();
     store.put(10, doc([("id", Value::Int(10))])).unwrap();
     store.put(5, doc([("id", Value::Int(5))])).unwrap();
-    assert_eq!(store.max_doc_id(), 10);
+    assert_eq!(store.max_doc_id().unwrap(), 10);
 }
 
 #[test]
@@ -304,7 +310,7 @@ fn max_doc_id_after_deleting_max() {
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
     store.put(5, doc([("id", Value::Int(5))])).unwrap();
     store.delete(5).unwrap();
-    assert_eq!(store.max_doc_id(), 1);
+    assert_eq!(store.max_doc_id().unwrap(), 1);
 }
 
 #[test]
@@ -320,21 +326,27 @@ fn get_field_existing_field() {
             ]),
         )
         .unwrap();
-    assert_eq!(store.get_field(1, "name"), Some(Value::Str("alice".into())));
-    assert_eq!(store.get_field(1, "score"), Some(Value::Float(8.0)));
+    assert_eq!(
+        store.get_field(1, "name").unwrap(),
+        Some(Value::Str("alice".into()))
+    );
+    assert_eq!(
+        store.get_field(1, "score").unwrap(),
+        Some(Value::Float(8.0))
+    );
 }
 
 #[test]
 fn get_field_missing_doc() {
     let (_dir, _conn, store) = make_store("t1");
-    assert_eq!(store.get_field(99, "name"), None);
+    assert_eq!(store.get_field(99, "name").unwrap(), None);
 }
 
 #[test]
 fn get_field_unknown_column_returns_none() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, doc([("id", Value::Int(1))])).unwrap();
-    assert_eq!(store.get_field(1, "nonexistent"), None);
+    assert_eq!(store.get_field(1, "nonexistent").unwrap(), None);
 }
 
 #[test]
@@ -347,7 +359,9 @@ fn eval_path_flat_single_key() {
         )
         .unwrap();
     assert_eq!(
-        store.eval_path(1, &[PathSegment::Key("name".into())]),
+        store
+            .eval_path(1, &[PathSegment::Key("name".into())])
+            .unwrap(),
         Some(Value::Str("alice".into()))
     );
 }
@@ -356,7 +370,9 @@ fn eval_path_flat_single_key() {
 fn eval_path_flat_missing_doc() {
     let (_dir, _conn, store) = make_store("t1");
     assert_eq!(
-        store.eval_path(99, &[PathSegment::Key("name".into())]),
+        store
+            .eval_path(99, &[PathSegment::Key("name".into())])
+            .unwrap(),
         None
     );
 }
@@ -368,13 +384,15 @@ fn eval_path_nested_path_falls_back_to_dict_traversal() {
         .put(1, doc([("name", Value::Str("alice".into()))]))
         .unwrap();
     assert_eq!(
-        store.eval_path(
-            1,
-            &[
-                PathSegment::Key("name".into()),
-                PathSegment::Key("first".into())
-            ]
-        ),
+        store
+            .eval_path(
+                1,
+                &[
+                    PathSegment::Key("name".into()),
+                    PathSegment::Key("first".into())
+                ]
+            )
+            .unwrap(),
         None
     );
 }
@@ -389,7 +407,9 @@ fn eval_path_single_element_path_uses_get_field() {
         )
         .unwrap();
     assert_eq!(
-        store.eval_path(1, &[PathSegment::Key("score".into())]),
+        store
+            .eval_path(1, &[PathSegment::Key("score".into())])
+            .unwrap(),
         Some(Value::Float(7.5))
     );
 }
@@ -416,13 +436,16 @@ fn two_tables_independent() {
         )
         .unwrap();
 
-    assert_eq!(store_a.len(), 1);
-    assert_eq!(store_b.len(), 1);
-    assert_eq!(store_a.get(1).unwrap()["x"], Value::Int(10));
-    assert_eq!(store_b.get(1).unwrap()["p"], Value::Float(TEST_FLOAT));
+    assert_eq!(store_a.len().unwrap(), 1);
+    assert_eq!(store_b.len().unwrap(), 1);
+    assert_eq!(store_a.get(1).unwrap().unwrap()["x"], Value::Int(10));
+    assert_eq!(
+        store_b.get(1).unwrap().unwrap()["p"],
+        Value::Float(TEST_FLOAT)
+    );
     store_a.delete(1).unwrap();
-    assert_eq!(store_a.len(), 0);
-    assert_eq!(store_b.len(), 1);
+    assert_eq!(store_a.len().unwrap(), 0);
+    assert_eq!(store_b.len().unwrap(), 1);
 }
 
 #[test]
@@ -444,17 +467,17 @@ fn different_schemas() {
         )
         .unwrap();
 
-    assert_eq!(store_1.get_field(1, "val"), Some(Value::Int(100)));
-    assert_eq!(store_2.get_field(1, "c"), Some(Value::Float(1.0)));
-    assert_eq!(store_1.doc_ids(), vec![1]);
-    assert_eq!(store_2.doc_ids(), vec![1]);
+    assert_eq!(store_1.get_field(1, "val").unwrap(), Some(Value::Int(100)));
+    assert_eq!(store_2.get_field(1, "c").unwrap(), Some(Value::Float(1.0)));
+    assert_eq!(store_1.doc_ids().unwrap(), vec![1]);
+    assert_eq!(store_2.doc_ids().unwrap(), vec![1]);
 }
 
 #[test]
 fn empty_document() {
     let (_dir, _conn, mut store) = make_store("t1");
     store.put(1, Document::new()).unwrap();
-    assert_eq!(store.get(1), Some(Document::new()));
+    assert_eq!(store.get(1).unwrap(), Some(Document::new()));
 }
 
 #[test]
@@ -470,10 +493,10 @@ fn large_doc_id() {
             ]),
         )
         .unwrap();
-    let got = store.get(big_id).unwrap();
+    let got = store.get(big_id).unwrap().unwrap();
     assert_eq!(got["id"], Value::Int(big_id as i64));
     assert_eq!(got["name"], Value::Str("big".into()));
-    assert_eq!(store.max_doc_id(), big_id);
+    assert_eq!(store.max_doc_id().unwrap(), big_id);
 }
 
 #[test]
@@ -482,5 +505,5 @@ fn idempotent_table_creation() {
     let (conn, mut store1) = make_store_in_dir(&dir, "dup");
     store1.put(1, doc([("val", Value::Int(42))])).unwrap();
     let store2 = SQLiteDocumentStore::new(conn, "dup");
-    assert_eq!(store2.get(1).unwrap()["val"], Value::Int(42));
+    assert_eq!(store2.get(1).unwrap().unwrap()["val"], Value::Int(42));
 }

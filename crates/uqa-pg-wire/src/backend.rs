@@ -263,7 +263,7 @@ fn encode_authentication(auth: &Authentication) -> Result<Vec<u8>, PgWireError> 
         Authentication::Sasl { mechanisms } => {
             body.write_i32(10);
             for mechanism in mechanisms {
-                body.write_cstring(mechanism);
+                body.write_cstring(mechanism, "SASL mechanism")?;
             }
             body.write_byte(0);
         }
@@ -288,8 +288,8 @@ fn encode_backend_key_data(data: BackendKeyData) -> Result<Vec<u8>, PgWireError>
 
 fn encode_parameter_status(name: &str, value: &str) -> Result<Vec<u8>, PgWireError> {
     let mut body = Writer::new();
-    body.write_cstring(name);
-    body.write_cstring(value);
+    body.write_cstring(name, "ParameterStatus name")?;
+    body.write_cstring(value, "ParameterStatus value")?;
     Writer::frame(b'S', &body.into_inner())
 }
 
@@ -301,7 +301,7 @@ fn encode_row_description(fields: &[FieldDescription]) -> Result<Vec<u8>, PgWire
     let mut body = Writer::new();
     body.write_i16(i16_len(fields.len(), "RowDescription field")?);
     for field in fields {
-        body.write_cstring(&field.name);
+        body.write_cstring(&field.name, "RowDescription field name")?;
         body.write_u32(field.table_oid);
         body.write_i16(field.column_attribute_number);
         body.write_u32(field.type_oid);
@@ -329,28 +329,48 @@ fn encode_data_row(values: &[Option<Vec<u8>>]) -> Result<Vec<u8>, PgWireError> {
 
 fn encode_command_complete(tag: &str) -> Result<Vec<u8>, PgWireError> {
     let mut body = Writer::new();
-    body.write_cstring(tag);
+    body.write_cstring(tag, "CommandComplete tag")?;
     Writer::frame(b'C', &body.into_inner())
 }
 
 fn encode_error_or_notice(tag: u8, message: &ErrorOrNotice) -> Result<Vec<u8>, PgWireError> {
+    if message.code.len() != 5
+        || !message
+            .code
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    {
+        return Err(PgWireError::InvalidSqlState {
+            code: message.code.clone(),
+        });
+    }
     let mut body = Writer::new();
-    write_field(&mut body, b'S', message.severity.as_str());
-    write_field(&mut body, b'V', message.severity.as_str());
-    write_field(&mut body, b'C', &message.code);
-    write_field(&mut body, b'M', &message.message);
-    write_optional_field(&mut body, b'D', message.detail.as_deref());
-    write_optional_field(&mut body, b'H', message.hint.as_deref());
-    write_optional_i32_field(&mut body, b'P', message.position);
-    write_optional_field(&mut body, b'W', message.where_.as_deref());
-    write_optional_field(&mut body, b's', message.schema.as_deref());
-    write_optional_field(&mut body, b't', message.table.as_deref());
-    write_optional_field(&mut body, b'c', message.column.as_deref());
-    write_optional_field(&mut body, b'd', message.data_type.as_deref());
-    write_optional_field(&mut body, b'n', message.constraint.as_deref());
-    write_optional_field(&mut body, b'F', message.file.as_deref());
-    write_optional_i32_field(&mut body, b'L', message.line);
-    write_optional_field(&mut body, b'R', message.routine.as_deref());
+    write_field(&mut body, b'S', message.severity.as_str(), "severity")?;
+    write_field(&mut body, b'V', message.severity.as_str(), "severity")?;
+    write_field(&mut body, b'C', &message.code, "SQLSTATE")?;
+    write_field(&mut body, b'M', &message.message, "error message")?;
+    write_optional_field(&mut body, b'D', message.detail.as_deref(), "error detail")?;
+    write_optional_field(&mut body, b'H', message.hint.as_deref(), "error hint")?;
+    write_optional_i32_field(&mut body, b'P', message.position, "error position")?;
+    write_optional_field(&mut body, b'W', message.where_.as_deref(), "error context")?;
+    write_optional_field(&mut body, b's', message.schema.as_deref(), "error schema")?;
+    write_optional_field(&mut body, b't', message.table.as_deref(), "error table")?;
+    write_optional_field(&mut body, b'c', message.column.as_deref(), "error column")?;
+    write_optional_field(
+        &mut body,
+        b'd',
+        message.data_type.as_deref(),
+        "error data type",
+    )?;
+    write_optional_field(
+        &mut body,
+        b'n',
+        message.constraint.as_deref(),
+        "error constraint",
+    )?;
+    write_optional_field(&mut body, b'F', message.file.as_deref(), "error file")?;
+    write_optional_i32_field(&mut body, b'L', message.line, "error line")?;
+    write_optional_field(&mut body, b'R', message.routine.as_deref(), "error routine")?;
     body.write_byte(0);
     Writer::frame(tag, &body.into_inner())
 }
@@ -382,7 +402,7 @@ fn encode_copy_response(tag: u8, response: &CopyResponse) -> Result<Vec<u8>, PgW
 
 fn encode_copy_fail(message: &str) -> Result<Vec<u8>, PgWireError> {
     let mut body = Writer::new();
-    body.write_cstring(message);
+    body.write_cstring(message, "CopyFail message")?;
     Writer::frame(b'f', &body.into_inner())
 }
 
@@ -390,19 +410,36 @@ fn encode_empty_body(tag: u8) -> Result<Vec<u8>, PgWireError> {
     Writer::frame(tag, &[])
 }
 
-fn write_field(body: &mut Writer, code: u8, value: &str) {
+fn write_field(
+    body: &mut Writer,
+    code: u8,
+    value: &str,
+    context: &'static str,
+) -> Result<(), PgWireError> {
     body.write_byte(code);
-    body.write_cstring(value);
+    body.write_cstring(value, context)
 }
 
-fn write_optional_field(body: &mut Writer, code: u8, value: Option<&str>) {
+fn write_optional_field(
+    body: &mut Writer,
+    code: u8,
+    value: Option<&str>,
+    context: &'static str,
+) -> Result<(), PgWireError> {
     if let Some(value) = value {
-        write_field(body, code, value);
+        write_field(body, code, value, context)?;
     }
+    Ok(())
 }
 
-fn write_optional_i32_field(body: &mut Writer, code: u8, value: Option<i32>) {
+fn write_optional_i32_field(
+    body: &mut Writer,
+    code: u8,
+    value: Option<i32>,
+    context: &'static str,
+) -> Result<(), PgWireError> {
     if let Some(value) = value {
-        write_field(body, code, &value.to_string());
+        write_field(body, code, &value.to_string(), context)?;
     }
+    Ok(())
 }

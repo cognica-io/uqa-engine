@@ -81,22 +81,28 @@ fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 fn schema(name: &str, fts: &[&str]) -> TableSchema {
+    schema_in("public", name, fts)
+}
+
+fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
     TableSchema {
-        name: name.to_string(),
+        relation: uqa_storage::RelationIdentity::new(schema_name, name),
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
         fts_fields: fts.iter().map(|s| (*s).to_string()).collect(),
         vector_fields: Vec::new(),
         columns_json: String::new(),
+        constraints_json: String::new(),
     }
 }
 
 fn schema_with_columns(name: &str, columns_json: &str) -> TableSchema {
     TableSchema {
-        name: name.to_string(),
+        relation: uqa_storage::RelationIdentity::new("public", name),
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
         fts_fields: Vec::new(),
         vector_fields: Vec::new(),
         columns_json: columns_json.to_string(),
+        constraints_json: String::new(),
     }
 }
 
@@ -144,7 +150,7 @@ fn table_schema_save_and_load_round_trip() {
         .unwrap();
     let loaded = cat.load_tables().unwrap();
     assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].name, "papers");
+    assert_eq!(loaded[0].relation.qualified_name(), "public.papers");
     assert_eq!(loaded[0].columns_json, columns_json);
 }
 
@@ -158,7 +164,7 @@ fn drop_table_removes_schema_and_documents() {
     cat.drop_table("t1").unwrap();
     cat.purge_table_data("t1").unwrap();
     assert!(cat.load_tables().unwrap().is_empty());
-    assert!(store.doc_ids().is_empty());
+    assert!(store.doc_ids().unwrap().is_empty());
 }
 
 #[test]
@@ -166,14 +172,57 @@ fn drop_table_cascades_postings_and_stats() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&schema("t1", &["x"])).unwrap();
     let mut idx = inverted_index(conn.clone(), "t1");
-    idx.add_document(1, fields(&[("x", "hello")]));
+    idx.add_document(1, fields(&[("x", "hello")])).unwrap();
     cat.save_column_stats(column_stats("t1", "x", 5, 0, Some("a"), Some("z"), 10))
         .unwrap();
     cat.drop_table("t1").unwrap();
     cat.purge_table_data("t1").unwrap();
-    assert_eq!(idx.get_posting_list("x", "hello").len(), 0);
-    assert_eq!(idx.get_doc_length(1, "x"), 0);
+    assert_eq!(idx.get_posting_list("x", "hello").unwrap().len(), 0);
+    assert_eq!(idx.get_doc_length(1, "x").unwrap(), 0);
     assert!(cat.load_column_stats("t1").unwrap().is_empty());
+}
+
+#[test]
+fn drop_table_data_atomically_cleans_only_its_legacy_public_alias() {
+    let (conn, cat) = open_in_memory_catalog();
+    cat.save_schema("app").unwrap();
+    cat.save_table(&schema("docs", &[])).unwrap();
+    cat.save_table(&schema_in("app", "docs", &[])).unwrap();
+    for table_name in ["public.docs", "docs", "app.docs"] {
+        cat.save_column_stats(column_stats(table_name, "id", 1, 0, None, None, 1))
+            .unwrap();
+    }
+
+    conn.with(|sqlite| {
+        sqlite.execute_batch(
+            "CREATE TRIGGER fail_legacy_stats_delete
+             BEFORE DELETE ON _column_stats
+             WHEN OLD.table_name = 'docs'
+             BEGIN SELECT RAISE(FAIL, 'injected legacy cleanup failure'); END;",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(cat.drop_table_and_data("public.docs").is_err());
+    assert_eq!(cat.load_tables().unwrap().len(), 2);
+    for table_name in ["public.docs", "docs", "app.docs"] {
+        assert_eq!(cat.load_column_stats(table_name).unwrap().len(), 1);
+    }
+
+    conn.with(|sqlite| {
+        sqlite.execute_batch("DROP TRIGGER fail_legacy_stats_delete")?;
+        Ok(())
+    })
+    .unwrap();
+    cat.drop_table_and_data("public.docs").unwrap();
+
+    assert!(cat.load_column_stats("public.docs").unwrap().is_empty());
+    assert!(cat.load_column_stats("docs").unwrap().is_empty());
+    assert_eq!(cat.load_column_stats("app.docs").unwrap().len(), 1);
+    assert_eq!(
+        cat.load_tables().unwrap()[0].relation.qualified_name(),
+        "app.docs"
+    );
 }
 
 #[test]
@@ -186,13 +235,17 @@ fn multiple_tables_round_trip() {
         .load_tables()
         .unwrap()
         .into_iter()
-        .map(|s| s.name)
+        .map(|s| s.relation.qualified_name())
         .collect();
     assert_eq!(
         names,
-        ["t1".to_string(), "t2".to_string(), "t3".to_string()]
-            .into_iter()
-            .collect()
+        [
+            "public.t1".to_string(),
+            "public.t2".to_string(),
+            "public.t3".to_string(),
+        ]
+        .into_iter()
+        .collect()
     );
 }
 
@@ -219,8 +272,8 @@ fn document_save_and_load() {
             doc([("name", Value::Str("bob".into())), ("age", Value::Int(25))]),
         )
         .unwrap();
-    let d1 = store.get(1).unwrap();
-    let d2 = store.get(2).unwrap();
+    let d1 = store.get(1).unwrap().unwrap();
+    let d2 = store.get(2).unwrap().unwrap();
     assert_eq!(d1.get("name"), Some(&Value::Str("alice".into())));
     assert_eq!(d2.get("name"), Some(&Value::Str("bob".into())));
 }
@@ -232,8 +285,8 @@ fn documents_tables_isolated() {
     let mut s2 = document_store(conn, "t2");
     s1.put(1, doc([("x", Value::Int(1))])).unwrap();
     s2.put(1, doc([("x", Value::Int(2))])).unwrap();
-    assert_eq!(s1.get(1).unwrap().get("x"), Some(&Value::Int(1)));
-    assert_eq!(s2.get(1).unwrap().get("x"), Some(&Value::Int(2)));
+    assert_eq!(s1.get(1).unwrap().unwrap().get("x"), Some(&Value::Int(1)));
+    assert_eq!(s2.get(1).unwrap().unwrap().get("x"), Some(&Value::Int(2)));
 }
 
 #[test]
@@ -243,7 +296,7 @@ fn document_delete_removes_row() {
     store.put(1, doc([("x", Value::Int(1))])).unwrap();
     store.put(2, doc([("x", Value::Int(2))])).unwrap();
     store.delete(1).unwrap();
-    let mut ids = store.doc_ids();
+    let mut ids = store.doc_ids().unwrap();
     ids.sort_unstable();
     assert_eq!(ids, vec![2u64 as DocId]);
 }
@@ -257,12 +310,12 @@ fn document_delete_cascades_postings() {
     store
         .put(1, doc([("x", Value::Str("hello".into()))]))
         .unwrap();
-    idx.add_document(1, fields(&[("x", "hello")]));
+    idx.add_document(1, fields(&[("x", "hello")])).unwrap();
     store.delete(1).unwrap();
-    idx.remove_document(1);
-    assert!(store.get(1).is_none());
-    assert_eq!(idx.get_posting_list("x", "hello").len(), 0);
-    assert_eq!(idx.get_doc_length(1, "x"), 0);
+    idx.remove_document(1).unwrap();
+    assert!(store.get(1).unwrap().is_none());
+    assert_eq!(idx.get_posting_list("x", "hello").unwrap().len(), 0);
+    assert_eq!(idx.get_doc_length(1, "x").unwrap(), 0);
 }
 
 #[test]
@@ -275,9 +328,9 @@ fn document_upsert_overwrites() {
     store
         .put(1, doc([("v", Value::Str("new".into()))]))
         .unwrap();
-    assert_eq!(store.len(), 1);
+    assert_eq!(store.len().unwrap(), 1);
     assert_eq!(
-        store.get(1).unwrap().get("v"),
+        store.get(1).unwrap().unwrap().get("v"),
         Some(&Value::Str("new".into()))
     );
 }
@@ -294,9 +347,10 @@ fn postings_save_and_load_round_trip() {
     idx.add_document(
         1,
         fields(&[("title", "hello world"), ("body", "hello hello world")]),
-    );
-    let pl_title = idx.get_posting_list("title", "hello");
-    let pl_body = idx.get_posting_list("body", "hello");
+    )
+    .unwrap();
+    let pl_title = idx.get_posting_list("title", "hello").unwrap();
+    let pl_body = idx.get_posting_list("body", "hello").unwrap();
     assert_eq!(pl_title.len(), 1);
     assert_eq!(pl_body.entries()[0].payload.positions.len(), 2);
 }
@@ -314,11 +368,13 @@ fn postings_doc_lengths_round_trip() {
             ("title", "alpha bravo charlie"),
             ("body", "alpha bravo charlie delta echo"),
         ]),
-    );
-    idx.add_document(2, fields(&[("title", "alpha bravo")]));
-    assert_eq!(idx.get_doc_length(1, "title"), 3);
-    assert_eq!(idx.get_doc_length(1, "body"), 5);
-    assert_eq!(idx.get_doc_length(2, "title"), 2);
+    )
+    .unwrap();
+    idx.add_document(2, fields(&[("title", "alpha bravo")]))
+        .unwrap();
+    assert_eq!(idx.get_doc_length(1, "title").unwrap(), 3);
+    assert_eq!(idx.get_doc_length(1, "body").unwrap(), 5);
+    assert_eq!(idx.get_doc_length(2, "title").unwrap(), 2);
 }
 
 #[test]
@@ -326,13 +382,13 @@ fn postings_delete_removes_row_only() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&schema("t1", &["x"])).unwrap();
     let mut idx = inverted_index(conn, "t1");
-    idx.add_document(1, fields(&[("x", "alpha")]));
-    idx.add_document(2, fields(&[("x", "bravo")]));
-    idx.remove_document(1);
-    assert_eq!(idx.get_posting_list("x", "alpha").len(), 0);
-    assert_eq!(idx.get_posting_list("x", "bravo").len(), 1);
-    assert_eq!(idx.get_doc_length(1, "x"), 0);
-    assert_eq!(idx.get_doc_length(2, "x"), 1);
+    idx.add_document(1, fields(&[("x", "alpha")])).unwrap();
+    idx.add_document(2, fields(&[("x", "bravo")])).unwrap();
+    idx.remove_document(1).unwrap();
+    assert_eq!(idx.get_posting_list("x", "alpha").unwrap().len(), 0);
+    assert_eq!(idx.get_posting_list("x", "bravo").unwrap().len(), 1);
+    assert_eq!(idx.get_doc_length(1, "x").unwrap(), 0);
+    assert_eq!(idx.get_doc_length(2, "x").unwrap(), 1);
 }
 
 #[test]
@@ -342,12 +398,12 @@ fn postings_tables_isolated() {
     cat.save_table(&schema("t2", &["x"])).unwrap();
     let mut i1 = inverted_index(conn.clone(), "t1");
     let mut i2 = inverted_index(conn, "t2");
-    i1.add_document(1, fields(&[("x", "alpha")]));
-    i2.add_document(1, fields(&[("x", "bravo")]));
-    assert_eq!(i1.get_posting_list("x", "alpha").len(), 1);
-    assert_eq!(i1.get_posting_list("x", "bravo").len(), 0);
-    assert_eq!(i2.get_posting_list("x", "alpha").len(), 0);
-    assert_eq!(i2.get_posting_list("x", "bravo").len(), 1);
+    i1.add_document(1, fields(&[("x", "alpha")])).unwrap();
+    i2.add_document(1, fields(&[("x", "bravo")])).unwrap();
+    assert_eq!(i1.get_posting_list("x", "alpha").unwrap().len(), 1);
+    assert_eq!(i1.get_posting_list("x", "bravo").unwrap().len(), 0);
+    assert_eq!(i2.get_posting_list("x", "alpha").unwrap().len(), 0);
+    assert_eq!(i2.get_posting_list("x", "bravo").unwrap().len(), 1);
 }
 
 // =====================================================================
@@ -391,7 +447,7 @@ fn graph_edges_round_trip() {
 fn vector_round_trip() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&TableSchema {
-        name: "t".into(),
+        relation: uqa_storage::RelationIdentity::new("public", "t"),
         analyzer_json: r#"{"name":"standard","language":"english"}"#.into(),
         fts_fields: Vec::new(),
         vector_fields: vec![VectorFieldSchema {
@@ -399,11 +455,12 @@ fn vector_round_trip() {
             dimensions: 3,
         }],
         columns_json: String::new(),
+        constraints_json: String::new(),
     })
     .unwrap();
     let mut idx = vector_index(conn, "t", "emb", 3);
-    idx.add(1, vec![1.0, 2.0, 3.0]);
-    let pl = idx.search_knn(&[1.0, 2.0, 3.0], 1);
+    idx.add(1, vec![1.0, 2.0, 3.0]).unwrap();
+    let pl = idx.search_knn(&[1.0, 2.0, 3.0], 1).unwrap();
     assert_eq!(pl.len(), 1);
     assert_eq!(pl.entries()[0].doc_id, 1);
 }
@@ -416,20 +473,21 @@ fn vector_multiple_documents_round_trip() {
         idx.add(
             i as DocId,
             vec![i as f32, (i * 2) as f32, (i * 3) as f32, (i * 4) as f32],
-        );
+        )
+        .unwrap();
     }
-    assert_eq!(idx.count(), 5);
+    assert_eq!(idx.count().unwrap(), 5);
 }
 
 #[test]
 fn vector_delete_removes_only_target() {
     let (conn, _cat) = open_in_memory_catalog();
     let mut idx = vector_index(conn, "t", "emb", 2);
-    idx.add(1, vec![1.0, 2.0]);
-    idx.add(2, vec![3.0, 4.0]);
-    idx.delete(1);
-    assert_eq!(idx.count(), 1);
-    let pl = idx.search_knn(&[3.0, 4.0], 1);
+    idx.add(1, vec![1.0, 2.0]).unwrap();
+    idx.add(2, vec![3.0, 4.0]).unwrap();
+    idx.delete(1).unwrap();
+    assert_eq!(idx.count().unwrap(), 1);
+    let pl = idx.search_knn(&[3.0, 4.0], 1).unwrap();
     assert_eq!(pl.entries()[0].doc_id, 2);
 }
 
@@ -514,6 +572,55 @@ fn column_stats_overwrite() {
     assert_eq!(stats[0].distinct_count, 8);
     assert_eq!(stats[0].null_count, 1);
     assert_eq!(stats[0].row_count, 30);
+}
+
+#[test]
+fn column_stats_replace_is_a_complete_snapshot() {
+    let (_conn, cat) = open_in_memory_catalog();
+    cat.save_column_stats(column_stats("t1", "old", 1, 0, None, None, 1))
+        .unwrap();
+    let replacement = [
+        column_stats("t1", "a", 2, 0, None, None, 3),
+        column_stats("t1", "b", 3, 1, None, None, 3),
+    ];
+
+    cat.replace_column_stats("t1", &replacement).unwrap();
+    let rows = cat.load_column_stats("t1").unwrap();
+    assert_eq!(
+        rows.into_iter()
+            .map(|row| row.column_name)
+            .collect::<Vec<_>>(),
+        vec!["a".to_string(), "b".to_string()]
+    );
+}
+
+#[test]
+fn column_stats_replace_failure_preserves_previous_snapshot() {
+    let (conn, cat) = open_in_memory_catalog();
+    cat.save_column_stats(column_stats("t1", "old", 1, 0, None, None, 1))
+        .unwrap();
+    conn.with(|connection| {
+        connection.execute_batch(
+            "CREATE TRIGGER fail_column_stats_insert
+             BEFORE INSERT ON _column_stats
+             WHEN NEW.column_name = 'bad'
+             BEGIN
+                 SELECT RAISE(ABORT, 'injected column stats failure');
+             END;",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let replacement = [
+        column_stats("t1", "good", 2, 0, None, None, 2),
+        column_stats("t1", "bad", 2, 0, None, None, 2),
+    ];
+
+    let error = cat.replace_column_stats("t1", &replacement).unwrap_err();
+    assert!(error.to_string().contains("injected column stats failure"));
+    let rows = cat.load_column_stats("t1").unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].column_name, "old");
 }
 
 #[test]
@@ -608,7 +715,7 @@ fn transaction_batch_commit() {
             .unwrap();
     }
     conn.commit_transaction().unwrap();
-    assert_eq!(store.len(), 3);
+    assert_eq!(store.len().unwrap(), 3);
 }
 
 #[test]
@@ -619,7 +726,7 @@ fn transaction_rollback_drops_uncommitted_writes() {
     conn.begin_transaction().unwrap();
     store.put(2, doc([("x", Value::Int(2))])).unwrap();
     conn.rollback_transaction().unwrap();
-    let mut ids = store.doc_ids();
+    let mut ids = store.doc_ids().unwrap();
     ids.sort_unstable();
     assert_eq!(ids, vec![1u64 as DocId]);
 }
@@ -635,7 +742,7 @@ fn auto_commit_outside_transaction_persists() {
     }
     let (conn2, _cat2) = open_catalog(&path);
     let store2 = document_store(conn2, "t1");
-    assert_eq!(store2.len(), 1);
+    assert_eq!(store2.len().unwrap(), 1);
 }
 
 // =====================================================================
@@ -657,32 +764,32 @@ fn close_and_reopen_restores_every_store() {
         let mut vec_idx = vector_index(conn.clone(), "t", "emb", 2);
 
         store.put(1, doc([("x", Value::Int(42))])).unwrap();
-        idx.add_document(1, fields(&[("x", "hello")]));
+        idx.add_document(1, fields(&[("x", "hello")])).unwrap();
         cat.save_vertex(1, "", r#"{"label":"A"}"#).unwrap();
         cat.save_edge(1, 1, 2, "link", "{}").unwrap();
-        vec_idx.add(1, vec![1.0, 2.0]);
+        vec_idx.add(1, vec![1.0, 2.0]).unwrap();
         cat.save_column_stats(column_stats("t", "x", 5, 0, Some("1"), Some("10"), 20))
             .unwrap();
         cat.save_scoring_params("bm25", r#"{"alpha":1.5}"#).unwrap();
 
-        lengths_before = idx.get_doc_length(1, "x");
-        posting_count_before = idx.get_posting_list("x", "hello").len();
+        lengths_before = idx.get_doc_length(1, "x").unwrap();
+        posting_count_before = idx.get_posting_list("x", "hello").unwrap().len();
     }
 
     let (conn2, cat2) = open_catalog(&path);
     assert_eq!(cat2.load_tables().unwrap().len(), 1);
     let store2 = document_store(conn2.clone(), "t");
-    assert_eq!(store2.len(), 1);
+    assert_eq!(store2.len().unwrap(), 1);
     assert_eq!(cat2.load_vertices().unwrap().len(), 1);
     assert_eq!(cat2.load_edges().unwrap().len(), 1);
     let vec2 = vector_index(conn2.clone(), "t", "emb", 2);
-    assert_eq!(vec2.count(), 1);
+    assert_eq!(vec2.count().unwrap(), 1);
     let idx2 = inverted_index(conn2, "t");
     assert_eq!(
-        idx2.get_posting_list("x", "hello").len(),
+        idx2.get_posting_list("x", "hello").unwrap().len(),
         posting_count_before
     );
-    assert_eq!(idx2.get_doc_length(1, "x"), lengths_before);
+    assert_eq!(idx2.get_doc_length(1, "x").unwrap(), lengths_before);
     assert_eq!(cat2.load_column_stats("t").unwrap().len(), 1);
     assert_eq!(
         cat2.load_scoring_params("bm25").unwrap().as_deref(),

@@ -26,18 +26,18 @@ use arrow_schema::{DataType, TimeUnit};
 use uqa_core::{TemporalValue, Value};
 
 use crate::{
-    project_row, row_matches_predicates, FDWError, FDWHandler, FDWPredicate, ForeignServer,
-    ForeignTable, Row,
+    limit_reached, project_row, row_matches_predicates, FDWError, FDWHandler, FDWPredicate,
+    ForeignServer, ForeignTable, Row,
 };
 
 #[derive(Debug, Clone)]
 pub struct ArrowIpcHandler {
-    server: ForeignServer,
+    _server: ForeignServer,
 }
 
 impl ArrowIpcHandler {
     pub fn new(server: ForeignServer) -> Self {
-        Self { server }
+        Self { _server: server }
     }
 }
 
@@ -49,7 +49,6 @@ impl FDWHandler for ArrowIpcHandler {
         predicates: &[FDWPredicate],
         limit: Option<u64>,
     ) -> Result<Vec<Row>, FDWError> {
-        let _ = &self.server;
         let source = table
             .options
             .get("source")
@@ -62,7 +61,7 @@ impl FDWHandler for ArrowIpcHandler {
                 let reader = FileReader::try_new(BufReader::new(file), None)?;
                 for batch in reader {
                     append_batch_rows(&batch?, table, columns, predicates, limit, &mut out)?;
-                    if limit.is_some_and(|cap| out.len() as u64 >= cap) {
+                    if limit.is_some_and(|cap| limit_reached(out.len(), cap)) {
                         break;
                     }
                 }
@@ -71,7 +70,7 @@ impl FDWHandler for ArrowIpcHandler {
                 let reader = StreamReader::try_new(BufReader::new(file), None)?;
                 for batch in reader {
                     append_batch_rows(&batch?, table, columns, predicates, limit, &mut out)?;
-                    if limit.is_some_and(|cap| out.len() as u64 >= cap) {
+                    if limit.is_some_and(|cap| limit_reached(out.len(), cap)) {
                         break;
                     }
                 }
@@ -101,10 +100,8 @@ fn append_batch_rows(
     }
 
     for row_idx in 0..batch.num_rows() {
-        if let Some(cap) = limit {
-            if out.len() as u64 >= cap {
-                break;
-            }
+        if limit.is_some_and(|cap| limit_reached(out.len(), cap)) {
+            break;
         }
         let mut row = Row::new();
         for (name, col_idx) in &indexed {
@@ -113,7 +110,7 @@ fn append_batch_rows(
                 arrow_value(batch.column(*col_idx).as_ref(), row_idx)?,
             );
         }
-        if row_matches_predicates(&row, predicates) {
+        if row_matches_predicates(&row, predicates)? {
             out.push(project_row(&row, columns));
         }
     }
@@ -163,7 +160,11 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
         DataType::UInt32 => Value::Int(i64::from(downcast_value!(UInt32Array))),
         DataType::UInt64 => {
             let v = downcast_value!(UInt64Array);
-            i64::try_from(v).map_or(Value::Str(v.to_string()), Value::Int)
+            Value::Int(i64::try_from(v).map_err(|_| {
+                FDWError::UnsupportedValue(format!(
+                    "Arrow UInt64 value {v} is outside UQA's signed integer range"
+                ))
+            })?)
         }
         DataType::Float32 => Value::Float(f64::from(downcast_value!(Float32Array))),
         DataType::Float64 => Value::Float(downcast_value!(Float64Array)),
@@ -175,20 +176,31 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
             days: downcast_value!(Date32Array),
         }),
         DataType::Date64 => Value::Temporal(TemporalValue::Timestamp {
-            micros: downcast_value!(Date64Array) * 1_000,
+            micros: checked_scale_micros(downcast_value!(Date64Array), 1_000, "Date64")?,
         }),
         DataType::Time64(TimeUnit::Microsecond) => Value::Temporal(TemporalValue::Time {
             micros: downcast_value!(Time64MicrosecondArray),
         }),
         DataType::Time64(TimeUnit::Nanosecond) => Value::Temporal(TemporalValue::Time {
-            micros: downcast_value!(Time64NanosecondArray) / 1_000,
+            micros: checked_nanos_to_micros(
+                downcast_value!(Time64NanosecondArray),
+                "nanosecond time",
+            )?,
         }),
         DataType::Timestamp(TimeUnit::Second, _) => Value::Temporal(TemporalValue::Timestamp {
-            micros: downcast_value!(TimestampSecondArray) * 1_000_000,
+            micros: checked_scale_micros(
+                downcast_value!(TimestampSecondArray),
+                1_000_000,
+                "second timestamp",
+            )?,
         }),
         DataType::Timestamp(TimeUnit::Millisecond, _) => {
             Value::Temporal(TemporalValue::Timestamp {
-                micros: downcast_value!(TimestampMillisecondArray) * 1_000,
+                micros: checked_scale_micros(
+                    downcast_value!(TimestampMillisecondArray),
+                    1_000,
+                    "millisecond timestamp",
+                )?,
             })
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
@@ -197,7 +209,10 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
             })
         }
         DataType::Timestamp(TimeUnit::Nanosecond, _) => Value::Temporal(TemporalValue::Timestamp {
-            micros: downcast_value!(TimestampNanosecondArray) / 1_000,
+            micros: checked_nanos_to_micros(
+                downcast_value!(TimestampNanosecondArray),
+                "nanosecond timestamp",
+            )?,
         }),
         other => {
             return Err(FDWError::UnsupportedValue(format!(
@@ -205,6 +220,23 @@ fn arrow_value(array: &dyn Array, row: usize) -> Result<Value, FDWError> {
             )));
         }
     })
+}
+
+fn checked_scale_micros(value: i64, factor: i64, context: &str) -> Result<i64, FDWError> {
+    value.checked_mul(factor).ok_or_else(|| {
+        FDWError::UnsupportedValue(format!(
+            "Arrow {context} value {value} is outside UQA's microsecond timestamp range"
+        ))
+    })
+}
+
+fn checked_nanos_to_micros(value: i64, context: &str) -> Result<i64, FDWError> {
+    if value % 1_000 != 0 {
+        return Err(FDWError::UnsupportedValue(format!(
+            "Arrow {context} value {value} has sub-microsecond precision"
+        )));
+    }
+    Ok(value / 1_000)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -220,7 +252,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use arrow_array::{Float64Array, Int64Array};
+    use arrow_array::{Float64Array, Int64Array, TimestampSecondArray, UInt64Array};
     use arrow_ipc::writer::FileWriter;
     use arrow_schema::{Field, Schema};
 
@@ -298,5 +330,19 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("title"), Some(&Value::Str("Rust".into())));
         assert!(!rows[0].contains_key("score"));
+    }
+
+    #[test]
+    fn numeric_and_timestamp_overflow_are_explicit_errors() {
+        let integers = UInt64Array::from(vec![u64::MAX]);
+        assert!(arrow_value(&integers, 0).is_err());
+
+        let timestamps = TimestampSecondArray::from(vec![i64::MAX]);
+        assert!(arrow_value(&timestamps, 0).is_err());
+
+        let nanoseconds = TimestampNanosecondArray::from(vec![1_001]);
+        let error = arrow_value(&nanoseconds, 0)
+            .expect_err("sub-microsecond timestamp precision must not be truncated");
+        assert!(error.to_string().contains("sub-microsecond"));
     }
 }

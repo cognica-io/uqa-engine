@@ -79,7 +79,10 @@ fn update_scoring_params() {
     engine
         .update_scoring_params("docs", "content", 0.8, 1)
         .unwrap();
-    let saved = engine.load_scoring_params("docs.content").unwrap();
+    let saved = engine
+        .load_scoring_params("docs.content")
+        .unwrap()
+        .expect("saved scoring parameters");
     let saved: std::collections::BTreeMap<String, f64> = serde_json::from_str(&saved).unwrap();
     assert!(saved["base_rate"] > 0.0);
 }

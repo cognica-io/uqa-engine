@@ -27,13 +27,15 @@ fn approx_eq(a: f64, b: f64) {
 }
 
 fn scorer(prior_fn: PriorFn) -> ExternalPriorScorer {
-    ExternalPriorScorer::new(BayesianBM25Params::default(), stats(), prior_fn)
+    ExternalPriorScorer::new(BayesianBM25Params::default(), stats(), prior_fn).unwrap()
 }
 
 #[test]
 fn score_with_neutral_prior() {
     let scorer = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.5));
-    let score = scorer.score_with_prior(3, 10, 10, &BTreeMap::new());
+    let score = scorer
+        .score_with_prior(3, 10, 10, &BTreeMap::new())
+        .unwrap();
     assert!(score > 0.0);
     assert!(score < 1.0);
 }
@@ -42,8 +44,10 @@ fn score_with_neutral_prior() {
 fn high_prior_boosts_score() {
     let neutral = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.5));
     let high = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.9));
-    let base_score = neutral.score_with_prior(3, 10, 10, &BTreeMap::new());
-    let boosted_score = high.score_with_prior(3, 10, 10, &BTreeMap::new());
+    let base_score = neutral
+        .score_with_prior(3, 10, 10, &BTreeMap::new())
+        .unwrap();
+    let boosted_score = high.score_with_prior(3, 10, 10, &BTreeMap::new()).unwrap();
     assert!(boosted_score > base_score);
 }
 
@@ -51,8 +55,10 @@ fn high_prior_boosts_score() {
 fn low_prior_reduces_score() {
     let neutral = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.5));
     let low = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.1));
-    let base_score = neutral.score_with_prior(3, 10, 10, &BTreeMap::new());
-    let reduced_score = low.score_with_prior(3, 10, 10, &BTreeMap::new());
+    let base_score = neutral
+        .score_with_prior(3, 10, 10, &BTreeMap::new())
+        .unwrap();
+    let reduced_score = low.score_with_prior(3, 10, 10, &BTreeMap::new()).unwrap();
     assert!(reduced_score < base_score);
 }
 
@@ -61,7 +67,7 @@ fn score_in_probability_range() {
     let scorer = scorer(Arc::new(|_: &BTreeMap<String, Value>| 0.7));
     let mut fields = BTreeMap::new();
     fields.insert("authority".into(), Value::Str("high".into()));
-    let score = scorer.score_with_prior(2, 8, 10, &fields);
+    let score = scorer.score_with_prior(2, 8, 10, &fields).unwrap();
     assert!(score > 0.0);
     assert!(score < 1.0);
 }

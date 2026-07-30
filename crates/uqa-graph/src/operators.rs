@@ -17,7 +17,23 @@ use uqa_operators::PathWeightPredicate;
 use crate::pattern::{EdgePattern, GraphPattern, VertexPredicate};
 use crate::posting_list::{GraphPayload, GraphPostingList};
 use crate::rpq::{build_nfa, simplify, subset_construction, Dfa, DfaState, RegularPathExpr};
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
+
+fn graph_id_value(id: u64, context: &str) -> GraphStoreResult<Value> {
+    i64::try_from(id).map(Value::Int).map_err(|_| {
+        GraphStoreError::CorruptGraph(format!(
+            "{context} graph id {id} exceeds the agtype integer range"
+        ))
+    })
+}
+
+fn synthetic_doc_id(index: usize, context: &str) -> GraphStoreResult<DocId> {
+    let one_based = index
+        .checked_add(1)
+        .ok_or_else(|| GraphStoreError::CorruptGraph(format!("{context} result index overflow")))?;
+    u64::try_from(one_based)
+        .map_err(|_| GraphStoreError::CorruptGraph(format!("{context} result count exceeds u64")))
+}
 
 /// Default score lifted into the traversal / match payload. The UQA
 /// reference uses 0.9 so calibrated fusion treats graph hits as a
@@ -67,7 +83,8 @@ impl<'a> Traverse<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        store.require_vertex_in_graph(self.start_vertex, self.graph)?;
         let mut visited: BTreeSet<VertexId> = BTreeSet::new();
         let mut frontier: BTreeSet<VertexId> = BTreeSet::new();
         frontier.insert(self.start_vertex);
@@ -76,10 +93,10 @@ impl<'a> Traverse<'a> {
         for _ in 0..self.max_hops {
             let mut next_frontier: BTreeSet<VertexId> = BTreeSet::new();
             for v in &frontier {
-                for eid in store.out_edge_ids(*v, self.graph) {
-                    let Some(edge) = store.get_edge(eid) else {
-                        continue;
-                    };
+                for eid in store.out_edge_ids(*v, self.graph)? {
+                    let edge = store.get_edge(eid).ok_or_else(|| {
+                        GraphStoreError::CorruptGraph(format!("missing traversal edge {eid}"))
+                    })?;
                     if let Some(want) = self.label {
                         if edge.label != want {
                             continue;
@@ -92,11 +109,12 @@ impl<'a> Traverse<'a> {
                         continue;
                     }
                     if let Some(pred) = &self.vertex_predicate {
-                        if let Some(vtx) = store.get_vertex(neighbor) {
-                            if !pred.matches(vtx) {
-                                continue;
-                            }
-                        } else {
+                        let vtx = store.get_vertex(neighbor).ok_or_else(|| {
+                            GraphStoreError::CorruptGraph(format!(
+                                "traversal edge {eid} references missing vertex {neighbor}"
+                            ))
+                        })?;
+                        if !pred.matches(vtx) {
                             continue;
                         }
                     }
@@ -129,7 +147,10 @@ impl<'a> Traverse<'a> {
                 },
             );
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 }
 
@@ -166,17 +187,17 @@ impl<'a> VertexMatch<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
         let candidates: Vec<VertexId> = match self.label {
-            Some(l) => store.vertex_ids_by_label(l, self.graph),
-            None => store.vertex_ids_in_graph(self.graph).into_iter().collect(),
+            Some(l) => store.vertex_ids_by_label(l, self.graph)?,
+            None => store.vertex_ids_in_graph(self.graph)?.into_iter().collect(),
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for vid in candidates {
-            let Some(vtx) = store.get_vertex(vid) else {
-                continue;
-            };
+            let vtx = store.get_vertex(vid).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("missing matched vertex {vid}"))
+            })?;
             if let Some(pred) = &self.predicate {
                 if !pred.matches(vtx) {
                     continue;
@@ -194,7 +215,10 @@ impl<'a> VertexMatch<'a> {
             );
         }
         entries.sort_by_key(|e| e.doc_id);
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 }
 
@@ -233,15 +257,15 @@ impl<'a> GMatch<'a> {
         }
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        if let Some(result) = self.try_execute_single_edge(store) {
-            return result;
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        if let Some(result) = self.try_execute_single_edge(store)? {
+            return Ok(result);
         }
-        if let Some(result) = self.try_execute_two_edge_path(store) {
-            return result;
+        if let Some(result) = self.try_execute_two_edge_path(store)? {
+            return Ok(result);
         }
 
-        let candidates = self.compute_candidates(store);
+        let candidates = self.compute_candidates(store)?;
 
         let (positive_edges, negated_edges): (Vec<&EdgePattern>, Vec<&EdgePattern>) =
             self.pattern.edge_patterns.iter().partition(|e| !e.negated);
@@ -264,20 +288,26 @@ impl<'a> GMatch<'a> {
             assigned_values: BTreeSet::new(),
             matches: Vec::new(),
         };
-        self.backtrack(store, &candidates, &var_edges, &mut state);
+        self.backtrack(store, &candidates, &var_edges, &mut state)?;
         let mut matches = state.matches;
 
         if !negated_edges.is_empty() {
-            matches.retain(|m| Self::check_negated(store, self.graph, &negated_edges, m));
+            let mut retained = Vec::with_capacity(matches.len());
+            for assignment in matches {
+                if Self::check_negated(store, self.graph, &negated_edges, &assignment)? {
+                    retained.push(assignment);
+                }
+            }
+            matches = retained;
         }
 
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(matches.len());
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for (i, m) in matches.iter().enumerate() {
-            let doc_id = (i + 1) as DocId;
+            let doc_id = synthetic_doc_id(i, "GMatch")?;
             let mut fields = BTreeMap::new();
             for (var, vid) in m {
-                fields.insert(var.clone(), Value::Int(*vid as i64));
+                fields.insert(var.clone(), graph_id_value(*vid, "GMatch assignment")?);
             }
             entries.push(PostingEntry::new(
                 doc_id,
@@ -290,7 +320,7 @@ impl<'a> GMatch<'a> {
             let mut subgraph_vertices: Vec<VertexId> = m.values().copied().collect();
             subgraph_vertices.sort_unstable();
             subgraph_vertices.dedup();
-            let subgraph_edges = Self::collect_match_edges(store, self.graph, &positive_edges, m);
+            let subgraph_edges = Self::collect_match_edges(store, self.graph, &positive_edges, m)?;
             graph_payloads.insert(
                 doc_id,
                 GraphPayload {
@@ -301,20 +331,30 @@ impl<'a> GMatch<'a> {
                 },
             );
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 
-    fn try_execute_single_edge<G: GraphStore>(&self, store: &G) -> Option<GraphPostingList> {
+    fn try_execute_single_edge<G: GraphStore>(
+        &self,
+        store: &G,
+    ) -> GraphStoreResult<Option<GraphPostingList>> {
         if self.pattern.vertex_patterns.len() != 2 || self.pattern.edge_patterns.len() != 1 {
-            return None;
+            return Ok(None);
         }
         let edge_pattern = &self.pattern.edge_patterns[0];
         if edge_pattern.negated || edge_pattern.source_var == edge_pattern.target_var {
-            return None;
+            return Ok(None);
         }
-        let source_pattern = self.vertex_pattern(&edge_pattern.source_var)?;
-        let target_pattern = self.vertex_pattern(&edge_pattern.target_var)?;
-        let edge_list = self.edge_list_for_pattern(store, edge_pattern);
+        let Some(source_pattern) = self.vertex_pattern(&edge_pattern.source_var) else {
+            return Ok(None);
+        };
+        let Some(target_pattern) = self.vertex_pattern(&edge_pattern.target_var) else {
+            return Ok(None);
+        };
+        let edge_list = self.edge_list_for_pattern(store, edge_pattern)?;
 
         let mut seen_assignments: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
         let mut entries: Vec<PostingEntry> = Vec::new();
@@ -323,15 +363,21 @@ impl<'a> GMatch<'a> {
             if !edge_pattern.satisfies(&edge) {
                 continue;
             }
-            let Some(source) = store.get_vertex(edge.source_id) else {
-                continue;
-            };
+            let source = store.get_vertex(edge.source_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "edge {} references missing source vertex {}",
+                    edge.edge_id, edge.source_id
+                ))
+            })?;
             if !source_pattern.satisfies(source) {
                 continue;
             }
-            let Some(target) = store.get_vertex(edge.target_id) else {
-                continue;
-            };
+            let target = store.get_vertex(edge.target_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "edge {} references missing target vertex {}",
+                    edge.edge_id, edge.target_id
+                ))
+            })?;
             if !target_pattern.satisfies(target) {
                 continue;
             }
@@ -339,15 +385,15 @@ impl<'a> GMatch<'a> {
                 continue;
             }
 
-            let doc_id = (entries.len() + 1) as DocId;
+            let doc_id = synthetic_doc_id(entries.len(), "single-edge GMatch")?;
             let mut fields = BTreeMap::new();
             fields.insert(
                 edge_pattern.source_var.clone(),
-                Value::Int(edge.source_id as i64),
+                graph_id_value(edge.source_id, "GMatch source")?,
             );
             fields.insert(
                 edge_pattern.target_var.clone(),
-                Value::Int(edge.target_id as i64),
+                graph_id_value(edge.target_id, "GMatch target")?,
             );
             entries.push(PostingEntry::new(
                 doc_id,
@@ -371,38 +417,47 @@ impl<'a> GMatch<'a> {
             );
         }
 
-        Some(GraphPostingList::from_parts(
+        Ok(Some(GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )))
     }
 
-    fn try_execute_two_edge_path<G: GraphStore>(&self, store: &G) -> Option<GraphPostingList> {
+    fn try_execute_two_edge_path<G: GraphStore>(
+        &self,
+        store: &G,
+    ) -> GraphStoreResult<Option<GraphPostingList>> {
         if self.pattern.vertex_patterns.len() != 3 || self.pattern.edge_patterns.len() != 2 {
-            return None;
+            return Ok(None);
         }
         let edge_patterns = &self.pattern.edge_patterns;
         if edge_patterns.iter().any(|edge| edge.negated) {
-            return None;
+            return Ok(None);
         }
         let (first, second) = if edge_patterns[0].target_var == edge_patterns[1].source_var {
             (&edge_patterns[0], &edge_patterns[1])
         } else if edge_patterns[1].target_var == edge_patterns[0].source_var {
             (&edge_patterns[1], &edge_patterns[0])
         } else {
-            return None;
+            return Ok(None);
         };
         if first.source_var == first.target_var
             || second.source_var == second.target_var
             || first.source_var == second.target_var
         {
-            return None;
+            return Ok(None);
         }
-        let source_pattern = self.vertex_pattern(&first.source_var)?;
-        let middle_pattern = self.vertex_pattern(&first.target_var)?;
-        let target_pattern = self.vertex_pattern(&second.target_var)?;
+        let Some(source_pattern) = self.vertex_pattern(&first.source_var) else {
+            return Ok(None);
+        };
+        let Some(middle_pattern) = self.vertex_pattern(&first.target_var) else {
+            return Ok(None);
+        };
+        let Some(target_pattern) = self.vertex_pattern(&second.target_var) else {
+            return Ok(None);
+        };
 
-        let first_edges = self.edge_list_for_pattern(store, first);
+        let first_edges = self.edge_list_for_pattern(store, first)?;
         let mut seen_assignments: BTreeSet<(VertexId, VertexId, VertexId)> = BTreeSet::new();
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
@@ -411,23 +466,29 @@ impl<'a> GMatch<'a> {
             if !first.satisfies(&first_edge) {
                 continue;
             }
-            let Some(source) = store.get_vertex(first_edge.source_id) else {
-                continue;
-            };
+            let source = store.get_vertex(first_edge.source_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "edge {} references missing source vertex {}",
+                    first_edge.edge_id, first_edge.source_id
+                ))
+            })?;
             if !source_pattern.satisfies(source) {
                 continue;
             }
-            let Some(middle) = store.get_vertex(first_edge.target_id) else {
-                continue;
-            };
+            let middle = store.get_vertex(first_edge.target_id).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "edge {} references missing middle vertex {}",
+                    first_edge.edge_id, first_edge.target_id
+                ))
+            })?;
             if !middle_pattern.satisfies(middle) {
                 continue;
             }
 
-            for second_edge_id in store.out_edge_ids(first_edge.target_id, self.graph) {
-                let Some(second_edge) = store.get_edge(second_edge_id) else {
-                    continue;
-                };
+            for second_edge_id in store.out_edge_ids(first_edge.target_id, self.graph)? {
+                let second_edge = store.get_edge(second_edge_id).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing path edge {second_edge_id}"))
+                })?;
                 if !second.satisfies(second_edge) {
                     continue;
                 }
@@ -436,9 +497,12 @@ impl<'a> GMatch<'a> {
                 {
                     continue;
                 }
-                let Some(target) = store.get_vertex(second_edge.target_id) else {
-                    continue;
-                };
+                let target = store.get_vertex(second_edge.target_id).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!(
+                        "edge {} references missing target vertex {}",
+                        second_edge.edge_id, second_edge.target_id
+                    ))
+                })?;
                 if !target_pattern.satisfies(target) {
                     continue;
                 }
@@ -457,14 +521,14 @@ impl<'a> GMatch<'a> {
                     second_edge,
                     &mut entries,
                     &mut graph_payloads,
-                );
+                )?;
             }
         }
 
-        Some(GraphPostingList::from_parts(
+        Ok(Some(GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )))
     }
 
     fn push_two_edge_path_match(
@@ -475,20 +539,20 @@ impl<'a> GMatch<'a> {
         second_edge: &Edge,
         entries: &mut Vec<PostingEntry>,
         graph_payloads: &mut BTreeMap<DocId, GraphPayload>,
-    ) {
-        let doc_id = (entries.len() + 1) as DocId;
+    ) -> GraphStoreResult<()> {
+        let doc_id = synthetic_doc_id(entries.len(), "two-edge GMatch")?;
         let mut fields = BTreeMap::new();
         fields.insert(
             first.source_var.clone(),
-            Value::Int(first_edge.source_id as i64),
+            graph_id_value(first_edge.source_id, "GMatch source")?,
         );
         fields.insert(
             first.target_var.clone(),
-            Value::Int(first_edge.target_id as i64),
+            graph_id_value(first_edge.target_id, "GMatch middle")?,
         );
         fields.insert(
             second.target_var.clone(),
-            Value::Int(second_edge.target_id as i64),
+            graph_id_value(second_edge.target_id, "GMatch target")?,
         );
         entries.push(PostingEntry::new(
             doc_id,
@@ -518,17 +582,26 @@ impl<'a> GMatch<'a> {
                 score_override: Some(self.score),
             },
         );
+        Ok(())
     }
 
-    fn edge_list_for_pattern<G: GraphStore>(&self, store: &G, pattern: &EdgePattern) -> Vec<Edge> {
-        match pattern.label.as_deref() {
-            Some(label) => store
-                .edge_ids_by_label(label, self.graph)
-                .into_iter()
-                .filter_map(|edge_id| store.get_edge(edge_id).cloned())
-                .collect(),
-            None => store.edges_in_graph(self.graph),
-        }
+    fn edge_list_for_pattern<G: GraphStore>(
+        &self,
+        store: &G,
+        pattern: &EdgePattern,
+    ) -> GraphStoreResult<Vec<Edge>> {
+        let edge_ids = match pattern.label.as_deref() {
+            Some(label) => store.edge_ids_by_label(label, self.graph)?,
+            None => return store.edges_in_graph(self.graph),
+        };
+        edge_ids
+            .into_iter()
+            .map(|edge_id| {
+                store.get_edge(edge_id).cloned().ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing pattern edge {edge_id}"))
+                })
+            })
+            .collect()
     }
 
     fn vertex_pattern(&self, variable: &str) -> Option<&crate::pattern::VertexPattern> {
@@ -538,16 +611,20 @@ impl<'a> GMatch<'a> {
             .find(|pattern| pattern.variable == variable)
     }
 
-    fn compute_candidates<G: GraphStore>(&self, store: &G) -> BTreeMap<String, Vec<VertexId>> {
+    fn compute_candidates<G: GraphStore>(
+        &self,
+        store: &G,
+    ) -> GraphStoreResult<BTreeMap<String, Vec<VertexId>>> {
         let mut candidates: BTreeMap<String, Vec<VertexId>> = BTreeMap::new();
-        let graph_vids = store.vertex_ids_in_graph(self.graph);
+        let graph_vids = store.vertex_ids_in_graph(self.graph)?;
         for vp in &self.pattern.vertex_patterns {
             let mut cands = Vec::new();
             for vid in &graph_vids {
-                if let Some(vtx) = store.get_vertex(*vid) {
-                    if vp.satisfies(vtx) {
-                        cands.push(*vid);
-                    }
+                let vtx = store.get_vertex(*vid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing candidate vertex {vid}"))
+                })?;
+                if vp.satisfies(vtx) {
+                    cands.push(*vid);
                 }
             }
             candidates.insert(vp.variable.clone(), cands);
@@ -569,28 +646,30 @@ impl<'a> GMatch<'a> {
                     continue;
                 };
                 let tgt_set: BTreeSet<VertexId> = tgt_cands.iter().copied().collect();
-                let new_src: Vec<VertexId> = candidates[src_var]
-                    .iter()
-                    .copied()
-                    .filter(|vid| Self::has_edge_out(store, self.graph, *vid, &tgt_set, ep))
-                    .collect();
+                let mut new_src = Vec::new();
+                for vid in candidates[src_var].iter().copied() {
+                    if Self::has_edge_out(store, self.graph, vid, &tgt_set, ep)? {
+                        new_src.push(vid);
+                    }
+                }
                 if new_src.len() < candidates[src_var].len() {
                     candidates.insert(src_var.clone(), new_src);
                     changed = true;
                 }
                 let src_set: BTreeSet<VertexId> = candidates[src_var].iter().copied().collect();
-                let new_tgt: Vec<VertexId> = candidates[tgt_var]
-                    .iter()
-                    .copied()
-                    .filter(|vid| Self::has_edge_in(store, self.graph, *vid, &src_set, ep))
-                    .collect();
+                let mut new_tgt = Vec::new();
+                for vid in candidates[tgt_var].iter().copied() {
+                    if Self::has_edge_in(store, self.graph, vid, &src_set, ep)? {
+                        new_tgt.push(vid);
+                    }
+                }
                 if new_tgt.len() < candidates[tgt_var].len() {
                     candidates.insert(tgt_var.clone(), new_tgt);
                     changed = true;
                 }
             }
         }
-        candidates
+        Ok(candidates)
     }
 
     fn has_edge_out<G: GraphStore>(
@@ -599,19 +678,19 @@ impl<'a> GMatch<'a> {
         src: VertexId,
         tgt_set: &BTreeSet<VertexId>,
         ep: &EdgePattern,
-    ) -> bool {
-        for eid in store.out_edge_ids(src, graph) {
-            let Some(edge) = store.get_edge(eid) else {
-                continue;
-            };
+    ) -> GraphStoreResult<bool> {
+        for eid in store.out_edge_ids(src, graph)? {
+            let edge = store.get_edge(eid).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
+            })?;
             if !tgt_set.contains(&edge.target_id) {
                 continue;
             }
             if ep.satisfies(edge) {
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 
     fn has_edge_in<G: GraphStore>(
@@ -620,19 +699,19 @@ impl<'a> GMatch<'a> {
         tgt: VertexId,
         src_set: &BTreeSet<VertexId>,
         ep: &EdgePattern,
-    ) -> bool {
-        for eid in store.in_edge_ids(tgt, graph) {
-            let Some(edge) = store.get_edge(eid) else {
-                continue;
-            };
+    ) -> GraphStoreResult<bool> {
+        for eid in store.in_edge_ids(tgt, graph)? {
+            let edge = store.get_edge(eid).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
+            })?;
             if !src_set.contains(&edge.source_id) {
                 continue;
             }
             if ep.satisfies(edge) {
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 
     fn backtrack<G: GraphStore>(
@@ -641,18 +720,24 @@ impl<'a> GMatch<'a> {
         candidates: &BTreeMap<String, Vec<VertexId>>,
         var_edges: &BTreeMap<String, Vec<&EdgePattern>>,
         state: &mut BacktrackState,
-    ) {
+    ) -> GraphStoreResult<()> {
         if state.unassigned.is_empty() {
             state.matches.push(state.assignment.clone());
-            return;
+            return Ok(());
         }
         let var = state
             .unassigned
             .iter()
             .min_by_key(|v| candidates.get(*v).map_or(usize::MAX, Vec::len))
             .cloned()
-            .expect("unassigned non-empty");
-        let cands = candidates.get(&var).cloned().unwrap_or_default();
+            .ok_or_else(|| {
+                GraphStoreError::CorruptGraph(
+                    "GMatch has no variable despite non-empty unassigned state".into(),
+                )
+            })?;
+        let cands = candidates.get(&var).cloned().ok_or_else(|| {
+            GraphStoreError::CorruptGraph(format!("missing candidate set for variable {var:?}"))
+        })?;
         for vid in cands {
             if state.assigned_values.contains(&vid) {
                 continue;
@@ -660,13 +745,14 @@ impl<'a> GMatch<'a> {
             state.assignment.insert(var.clone(), vid);
             state.assigned_values.insert(vid);
             state.unassigned.remove(&var);
-            if Self::validate_edges_for(store, self.graph, &var, var_edges, &state.assignment) {
-                self.backtrack(store, candidates, var_edges, state);
+            if Self::validate_edges_for(store, self.graph, &var, var_edges, &state.assignment)? {
+                self.backtrack(store, candidates, var_edges, state)?;
             }
             state.assignment.remove(&var);
             state.assigned_values.remove(&vid);
             state.unassigned.insert(var.clone());
         }
+        Ok(())
     }
 
     fn validate_edges_for<G: GraphStore>(
@@ -675,9 +761,9 @@ impl<'a> GMatch<'a> {
         var: &str,
         var_edges: &BTreeMap<String, Vec<&EdgePattern>>,
         assignment: &BTreeMap<String, VertexId>,
-    ) -> bool {
+    ) -> GraphStoreResult<bool> {
         let Some(edges) = var_edges.get(var) else {
-            return true;
+            return Ok(true);
         };
         for ep in edges {
             let (Some(src_id), Some(tgt_id)) = (
@@ -687,10 +773,10 @@ impl<'a> GMatch<'a> {
                 continue;
             };
             let mut found = false;
-            for eid in store.out_edge_ids(src_id, graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(src_id, graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
+                })?;
                 if edge.target_id != tgt_id {
                     continue;
                 }
@@ -700,10 +786,10 @@ impl<'a> GMatch<'a> {
                 }
             }
             if !found {
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     fn check_negated<G: GraphStore>(
@@ -711,7 +797,7 @@ impl<'a> GMatch<'a> {
         graph: &str,
         negated: &[&EdgePattern],
         assignment: &BTreeMap<String, VertexId>,
-    ) -> bool {
+    ) -> GraphStoreResult<bool> {
         for ep in negated {
             let (Some(src_id), Some(tgt_id)) = (
                 assignment.get(&ep.source_var).copied(),
@@ -719,19 +805,19 @@ impl<'a> GMatch<'a> {
             ) else {
                 continue;
             };
-            for eid in store.out_edge_ids(src_id, graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(src_id, graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
+                })?;
                 if edge.target_id != tgt_id {
                     continue;
                 }
                 if ep.satisfies(edge) {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
-        true
+        Ok(true)
     }
 
     fn collect_match_edges<G: GraphStore>(
@@ -739,7 +825,7 @@ impl<'a> GMatch<'a> {
         graph: &str,
         positive: &[&EdgePattern],
         assignment: &BTreeMap<String, VertexId>,
-    ) -> Vec<EdgeId> {
+    ) -> GraphStoreResult<Vec<EdgeId>> {
         let mut edges: BTreeSet<EdgeId> = BTreeSet::new();
         for ep in positive {
             let (Some(src_id), Some(tgt_id)) = (
@@ -748,17 +834,17 @@ impl<'a> GMatch<'a> {
             ) else {
                 continue;
             };
-            for eid in store.out_edge_ids(src_id, graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(src_id, graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
+                })?;
                 if edge.target_id == tgt_id && ep.satisfies(edge) {
                     edges.insert(eid);
                     break;
                 }
             }
         }
-        edges.into_iter().collect()
+        Ok(edges.into_iter().collect())
     }
 }
 
@@ -800,7 +886,7 @@ impl<'a> VertexAggregation<'a> {
         }
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
         let mut vertex_ids: BTreeSet<VertexId> = BTreeSet::new();
         for entry in self.source.inner().entries() {
             if let Some(gp) = self.source.get_graph_payload(entry.doc_id) {
@@ -809,15 +895,21 @@ impl<'a> VertexAggregation<'a> {
         }
         let mut numeric: Vec<f64> = Vec::new();
         for vid in &vertex_ids {
-            if let Some(vtx) = store.get_vertex(*vid) {
-                if let Some(value) = vtx.properties.get(&self.property_name) {
-                    if let Some(n) = value_as_f64(value) {
-                        numeric.push(n);
-                    }
+            let vtx = store.get_vertex(*vid).ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!("missing aggregate vertex {vid}"))
+            })?;
+            if let Some(value) = vtx.properties.get(&self.property_name) {
+                if let Some(number) = value_as_f64(value)? {
+                    numeric.push(number);
+                } else {
+                    return Err(GraphStoreError::InvalidMutation(format!(
+                        "vertex {vid} property {:?} is not numeric",
+                        self.property_name
+                    )));
                 }
             }
         }
-        let result = aggregate(self.agg_fn, &numeric);
+        let result = aggregate(self.agg_fn, &numeric)?;
 
         let mut fields: BTreeMap<String, Value> = BTreeMap::new();
         fields.insert(
@@ -831,7 +923,11 @@ impl<'a> VertexAggregation<'a> {
         fields.insert("_vertex_agg_result".to_string(), Value::Float(result));
         fields.insert(
             "_vertex_agg_count".to_string(),
-            Value::Int(numeric.len() as i64),
+            Value::Int(i64::try_from(numeric.len()).map_err(|_| {
+                GraphStoreError::CorruptGraph(
+                    "vertex aggregate count exceeds agtype integer range".into(),
+                )
+            })?),
         );
 
         let entry = PostingEntry::new(
@@ -852,10 +948,10 @@ impl<'a> VertexAggregation<'a> {
                 score_override: Some(result),
             },
         );
-        GraphPostingList::from_parts(
+        Ok(GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(vec![entry]),
             graph_payloads,
-        )
+        ))
     }
 }
 
@@ -895,26 +991,32 @@ impl<'a> RegularPathQuery<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let simplified = simplify(&self.path);
-        let nfa = build_nfa(&simplified);
-        let dfa = subset_construction(&nfa);
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        let simplified = simplify(&self.path)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
+        let nfa = build_nfa(&simplified)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
+        let dfa = subset_construction(&nfa)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
 
         let starts: Vec<VertexId> = match self.start_vertex {
-            Some(v) => vec![v],
-            None => store.vertex_ids_in_graph(self.graph).into_iter().collect(),
+            Some(v) => {
+                store.require_vertex_in_graph(v, self.graph)?;
+                vec![v]
+            }
+            None => store.vertex_ids_in_graph(self.graph)?.into_iter().collect(),
         };
 
         let mut pairs: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
         for sv in &starts {
-            self.simulate_from(store, *sv, &dfa, &mut pairs);
+            self.simulate_from(store, *sv, &dfa, &mut pairs)?;
         }
 
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         let mut seen: BTreeSet<DocId> = BTreeSet::new();
         for (start_v, end_v) in &pairs {
-            let doc_id = *end_v as DocId;
+            let doc_id = *end_v;
             if seen.insert(doc_id) {
                 entries.push(PostingEntry::new(doc_id, Payload::with_score(self.score)));
                 let mut subgraph_vertices = vec![*start_v, *end_v];
@@ -932,7 +1034,10 @@ impl<'a> RegularPathQuery<'a> {
             }
         }
         entries.sort_by_key(|e| e.doc_id);
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 
     fn simulate_from<G: GraphStore>(
@@ -941,7 +1046,7 @@ impl<'a> RegularPathQuery<'a> {
         start: VertexId,
         dfa: &Dfa,
         pairs: &mut BTreeSet<(VertexId, VertexId)>,
-    ) {
+    ) -> GraphStoreResult<()> {
         let mut visited: BTreeSet<(VertexId, DfaState)> = BTreeSet::new();
         let mut queue: VecDeque<(VertexId, DfaState)> = VecDeque::new();
         queue.push_back((start, dfa.start.clone()));
@@ -955,10 +1060,10 @@ impl<'a> RegularPathQuery<'a> {
             let Some(transitions) = dfa.transitions.get(&state) else {
                 continue;
             };
-            for eid in store.out_edge_ids(vertex, self.graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(vertex, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing RPQ edge {eid}"))
+                })?;
                 let Some(next_state) = transitions.get(&edge.label) else {
                     continue;
                 };
@@ -972,6 +1077,7 @@ impl<'a> RegularPathQuery<'a> {
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -1023,15 +1129,35 @@ impl<'a> WeightedPathQuery<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let dfa = subset_construction(&build_nfa(&simplify(&self.path)));
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        if !self.default_edge_weight.is_finite() {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "default edge weight must be finite, got {}",
+                self.default_edge_weight
+            )));
+        }
+        if !self.score.is_finite() {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "weighted path score must be finite, got {}",
+                self.score
+            )));
+        }
+        let simplified = simplify(&self.path)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
+        let nfa = build_nfa(&simplified)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
+        let dfa = subset_construction(&nfa)
+            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
         let starts: Vec<VertexId> = match self.start_vertex {
-            Some(vertex) => vec![vertex],
-            None => store.vertex_ids_in_graph(self.graph).into_iter().collect(),
+            Some(vertex) => {
+                store.require_vertex_in_graph(vertex, self.graph)?;
+                vec![vertex]
+            }
+            None => store.vertex_ids_in_graph(self.graph)?.into_iter().collect(),
         };
         let mut accepted = BTreeMap::<VertexId, WeightedPathMatch>::new();
         for start in starts {
-            self.simulate_from(store, start, &dfa, &mut accepted);
+            self.simulate_from(store, start, &dfa, &mut accepted)?;
         }
 
         let mut entries = Vec::with_capacity(accepted.len());
@@ -1057,7 +1183,10 @@ impl<'a> WeightedPathQuery<'a> {
                 },
             );
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 
     fn simulate_from<G: GraphStore>(
@@ -1066,7 +1195,7 @@ impl<'a> WeightedPathQuery<'a> {
         start: VertexId,
         dfa: &Dfa,
         accepted: &mut BTreeMap<VertexId, WeightedPathMatch>,
-    ) {
+    ) -> GraphStoreResult<()> {
         let mut queue = VecDeque::from([WeightedWalk {
             vertex: start,
             state: dfa.start.clone(),
@@ -1086,22 +1215,27 @@ impl<'a> WeightedPathQuery<'a> {
             let Some(transitions) = dfa.transitions.get(&walk.state) else {
                 continue;
             };
-            for edge_id in store.out_edge_ids(walk.vertex, self.graph) {
-                let Some(edge) = store.get_edge(edge_id) else {
-                    continue;
-                };
+            for edge_id in store.out_edge_ids(walk.vertex, self.graph)? {
+                let edge = store.get_edge(edge_id).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing weighted-path edge {edge_id}"))
+                })?;
                 let Some(next_state) = transitions.get(&edge.label) else {
                     continue;
                 };
-                let edge_weight = edge
-                    .properties
-                    .get(self.weight_property)
-                    .and_then(value_as_f64)
-                    .filter(|weight| weight.is_finite())
-                    .unwrap_or(self.default_edge_weight);
+                let edge_weight = match edge.properties.get(self.weight_property) {
+                    Some(value) => value_as_f64(value)?.ok_or_else(|| {
+                        GraphStoreError::InvalidMutation(format!(
+                            "edge {edge_id} weight property {:?} is not numeric",
+                            self.weight_property
+                        ))
+                    })?,
+                    None => self.default_edge_weight,
+                };
                 let weight = walk.weight + edge_weight;
                 if !weight.is_finite() {
-                    continue;
+                    return Err(GraphStoreError::InvalidMutation(format!(
+                        "weighted path accumulation is not finite at edge {edge_id}"
+                    )));
                 }
                 let mut vertices = walk.vertices.clone();
                 vertices.push(edge.target_id);
@@ -1119,13 +1253,16 @@ impl<'a> WeightedPathQuery<'a> {
                 queue.push_back(WeightedWalk {
                     vertex: edge.target_id,
                     state: next_state.clone(),
-                    hops: walk.hops + 1,
+                    hops: walk.hops.checked_add(1).ok_or_else(|| {
+                        GraphStoreError::CorruptGraph("weighted path hop count overflow".into())
+                    })?,
                     weight,
                     vertices,
                     edges,
                 });
             }
         }
+        Ok(())
     }
 }
 
@@ -1166,25 +1303,51 @@ fn record_weighted_match(
     }
 }
 
-fn value_as_f64(v: &Value) -> Option<f64> {
+fn value_as_f64(v: &Value) -> GraphStoreResult<Option<f64>> {
     match v {
-        Value::Int(n) => Some(*n as f64),
-        Value::Float(f) => Some(*f),
-        Value::Decimal(value) => value.to_f64(),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        _ => None,
+        Value::Int(n) if (-9_007_199_254_740_992..=9_007_199_254_740_992).contains(n) => {
+            Ok(Some(*n as f64))
+        }
+        Value::Int(n) => Err(GraphStoreError::InvalidMutation(format!(
+            "integer {n} cannot be represented exactly as f64"
+        ))),
+        Value::Float(f) if f.is_finite() => Ok(Some(*f)),
+        Value::Float(f) => Err(GraphStoreError::InvalidMutation(format!(
+            "numeric graph property must be finite, got {f}"
+        ))),
+        Value::Decimal(value) => value.to_f64().map(Some).ok_or_else(|| {
+            GraphStoreError::InvalidMutation(
+                "decimal graph property cannot be represented as f64".into(),
+            )
+        }),
+        Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
+        _ => Ok(None),
     }
 }
 
-fn aggregate(agg_fn: AggFn, values: &[f64]) -> f64 {
+fn aggregate(agg_fn: AggFn, values: &[f64]) -> GraphStoreResult<f64> {
     if values.is_empty() {
-        return 0.0;
+        return Ok(0.0);
     }
-    match agg_fn {
+    let count = if u64::try_from(values.len()).is_ok_and(|count| count <= 9_007_199_254_740_992) {
+        values.len() as f64
+    } else {
+        return Err(GraphStoreError::CorruptGraph(
+            "vertex aggregate count exceeds the exact f64 integer range".into(),
+        ));
+    };
+    let result = match agg_fn {
         AggFn::Sum => values.iter().sum(),
-        AggFn::Avg => values.iter().sum::<f64>() / values.len() as f64,
+        AggFn::Avg => values.iter().sum::<f64>() / count,
         AggFn::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
         AggFn::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        AggFn::Count => values.len() as f64,
+        AggFn::Count => count,
+    };
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(GraphStoreError::InvalidMutation(format!(
+            "vertex aggregate result is not finite: {result}"
+        )))
     }
 }

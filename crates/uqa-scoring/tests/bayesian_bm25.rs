@@ -38,7 +38,7 @@ fn arb_transform() -> impl Strategy<Value = BayesianProbabilityTransform> {
         -2.0f64..2.0, // beta
         proptest::option::of(0.05f64..0.95),
     )
-        .prop_map(|(a, b, br)| BayesianProbabilityTransform::new(a, b, br))
+        .prop_map(|(a, b, br)| BayesianProbabilityTransform::new(a, b, br).unwrap())
 }
 
 proptest! {
@@ -57,7 +57,7 @@ proptest! {
         alpha in 0.1f64..3.0,
         beta in -2.0f64..2.0,
     ) {
-        let tx = BayesianProbabilityTransform::new(alpha, beta, None);
+        let tx = BayesianProbabilityTransform::new(alpha, beta, None).unwrap();
         let l = tx.likelihood(score);
         // Avoid degenerate likelihoods that push logit() out of range.
         prop_assume!(l > 1e-12 && l < 1.0 - 1e-12);
@@ -81,7 +81,7 @@ proptest! {
         alpha in 0.1f64..3.0,
         beta in -2.0f64..2.0,
     ) {
-        let tx = BayesianProbabilityTransform::new(alpha, beta, Some(base_rate));
+        let tx = BayesianProbabilityTransform::new(alpha, beta, Some(base_rate)).unwrap();
         let l = tx.likelihood(score);
         prop_assume!(l > 1e-12 && l < 1.0 - 1e-12);
 
@@ -155,7 +155,7 @@ proptest! {
         alpha in 0.1f64..3.0,
         beta in -2.0f64..2.0,
     ) {
-        let tx = BayesianProbabilityTransform::new(alpha, beta, base_rate);
+        let tx = BayesianProbabilityTransform::new(alpha, beta, base_rate).unwrap();
         let l = tx.likelihood(score);
         prop_assume!(l > 1e-12 && l < 1.0 - 1e-12);
 

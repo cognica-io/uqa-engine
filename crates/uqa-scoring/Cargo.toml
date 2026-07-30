@@ -13,6 +13,7 @@ rust-version.workspace = true
 uqa-core = { workspace = true }
 uqa-storage = { workspace = true }
 chrono = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 uqa-analysis = { workspace = true }

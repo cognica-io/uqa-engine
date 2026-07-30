@@ -23,6 +23,28 @@ pub enum MLError {
 
 pub type MLResult<T> = Result<T, MLError>;
 
+pub(crate) fn try_vec_with_capacity<T>(capacity: usize, context: &str) -> MLResult<Vec<T>> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(capacity).map_err(|error| {
+        MLError::Backend(format!(
+            "cannot allocate {capacity} elements for {context}: {error}"
+        ))
+    })?;
+    Ok(values)
+}
+
+pub(crate) fn try_filled_vec<T: Clone>(length: usize, value: T, context: &str) -> MLResult<Vec<T>> {
+    let mut values = try_vec_with_capacity(length, context)?;
+    values.resize(length, value);
+    Ok(values)
+}
+
+pub(crate) fn try_clone_slice<T: Clone>(values: &[T], context: &str) -> MLResult<Vec<T>> {
+    let mut cloned = try_vec_with_capacity(values.len(), context)?;
+    cloned.extend_from_slice(values);
+    Ok(cloned)
+}
+
 pub trait MLBackend {
     fn name(&self) -> &'static str;
 
@@ -50,7 +72,7 @@ impl MLBackend for CPUBackend {
     }
 
     fn predict(&self, model: &DeepModel, ctx: &ExecutionContext) -> MLResult<PredictResult> {
-        Ok(predict_cpu(model, ctx))
+        predict_cpu(model, ctx)
     }
 
     fn predict_features(
@@ -67,5 +89,17 @@ impl MLBackend for CPUBackend {
         options: &LearnOptions,
     ) -> MLResult<DeepLearnOutput> {
         deep_learn(training_set, options)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impossible_runtime_allocations_are_errors() {
+        let error = try_filled_vec(usize::MAX, 0_u8, "test model channels")
+            .expect_err("an impossible external dimension must not panic or abort");
+        assert!(error.to_string().contains("cannot allocate"));
     }
 }

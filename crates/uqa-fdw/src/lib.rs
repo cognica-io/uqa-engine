@@ -49,13 +49,15 @@ pub struct ColumnDef {
     pub ty: ColumnType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnType {
     Integer,
     Real,
     Text,
     Bool,
     Bytes,
+    /// An array whose element metadata is preserved across the SQL/FDW boundary.
+    Array(Box<ColumnType>),
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +124,7 @@ pub struct FDWPredicate {
 }
 
 pub type Row = BTreeMap<String, Value>;
+pub type RowStream = Box<dyn Iterator<Item = Result<Row, FDWError>> + Send>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FDWError {
@@ -141,6 +144,10 @@ pub enum FDWError {
     Io(#[from] std::io::Error),
     #[error("Unsupported FDW value: {0}")]
     UnsupportedValue(String),
+    #[error("Foreign table `{0}` is not loaded by the memory FDW")]
+    UnknownTable(String),
+    #[error("Invalid FDW predicate: {0}")]
+    InvalidPredicate(String),
     #[error("{0}")]
     Other(String),
 }
@@ -153,6 +160,23 @@ pub trait FDWHandler: Send + Sync {
         predicates: &[FDWPredicate],
         limit: Option<u64>,
     ) -> Result<Vec<Row>, FDWError>;
+
+    /// Pull-based scan ABI. Existing wrappers inherit the vector adapter;
+    /// wrappers capable of cursor/batch reads can override this method and
+    /// avoid a cardinality-sized intermediate allocation.
+    fn scan_stream(
+        &self,
+        table: &ForeignTable,
+        columns: Option<&[String]>,
+        predicates: &[FDWPredicate],
+        limit: Option<u64>,
+    ) -> Result<RowStream, FDWError> {
+        Ok(Box::new(
+            self.scan(table, columns, predicates, limit)?
+                .into_iter()
+                .map(Ok),
+        ))
+    }
 
     fn close(&self) {}
 }
@@ -184,16 +208,14 @@ impl FDWHandler for MemoryHandler {
         limit: Option<u64>,
     ) -> Result<Vec<Row>, FDWError> {
         let Some(rows) = self.tables.get(&table.name) else {
-            return Ok(Vec::new());
+            return Err(FDWError::UnknownTable(table.name.clone()));
         };
         let mut out: Vec<Row> = Vec::new();
         for row in rows {
-            if let Some(cap) = limit {
-                if out.len() as u64 >= cap {
-                    break;
-                }
+            if limit.is_some_and(|cap| limit_reached(out.len(), cap)) {
+                break;
             }
-            if !row_matches_predicates(row, predicates) {
+            if !row_matches_predicates(row, predicates)? {
                 continue;
             }
             out.push(project_row(row, columns));
@@ -202,18 +224,21 @@ impl FDWHandler for MemoryHandler {
     }
 }
 
-pub(crate) fn row_matches_predicates(row: &Row, predicates: &[FDWPredicate]) -> bool {
-    predicates.iter().all(|p| eval_predicate(p, row))
+pub fn row_matches_predicates(row: &Row, predicates: &[FDWPredicate]) -> Result<bool, FDWError> {
+    for predicate in predicates {
+        if !eval_predicate(predicate, row)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
-pub(crate) fn project_row(row: &Row, columns: Option<&[String]>) -> Row {
+pub fn project_row(row: &Row, columns: Option<&[String]>) -> Row {
     match columns {
         Some(cols) => {
             let mut keep = Row::new();
             for col in cols {
-                if let Some(v) = row.get(col) {
-                    keep.insert(col.clone(), v.clone());
-                }
+                keep.insert(col.clone(), row.get(col).cloned().unwrap_or(Value::Null));
             }
             keep
         }
@@ -221,36 +246,105 @@ pub(crate) fn project_row(row: &Row, columns: Option<&[String]>) -> Row {
     }
 }
 
-fn eval_predicate(p: &FDWPredicate, row: &Row) -> bool {
+fn eval_predicate(p: &FDWPredicate, row: &Row) -> Result<bool, FDWError> {
     let lhs = row.get(&p.column);
-    match p.operator {
-        PredicateOp::Eq => lhs == Some(&p.value),
-        PredicateOp::NotEq => lhs.is_some() && lhs != Some(&p.value),
-        PredicateOp::Lt => lhs.is_some_and(|v| v < &p.value),
-        PredicateOp::LtEq => lhs.is_some_and(|v| v <= &p.value),
-        PredicateOp::Gt => lhs.is_some_and(|v| v > &p.value),
-        PredicateOp::GtEq => lhs.is_some_and(|v| v >= &p.value),
+    let matches = match p.operator {
+        PredicateOp::Eq if matches!(p.value, Value::Null) => is_null(lhs),
+        PredicateOp::Eq => {
+            lhs.is_some_and(|value| !matches!(value, Value::Null) && value == &p.value)
+        }
+        PredicateOp::NotEq if matches!(p.value, Value::Null) => is_non_null(lhs),
+        PredicateOp::NotEq => {
+            lhs.is_some_and(|value| !matches!(value, Value::Null) && value != &p.value)
+        }
+        PredicateOp::Lt => compare_non_null(lhs, &p.value, p, |lhs, rhs| lhs < rhs)?,
+        PredicateOp::LtEq => compare_non_null(lhs, &p.value, p, |lhs, rhs| lhs <= rhs)?,
+        PredicateOp::Gt => compare_non_null(lhs, &p.value, p, |lhs, rhs| lhs > rhs)?,
+        PredicateOp::GtEq => compare_non_null(lhs, &p.value, p, |lhs, rhs| lhs >= rhs)?,
         PredicateOp::In => match (&p.value, lhs) {
-            (Value::List(items), Some(v)) => items.iter().any(|item| item == v),
-            _ => false,
+            (Value::List(items), Some(value)) if !matches!(value, Value::Null) => items
+                .iter()
+                .any(|item| !matches!(item, Value::Null) && item == value),
+            (Value::List(_), None | Some(Value::Null)) => false,
+            (other, _) => {
+                return Err(FDWError::InvalidPredicate(format!(
+                    "IN on `{}` requires a list, got {other:?}",
+                    p.column
+                )));
+            }
         },
-        PredicateOp::Like => string_matches(lhs, &p.value, false),
-        PredicateOp::NotLike => !string_matches(lhs, &p.value, false),
-        PredicateOp::ILike => string_matches(lhs, &p.value, true),
-        PredicateOp::NotILike => !string_matches(lhs, &p.value, true),
+        PredicateOp::Like => string_predicate(lhs, &p.value, p, false, false)?,
+        PredicateOp::NotLike => string_predicate(lhs, &p.value, p, false, true)?,
+        PredicateOp::ILike => string_predicate(lhs, &p.value, p, true, false)?,
+        PredicateOp::NotILike => string_predicate(lhs, &p.value, p, true, true)?,
+    };
+    Ok(matches)
+}
+
+fn is_null(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => true,
+        Some(_) => false,
     }
 }
 
-fn string_matches(lhs: Option<&Value>, rhs: &Value, case_insensitive: bool) -> bool {
-    match (lhs, rhs) {
-        (Some(Value::Str(haystack)), Value::Str(pattern)) => {
-            if case_insensitive {
-                sql_like(&haystack.to_lowercase(), &pattern.to_lowercase())
-            } else {
-                sql_like(haystack, pattern)
-            }
+fn is_non_null(value: Option<&Value>) -> bool {
+    value.is_some_and(|value| !matches!(value, Value::Null))
+}
+
+fn compare_non_null(
+    lhs: Option<&Value>,
+    rhs: &Value,
+    predicate: &FDWPredicate,
+    compare: impl FnOnce(&Value, &Value) -> bool,
+) -> Result<bool, FDWError> {
+    if matches!(rhs, Value::Null) {
+        return Err(FDWError::InvalidPredicate(format!(
+            "{:?} cannot compare `{}` with NULL",
+            predicate.operator, predicate.column
+        )));
+    }
+    Ok(lhs.is_some_and(|lhs| !matches!(lhs, Value::Null) && compare(lhs, rhs)))
+}
+
+pub(crate) fn limit_reached(len: usize, cap: u64) -> bool {
+    usize::try_from(cap).is_ok_and(|cap| len >= cap)
+}
+
+fn string_predicate(
+    lhs: Option<&Value>,
+    rhs: &Value,
+    predicate: &FDWPredicate,
+    case_insensitive: bool,
+    negate: bool,
+) -> Result<bool, FDWError> {
+    let Value::Str(pattern) = rhs else {
+        return Err(FDWError::InvalidPredicate(format!(
+            "{:?} on `{}` requires a string pattern",
+            predicate.operator, predicate.column
+        )));
+    };
+    let Some(lhs) = lhs else {
+        return Ok(false);
+    };
+    let Value::Str(haystack) = lhs else {
+        if matches!(lhs, Value::Null) {
+            return Ok(false);
         }
-        _ => false,
+        return Err(FDWError::InvalidPredicate(format!(
+            "{:?} on `{}` requires string input",
+            predicate.operator, predicate.column
+        )));
+    };
+    let matched = if case_insensitive {
+        sql_like(&haystack.to_lowercase(), &pattern.to_lowercase())
+    } else {
+        sql_like(haystack, pattern)
+    };
+    if negate {
+        Ok(!matched)
+    } else {
+        Ok(matched)
     }
 }
 
@@ -356,6 +450,13 @@ mod tests {
     }
 
     #[test]
+    fn memory_handler_does_not_treat_an_unloaded_table_as_empty() {
+        let handler = MemoryHandler::new();
+        let error = handler.scan(&books_table(), None, &[], None).unwrap_err();
+        assert!(matches!(error, FDWError::UnknownTable(name) if name == "books"));
+    }
+
+    #[test]
     fn pushdown_predicate_filters_rows() {
         let mut handler = MemoryHandler::new();
         handler.load(
@@ -403,6 +504,60 @@ mod tests {
         assert_eq!(rows[0].len(), 1);
         assert!(rows[0].contains_key("title"));
         assert!(!rows[0].contains_key("id"));
+    }
+
+    #[test]
+    fn projection_represents_missing_columns_as_null() {
+        let row = row(&[("id", Value::Int(1))]);
+        let projected = project_row(&row, Some(&["missing".to_string()]));
+        assert_eq!(projected.get("missing"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn malformed_in_predicate_is_an_error_and_not_an_empty_match() {
+        let row = row(&[("id", Value::Int(1))]);
+        let predicate = FDWPredicate {
+            column: "id".into(),
+            operator: PredicateOp::In,
+            value: Value::Int(1),
+        };
+        assert!(row_matches_predicates(&row, &[predicate]).is_err());
+    }
+
+    #[test]
+    fn not_like_does_not_match_missing_values_and_rejects_non_text_values() {
+        let predicate = FDWPredicate {
+            column: "title".into(),
+            operator: PredicateOp::NotLike,
+            value: Value::Str("x%".into()),
+        };
+        assert!(!row_matches_predicates(&Row::new(), std::slice::from_ref(&predicate)).unwrap());
+        assert!(row_matches_predicates(&row(&[("title", Value::Int(7))]), &[predicate]).is_err());
+    }
+
+    #[test]
+    fn null_predicates_match_sql_filter_semantics() {
+        let is_null = FDWPredicate {
+            column: "missing".into(),
+            operator: PredicateOp::Eq,
+            value: Value::Null,
+        };
+        assert!(row_matches_predicates(&Row::new(), std::slice::from_ref(&is_null)).unwrap());
+        assert!(row_matches_predicates(&row(&[("missing", Value::Null)]), &[is_null]).unwrap());
+
+        let not_equal = FDWPredicate {
+            column: "value".into(),
+            operator: PredicateOp::NotEq,
+            value: Value::Int(1),
+        };
+        assert!(!row_matches_predicates(&row(&[("value", Value::Null)]), &[not_equal]).unwrap());
+
+        let invalid_order = FDWPredicate {
+            column: "value".into(),
+            operator: PredicateOp::Lt,
+            value: Value::Null,
+        };
+        assert!(row_matches_predicates(&Row::new(), &[invalid_order]).is_err());
     }
 
     #[test]

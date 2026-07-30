@@ -31,10 +31,10 @@ fn bench_top_k(c: &mut Criterion) {
     let bounds = vec![0.95; sigs.len()];
     let mut group = c.benchmark_group("fusion_wand_top_k");
     for k in [10_usize, 50, 100] {
-        let scorer = FusionWANDScorer::new(sigs.clone(), bounds.clone(), 0.5, k);
+        let scorer = FusionWANDScorer::new(sigs.clone(), bounds.clone(), 0.5, k).unwrap();
         group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&scorer).score_top_k();
+                let result = black_box(&scorer).score_top_k().unwrap();
                 black_box(result.len())
             });
         });
@@ -47,13 +47,13 @@ fn bench_vs_exhaustive_shapes(c: &mut Criterion) {
     for n_signals in [2_usize, 3, 5] {
         let sigs = signals(n_signals, 10_000);
         let bounds = vec![0.95; sigs.len()];
-        let scorer = FusionWANDScorer::new(sigs, bounds, 0.5, 50);
+        let scorer = FusionWANDScorer::new(sigs, bounds, 0.5, 50).unwrap();
         group.bench_with_input(
             BenchmarkId::from_parameter(n_signals),
             &n_signals,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&scorer).score_top_k();
+                    let result = black_box(&scorer).score_top_k().unwrap();
                     black_box(result.len())
                 });
             },

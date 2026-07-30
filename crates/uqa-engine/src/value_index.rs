@@ -29,12 +29,57 @@
 //! is temporal or NaN, and callers fall back to the evaluated scan, so
 //! an index lookup can never change query results.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_storage::BTreeIndex;
 
-use crate::{SQLError, StorageBackendResult, TableState};
+use crate::{SQLError, StorageBackendError, StorageBackendResult, TableState};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MissingValueIndexMode {
+    /// Build an in-memory accelerator from the pinned document snapshot, but
+    /// leave durable storage untouched. Query execution and rollback recovery
+    /// use this mode so a read transaction can never be upgraded by an index
+    /// cache miss.
+    MemoryOnly,
+    /// Materialize the complete durable posting set when it is absent. Only
+    /// DDL and the explicit open-time repair boundary may use this mode.
+    Persist,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PersistentValueIndexRepairPlan {
+    /// Legacy unqualified table keys whose complete durable posting sets must
+    /// be removed before their canonical counterparts are rebuilt.
+    aliases: BTreeSet<String>,
+    /// Canonical tables whose durable marker fields differ from catalog policy
+    /// or which had a legacy alias.
+    tables: BTreeSet<String>,
+}
+
+impl PersistentValueIndexRepairPlan {
+    fn is_empty(&self) -> bool {
+        self.aliases.is_empty() && self.tables.is_empty()
+    }
+}
+
+fn unqualified_relation_key(qualified: &str) -> Option<&str> {
+    let mut quoted = false;
+    let mut chars = qualified.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '"' {
+            if quoted && chars.peek().is_some_and(|(_, next)| *next == '"') {
+                chars.next();
+            } else {
+                quoted = !quoted;
+            }
+        } else if ch == '.' && !quoted {
+            return Some(&qualified[index + 1..]);
+        }
+    }
+    None
+}
 
 /// Per-column index: non-null scalar keys in a B-tree plus the doc ids
 /// whose field is missing or SQL NULL.
@@ -157,35 +202,40 @@ impl crate::Engine {
     /// Columns of `table` that qualify for a value index: PRIMARY KEY
     /// and UNIQUE columns plus the leading column of every btree
     /// `CREATE INDEX` on the table.
-    pub(crate) fn value_indexable_fields(&self, table: &str) -> Vec<String> {
+    pub(crate) fn value_indexable_fields(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        let Some(table_name) = self.try_resolve_table_name(table)? else {
+            return Ok(Vec::new());
+        };
         let mut fields = Vec::new();
-        if let Some(t) = self.table(table) {
+        if let Some(t) = self.try_table(&table_name)? {
             for column in t.columns.read().iter() {
                 if (column.primary_key || column.unique) && !fields.contains(&column.name) {
                     fields.push(column.name.clone());
                 }
             }
+            for constraint in t.key_constraints.read().iter() {
+                for column in &constraint.columns {
+                    if !fields.contains(column) {
+                        fields.push(column.clone());
+                    }
+                }
+            }
         }
-        let resolved = self.resolve_table_name(table);
         for row in self.catalog_indexes.read().values() {
             if !row.index_type.eq_ignore_ascii_case("btree") {
                 continue;
             }
-            let matches_table = row.table_name == table
-                || resolved
-                    .as_deref()
-                    .is_some_and(|name| row.table_name == name);
-            if !matches_table {
+            if row.table_name != table_name {
                 continue;
             }
-            let columns: Vec<String> = serde_json::from_str(&row.columns_json).unwrap_or_default();
+            let columns: Vec<String> = serde_json::from_str(&row.columns_json)?;
             if let Some(first) = columns.first() {
                 if !fields.contains(first) {
                     fields.push(first.clone());
                 }
             }
         }
-        fields
+        Ok(fields)
     }
 
     /// Resolve a scalar predicate on `field` through a value index.
@@ -196,34 +246,59 @@ impl crate::Engine {
         table: &str,
         field: &str,
         predicate: &Predicate,
-    ) -> Option<PostingList> {
-        let t = self.table(table)?;
+    ) -> Result<Option<PostingList>, SQLError> {
+        let t = self.require_table(table)?;
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return index.scan(predicate);
+                return Ok(index.scan(predicate));
             }
         }
-        self.ensure_value_index(table, field)
-            .ok()
-            .filter(|built| *built)?;
-        let result = t.value_indexes.read().get(field)?.scan(predicate);
-        result
+        if !self
+            .ensure_value_index(table, field)
+            .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
+        {
+            return Ok(None);
+        }
+        let result = t
+            .value_indexes
+            .read()
+            .get(field)
+            .and_then(|index| index.scan(predicate));
+        Ok(result)
     }
 
-    /// Install one value index from durable postings when available, or
-    /// backfill it once from the document store and persist that compact
-    /// posting set. Holding the document-store read guard through publish
-    /// prevents a write from landing between the snapshot and index install.
+    /// Hydrate one value index from durable postings when available. A missing
+    /// durable marker is satisfied by an in-memory build only; query execution
+    /// must not turn a deferred read transaction into a writer.
     fn ensure_value_index(&self, table: &str, field: &str) -> StorageBackendResult<bool> {
-        let Some(t) = self.table(table) else {
+        self.ensure_value_index_with_mode(table, field, MissingValueIndexMode::MemoryOnly)
+    }
+
+    /// DDL/open-repair counterpart of [`Engine::ensure_value_index`].
+    fn ensure_persistent_value_index(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> StorageBackendResult<bool> {
+        self.ensure_value_index_with_mode(table, field, MissingValueIndexMode::Persist)
+    }
+
+    fn ensure_value_index_with_mode(
+        &self,
+        table: &str,
+        field: &str,
+        mode: MissingValueIndexMode,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.try_resolve_table_name(table)? else {
             return Ok(false);
         };
-        if t.value_indexes.read().contains_key(field) {
-            return Ok(true);
-        }
+        let Some(t) = self.try_table(&table_name)? else {
+            return Ok(false);
+        };
+        let memory_index_exists = t.value_indexes.read().contains_key(field);
         if !self
-            .value_indexable_fields(table)
+            .value_indexable_fields(&table_name)?
             .iter()
             .any(|name| name == field)
         {
@@ -231,46 +306,74 @@ impl crate::Engine {
         }
 
         let store = t.document_store.read();
-        let persisted = match self.backend.as_ref() {
-            Some(backend) if backend.persists_btree_indexes() => {
-                backend.load_btree_index(table, field)?
-            }
-            _ => None,
-        };
+        let persistent_backend = self
+            .backend
+            .as_ref()
+            .filter(|backend| backend.persists_btree_indexes());
+        let persisted = persistent_backend
+            .map(|backend| backend.load_btree_index(&table_name, field))
+            .transpose()?
+            .flatten();
+        let durable_index_missing = persistent_backend.is_some() && persisted.is_none();
+        if memory_index_exists
+            && (mode == MissingValueIndexMode::MemoryOnly || !durable_index_missing)
+        {
+            return Ok(true);
+        }
         let values = if let Some(values) = persisted {
             values
         } else {
-            let doc_ids = store.doc_ids();
-            let fields = store.get_fields_bulk(&doc_ids, field);
-            let values: Vec<(DocId, Value)> = doc_ids
-                .into_iter()
-                .map(|doc_id| {
-                    let value = fields.get(&doc_id).cloned().unwrap_or(Value::Null);
-                    (doc_id, value)
-                })
-                .collect();
-            if let Some(backend) = self
-                .backend
-                .as_ref()
-                .filter(|backend| backend.persists_btree_indexes())
-            {
-                backend.replace_btree_index(table, field, &values)?;
+            let doc_ids = store.doc_ids()?;
+            let mut projected = store.get_fields_multi(&doc_ids, &[field])?;
+            let mut values = Vec::with_capacity(doc_ids.len());
+            for doc_id in doc_ids {
+                // `DocumentStore::get_fields_multi` deliberately omits ids
+                // without a backing document, so a concurrently removed/stale
+                // id may be skipped. An id whose document still exists but was
+                // lost from the projection is a broken storage response and
+                // must fail the rebuild instead of silently omitting an index
+                // entry.
+                let Some(row) = projected.remove(&doc_id) else {
+                    if store.get(doc_id)?.is_none() {
+                        continue;
+                    }
+                    return Err(StorageBackendError::Other(format!(
+                        "value-index rebuild for `{table_name}`.`{field}` lost document {doc_id} from the field projection"
+                    )));
+                };
+                let [value]: [Value; 1] = row.try_into().map_err(|row: Vec<Value>| {
+                    StorageBackendError::Other(format!(
+                        "value-index rebuild for `{table_name}`.`{field}` returned {} projected values for document {doc_id}; expected 1",
+                        row.len()
+                    ))
+                })?;
+                values.push((doc_id, value));
+            }
+            if mode == MissingValueIndexMode::Persist {
+                if let Some(backend) = persistent_backend {
+                    backend.replace_btree_index(&table_name, field, &values)?;
+                }
             }
             values
         };
-        let built = ColumnValueIndex::build(field, values.into_iter());
-        let mut indexes = t.value_indexes.write();
-        indexes.entry(field.to_string()).or_insert(built);
+        if !memory_index_exists {
+            let built = ColumnValueIndex::build(field, values.into_iter());
+            let mut indexes = t.value_indexes.write();
+            indexes.entry(field.to_string()).or_insert(built);
+        }
         Ok(true)
     }
 
     /// Reconcile one table's in-memory and durable indexes with its current
     /// PRIMARY KEY / UNIQUE / catalog-btree policy.
     pub(crate) fn refresh_value_indexes_for_table(&self, table: &str) -> StorageBackendResult<()> {
-        let Some(t) = self.table(table) else {
-            return Ok(());
-        };
-        let desired = self.value_indexable_fields(table);
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
+        let t = self.try_table(&table_name)?.ok_or_else(|| {
+            StorageBackendError::Other(format!("table `{table_name}` does not exist"))
+        })?;
+        let desired = self.value_indexable_fields(&table_name)?;
         let mut stale: Vec<String> = t
             .value_indexes
             .read()
@@ -283,22 +386,86 @@ impl crate::Engine {
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
         {
-            for field in backend.btree_index_fields(table)? {
+            for field in backend.btree_index_fields(&table_name)? {
                 if !desired.contains(&field) && !stale.contains(&field) {
                     stale.push(field);
                 }
             }
             for field in &stale {
-                backend.drop_btree_index(table, field)?;
+                backend.drop_btree_index(&table_name, field)?;
             }
         }
         t.value_indexes
             .write()
             .retain(|field, _| desired.contains(field));
         for field in desired {
-            self.ensure_value_index(table, &field)?;
+            self.ensure_persistent_value_index(&table_name, &field)?;
         }
         Ok(())
+    }
+
+    /// Reconcile durable value indexes at the explicit database-open repair
+    /// boundary. A read-only preflight keeps the normal open/session path out
+    /// of `SQLite`'s single-writer lane. Only an observed missing/stale marker or
+    /// pre-canonicalization alias opens the writer transaction, where the plan
+    /// is recomputed against the pinned snapshot before making any changes.
+    pub(crate) fn repair_persistent_value_indexes_on_open(&self) -> StorageBackendResult<()> {
+        if self.persistent_value_index_repair_plan()?.is_empty() {
+            return Ok(());
+        }
+        self.with_implicit_storage_transaction(|engine| {
+            // Waiting for the writer reservation may have made the preflight
+            // stale. Recompute after the transaction has refreshed its pinned
+            // catalog/data snapshot and mutate only what is still divergent.
+            let plan = engine.persistent_value_index_repair_plan()?;
+            let Some(backend) = engine
+                .backend
+                .as_ref()
+                .filter(|backend| backend.persists_btree_indexes())
+            else {
+                return Ok(());
+            };
+            for alias in plan.aliases {
+                for field in backend.btree_index_fields(&alias)? {
+                    backend.drop_btree_index(&alias, &field)?;
+                }
+            }
+            for table in plan.tables {
+                engine.refresh_value_indexes_for_table(&table)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn persistent_value_index_repair_plan(
+        &self,
+    ) -> StorageBackendResult<PersistentValueIndexRepairPlan> {
+        let Some(backend) = self
+            .backend
+            .as_ref()
+            .filter(|backend| backend.persists_btree_indexes())
+        else {
+            return Ok(PersistentValueIndexRepairPlan::default());
+        };
+
+        let mut plan = PersistentValueIndexRepairPlan::default();
+        for table in self.table_names()? {
+            let desired: BTreeSet<String> =
+                self.value_indexable_fields(&table)?.into_iter().collect();
+            let actual: BTreeSet<String> =
+                backend.btree_index_fields(&table)?.into_iter().collect();
+            let mut has_legacy_alias = false;
+            if let Some(alias) = unqualified_relation_key(&table) {
+                if !backend.btree_index_fields(alias)?.is_empty() {
+                    has_legacy_alias = true;
+                    plan.aliases.insert(alias.to_string());
+                }
+            }
+            if actual != desired || has_legacy_alias {
+                plan.tables.insert(table);
+            }
+        }
+        Ok(plan)
     }
 
     /// A persistent rollback reverts `SQLite` postings but not the in-memory
@@ -312,8 +479,8 @@ impl crate::Engine {
         {
             return Ok(());
         }
-        for table in self.table_names() {
-            let Some(t) = self.table(&table) else {
+        for table in self.table_names()? {
+            let Some(t) = self.try_table(&table)? else {
                 continue;
             };
             let fields: Vec<String> = t.value_indexes.read().keys().cloned().collect();
@@ -326,56 +493,36 @@ impl crate::Engine {
     }
 
     /// Values of every logical btree field in a complete document. Persistent
-    /// storage ignores fields whose durable posting set has not been built yet;
-    /// the first lookup will backfill that set from the current documents.
+    /// storage ignores fields whose durable posting set has not been repaired
+    /// yet; query-time memory indexes remain independent of durable postings.
     pub(crate) fn persistent_value_index_document_values(
         &self,
         table: &str,
         document: &BTreeMap<String, Value>,
-    ) -> Option<BTreeMap<String, Value>> {
-        self.backend
-            .as_ref()
-            .is_some_and(|backend| backend.persists_btree_indexes())
-            .then(|| {
-                self.value_indexable_fields(table)
-                    .into_iter()
-                    .map(|field| {
-                        let value = document.get(&field).cloned().unwrap_or(Value::Null);
-                        (field, value)
-                    })
-                    .collect()
-            })
-    }
-
-    /// Read the current values of every logical btree field without
-    /// materialising a large document body. Used by partial updates so durable
-    /// postings stay current even when the in-memory B-tree is still cold.
-    pub(crate) fn persistent_value_indexes_old_values(
-        &self,
-        table: &str,
-        t: &TableState,
-        doc_id: DocId,
-    ) -> Option<BTreeMap<String, Value>> {
+    ) -> Result<Option<BTreeMap<String, Value>>, SQLError> {
         if !self
             .backend
             .as_ref()
             .is_some_and(|backend| backend.persists_btree_indexes())
         {
-            return None;
+            return Ok(None);
         }
-        let fields = self.value_indexable_fields(table);
-        if fields.is_empty() {
-            return Some(BTreeMap::new());
-        }
-        let field_refs: Vec<&str> = fields.iter().map(String::as_str).collect();
-        let mut rows = t
-            .document_store
-            .read()
-            .get_fields_multi(&[doc_id], &field_refs);
-        let values = rows
-            .remove(&doc_id)
-            .unwrap_or_else(|| vec![Value::Null; fields.len()]);
-        Some(fields.into_iter().zip(values).collect())
+        let table_name = self
+            .try_resolve_table_name(table)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        let fields = self
+            .value_indexable_fields(&table_name)
+            .map_err(|err| SQLError::Internal(format!("read value-index policy: {err}")))?;
+        Ok(Some(
+            fields
+                .into_iter()
+                .map(|field| {
+                    let value = document.get(&field).cloned().unwrap_or(Value::Null);
+                    (field, value)
+                })
+                .collect(),
+        ))
     }
 
     pub(crate) fn persist_value_indexes_apply_write(
@@ -391,8 +538,12 @@ impl crate::Engine {
         else {
             return Ok(());
         };
+        let table_name = self
+            .try_resolve_table_name(table)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
         backend
-            .apply_btree_index_write(table, doc_id, new)
+            .apply_btree_index_write(&table_name, doc_id, new)
             .map_err(|err| SQLError::Internal(format!("btree index write failed: {err}")))
     }
 
@@ -402,13 +553,17 @@ impl crate::Engine {
         table: &str,
         t: &TableState,
     ) -> Result<(), SQLError> {
+        let table_name = self
+            .try_resolve_table_name(table)
+            .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
         if let Some(backend) = self
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
         {
             backend
-                .clear_btree_indexes(table)
+                .clear_btree_indexes(&table_name)
                 .map_err(|err| SQLError::Internal(format!("btree truncate failed: {err}")))?;
         }
         for index in t.value_indexes.write().values_mut() {
@@ -457,11 +612,11 @@ impl crate::Engine {
     pub(crate) fn value_indexes_old_values(
         t: &TableState,
         doc_id: DocId,
-    ) -> Option<BTreeMap<String, Value>> {
+    ) -> Result<Option<BTreeMap<String, Value>>, SQLError> {
         let fields: Vec<String> = {
             let indexes = t.value_indexes.read();
             if indexes.is_empty() {
-                return None;
+                return Ok(None);
             }
             indexes.keys().cloned().collect()
         };
@@ -469,11 +624,12 @@ impl crate::Engine {
         let mut rows = t
             .document_store
             .read()
-            .get_fields_multi(&[doc_id], &field_refs);
+            .get_fields_multi(&[doc_id], &field_refs)
+            .map_err(|error| SQLError::Internal(format!("read indexed fields: {error}")))?;
         let values = rows
             .remove(&doc_id)
             .unwrap_or_else(|| vec![Value::Null; fields.len()]);
-        Some(fields.into_iter().zip(values).collect())
+        Ok(Some(fields.into_iter().zip(values).collect()))
     }
 
     /// Drop every built index for the table (TRUNCATE, bulk reloads,
@@ -486,6 +642,53 @@ impl crate::Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use uqa_storage::document_store::{Document, DocumentStore};
+
+    #[derive(Clone)]
+    struct MissingProjectionStore;
+
+    impl DocumentStore for MissingProjectionStore {
+        fn put(&mut self, _doc_id: DocId, _document: Document) -> StorageBackendResult<()> {
+            Ok(())
+        }
+
+        fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+            Ok((doc_id == 1).then(Document::new))
+        }
+
+        fn delete(&mut self, _doc_id: DocId) -> StorageBackendResult<()> {
+            Ok(())
+        }
+
+        fn clear(&mut self) -> StorageBackendResult<()> {
+            Ok(())
+        }
+
+        fn get_fields_multi(
+            &self,
+            _doc_ids: &[DocId],
+            _fields: &[&str],
+        ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+            Ok(BTreeMap::new())
+        }
+
+        fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+            Ok(vec![1])
+        }
+
+        fn len(&self) -> StorageBackendResult<usize> {
+            Ok(1)
+        }
+
+        fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+            Ok(Arc::new(self.clone()))
+        }
+
+        fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+            Ok(Box::new(self.clone()))
+        }
+    }
 
     fn ids(list: &PostingList) -> Vec<DocId> {
         list.entries().iter().map(|e| e.doc_id).collect()
@@ -563,5 +766,171 @@ mod tests {
         assert!(numeric
             .scan(&Predicate::Equals(Value::Temporal(temporal)))
             .is_none());
+    }
+
+    #[test]
+    fn rebuild_rejects_a_document_missing_from_the_field_projection() {
+        let engine = crate::Engine::new();
+        engine
+            .sql("CREATE TABLE projection_gap (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        let table = engine.try_table("projection_gap").unwrap().unwrap();
+        *table.document_store.write() = Box::new(MissingProjectionStore);
+        crate::Engine::value_indexes_clear(&table);
+
+        let error = engine
+            .ensure_value_index("projection_gap", "id")
+            .unwrap_err();
+        assert!(error.to_string().contains("lost document 1"), "{error}");
+        assert!(table.value_indexes.read().is_empty());
+    }
+
+    #[test]
+    fn relation_key_suffix_preserves_quoted_components() {
+        assert_eq!(unqualified_relation_key("public.items"), Some("items"));
+        assert_eq!(
+            unqualified_relation_key("public.\"items.with.dot\""),
+            Some("\"items.with.dot\"")
+        );
+        assert_eq!(
+            unqualified_relation_key("\"schema.with.dot\".\"items.with.dot\""),
+            Some("\"items.with.dot\"")
+        );
+        assert_eq!(
+            unqualified_relation_key("public.\"items\"\"quoted\""),
+            Some("\"items\"\"quoted\"")
+        );
+    }
+
+    #[test]
+    fn query_builds_missing_durable_index_in_memory_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = crate::Engine::open(&directory.path().join("memory-only-btree.db")).unwrap();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO items (id) VALUES (1)", &[])
+            .unwrap();
+        let backend = engine.backend.as_ref().unwrap();
+        backend.drop_btree_index("public.items", "id").unwrap();
+        let table = engine.try_table("items").unwrap().unwrap();
+        crate::Engine::value_indexes_clear(&table);
+
+        let result = engine
+            .sql("SELECT id FROM items WHERE id = 1", &[])
+            .unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert!(backend
+            .load_btree_index("public.items", "id")
+            .unwrap()
+            .is_none());
+        assert!(engine
+            .try_table("items")
+            .unwrap()
+            .unwrap()
+            .value_indexes
+            .read()
+            .contains_key("id"));
+
+        // Rollback recovery clears hot indexes before hydrating them again;
+        // a missing durable marker must remain a memory-only cache miss there
+        // too, rather than silently turning rollback into a new write.
+        engine.reload_persistent_value_indexes().unwrap();
+        assert!(backend
+            .load_btree_index("public.items", "id")
+            .unwrap()
+            .is_none());
+        assert!(engine
+            .try_table("items")
+            .unwrap()
+            .unwrap()
+            .value_indexes
+            .read()
+            .contains_key("id"));
+
+        // The explicit persistence path must not mistake the hot memory cache
+        // for a durable marker.
+        engine.ensure_persistent_value_index("items", "id").unwrap();
+        assert_eq!(
+            backend
+                .load_btree_index("public.items", "id")
+                .unwrap()
+                .unwrap(),
+            vec![(1, Value::Int(1))]
+        );
+    }
+
+    #[test]
+    fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("repair-btree.db");
+        let engine = crate::Engine::open(&database).unwrap();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO items (id) VALUES (1)", &[])
+            .unwrap();
+        let backend = engine.backend.as_ref().unwrap().clone();
+        backend.drop_btree_index("public.items", "id").unwrap();
+        backend
+            .replace_btree_index("public.items", "obsolete", &[(1, Value::Int(888))])
+            .unwrap();
+        backend
+            .replace_btree_index("items", "id", &[(1, Value::Int(999))])
+            .unwrap();
+        let table = engine.try_table("items").unwrap().unwrap();
+        crate::Engine::value_indexes_clear(&table);
+        drop(table);
+        drop(backend);
+        drop(engine);
+
+        let reopened = crate::Engine::open(&database).unwrap();
+        let backend = reopened.backend.as_ref().unwrap();
+
+        assert!(backend.load_btree_index("items", "id").unwrap().is_none());
+        assert!(backend
+            .load_btree_index("public.items", "obsolete")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            backend
+                .load_btree_index("public.items", "id")
+                .unwrap()
+                .unwrap(),
+            vec![(1, Value::Int(1))]
+        );
+    }
+
+    #[test]
+    fn clean_open_repair_does_not_contend_for_sqlite_writer_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("clean-repair.db");
+        let engine = crate::Engine::open(&database).unwrap();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO items (id) VALUES (1)", &[])
+            .unwrap();
+        assert!(engine
+            .persistent_value_index_repair_plan()
+            .unwrap()
+            .is_empty());
+
+        // A clean repair is read-only and therefore succeeds while an
+        // independent session owns SQLite's single writer reservation. If the
+        // repair unconditionally issued BEGIN IMMEDIATE this would block and
+        // eventually return SQLITE_BUSY.
+        let blocker = engine.sqlite_session.as_ref().unwrap().new_session();
+        blocker.begin_transaction().unwrap();
+        let repair_result = engine.repair_persistent_value_indexes_on_open();
+        let new_session_result = engine.new_session();
+        let reopen_result = crate::Engine::open(&database);
+        blocker.rollback_transaction().unwrap();
+        repair_result.unwrap();
+        new_session_result.unwrap();
+        reopen_result.unwrap();
     }
 }

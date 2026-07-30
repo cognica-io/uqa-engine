@@ -8,10 +8,13 @@
 
 use std::sync::Arc;
 
-use uqa_core::{FieldName, IndexStats, PostingList};
+use uqa_core::{FieldName, IndexStats, Payload, PostingEntry, PostingList};
 use uqa_scoring::cosine_to_probability;
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{
+    missing_backend, require_finite_score, ExecutionContext, Operator, OperatorResult,
+};
 
 /// `V_theta(q)`: returns documents with cosine similarity at least
 /// `threshold` (Definition 3.1.2). Returns an empty posting list when the
@@ -33,11 +36,18 @@ impl VectorSimilarityOperator {
 }
 
 impl Operator for VectorSimilarityOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        match ctx.vector_indexes.get(&self.field) {
-            Some(idx) => idx.search_threshold(&self.query_vector, self.threshold),
-            None => PostingList::new(),
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        validate_vector_query(&self.query_vector, "vector similarity")?;
+        if !self.threshold.is_finite() || !(-1.0..=1.0).contains(&self.threshold) {
+            return Err(StorageBackendError::Other(format!(
+                "vector similarity threshold must be finite and in [-1, 1], got {}",
+                self.threshold
+            )));
         }
+        ctx.vector_indexes
+            .get(&self.field)
+            .ok_or_else(|| missing_backend("vector-index", "vector similarity"))?
+            .search_threshold(&self.query_vector, self.threshold)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -65,11 +75,12 @@ impl KNNOperator {
 }
 
 impl Operator for KNNOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        match ctx.vector_indexes.get(&self.field) {
-            Some(idx) => idx.search_knn(&self.query_vector, self.k),
-            None => PostingList::new(),
-        }
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        validate_vector_query(&self.query_vector, "KNN search")?;
+        ctx.vector_indexes
+            .get(&self.field)
+            .ok_or_else(|| missing_backend("vector-index", "KNN search"))?
+            .search_knn(&self.query_vector, self.k)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -95,12 +106,44 @@ impl CosineProbabilityOperator {
 }
 
 impl Operator for CosineProbabilityOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let pl = self.source.execute(ctx);
-        pl.with_scores(|e| cosine_to_probability(e.payload.score))
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let pl = self.source.execute(ctx)?;
+        let mut entries = Vec::with_capacity(pl.len());
+        for entry in pl.entries() {
+            require_finite_score(entry.payload.score, "cosine probability projection")?;
+            if !(-1.0..=1.0).contains(&entry.payload.score) {
+                return Err(StorageBackendError::Other(format!(
+                    "cosine probability projection requires scores in [-1, 1], got {}",
+                    entry.payload.score
+                )));
+            }
+            entries.push(PostingEntry::new(
+                entry.doc_id,
+                Payload {
+                    positions: entry.payload.positions.clone(),
+                    score: cosine_to_probability(entry.payload.score),
+                    fields: entry.payload.fields.clone(),
+                },
+            ));
+        }
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
         self.source.cost_estimate(stats)
     }
+}
+
+fn validate_vector_query(query: &[f32], operation: &str) -> StorageBackendResult<()> {
+    if query.is_empty() {
+        return Err(StorageBackendError::Other(format!(
+            "{operation} requires a non-empty query vector"
+        )));
+    }
+    if query.iter().any(|component| !component.is_finite()) {
+        return Err(StorageBackendError::Other(format!(
+            "{operation} query vector must contain only finite values"
+        )));
+    }
+    Ok(())
 }

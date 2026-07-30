@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{
-    cypher::{parse_cypher, CypherExecutor},
+    agtype::AGTYPE_KIND_KEY,
+    cypher::{parse_cypher, CypherError, CypherExecutor},
     GraphStore, MemoryGraphStore,
 };
 
@@ -34,7 +35,8 @@ fn corpus() -> MemoryGraphStore {
             ],
         ),
         "g",
-    );
+    )
+    .unwrap();
     g.add_vertex(
         mk(
             2,
@@ -42,7 +44,8 @@ fn corpus() -> MemoryGraphStore {
             &[("name", Value::Str("bob".into())), ("age", Value::Int(40))],
         ),
         "g",
-    );
+    )
+    .unwrap();
     g.add_vertex(
         mk(
             3,
@@ -53,14 +56,17 @@ fn corpus() -> MemoryGraphStore {
             ],
         ),
         "g",
-    );
-    g.add_vertex(mk(10, "City", &[("name", Value::Str("sf".into()))]), "g");
-    g.add_vertex(mk(11, "City", &[("name", Value::Str("ny".into()))]), "g");
-    g.add_edge(Edge::new(100, 1, 2, "KNOWS"), "g");
-    g.add_edge(Edge::new(101, 2, 3, "KNOWS"), "g");
-    g.add_edge(Edge::new(110, 1, 10, "LIVES_IN"), "g");
-    g.add_edge(Edge::new(111, 2, 10, "LIVES_IN"), "g");
-    g.add_edge(Edge::new(112, 3, 11, "LIVES_IN"), "g");
+    )
+    .unwrap();
+    g.add_vertex(mk(10, "City", &[("name", Value::Str("sf".into()))]), "g")
+        .unwrap();
+    g.add_vertex(mk(11, "City", &[("name", Value::Str("ny".into()))]), "g")
+        .unwrap();
+    g.add_edge(Edge::new(100, 1, 2, "KNOWS"), "g").unwrap();
+    g.add_edge(Edge::new(101, 2, 3, "KNOWS"), "g").unwrap();
+    g.add_edge(Edge::new(110, 1, 10, "LIVES_IN"), "g").unwrap();
+    g.add_edge(Edge::new(111, 2, 10, "LIVES_IN"), "g").unwrap();
+    g.add_edge(Edge::new(112, 3, 11, "LIVES_IN"), "g").unwrap();
     g
 }
 
@@ -206,4 +212,34 @@ fn function_calls_id_and_labels() {
     } else {
         panic!("expected labels list");
     }
+}
+
+#[test]
+fn path_projection_functions_reject_malformed_tagged_envelopes() {
+    let malformed = Value::Map(BTreeMap::from([(
+        AGTYPE_KIND_KEY.to_string(),
+        Value::Str("path".into()),
+    )]));
+    for function in ["nodes", "relationships"] {
+        let graph = corpus();
+        let executor = CypherExecutor::new(&graph, "g")
+            .with_params(BTreeMap::from([("p".to_string(), malformed.clone())]));
+        let query = parse_cypher(&format!("RETURN {function}($p)")).unwrap();
+        let error = executor.execute(&query).unwrap_err();
+        assert!(matches!(error, CypherError::Storage(_)));
+        assert!(error.to_string().contains("missing its elements"));
+    }
+
+    let malformed_elements = Value::Map(BTreeMap::from([
+        (AGTYPE_KIND_KEY.to_string(), Value::Str("path".into())),
+        ("elements".to_string(), Value::List(vec![Value::Int(1)])),
+    ]));
+    let graph = corpus();
+    let executor = CypherExecutor::new(&graph, "g")
+        .with_params(BTreeMap::from([("p".to_string(), malformed_elements)]));
+    let query = parse_cypher("RETURN nodes($p)").unwrap();
+    assert!(matches!(
+        executor.execute(&query),
+        Err(CypherError::Storage(_))
+    ));
 }

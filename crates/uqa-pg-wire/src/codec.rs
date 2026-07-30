@@ -183,9 +183,17 @@ impl Writer {
         self.bytes.extend_from_slice(value);
     }
 
-    pub(crate) fn write_cstring(&mut self, value: &str) {
+    pub(crate) fn write_cstring(
+        &mut self,
+        value: &str,
+        context: &'static str,
+    ) -> Result<(), PgWireError> {
+        if value.as_bytes().contains(&0) {
+            return Err(PgWireError::EmbeddedNul { context });
+        }
         self.write_bytes(value.as_bytes());
         self.write_byte(0);
+        Ok(())
     }
 
     pub(crate) fn write_format(&mut self, value: FormatCode) {
@@ -193,8 +201,21 @@ impl Writer {
     }
 
     pub(crate) fn frame(tag: u8, body: &[u8]) -> Result<Vec<u8>, PgWireError> {
-        let length = i32_len(body.len() + LEN_FIELD_SIZE, "backend message")?;
-        let mut out = Self::with_capacity(1 + LEN_FIELD_SIZE + body.len());
+        let framed_body_len =
+            body.len()
+                .checked_add(LEN_FIELD_SIZE)
+                .ok_or(PgWireError::LengthTooLarge {
+                    context: "backend message",
+                    length: body.len(),
+                })?;
+        let length = i32_len(framed_body_len, "backend message")?;
+        let capacity = framed_body_len
+            .checked_add(1)
+            .ok_or(PgWireError::LengthTooLarge {
+                context: "backend message",
+                length: body.len(),
+            })?;
+        let mut out = Self::with_capacity(capacity);
         out.write_byte(tag);
         out.write_i32(length);
         out.write_bytes(body);

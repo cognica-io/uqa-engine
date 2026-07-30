@@ -26,5 +26,12 @@ uqa-storage = { workspace = true }
 [build-dependencies]
 napi-build = { workspace = true }
 
+# Unit-test binaries run outside a Node.js host, so resolve Node-API symbols
+# dynamically during test builds instead of asking the native linker for
+# symbols that only the host process exports. Normal addon builds keep the
+# lean, statically declared Node-API surface above.
+[dev-dependencies]
+napi = { workspace = true, features = ["dyn-symbols"] }
+
 [lints]
 workspace = true

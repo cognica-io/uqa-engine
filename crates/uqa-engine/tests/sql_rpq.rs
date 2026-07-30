@@ -12,16 +12,19 @@ use uqa_engine::Engine;
 use uqa_graph::GraphStore;
 
 fn build_chain(eng: &Engine) {
-    eng.create_graph("g");
+    eng.create_graph("g").unwrap();
     eng.graph_with_mut("g", |store| {
-        store.add_vertex(Vertex::new(1, "P"), "g");
-        store.add_vertex(Vertex::new(2, "P"), "g");
-        store.add_vertex(Vertex::new(3, "P"), "g");
-        store.add_vertex(Vertex::new(4, "P"), "g");
-        store.add_edge(Edge::new(10, 1, 2, "manages"), "g");
-        store.add_edge(Edge::new(11, 2, 3, "manages"), "g");
-        store.add_edge(Edge::new(12, 3, 4, "manages"), "g");
-    });
+        store.add_vertex(Vertex::new(1, "P"), "g")?;
+        store.add_vertex(Vertex::new(2, "P"), "g")?;
+        store.add_vertex(Vertex::new(3, "P"), "g")?;
+        store.add_vertex(Vertex::new(4, "P"), "g")?;
+        store.add_edge(Edge::new(10, 1, 2, "manages"), "g")?;
+        store.add_edge(Edge::new(11, 2, 3, "manages"), "g")?;
+        store.add_edge(Edge::new(12, 3, 4, "manages"), "g")?;
+        Ok(())
+    })
+    .unwrap()
+    .expect("graph exists");
 }
 
 #[test]
@@ -91,4 +94,15 @@ fn rpq_combines_with_relational_filter() {
         })
         .collect();
     assert_eq!(ids, vec![1, 3]);
+}
+
+#[test]
+fn rpq_rejects_negative_start_vertex_instead_of_wrapping_it() {
+    let eng = Engine::new();
+    build_chain(&eng);
+
+    let error = eng
+        .sql("SELECT * FROM rpq('manages*', -1, 'g')", &[])
+        .expect_err("a negative vertex id must not wrap to u64 and look like no matches");
+    assert!(error.to_string().contains("non-negative"), "{error}");
 }

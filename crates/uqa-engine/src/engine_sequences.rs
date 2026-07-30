@@ -5,35 +5,136 @@
 //
 
 use super::{
-    BTreeMap, CatalogFacade, Engine, SequenceState, StorageBackendResult, SEQUENCES_METADATA_KEY,
+    BTreeMap, CatalogFacade, Engine, RelationIdentity, SequenceRestart, SequenceRow, SequenceState,
+    StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
 
 impl Engine {
+    /// Resolve a sequence reference at DDL binding time using the current
+    /// `search_path`. Persisted expressions must store the returned canonical
+    /// relation name so later session state cannot change their target.
+    pub(crate) fn resolve_sequence_reference_for_binding(
+        &self,
+        reference: &str,
+    ) -> StorageBackendResult<String> {
+        self.try_resolve_sequence_name(reference)?.ok_or_else(|| {
+            StorageBackendError::Other(format!("Sequence `{reference}` does not exist"))
+        })
+    }
+
+    /// Resolve a reference read from legacy persisted metadata without using
+    /// the current session's `search_path`. An unqualified local name is safe
+    /// only when exactly one catalog sequence has that name.
+    pub(crate) fn resolve_stored_sequence_reference(
+        &self,
+        reference: &str,
+    ) -> StorageBackendResult<String> {
+        self.refresh_sequences_from_catalog()?;
+        let (schema, local_name) =
+            RelationIdentity::parse_reference(reference).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "invalid persisted sequence reference `{reference}`: {error}"
+                ))
+            })?;
+        let sequences = self.sequences.read();
+        if let Some(schema) = schema {
+            let target = RelationIdentity::new(schema, local_name);
+            if sequences.contains_key(&target) {
+                return Ok(target.qualified_name());
+            }
+            return Err(StorageBackendError::Other(format!(
+                "dangling persisted sequence reference `{reference}`"
+            )));
+        }
+
+        let candidates = sequences
+            .keys()
+            .filter(|candidate| candidate.name == local_name)
+            .map(RelationIdentity::qualified_name)
+            .collect::<Vec<_>>();
+        match candidates.as_slice() {
+            [target] => Ok(target.clone()),
+            [] => Err(StorageBackendError::Other(format!(
+                "dangling persisted sequence reference `{reference}`"
+            ))),
+            _ => Err(StorageBackendError::Other(format!(
+                "ambiguous persisted sequence reference `{reference}` matches {}",
+                candidates.join(", ")
+            ))),
+        }
+    }
+
     pub fn create_sequence(
         &self,
         name: &str,
         start: i64,
         increment: i64,
         if_not_exists: bool,
-    ) -> bool {
-        let name = self.relation_name_for_create(name);
-        let mut seqs = self.sequences.write();
-        if seqs.contains_key(&name) {
-            return if_not_exists;
-        }
-        seqs.insert(
-            name,
-            SequenceState {
-                start,
-                increment,
-                current: start - increment,
-            },
-        );
-        drop(seqs);
-        self.persist_sequences();
-        true
+    ) -> Result<bool, String> {
+        self.with_implicit_string_transaction(|engine| {
+            engine.create_sequence_inner(name, start, increment, if_not_exists)
+        })
     }
 
+    fn create_sequence_inner(
+        &self,
+        name: &str,
+        start: i64,
+        increment: i64,
+        if_not_exists: bool,
+    ) -> Result<bool, String> {
+        Self::validate_sequence_increment(name, increment)?;
+        let name = self.try_relation_name_for_create(name)?;
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        self.refresh_sequences_from_catalog()
+            .map_err(|err| format!("load sequence catalog: {err}"))?;
+        if let Some(kind) = self
+            .relation_kind_at(&name)
+            .map_err(|err| format!("resolve relation `{name}`: {err}"))?
+        {
+            if kind != "sequence" {
+                return Err(format!("Relation `{name}` already exists as {kind}"));
+            }
+        }
+        let state = SequenceState {
+            start,
+            increment,
+            current: start,
+            called: false,
+        };
+        if let Some(catalog) = self.catalog.as_ref() {
+            let created = catalog
+                .create_sequence_row(
+                    &Self::sequence_row(&name, state)
+                        .map_err(|err| format!("build sequence catalog row: {err}"))?,
+                )
+                .map_err(|err| format!("persist sequence catalog: {err}"))?;
+            if !created {
+                return if if_not_exists {
+                    Ok(false)
+                } else {
+                    Err(format!("Sequence `{name}` already exists"))
+                };
+            }
+        } else {
+            let seqs = self.sequences.read();
+            if seqs.contains_key(&relation) {
+                return if if_not_exists {
+                    Ok(false)
+                } else {
+                    Err(format!("Sequence `{name}` already exists"))
+                };
+            }
+        }
+        self.sequences.write().insert(relation, state);
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
+    /// Compatibility wrapper for the original direct API. SQL lowering and
+    /// all internal execution use [`SequenceRestart`] instead.
+    #[allow(clippy::option_option)]
     pub fn alter_sequence(
         &self,
         name: &str,
@@ -41,135 +142,349 @@ impl Engine {
         increment: Option<i64>,
         start: Option<i64>,
     ) -> Result<(), String> {
-        let name = self
-            .resolve_sequence_name(name)
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let mut seqs = self.sequences.write();
-        let seq = seqs
-            .get_mut(&name)
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        if let Some(start_val) = start {
-            seq.start = start_val;
-        }
-        if let Some(inc) = increment {
-            seq.increment = inc;
-        }
-        if let Some(opt) = restart {
-            let restart_val = opt.unwrap_or(seq.start);
-            seq.current = restart_val - seq.increment;
-        }
-        drop(seqs);
-        self.persist_sequences();
-        Ok(())
+        let restart = match restart {
+            None => SequenceRestart::Unchanged,
+            Some(None) => SequenceRestart::FromStart,
+            Some(Some(value)) => SequenceRestart::With(value),
+        };
+        self.with_implicit_string_transaction(|engine| {
+            engine
+                .alter_sequence_inner(name, restart, increment, start, false)
+                .map(|_| ())
+        })
     }
 
-    pub fn drop_sequence(&self, name: &str) -> bool {
-        let Some(name) = self.resolve_sequence_name(name) else {
-            return false;
+    pub(crate) fn alter_sequence_if_exists(
+        &self,
+        name: &str,
+        restart: SequenceRestart,
+        increment: Option<i64>,
+        start: Option<i64>,
+        if_exists: bool,
+    ) -> Result<bool, String> {
+        self.with_implicit_string_transaction(|engine| {
+            engine.alter_sequence_inner(name, restart, increment, start, if_exists)
+        })
+    }
+
+    fn alter_sequence_inner(
+        &self,
+        name: &str,
+        restart: SequenceRestart,
+        increment: Option<i64>,
+        start: Option<i64>,
+        if_exists: bool,
+    ) -> Result<bool, String> {
+        let Some(name) = self
+            .try_resolve_sequence_name(name)
+            .map_err(|err| format!("load sequence catalog: {err}"))?
+        else {
+            return if if_exists {
+                Ok(false)
+            } else {
+                Err(format!("Sequence `{name}` does not exist"))
+            };
         };
-        let removed = self.sequences.write().remove(&name).is_some();
-        if removed {
-            self.persist_sequences();
+        if let Some(increment) = increment {
+            Self::validate_sequence_increment(&name, increment)?;
         }
-        removed
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        let mut state = self
+            .sequences
+            .read()
+            .get(&relation)
+            .copied()
+            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        if let Some(start_val) = start {
+            state.start = start_val;
+        }
+        if let Some(inc) = increment {
+            state.increment = inc;
+        }
+        if restart != SequenceRestart::Unchanged {
+            let restart_val = match restart {
+                SequenceRestart::Unchanged => unreachable!("restart action was checked above"),
+                SequenceRestart::FromStart => state.start,
+                SequenceRestart::With(value) => value,
+            };
+            state.current = restart_val;
+            state.called = false;
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            if !catalog
+                .replace_sequence_row(
+                    &Self::sequence_row(&name, state)
+                        .map_err(|err| format!("build sequence catalog row: {err}"))?,
+                )
+                .map_err(|err| format!("persist sequence catalog: {err}"))?
+            {
+                return Err(format!("Sequence `{name}` does not exist"));
+            }
+        }
+        self.sequences.write().insert(relation, state);
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
+    fn validate_sequence_increment(name: &str, increment: i64) -> Result<(), String> {
+        if increment == 0 {
+            Err(format!("Sequence `{name}` increment must not be zero"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn drop_sequence(&self, name: &str) -> Result<bool, String> {
+        self.with_implicit_string_transaction(|engine| engine.drop_sequence_inner(name))
+    }
+
+    fn drop_sequence_inner(&self, name: &str) -> Result<bool, String> {
+        let Some(name) = self
+            .try_resolve_sequence_name(name)
+            .map_err(|err| format!("load sequence catalog: {err}"))?
+        else {
+            return Ok(false);
+        };
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        self.ensure_no_sequence_default_dependencies(&name)
+            .map_err(|err| format!("DROP SEQUENCE `{name}` rejected: {err}"))?;
+        let dependent_views = self
+            .views_depending_on_sequence(&name)
+            .map_err(|err| format!("DROP SEQUENCE `{name}` dependency scan failed: {err}"))?;
+        if !dependent_views.is_empty() {
+            return Err(format!(
+                "DROP SEQUENCE `{name}` rejected: dependent view(s) `{}` reference it",
+                dependent_views.join("`, `")
+            ));
+        }
+        let removed = if let Some(catalog) = self.catalog.as_ref() {
+            catalog
+                .drop_sequence_row(&name)
+                .map_err(|err| format!("persist sequence catalog: {err}"))?
+        } else {
+            self.sequences.read().contains_key(&relation)
+        };
+        if removed {
+            self.sequences.write().remove(&relation);
+            self.sequence_currvals.write().remove(&relation);
+            self.note_catalog_registry_changed();
+        }
+        Ok(removed)
     }
 
     pub fn nextval(&self, name: &str) -> Result<i64, String> {
         let name = self
-            .resolve_sequence_name(name)
+            .try_resolve_sequence_name(name)
+            .map_err(|err| format!("load sequence catalog: {err}"))?
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let mut seqs = self.sequences.write();
-        let seq = seqs
-            .get_mut(&name)
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        seq.current += seq.increment;
-        let current = seq.current;
-        drop(seqs);
-        self.persist_sequences();
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        let current = if let Some(catalog) = self.catalog.as_ref() {
+            catalog
+                .next_sequence_value(&name)
+                .map_err(|err| format!("allocate sequence value: {err}"))?
+                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?
+        } else {
+            let mut seqs = self.sequences.write();
+            let seq = seqs
+                .get_mut(&relation)
+                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+            if seq.called {
+                seq.current = seq
+                    .current
+                    .checked_add(seq.increment)
+                    .ok_or_else(|| format!("Sequence `{name}` value overflows BIGINT"))?;
+            } else {
+                seq.called = true;
+            }
+            seq.current
+        };
+        if let Some(state) = self.sequences.write().get_mut(&relation) {
+            state.current = current;
+            state.called = true;
+        }
+        self.sequence_currvals.write().insert(relation, current);
         Ok(current)
     }
 
     pub fn currval(&self, name: &str) -> Result<i64, String> {
         let name = self
-            .resolve_sequence_name(name)
+            .try_resolve_sequence_name(name)
+            .map_err(|err| format!("load sequence catalog: {err}"))?
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        let seqs = self.sequences.read();
-        seqs.get(&name)
-            .map(|s| s.current)
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        self.sequence_currvals
+            .read()
+            .get(&relation)
+            .copied()
+            .ok_or_else(|| {
+                format!("currval of sequence `{name}` is not yet defined in this session")
+            })
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
         let name = self
-            .resolve_sequence_name(name)
+            .try_resolve_sequence_name(name)
+            .map_err(|err| format!("load sequence catalog: {err}"))?
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        let relation = Self::resolved_relation_identity(&name)
+            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog
+                .set_sequence_value(&name, value)
+                .map_err(|err| format!("persist sequence value: {err}"))?
+                .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
+        }
         let mut seqs = self.sequences.write();
         let seq = seqs
-            .get_mut(&name)
+            .get_mut(&relation)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         seq.current = value;
+        seq.called = true;
         drop(seqs);
-        self.persist_sequences();
+        self.sequence_currvals.write().insert(relation, value);
         Ok(value)
     }
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.
-    pub fn sequences_snapshot(&self) -> BTreeMap<String, SequenceState> {
-        self.sequences.read().clone()
+    pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
+        self.refresh_sequences_from_catalog()?;
+        Ok(self
+            .sequences
+            .read()
+            .iter()
+            .map(|(relation, state)| (relation.qualified_name(), *state))
+            .collect())
+    }
+
+    pub fn sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
+        self.try_sequences_snapshot()
     }
 
     /// Resolve a sequence name through the current `search_path` and return
     /// its canonical name with the current state.
-    pub fn sequence_state(&self, name: &str) -> Option<(String, SequenceState)> {
-        let canonical = self.resolve_sequence_name(name)?;
-        let seqs = self.sequences.read();
-        seqs.get(&canonical)
-            .copied()
-            .map(|state| (canonical, state))
-    }
-
-    fn persist_sequences(&self) {
-        let Some(catalog) = self.catalog.as_ref() else {
-            return;
+    pub fn sequence_state(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<(String, SequenceState)>> {
+        let Some(canonical) = self.try_resolve_sequence_name(name)? else {
+            return Ok(None);
         };
-        if let Ok(json) = serde_json::to_string(&*self.sequences.read()) {
-            let _ = catalog.set_metadata(SEQUENCES_METADATA_KEY, &json);
-        }
+        let relation = Self::resolved_relation_identity(&canonical)?;
+        let seqs = self.sequences.read();
+        Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
     }
 
-    pub(crate) fn restore_sequences_from_metadata(
+    fn sequence_row(name: &str, state: SequenceState) -> StorageBackendResult<SequenceRow> {
+        Ok(SequenceRow {
+            relation: RelationIdentity::from_legacy_name(name)
+                .map_err(StorageBackendError::Other)?,
+            start: state.start,
+            increment: state.increment,
+            current: state.current,
+            called: state.called,
+        })
+    }
+
+    pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return Ok(());
+        };
+        let rows = catalog.load_sequence_rows()?;
+        *self.sequences.write() = rows
+            .into_iter()
+            .map(Self::sequence_state_from_row)
+            .collect::<StorageBackendResult<_>>()?;
+        Ok(())
+    }
+
+    /// Consume the legacy all-sequences metadata snapshot during initial
+    /// engine open.  Runtime catalog reloads must never call this migration:
+    /// they can run inside a pinned read transaction or after a physical
+    /// rollback, where clearing metadata would silently turn restoration into
+    /// a database write.
+    pub(crate) fn migrate_legacy_sequences_from_metadata(
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        // One-time, restart-safe migration from the former all-sequences JSON
+        // snapshot. Merge idempotently even after a partially completed run,
+        // then clear the legacy payload so deliberately dropping every typed
+        // sequence cannot resurrect the old snapshot on the next open.
+        if let Some(json) = catalog.get_metadata(SEQUENCES_METADATA_KEY)? {
+            let legacy = serde_json::from_str::<BTreeMap<String, SequenceState>>(&json)?;
+            if !legacy.is_empty() {
+                for (name, state) in legacy {
+                    catalog.create_sequence_row(&Self::sequence_row(&name, state)?)?;
+                }
+                catalog.set_metadata(SEQUENCES_METADATA_KEY, "{}")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore the typed sequence registry without modifying the catalog.
+    /// This is safe for initial hydration, pinned snapshots, external-commit
+    /// refreshes, and rollback cleanup alike.
+    pub(crate) fn restore_sequences_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        let Some(json) = catalog.get_metadata(SEQUENCES_METADATA_KEY)? else {
-            return Ok(());
-        };
-        if let Ok(sequences) = serde_json::from_str::<BTreeMap<String, SequenceState>>(&json) {
-            *self.sequences.write() = sequences;
-        }
+        let rows = catalog.load_sequence_rows()?;
+        *self.sequences.write() = rows
+            .into_iter()
+            .map(Self::sequence_state_from_row)
+            .collect::<StorageBackendResult<_>>()?;
         Ok(())
+    }
+
+    fn sequence_state_from_row(
+        row: SequenceRow,
+    ) -> StorageBackendResult<(RelationIdentity, SequenceState)> {
+        if row.increment == 0 {
+            return Err(StorageBackendError::Other(format!(
+                "corrupt sequence `{}` has zero increment",
+                row.relation.qualified_name()
+            )));
+        }
+        Ok((
+            row.relation,
+            SequenceState {
+                start: row.start,
+                increment: row.increment,
+                current: row.current,
+                called: row.called,
+            },
+        ))
     }
 
     // -----------------------------------------------------------------
     // Prepared statements. Mirrors `_engine._prepared`.
     // -----------------------------------------------------------------
 
-    pub fn register_prepared(&self, name: String, definition: uqa_sql::ast::Statement) {
+    pub fn register_prepared(
+        &self,
+        name: String,
+        definition: uqa_sql::ast::Statement,
+    ) -> Result<(), uqa_sql::SQLError> {
         let plan = uqa_planner::UnifiedPlan::lower_with(definition, &|aggregate: &str| {
             self.has_registered_aggregate_function(aggregate)
         });
-        let plan = uqa_planner::optimizer::optimize_with_aggregates(
-            plan,
-            &uqa_planner::optimizer::OptimizerConfig::default(),
-            &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
-        );
-        self.register_prepared_plan(name, plan);
+        self.register_prepared_plan(name, plan)
     }
 
-    pub(crate) fn register_prepared_plan(&self, name: String, plan: uqa_planner::UnifiedPlan) {
+    pub(crate) fn register_prepared_plan(
+        &self,
+        name: String,
+        logical_plan: uqa_planner::UnifiedPlan,
+    ) -> Result<(), uqa_sql::SQLError> {
+        let plan = crate::sql::optimize_engine_plan(self, logical_plan.clone())?;
         self.prepared
             .write()
-            .insert(name, super::PreparedStatementPlan { plan });
+            .insert(name, super::PreparedStatementPlan { logical_plan, plan });
+        Ok(())
     }
 
     pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
@@ -179,14 +494,24 @@ impl Engine {
             .map(|entry| entry.plan.clone())
     }
 
-    pub(crate) fn rebind_prepared_plans(&self) {
-        for prepared in self.prepared.write().values_mut() {
-            prepared.plan = uqa_planner::optimizer::optimize_with_aggregates(
-                prepared.plan.clone(),
-                &uqa_planner::optimizer::OptimizerConfig::default(),
-                &|aggregate: &str| self.has_registered_aggregate_function(aggregate),
-            );
+    pub(crate) fn rebind_prepared_plans(&self) -> Result<(), uqa_sql::SQLError> {
+        let plans = self
+            .prepared
+            .read()
+            .iter()
+            .map(|(name, prepared)| (name.clone(), prepared.logical_plan.clone()))
+            .collect::<Vec<_>>();
+        let mut rebound = Vec::with_capacity(plans.len());
+        for (name, plan) in plans {
+            rebound.push((name, crate::sql::optimize_engine_plan(self, plan)?));
         }
+        let mut prepared = self.prepared.write();
+        for (name, plan) in rebound {
+            if let Some(entry) = prepared.get_mut(&name) {
+                entry.plan = plan;
+            }
+        }
+        Ok(())
     }
 
     pub fn deallocate_prepared(&self, name: Option<&str>) {

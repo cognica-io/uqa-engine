@@ -37,7 +37,10 @@ fn temporal_columns_store_typed_values_and_compare_by_time_key() {
         )
         .unwrap();
 
-    let doc = engine.get_document("events", 1).unwrap();
+    let doc = engine
+        .get_document("events", 1)
+        .unwrap()
+        .expect("temporal event row");
     assert!(matches!(
         doc.get("event_date"),
         Some(Value::Temporal(TemporalValue::Date { .. }))
@@ -92,7 +95,10 @@ fn timestamp_without_time_zone_accepts_now_default() {
     engine
         .sql("INSERT INTO inputs (id) VALUES (1)", &[])
         .unwrap();
-    let doc = engine.get_document("inputs", 1).unwrap();
+    let doc = engine
+        .get_document("inputs", 1)
+        .unwrap()
+        .expect("timestamp input row");
     assert!(matches!(
         doc.get("created_at"),
         Some(Value::Temporal(TemporalValue::Timestamp { .. }))

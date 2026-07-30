@@ -236,7 +236,7 @@ impl CostEstimator {
 // ---------------------------------------------------------------
 
 use uqa_core::IndexStats;
-use uqa_operators::{DeepFusionLayer, OperatorTree, ProbBoolMode};
+use uqa_operators::{DeepFusionLayer, OperatorTree};
 
 use crate::cardinality::GraphStats;
 
@@ -289,6 +289,10 @@ impl CostModel {
                 let dims = f64::from(stats.dimensions);
                 dims * ((stats.total_docs as f64) + 1.0).log2()
             }
+            OperatorTree::CalibratedVectorMatch { .. } => {
+                let dims = f64::from(stats.dimensions);
+                dims * ((stats.total_docs as f64) + 1.0).log2() * SCORE_OVERHEAD_FACTOR
+            }
             OperatorTree::IndexScan { .. } => {
                 // The UQA-RS implementation lacks an `IndexScanOperator.cost_estimate`
                 // hook; mirror the canonical UQA implementation's behaviour by treating the index
@@ -301,6 +305,14 @@ impl CostModel {
             }
             OperatorTree::BayesianScore { source, .. } => {
                 self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
+            }
+            OperatorTree::BayesianMatchWithPrior { query, field, .. } => {
+                let postings = if stats.total_docs == 0 {
+                    1.0
+                } else {
+                    stats.doc_freq(field, query) as f64
+                };
+                postings * SCORE_OVERHEAD_FACTOR
             }
             OperatorTree::Filter { source, .. } => {
                 let mut base = n;
@@ -343,18 +355,33 @@ impl CostModel {
                 if let Some(gs) = self.graph_stats.as_ref() {
                     let sel = gs.label_selectivity(label.as_deref());
                     let d = gs.avg_out_degree * sel;
-                    let mut cost = 0.0_f64;
-                    let hops = (*max_hops).max(1);
-                    for i in 1..=hops {
-                        cost += d.powi(i as i32);
-                    }
+                    let hops = (*max_hops).max(1) as f64;
+                    let cost = if d == 1.0 {
+                        hops
+                    } else if d <= 0.0 {
+                        0.0
+                    } else {
+                        d * (d.powf(hops) - 1.0) / (d - 1.0)
+                    };
                     cost.max(1.0)
                 } else {
                     n * TRAVERSE_FRACTION
                 }
             }
+            OperatorTree::GraphNeighbors { label, .. } => self
+                .graph_stats
+                .as_ref()
+                .map(|stats| {
+                    (stats.avg_out_degree * stats.label_selectivity(label.as_deref())).max(1.0)
+                })
+                .unwrap_or(n * TRAVERSE_FRACTION),
+            OperatorTree::GraphEdges { label, .. } => self
+                .graph_stats
+                .as_ref()
+                .map(|stats| stats.num_edges as f64 * stats.label_selectivity(label.as_deref()))
+                .unwrap_or(n),
             OperatorTree::PatternMatch { pattern, .. } => {
-                let k = pattern.vertex_patterns.len() as i32;
+                let k = pattern.vertex_patterns.len() as f64;
                 // Negated edge patterns aren't represented in the Rust
                 // IR yet (`EdgePatternIR` carries no `negated` flag).
                 // The base cost matches the canonical UQA implementation's path; the +20% per
@@ -365,7 +392,7 @@ impl CostModel {
                     } else {
                         n
                     };
-                    (nv.powi(k) * 0.01).max(1.0)
+                    (nv.powf(k) * 0.01).max(1.0)
                 } else {
                     n * n
                 }
@@ -413,6 +440,7 @@ impl CostModel {
                 stages.last().map(|s| s.k as f64).unwrap_or(n)
             }
             OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
+            OperatorTree::DeepPredict { .. } => n,
             OperatorTree::Composed(ops) | OperatorTree::Opaque { children: ops, .. } => {
                 ops.iter().map(|o| self.estimate(o, stats)).sum()
             }
@@ -480,13 +508,6 @@ fn rpq_source_label_count(source: &str) -> usize {
     }
     labels.max(1)
 }
-
-// Required for the `ProbBoolMode` variant match above to work even
-// when the OR/AND distinction is irrelevant at the cost-model layer.
-const _: () = {
-    let _ = ProbBoolMode::And;
-    let _ = ProbBoolMode::Or;
-};
 
 #[cfg(test)]
 mod tests {

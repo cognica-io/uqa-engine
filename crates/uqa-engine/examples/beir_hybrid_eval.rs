@@ -59,7 +59,11 @@ fn dcg(relevances: &[f64], k: usize) -> f64 {
 
 fn true_ideal_ndcg(relevances: &[f64], judgments: &BTreeMap<u64, f64>, k: usize) -> f64 {
     let mut ideal: Vec<f64> = judgments.values().copied().collect();
-    ideal.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    assert!(
+        ideal.iter().all(|score| score.is_finite()),
+        "judgments must contain only finite scores"
+    );
+    ideal.sort_by(|a, b| b.total_cmp(a));
     let idcg = dcg(&ideal, k);
     if idcg == 0.0 {
         return 0.0;
@@ -89,8 +93,12 @@ fn main() {
         .expect("usage: beir_hybrid_eval <data-dir>");
 
     let engine = Engine::new();
-    engine.create_default_table("docs", vec!["body".into()]);
-    engine.create_vector_field("docs", "embedding", 384);
+    engine
+        .create_default_table("docs", vec!["body".into()])
+        .unwrap();
+    engine
+        .create_vector_field("docs", "embedding", 384)
+        .unwrap();
 
     let corpus_file = std::fs::File::open(format!("{data_dir}/eval_corpus.jsonl")).unwrap();
     let mut doc_count = 0u64;
@@ -176,6 +184,7 @@ fn main() {
                 alpha: 0.5,
                 top_k: K,
             })
+            .expect("hybrid evaluation search")
             .into_iter()
             .map(|hit| (hit.doc_id, hit.score))
             .collect()
@@ -191,6 +200,7 @@ fn main() {
                 &ScoringMode::BM25(BM25Params::default()),
                 K,
             )
+            .expect("text evaluation search")
             .into_iter()
             .map(|hit| hit.doc_id)
             .collect()
@@ -198,6 +208,7 @@ fn main() {
     evaluate("vector_only", &|query| {
         engine
             .knn_search("docs", "embedding", &query.embedding, K)
+            .expect("vector evaluation search")
             .into_iter()
             .map(|hit| hit.doc_id)
             .collect()

@@ -21,7 +21,7 @@ use uqa_core::{Edge, VertexId};
 use crate::delta::{DeltaOp, GraphDelta};
 use crate::operators::GMatch;
 use crate::pattern::{GraphPattern, VertexPredicate};
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreResult};
 
 pub struct IncrementalPatternMatcher {
     pub pattern: GraphPattern,
@@ -44,16 +44,19 @@ impl IncrementalPatternMatcher {
 
     /// Initial population of the base match set. Equivalent to a
     /// one-shot `GMatch` whose results are folded into `base_matches`.
-    pub fn seed<G: GraphStore>(&mut self, store: &G) {
-        let result = GMatch::new(self.pattern.clone(), &self.graph).execute(store);
+    pub fn seed<G: GraphStore>(&mut self, store: &G) -> GraphStoreResult<()> {
+        let result = GMatch::new(self.pattern.clone(), &self.graph).execute(store)?;
+        let mut matches = BTreeSet::new();
         for entry in result.inner().entries() {
             if let Some(gp) = result.get_graph_payload(entry.doc_id) {
                 let mut vertices = gp.subgraph_vertices.clone();
                 vertices.sort_unstable();
                 vertices.dedup();
-                self.base_matches.insert(vertices);
+                matches.insert(vertices);
             }
         }
+        self.base_matches = matches;
+        Ok(())
     }
 
     /// Apply a delta and return the refreshed match set. The store is
@@ -62,7 +65,19 @@ impl IncrementalPatternMatcher {
         &mut self,
         store: &G,
         delta: &GraphDelta,
-    ) -> &BTreeSet<Vec<VertexId>> {
+    ) -> GraphStoreResult<&BTreeSet<Vec<VertexId>>> {
+        if delta
+            .ops()
+            .iter()
+            .any(|operation| matches!(operation, DeltaOp::RemoveEdge(_)))
+        {
+            // A remove-by-id delta does not retain the deleted edge's
+            // endpoints. Negated edge predicates may gain matches anywhere
+            // those endpoints participated, so the only exact refresh after
+            // the store has applied such a delta is a complete re-match.
+            self.seed(store)?;
+            return Ok(&self.base_matches);
+        }
         let mut affected: BTreeSet<VertexId> = delta.affected_vertex_ids();
         // Edge add/remove ops also implicate their endpoints, even though
         // GraphDelta::affected_vertex_ids only sees the endpoints of *added*
@@ -78,8 +93,8 @@ impl IncrementalPatternMatcher {
 
         // Step 1: drop any base match that overlaps an affected vertex.
         let affected_set = affected.clone();
-        self.base_matches
-            .retain(|m| !m.iter().any(|v| affected_set.contains(v)));
+        let mut base_matches = self.base_matches.clone();
+        base_matches.retain(|m| !m.iter().any(|v| affected_set.contains(v)));
 
         // Step 2: for each pattern variable, re-run a constrained match
         // with that variable bound to one of the affected vertices.
@@ -95,7 +110,7 @@ impl IncrementalPatternMatcher {
                         )));
                 }
             }
-            let result = GMatch::new(constrained_pattern, &self.graph).execute(store);
+            let result = GMatch::new(constrained_pattern, &self.graph).execute(store)?;
             for entry in result.inner().entries() {
                 if let Some(gp) = result.get_graph_payload(entry.doc_id) {
                     let mut vertices = gp.subgraph_vertices.clone();
@@ -106,8 +121,9 @@ impl IncrementalPatternMatcher {
             }
         }
 
-        self.base_matches.extend(new_matches);
-        &self.base_matches
+        base_matches.extend(new_matches);
+        self.base_matches = base_matches;
+        Ok(&self.base_matches)
     }
 }
 
@@ -118,10 +134,18 @@ pub fn implicated_vertices<G: GraphStore>(
     store: &G,
     delta: &GraphDelta,
     graph: &str,
-) -> BTreeSet<VertexId> {
+) -> GraphStoreResult<BTreeSet<VertexId>> {
+    let graph_edge_ids: BTreeSet<_> = store
+        .edges_in_graph(graph)?
+        .into_iter()
+        .map(|edge| edge.edge_id)
+        .collect();
     let mut out = delta.affected_vertex_ids();
     for op in delta.ops() {
         if let DeltaOp::RemoveEdge(eid) = op {
+            if !graph_edge_ids.contains(eid) {
+                continue;
+            }
             if let Some(Edge {
                 source_id,
                 target_id,
@@ -133,6 +157,5 @@ pub fn implicated_vertices<G: GraphStore>(
             }
         }
     }
-    let _ = graph;
-    out
+    Ok(out)
 }

@@ -36,6 +36,66 @@ pub struct VecSource {
     rows: std::vec::IntoIter<ResultRow>,
 }
 
+/// Physical scan over a fallible row iterator. Unlike [`VecSource`], this
+/// adapter preserves producer backpressure and late errors without requiring a
+/// cardinality-sized staging vector.
+pub struct RowIteratorScan<'a> {
+    schema: RowSchema,
+    rows: Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send + 'a>,
+    exhausted: bool,
+}
+
+impl<'a> RowIteratorScan<'a> {
+    pub fn new(
+        schema: Vec<String>,
+        rows: Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send + 'a>,
+    ) -> Self {
+        Self {
+            schema: RowSchema::new(schema),
+            rows,
+            exhausted: false,
+        }
+    }
+}
+
+impl PhysicalOperator for RowIteratorScan<'_> {
+    fn schema(&self) -> &[String] {
+        &self.schema.columns
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.exhausted = false;
+        Ok(())
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        if self.exhausted {
+            return Ok(None);
+        }
+        let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
+        while batch.len() < DEFAULT_BATCH_SIZE {
+            match self.rows.next() {
+                Some(Ok(row)) => batch.push(row),
+                Some(Err(error)) => return Err(error),
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
+        }
+        if batch.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Batch::new(self.schema.clone(), batch)))
+        }
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.exhausted = true;
+        Ok(())
+    }
+}
+
 impl VecSource {
     pub fn new(schema: Vec<String>, rows: Vec<ResultRow>) -> Self {
         Self {
@@ -147,5 +207,16 @@ mod tests {
         let mut scan = TableScan::from_rows(vec!["id".into()], Vec::new());
         let (_cols, rows) = run_to_rows(&mut scan).unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn iterator_scan_propagates_a_late_producer_error() {
+        let rows = vec![
+            Ok(row([("id", Value::Int(1))])),
+            Err(crate::ExecError::Other("late producer failure".into())),
+        ];
+        let mut scan = RowIteratorScan::new(vec!["id".into()], Box::new(rows.into_iter()));
+        let error = run_to_rows(&mut scan).unwrap_err();
+        assert!(error.to_string().contains("late producer failure"));
     }
 }

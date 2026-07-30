@@ -112,8 +112,7 @@ test("persistent open, format detection, and encryption rejection", async () => 
   assert.deepEqual((await reopened.sql("SELECT count(*) AS n FROM docs")).rows, [{ n: 1 }]);
   await reopened.close();
 
-  // persist() is a no-op outside the browser but must not throw.
-  await UQA.persist();
+  await assert.rejects(UQA.persist(), /IndexedDB.*unavailable/i);
 
   const compressed = `${UQA.persistDir}/compressed.db`;
   const compressedEngine = await Engine.openCompressed(compressed);

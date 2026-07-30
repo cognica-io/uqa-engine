@@ -67,34 +67,34 @@ fn bound_tightness_analyzer_empty() {
 #[test]
 fn bound_tightness_analyzer_perfect() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(5.0, 5.0);
-    analyzer.record(3.0, 3.0);
+    analyzer.record(5.0, 5.0).unwrap();
+    analyzer.record(3.0, 3.0).unwrap();
     approx_eq(analyzer.tightness_ratio(), 1.0);
 }
 
 #[test]
 fn bound_tightness_analyzer_loose() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(10.0, 5.0);
+    analyzer.record(10.0, 5.0).unwrap();
     approx_eq(analyzer.tightness_ratio(), 0.5);
 }
 
 #[test]
 fn bound_tightness_slack() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(10.0, 5.0);
+    analyzer.record(10.0, 5.0).unwrap();
     approx_eq(analyzer.slack(), 0.5);
     analyzer.clear();
-    analyzer.record(4.0, 4.0);
+    analyzer.record(4.0, 4.0).unwrap();
     approx_eq(analyzer.slack(), 0.0);
 }
 
 #[test]
 fn bound_tightness_worst_index() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(10.0, 9.0);
-    analyzer.record(10.0, 2.0);
-    analyzer.record(10.0, 7.0);
+    analyzer.record(10.0, 9.0).unwrap();
+    analyzer.record(10.0, 2.0).unwrap();
+    analyzer.record(10.0, 7.0).unwrap();
     assert_eq!(analyzer.worst_bound_index(), 1);
 }
 
@@ -106,14 +106,14 @@ fn bound_tightness_worst_index_empty() {
 #[test]
 fn bound_tightness_zero_upper_bound() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(0.0, 0.0);
+    analyzer.record(0.0, 0.0).unwrap();
     approx_eq(analyzer.tightness_ratio(), 1.0);
 }
 
 #[test]
 fn bound_tightness_clear() {
     let mut analyzer = BoundTightnessAnalyzer::default();
-    analyzer.record(10.0, 5.0);
+    analyzer.record(10.0, 5.0).unwrap();
     approx_eq(analyzer.tightness_ratio(), 0.5);
     analyzer.clear();
     approx_eq(analyzer.tightness_ratio(), 1.0);
@@ -126,8 +126,9 @@ fn adaptive_wand_tightening() {
         2,
         vec![pl(&[(1, 0.8), (2, 0.6)]), pl(&[(1, 0.9), (3, 0.5)])],
         0.8,
-    );
-    let bounds = adaptive.compute_upper_bounds();
+    )
+    .unwrap();
+    let bounds = adaptive.compute_upper_bounds().unwrap();
     approx_eq(bounds[0], 1.6);
     approx_eq(bounds[1], 3.2);
 }
@@ -142,8 +143,9 @@ fn adaptive_wand_produces_results() {
             pl(&[(1, 0.8), (2, 0.6), (4, 0.3)]),
         ],
         0.9,
-    );
-    let result = adaptive.score_top_k();
+    )
+    .unwrap();
+    let result = adaptive.score_top_k().unwrap();
     assert!(result.len() <= 2);
     assert!(!result.is_empty());
 }
@@ -151,8 +153,8 @@ fn adaptive_wand_produces_results() {
 #[test]
 fn adaptive_wand_analyzer_populated() {
     let mut adaptive =
-        AdaptiveWANDScorer::new(vec![mock(1.0)], 2, vec![pl(&[(1, 0.5), (2, 0.8)])], 0.9);
-    adaptive.score_top_k();
+        AdaptiveWANDScorer::new(vec![mock(1.0)], 2, vec![pl(&[(1, 0.5), (2, 0.8)])], 0.9).unwrap();
+    adaptive.score_top_k().unwrap();
     approx_eq(adaptive.analyzer.tightness_ratio(), 0.4);
 }
 
@@ -167,8 +169,9 @@ fn tightened_fusion_wand() {
         0.5,
         2,
         0.9,
-    );
-    let result = scorer.score_top_k();
+    )
+    .unwrap();
+    let result = scorer.score_top_k().unwrap();
     assert!(result.len() <= 2);
     assert!(!result.is_empty());
 }
@@ -181,14 +184,16 @@ fn tightened_fusion_analyzer() {
         0.5,
         2,
         0.85,
-    );
-    scorer.score_top_k();
+    )
+    .unwrap();
+    scorer.score_top_k().unwrap();
     approx_eq(scorer.analyzer.tightness_ratio(), 0.85);
 }
 
 #[test]
 fn tightened_fusion_preserves_original_bounds() {
-    let scorer = TightenedFusionWANDScorer::new(vec![map(&[(1, 0.9)])], vec![1.0], 0.5, 1, 0.8);
+    let scorer =
+        TightenedFusionWANDScorer::new(vec![map(&[(1, 0.9)])], vec![1.0], 0.5, 1, 0.8).unwrap();
     assert_eq!(scorer.original_bounds, vec![1.0]);
-    assert_eq!(scorer.signal_upper_bounds, vec![0.8]);
+    assert_eq!(scorer.signal_upper_bounds, vec![0.9]);
 }

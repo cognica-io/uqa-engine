@@ -17,9 +17,11 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use uqa_core::{DocId, FieldName, Payload, PostingEntry, PostingList};
-use uqa_storage::{BlockMaxIndex, InvertedIndex};
+use uqa_storage::{BlockMaxIndex, InvertedIndex, StorageBackendError, StorageBackendResult};
 
+use crate::error::invalid_input;
 use crate::scorer::Scorer;
+use crate::ScoringResult;
 
 const INF_DOC: u64 = u64::MAX;
 
@@ -51,11 +53,7 @@ impl Ord for HeapEntry {
         // score tie, the entry with the *larger* doc id sits at the
         // root, matching the conventional "lower doc id wins" tie break
         // applied at output time.
-        match other
-            .score
-            .partial_cmp(&self.score)
-            .unwrap_or(Ordering::Equal)
-        {
+        match other.score.total_cmp(&self.score) {
             Ordering::Equal => self.doc_id.cmp(&other.doc_id),
             ord => ord,
         }
@@ -114,17 +112,23 @@ impl WANDQuery {
         fields: Vec<FieldName>,
         terms: Vec<String>,
         k: usize,
-    ) -> Self {
-        debug_assert_eq!(posting_lists.len(), scorers.len());
-        debug_assert_eq!(posting_lists.len(), fields.len());
-        debug_assert_eq!(posting_lists.len(), terms.len());
-        Self {
+    ) -> StorageBackendResult<Self> {
+        let expected = posting_lists.len();
+        if scorers.len() != expected || fields.len() != expected || terms.len() != expected {
+            return Err(invalid_wand_input(format!(
+                "WAND term arrays must have equal lengths: posting_lists={expected}, scorers={}, fields={}, terms={}",
+                scorers.len(),
+                fields.len(),
+                terms.len()
+            )));
+        }
+        Ok(Self {
             posting_lists,
             scorers,
             fields,
             terms,
             k,
-        }
+        })
     }
 }
 
@@ -174,9 +178,12 @@ impl<'a> WANDScorer<'a> {
         }
     }
 
-    pub fn score_top_k(&self) -> WANDResult {
-        let mut cursors = build_cursors(self.query);
-        run_pivot_loop(self.query, &mut cursors, self.inverted_index, |_, _| None)
+    pub fn score_top_k(&self) -> StorageBackendResult<WANDResult> {
+        validate_query(self.query)?;
+        let mut cursors = build_cursors(self.query)?;
+        run_pivot_loop(self.query, &mut cursors, self.inverted_index, |_, _| {
+            Ok(None)
+        })
     }
 }
 
@@ -204,8 +211,9 @@ impl<'a> BlockMaxWANDScorer<'a> {
         }
     }
 
-    pub fn score_top_k(&self) -> WANDResult {
-        let mut cursors = build_cursors(self.query);
+    pub fn score_top_k(&self) -> StorageBackendResult<WANDResult> {
+        validate_query(self.query)?;
+        let mut cursors = build_cursors(self.query)?;
         let q = self.query;
         let bmi = self.block_max_index;
         let table = &self.table;
@@ -220,7 +228,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
                         bounds.push(0.0);
                         continue;
                     }
-                    let cur_block = bmi.block_index_for(cursors[ti].position);
+                    let cur_block = bmi.block_index_for(cursors[ti].position)?;
                     let total_blocks = bmi.num_blocks(table, &q.fields[ti], &q.terms[ti]);
                     // Take the max block-max across the remaining blocks
                     // for this term so the bound stays valid for any
@@ -245,25 +253,58 @@ impl<'a> BlockMaxWANDScorer<'a> {
                     };
                     bounds.push(bound);
                 }
-                Some(bounds)
+                Ok(Some(bounds))
             },
         )
     }
 }
 
-fn build_cursors(query: &WANDQuery) -> Vec<TermCursor<'_>> {
+fn build_cursors(query: &WANDQuery) -> StorageBackendResult<Vec<TermCursor<'_>>> {
     let mut cursors = Vec::with_capacity(query.posting_lists.len());
     for i in 0..query.posting_lists.len() {
         let entries = query.posting_lists[i].entries();
-        let df = entries.len() as u64;
+        let df = u64::try_from(entries.len())
+            .map_err(|_| invalid_wand_input("posting-list length does not fit in u64"))?;
         let upper_bound = query.scorers[i].term_upper_bound(df);
+        require_nonnegative_finite(upper_bound, "WAND term upper bound")?;
         cursors.push(TermCursor {
             entries,
             position: 0,
             upper_bound,
         });
     }
-    cursors
+    Ok(cursors)
+}
+
+fn invalid_wand_input(message: impl Into<String>) -> StorageBackendError {
+    StorageBackendError::Other(format!("invalid WAND input: {}", message.into()))
+}
+
+fn validate_query(query: &WANDQuery) -> StorageBackendResult<()> {
+    let expected = query.posting_lists.len();
+    if query.scorers.len() == expected
+        && query.fields.len() == expected
+        && query.terms.len() == expected
+    {
+        Ok(())
+    } else {
+        Err(invalid_wand_input(format!(
+            "WAND term arrays must have equal lengths: posting_lists={expected}, scorers={}, fields={}, terms={}",
+            query.scorers.len(),
+            query.fields.len(),
+            query.terms.len()
+        )))
+    }
+}
+
+fn require_nonnegative_finite(value: f64, name: &str) -> StorageBackendResult<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(invalid_wand_input(format!(
+            "{name} must be finite and non-negative, got {value}"
+        )))
+    }
 }
 
 /// Core pivot loop shared by WAND and BMW. `bound_provider` returns a
@@ -275,22 +316,24 @@ fn run_pivot_loop<F>(
     cursors: &mut [TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     mut bound_provider: F,
-) -> WANDResult
+) -> StorageBackendResult<WANDResult>
 where
-    F: FnMut(&[(u64, usize)], &[TermCursor<'_>]) -> Option<Vec<f64>>,
+    F: FnMut(&[(u64, usize)], &[TermCursor<'_>]) -> StorageBackendResult<Option<Vec<f64>>>,
 {
     let num_terms = query.posting_lists.len();
-    if num_terms == 0 {
-        return WANDResult {
+    if num_terms == 0 || query.k == 0 {
+        return Ok(WANDResult {
             top_k: PostingList::new(),
-            stats: WANDStats::default(),
-        };
+            stats: WANDStats {
+                total_candidates: candidate_union(&query.posting_lists)?,
+                ..WANDStats::default()
+            },
+        });
     }
-
     let mut top_k: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(query.k);
     let mut threshold = 0.0_f64;
     let mut stats = WANDStats {
-        total_candidates: candidate_union(&query.posting_lists),
+        total_candidates: candidate_union(&query.posting_lists)?,
         ..WANDStats::default()
     };
 
@@ -304,7 +347,7 @@ where
             break;
         }
 
-        let bounds = bound_provider(&sorted_terms, cursors).unwrap_or_else(|| {
+        let bounds = bound_provider(&sorted_terms, cursors)?.unwrap_or_else(|| {
             sorted_terms
                 .iter()
                 .map(|&(doc_val, ti)| {
@@ -316,22 +359,7 @@ where
                 })
                 .collect()
         });
-
-        let mut cumulative_bounds = Vec::with_capacity(bounds.len());
-        let mut pivot: Option<usize> = None;
-        for (idx, &(doc_val, _)) in sorted_terms.iter().enumerate() {
-            if doc_val == INF_DOC {
-                break;
-            }
-            cumulative_bounds.push(bounds[idx]);
-            let cumulative = query.scorers[0].finalize_upper_bound(&cumulative_bounds);
-            if cumulative >= threshold {
-                pivot = Some(idx);
-                break;
-            }
-        }
-
-        let Some(pivot_idx) = pivot else {
+        let Some(pivot_idx) = select_pivot(query, &sorted_terms, &bounds, threshold)? else {
             break;
         };
 
@@ -339,8 +367,11 @@ where
         let first_doc = sorted_terms[0].0;
 
         if first_doc == pivot_doc {
-            let actual_score = score_document(query, cursors, inverted_index, pivot_doc as DocId);
-            stats.scored += 1;
+            let actual_score = score_document(query, cursors, inverted_index, pivot_doc as DocId)?;
+            stats.scored = stats
+                .scored
+                .checked_add(1)
+                .ok_or_else(|| invalid_wand_input("scored-document counter overflowed"))?;
 
             if top_k.len() < query.k {
                 top_k.push(HeapEntry {
@@ -372,7 +403,10 @@ where
             // Skip first cursor forward to pivot_doc.
             let first_term = sorted_terms[0].1;
             cursors[first_term].advance_to(pivot_doc);
-            stats.cursor_advances += 1;
+            stats.cursor_advances = stats
+                .cursor_advances
+                .checked_add(1)
+                .ok_or_else(|| invalid_wand_input("cursor-advance counter overflowed"))?;
             sorted_terms[0].0 = cursors[first_term].current_doc();
             sorted_terms.sort_unstable();
         }
@@ -385,20 +419,52 @@ where
         .map(|h| PostingEntry::new(h.doc_id, Payload::with_score(h.score)))
         .collect();
     entries.sort_by_key(|e| e.doc_id);
-    WANDResult {
+    Ok(WANDResult {
         top_k: PostingList::from_sorted_unchecked(entries),
         stats,
-    }
+    })
 }
 
-fn candidate_union(posting_lists: &[PostingList]) -> u64 {
+fn select_pivot(
+    query: &WANDQuery,
+    sorted_terms: &[(u64, usize)],
+    bounds: &[f64],
+    threshold: f64,
+) -> StorageBackendResult<Option<usize>> {
+    if bounds.len() != sorted_terms.len() {
+        return Err(invalid_wand_input(format!(
+            "bound provider returned {} bounds for {} terms",
+            bounds.len(),
+            sorted_terms.len()
+        )));
+    }
+    for bound in bounds {
+        require_nonnegative_finite(*bound, "WAND pruning bound")?;
+    }
+    let mut cumulative_bounds = Vec::with_capacity(bounds.len());
+    for (index, &(doc_id, _)) in sorted_terms.iter().enumerate() {
+        if doc_id == INF_DOC {
+            break;
+        }
+        cumulative_bounds.push(bounds[index]);
+        let cumulative = query.scorers[0].finalize_upper_bound(&cumulative_bounds);
+        require_nonnegative_finite(cumulative, "WAND cumulative upper bound")?;
+        if cumulative >= threshold {
+            return Ok(Some(index));
+        }
+    }
+    Ok(None)
+}
+
+fn candidate_union(posting_lists: &[PostingList]) -> StorageBackendResult<u64> {
     let mut ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::default();
     for pl in posting_lists {
         for entry in pl {
             ids.insert(entry.doc_id);
         }
     }
-    ids.len() as u64
+    u64::try_from(ids.len())
+        .map_err(|_| invalid_wand_input("candidate union length does not fit in u64"))
 }
 
 /// Score a single document against every term cursor. Cursors that
@@ -410,7 +476,7 @@ fn score_document(
     cursors: &[TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     target: DocId,
-) -> f64 {
+) -> StorageBackendResult<f64> {
     let mut term_scores = Vec::with_capacity(cursors.len());
     for (i, cursor) in cursors.iter().enumerate() {
         let Some(entry) = cursor.current() else {
@@ -422,16 +488,22 @@ fn score_document(
         let tf = if entry.payload.positions.is_empty() {
             1
         } else {
-            entry.payload.positions.len() as u64
+            u64::try_from(entry.payload.positions.len())
+                .map_err(|_| invalid_wand_input("term frequency does not fit in u64"))?
         };
-        let df = query.posting_lists[i].len() as u64;
+        let df = u64::try_from(query.posting_lists[i].len())
+            .map_err(|_| invalid_wand_input("document frequency does not fit in u64"))?;
         let doc_length = match inverted_index {
-            Some(idx) => idx.get_doc_length(target, &query.fields[i]).max(tf),
+            Some(idx) => idx.get_doc_length(target, &query.fields[i])?.max(tf),
             None => tf,
         };
-        term_scores.push(query.scorers[i].term_score(tf, doc_length, df));
+        let term_score = query.scorers[i].term_score(tf, doc_length, df);
+        require_nonnegative_finite(term_score, "WAND term score")?;
+        term_scores.push(term_score);
     }
-    query.scorers[0].finalize_score(&term_scores)
+    let score = query.scorers[0].finalize_score(&term_scores);
+    require_nonnegative_finite(score, "WAND finalized score")?;
+    Ok(score)
 }
 
 /// Track upper-bound tightness: ratio of `actual_max / upper_bound` per
@@ -442,8 +514,24 @@ pub struct BoundTightnessAnalyzer {
 }
 
 impl BoundTightnessAnalyzer {
-    pub fn record(&mut self, upper_bound: f64, actual_max: f64) {
+    pub fn record(&mut self, upper_bound: f64, actual_max: f64) -> ScoringResult<()> {
+        if !upper_bound.is_finite() || upper_bound < 0.0 {
+            return Err(invalid_input(format!(
+                "upper bound must be finite and non-negative, got {upper_bound}"
+            )));
+        }
+        if !actual_max.is_finite() || actual_max < 0.0 {
+            return Err(invalid_input(format!(
+                "actual maximum must be finite and non-negative, got {actual_max}"
+            )));
+        }
+        if actual_max > upper_bound {
+            return Err(invalid_input(format!(
+                "actual maximum {actual_max} exceeds upper bound {upper_bound}"
+            )));
+        }
         self.pairs.push((upper_bound, actual_max));
+        Ok(())
     }
 
     pub fn tightness_ratio(&self) -> f64 {
@@ -478,9 +566,7 @@ impl BoundTightnessAnalyzer {
                 } else {
                     1.0
                 };
-                ratio_a
-                    .partial_cmp(&ratio_b)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                ratio_a.total_cmp(&ratio_b)
             })
             .map_or(0, |(idx, _)| idx)
     }
@@ -504,36 +590,61 @@ impl AdaptiveWANDScorer {
         k: usize,
         posting_lists: Vec<PostingList>,
         tightening_factor: f64,
-    ) -> Self {
-        Self {
+    ) -> ScoringResult<Self> {
+        validate_adaptive_inputs(&scorers, &posting_lists, tightening_factor)?;
+        Ok(Self {
             scorers,
             k,
             posting_lists,
             tightening_factor,
             analyzer: BoundTightnessAnalyzer::default(),
-        }
+        })
     }
 
-    pub fn compute_upper_bounds(&self) -> Vec<f64> {
+    pub fn compute_upper_bounds(&self) -> ScoringResult<Vec<f64>> {
+        validate_adaptive_inputs(&self.scorers, &self.posting_lists, self.tightening_factor)?;
         self.scorers
             .iter()
             .zip(&self.posting_lists)
-            .map(|(scorer, pl)| scorer.term_upper_bound(pl.len() as u64) * self.tightening_factor)
+            .map(|(scorer, pl)| {
+                let df = u64::try_from(pl.len())
+                    .map_err(|_| invalid_input("posting-list length does not fit in u64"))?;
+                let bound = scorer.term_upper_bound(df) * self.tightening_factor;
+                if bound.is_finite() && bound >= 0.0 {
+                    Ok(bound)
+                } else {
+                    Err(invalid_input(format!(
+                        "adaptive WAND bound must be finite and non-negative, got {bound}"
+                    )))
+                }
+            })
             .collect()
     }
 
-    pub fn score_top_k(&mut self) -> PostingList {
+    pub fn score_top_k(&mut self) -> ScoringResult<PostingList> {
+        validate_adaptive_inputs(&self.scorers, &self.posting_lists, self.tightening_factor)?;
         self.analyzer.clear();
         for (scorer, pl) in self.scorers.iter().zip(&self.posting_lists) {
-            let upper = scorer.term_upper_bound(pl.len() as u64);
-            let actual = pl.iter().map(|e| e.payload.score).fold(0.0_f64, f64::max);
-            self.analyzer.record(upper, actual);
+            let df = u64::try_from(pl.len())
+                .map_err(|_| invalid_input("posting-list length does not fit in u64"))?;
+            let upper = scorer.term_upper_bound(df);
+            let actual = pl
+                .iter()
+                .map(|entry| entry.payload.score)
+                .fold(0.0_f64, f64::max);
+            self.analyzer.record(upper, actual)?;
         }
 
         let mut scores: std::collections::BTreeMap<DocId, f64> = std::collections::BTreeMap::new();
         for pl in &self.posting_lists {
             for entry in pl {
-                *scores.entry(entry.doc_id).or_insert(0.0) += entry.payload.score;
+                let score = scores.entry(entry.doc_id).or_insert(0.0);
+                *score += entry.payload.score;
+                if !score.is_finite() || *score < 0.0 {
+                    return Err(invalid_input(format!(
+                        "adaptive WAND aggregate score must be finite and non-negative, got {score}"
+                    )));
+                }
             }
         }
         let mut entries: Vec<PostingEntry> = scores
@@ -543,13 +654,42 @@ impl AdaptiveWANDScorer {
         entries.sort_by(|a, b| {
             b.payload
                 .score
-                .partial_cmp(&a.payload.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&a.payload.score)
                 .then_with(|| a.doc_id.cmp(&b.doc_id))
         });
         entries.truncate(self.k);
-        PostingList::from_unsorted(entries)
+        Ok(PostingList::from_unsorted(entries))
     }
+}
+
+fn validate_adaptive_inputs(
+    scorers: &[Arc<dyn Scorer>],
+    posting_lists: &[PostingList],
+    tightening_factor: f64,
+) -> ScoringResult<()> {
+    if scorers.len() != posting_lists.len() {
+        return Err(invalid_input(format!(
+            "adaptive WAND requires one scorer per posting list, got {} scorers and {} lists",
+            scorers.len(),
+            posting_lists.len()
+        )));
+    }
+    if !tightening_factor.is_finite() || !(0.0..=1.0).contains(&tightening_factor) {
+        return Err(invalid_input(format!(
+            "adaptive WAND tightening factor must be finite and in [0, 1], got {tightening_factor}"
+        )));
+    }
+    for posting_list in posting_lists {
+        for entry in posting_list {
+            if !entry.payload.score.is_finite() || entry.payload.score < 0.0 {
+                return Err(invalid_input(format!(
+                    "adaptive WAND input score must be finite and non-negative, got {} for document {}",
+                    entry.payload.score, entry.doc_id
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -582,6 +722,73 @@ mod tests {
         Arc::new(BM25Scorer::new(BM25Params::default(), stats))
     }
 
+    struct InvalidScorer;
+
+    impl Scorer for InvalidScorer {
+        fn idf(&self, _doc_freq: u64) -> f64 {
+            f64::NAN
+        }
+
+        fn term_score(&self, _term_freq: u64, _doc_length: u64, _doc_freq: u64) -> f64 {
+            f64::NAN
+        }
+
+        fn term_score_with_idf(&self, _term_freq: u64, _doc_length: u64, _idf_value: f64) -> f64 {
+            f64::NAN
+        }
+
+        fn finalize_score(&self, _term_scores: &[f64]) -> f64 {
+            f64::NAN
+        }
+
+        fn term_upper_bound(&self, _doc_freq: u64) -> f64 {
+            f64::NAN
+        }
+    }
+
+    #[test]
+    fn wand_rejects_mismatched_shapes_and_non_finite_bounds() {
+        let posting_list = pl_from_tfs(&[(1, 1)]);
+        assert!(WANDQuery::new(
+            vec![posting_list.clone()],
+            Vec::new(),
+            vec!["body".into()],
+            vec!["term".into()],
+            1,
+        )
+        .is_err());
+
+        let query = WANDQuery::new(
+            vec![posting_list],
+            vec![Arc::new(InvalidScorer)],
+            vec!["body".into()],
+            vec!["term".into()],
+            1,
+        )
+        .unwrap();
+        assert!(WANDScorer::new(&query, None).score_top_k().is_err());
+    }
+
+    #[test]
+    fn zero_k_returns_no_results() {
+        let mut stats = IndexStats::default();
+        stats.total_docs = 10;
+        stats.avg_doc_length = 5.0;
+        let query = WANDQuery::new(
+            vec![pl_from_tfs(&[(1, 1)])],
+            vec![bm25(Arc::new(stats))],
+            vec!["body".into()],
+            vec!["term".into()],
+            0,
+        )
+        .unwrap();
+        assert!(WANDScorer::new(&query, None)
+            .score_top_k()
+            .unwrap()
+            .top_k
+            .is_empty());
+    }
+
     #[test]
     fn wand_top_k_matches_exhaustive_scoring() {
         let mut stats = IndexStats::default();
@@ -599,9 +806,10 @@ mod tests {
             vec!["title".into(), "title".into()],
             vec!["rust".into(), "lang".into()],
             3,
-        );
+        )
+        .unwrap();
         let wand = WANDScorer::new(&q, None);
-        let result = wand.score_top_k();
+        let result = wand.score_top_k().unwrap();
 
         // Exhaustive baseline: score every doc that appears in either
         // list and sort.
@@ -668,7 +876,9 @@ mod tests {
             pl_from_tfs(&[(1, 1), (3, 4), (4, 1), (6, 2), (8, 3)]),
         ];
         let scorers: Vec<Arc<dyn Scorer>> = (0..2)
-            .map(|_| Arc::new(BayesianBM25Scorer::new(params, stats.clone())) as Arc<dyn Scorer>)
+            .map(|_| {
+                Arc::new(BayesianBM25Scorer::new(params, stats.clone()).unwrap()) as Arc<dyn Scorer>
+            })
             .collect();
         let query = WANDQuery::new(
             posting_lists.clone(),
@@ -676,8 +886,9 @@ mod tests {
             vec!["title".into(), "title".into()],
             vec!["rust".into(), "language".into()],
             3,
-        );
-        let result = WANDScorer::new(&query, None).score_top_k();
+        )
+        .unwrap();
+        let result = WANDScorer::new(&query, None).score_top_k().unwrap();
 
         let mut candidate_ids = std::collections::BTreeSet::new();
         for posting_list in &posting_lists {
@@ -738,8 +949,8 @@ mod tests {
     #[test]
     fn bound_tightness_records_ratio() {
         let mut a = BoundTightnessAnalyzer::default();
-        a.record(1.0, 0.8);
-        a.record(2.0, 1.0);
+        a.record(1.0, 0.8).unwrap();
+        a.record(2.0, 1.0).unwrap();
         // ratios: 0.8, 0.5; mean 0.65
         assert!((a.tightness_ratio() - 0.65).abs() < 1e-9);
     }

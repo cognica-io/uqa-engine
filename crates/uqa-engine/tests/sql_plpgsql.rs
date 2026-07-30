@@ -40,6 +40,32 @@ fn engine() -> Engine {
     Engine::new()
 }
 
+fn assert_exception_block_rollback(engine: &Engine) {
+    exec(engine, "CREATE TABLE exception_log (v INTEGER)");
+    exec(
+        engine,
+        "DO $$
+         BEGIN
+           INSERT INTO exception_log VALUES (1);
+           BEGIN
+             INSERT INTO exception_log VALUES (2);
+             RAISE EXCEPTION 'discard inner write';
+           EXCEPTION
+             WHEN OTHERS THEN INSERT INTO exception_log VALUES (3);
+           END;
+           INSERT INTO exception_log VALUES (4);
+         END
+         $$",
+    );
+    let result = exec(engine, "SELECT v FROM exception_log ORDER BY v");
+    let values: Vec<_> = result
+        .rows
+        .iter()
+        .map(|row| row.get("v").cloned().unwrap_or(Value::Null))
+        .collect();
+    assert_eq!(values, vec![Value::Int(1), Value::Int(3), Value::Int(4)]);
+}
+
 // ---------------------------------------------------------------------
 // Scalar functions
 // ---------------------------------------------------------------------
@@ -804,6 +830,43 @@ fn exception_when_sqlstate_condition() {
         scalar(&eng, "SELECT state_guard() AS v"),
         Value::Str("caught".into())
     );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION serialization_guard() RETURNS text AS $$
+         BEGIN
+           RAISE serialization_failure;
+         EXCEPTION
+           WHEN serialization_failure THEN RETURN SQLSTATE;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT serialization_guard() AS v"),
+        Value::Str("40001".into())
+    );
+}
+
+#[test]
+fn exception_block_rolls_back_database_changes_before_handler() {
+    assert_exception_block_rollback(&engine());
+
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("plpgsql_exception_rollback.db");
+    {
+        let persistent = Engine::open(&db).unwrap();
+        assert_exception_block_rollback(&persistent);
+    }
+    {
+        let reopened = Engine::open(&db).unwrap();
+        let result = exec(&reopened, "SELECT v FROM exception_log ORDER BY v");
+        let values: Vec<_> = result
+            .rows
+            .iter()
+            .map(|row| row.get("v").cloned().unwrap_or(Value::Null))
+            .collect();
+        assert_eq!(values, vec![Value::Int(1), Value::Int(3), Value::Int(4)]);
+    }
 }
 
 #[test]

@@ -6,15 +6,15 @@
 
 //! `SQLite`-backed [`DocumentStore`].
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rusqlite::{params, OptionalExtension};
-use uqa_core::{DocId, Value};
+use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 
 use crate::backend::StorageBackendResult;
 use crate::document_store::{Document, DocumentStore};
-use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult};
+use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult, SQLiteError};
 
 const DOCUMENT_BLOBS_TABLE: &str = "_document_blobs";
 const BLOB_MARKER_TYPE: &str = "$uqa_type";
@@ -24,24 +24,55 @@ const BLOB_MARKER_ENCODING: &str = "encoding";
 const VALUE_BLOB_MARKER_VALUE: &str = "value_blob";
 const VALUE_BLOB_F64_LIST: &str = "f64_list";
 const VALUE_BLOB_F64_TENSOR: &str = "f64_tensor";
+const VALUE_BLOB_TYPED_JSON: &str = "typed_json_v1";
 const MIN_NUMERIC_BLOB_VALUES: usize = 32;
+
+type EncodedDocument = (Document, Vec<(String, Vec<u8>)>);
 
 /// Batch size for `doc_id IN (...)` reads. Partial batches are padded
 /// by repeating the final id so every batch reuses one cached
 /// statement text.
 const DOC_ID_IN_CHUNK: usize = 256;
 
+fn sqlite_doc_id(doc_id: DocId) -> SQLiteResult<i64> {
+    i64::try_from(doc_id).map_err(|_| {
+        SQLiteError::StorageBackend(format!("document id {doc_id} exceeds SQLite INTEGER"))
+    })
+}
+
+fn document_id_from_sqlite(raw: i64) -> SQLiteResult<DocId> {
+    DocId::try_from(raw).map_err(|_| {
+        SQLiteError::StorageBackend(format!("negative SQLite document id {raw} is invalid"))
+    })
+}
+
+fn read_doc_id(row: &rusqlite::Row<'_>, index: usize) -> SQLiteResult<DocId> {
+    document_id_from_sqlite(row.get::<_, i64>(index)?)
+}
+
+fn allocation_error(context: &str, error: impl std::fmt::Display) -> SQLiteError {
+    SQLiteError::StorageBackend(format!("cannot allocate {context}: {error}"))
+}
+
 /// Build `?first,?first+1,...` placeholders for a doc-id IN clause.
-fn doc_id_in_placeholders(first_index: usize, count: usize) -> String {
-    let mut out = String::with_capacity(count * 5);
+fn doc_id_in_placeholders(first_index: usize, count: usize) -> SQLiteResult<String> {
+    let estimated_capacity = count.checked_mul(5).ok_or_else(|| {
+        SQLiteError::StorageBackend("document-id placeholder capacity overflow".into())
+    })?;
+    let mut out = String::new();
+    out.try_reserve(estimated_capacity)
+        .map_err(|error| allocation_error("document-id placeholders", error))?;
     for i in 0..count {
         if i > 0 {
             out.push(',');
         }
         out.push('?');
-        out.push_str(&(first_index + i).to_string());
+        let parameter_index = first_index.checked_add(i).ok_or_else(|| {
+            SQLiteError::StorageBackend("document-id parameter index overflow".into())
+        })?;
+        out.push_str(&parameter_index.to_string());
     }
-    out
+    Ok(out)
 }
 
 /// Bind values for one padded id batch: leading params (table name,
@@ -49,15 +80,38 @@ fn doc_id_in_placeholders(first_index: usize, count: usize) -> String {
 fn chunk_bind_values(
     leading: &[rusqlite::types::Value],
     chunk: &[DocId],
-) -> Vec<rusqlite::types::Value> {
-    let mut bind = Vec::with_capacity(leading.len() + DOC_ID_IN_CHUNK);
+) -> SQLiteResult<Vec<rusqlite::types::Value>> {
+    let capacity = leading
+        .len()
+        .checked_add(DOC_ID_IN_CHUNK)
+        .ok_or_else(|| SQLiteError::StorageBackend("document-id bind count overflow".into()))?;
+    let mut bind = Vec::new();
+    bind.try_reserve_exact(capacity)
+        .map_err(|error| allocation_error("document-id bind values", error))?;
     bind.extend_from_slice(leading);
     let pad = chunk.last().copied().unwrap_or(0);
     for i in 0..DOC_ID_IN_CHUNK {
         let id = chunk.get(i).copied().unwrap_or(pad);
-        bind.push(rusqlite::types::Value::Integer(id as i64));
+        bind.push(rusqlite::types::Value::Integer(sqlite_doc_id(id)?));
     }
-    bind
+    Ok(bind)
+}
+
+fn should_probe_doc_ids(requested: usize, total: usize) -> bool {
+    requested
+        .checked_mul(2)
+        .is_some_and(|doubled| doubled < total)
+}
+
+fn sorted_unique_doc_ids(doc_ids: &[DocId]) -> SQLiteResult<Vec<DocId>> {
+    let mut requested = Vec::new();
+    requested
+        .try_reserve_exact(doc_ids.len())
+        .map_err(|error| allocation_error("requested document ids", error))?;
+    requested.extend_from_slice(doc_ids);
+    requested.sort_unstable();
+    requested.dedup();
+    Ok(requested)
 }
 
 #[derive(Clone)]
@@ -68,103 +122,74 @@ pub struct SQLiteDocumentStore {
 
 impl SQLiteDocumentStore {
     pub fn new(conn: ManagedConnection, table: impl Into<String>) -> Self {
-        let store = Self {
+        Self {
             conn,
             table: table.into(),
-        };
-        let _ = store.ensure_blob_table();
-        store
+        }
     }
 
-    pub fn max_doc_id(&self) -> DocId {
-        self.conn
-            .with(|c| {
-                let id: Option<i64> = c
-                    .prepare_cached("SELECT MAX(doc_id) FROM _documents WHERE table_name = ?1")?
-                    .query_row(params![self.table], |r| r.get(0))?;
-                Ok(id.unwrap_or(0) as DocId)
-            })
-            .unwrap_or(0)
+    pub fn max_doc_id(&self) -> StorageBackendResult<DocId> {
+        Ok(self.conn.with(|c| {
+            let id: Option<i64> = c
+                .prepare_cached("SELECT MAX(doc_id) FROM _documents WHERE table_name = ?1")?
+                .query_row(params![self.table], |r| r.get(0))?;
+            id.map_or(Ok(0), document_id_from_sqlite)
+        })?)
     }
 
     fn put_inner(&self, doc_id: DocId, document: &Document) -> SQLiteResult<()> {
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let document: Document = document
             .iter()
             .filter(|(_, value)| !matches!(value, uqa_core::Value::Null))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        let (document, blobs) = encode_document_blobs(document);
+        let (document, blobs) = encode_document_blobs(document)?;
         let body = serde_json::to_string(&document)?;
         self.conn.with(|c| {
             c.prepare_cached(&format!(
                 "DELETE FROM {DOCUMENT_BLOBS_TABLE}
                  WHERE table_name = ?1 AND doc_id = ?2"
             ))?
-            .execute(params![self.table, doc_id as i64])?;
+            .execute(params![self.table, sqlite_doc_id])?;
             c.prepare_cached(
                 "INSERT OR REPLACE INTO _documents (table_name, doc_id, body)
                  VALUES (?1, ?2, ?3)",
             )?
-            .execute(params![self.table, doc_id as i64, body])?;
+            .execute(params![self.table, sqlite_doc_id, body])?;
             for (field, bytes) in blobs {
                 c.prepare_cached(&format!(
                     "INSERT OR REPLACE INTO {DOCUMENT_BLOBS_TABLE}
                      (table_name, doc_id, field_name, bytes)
                      VALUES (?1, ?2, ?3, ?4)"
                 ))?
-                .execute(params![self.table, doc_id as i64, field, bytes])?;
+                .execute(params![self.table, sqlite_doc_id, field, bytes])?;
             }
             Ok(())
         })
     }
 
     fn get_inner(&self, doc_id: DocId) -> SQLiteResult<Option<Document>> {
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
             let body: Option<String> = c
                 .prepare_cached(
                     "SELECT body FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, doc_id as i64], |r| r.get(0))
+                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
                 .optional()?;
             let Some(body) = body else {
                 return Ok(None);
             };
-            let mut document: Document = serde_json::from_str(&body)?;
-            let has_inline_bytes = document
-                .values()
-                .any(|value| matches!(value, Value::Bytes(_)));
+            let mut document = decode_legacy_document_body(&body)?;
             hydrate_document_blobs(c, &self.table, doc_id, &mut document)?;
-            if has_inline_bytes {
-                let (stored, blobs) = encode_document_blobs(document.clone());
-                c.execute(
-                    "UPDATE _documents SET body = ?3
-                     WHERE table_name = ?1 AND doc_id = ?2",
-                    params![self.table, doc_id as i64, serde_json::to_string(&stored)?],
-                )?;
-                c.execute(
-                    &format!(
-                        "DELETE FROM {DOCUMENT_BLOBS_TABLE}
-                         WHERE table_name = ?1 AND doc_id = ?2"
-                    ),
-                    params![self.table, doc_id as i64],
-                )?;
-                for (field, bytes) in blobs {
-                    c.execute(
-                        &format!(
-                            "INSERT OR REPLACE INTO {DOCUMENT_BLOBS_TABLE}
-                             (table_name, doc_id, field_name, bytes)
-                             VALUES (?1, ?2, ?3, ?4)"
-                        ),
-                        params![self.table, doc_id as i64, field, bytes],
-                    )?;
-                }
-            }
             Ok(Some(document))
         })
     }
 
     fn get_field_inner(&self, doc_id: DocId, field: &str) -> SQLiteResult<Option<Value>> {
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let path = sqlite_json_path(field);
         self.conn.with(|c| {
             let row: Option<(Option<String>, String)> = c
@@ -173,14 +198,14 @@ impl SQLiteDocumentStore {
                      FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, doc_id as i64, path], |r| {
+                .query_row(params![self.table, sqlite_doc_id, path], |r| {
                     Ok((r.get(0)?, r.get(1)?))
                 })
                 .optional()?;
             let Some((json_type, json_text)) = row else {
                 return Ok(None);
             };
-            decode_json_field_value(c, &self.table, doc_id, json_type, &json_text)
+            decode_json_field_value(c, &self.table, doc_id, field, json_type, &json_text)
         })
     }
 
@@ -211,12 +236,28 @@ impl SQLiteDocumentStore {
                         |r| r.get(0),
                     )
                     .optional()?;
-                Ok(doc_id.map(|id| id as DocId))
+                doc_id.map(document_id_from_sqlite).transpose()
             }),
-            _ => Ok(self
-                .doc_ids()
-                .into_iter()
-                .find(|id| self.get_field(*id, field).as_ref() == Some(value))),
+            _ => {
+                let doc_ids = self.conn.with(|c| {
+                    let mut stmt = c.prepare_cached(
+                        "SELECT doc_id FROM _documents
+                         WHERE table_name = ?1 ORDER BY doc_id",
+                    )?;
+                    let rows = stmt.query_map(params![self.table], |row| row.get::<_, i64>(0))?;
+                    let mut out = Vec::new();
+                    for row in rows {
+                        out.push(document_id_from_sqlite(row?)?);
+                    }
+                    Ok(out)
+                })?;
+                for doc_id in doc_ids {
+                    if self.get_field_inner(doc_id, field)?.as_ref() == Some(value) {
+                        return Ok(Some(doc_id));
+                    }
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -228,6 +269,7 @@ impl SQLiteDocumentStore {
         if updates.is_empty() {
             return Ok(true);
         }
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
             let exists: Option<i64> = c
                 .prepare_cached(
@@ -235,7 +277,7 @@ impl SQLiteDocumentStore {
                      WHERE table_name = ?1 AND doc_id = ?2
                      LIMIT 1",
                 )?
-                .query_row(params![self.table, doc_id as i64], |r| r.get(0))
+                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
                 .optional()?;
             if exists.is_none() {
                 return Ok(false);
@@ -249,7 +291,7 @@ impl SQLiteDocumentStore {
                         c.execute(
                             "UPDATE _documents SET body = json_remove(body, ?3)
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, doc_id as i64, path],
+                            params![self.table, sqlite_doc_id, path],
                         )?;
                     }
                     Value::Bytes(bytes) => {
@@ -257,17 +299,17 @@ impl SQLiteDocumentStore {
                         c.execute(
                             "UPDATE _documents SET body = json_set(body, ?3, json(?4))
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, doc_id as i64, path, marker],
+                            params![self.table, sqlite_doc_id, path, marker],
                         )?;
                         upsert_document_blob(c, &self.table, doc_id, field, bytes)?;
                     }
                     other => {
-                        let (stored, blob) = encode_stored_value(field, other.clone());
+                        let (stored, blob) = encode_stored_value(field, other.clone())?;
                         let json = serde_json::to_string(&stored)?;
                         c.execute(
                             "UPDATE _documents SET body = json_set(body, ?3, json(?4))
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, doc_id as i64, path, json],
+                            params![self.table, sqlite_doc_id, path, json],
                         )?;
                         if let Some(bytes) = blob {
                             upsert_document_blob(c, &self.table, doc_id, field, &bytes)?;
@@ -278,24 +320,6 @@ impl SQLiteDocumentStore {
                 }
             }
             Ok(true)
-        })
-    }
-
-    fn ensure_blob_table(&self) -> SQLiteResult<()> {
-        self.conn.with(|c| {
-            c.execute(
-                &format!(
-                    "CREATE TABLE IF NOT EXISTS {DOCUMENT_BLOBS_TABLE} (
-                       table_name TEXT NOT NULL,
-                       doc_id INTEGER NOT NULL,
-                       field_name TEXT NOT NULL,
-                       bytes BLOB NOT NULL,
-                       PRIMARY KEY (table_name, doc_id, field_name)
-                     )"
-                ),
-                [],
-            )?;
-            Ok(())
         })
     }
 }
@@ -309,7 +333,7 @@ fn sqlite_json_path(field: &str) -> String {
     {
         format!("$.{field}")
     } else {
-        format!("$.{}", serde_json::to_string(field).unwrap_or_default())
+        format!("$.{}", serde_json::Value::String(field.to_string()))
     }
 }
 
@@ -328,86 +352,275 @@ fn find_doc_id_by_scalar<T: rusqlite::ToSql>(
             |r| r.get(0),
         )
         .optional()?;
-    Ok(doc_id.map(|id| id as DocId))
+    doc_id.map(document_id_from_sqlite).transpose()
 }
 
-fn encode_document_blobs(document: Document) -> (Document, Vec<(String, Vec<u8>)>) {
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+enum StoredValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    FloatBits(u64),
+    Str(String),
+    Bytes(Vec<u8>),
+    Temporal(TemporalValue),
+    Decimal(DecimalValue),
+    List(Vec<StoredValue>),
+    Map(BTreeMap<String, StoredValue>),
+}
+
+impl StoredValue {
+    fn from_value(value: Value) -> Self {
+        match value {
+            Value::Null => Self::Null,
+            Value::Bool(value) => Self::Bool(value),
+            Value::Int(value) => Self::Int(value),
+            Value::Float(value) => Self::FloatBits(value.to_bits()),
+            Value::Str(value) => Self::Str(value),
+            Value::Bytes(value) => Self::Bytes(value),
+            Value::Temporal(value) => Self::Temporal(value),
+            Value::Decimal(value) => Self::Decimal(value),
+            Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
+            Value::Map(values) => Self::Map(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from_value(value)))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn into_value(self) -> Value {
+        match self {
+            Self::Null => Value::Null,
+            Self::Bool(value) => Value::Bool(value),
+            Self::Int(value) => Value::Int(value),
+            Self::FloatBits(value) => Value::Float(f64::from_bits(value)),
+            Self::Str(value) => Value::Str(value),
+            Self::Bytes(value) => Value::Bytes(value),
+            Self::Temporal(value) => Value::Temporal(value),
+            Self::Decimal(value) => Value::Decimal(value),
+            Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
+            Self::Map(values) => Value::Map(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into_value()))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+fn value_requires_typed_encoding(value: &Value) -> bool {
+    if blob_marker_info(value).is_some() {
+        return true;
+    }
+    match value {
+        Value::List(items) => {
+            items.is_empty()
+                || items
+                    .iter()
+                    .all(|item| matches!(item, Value::Int(value) if u8::try_from(*value).is_ok()))
+                || items.iter().any(value_requires_typed_encoding)
+        }
+        Value::Map(values) => values.values().any(value_requires_typed_encoding),
+        Value::Bytes(_) => true,
+        _ => false,
+    }
+}
+
+/// Decode the unversioned document-body representation written before
+/// `Value::Bytes` gained an explicit tag. New ambiguous lists and nested byte
+/// values are stored as typed blobs, so a byte-range JSON array that still
+/// appears inline can only be a legacy body and keeps its historical meaning.
+fn decode_legacy_document_body(body: &str) -> SQLiteResult<Document> {
+    let serde_json::Value::Object(fields) = serde_json::from_str(body)? else {
+        return Err(SQLiteError::StorageBackend(
+            "persisted document body is not a JSON object".into(),
+        ));
+    };
+    fields
+        .into_iter()
+        .map(|(field, value)| Ok((field, decode_legacy_json_value(value)?)))
+        .collect()
+}
+
+fn decode_legacy_json_value(value: serde_json::Value) -> SQLiteResult<Value> {
+    match value {
+        serde_json::Value::Null => Ok(Value::Null),
+        serde_json::Value::Bool(value) => Ok(Value::Bool(value)),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                Ok(Value::Int(value))
+            } else if let Some(value) = value.as_u64() {
+                Ok(i64::try_from(value).map_or(Value::Float(value as f64), Value::Int))
+            } else if let Some(value) = value.as_f64() {
+                Ok(Value::Float(value))
+            } else {
+                Err(SQLiteError::StorageBackend(
+                    "persisted document number is outside the supported numeric range".into(),
+                ))
+            }
+        }
+        serde_json::Value::String(value) => Ok(Value::Str(value)),
+        serde_json::Value::Array(values) => {
+            let mut decoded = Vec::new();
+            decoded
+                .try_reserve_exact(values.len())
+                .map_err(|error| allocation_error("legacy document array", error))?;
+            for value in values {
+                decoded.push(decode_legacy_json_value(value)?);
+            }
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(decoded.len())
+                .map_err(|error| allocation_error("legacy document byte array", error))?;
+            for value in &decoded {
+                let Value::Int(value) = value else {
+                    return Ok(Value::List(decoded));
+                };
+                let Ok(value) = u8::try_from(*value) else {
+                    return Ok(Value::List(decoded));
+                };
+                bytes.push(value);
+            }
+            Ok(Value::Bytes(bytes))
+        }
+        serde_json::Value::Object(values) => {
+            if values.contains_key("$uqa_type") {
+                let tagged = serde_json::Value::Object(values.clone());
+                let decoded = serde_json::from_value::<Value>(tagged)?;
+                if !matches!(decoded, Value::Map(_)) {
+                    return Ok(decoded);
+                }
+            }
+            let mut decoded = BTreeMap::new();
+            for (key, value) in values {
+                decoded.insert(key, decode_legacy_json_value(value)?);
+            }
+            Ok(Value::Map(decoded))
+        }
+    }
+}
+
+fn encode_typed_value(field: &str, value: Value) -> SQLiteResult<(Value, Option<Vec<u8>>)> {
+    let bytes = serde_json::to_vec(&StoredValue::from_value(value))?;
+    Ok((
+        value_blob_marker(field.to_string(), VALUE_BLOB_TYPED_JSON),
+        Some(bytes),
+    ))
+}
+
+fn encode_document_blobs(document: Document) -> SQLiteResult<EncodedDocument> {
     let mut stored = Document::new();
     let mut blobs = Vec::new();
     for (field, value) in document {
-        let (stored_value, blob) = encode_stored_value(&field, value);
+        let (stored_value, blob) = encode_stored_value(&field, value)?;
         stored.insert(field.clone(), stored_value);
         if let Some(bytes) = blob {
             blobs.push((field, bytes));
         }
     }
-    (stored, blobs)
+    Ok((stored, blobs))
 }
 
-fn encode_stored_value(field: &str, value: Value) -> (Value, Option<Vec<u8>>) {
+fn encode_stored_value(field: &str, value: Value) -> SQLiteResult<(Value, Option<Vec<u8>>)> {
     match value {
-        Value::Bytes(bytes) => (blob_marker(field.to_string()), Some(bytes)),
+        Value::Bytes(bytes) => Ok((blob_marker(field.to_string()), Some(bytes))),
         Value::List(items) => {
-            if let Some(bytes) = encode_f64_tensor_blob(&items) {
-                (
+            if let Some(bytes) = encode_f64_tensor_blob(&items)? {
+                Ok((
                     value_blob_marker(field.to_string(), VALUE_BLOB_F64_TENSOR),
                     Some(bytes),
-                )
-            } else if let Some(bytes) = encode_f64_list_blob(&items) {
-                (
+                ))
+            } else if let Some(bytes) = encode_f64_list_blob(&items)? {
+                Ok((
                     value_blob_marker(field.to_string(), VALUE_BLOB_F64_LIST),
                     Some(bytes),
-                )
+                ))
             } else {
-                (Value::List(items), None)
+                let value = Value::List(items);
+                if value_requires_typed_encoding(&value) {
+                    encode_typed_value(field, value)
+                } else {
+                    Ok((value, None))
+                }
             }
         }
-        other => (other, None),
+        other if value_requires_typed_encoding(&other) => encode_typed_value(field, other),
+        other => Ok((other, None)),
     }
 }
 
-fn encode_f64_list_blob(items: &[Value]) -> Option<Vec<u8>> {
+fn encode_f64_list_blob(items: &[Value]) -> SQLiteResult<Option<Vec<u8>>> {
     if items.len() < MIN_NUMERIC_BLOB_VALUES {
-        return None;
+        return Ok(None);
     }
-    let mut out = Vec::with_capacity(items.len() * std::mem::size_of::<f64>());
+    let capacity = items
+        .len()
+        .checked_mul(std::mem::size_of::<f64>())
+        .ok_or_else(|| SQLiteError::StorageBackend("f64-list payload size overflow".into()))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(capacity)
+        .map_err(|error| allocation_error("f64-list payload", error))?;
     for item in items {
-        out.extend_from_slice(&value_as_finite_f64(item)?.to_le_bytes());
+        let Some(value) = value_as_finite_f64(item) else {
+            return Ok(None);
+        };
+        out.extend_from_slice(&value.to_le_bytes());
     }
-    Some(out)
+    Ok(Some(out))
 }
 
-fn encode_f64_tensor_blob(items: &[Value]) -> Option<Vec<u8>> {
+fn encode_f64_tensor_blob(items: &[Value]) -> SQLiteResult<Option<Vec<u8>>> {
     let rows = items.len();
-    let Value::List(first) = items.first()? else {
-        return None;
+    let Some(Value::List(first)) = items.first() else {
+        return Ok(None);
     };
     let cols = first.len();
-    if rows == 0 || cols == 0 || rows.saturating_mul(cols) < MIN_NUMERIC_BLOB_VALUES {
-        return None;
+    let Some(value_count) = rows.checked_mul(cols) else {
+        return Ok(None);
+    };
+    if rows == 0 || cols == 0 || value_count < MIN_NUMERIC_BLOB_VALUES {
+        return Ok(None);
     }
-    let rows_u32 = u32::try_from(rows).ok()?;
-    let cols_u32 = u32::try_from(cols).ok()?;
-    let mut out = Vec::with_capacity(8 + rows * cols * std::mem::size_of::<f64>());
+    let Ok(rows_u32) = u32::try_from(rows) else {
+        return Ok(None);
+    };
+    let Ok(cols_u32) = u32::try_from(cols) else {
+        return Ok(None);
+    };
+    let payload_len = value_count
+        .checked_mul(std::mem::size_of::<f64>())
+        .ok_or_else(|| SQLiteError::StorageBackend("f64-tensor payload size overflow".into()))?;
+    let capacity = 8usize
+        .checked_add(payload_len)
+        .ok_or_else(|| SQLiteError::StorageBackend("f64-tensor payload size overflow".into()))?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(capacity)
+        .map_err(|error| allocation_error("f64-tensor payload", error))?;
     out.extend_from_slice(&rows_u32.to_le_bytes());
     out.extend_from_slice(&cols_u32.to_le_bytes());
     for row in items {
         let Value::List(values) = row else {
-            return None;
+            return Ok(None);
         };
         if values.len() != cols {
-            return None;
+            return Ok(None);
         }
         for value in values {
-            out.extend_from_slice(&value_as_finite_f64(value)?.to_le_bytes());
+            let Some(value) = value_as_finite_f64(value) else {
+                return Ok(None);
+            };
+            out.extend_from_slice(&value.to_le_bytes());
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 fn value_as_finite_f64(value: &Value) -> Option<f64> {
     let value = match value {
-        Value::Int(value) => *value as f64,
         Value::Float(value) => *value,
         _ => return None,
     };
@@ -428,7 +641,7 @@ fn take_requested_field(
         return Ok(None);
     };
     if let Some(marker) = blob_marker_info(&value) {
-        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, field, &marker)? {
             value = decoded;
         }
     }
@@ -439,6 +652,7 @@ fn decode_json_field_value(
     conn: &rusqlite::Connection,
     table: &str,
     doc_id: DocId,
+    field: &str,
     json_type: Option<String>,
     json_text: &str,
 ) -> SQLiteResult<Option<Value>> {
@@ -449,10 +663,10 @@ fn decode_json_field_value(
         "true" => Value::Bool(true),
         "false" => Value::Bool(false),
         "null" => Value::Null,
-        _ => serde_json::from_str::<Value>(json_text)?,
+        _ => decode_legacy_json_value(serde_json::from_str(json_text)?)?,
     };
     if let Some(marker) = blob_marker_info(&value) {
-        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+        if let Some(decoded) = load_marked_document_blob(conn, table, doc_id, field, &marker)? {
             value = decoded;
         }
     }
@@ -488,6 +702,7 @@ enum BlobMarker {
     Bytes(String),
     F64List(String),
     F64Tensor(String),
+    TypedValue(String),
 }
 
 fn blob_marker_info(value: &Value) -> Option<BlobMarker> {
@@ -506,6 +721,9 @@ fn blob_marker_info(value: &Value) -> Option<BlobMarker> {
                 Some(Value::Str(encoding)) if encoding == VALUE_BLOB_F64_TENSOR => {
                     Some(BlobMarker::F64Tensor(field.clone()))
                 }
+                Some(Value::Str(encoding)) if encoding == VALUE_BLOB_TYPED_JSON => {
+                    Some(BlobMarker::TypedValue(field.clone()))
+                }
                 _ => None,
             }
         }
@@ -519,12 +737,17 @@ fn hydrate_document_blobs(
     doc_id: DocId,
     document: &mut Document,
 ) -> SQLiteResult<()> {
-    let marker_fields: Vec<(String, BlobMarker)> = document
-        .iter()
-        .filter_map(|(field, value)| blob_marker_info(value).map(|marker| (field.clone(), marker)))
-        .collect();
+    let mut marker_fields = Vec::new();
+    marker_fields
+        .try_reserve_exact(document.len())
+        .map_err(|error| allocation_error("document blob markers", error))?;
+    for (field, value) in document.iter() {
+        if let Some(marker) = blob_marker_info(value) {
+            marker_fields.push((field.clone(), marker));
+        }
+    }
     for (field, marker) in marker_fields {
-        if let Some(value) = load_marked_document_blob(conn, table, doc_id, &marker)? {
+        if let Some(value) = load_marked_document_blob(conn, table, doc_id, &field, &marker)? {
             document.insert(field, value);
         }
     }
@@ -535,66 +758,123 @@ fn load_marked_document_blob(
     conn: &rusqlite::Connection,
     table: &str,
     doc_id: DocId,
+    expected_field: &str,
     marker: &BlobMarker,
 ) -> SQLiteResult<Option<Value>> {
     let field = match marker {
-        BlobMarker::Bytes(field) | BlobMarker::F64List(field) | BlobMarker::F64Tensor(field) => {
-            field.as_str()
+        BlobMarker::Bytes(field)
+        | BlobMarker::F64List(field)
+        | BlobMarker::F64Tensor(field)
+        | BlobMarker::TypedValue(field) => field.as_str(),
+    };
+    if field != expected_field {
+        return Err(SQLiteError::CorruptDocumentBlob {
+            table: table.to_string(),
+            doc_id,
+            field: expected_field.to_string(),
+            reason: format!(
+                "JSON marker for field `{expected_field}` references blob field `{field}`"
+            ),
+        });
+    }
+    let bytes = load_document_blob(conn, table, doc_id, field)?.ok_or_else(|| {
+        SQLiteError::CorruptDocumentBlob {
+            table: table.to_string(),
+            doc_id,
+            field: field.to_string(),
+            reason: "JSON marker references a missing blob row".to_string(),
         }
-    };
-    let Some(bytes) = load_document_blob(conn, table, doc_id, field)? else {
-        return Ok(None);
-    };
+    })?;
     let value = match marker {
         BlobMarker::Bytes(_) => Value::Bytes(bytes),
-        BlobMarker::F64List(_) => decode_f64_list_blob(&bytes).unwrap_or(Value::Null),
-        BlobMarker::F64Tensor(_) => decode_f64_tensor_blob(&bytes).unwrap_or(Value::Null),
+        BlobMarker::F64List(_) => {
+            decode_f64_list_blob(&bytes)?.ok_or_else(|| SQLiteError::CorruptDocumentBlob {
+                table: table.to_string(),
+                doc_id,
+                field: field.to_string(),
+                reason: "invalid f64-list encoding".to_string(),
+            })?
+        }
+        BlobMarker::F64Tensor(_) => {
+            decode_f64_tensor_blob(&bytes)?.ok_or_else(|| SQLiteError::CorruptDocumentBlob {
+                table: table.to_string(),
+                doc_id,
+                field: field.to_string(),
+                reason: "invalid f64-tensor encoding".to_string(),
+            })?
+        }
+        BlobMarker::TypedValue(_) => serde_json::from_slice::<StoredValue>(&bytes)
+            .map(StoredValue::into_value)
+            .map_err(|error| SQLiteError::CorruptDocumentBlob {
+                table: table.to_string(),
+                doc_id,
+                field: field.to_string(),
+                reason: format!("invalid typed-value encoding: {error}"),
+            })?,
     };
     Ok(Some(value))
 }
 
-fn decode_f64_list_blob(bytes: &[u8]) -> Option<Value> {
+fn decode_f64_list_blob(bytes: &[u8]) -> SQLiteResult<Option<Value>> {
     if bytes.len() % std::mem::size_of::<f64>() != 0 {
-        return None;
+        return Ok(None);
     }
-    let values = bytes
-        .chunks_exact(std::mem::size_of::<f64>())
-        .map(|chunk| {
-            let mut raw = [0_u8; std::mem::size_of::<f64>()];
-            raw.copy_from_slice(chunk);
-            Value::Float(f64::from_le_bytes(raw))
-        })
-        .collect();
-    Some(Value::List(values))
+    let count = bytes.len() / std::mem::size_of::<f64>();
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|error| allocation_error("decoded f64-list", error))?;
+    for chunk in bytes.chunks_exact(std::mem::size_of::<f64>()) {
+        let mut raw = [0_u8; std::mem::size_of::<f64>()];
+        raw.copy_from_slice(chunk);
+        values.push(Value::Float(f64::from_le_bytes(raw)));
+    }
+    Ok(Some(Value::List(values)))
 }
 
-fn decode_f64_tensor_blob(bytes: &[u8]) -> Option<Value> {
+fn decode_f64_tensor_blob(bytes: &[u8]) -> SQLiteResult<Option<Value>> {
     if bytes.len() < 8 {
-        return None;
+        return Ok(None);
     }
     let mut rows_raw = [0_u8; 4];
     rows_raw.copy_from_slice(&bytes[0..4]);
-    let rows = u32::from_le_bytes(rows_raw) as usize;
+    let rows = usize::try_from(u32::from_le_bytes(rows_raw)).map_err(|_| {
+        SQLiteError::StorageBackend("tensor row count exceeds platform usize".into())
+    })?;
     let mut cols_raw = [0_u8; 4];
     cols_raw.copy_from_slice(&bytes[4..8]);
-    let cols = u32::from_le_bytes(cols_raw) as usize;
+    let cols = usize::try_from(u32::from_le_bytes(cols_raw)).map_err(|_| {
+        SQLiteError::StorageBackend("tensor column count exceeds platform usize".into())
+    })?;
     let payload = &bytes[8..];
-    if rows == 0 || cols == 0 || payload.len() != rows * cols * std::mem::size_of::<f64>() {
-        return None;
+    let Some(value_count) = rows.checked_mul(cols) else {
+        return Ok(None);
+    };
+    let Some(payload_len) = value_count.checked_mul(std::mem::size_of::<f64>()) else {
+        return Ok(None);
+    };
+    let Some(row_len) = cols.checked_mul(std::mem::size_of::<f64>()) else {
+        return Ok(None);
+    };
+    if rows == 0 || cols == 0 || payload.len() != payload_len {
+        return Ok(None);
     }
-    let mut out = Vec::with_capacity(rows);
-    for row in payload.chunks_exact(cols * std::mem::size_of::<f64>()) {
-        let values = row
-            .chunks_exact(std::mem::size_of::<f64>())
-            .map(|chunk| {
-                let mut raw = [0_u8; std::mem::size_of::<f64>()];
-                raw.copy_from_slice(chunk);
-                Value::Float(f64::from_le_bytes(raw))
-            })
-            .collect();
+    let mut out = Vec::new();
+    out.try_reserve_exact(rows)
+        .map_err(|error| allocation_error("decoded f64-tensor rows", error))?;
+    for row in payload.chunks_exact(row_len) {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(cols)
+            .map_err(|error| allocation_error("decoded f64-tensor row", error))?;
+        for chunk in row.chunks_exact(std::mem::size_of::<f64>()) {
+            let mut raw = [0_u8; std::mem::size_of::<f64>()];
+            raw.copy_from_slice(chunk);
+            values.push(Value::Float(f64::from_le_bytes(raw)));
+        }
         out.push(Value::List(values));
     }
-    Some(Value::List(out))
+    Ok(Some(Value::List(out)))
 }
 
 fn load_document_blob(
@@ -603,12 +883,13 @@ fn load_document_blob(
     doc_id: DocId,
     field: &str,
 ) -> SQLiteResult<Option<Vec<u8>>> {
+    let sqlite_doc_id = sqlite_doc_id(doc_id)?;
     conn.query_row(
         &format!(
             "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
              WHERE table_name = ?1 AND doc_id = ?2 AND field_name = ?3"
         ),
-        params![table, doc_id as i64, field],
+        params![table, sqlite_doc_id, field],
         |r| r.get(0),
     )
     .optional()
@@ -621,12 +902,13 @@ fn delete_document_blob(
     doc_id: DocId,
     field: &str,
 ) -> SQLiteResult<()> {
+    let sqlite_doc_id = sqlite_doc_id(doc_id)?;
     conn.execute(
         &format!(
             "DELETE FROM {DOCUMENT_BLOBS_TABLE}
              WHERE table_name = ?1 AND doc_id = ?2 AND field_name = ?3"
         ),
-        params![table, doc_id as i64, field],
+        params![table, sqlite_doc_id, field],
     )?;
     Ok(())
 }
@@ -638,13 +920,14 @@ fn upsert_document_blob(
     field: &str,
     bytes: &[u8],
 ) -> SQLiteResult<()> {
+    let sqlite_doc_id = sqlite_doc_id(doc_id)?;
     conn.execute(
         &format!(
             "INSERT OR REPLACE INTO {DOCUMENT_BLOBS_TABLE}
              (table_name, doc_id, field_name, bytes)
              VALUES (?1, ?2, ?3, ?4)"
         ),
-        params![table, doc_id as i64, field, bytes],
+        params![table, sqlite_doc_id, field, bytes],
     )?;
     Ok(())
 }
@@ -655,44 +938,54 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(())
     }
 
-    fn get(&self, doc_id: DocId) -> Option<Document> {
-        self.get_inner(doc_id).ok().flatten()
+    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+        Ok(self.get_inner(doc_id)?)
     }
 
-    fn contains_doc_id(&self, doc_id: DocId) -> bool {
-        self.conn
-            .with(|c| {
-                let found: Option<i64> = c
-                    .prepare_cached(
-                        "SELECT 1 FROM _documents
+    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
+        Ok(self.conn.with(|c| {
+            let found: Option<i64> = c
+                .prepare_cached(
+                    "SELECT 1 FROM _documents
                          WHERE table_name = ?1 AND doc_id = ?2
                          LIMIT 1",
-                    )?
-                    .query_row(params![self.table, doc_id as i64], |r| r.get(0))
-                    .optional()?;
-                Ok(found.is_some())
-            })
-            .unwrap_or(false)
+                )?
+                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
+                .optional()?;
+            Ok(found.is_some())
+        })?)
     }
 
-    fn get_field(&self, doc_id: DocId, field: &str) -> Option<uqa_core::Value> {
-        self.get_field_inner(doc_id, field).ok().flatten()
+    fn get_field(
+        &self,
+        doc_id: DocId,
+        field: &str,
+    ) -> StorageBackendResult<Option<uqa_core::Value>> {
+        Ok(self.get_field_inner(doc_id, field)?)
     }
 
-    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
-        self.find_doc_id_by_field_inner(field, value).ok().flatten()
+    fn find_doc_id_by_field(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> StorageBackendResult<Option<DocId>> {
+        Ok(self.find_doc_id_by_field_inner(field, value)?)
     }
 
-    fn get_fields_bulk(&self, doc_ids: &[DocId], field: &str) -> BTreeMap<DocId, Value> {
+    fn get_fields_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, Value>> {
         let mut out: BTreeMap<DocId, Value> = doc_ids
             .iter()
             .copied()
             .map(|doc_id| (doc_id, Value::Null))
             .collect();
         if doc_ids.is_empty() {
-            return out;
+            return Ok(out);
         }
-
         // Fetch the document body and extract the field in Rust: one
         // JSON parse per row. Extracting through `json_type` +
         // `json_extract` made `SQLite` parse the same body twice per
@@ -700,9 +993,9 @@ impl DocumentStore for SQLiteDocumentStore {
         let mut decode_row = |c: &rusqlite::Connection,
                               row: &rusqlite::Row<'_>|
          -> SQLiteResult<()> {
-            let doc_id = row.get::<_, i64>(0)? as DocId;
+            let doc_id = read_doc_id(row, 0)?;
             let body = row.get::<_, String>(1)?;
-            let mut document: Document = serde_json::from_str(&body)?;
+            let mut document = decode_legacy_document_body(&body)?;
             if let Some(value) = take_requested_field(c, &self.table, doc_id, &mut document, field)?
             {
                 out.insert(doc_id, value);
@@ -713,29 +1006,31 @@ impl DocumentStore for SQLiteDocumentStore {
         // Selective requests probe by id; wide requests (half the
         // table or more) sequential-scan once instead of issuing many
         // B-tree probes.
-        if doc_ids.len() <= DOC_ID_IN_CHUNK || doc_ids.len() * 2 < self.len() {
+        let should_probe =
+            doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
+        if should_probe {
             let leading = [rusqlite::types::Value::Text(self.table.clone())];
             let sql = format!(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
-                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)
+                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)?
             );
-            let _ = self.conn.with(|c| {
+            self.conn.with(|c| {
                 for chunk in doc_ids.chunks(DOC_ID_IN_CHUNK) {
                     let mut stmt = c.prepare_cached(&sql)?;
-                    let bind = chunk_bind_values(&leading, chunk);
+                    let bind = chunk_bind_values(&leading, chunk)?;
                     let mut rows = stmt.query(rusqlite::params_from_iter(bind))?;
                     while let Some(row) = rows.next()? {
                         decode_row(c, row)?;
                     }
                 }
                 Ok(())
-            });
-            return out;
+            })?;
+            return Ok(out);
         }
 
-        let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
-        let _ = self.conn.with(|c| {
+        let requested = sorted_unique_doc_ids(doc_ids)?;
+        self.conn.with(|c| {
             let mut stmt = c.prepare_cached(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1
@@ -743,23 +1038,26 @@ impl DocumentStore for SQLiteDocumentStore {
             )?;
             let mut rows = stmt.query(params![self.table])?;
             while let Some(row) = rows.next()? {
-                let doc_id = row.get::<_, i64>(0)? as DocId;
-                if !requested.contains(&doc_id) {
+                let doc_id = read_doc_id(row, 0)?;
+                if requested.binary_search(&doc_id).is_err() {
                     continue;
                 }
                 decode_row(c, row)?;
             }
             Ok(())
-        });
-        out
+        })?;
+        Ok(out)
     }
 
-    fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
+    fn get_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
         let mut out: BTreeMap<DocId, Vec<Value>> = BTreeMap::new();
         if doc_ids.is_empty() || fields.is_empty() {
-            return out;
+            return Ok(out);
         }
-
         // Fetch the document body and extract every requested field in
         // Rust: one JSON parse per row, however many fields the caller
         // asked for. The previous `json_type` + `json_extract` pair per
@@ -767,15 +1065,18 @@ impl DocumentStore for SQLiteDocumentStore {
         let decode_row = |c: &rusqlite::Connection,
                           row: &rusqlite::Row<'_>|
          -> SQLiteResult<(DocId, Vec<Value>)> {
-            let doc_id = row.get::<_, i64>(0)? as DocId;
+            let doc_id = read_doc_id(row, 0)?;
             let body = row.get::<_, String>(1)?;
-            let document: Document = serde_json::from_str(&body)?;
-            let mut values = Vec::with_capacity(fields.len());
+            let document = decode_legacy_document_body(&body)?;
+            let mut values = Vec::new();
+            values
+                .try_reserve_exact(fields.len())
+                .map_err(|error| allocation_error("multi-field document values", error))?;
             for field in fields {
                 let mut value = document.get(*field).cloned().unwrap_or(Value::Null);
                 if let Some(marker) = blob_marker_info(&value) {
                     if let Some(decoded) =
-                        load_marked_document_blob(c, &self.table, doc_id, &marker)?
+                        load_marked_document_blob(c, &self.table, doc_id, field, &marker)?
                     {
                         value = decoded;
                     }
@@ -785,17 +1086,19 @@ impl DocumentStore for SQLiteDocumentStore {
             Ok((doc_id, values))
         };
 
-        if doc_ids.len() <= DOC_ID_IN_CHUNK || doc_ids.len() * 2 < self.len() {
+        let should_probe =
+            doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
+        if should_probe {
             let leading = [rusqlite::types::Value::Text(self.table.clone())];
             let sql = format!(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
-                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)
+                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)?
             );
-            let _ = self.conn.with(|c| {
+            self.conn.with(|c| {
                 for chunk in doc_ids.chunks(DOC_ID_IN_CHUNK) {
                     let mut stmt = c.prepare_cached(&sql)?;
-                    let bind = chunk_bind_values(&leading, chunk);
+                    let bind = chunk_bind_values(&leading, chunk)?;
                     let mut rows = stmt.query(rusqlite::params_from_iter(bind))?;
                     while let Some(row) = rows.next()? {
                         let (doc_id, values) = decode_row(c, row)?;
@@ -803,12 +1106,12 @@ impl DocumentStore for SQLiteDocumentStore {
                     }
                 }
                 Ok(())
-            });
-            return out;
+            })?;
+            return Ok(out);
         }
 
-        let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
-        let _ = self.conn.with(|c| {
+        let requested = sorted_unique_doc_ids(doc_ids)?;
+        self.conn.with(|c| {
             let mut stmt = c.prepare_cached(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1
@@ -816,52 +1119,53 @@ impl DocumentStore for SQLiteDocumentStore {
             )?;
             let mut rows = stmt.query(params![self.table])?;
             while let Some(row) = rows.next()? {
-                let doc_id = row.get::<_, i64>(0)? as DocId;
-                if !requested.contains(&doc_id) {
+                let doc_id = read_doc_id(row, 0)?;
+                if requested.binary_search(&doc_id).is_err() {
                     continue;
                 }
                 let (doc_id, values) = decode_row(c, row)?;
                 out.insert(doc_id, values);
             }
             Ok(())
-        });
-        out
+        })?;
+        Ok(out)
     }
 
-    fn get_many(&self, doc_ids: &[DocId]) -> BTreeMap<DocId, Document> {
+    fn get_many(&self, doc_ids: &[DocId]) -> StorageBackendResult<BTreeMap<DocId, Document>> {
         let mut out: BTreeMap<DocId, Document> = BTreeMap::new();
         if doc_ids.is_empty() {
-            return out;
+            return Ok(out);
         }
-
         // Same probe-vs-scan split as `get_fields_bulk`.
-        if doc_ids.len() <= DOC_ID_IN_CHUNK || doc_ids.len() * 2 < self.len() {
+        let should_probe =
+            doc_ids.len() <= DOC_ID_IN_CHUNK || should_probe_doc_ids(doc_ids.len(), self.len()?);
+        if should_probe {
             let leading = [rusqlite::types::Value::Text(self.table.clone())];
             let sql = format!(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1 AND doc_id IN ({})",
-                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)
+                doc_id_in_placeholders(2, DOC_ID_IN_CHUNK)?
             );
-            let _ = self.conn.with(|c| {
+            self.conn.with(|c| {
                 for chunk in doc_ids.chunks(DOC_ID_IN_CHUNK) {
                     let mut stmt = c.prepare_cached(&sql)?;
-                    let bind = chunk_bind_values(&leading, chunk);
+                    let bind = chunk_bind_values(&leading, chunk)?;
                     let mut rows = stmt.query(rusqlite::params_from_iter(bind))?;
                     while let Some(row) = rows.next()? {
-                        let doc_id = row.get::<_, i64>(0)? as DocId;
+                        let doc_id = read_doc_id(row, 0)?;
                         let body = row.get::<_, String>(1)?;
-                        let mut document: Document = serde_json::from_str(&body)?;
+                        let mut document = decode_legacy_document_body(&body)?;
                         hydrate_document_blobs(c, &self.table, doc_id, &mut document)?;
                         out.insert(doc_id, document);
                     }
                 }
                 Ok(())
-            });
-            return out;
+            })?;
+            return Ok(out);
         }
 
-        let requested: BTreeSet<DocId> = doc_ids.iter().copied().collect();
-        let _ = self.conn.with(|c| {
+        let requested = sorted_unique_doc_ids(doc_ids)?;
+        self.conn.with(|c| {
             let mut stmt = c.prepare_cached(
                 "SELECT doc_id, body FROM _documents
                  WHERE table_name = ?1
@@ -869,18 +1173,18 @@ impl DocumentStore for SQLiteDocumentStore {
             )?;
             let mut rows = stmt.query(params![self.table])?;
             while let Some(row) = rows.next()? {
-                let doc_id = row.get::<_, i64>(0)? as DocId;
-                if !requested.contains(&doc_id) {
+                let doc_id = read_doc_id(row, 0)?;
+                if requested.binary_search(&doc_id).is_err() {
                     continue;
                 }
                 let body = row.get::<_, String>(1)?;
-                let mut document: Document = serde_json::from_str(&body)?;
+                let mut document = decode_legacy_document_body(&body)?;
                 hydrate_document_blobs(c, &self.table, doc_id, &mut document)?;
                 out.insert(doc_id, document);
             }
             Ok(())
-        });
-        out
+        })?;
+        Ok(out)
     }
 
     fn patch_fields(
@@ -892,22 +1196,21 @@ impl DocumentStore for SQLiteDocumentStore {
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.ensure_blob_table()?;
+        let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
             c.prepare_cached(&format!(
                 "DELETE FROM {DOCUMENT_BLOBS_TABLE}
                  WHERE table_name = ?1 AND doc_id = ?2"
             ))?
-            .execute(params![self.table, doc_id as i64])?;
+            .execute(params![self.table, sqlite_doc_id])?;
             c.prepare_cached("DELETE FROM _documents WHERE table_name = ?1 AND doc_id = ?2")?
-                .execute(params![self.table, doc_id as i64])?;
+                .execute(params![self.table, sqlite_doc_id])?;
             Ok(())
         })?;
         Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.ensure_blob_table()?;
         self.conn.with(|c| {
             c.execute(
                 &format!("DELETE FROM {DOCUMENT_BLOBS_TABLE} WHERE table_name = ?1"),
@@ -922,39 +1225,64 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(())
     }
 
-    fn doc_ids(&self) -> Vec<DocId> {
-        self.conn
-            .with(|c| {
-                let mut stmt = c.prepare_cached(
-                    "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id",
-                )?;
-                let rows = stmt.query_map(params![self.table], |r| r.get::<_, i64>(0))?;
-                let mut out = Vec::new();
-                for row in rows {
-                    out.push(row? as DocId);
-                }
-                Ok(out)
-            })
-            .unwrap_or_default()
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        Ok(self.conn.with(|c| {
+            let mut stmt = c.prepare_cached(
+                "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id",
+            )?;
+            let rows = stmt.query_map(params![self.table], |r| r.get::<_, i64>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(document_id_from_sqlite(row?)?);
+            }
+            Ok(out)
+        })?)
     }
 
-    fn max_doc_id(&self) -> DocId {
+    fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
+        let after = after.map(sqlite_doc_id).transpose()?;
+        Ok(self.conn.with(|connection| {
+            let doc_id: Option<i64> = match after {
+                Some(after) => connection
+                    .prepare_cached(
+                        "SELECT doc_id FROM _documents
+                         WHERE table_name = ?1 AND doc_id > ?2
+                         ORDER BY doc_id LIMIT 1",
+                    )?
+                    .query_row(params![self.table, after], |row| row.get::<_, i64>(0))
+                    .optional()?,
+                None => connection
+                    .prepare_cached(
+                        "SELECT doc_id FROM _documents
+                         WHERE table_name = ?1
+                         ORDER BY doc_id LIMIT 1",
+                    )?
+                    .query_row(params![self.table], |row| row.get::<_, i64>(0))
+                    .optional()?,
+            };
+            doc_id.map(document_id_from_sqlite).transpose()
+        })?)
+    }
+
+    fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         SQLiteDocumentStore::max_doc_id(self)
     }
 
-    fn len(&self) -> usize {
-        self.conn
-            .with(|c| {
-                let n: i64 = c
-                    .prepare_cached("SELECT COUNT(*) FROM _documents WHERE table_name = ?1")?
-                    .query_row(params![self.table], |r| r.get(0))?;
-                Ok(n as usize)
+    fn len(&self) -> StorageBackendResult<usize> {
+        Ok(self.conn.with(|c| {
+            let n: i64 = c
+                .prepare_cached("SELECT COUNT(*) FROM _documents WHERE table_name = ?1")?
+                .query_row(params![self.table], |r| r.get(0))?;
+            usize::try_from(n).map_err(|_| {
+                SQLiteError::StorageBackend(format!(
+                    "document count {n} is outside the addressable range"
+                ))
             })
-            .unwrap_or(0)
+        })?)
     }
 
-    fn snapshot(&self) -> Arc<dyn DocumentStore> {
-        Arc::new(self.clone())
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        Ok(Arc::new(self.clone()))
     }
 }
 
@@ -962,6 +1290,7 @@ impl DocumentStore for SQLiteDocumentStore {
 mod tests {
     use super::*;
     use crate::sqlite::catalog::Catalog;
+    use crate::StorageBackendError;
     use uqa_core::Value;
 
     fn store() -> SQLiteDocumentStore {
@@ -979,8 +1308,165 @@ mod tests {
         let mut s = store();
         s.put(1, doc([("title", Value::Str("rust".into()))]))
             .unwrap();
-        let got = s.get(1).unwrap();
+        let got = s.get(1).unwrap().unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
+    }
+
+    #[test]
+    fn typed_lists_round_trip_without_becoming_bytes_or_floats() {
+        let mut s = store();
+        let expected = doc([
+            (
+                "short_ints",
+                Value::List(vec![Value::Int(10), Value::Int(20)]),
+            ),
+            ("empty", Value::List(Vec::new())),
+            (
+                "matrix",
+                Value::List(vec![
+                    Value::List(vec![Value::Int(1), Value::Int(2)]),
+                    Value::List(vec![Value::Int(3), Value::Int(4)]),
+                ]),
+            ),
+            (
+                "nested_map",
+                Value::Map(BTreeMap::from([(
+                    "flags".into(),
+                    Value::List(vec![Value::Int(0), Value::Int(1)]),
+                )])),
+            ),
+            ("long_ints", Value::List((0..64).map(Value::Int).collect())),
+            ("bytes", Value::Bytes(vec![1, 2, 3])),
+        ]);
+        s.put(2, expected.clone()).unwrap();
+
+        let restored = s.get(2).unwrap().unwrap();
+        assert_eq!(restored, expected);
+        assert_eq!(
+            s.get_field(2, "short_ints").unwrap(),
+            Some(Value::List(vec![Value::Int(10), Value::Int(20)]))
+        );
+        assert_eq!(
+            s.get_fields_bulk(&[2], "empty").unwrap().get(&2),
+            Some(&Value::List(Vec::new()))
+        );
+        assert_eq!(s.get_many(&[2]).unwrap().get(&2), Some(&expected));
+
+        s.conn
+            .with(|connection| {
+                let body: String = connection.query_row(
+                    "SELECT body FROM _documents
+                     WHERE table_name = 'articles' AND doc_id = 2",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert!(body.contains(VALUE_BLOB_TYPED_JSON), "{body}");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn user_maps_that_resemble_internal_blob_markers_round_trip_as_data() {
+        let mut s = store();
+        let expected = doc([
+            ("bytes_marker", blob_marker("other_field".into())),
+            (
+                "value_marker",
+                value_blob_marker("other_field".into(), VALUE_BLOB_F64_LIST),
+            ),
+        ]);
+        s.put(4, expected.clone()).unwrap();
+
+        assert_eq!(s.get(4).unwrap(), Some(expected.clone()));
+        assert_eq!(
+            s.get_field(4, "bytes_marker").unwrap(),
+            expected.get("bytes_marker").cloned()
+        );
+        assert_eq!(
+            s.get_fields_multi(&[4], &["bytes_marker", "value_marker"])
+                .unwrap()
+                .get(&4),
+            Some(&vec![
+                expected["bytes_marker"].clone(),
+                expected["value_marker"].clone(),
+            ])
+        );
+    }
+
+    #[test]
+    fn patch_fields_preserves_ambiguous_list_variants() {
+        let mut s = store();
+        s.put(3, doc([("value", Value::Str("old".into()))]))
+            .unwrap();
+        let updates = BTreeMap::from([(
+            "value".to_string(),
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        )]);
+        assert!(s.patch_fields(3, &updates).unwrap());
+        assert_eq!(
+            s.get_field(3, "value").unwrap(),
+            Some(Value::List(vec![Value::Int(1), Value::Int(2)]))
+        );
+    }
+
+    #[test]
+    fn placeholder_builder_reports_size_and_index_overflow() {
+        assert!(doc_id_in_placeholders(1, usize::MAX).is_err());
+        assert!(doc_id_in_placeholders(usize::MAX, 2).is_err());
+    }
+
+    #[test]
+    fn document_id_larger_than_sqlite_integer_is_rejected() {
+        let mut s = store();
+        let error = s.put(DocId::MAX, Document::new()).unwrap_err();
+        assert!(matches!(
+            error,
+            StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message))
+                if message.contains("exceeds SQLite INTEGER")
+        ));
+        assert_eq!(s.len().unwrap(), 0, "failed write must not insert a row");
+
+        assert!(matches!(
+            s.get(DocId::MAX),
+            Err(StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message)))
+                if message.contains("exceeds SQLite INTEGER")
+        ));
+        assert!(matches!(
+            s.get_many(&[DocId::MAX]),
+            Err(StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message)))
+                if message.contains("exceeds SQLite INTEGER")
+        ));
+    }
+
+    #[test]
+    fn negative_persisted_document_id_is_reported_as_corruption() {
+        let s = store();
+        s.conn
+            .with(|connection| {
+                connection.execute(
+                    "INSERT INTO _documents (table_name, doc_id, body) VALUES (?1, ?2, ?3)",
+                    params!["articles", -1_i64, "{}"],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(matches!(
+            s.doc_ids(),
+            Err(StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message)))
+                if message.contains("negative SQLite document id -1")
+        ));
+        assert!(matches!(
+            s.next_doc_id(None),
+            Err(StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message)))
+                if message.contains("negative SQLite document id -1")
+        ));
+        assert!(matches!(
+            s.max_doc_id(),
+            Err(StorageBackendError::SQLite(SQLiteError::StorageBackend(ref message)))
+                if message.contains("negative SQLite document id -1")
+        ));
     }
 
     /// A real storage write failure (`SQLITE_FULL` via `max_page_count`)
@@ -1005,7 +1491,7 @@ mod tests {
             "oversized put must fail once the page budget is exhausted"
         );
         // The failure must not have corrupted existing data.
-        let got = s.get(1).unwrap();
+        let got = s.get(1).unwrap().unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("small".into())));
     }
 
@@ -1014,8 +1500,8 @@ mod tests {
         let mut s = store();
         s.put(1, doc([("a", Value::Int(1))])).unwrap();
         s.delete(1).unwrap();
-        assert!(s.get(1).is_none());
-        assert_eq!(s.len(), 0);
+        assert!(s.get(1).unwrap().is_none());
+        assert_eq!(s.len().unwrap(), 0);
     }
 
     #[test]
@@ -1024,7 +1510,7 @@ mod tests {
         s.put(3, Document::new()).unwrap();
         s.put(1, Document::new()).unwrap();
         s.put(2, Document::new()).unwrap();
-        assert_eq!(s.doc_ids(), vec![1, 2, 3]);
+        assert_eq!(s.doc_ids().unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
@@ -1035,9 +1521,9 @@ mod tests {
             doc([("year", Value::Int(2026)), ("flag", Value::Bool(true))]),
         )
         .unwrap();
-        assert_eq!(s.get_field(7, "year"), Some(Value::Int(2026)));
-        assert_eq!(s.get_field(7, "flag"), Some(Value::Bool(true)));
-        assert_eq!(s.get_field(7, "missing"), None);
+        assert_eq!(s.get_field(7, "year").unwrap(), Some(Value::Int(2026)));
+        assert_eq!(s.get_field(7, "flag").unwrap(), Some(Value::Bool(true)));
+        assert_eq!(s.get_field(7, "missing").unwrap(), None);
     }
 
     #[test]
@@ -1054,12 +1540,12 @@ mod tests {
         s.put(2, doc([("title", Value::Str("sqlite".into()))]))
             .unwrap();
 
-        let titles = s.get_fields_bulk(&[1, 2, 99], "title");
+        let titles = s.get_fields_bulk(&[1, 2, 99], "title").unwrap();
         assert_eq!(titles.get(&1), Some(&Value::Str("rust".into())));
         assert_eq!(titles.get(&2), Some(&Value::Str("sqlite".into())));
         assert_eq!(titles.get(&99), Some(&Value::Null));
 
-        let payloads = s.get_fields_bulk(&[1, 2], "payload");
+        let payloads = s.get_fields_bulk(&[1, 2], "payload").unwrap();
         assert_eq!(payloads.get(&1), Some(&Value::Bytes(vec![1, 2, 3])));
         assert_eq!(payloads.get(&2), Some(&Value::Null));
     }
@@ -1085,11 +1571,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            s.find_doc_id_by_field("public_id", &Value::Str("m-9".into())),
+            s.find_doc_id_by_field("public_id", &Value::Str("m-9".into()))
+                .unwrap(),
             Some(9)
         );
         assert_eq!(
-            s.find_doc_id_by_field("public_id", &Value::Str("missing".into())),
+            s.find_doc_id_by_field("public_id", &Value::Str("missing".into()))
+                .unwrap(),
             None
         );
     }
@@ -1117,7 +1605,7 @@ mod tests {
         ]);
         assert!(s.patch_fields(31, &updates).unwrap());
 
-        let got = s.get(31).unwrap();
+        let got = s.get(31).unwrap().unwrap();
         assert_eq!(got.get("public_id"), Some(&Value::Str("m-31".into())));
         assert_eq!(got.get("content"), Some(&Value::Str("new".into())));
         assert_eq!(
@@ -1141,7 +1629,10 @@ mod tests {
 
         let updates = BTreeMap::from([("bytes".to_string(), Value::Bytes(vec![4, 5]))]);
         assert!(s.patch_fields(41, &updates).unwrap());
-        assert_eq!(s.get_field(41, "bytes"), Some(Value::Bytes(vec![4, 5])));
+        assert_eq!(
+            s.get_field(41, "bytes").unwrap(),
+            Some(Value::Bytes(vec![4, 5]))
+        );
 
         s.conn
             .with(|c| {
@@ -1200,10 +1691,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            s.get_field(11, "bytes"),
+            s.get_field(11, "bytes").unwrap(),
             Some(Value::Bytes(vec![1, 2, 3, 4]))
         );
-        let got = s.get(11).unwrap();
+        let got = s.get(11).unwrap().unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("asset".into())));
     }
 
@@ -1274,21 +1765,24 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(s.get_field(12, "embedding"), Some(embedding.clone()));
-        assert_eq!(s.get_field(12, "tensor"), Some(tensor.clone()));
+        assert_eq!(
+            s.get_field(12, "embedding").unwrap(),
+            Some(embedding.clone())
+        );
+        assert_eq!(s.get_field(12, "tensor").unwrap(), Some(tensor.clone()));
 
-        let fields = s.get_fields_bulk(&[12, 99], "embedding");
+        let fields = s.get_fields_bulk(&[12, 99], "embedding").unwrap();
         assert_eq!(fields.get(&12), Some(&embedding));
         assert_eq!(fields.get(&99), Some(&Value::Null));
 
-        let got = s.get(12).unwrap();
+        let got = s.get(12).unwrap().unwrap();
         assert_eq!(got.get("embedding"), Some(&embedding));
         assert_eq!(got.get("tensor"), Some(&tensor));
         assert_eq!(got.get("title"), Some(&Value::Str("vector".into())));
     }
 
     #[test]
-    fn legacy_inline_byte_arrays_are_rewritten_to_blob_storage_on_read() {
+    fn legacy_inline_byte_arrays_are_read_without_hidden_writes() {
         let s = store();
         s.conn
             .with(|c| {
@@ -1301,7 +1795,7 @@ mod tests {
             })
             .unwrap();
 
-        let got = s.get(21).unwrap();
+        let got = s.get(21).unwrap().unwrap();
         assert_eq!(got.get("bytes"), Some(&Value::Bytes(vec![9, 8, 7])));
         assert_eq!(got.get("title"), Some(&Value::Str("legacy".into())));
 
@@ -1313,12 +1807,12 @@ mod tests {
                     [],
                     |r| r.get(0),
                 )?;
-                assert!(body.contains(BLOB_MARKER_VALUE), "{body}");
-                assert!(!body.contains("\"bytes\":[9,8,7]"), "{body}");
+                assert!(!body.contains(BLOB_MARKER_VALUE), "{body}");
+                assert!(body.contains("\"bytes\":[9,8,7]"), "{body}");
 
-                let bytes: Vec<u8> = c.query_row(
+                let blob_rows: i64 = c.query_row(
                     &format!(
-                        "SELECT bytes FROM {DOCUMENT_BLOBS_TABLE}
+                        "SELECT COUNT(*) FROM {DOCUMENT_BLOBS_TABLE}
                          WHERE table_name = 'articles'
                            AND doc_id = 21
                            AND field_name = 'bytes'"
@@ -1326,10 +1820,64 @@ mod tests {
                     [],
                     |r| r.get(0),
                 )?;
-                assert_eq!(bytes, vec![9, 8, 7]);
+                assert_eq!(blob_rows, 0);
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn missing_or_malformed_blob_rows_are_reported_as_corruption() {
+        let mut s = store();
+        s.put(31, doc([("bytes", Value::Bytes(vec![1, 2, 3]))]))
+            .unwrap();
+        s.conn
+            .with(|c| {
+                c.execute(
+                    "DELETE FROM _document_blobs
+                     WHERE table_name = 'articles' AND doc_id = 31",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            s.get(31),
+            Err(StorageBackendError::SQLite(
+                SQLiteError::CorruptDocumentBlob { .. }
+            ))
+        ));
+
+        let embedding = Value::List(
+            (0..64)
+                .map(|value| Value::Float(f64::from(value)))
+                .collect(),
+        );
+        s.put(32, doc([("embedding", embedding)])).unwrap();
+        s.conn
+            .with(|c| {
+                c.execute(
+                    "UPDATE _document_blobs SET bytes = x'00'
+                     WHERE table_name = 'articles' AND doc_id = 32",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            s.get_field(32, "embedding"),
+            Err(StorageBackendError::SQLite(
+                SQLiteError::CorruptDocumentBlob { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn tensor_decoder_rejects_dimension_product_overflow() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(decode_f64_tensor_blob(&bytes).unwrap(), None);
     }
 
     #[test]

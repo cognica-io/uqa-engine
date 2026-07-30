@@ -46,18 +46,27 @@ fn migrates_python_uqa_catalog_from_directory() {
     assert_eq!(report.column_stats, 1);
 
     let engine = Engine::open(&destination).unwrap();
-    assert_eq!(engine.table_names(), vec!["docs".to_string()]);
     assert_eq!(
-        engine.list_foreign_servers(),
+        engine.table_names().unwrap(),
+        vec!["public.docs".to_string()]
+    );
+    assert_eq!(
+        engine.list_foreign_servers().unwrap(),
         vec!["memory_srv".to_string()]
     );
     assert_eq!(
-        engine.list_foreign_tables(),
-        vec!["remote_docs".to_string()]
+        engine.list_foreign_tables().unwrap(),
+        vec!["public.remote_docs".to_string()]
     );
-    assert_eq!(engine.list_path_indexes(), vec!["g::default".to_string()]);
+    assert_eq!(
+        engine.list_path_indexes().unwrap(),
+        vec!["g::default".to_string()]
+    );
 
-    let doc = engine.get_document("docs", 1).unwrap();
+    let doc = engine
+        .get_document("docs", 1)
+        .unwrap()
+        .expect("migrated document");
     assert_eq!(doc.get("title"), Some(&Value::Str("Rust migration".into())));
     assert!(matches!(doc.get("payload"), Some(Value::Map(_))));
     assert!(matches!(
@@ -73,29 +82,63 @@ fn migrates_python_uqa_catalog_from_directory() {
         Some(Value::Temporal(TemporalValue::TimeTz { .. }))
     ));
 
-    let text_hits = engine.search("docs", "body", "database", &ScoringMode::default(), 10);
+    let text_hits = engine
+        .search("docs", "body", "database", &ScoringMode::default(), 10)
+        .unwrap();
     assert_eq!(text_hits.first().map(|hit| hit.doc_id), Some(1));
 
-    let vector_hits = engine.knn_search("docs", "embedding", vec![1.0, 0.0, 0.0], 1);
+    let vector_hits = engine
+        .knn_search("docs", "embedding", vec![1.0, 0.0, 0.0], 1)
+        .unwrap();
     assert_eq!(vector_hits.first().map(|hit| hit.doc_id), Some(1));
 
     assert_eq!(
-        engine.load_scoring_params("docs.body").as_deref(),
+        engine.load_scoring_params("docs.body").unwrap().as_deref(),
         Some("{\"alpha\":1.5}")
     );
 
-    let stats = engine.column_stats("docs");
+    let stats = engine.column_stats("docs").unwrap();
     assert_eq!(stats.get("id").map(|s| s.row_count), Some(2));
 
     let graph_counts = engine
         .graph_with("g", |store| {
             (
-                store.vertices_in_graph("g").len(),
-                store.edges_in_graph("g").len(),
+                store.vertices_in_graph("g").unwrap().len(),
+                store.edges_in_graph("g").unwrap().len(),
             )
         })
-        .unwrap();
+        .unwrap()
+        .expect("migrated graph");
     assert_eq!(graph_counts, (2, 1));
+}
+
+#[test]
+fn late_python_migration_failure_rolls_back_the_entire_destination() {
+    let tmp = tempdir().unwrap();
+    let source = tmp.path().join("python.sqlite");
+    let destination = tmp.path().join("uqa-rs.sqlite");
+    create_python_catalog(&source);
+    Connection::open(&source)
+        .unwrap()
+        .execute(
+            "UPDATE _graph_edges SET target_id = 999 WHERE edge_id = 10",
+            [],
+        )
+        .unwrap();
+
+    let error = migrate_python_database(&source, &destination).unwrap_err();
+    assert!(
+        error.to_string().contains("999") || error.to_string().contains("vertex"),
+        "{error}"
+    );
+
+    let reopened = Engine::open(&destination).unwrap();
+    assert!(reopened.table_names().unwrap().is_empty());
+    assert!(reopened.list_graphs().unwrap().is_empty());
+    assert!(reopened.list_foreign_servers().unwrap().is_empty());
+    assert!(reopened.list_named_analyzers().unwrap().is_empty());
+    assert!(reopened.load_model("toy").unwrap().is_none());
+    assert!(reopened.load_scoring_params("docs.body").unwrap().is_none());
 }
 
 fn create_python_catalog(path: &std::path::Path) {

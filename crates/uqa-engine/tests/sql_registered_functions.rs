@@ -4,9 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use uqa_core::Value;
 use uqa_engine::{
     Engine, SQLAggregateState, SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult,
+    SQLTableFunctionStream,
 };
 use uqa_sql::SQLError;
 
@@ -82,6 +88,27 @@ impl SQLTableFunction for RepeatRows {
     }
 }
 
+struct CountingRows {
+    calls: Arc<AtomicUsize>,
+}
+
+impl SQLTableFunction for CountingRows {
+    fn call(&self, args: &[Value]) -> Result<SQLTableFunctionResult, SQLError> {
+        if !args.is_empty() {
+            return Err(SQLError::BadArity {
+                name: "rust_counting_rows".into(),
+                expected: "0 arguments".into(),
+                actual: args.len(),
+            });
+        }
+        let value = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(SQLTableFunctionResult::new(
+            ["marker"],
+            vec![vec![Value::Int(value as i64)]],
+        ))
+    }
+}
+
 #[test]
 fn registered_table_function_runs_in_from_with_column_aliases() {
     let eng = Engine::new();
@@ -99,6 +126,101 @@ fn registered_table_function_runs_in_from_with_column_aliases() {
     assert_eq!(res.rows[0]["name"], Value::Str("row".into()));
     assert_eq!(res.rows[0]["n"], Value::Int(0));
     assert_eq!(res.rows[2]["n"], Value::Int(2));
+}
+
+#[test]
+fn registered_table_function_source_makes_a_view_volatile() {
+    let eng = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    eng.register_table_function(
+        "rust_counting_rows",
+        CountingRows {
+            calls: Arc::clone(&calls),
+        },
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE VIEW counted_table_source AS
+         SELECT marker FROM rust_counting_rows() AS r(marker)",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT a.marker AS left_marker, b.marker AS right_marker
+             FROM counted_table_source a CROSS JOIN counted_table_source b",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows[0]["left_marker"], Value::Int(1));
+    assert_eq!(result.rows[0]["right_marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+struct StreamingRows;
+
+impl SQLTableFunction for StreamingRows {
+    fn call_stream(&self, args: &[Value]) -> Result<SQLTableFunctionStream, SQLError> {
+        let [Value::Int(count)] = args else {
+            return Err(SQLError::BadArity {
+                name: "rust_streaming_rows".into(),
+                expected: "1 integer argument".into(),
+                actual: args.len(),
+            });
+        };
+        let count = *count;
+        Ok(SQLTableFunctionStream::new(
+            ["n"],
+            (0..count).map(|value| Ok(vec![Value::Int(value)])),
+        ))
+    }
+}
+
+struct LateTableFunctionFailure;
+
+impl SQLTableFunction for LateTableFunctionFailure {
+    fn call_stream(&self, _args: &[Value]) -> Result<SQLTableFunctionStream, SQLError> {
+        Ok(SQLTableFunctionStream::new(
+            ["n"],
+            std::iter::once(Ok(vec![Value::Int(1)])).chain(std::iter::once(Err(
+                SQLError::Internal("late registered table-function failure".into()),
+            ))),
+        ))
+    }
+}
+
+#[test]
+fn registered_table_function_can_stream_under_tiny_work_mem() {
+    let eng = Engine::new();
+    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+    eng.register_table_function("rust_streaming_rows", StreamingRows)
+        .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT count(*) AS total, max(n) AS maximum \
+             FROM rust_streaming_rows(4096)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["total"], Value::Int(4_096));
+    assert_eq!(result.rows[0]["maximum"], Value::Int(4_095));
+}
+
+#[test]
+fn registered_table_function_propagates_late_stream_errors() {
+    let eng = Engine::new();
+    eng.register_table_function("rust_late_failure", LateTableFunctionFailure)
+        .unwrap();
+
+    let error = eng
+        .sql("SELECT * FROM rust_late_failure()", &[])
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("late registered table-function failure"));
 }
 
 #[derive(Default)]
@@ -132,6 +254,30 @@ impl SQLAggregateState for SumSquares {
     }
 }
 
+struct CountingSum {
+    total: i64,
+    finishes: Arc<AtomicUsize>,
+}
+
+impl SQLAggregateState for CountingSum {
+    fn observe(&mut self, args: &[Value]) -> Result<(), SQLError> {
+        let [Value::Int(value)] = args else {
+            return Err(SQLError::BadArity {
+                name: "rust_counted_sum".into(),
+                expected: "1 integer argument".into(),
+                actual: args.len(),
+            });
+        };
+        self.total += value;
+        Ok(())
+    }
+
+    fn finish(&self) -> Result<Value, SQLError> {
+        self.finishes.fetch_add(1, Ordering::SeqCst);
+        Ok(Value::Int(self.total))
+    }
+}
+
 #[test]
 fn registered_aggregate_function_participates_in_group_by() {
     let eng = Engine::new();
@@ -159,6 +305,43 @@ fn registered_aggregate_function_participates_in_group_by() {
     assert_eq!(res.rows[0]["total"], Value::Int(5));
     assert_eq!(res.rows[1]["grp"], Value::Str("b".into()));
     assert_eq!(res.rows[1]["total"], Value::Int(9));
+}
+
+#[test]
+fn registered_aggregate_makes_a_view_volatile() {
+    let eng = Engine::new();
+    let finishes = Arc::new(AtomicUsize::new(0));
+    let state_finishes = Arc::clone(&finishes);
+    eng.register_aggregate_function("rust_counted_sum", move || CountingSum {
+        total: 0,
+        finishes: Arc::clone(&state_finishes),
+    })
+    .unwrap();
+    eng.sql("CREATE TABLE aggregate_inputs (value INTEGER)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO aggregate_inputs(value) VALUES (1), (2), (3)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE VIEW counted_aggregate AS
+         SELECT rust_counted_sum(value) AS total FROM aggregate_inputs",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT a.total AS left_total, b.total AS right_total
+             FROM counted_aggregate a CROSS JOIN counted_aggregate b",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows[0]["left_total"], Value::Int(6));
+    assert_eq!(result.rows[0]["right_total"], Value::Int(6));
+    assert_eq!(finishes.load(Ordering::SeqCst), 2);
 }
 
 #[test]

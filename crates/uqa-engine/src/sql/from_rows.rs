@@ -10,45 +10,45 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
 use uqa_execution::{
-    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder,
-    ScalarSubqueryRunner,
+    eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner,
 };
-use uqa_joins::row_join::JoinKey;
 use uqa_planner::{
-    AccessPathPlan, ComputePlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
+    AccessPathPlan, ComputePlan, JoinExecutionStrategy, QueryBlockPlan, QueryPlan, RelationalPlan,
     SourcePlan,
 };
 use uqa_sql::ast::JoinKind;
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{ResultRow, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, SQLTableFunctionResult};
+use crate::{Engine, SQLTableFunctionResult, SQLTableFunctionStream};
 
-use super::scalar::{
-    eval_physical_scalar, PhysicalEvalContext, PhysicalSubqueryRunner, PlanSubqueryArena,
-};
+use super::scalar::{PhysicalSubqueryRunner, PlanSubqueryArena};
 use super::select::{
-    execute_query_plan_with_ctes, push_output_filter_into_query_plan,
-    select_contains_volatile_function, CteScope, ScopedEngineHook,
+    execute_query_plan_output, physical_work_mem_bytes, push_output_filter_into_query_plan,
+    CteScope, EngineExpressionEvaluator, QueryOutput, QueryOutputMode, QueryRows, ScopedEngineHook,
+    ScoredDocumentSource, ScoredInput,
 };
+use super::volatility::query_contains_volatile_function;
 use super::{
-    age_cypher, aggregate_join_rows, apply_row_order_limit_with_ctes, build_info_schema_rows,
-    expect_column_name, expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
-    graph_pagerank_entries, has_aggregate, json_table_arg, json_table_value_to_text,
-    projected_value_from_row, projection_columns, run_age_create_graph_with_evaluator,
-    run_age_drop_graph_with_evaluator, run_graph_create_with_evaluator,
-    run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    age_cypher, build_info_schema_rows, doc_id_value, execute_tree_entries, expect_column_name,
+    expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
+    graph_pagerank_entries, is_score_provenance_column, json_table_arg, json_table_value_to_text,
+    projection_columns, run_age_create_graph_with_evaluator, run_age_drop_graph_with_evaluator,
+    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, MERGE_ACTION_COLUMN,
+    SCORE_PROVENANCE_COLUMN,
 };
 
 pub(super) type ColumnPrune = BTreeMap<String, BTreeSet<String>>;
 pub(super) type QualifierFilters = BTreeMap<String, Vec<ScalarExpr>>;
-type RowFilter<'a> = &'a mut dyn FnMut(&mut Vec<ResultRow>) -> Result<(), SQLError>;
 
-struct JoinRuntime<'a> {
-    engine: &'a Engine,
-    function_hook: &'a dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &'a dyn ScalarSubqueryRunner,
-    params: &'a [SQLParam],
+fn checked_integer_value<T>(value: T, label: &str) -> Result<Value, SQLError>
+where
+    T: Copy + std::fmt::Display,
+    i64: TryFrom<T>,
+{
+    i64::try_from(value).map(Value::Int).map_err(|_| {
+        SQLError::TypeMismatch(format!("{label} {value} exceeds the SQL BIGINT range"))
+    })
 }
 
 fn qualifier_for(name: &str, alias: Option<&str>) -> String {
@@ -63,51 +63,6 @@ fn qualified_key(qual: &str, column: &str) -> String {
     key
 }
 
-fn table_row_cache_key(name: &str) -> String {
-    format!("__uqa_internal_table_cache__:{name}")
-}
-
-fn prefixed_table_row_cache_key(name: &str, qual: &str) -> String {
-    format!("__uqa_internal_prefixed_table_cache__:{name}:{qual}")
-}
-
-fn prefixed_view_row_cache_key(name: &str, qual: &str) -> String {
-    format!("__uqa_internal_prefixed_view_cache__:{name}:{qual}")
-}
-
-fn prefixed_cte_row_cache_key(name: &str, qual: &str) -> String {
-    format!("__uqa_internal_prefixed_cte_cache__:{name}:{qual}")
-}
-
-fn load_table_rows(engine: &Engine, table: &str) -> Vec<Document> {
-    let doc_ids = engine.table_doc_ids(table);
-    let mut documents = engine.get_documents_bulk(table, &doc_ids);
-    doc_ids
-        .into_iter()
-        .filter_map(|id| documents.remove(&id))
-        .collect()
-}
-
-fn load_table_rows_pruned(
-    engine: &Engine,
-    table: &str,
-    qual: &str,
-    columns: &BTreeSet<String>,
-) -> Vec<ResultRow> {
-    let doc_ids = engine.table_doc_ids(table);
-    let names: Vec<&str> = columns.iter().map(String::as_str).collect();
-    let values = engine.get_document_fields_multi(table, &doc_ids, &names);
-    let mut rows = vec![ResultRow::new(); doc_ids.len()];
-    let empty: Vec<Value> = Vec::new();
-    for (idx, doc_id) in doc_ids.iter().enumerate() {
-        let row_values = values.get(doc_id).unwrap_or(&empty);
-        for (column, value) in columns.iter().zip(row_values) {
-            rows[idx].insert(qualified_key(qual, column), value.clone());
-        }
-    }
-    rows
-}
-
 /// Synthesize rows for `information_schema` / `pg_catalog` virtual
 /// views. Returns `None` for any unknown name so the caller falls back
 /// to the regular table lookup.
@@ -119,356 +74,28 @@ pub(super) fn prefix_row(qual: &str, doc: &Document) -> ResultRow {
     out
 }
 
-fn prefix_row_pruned(qual: &str, doc: &Document, prune: Option<&ColumnPrune>) -> ResultRow {
-    let mut out = ResultRow::new();
-    let wanted = prune.and_then(|columns| columns.get(qual));
-    for (k, v) in doc {
-        if wanted.is_some_and(|columns| !columns.contains(k)) {
-            continue;
-        }
-        out.insert(qualified_key(qual, k), v.clone());
-    }
-    out
-}
-
-/// Re-key a row that already has unprefixed column labels onto a new
-/// qualifier. Used to plug CTE materializations into the JOIN executor
-/// under whatever alias the outer query referenced them by.
-fn reprefix_row_pruned(qual: &str, row: &ResultRow, prune: Option<&ColumnPrune>) -> ResultRow {
-    let mut out = ResultRow::new();
-    let wanted = prune.and_then(|columns| columns.get(qual));
-    for (k, v) in row {
-        // CTE rows are already keyed by their projection labels; lift
-        // unqualified labels under the new qualifier so qualified refs
-        // (`alias.col`) and unqualified suffix matches both resolve.
-        let column = k.rsplit_once('.').map_or(k.as_str(), |(_, col)| col);
-        if wanted.is_some_and(|columns| !columns.contains(column)) {
-            continue;
-        }
-        let key = qualified_key(qual, column);
-        out.insert(key, v.clone());
-    }
-    out
-}
-
-fn reprefix_rows_pruned(
-    qual: &str,
-    rows: &[ResultRow],
-    prune: Option<&ColumnPrune>,
-) -> Vec<ResultRow> {
-    let Some(first) = rows.first() else {
-        return Vec::new();
-    };
-    let same_schema = rows
-        .iter()
-        .all(|row| row.len() == first.len() && row.keys().eq(first.keys()));
-    if !same_schema {
-        return rows
-            .iter()
-            .map(|row| reprefix_row_pruned(qual, row, prune))
-            .collect();
-    }
-
-    let wanted = prune.and_then(|columns| columns.get(qual));
-    let keys: Vec<(String, String)> = first
-        .keys()
-        .filter_map(|key| {
-            let column = key.rsplit_once('.').map_or(key.as_str(), |(_, col)| col);
-            if wanted.is_some_and(|columns| !columns.contains(column)) {
-                return None;
-            }
-            Some((key.clone(), qualified_key(qual, column)))
-        })
-        .collect();
-    rows.iter()
-        .map(|row| {
-            let mut out = ResultRow::new();
-            for (source_key, target_key) in &keys {
-                if let Some(value) = row.get(source_key) {
-                    out.insert(target_key.clone(), value.clone());
-                }
-            }
-            out
-        })
-        .collect()
-}
-
-fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
-    if left.len() >= right.len() {
-        let mut out = left.clone();
-        for (k, v) in right {
-            out.insert(k.clone(), v.clone());
-        }
-        out
-    } else {
-        let mut out = right.clone();
-        for (k, v) in left {
-            out.entry(k.clone()).or_insert_with(|| v.clone());
-        }
-        out
-    }
-}
-
 fn has_filters_for_qualifier(filters: Option<&QualifierFilters>, qual: &str) -> bool {
     filters
         .and_then(|filters| filters.get(qual))
         .is_some_and(|filters| !filters.is_empty())
 }
 
-fn apply_qualifier_filters(
-    engine: &Engine,
-    rows: Vec<ResultRow>,
-    filters: Option<&QualifierFilters>,
-    qual: &str,
-    params: &[SQLParam],
-) -> Result<Vec<ResultRow>, SQLError> {
-    let Some(filters) = filters.and_then(|filters| filters.get(qual)) else {
-        return Ok(rows);
-    };
-    if filters.is_empty() || rows.is_empty() {
-        return Ok(rows);
-    }
-    let filter = combine_filters(filters.iter().cloned());
-    let mut out = Vec::with_capacity(rows.len());
-    for row in rows {
-        let ctx = ScalarEvalContext::new(Some(&row), params).with_function_hook(engine);
-        if uqa_sql::expr::truthy(&eval_scalar(&filter, &ctx)?) {
-            out.push(row);
-        }
-    }
-    Ok(out)
-}
-
-fn qualifier_filters_require_table_select(filters: Option<&QualifierFilters>, qual: &str) -> bool {
-    // Any pushed-down filter benefits from the single-table SELECT
-    // path: registered row functions need it for posting-list
-    // execution, and plain scalar predicates pick up value-index
-    // acceleration plus bulk row materialisation there.
-    filters
-        .and_then(|filters| filters.get(qual))
-        .is_some_and(|filters| !filters.is_empty())
-}
-
-fn run_table_select_for_qualifier_filters(
-    engine: &Engine,
-    table: &str,
-    qual: &str,
-    filters: Option<&QualifierFilters>,
-    prune: Option<&ColumnPrune>,
-    params: &[SQLParam],
-) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    if !qualifier_filters_require_table_select(filters, qual) {
-        return Ok(None);
-    }
-    let Some(filters) = filters.and_then(|filters| filters.get(qual)) else {
-        return Ok(None);
-    };
-    if filters.is_empty() {
-        return Ok(None);
-    }
-    let Some(filter) =
-        dequalify_expr_for_qualifier(&combine_filters(filters.iter().cloned()), qual)
-    else {
-        return Ok(None);
-    };
-
-    let mut projections = vec![ProjectionPlan {
-        expr: ScalarExpr::Star,
-        alias: None,
-    }];
-    if prune
-        .and_then(|prune| prune.get(qual))
-        .is_some_and(|columns| columns.contains(SCORE_COLUMN))
-    {
-        projections.push(ProjectionPlan {
-            expr: ScalarExpr::Column(SCORE_COLUMN.to_string()),
-            alias: None,
-        });
-    }
-
-    let stmt = QueryBlockPlan {
-        projections,
-        from: Some(SourcePlan::Table {
-            name: table.to_string(),
-            alias: None,
-        }),
-        r#where: Some(filter),
-        compute: ComputePlan::Project,
-        group_by: Vec::new(),
-        grouping_sets: Vec::new(),
-        having: None,
-        order_by: Vec::new(),
-        limit: None,
-        offset: None,
-        distinct: false,
-        distinct_on: Vec::new(),
-        subqueries: Vec::new(),
-        access: AccessPathPlan::OperatorTree {
-            score_limit_pushdown: false,
-        },
-    };
-    let result = super::select::execute_query_plan(
-        engine,
-        &QueryPlan {
-            ctes: Vec::new(),
-            root: RelationalPlan::QueryBlock(Box::new(stmt)),
-        },
-        params,
-    )?;
-    Ok(Some(reprefix_rows_pruned(qual, &result.rows, prune)))
-}
-
-fn dequalify_expr_for_qualifier(expr: &ScalarExpr, qual: &str) -> Option<ScalarExpr> {
-    match expr {
-        ScalarExpr::QualifiedColumn {
-            qualifier, column, ..
-        } => (qualifier == qual).then(|| ScalarExpr::Column(column.clone())),
-        ScalarExpr::Column(_)
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::Star => Some(expr.clone()),
-        ScalarExpr::Array(items) => Some(ScalarExpr::Array(
-            items
-                .iter()
-                .map(|item| dequalify_expr_for_qualifier(item, qual))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        ScalarExpr::And(items) => Some(ScalarExpr::And(
-            items
-                .iter()
-                .map(|item| dequalify_expr_for_qualifier(item, qual))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        ScalarExpr::Or(items) => Some(ScalarExpr::Or(
-            items
-                .iter()
-                .map(|item| dequalify_expr_for_qualifier(item, qual))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        ScalarExpr::Binary { op, lhs, rhs } => Some(ScalarExpr::Binary {
-            op: *op,
-            lhs: Box::new(dequalify_expr_for_qualifier(lhs, qual)?),
-            rhs: Box::new(dequalify_expr_for_qualifier(rhs, qual)?),
-        }),
-        ScalarExpr::Not(inner) => Some(ScalarExpr::Not(Box::new(dequalify_expr_for_qualifier(
-            inner, qual,
-        )?))),
-        ScalarExpr::IsNull { expr, negated } => Some(ScalarExpr::IsNull {
-            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
-            negated: *negated,
-        }),
-        ScalarExpr::Between { expr, low, high } => Some(ScalarExpr::Between {
-            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
-            low: Box::new(dequalify_expr_for_qualifier(low, qual)?),
-            high: Box::new(dequalify_expr_for_qualifier(high, qual)?),
-        }),
-        ScalarExpr::InList {
-            expr,
-            list,
-            negated,
-        } => Some(ScalarExpr::InList {
-            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
-            list: list
-                .iter()
-                .map(|item| dequalify_expr_for_qualifier(item, qual))
-                .collect::<Option<Vec<_>>>()?,
-            negated: *negated,
-        }),
-        ScalarExpr::Func {
-            name,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => Some(ScalarExpr::Func {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| dequalify_expr_for_qualifier(arg, qual))
-                .collect::<Option<Vec<_>>>()?,
-            distinct: *distinct,
-            order_by: order_by
-                .iter()
-                .map(|order| {
-                    Some(ScalarOrder {
-                        expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
-                        descending: order.descending,
-                        nulls: order.nulls,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-            filter: match filter.as_ref() {
-                Some(filter) => Some(Box::new(dequalify_expr_for_qualifier(filter, qual)?)),
-                None => None,
-            },
-        }),
-        ScalarExpr::WindowCall { name, args, spec } => {
-            let mut spec = spec.clone();
-            spec.partition_by = spec
-                .partition_by
-                .iter()
-                .map(|expr| dequalify_expr_for_qualifier(expr, qual))
-                .collect::<Option<Vec<_>>>()?;
-            spec.order_by = spec
-                .order_by
-                .iter()
-                .map(|order| {
-                    Some(ScalarOrder {
-                        expr: dequalify_expr_for_qualifier(&order.expr, qual)?,
-                        descending: order.descending,
-                        nulls: order.nulls,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(ScalarExpr::WindowCall {
-                name: name.clone(),
-                args: args
-                    .iter()
-                    .map(|arg| dequalify_expr_for_qualifier(arg, qual))
-                    .collect::<Option<Vec<_>>>()?,
-                spec,
-            })
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => Some(ScalarExpr::Case {
-            base: match base.as_ref() {
-                Some(expr) => Some(Box::new(dequalify_expr_for_qualifier(expr, qual)?)),
-                None => None,
-            },
-            when: when
-                .iter()
-                .map(|(cond, result)| {
-                    Some((
-                        dequalify_expr_for_qualifier(cond, qual)?,
-                        dequalify_expr_for_qualifier(result, qual)?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?,
-            else_branch: match else_branch.as_ref() {
-                Some(expr) => Some(Box::new(dequalify_expr_for_qualifier(expr, qual)?)),
-                None => None,
-            },
-        }),
-        ScalarExpr::Cast { expr, ty } => Some(ScalarExpr::Cast {
-            expr: Box::new(dequalify_expr_for_qualifier(expr, qual)?),
-            ty: ty.clone(),
-        }),
-        ScalarExpr::InSubquery { .. }
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => None,
-    }
-}
-
-fn combine_filters(filters: impl IntoIterator<Item = ScalarExpr>) -> ScalarExpr {
+fn combine_filters(filters: impl IntoIterator<Item = ScalarExpr>) -> Option<ScalarExpr> {
     let mut filters: Vec<ScalarExpr> = filters.into_iter().collect();
     if filters.len() == 1 {
-        filters.pop().unwrap()
+        filters.pop()
+    } else if filters.is_empty() {
+        None
     } else {
-        ScalarExpr::And(filters)
+        Some(ScalarExpr::And(filters))
     }
+}
+
+fn qualifier_filter(filters: Option<&QualifierFilters>, qualifier: &str) -> Option<ScalarExpr> {
+    filters
+        .and_then(|filters| filters.get(qualifier))
+        .filter(|filters| !filters.is_empty())
+        .and_then(|filters| combine_filters(filters.iter().cloned()))
 }
 
 fn propagated_join_filters(
@@ -618,22 +245,29 @@ fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
     }
 }
 
-fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow {
+fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> Result<ResultRow, SQLError> {
     let qual = qualifier_for(table, alias);
     let mut out = ResultRow::new();
-    if engine.table(table).is_none() {
-        for column in engine.foreign_table_columns(table) {
+    if engine
+        .try_table(table)
+        .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+        .is_none()
+    {
+        for column in engine
+            .foreign_table_columns(table)
+            .map_err(SQLError::Unsupported)?
+        {
             out.insert(qualified_key(&qual, &column), Value::Null);
         }
-        return out;
+        return Ok(out);
     }
     // Emit NULLs for any column that ever appeared in the table; for an
     // empty table we still know the keys via document_count, but the
     // safe default is just an empty row - a missing key resolves to
     // NULL through ScalarExpr::Column / QualifiedColumn lookup anyway.
     let mut sample_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for id in engine.table_doc_ids(table) {
-        if let Some(doc) = engine.get_document(table, id) {
+    for id in engine.table_doc_ids(table)? {
+        if let Some(doc) = engine.get_document(table, id)? {
             for k in doc.keys() {
                 sample_keys.insert(k.clone());
             }
@@ -645,204 +279,198 @@ fn null_row_for(table: &str, alias: Option<&str>, engine: &Engine) -> ResultRow 
     for k in sample_keys {
         out.insert(qualified_key(&qual, &k), Value::Null);
     }
-    out
+    Ok(out)
 }
 
-pub(super) fn build_join_rows_with_ctes(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = None;
-    build_join_rows_with_ctes_inner(engine, from, params, ctes, &mut row_filter, None, None)
+/// Pull-based local-table source used by join leaves. It advances through the
+/// document store with `next_doc_id`, so neither ids nor documents are copied
+/// into a cardinality-sized staging vector before the physical join sees its
+/// first batch.
+struct EngineTableRowSource {
+    table_name: String,
+    table: std::sync::Arc<crate::TableState>,
+    qualifier: String,
+    wanted: Option<BTreeSet<String>>,
+    schema: Vec<String>,
+    after: Option<uqa_core::DocId>,
 }
 
-pub(super) fn build_join_rows_with_ctes_pruned(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    prune: &ColumnPrune,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = None;
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        Some(prune),
-        None,
-    )
+impl uqa_execution::RowSource for EngineTableRowSource {
+    fn schema(&self) -> &[String] {
+        &self.schema
+    }
+
+    fn next_row(&mut self) -> uqa_execution::ExecResult<Option<ResultRow>> {
+        let store = self.table.document_store.read();
+        let Some(doc_id) = store.next_doc_id(self.after).map_err(|error| {
+            SQLError::Internal(format!(
+                "scan document ids for `{}`: {error}",
+                self.table_name
+            ))
+        })?
+        else {
+            return Ok(None);
+        };
+        self.after = Some(doc_id);
+        let document = store.get(doc_id).map_err(|error| {
+            SQLError::Internal(format!(
+                "read `{}` document {doc_id}: {error}",
+                self.table_name
+            ))
+        })?;
+        let document = document.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "table `{}` cursor returned document {doc_id}, but materialization omitted it",
+                self.table_name
+            ))
+        })?;
+        let mut row = ResultRow::new();
+        for (column, value) in document {
+            if self
+                .wanted
+                .as_ref()
+                .is_some_and(|wanted| !wanted.contains(&column))
+            {
+                continue;
+            }
+            row.insert(qualified_key(&self.qualifier, &column), value);
+        }
+        Ok(Some(row))
+    }
 }
 
-pub(super) fn build_join_rows_with_ctes_filtered_by_qualifier(
+fn try_streaming_local_table_scan<'a>(
     engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    filters: &QualifierFilters,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = None;
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        None,
-        Some(filters),
-    )
-}
-
-pub(super) fn build_join_rows_with_ctes_pruned_filtered_by_qualifier(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    prune: &ColumnPrune,
-    filters: &QualifierFilters,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = None;
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        Some(prune),
-        Some(filters),
-    )
-}
-
-pub(super) fn build_join_rows_with_ctes_filtered(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    row_filter: RowFilter<'_>,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = Some(row_filter);
-    build_join_rows_with_ctes_inner(engine, from, params, ctes, &mut row_filter, None, None)
-}
-
-pub(super) fn build_join_rows_with_ctes_filtered_pruned(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    row_filter: RowFilter<'_>,
-    prune: &ColumnPrune,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = Some(row_filter);
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        Some(prune),
-        None,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_join_rows_with_ctes_filtered_pruned_filtered_by_qualifier(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    row_filter: RowFilter<'_>,
-    prune: &ColumnPrune,
-    filters: &QualifierFilters,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = Some(row_filter);
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        Some(prune),
-        Some(filters),
-    )
-}
-
-pub(super) fn build_join_rows_with_ctes_filtered_filtered_by_qualifier(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    row_filter: RowFilter<'_>,
-    filters: &QualifierFilters,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut row_filter = Some(row_filter);
-    build_join_rows_with_ctes_inner(
-        engine,
-        from,
-        params,
-        ctes,
-        &mut row_filter,
-        None,
-        Some(filters),
-    )
-}
-
-fn build_join_rows_with_ctes_inner(
-    engine: &Engine,
-    from: &SourcePlan,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    row_filter: &mut Option<RowFilter<'_>>,
+    source: &SourcePlan,
+    ctes: &CteScope,
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
-) -> Result<Vec<ResultRow>, SQLError> {
+) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator + 'a>>, SQLError> {
+    let SourcePlan::Table { name, alias } = source else {
+        return Ok(None);
+    };
+    let qualifier = qualifier_for(name, alias.as_deref());
+    if let Some(materialized) = ctes.rows.get(name).cloned() {
+        if has_filters_for_qualifier(filters, &qualifier) {
+            return Ok(None);
+        }
+        let mapping = materialized
+            .schema()
+            .iter()
+            .filter_map(|source| {
+                let column = if is_score_provenance_column(source) {
+                    source.as_str()
+                } else {
+                    source
+                        .rsplit_once('.')
+                        .map_or(source.as_str(), |(_, column)| column)
+                };
+                if !is_score_provenance_column(source)
+                    && prune
+                        .and_then(|prune| prune.get(&qualifier))
+                        .is_some_and(|wanted| !wanted.contains(column))
+                {
+                    return None;
+                }
+                Some((qualified_key(&qualifier, column), source.clone()))
+            })
+            .collect();
+        let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
+            Box::new(uqa_execution::SharedSpillScan::new(materialized));
+        return Ok(Some(Box::new(
+            uqa_execution::ColumnSelection::with_mapping(scan, mapping),
+        )));
+    }
+    if has_filters_for_qualifier(filters, &qualifier)
+        || engine.view_plan(name)?.is_some()
+        || engine
+            .foreign_table(name)
+            .map_err(SQLError::Unsupported)?
+            .is_some()
+    {
+        return Ok(None);
+    }
+    let Some(table) = engine
+        .try_table(name)
+        .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?
+    else {
+        return Ok(None);
+    };
+    let wanted = prune.and_then(|prune| prune.get(&qualifier)).cloned();
+    let columns = if let Some(wanted) = wanted.as_ref() {
+        wanted.iter().cloned().collect()
+    } else {
+        engine.try_table_columns(name).map_err(|error| {
+            SQLError::Internal(format!("read table columns for `{name}`: {error}"))
+        })?
+    };
+    let schema = columns
+        .into_iter()
+        .map(|column| qualified_key(&qualifier, &column))
+        .collect();
+    let source = EngineTableRowSource {
+        table_name: name.clone(),
+        table,
+        qualifier,
+        wanted,
+        schema,
+        after: None,
+    };
+    Ok(Some(Box::new(uqa_execution::TableScan::new(Box::new(
+        source,
+    )))))
+}
+
+/// Build a complete FROM source as a pull-based physical operator. Unlike the
+/// compatibility `build_join_rows_*` entry points below, this is the query
+/// executor's primary path and never collects a join, view, CTE, derived table,
+/// or table-function result into a cardinality-sized `Vec`.
+pub(super) fn build_join_operator_with_ctes<'a>(
+    engine: &'a Engine,
+    from: &SourcePlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    use uqa_execution::{HashJoin, LateralJoin, NestedLoopJoin, PhysicalOperator};
+
     match from {
         SourcePlan::Table { name, alias } => {
-            let qual = qualifier_for(name, alias.as_deref());
-            // CTE reference takes precedence over a real table of the
-            // same name (matches `PostgreSQL` semantics).
-            let prefixed_cte_cache_key = prefixed_cte_row_cache_key(name, &qual);
-            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                if let Some(rows) = ctes.rows.get(&prefixed_cte_cache_key) {
-                    return Ok(rows.clone());
-                }
+            let qualifier = qualifier_for(name, alias.as_deref());
+            if let Some(materialized) = ctes.rows.get(name).cloned() {
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::SharedSpillScan::new(materialized));
+                let operator = qualify_source_operator(scan, &qualifier, prune);
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
             }
-            if let Some(rows) = ctes.rows.get(name) {
-                let prefixed = reprefix_rows_pruned(&qual, rows, prune);
-                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
-                if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                    ctes.rows.insert(prefixed_cte_cache_key, prefixed.clone());
-                }
-                return Ok(prefixed);
-            }
-            let prefixed_view_cache_key = prefixed_view_row_cache_key(name, &qual);
-            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                if let Some(rows) = ctes.rows.get(&prefixed_view_cache_key) {
-                    return Ok(rows.clone());
-                }
-            }
-            if let Some(rows) = ctes.rows.get(name) {
-                let prefixed = reprefix_rows_pruned(&qual, rows, prune);
-                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
-            }
-            if let Some(plan) = engine.view_plan(name) {
+
+            if let Some(plan) = engine.view_plan(name)? {
                 let specialized_plan = filters
-                    .and_then(|filters| filters.get(&qual))
+                    .and_then(|filters| filters.get(&qualifier))
                     .filter(|filters| !filters.is_empty())
-                    .and_then(|filters| {
-                        let filter = combine_filters(filters.iter().cloned());
-                        push_output_filter_into_query_plan(engine, &plan, &qual, &filter, None)
-                    });
+                    .and_then(|filters| combine_filters(filters.iter().cloned()))
+                    .map(|filter| {
+                        push_output_filter_into_query_plan(engine, &plan, &qualifier, &filter, None)
+                    })
+                    .transpose()?
+                    .flatten();
                 let execution_plan = specialized_plan.as_ref().unwrap_or(&plan);
                 let local_cte_names = query_cte_names(execution_plan);
-                let is_volatile = query_contains_volatile_function(execution_plan);
-                let result = if is_volatile {
-                    let mut scoped_ctes = ctes.clone();
-                    execute_query_plan_with_ctes(engine, execution_plan, params, &mut scoped_ctes)?
+                let is_volatile = query_contains_volatile_function(engine, execution_plan)?;
+                let output = if is_volatile {
+                    let mut scoped = ctes.clone();
+                    execute_query_plan_output(
+                        engine,
+                        execution_plan,
+                        params,
+                        &mut scoped,
+                        QueryOutputMode::SharedSpill,
+                    )?
                 } else {
-                    execute_view_plan_with_parent_cache(
+                    execute_view_plan_output_with_parent_cache(
                         engine,
                         execution_plan,
                         params,
@@ -850,65 +478,98 @@ fn build_join_rows_with_ctes_inner(
                         &local_cte_names,
                     )?
                 };
-                let prefixed = reprefix_rows_pruned(&qual, &result.rows, prune);
-                let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
+                let columns = output.internal_columns.clone();
+                let shared = query_output_shared(output, "view")?;
                 if !is_volatile && specialized_plan.is_none() {
-                    ctes.rows.insert(name.clone(), result.rows);
-                    if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                        ctes.rows.insert(prefixed_view_cache_key, prefixed.clone());
-                    }
+                    ctes.insert_shared(name.clone(), shared.clone());
                 }
-                return Ok(prefixed);
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::SharedSpillScan::new(shared));
+                let operator =
+                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
             }
-            // information_schema / pg_catalog virtual views.
-            if let Some(rows) = build_info_schema_rows(engine, name) {
-                let prefixed = reprefix_rows_pruned(&qual, &rows, prune);
-                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
+
+            if let Some(rows) = build_info_schema_rows(engine, name)? {
+                let columns: Vec<String> = rows
+                    .first()
+                    .map(|row| row.keys().cloned().collect())
+                    .unwrap_or_default();
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::TableScan::from_rows(columns.clone(), rows));
+                let operator =
+                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
             }
-            if engine.foreign_table(name).is_some() {
+
+            if engine
+                .foreign_table(name)
+                .map_err(SQLError::Unsupported)?
+                .is_some()
+            {
                 let rows = engine
-                    .scan_foreign_table(name, None, &[], None)
+                    .scan_foreign_table_stream(name, None, &[], None)
                     .map_err(SQLError::Unsupported)?;
-                let prefixed = reprefix_rows_pruned(&qual, &rows, prune);
-                return apply_qualifier_filters(engine, prefixed, filters, &qual, params);
+                let columns = engine
+                    .foreign_table_columns(name)
+                    .map_err(SQLError::Unsupported)?;
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::RowIteratorScan::new(
+                        columns.clone(),
+                        Box::new(rows.map(|row| {
+                            row.map_err(SQLError::Unsupported)
+                                .map_err(uqa_execution::ExecError::from)
+                        })),
+                    ));
+                let operator =
+                    qualify_source_operator_with_columns(scan, &columns, &qualifier, prune, &[]);
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
             }
-            if engine.table(name).is_none() {
+
+            if let Some(predicate) = qualifier_filter(filters, &qualifier)
+                .filter(uqa_planner::optimizer::contains_retrieval)
+            {
+                let entries = crate::operator_tree_bridge::run_optimised(
+                    engine,
+                    name,
+                    Some(&predicate),
+                    params,
+                )?
+                .ok_or_else(|| {
+                    SQLError::Unsupported(format!(
+                        "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
+                    ))
+                })?;
+                let table = engine.require_table(name)?;
+                let columns = engine.try_table_columns(name).map_err(|error| {
+                    SQLError::Internal(format!("read table columns for `{name}`: {error}"))
+                })?;
+                let source = ScoredDocumentSource::new(
+                    name,
+                    table,
+                    ScoredInput::entries(entries, true),
+                    columns,
+                );
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(uqa_execution::TableScan::new(Box::new(source)));
+                return Ok(qualify_source_operator(scan, &qualifier, prune));
+            }
+
+            let Some(operator) = try_streaming_local_table_scan(engine, from, ctes, prune, None)?
+            else {
                 return Err(SQLError::Unsupported(format!(
                     "relation `{name}` does not exist"
                 )));
-            }
-            if let Some(rows) =
-                run_table_select_for_qualifier_filters(engine, name, &qual, filters, prune, params)?
-            {
-                return Ok(rows);
-            }
-            let prefixed_cache_key = prefixed_table_row_cache_key(name, &qual);
-            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                if let Some(rows) = ctes.rows.get(&prefixed_cache_key) {
-                    return Ok(rows.clone());
-                }
-            }
-            let prefixed: Vec<ResultRow> =
-                if let Some(columns) = prune.and_then(|prune| prune.get(&qual)) {
-                    load_table_rows_pruned(engine, name, &qual, columns)
-                } else {
-                    let cache_key = table_row_cache_key(name);
-                    let rows = if let Some(rows) = ctes.rows.get(&cache_key) {
-                        rows.clone()
-                    } else {
-                        let rows: Vec<ResultRow> = load_table_rows(engine, name);
-                        ctes.rows.insert(cache_key, rows.clone());
-                        rows
-                    };
-                    rows.iter()
-                        .map(|row| prefix_row_pruned(&qual, row, prune))
-                        .collect()
-                };
-            let prefixed = apply_qualifier_filters(engine, prefixed, filters, &qual, params)?;
-            if prune.is_none() && !has_filters_for_qualifier(filters, &qual) {
-                ctes.rows.insert(prefixed_cache_key, prefixed.clone());
-            }
-            Ok(prefixed)
+            };
+            Ok(attach_qualifier_filter(
+                operator, &qualifier, filters, engine, params, ctes,
+            ))
         }
         SourcePlan::Join {
             left,
@@ -916,113 +577,136 @@ fn build_join_rows_with_ctes_inner(
             kind,
             on,
             lateral,
+            strategy,
         } => {
             let left_filters = filters
                 .and_then(|filters| propagated_join_filters(filters, right, left, on.as_ref()));
             let left_filter_ref = left_filters.as_ref().or(filters);
-            let left_rows = build_join_rows_with_ctes_inner(
-                engine,
-                left,
-                params,
-                ctes,
-                row_filter,
-                prune,
-                left_filter_ref,
-            )?;
-            // LATERAL: re-evaluate the right side once per left row,
-            // so the right body can reference outer columns. The
-            // engine substitutes the outer row into the ScalarEvalContext
-            // through the row-level evaluator.
+            let left_operator =
+                build_join_operator_with_ctes(engine, left, params, ctes, prune, left_filter_ref)?;
             let implicit_lateral_function = matches!(right.as_ref(), SourcePlan::Function { .. });
             if *lateral || implicit_lateral_function {
-                return build_lateral_join_rows(
+                if !matches!(strategy, JoinExecutionStrategy::Auto) {
+                    return Err(SQLError::Internal(
+                        "optimizer selected a hash strategy for a lateral join".into(),
+                    ));
+                }
+                let left_nulls = null_row_for_schema(left_operator.schema());
+                let mut right_nulls = ResultRow::new();
+                pad_nulls_for_from(&mut right_nulls, right, engine)?;
+                let source = EngineLateralSource {
                     engine,
-                    &left_rows,
-                    right,
-                    *kind,
-                    on.as_ref(),
+                    right: (**right).clone(),
+                    on: on.clone(),
                     params,
-                    ctes,
-                );
+                    ctes: ctes.clone(),
+                };
+                return Ok(Box::new(LateralJoin::new(
+                    left_operator,
+                    Box::new(source),
+                    *kind,
+                    left_nulls,
+                    right_nulls,
+                )));
             }
+
             let right_filters = filters
                 .and_then(|filters| propagated_join_filters(filters, left, right, on.as_ref()));
             let right_filter_ref = right_filters.as_ref().or(filters);
-            let right_rows = build_join_rows_with_ctes_inner(
+            let right_operator = build_join_operator_with_ctes(
                 engine,
                 right,
                 params,
                 ctes,
-                row_filter,
                 prune,
                 right_filter_ref,
             )?;
-            let on_expr = on.as_ref();
-            let scoped_hook = ScopedEngineHook::new(engine, ctes);
-            let eval_hook: &dyn uqa_sql::expr::EngineHook = &scoped_hook;
-            let subquery_arena =
-                PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
-            let subquery_runner: &dyn ScalarSubqueryRunner = &subquery_arena;
-            let join_runtime = JoinRuntime {
-                engine,
-                function_hook: eval_hook,
-                subquery_runner,
-                params,
-            };
 
-            let mut rows = match kind {
-                JoinKind::Inner | JoinKind::Cross => {
-                    if matches!(kind, JoinKind::Inner) {
-                        if let Some(rows) = try_hash_inner_join(
-                            eval_hook,
-                            subquery_runner,
-                            &left_rows,
-                            &right_rows,
-                            on_expr,
+            let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+            let hash_plan = if matches!(kind, JoinKind::Cross) {
+                None
+            } else {
+                on.as_ref().and_then(|predicate| {
+                    let conjuncts = join_conjuncts(predicate);
+                    let scoped_hook = ScopedEngineHook::new(engine, ctes);
+                    let subquery_arena =
+                        PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
+                    let left_sample = join_schema_sample(left_operator.schema());
+                    let right_sample = join_schema_sample(right_operator.schema());
+                    let mut left_keys = Vec::with_capacity(conjuncts.len());
+                    let mut right_keys = Vec::with_capacity(conjuncts.len());
+                    let mut residual = Vec::new();
+                    for conjunct in conjuncts {
+                        let ScalarExpr::Binary {
+                            op: uqa_sql::ast::BinaryOp::Equal,
+                            lhs,
+                            rhs,
+                        } = conjunct
+                        else {
+                            residual.push(conjunct.clone());
+                            continue;
+                        };
+                        if let Some((left_key, right_key)) = decide_join_sides(
+                            &scoped_hook,
+                            &subquery_arena,
+                            std::slice::from_ref(&left_sample),
+                            std::slice::from_ref(&right_sample),
+                            lhs,
+                            rhs,
                             params,
-                        )? {
-                            rows
+                        ) {
+                            left_keys.push(left_key.clone());
+                            right_keys.push(right_key.clone());
                         } else {
-                            cross_filter(
-                                eval_hook,
-                                subquery_runner,
-                                &left_rows,
-                                &right_rows,
-                                on_expr,
-                                params,
-                            )?
+                            residual.push(conjunct.clone());
                         }
-                    } else {
-                        cross_filter(
-                            eval_hook,
-                            subquery_runner,
-                            &left_rows,
-                            &right_rows,
-                            on_expr,
-                            params,
-                        )?
                     }
-                }
-                JoinKind::Left => {
-                    if let Some(rows) =
-                        try_hash_left_join(&join_runtime, &left_rows, &right_rows, right, on_expr)?
-                    {
-                        rows
-                    } else {
-                        left_outer(&join_runtime, &left_rows, &right_rows, right, on_expr)?
+                    if left_keys.is_empty() {
+                        return None;
                     }
-                }
-                JoinKind::Right => {
-                    left_outer(&join_runtime, &right_rows, &left_rows, left, on_expr)?
-                }
-                JoinKind::Full => {
-                    full_outer(&join_runtime, &left_rows, &right_rows, left, right, on_expr)?
-                }
+                    let residual = match residual.len() {
+                        0 => None,
+                        1 => residual.pop(),
+                        _ => Some(ScalarExpr::And(residual)),
+                    };
+                    Some((left_keys, right_keys, residual))
+                })
             };
-            if let Some(filter) = row_filter.as_deref_mut() {
-                filter(&mut rows)?;
+            let left_nulls = null_row_for_schema(left_operator.schema());
+            let right_nulls = null_row_for_schema(right_operator.schema());
+            let work_mem = physical_work_mem_bytes(engine)?;
+            match (strategy, hash_plan) {
+                (
+                    JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,
+                    Some((left_keys, right_keys, residual)),
+                ) => Ok(Box::new(HashJoin::new_with_work_mem_and_predicate(
+                    left_operator,
+                    right_operator,
+                    *kind,
+                    left_keys,
+                    right_keys,
+                    residual,
+                    evaluator,
+                    left_nulls,
+                    right_nulls,
+                    work_mem,
+                ))),
+                (JoinExecutionStrategy::Auto, None) => {
+                    Ok(Box::new(NestedLoopJoin::new_with_work_mem(
+                        left_operator,
+                        right_operator,
+                        *kind,
+                        on.clone(),
+                        evaluator,
+                        left_nulls,
+                        right_nulls,
+                        work_mem,
+                    )))
+                }
+                (JoinExecutionStrategy::Hash, None) => Err(SQLError::Internal(
+                    "DPccp hash-join strategy has no splittable equality predicate".into(),
+                )),
             }
-            Ok(rows)
         }
         SourcePlan::Values {
             rows,
@@ -1030,7 +714,7 @@ fn build_join_rows_with_ctes_inner(
             column_aliases,
         } => {
             let hook = ScopedEngineHook::new(engine, ctes);
-            Ok(build_values_rows(
+            let rows = build_values_rows(
                 rows,
                 alias.as_deref(),
                 column_aliases,
@@ -1038,7 +722,21 @@ fn build_join_rows_with_ctes_inner(
                 &hook,
                 &hook,
                 &ctes.scalar_subqueries,
-            )?)
+            )?;
+            let columns = rows.first().map_or_else(
+                || {
+                    column_aliases
+                        .iter()
+                        .map(|column| {
+                            alias
+                                .as_deref()
+                                .map_or_else(|| column.clone(), |qual| qualified_key(qual, column))
+                        })
+                        .collect()
+                },
+                |row| row.keys().cloned().collect(),
+            );
+            Ok(Box::new(uqa_execution::TableScan::from_rows(columns, rows)))
         }
         SourcePlan::Function {
             name,
@@ -1055,14 +753,27 @@ fn build_join_rows_with_ctes_inner(
                 &hook,
                 &ctes.scalar_subqueries,
             );
-            Ok(build_table_function_rows(
+            let mut rows = build_table_function_row_stream(
                 &context,
                 name,
                 args,
                 alias.as_deref(),
                 column_aliases,
                 column_types,
-            )?)
+            )?;
+            let first = rows
+                .next()
+                .transpose()
+                .map_err(super::select::physical_exec_error)?;
+            let columns = first.as_ref().map_or_else(
+                || table_function_empty_schema(name, alias.as_deref(), column_aliases),
+                |row| row.keys().cloned().collect(),
+            );
+            let rows = first.into_iter().map(Ok).chain(rows);
+            Ok(Box::new(uqa_execution::RowIteratorScan::new(
+                columns,
+                Box::new(rows),
+            )))
         }
         SourcePlan::Subquery {
             body,
@@ -1070,41 +781,221 @@ fn build_join_rows_with_ctes_inner(
             column_aliases,
         } => {
             let local_cte_names = query_cte_names(body);
-            let result =
-                execute_view_plan_with_parent_cache(engine, body, params, ctes, &local_cte_names)?;
-            Ok(materialize_subquery_rows(
-                result,
-                alias.as_deref(),
+            let output = execute_view_plan_output_with_parent_cache(
+                engine,
+                body,
+                params,
+                ctes,
+                &local_cte_names,
+            )?;
+            let source_columns = output.internal_columns.clone();
+            let operator = output.into_operator();
+            let qualifier = alias.as_deref().unwrap_or_default();
+            let operator = qualify_source_operator_with_columns(
+                operator,
+                &source_columns,
+                qualifier,
+                prune,
                 column_aliases,
+            );
+            Ok(attach_qualifier_filter(
+                operator, qualifier, filters, engine, params, ctes,
             ))
         }
     }
 }
 
-fn execute_view_plan_with_parent_cache(
+fn query_output_shared(
+    output: QueryOutput,
+    label: &str,
+) -> Result<uqa_execution::SharedSpill, SQLError> {
+    let QueryRows::SharedSpill(rows) = output.rows else {
+        return Err(SQLError::Internal(format!(
+            "{label} execution returned in-memory rows at an internal streaming boundary"
+        )));
+    };
+    Ok(rows)
+}
+
+fn execute_view_plan_output_with_parent_cache(
     engine: &Engine,
-    plan: &uqa_planner::QueryPlan,
+    plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
     local_cte_names: &BTreeSet<String>,
-) -> Result<SQLResult, SQLError> {
+) -> Result<QueryOutput, SQLError> {
     let saved = save_and_remove_cte_names(ctes, local_cte_names);
-    let result = execute_query_plan_with_ctes(engine, plan, params, ctes);
+    let result =
+        execute_query_plan_output(engine, plan, params, ctes, QueryOutputMode::SharedSpill);
     restore_cte_names(ctes, saved);
     result
+}
+
+fn qualify_source_operator<'a>(
+    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    qualifier: &str,
+    prune: Option<&ColumnPrune>,
+) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
+    let columns = operator.schema().to_vec();
+    qualify_source_operator_with_columns(operator, &columns, qualifier, prune, &[])
+}
+
+fn qualify_source_operator_with_columns<'a>(
+    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    source_columns: &[String],
+    qualifier: &str,
+    prune: Option<&ColumnPrune>,
+    aliases: &[String],
+) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
+    let mapping = source_columns
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| {
+            let source_base = if is_score_provenance_column(source) {
+                source.as_str()
+            } else {
+                source
+                    .rsplit_once('.')
+                    .map_or(source.as_str(), |(_, column)| column)
+            };
+            let column = aliases.get(index).map_or(source_base, String::as_str);
+            if !is_score_provenance_column(column)
+                && !qualifier.is_empty()
+                && prune
+                    .and_then(|prune| prune.get(qualifier))
+                    .is_some_and(|wanted| !wanted.contains(column))
+            {
+                return None;
+            }
+            let output = if qualifier.is_empty() {
+                column.to_string()
+            } else {
+                qualified_key(qualifier, column)
+            };
+            Some((output, source.clone()))
+        })
+        .collect();
+    Box::new(uqa_execution::ColumnSelection::with_mapping(
+        operator, mapping,
+    ))
+}
+
+fn attach_qualifier_filter<'a>(
+    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    qualifier: &str,
+    filters: Option<&QualifierFilters>,
+    engine: &'a Engine,
+    params: &'a [SQLParam],
+    ctes: &CteScope,
+) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
+    let Some(predicate) = qualifier_filter(filters, qualifier) else {
+        return operator;
+    };
+    Box::new(uqa_execution::Filter::with_evaluator(
+        operator,
+        predicate,
+        EngineExpressionEvaluator::shared(engine, params, ctes),
+    ))
+}
+
+fn null_row_for_schema(schema: &[String]) -> ResultRow {
+    schema
+        .iter()
+        .map(|column| (column.clone(), Value::Null))
+        .collect()
+}
+
+fn table_function_empty_schema(
+    name: &str,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Vec<String> {
+    let lower = super::builtin_function_dispatch_name(&name.to_ascii_lowercase());
+    let columns = if column_aliases.is_empty() {
+        match lower.as_str() {
+            "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
+                vec!["key".into(), "value".into()]
+            }
+            "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
+            | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
+            "rpq" => vec!["vertex_id".into()],
+            _ => vec![scalar_table_function_default_column(
+                &lower,
+                alias,
+                column_aliases,
+            )],
+        }
+    } else {
+        column_aliases.to_vec()
+    };
+    match alias {
+        Some(alias) => columns
+            .into_iter()
+            .map(|column| qualified_key(alias, &column))
+            .collect(),
+        None => columns,
+    }
+}
+
+fn is_json_array_table_function(name: &str) -> bool {
+    matches!(
+        name,
+        "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+    )
+}
+
+fn scalar_table_function_default_column(
+    normalized_name: &str,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> String {
+    column_aliases.first().cloned().unwrap_or_else(|| {
+        if is_json_array_table_function(normalized_name) {
+            "value".into()
+        } else {
+            alias.unwrap_or(normalized_name).to_string()
+        }
+    })
+}
+
+/// Materialize a repeatable FROM input under the session work-memory budget.
+/// DML statements may need to rescan their source for each target row; the
+/// shared spill keeps that requirement without retaining the full source in a
+/// cardinality-sized vector.
+pub(super) fn build_join_spill_with_ctes(
+    engine: &Engine,
+    from: &SourcePlan,
+    params: &[SQLParam],
+    ctes: &mut CteScope,
+) -> Result<uqa_execution::SharedSpill, SQLError> {
+    let operator = build_join_operator_with_ctes(engine, from, params, ctes, None, None)?;
+    let columns = operator.schema().to_vec();
+    let output = super::select::collect_query_operator(
+        engine,
+        columns,
+        operator,
+        QueryOutputMode::SharedSpill,
+    )?;
+    query_output_shared(output, "DML FROM")
 }
 
 fn save_and_remove_cte_names(
     ctes: &mut CteScope,
     names: &BTreeSet<String>,
-) -> Vec<(String, Option<Vec<ResultRow>>)> {
+) -> Vec<(String, Option<uqa_execution::SharedSpill>)> {
     names
         .iter()
         .map(|name| (name.clone(), ctes.remove_materialized(name)))
         .collect()
 }
 
-fn restore_cte_names(ctes: &mut CteScope, saved: Vec<(String, Option<Vec<ResultRow>>)>) {
+fn restore_cte_names(
+    ctes: &mut CteScope,
+    saved: Vec<(String, Option<uqa_execution::SharedSpill>)>,
+) {
     for (name, rows) in saved {
         match rows {
             Some(rows) => {
@@ -1153,75 +1044,6 @@ fn collect_source_query_cte_names(source: &SourcePlan, names: &mut BTreeSet<Stri
     }
 }
 
-fn query_contains_volatile_function(plan: &QueryPlan) -> bool {
-    plan.ctes
-        .iter()
-        .any(|cte| query_contains_volatile_function(&cte.query))
-        || match &plan.root {
-            RelationalPlan::QueryBlock(block) => {
-                select_contains_volatile_function(block)
-                    || block
-                        .subqueries
-                        .iter()
-                        .any(query_contains_volatile_function)
-                    || block
-                        .from
-                        .as_ref()
-                        .is_some_and(source_contains_volatile_query)
-            }
-            RelationalPlan::SetOp { left, right, .. } => {
-                query_contains_volatile_function(left) || query_contains_volatile_function(right)
-            }
-            RelationalPlan::Values { subqueries, .. } => {
-                subqueries.iter().any(query_contains_volatile_function)
-            }
-        }
-}
-
-fn source_contains_volatile_query(source: &SourcePlan) -> bool {
-    match source {
-        SourcePlan::Join { left, right, .. } => {
-            source_contains_volatile_query(left) || source_contains_volatile_query(right)
-        }
-        SourcePlan::Subquery { body, .. } => query_contains_volatile_function(body),
-        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => false,
-    }
-}
-
-fn materialize_subquery_rows(
-    result: SQLResult,
-    alias: Option<&str>,
-    column_aliases: &[String],
-) -> Vec<ResultRow> {
-    let cols = column_aliases.to_vec();
-    result
-        .rows
-        .into_iter()
-        .map(|mut r| {
-            if !cols.is_empty() {
-                let pairs: Vec<(String, Value)> = result
-                    .columns
-                    .iter()
-                    .zip(cols.iter())
-                    .filter_map(|(orig, new)| r.remove(orig).map(|v| (new.clone(), v)))
-                    .collect();
-                let mut renamed = ResultRow::new();
-                for (k, v) in pairs {
-                    renamed.insert(k, v);
-                }
-                if let Some(q) = alias {
-                    return prefix_row(q, &renamed);
-                }
-                renamed
-            } else if let Some(q) = alias {
-                prefix_row(q, &r)
-            } else {
-                r
-            }
-        })
-        .collect()
-}
-
 fn build_values_rows(
     rows: &[Vec<ScalarExpr>],
     alias: Option<&str>,
@@ -1263,111 +1085,137 @@ fn build_values_rows(
     Ok(out)
 }
 
-/// LATERAL join executor: re-evaluates the right side per left row
-/// so the right body can reference outer columns. We splice the
-/// outer row into a per-row CTE-style scope by registering it under
-/// the `__lateral__` reserved name and inlining its keys into a
-/// fresh CTE map; the right side then sees those columns as plain
-/// row keys when its internal expressions evaluate. Mirrors
-/// `PostgreSQL` LATERAL semantics.
-#[allow(clippy::too_many_arguments)]
-fn build_lateral_join_rows(
-    engine: &Engine,
-    left_rows: &[ResultRow],
-    right: &SourcePlan,
-    kind: JoinKind,
-    on: Option<&ScalarExpr>,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<Vec<ResultRow>, SQLError> {
-    use uqa_sql::expr::truthy;
-    let mut out: Vec<ResultRow> = Vec::new();
-    for left_row in left_rows {
-        let right_rows = match right {
+struct EngineLateralSource<'a> {
+    engine: &'a Engine,
+    right: SourcePlan,
+    on: Option<ScalarExpr>,
+    params: &'a [SQLParam],
+    ctes: CteScope,
+}
+
+impl uqa_execution::LateralSource for EngineLateralSource<'_> {
+    fn rows_for(
+        &mut self,
+        left_row: &ResultRow,
+    ) -> uqa_execution::ExecResult<uqa_execution::LateralRows> {
+        if let SourcePlan::Function {
+            name,
+            args,
+            alias,
+            column_aliases,
+            column_types,
+        } = &self.right
+        {
+            let hook = ScopedEngineHook::new(self.engine, &self.ctes);
+            let context = TableFunctionEvalContext::new(
+                self.engine,
+                self.params,
+                &hook,
+                &hook,
+                &self.ctes.scalar_subqueries,
+            );
+            return Ok(build_table_function_row_stream_with_row(
+                &context,
+                name,
+                args,
+                alias.as_deref(),
+                column_aliases,
+                column_types,
+                Some(left_row),
+            )?);
+        }
+        match &self.right {
             SourcePlan::Subquery {
                 body,
                 alias,
                 column_aliases,
             } => {
-                let result = execute_lateral_subquery(engine, body, left_row, params, ctes)?;
-                materialize_subquery_rows(result, alias.as_deref(), column_aliases)
+                let output = execute_lateral_subquery_output(
+                    self.engine,
+                    body,
+                    left_row,
+                    self.params,
+                    &self.ctes,
+                )?;
+                let source_columns = output.internal_columns.clone();
+                let rows = query_output_shared(output, "lateral subquery")?;
+                let reader = rows.read_rows()?;
+                let alias = alias.clone();
+                let aliases = column_aliases.clone();
+                Ok(Box::new(reader.map(move |row| {
+                    let row = row?;
+                    Ok(remap_subquery_row(
+                        row,
+                        &source_columns,
+                        alias.as_deref(),
+                        &aliases,
+                    ))
+                })))
             }
-            SourcePlan::Function {
-                name,
-                args,
-                alias,
-                column_aliases,
-                column_types,
-            } => {
-                let hook = ScopedEngineHook::new(engine, ctes);
-                let context = TableFunctionEvalContext::new(
-                    engine,
-                    params,
-                    &hook,
-                    &hook,
-                    &ctes.scalar_subqueries,
-                );
-                build_table_function_rows_with_row(
-                    &context,
-                    name,
-                    args,
-                    alias.as_deref(),
-                    column_aliases,
-                    column_types,
-                    Some(left_row),
-                )?
-            }
-            _ => build_join_rows_with_ctes(engine, right, params, ctes)?,
-        };
-        let scoped_hook = ScopedEngineHook::new(engine, ctes);
-        let subquery_arena = PlanSubqueryArena::new(&ctes.scalar_subqueries, Some(&scoped_hook));
-        for r_row in &right_rows {
-            let mut joined = ResultRow::new();
-            for (k, v) in left_row {
-                joined.insert(k.clone(), v.clone());
-            }
-            for (k, v) in r_row {
-                joined.insert(k.clone(), v.clone());
-            }
-            let keep = match (on, kind) {
-                (None, _) | (_, JoinKind::Cross) => true,
-                (Some(filter), _) => {
-                    let ctx = ScalarEvalContext::new(Some(&joined), params)
-                        .with_function_hook(&scoped_hook)
-                        .with_subquery_runner(&subquery_arena);
-                    truthy(&eval_scalar(filter, &ctx)?)
-                }
-            };
-            if keep {
-                out.push(joined);
+            SourcePlan::Function { .. } => Err(uqa_execution::ExecError::SQL(SQLError::Internal(
+                "function source reached the relational-source fallback".into(),
+            ))),
+            source => {
+                let operator = build_join_operator_with_ctes(
+                    self.engine,
+                    source,
+                    self.params,
+                    &mut self.ctes,
+                    None,
+                    None,
+                )?;
+                let columns = operator.schema().to_vec();
+                let output = super::select::collect_query_operator(
+                    self.engine,
+                    columns,
+                    operator,
+                    QueryOutputMode::SharedSpill,
+                )?;
+                let rows = query_output_shared(output, "lateral source")?;
+                Ok(Box::new(rows.read_rows()?))
             }
         }
     }
-    Ok(out)
+
+    fn matches(&mut self, joined: &ResultRow) -> uqa_execution::ExecResult<bool> {
+        let Some(filter) = self.on.as_ref() else {
+            return Ok(true);
+        };
+        let scoped_hook = ScopedEngineHook::new(self.engine, &self.ctes);
+        let subquery_arena =
+            PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(&scoped_hook));
+        let context = ScalarEvalContext::new(Some(joined), self.params)
+            .with_function_hook(&scoped_hook)
+            .with_subquery_runner(&subquery_arena);
+        Ok(uqa_sql::expr::truthy(&eval_scalar(filter, &context)?))
+    }
 }
 
-pub(super) fn execute_lateral_subquery(
+/// Build the engine-specific correlated source and execute it through the
+/// common physical `LateralJoin` operator.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn execute_lateral_subquery_output(
     engine: &Engine,
     plan: &QueryPlan,
     outer_row: &ResultRow,
     params: &[SQLParam],
     ctes: &CteScope,
-) -> Result<SQLResult, SQLError> {
+) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
     super::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut scoped_ctes)?;
-    execute_lateral_relational_root(engine, &plan.root, outer_row, params, &mut scoped_ctes)
+    execute_lateral_relational_root_output(engine, &plan.root, outer_row, params, &mut scoped_ctes)
 }
 
-fn execute_lateral_relational_root(
+fn execute_lateral_relational_root_output(
     engine: &Engine,
     root: &RelationalPlan,
     outer_row: &ResultRow,
     params: &[SQLParam],
     ctes: &mut CteScope,
-) -> Result<SQLResult, SQLError> {
+) -> Result<QueryOutput, SQLError> {
     match root {
         RelationalPlan::QueryBlock(block) => {
-            execute_lateral_query_block(engine, block, outer_row, params, ctes)
+            execute_lateral_query_block_output(engine, block, outer_row, params, ctes)
         }
         RelationalPlan::SetOp {
             kind,
@@ -1379,35 +1227,48 @@ fn execute_lateral_relational_root(
             offset,
             subqueries,
         } => {
-            let lhs = execute_lateral_subquery(engine, left, outer_row, params, ctes)?;
-            let rhs = execute_lateral_subquery(engine, right, outer_row, params, ctes)?;
-            let mut result = super::select::combine_set_results(*kind, *all, lhs, rhs);
-            if !order_by.is_empty() || limit.is_some() || offset.is_some() {
-                let order_plan = QueryBlockPlan {
-                    projections: Vec::new(),
-                    from: None,
-                    r#where: None,
-                    compute: ComputePlan::Project,
-                    group_by: Vec::new(),
-                    grouping_sets: Vec::new(),
-                    having: None,
-                    order_by: order_by.clone(),
-                    limit: limit.as_deref().cloned(),
-                    offset: offset.as_deref().cloned(),
-                    distinct: false,
-                    distinct_on: Vec::new(),
-                    subqueries: subqueries.clone(),
-                    access: AccessPathPlan::Row,
-                };
-                result.rows = apply_row_order_limit_with_ctes(
-                    result.rows,
-                    &order_plan,
-                    engine,
-                    params,
-                    ctes,
-                )?;
-            }
-            Ok(result)
+            let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+            let lhs =
+                execute_lateral_subquery_output(engine, left, outer_row, params, &scoped_ctes)?;
+            let columns = lhs.columns.clone();
+            let lhs = query_output_shared(lhs, "lateral set left")?;
+            let rhs =
+                execute_lateral_subquery_output(engine, right, outer_row, params, &scoped_ctes)?;
+            let rhs = query_output_shared(rhs, "lateral set right")?;
+            let order_plan =
+                (!order_by.is_empty() || limit.is_some() || offset.is_some()).then(|| {
+                    QueryBlockPlan {
+                        projections: Vec::new(),
+                        from: None,
+                        r#where: None,
+                        compute: ComputePlan::Project,
+                        group_by: Vec::new(),
+                        grouping_sets: Vec::new(),
+                        having: None,
+                        order_by: order_by.clone(),
+                        limit: limit.as_deref().cloned(),
+                        offset: offset.as_deref().cloned(),
+                        distinct: false,
+                        distinct_on: Vec::new(),
+                        subqueries: subqueries.clone(),
+                        access: AccessPathPlan::Row,
+                    }
+                });
+            let execution = super::select::SetSpillExecution::new(
+                *kind,
+                *all,
+                columns,
+                lhs,
+                rhs,
+                order_plan.as_ref(),
+                QueryOutputMode::SharedSpill,
+            );
+            super::select::combine_set_spills_with_order_output(
+                engine,
+                execution,
+                params,
+                &scoped_ctes,
+            )
         }
         RelationalPlan::Values { rows, subqueries } => {
             let columns: Vec<String> = rows
@@ -1435,96 +1296,86 @@ fn execute_lateral_relational_root(
                     Ok(row)
                 })
                 .collect::<Result<Vec<_>, SQLError>>()?;
-            Ok(SQLResult::from_rows(columns, rows))
+            let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
+                Box::new(uqa_execution::TableScan::from_rows(columns.clone(), rows));
+            super::select::collect_query_operator(
+                engine,
+                columns,
+                operator,
+                QueryOutputMode::SharedSpill,
+            )
         }
     }
 }
 
-fn execute_lateral_query_block(
+fn execute_lateral_query_block_output(
     engine: &Engine,
     stmt: &QueryBlockPlan,
     outer_row: &ResultRow,
     params: &[SQLParam],
     scoped_ctes: &mut CteScope,
-) -> Result<SQLResult, SQLError> {
-    let Some(from) = stmt.from.as_ref() else {
-        // A FROM-less body still applies its WHERE clause against the
-        // outer scope (`EXISTS (SELECT 1 WHERE false)` has no rows).
-        if let Some(filter) = stmt.r#where.as_ref() {
-            let hook = ScopedEngineHook::new(engine, scoped_ctes);
-            let ctx = PhysicalEvalContext::new(Some(outer_row), params)
-                .with_function_hook(&hook)
-                .with_subquery_runner(&hook);
-            if !uqa_sql::expr::truthy(&eval_physical_scalar(filter, &stmt.subqueries, &ctx)?) {
-                return Ok(SQLResult::from_rows(
-                    projection_columns(&stmt.projections),
-                    Vec::new(),
-                ));
+) -> Result<QueryOutput, SQLError> {
+    let mut scoped_ctes = scoped_ctes.enter_scalar_subqueries(&stmt.subqueries);
+    let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
+        if let Some(from) = stmt.from.as_ref() {
+            let child =
+                build_join_operator_with_ctes(engine, from, params, &mut scoped_ctes, None, None)?;
+            let mut schema = outer_row.keys().cloned().collect::<Vec<_>>();
+            for column in child.schema() {
+                if !schema.contains(column) {
+                    schema.push(column.clone());
+                }
+                if let Some((_, unqualified)) = column.rsplit_once('.') {
+                    if !schema.iter().any(|existing| existing == unqualified) {
+                        schema.push(unqualified.to_string());
+                    }
+                }
             }
-        }
-        let hook = ScopedEngineHook::new(engine, scoped_ctes);
-        let projected = project_join_row_with_plan(
-            engine,
-            &hook,
-            &hook,
-            &stmt.subqueries,
-            outer_row,
-            &stmt.projections,
-            params,
-        )?;
-        return Ok(SQLResult::from_rows(
-            projection_columns(&stmt.projections),
-            vec![projected],
-        ));
-    };
-
-    let inner_rows = build_join_rows_with_ctes(engine, from, params, scoped_ctes)?;
-    let mut filtered: Vec<ResultRow> = Vec::with_capacity(inner_rows.len());
-    for inner in inner_rows {
-        let merged = merge_lateral_scope_rows(outer_row, &inner);
-        let keep = match stmt.r#where.as_ref() {
-            None => true,
-            Some(filter) => {
-                let hook = ScopedEngineHook::new(engine, scoped_ctes);
-                let ctx = PhysicalEvalContext::new(Some(&merged), params)
-                    .with_function_hook(&hook)
-                    .with_subquery_runner(&hook);
-                uqa_sql::expr::truthy(&eval_physical_scalar(filter, &stmt.subqueries, &ctx)?)
-            }
+            let outer = outer_row.clone();
+            Box::new(uqa_execution::MapRows::new(
+                child,
+                schema,
+                std::sync::Arc::new(move |inner| Ok(merge_lateral_scope_rows(&outer, &inner))),
+            ))
+        } else {
+            Box::new(uqa_execution::TableScan::from_rows(
+                outer_row.keys().cloned().collect(),
+                vec![outer_row.clone()],
+            ))
         };
-        if keep {
-            filtered.push(merged);
-        }
-    }
-
-    if has_aggregate(engine, &stmt.projections)
-        || !stmt.group_by.is_empty()
-        || !stmt.grouping_sets.is_empty()
-    {
-        let columns = projection_columns(&stmt.projections);
-        let rows = aggregate_join_rows(engine, stmt, &filtered, params, scoped_ctes)?;
-        let rows = apply_row_order_limit_with_ctes(rows, stmt, engine, params, scoped_ctes)?;
-        return Ok(SQLResult::from_rows(columns, rows));
-    }
-
-    let ordered = apply_row_order_limit_with_ctes(filtered, stmt, engine, params, scoped_ctes)?;
     let columns = projection_columns(&stmt.projections);
-    let hook = ScopedEngineHook::new(engine, scoped_ctes);
-    let rows = ordered
-        .iter()
-        .map(|src| {
-            project_join_row_with_plan(
-                engine,
-                &hook,
-                &hook,
-                &stmt.subqueries,
-                src,
-                &stmt.projections,
-                params,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(SQLResult::from_rows(columns, rows))
+    super::select::execute_query_block_operator_output(
+        engine,
+        operator,
+        stmt.r#where.clone(),
+        stmt,
+        stmt,
+        params,
+        &scoped_ctes,
+        columns,
+        QueryOutputMode::SharedSpill,
+    )
+}
+
+fn remap_subquery_row(
+    mut row: ResultRow,
+    source_columns: &[String],
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> ResultRow {
+    let mut output = ResultRow::new();
+    for (index, source) in source_columns.iter().enumerate() {
+        let target = column_aliases
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| source.clone());
+        let value = row.remove(source).unwrap_or(Value::Null);
+        output.insert(target, value);
+    }
+    match alias {
+        Some(alias) => prefix_row(alias, &output),
+        None => output,
+    }
 }
 
 fn merge_lateral_scope_rows(outer_row: &ResultRow, inner_row: &ResultRow) -> ResultRow {
@@ -1564,16 +1415,19 @@ impl<'a> TableFunctionEvalContext<'a> {
     }
 }
 
-#[allow(clippy::similar_names)]
-pub(super) fn build_table_function_rows(
+/// Build a table-function result as a fallible owned row stream. Built-in
+/// cardinality-producing functions are evaluated lazily; registered/user
+/// functions keep their existing vector-valued API and are adapted at this
+/// explicit extension boundary.
+pub(super) fn build_table_function_row_stream(
     context: &TableFunctionEvalContext<'_>,
     name: &str,
     args: &[ScalarExpr],
     alias: Option<&str>,
     column_aliases: &[String],
     column_types: &[String],
-) -> Result<Vec<ResultRow>, SQLError> {
-    build_table_function_rows_with_row(
+) -> Result<uqa_execution::ProjectRows, SQLError> {
+    build_table_function_row_stream_with_row(
         context,
         name,
         args,
@@ -1582,6 +1436,367 @@ pub(super) fn build_table_function_rows(
         column_types,
         None,
     )
+}
+
+#[allow(clippy::similar_names)]
+fn build_table_function_row_stream_with_row(
+    context: &TableFunctionEvalContext<'_>,
+    name: &str,
+    args: &[ScalarExpr],
+    alias: Option<&str>,
+    column_aliases: &[String],
+    column_types: &[String],
+    row: Option<&ResultRow>,
+) -> Result<uqa_execution::ProjectRows, SQLError> {
+    let identity = name.to_ascii_lowercase();
+    let lower = super::builtin_function_dispatch_name(&identity);
+    if matches!(
+        lower.as_str(),
+        "generate_series"
+            | "unnest"
+            | "regexp_split_to_table"
+            | "string_to_table"
+            | "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text"
+            | "json_each"
+            | "jsonb_each"
+            | "json_each_text"
+            | "jsonb_each_text"
+    ) {
+        let subquery_arena =
+            PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
+        let scalar_context = ScalarEvalContext::new(row, context.params)
+            .with_function_hook(context.eval_hook)
+            .with_subquery_runner(&subquery_arena);
+        let call_args = eval_call_arguments(args, &scalar_context)?;
+        if call_args.iter().any(|(name, _)| name.is_some()) {
+            return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
+        }
+        let evaluated: Vec<Value> = call_args.into_iter().map(|(_, value)| value).collect();
+        let json_array_function = is_json_array_table_function(&lower);
+        let default_col = scalar_table_function_default_column(&lower, alias, column_aliases);
+        let row_builder = ScalarFunctionRowBuilder {
+            default_col,
+            function_name: lower.clone(),
+            qualifier: alias.map(str::to_string),
+            preserve_function_name: !json_array_function
+                && column_aliases.is_empty()
+                && alias.is_some(),
+        };
+
+        let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
+            "generate_series" => generate_series_values(evaluated)?,
+            "unnest" => Box::new(evaluated.into_iter().flat_map(|value| match value {
+                Value::List(items) => items,
+                value => vec![value],
+            })),
+            "regexp_split_to_table" => regexp_split_values(evaluated)?,
+            "string_to_table" => string_to_table_values(evaluated)?,
+            "json_array_elements"
+            | "jsonb_array_elements"
+            | "json_array_elements_text"
+            | "jsonb_array_elements_text" => json_array_values(&lower, evaluated)?,
+            "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
+                return json_each_row_stream(&lower, evaluated, alias, column_aliases);
+            }
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "streaming table function `{lower}` reached an unsupported dispatch branch"
+                )));
+            }
+        };
+        return Ok(Box::new(
+            values.map(move |value| Ok(row_builder.row(value))),
+        ));
+    }
+
+    if context.engine.has_registered_table_function(&identity) {
+        let subquery_arena =
+            PlanSubqueryArena::new(context.subqueries, Some(context.subquery_runner));
+        let scalar_context = ScalarEvalContext::new(row, context.params)
+            .with_function_hook(context.eval_hook)
+            .with_subquery_runner(&subquery_arena);
+        let call_args = eval_call_arguments(args, &scalar_context)?;
+        if call_args.iter().any(|(name, _)| name.is_some()) {
+            return Err(uqa_sql::expr::unknown_function_error(&lower, &call_args));
+        }
+        let evaluated = call_args
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>();
+        let result = context
+            .engine
+            .call_registered_table_function_stream(&identity, &evaluated)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "registered table function `{name}` disappeared during execution"
+                ))
+            })??;
+        return registered_table_function_row_stream(name, result, alias, column_aliases);
+    }
+
+    let rows = build_table_function_rows_with_row(
+        context,
+        name,
+        args,
+        alias,
+        column_aliases,
+        column_types,
+        row,
+    )?;
+    Ok(Box::new(rows.into_iter().map(Ok)))
+}
+
+#[derive(Clone)]
+struct ScalarFunctionRowBuilder {
+    default_col: String,
+    function_name: String,
+    qualifier: Option<String>,
+    preserve_function_name: bool,
+}
+
+impl ScalarFunctionRowBuilder {
+    fn row(&self, value: Value) -> ResultRow {
+        let mut row = ResultRow::new();
+        row.insert(self.default_col.clone(), value.clone());
+        if self.preserve_function_name && self.default_col != self.function_name {
+            row.insert(self.function_name.clone(), value);
+        }
+        self.qualifier
+            .as_deref()
+            .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row))
+    }
+}
+
+fn generate_series_values(
+    evaluated: Vec<Value>,
+) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
+    if !(2..=3).contains(&evaluated.len()) {
+        return Err(SQLError::TypeMismatch(
+            "generate_series requires 2-3 args".into(),
+        ));
+    }
+    let start = generate_series_integer(&evaluated[0], "start")?;
+    let end = generate_series_integer(&evaluated[1], "stop")?;
+    let increment = evaluated
+        .get(2)
+        .map_or(Ok(1), |value| generate_series_integer(value, "step"))?;
+    if increment == 0 {
+        return Err(SQLError::TypeMismatch(
+            "generate_series step cannot be 0".into(),
+        ));
+    }
+    let mut current = Some(start);
+    Ok(Box::new(std::iter::from_fn(move || {
+        let value = current?;
+        if (increment > 0 && value > end) || (increment < 0 && value < end) {
+            current = None;
+            return None;
+        }
+        current = value.checked_add(increment);
+        Some(Value::Int(value))
+    })))
+}
+
+fn generate_series_integer(value: &Value, label: &str) -> Result<i64, SQLError> {
+    match value {
+        Value::Int(value) => Ok(*value),
+        Value::Float(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && *value >= i64::MIN as f64
+                && *value < -(i64::MIN as f64) =>
+        {
+            Ok(*value as i64)
+        }
+        _ => Err(SQLError::TypeMismatch(format!(
+            "generate_series {label} must be an integer"
+        ))),
+    }
+}
+
+struct RegexSplitValues {
+    regex: regex::Regex,
+    source: String,
+    piece_start: usize,
+    search_start: usize,
+    tail_pending: bool,
+    done: bool,
+}
+
+impl Iterator for RegexSplitValues {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        if self.tail_pending {
+            self.done = true;
+            return Some(Value::Str(self.source[self.piece_start..].to_string()));
+        }
+        let Some(found) = self.regex.find_at(&self.source, self.search_start) else {
+            self.done = true;
+            return Some(Value::Str(self.source[self.piece_start..].to_string()));
+        };
+        let piece = self.source[self.piece_start..found.start()].to_string();
+        self.piece_start = found.end();
+        if found.start() == found.end() {
+            if found.end() == self.source.len() {
+                self.tail_pending = true;
+            } else {
+                let advance = self.source[found.end()..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+                self.search_start = found.end().saturating_add(advance);
+            }
+        } else {
+            self.search_start = found.end();
+        }
+        Some(Value::Str(piece))
+    }
+}
+
+fn regexp_split_values(
+    evaluated: Vec<Value>,
+) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
+    if evaluated.len() != 2 {
+        return Err(SQLError::TypeMismatch(
+            "regexp_split_to_table requires 2 args".into(),
+        ));
+    }
+    let source = match &evaluated[0] {
+        Value::Str(value) => value.clone(),
+        _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 1".into())),
+    };
+    let pattern = match &evaluated[1] {
+        Value::Str(value) => value,
+        _ => return Err(SQLError::TypeMismatch("regexp_split_to_table arg 2".into())),
+    };
+    let regex = regex::Regex::new(pattern)
+        .map_err(|error| SQLError::TypeMismatch(format!("invalid regex: {error}")))?;
+    Ok(Box::new(RegexSplitValues {
+        regex,
+        source,
+        piece_start: 0,
+        search_start: 0,
+        tail_pending: false,
+        done: false,
+    }))
+}
+
+fn string_to_table_values(
+    evaluated: Vec<Value>,
+) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
+    if evaluated.len() != 2 {
+        return Err(SQLError::TypeMismatch(
+            "string_to_table requires 2 args".into(),
+        ));
+    }
+    let source = match &evaluated[0] {
+        Value::Str(value) => value.clone(),
+        _ => return Err(SQLError::TypeMismatch("string_to_table arg 1".into())),
+    };
+    let delimiter = match &evaluated[1] {
+        Value::Str(value) => value.clone(),
+        _ => return Err(SQLError::TypeMismatch("string_to_table arg 2".into())),
+    };
+    Ok(Box::new(LiteralSplitValues {
+        source,
+        delimiter,
+        cursor: 0,
+        done: false,
+    }))
+}
+
+struct LiteralSplitValues {
+    source: String,
+    delimiter: String,
+    cursor: usize,
+    done: bool,
+}
+
+impl Iterator for LiteralSplitValues {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        if self.delimiter.is_empty() {
+            let value = self.source[self.cursor..].chars().next()?;
+            self.cursor += value.len_utf8();
+            if self.cursor == self.source.len() {
+                self.done = true;
+            }
+            return Some(Value::Str(value.to_string()));
+        }
+        if let Some(relative) = self.source[self.cursor..].find(&self.delimiter) {
+            let delimiter_start = self.cursor + relative;
+            let piece = self.source[self.cursor..delimiter_start].to_string();
+            self.cursor = delimiter_start + self.delimiter.len();
+            return Some(Value::Str(piece));
+        }
+        self.done = true;
+        Some(Value::Str(self.source[self.cursor..].to_string()))
+    }
+}
+
+fn json_array_values(
+    name: &str,
+    evaluated: Vec<Value>,
+) -> Result<Box<dyn Iterator<Item = Value> + Send>, SQLError> {
+    if evaluated.len() != 1 {
+        return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
+    }
+    let parsed = json_table_arg(&evaluated[0], name)?;
+    let serde_json::Value::Array(items) = parsed else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name}: argument is not an array"
+        )));
+    };
+    Ok(Box::new(
+        items
+            .into_iter()
+            .map(|value| json_table_value_to_text(&value)),
+    ))
+}
+
+fn json_each_row_stream(
+    name: &str,
+    evaluated: Vec<Value>,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<uqa_execution::ProjectRows, SQLError> {
+    if evaluated.len() != 1 {
+        return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
+    }
+    let parsed = json_table_arg(&evaluated[0], name)?;
+    let serde_json::Value::Object(object) = parsed else {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name}: argument is not an object"
+        )));
+    };
+    let key_column = column_aliases
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "key".into());
+    let value_column = column_aliases
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "value".into());
+    let qualifier = alias.map(str::to_string);
+    Ok(Box::new(object.into_iter().map(move |(key, value)| {
+        let mut row = ResultRow::new();
+        row.insert(key_column.clone(), Value::Str(key));
+        row.insert(value_column.clone(), json_table_value_to_text(&value));
+        Ok(qualifier
+            .as_deref()
+            .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row)))
+    })))
 }
 
 #[allow(clippy::similar_names)]
@@ -1600,7 +1815,8 @@ fn build_table_function_rows_with_row(
     let ctx = ScalarEvalContext::new(row, context.params)
         .with_function_hook(context.eval_hook)
         .with_subquery_runner(&subquery_arena);
-    let lower = name.to_ascii_lowercase();
+    let identity = name.to_ascii_lowercase();
+    let lower = super::builtin_function_dispatch_name(&identity);
     let call_args = eval_call_arguments(args, &ctx)?;
     let has_named_args = call_args.iter().any(|(name, _)| name.is_some());
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
@@ -1623,12 +1839,12 @@ fn build_table_function_rows_with_row(
         out.push(r);
     };
     if !has_named_args {
-        if let Some(result) = engine.call_registered_table_function(&lower, &evaluated) {
+        if let Some(result) = engine.call_registered_table_function(&identity, &evaluated) {
             return registered_table_function_rows(name, result?, qual, column_aliases);
         }
     }
     if let Some(result) =
-        crate::sql::plpgsql_exec::call_user_table_function(engine, &lower, &call_args)
+        crate::sql::plpgsql_exec::call_user_table_function(engine, &identity, &call_args)
     {
         return registered_table_function_rows(name, result?, qual, column_aliases);
     }
@@ -1637,46 +1853,8 @@ fn build_table_function_rows_with_row(
     }
     match lower.as_str() {
         "generate_series" => {
-            if !(2..=3).contains(&evaluated.len()) {
-                return Err(SQLError::TypeMismatch(
-                    "generate_series requires 2-3 args".into(),
-                ));
-            }
-            let start = match &evaluated[0] {
-                Value::Int(i) => *i,
-                Value::Float(f) => *f as i64,
-                _ => return Err(SQLError::TypeMismatch("generate_series start".into())),
-            };
-            let stop = match &evaluated[1] {
-                Value::Int(i) => *i,
-                Value::Float(f) => *f as i64,
-                _ => return Err(SQLError::TypeMismatch("generate_series stop".into())),
-            };
-            let step = if evaluated.len() == 3 {
-                match &evaluated[2] {
-                    Value::Int(i) => *i,
-                    Value::Float(f) => *f as i64,
-                    _ => return Err(SQLError::TypeMismatch("generate_series step".into())),
-                }
-            } else {
-                1
-            };
-            if step == 0 {
-                return Err(SQLError::TypeMismatch(
-                    "generate_series step cannot be 0".into(),
-                ));
-            }
-            let mut current = start;
-            if step > 0 {
-                while current <= stop {
-                    push_scalar(&mut out, Value::Int(current));
-                    current += step;
-                }
-            } else {
-                while current >= stop {
-                    push_scalar(&mut out, Value::Int(current));
-                    current += step;
-                }
+            for value in generate_series_values(evaluated)? {
+                push_scalar(&mut out, value);
             }
             Ok(out)
         }
@@ -1777,10 +1955,12 @@ fn build_table_function_rows_with_row(
         // _build_list_analyzers / _build_set_table_analyzer.
         // -------------------------------------------------------------
         "create_analyzer" => {
-            if evaluated.len() < 2 {
-                return Err(SQLError::TypeMismatch(
-                    "create_analyzer requires (name, config_json)".into(),
-                ));
+            if evaluated.len() != 2 {
+                return Err(SQLError::BadArity {
+                    name: "create_analyzer".into(),
+                    expected: "2".into(),
+                    actual: evaluated.len(),
+                });
             }
             let analyzer_name = match &evaluated[0] {
                 Value::Str(s) => s.clone(),
@@ -1808,16 +1988,25 @@ fn build_table_function_rows_with_row(
             Ok(vec![r])
         }
         "drop_analyzer" => {
-            if evaluated.is_empty() {
-                return Err(SQLError::TypeMismatch(
-                    "drop_analyzer requires a name argument".into(),
-                ));
+            if evaluated.len() != 1 {
+                return Err(SQLError::BadArity {
+                    name: "drop_analyzer".into(),
+                    expected: "1".into(),
+                    actual: evaluated.len(),
+                });
             }
             let analyzer_name = match &evaluated[0] {
                 Value::Str(s) => s.clone(),
                 _ => return Err(SQLError::TypeMismatch("drop_analyzer arg 1".into())),
             };
-            engine.drop_named_analyzer(&analyzer_name);
+            let removed = engine
+                .drop_named_analyzer(&analyzer_name)
+                .map_err(SQLError::Internal)?;
+            if !removed {
+                return Err(SQLError::Unsupported(format!(
+                    "analyzer `{analyzer_name}` does not exist"
+                )));
+            }
             let mut r = ResultRow::new();
             r.insert(
                 column_aliases
@@ -1833,11 +2022,21 @@ fn build_table_function_rows_with_row(
             Ok(vec![r])
         }
         "list_analyzers" => {
+            if !evaluated.is_empty() {
+                return Err(SQLError::BadArity {
+                    name: "list_analyzers".into(),
+                    expected: "0".into(),
+                    actual: evaluated.len(),
+                });
+            }
             // Match UQA behavior for: include the four built-in analyzers
             // (`whitespace`, `standard`, `standard_cjk`, `keyword`) on
             // top of every user-registered named analyzer.
-            let mut names: std::collections::BTreeSet<String> =
-                engine.list_named_analyzers().into_iter().collect();
+            let mut names: std::collections::BTreeSet<String> = engine
+                .list_named_analyzers()
+                .map_err(SQLError::Unsupported)?
+                .into_iter()
+                .collect();
             for builtin in ["whitespace", "standard", "standard_cjk", "keyword"] {
                 names.insert(builtin.to_string());
             }
@@ -1867,27 +2066,30 @@ fn build_table_function_rows_with_row(
                 Some(_) => return Err(SQLError::TypeMismatch("fts_index_stats arg 1".into())),
                 None => None,
             };
-            for stat in engine.fts_index_stats(table_filter) {
+            for stat in engine.fts_index_stats(table_filter)? {
                 let mut r = ResultRow::new();
                 r.insert("table_name".into(), Value::Str(stat.table_name));
                 r.insert("field".into(), Value::Str(stat.field));
                 r.insert("analyzer".into(), Value::Str(stat.analyzer));
                 r.insert(
                     "posting_count".into(),
-                    Value::Int(stat.posting_count as i64),
+                    checked_integer_value(stat.posting_count, "posting count")?,
                 );
                 r.insert(
                     "doc_length_count".into(),
-                    Value::Int(stat.doc_length_count as i64),
+                    checked_integer_value(stat.doc_length_count, "document-length count")?,
                 );
                 r.insert(
                     "indexed_doc_count".into(),
-                    Value::Int(stat.indexed_doc_count as i64),
+                    checked_integer_value(stat.indexed_doc_count, "indexed-document count")?,
                 );
-                r.insert("term_count".into(), Value::Int(stat.term_count as i64));
+                r.insert(
+                    "term_count".into(),
+                    checked_integer_value(stat.term_count, "term count")?,
+                );
                 r.insert(
                     "total_field_length".into(),
-                    Value::Int(stat.total_field_length as i64),
+                    checked_integer_value(stat.total_field_length, "total field length")?,
                 );
                 let r = match qual {
                     Some(a) => prefix_row(a, &r),
@@ -1898,10 +2100,12 @@ fn build_table_function_rows_with_row(
             Ok(out)
         }
         "set_table_analyzer" => {
-            if evaluated.len() < 3 {
-                return Err(SQLError::TypeMismatch(
-                    "set_table_analyzer requires (table, field, analyzer_name[, phase])".into(),
-                ));
+            if !(3..=4).contains(&evaluated.len()) {
+                return Err(SQLError::BadArity {
+                    name: "set_table_analyzer".into(),
+                    expected: "3 or 4".into(),
+                    actual: evaluated.len(),
+                });
             }
             let target_table = match &evaluated[0] {
                 Value::Str(s) => s.clone(),
@@ -1918,7 +2122,11 @@ fn build_table_function_rows_with_row(
             let phase = if evaluated.len() > 3 {
                 match &evaluated[3] {
                     Value::Str(s) => s.clone(),
-                    _ => "both".into(),
+                    _ => {
+                        return Err(SQLError::TypeMismatch(
+                            "set_table_analyzer phase must be a string".into(),
+                        ));
+                    }
                 }
             } else {
                 "both".into()
@@ -1957,7 +2165,11 @@ fn build_table_function_rows_with_row(
                 "pagerank" | "graph_pagerank" => graph_pagerank_entries(engine, &graph)?,
                 "hits" | "graph_hits" => graph_hits_entries(engine, &graph)?,
                 "betweenness" | "graph_betweenness" => graph_betweenness_entries(engine, &graph)?,
-                _ => unreachable!(),
+                _ => {
+                    return Err(SQLError::Internal(format!(
+                        "graph centrality function `{lower}` reached an unsupported dispatch branch"
+                    )));
+                }
             };
             let id_col = column_aliases
                 .first()
@@ -1969,7 +2181,7 @@ fn build_table_function_rows_with_row(
                 .unwrap_or_else(|| "_score".into());
             for entry in entries {
                 let mut r = ResultRow::new();
-                r.insert(id_col.clone(), Value::Int(entry.doc_id as i64));
+                r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
                 r.insert(score_col.clone(), Value::Float(entry.score));
                 let r = match qual {
                     Some(a) => prefix_row(a, &r),
@@ -1993,26 +2205,27 @@ fn build_table_function_rows_with_row(
                 _ => return Err(SQLError::TypeMismatch("rpq.expr must be string".into())),
             };
             let start = match &evaluated[1] {
-                Value::Int(n) => *n as u64,
+                Value::Int(n) => u64::try_from(*n).map_err(|_| {
+                    SQLError::TypeMismatch("rpq.start must be a non-negative integer".into())
+                })?,
                 _ => return Err(SQLError::TypeMismatch("rpq.start must be integer".into())),
             };
             let graph = expect_optional_graph_value(engine, evaluated.get(2), "rpq")?;
-            let path = uqa_graph::parse_rpq(&expr_str)
-                .map_err(|e| SQLError::Unsupported(format!("{e:?}")))?;
-            let pl = engine
-                .graph_with(&graph, |store| {
-                    uqa_graph::RegularPathQuery::new(path, &graph)
-                        .from_vertex(start)
-                        .execute(store)
-                })
-                .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?;
+            let entries = execute_tree_entries(
+                engine,
+                &uqa_operators::OperatorTree::RegularPathQuery {
+                    rpq_source: expr_str,
+                    start_vertex: start,
+                    graph,
+                },
+            )?;
             let id_col = column_aliases
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "vertex_id".into());
-            for entry in pl.inner().entries() {
+            for entry in entries {
                 let mut r = ResultRow::new();
-                r.insert(id_col.clone(), Value::Int(entry.doc_id as i64));
+                r.insert(id_col.clone(), doc_id_value(entry.doc_id)?);
                 let r = match qual {
                     Some(a) => prefix_row(a, &r),
                     None => r,
@@ -2071,266 +2284,62 @@ fn registered_table_function_rows(
     Ok(out)
 }
 
-/// Detect an equijoin shape `<col_a> = <col_b>` and run a hash join.
-///
-/// Returns `Some(rows)` when the predicate is a clean equality
-/// between qualified columns from the two sides. Returns `None` for
-/// every other shape; the caller then falls back to the nested-loop
-/// cross filter.
-fn try_hash_inner_join(
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    left_rows: &[ResultRow],
-    right_rows: &[ResultRow],
-    on: Option<&ScalarExpr>,
-    params: &[SQLParam],
-) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(on_expr) = on else {
-        return Ok(None);
-    };
-    let Some(equalities) = split_join_equalities(on_expr) else {
-        return Ok(None);
-    };
-    let mut left_keys = Vec::with_capacity(equalities.len());
-    let mut right_keys = Vec::with_capacity(equalities.len());
-    for (lhs, rhs) in equalities {
-        let Some((left_key, right_key)) = decide_join_sides(
-            eval_hook,
-            subquery_runner,
-            left_rows,
-            right_rows,
-            lhs,
-            rhs,
-            params,
-        ) else {
-            return Ok(None);
-        };
-        left_keys.push(left_key);
-        right_keys.push(right_key);
+fn registered_table_function_row_stream(
+    name: &str,
+    result: SQLTableFunctionStream,
+    alias: Option<&str>,
+    column_aliases: &[String],
+) -> Result<uqa_execution::ProjectRows, SQLError> {
+    if result.columns.is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "table function `{name}` returned no columns"
+        )));
     }
-    // Use the shared hash-join algorithm from `uqa-joins`. The closures
-    // evaluate the picked join keys against each row and lift the
-    // result into a hashable `JoinKey`; null-valued keys are skipped
-    // so they do not match anything.
-    use uqa_joins::row_join::try_hash_inner_join;
-    let out = if left_keys.len() == 1 {
-        let left_accessor = JoinKeyAccessor::new(left_keys[0]);
-        let right_accessor = JoinKeyAccessor::new(right_keys[0]);
-        try_hash_inner_join(
-            left_rows,
-            right_rows,
-            |row| left_accessor.key(row, eval_hook, subquery_runner, params),
-            |row| right_accessor.key(row, eval_hook, subquery_runner, params),
-        )?
-    } else {
-        try_hash_inner_join(
-            left_rows,
-            right_rows,
-            |row| composite_join_key(&left_keys, row, eval_hook, subquery_runner, params),
-            |row| composite_join_key(&right_keys, row, eval_hook, subquery_runner, params),
-        )?
-    };
-    Ok(Some(out))
-}
-
-fn try_hash_left_join(
-    runtime: &JoinRuntime<'_>,
-    left_rows: &[ResultRow],
-    right_rows: &[ResultRow],
-    right_from: &SourcePlan,
-    on: Option<&ScalarExpr>,
-) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(on_expr) = on else {
-        return Ok(None);
-    };
-    let Some(equalities) = split_join_equalities(on_expr) else {
-        return Ok(None);
-    };
-    if left_rows.is_empty() || right_rows.is_empty() {
-        return Ok(None);
-    }
-    let mut left_keys = Vec::with_capacity(equalities.len());
-    let mut right_keys = Vec::with_capacity(equalities.len());
-    for (lhs, rhs) in equalities {
-        let Some((left_key, right_key)) = decide_join_sides(
-            runtime.function_hook,
-            runtime.subquery_runner,
-            left_rows,
-            right_rows,
-            lhs,
-            rhs,
-            runtime.params,
-        ) else {
-            return Ok(None);
-        };
-        left_keys.push(left_key);
-        right_keys.push(right_key);
-    }
-
-    let mut index: std::collections::HashMap<JoinKey, Vec<&ResultRow>> =
-        std::collections::HashMap::with_capacity(right_rows.len());
-    for row in right_rows {
-        if let Some(key) = join_key_for_exprs(
-            &right_keys,
-            row,
-            runtime.function_hook,
-            runtime.subquery_runner,
-            runtime.params,
-        )? {
-            index.entry(key).or_default().push(row);
-        }
-    }
-
-    let mut out = Vec::with_capacity(left_rows.len());
-    for left in left_rows {
-        let key = join_key_for_exprs(
-            &left_keys,
-            left,
-            runtime.function_hook,
-            runtime.subquery_runner,
-            runtime.params,
-        )?;
-        let matches = key.as_ref().and_then(|key| index.get(key));
-        match matches {
-            Some(rows) if !rows.is_empty() => {
-                for right in rows {
-                    out.push(merge_rows(left, right));
-                }
-            }
-            _ => {
-                let mut padded = left.clone();
-                pad_nulls_for_from(&mut padded, right_from, runtime.engine);
-                out.push(padded);
-            }
-        }
-    }
-    Ok(Some(out))
-}
-
-fn split_join_equalities(expr: &ScalarExpr) -> Option<Vec<(&ScalarExpr, &ScalarExpr)>> {
-    match expr {
-        ScalarExpr::Binary {
-            op: uqa_sql::ast::BinaryOp::Equal,
-            lhs,
-            rhs,
-        } => Some(vec![(lhs, rhs)]),
-        ScalarExpr::And(items) => {
-            let mut equalities = Vec::with_capacity(items.len());
-            for item in items {
-                let ScalarExpr::Binary {
-                    op: uqa_sql::ast::BinaryOp::Equal,
-                    lhs,
-                    rhs,
-                } = item
-                else {
-                    return None;
-                };
-                equalities.push((lhs.as_ref(), rhs.as_ref()));
-            }
-            if equalities.is_empty() {
-                None
-            } else {
-                Some(equalities)
-            }
-        }
-        _ => None,
-    }
-}
-
-enum JoinKeyAccessor<'a> {
-    Column(&'a str),
-    QualifiedColumn(String),
-    ScalarExpr(&'a ScalarExpr),
-}
-
-impl<'a> JoinKeyAccessor<'a> {
-    fn new(expr: &'a ScalarExpr) -> Self {
-        match expr {
-            ScalarExpr::Column(name) => Self::Column(name.as_str()),
-            ScalarExpr::QualifiedColumn {
-                qualifier,
-                column,
-                key,
-            } => Self::QualifiedColumn(if key.is_empty() {
-                qualified_key(qualifier, column)
-            } else {
-                key.clone()
-            }),
-            _ => Self::ScalarExpr(expr),
-        }
-    }
-
-    fn key(
-        &self,
-        row: &ResultRow,
-        eval_hook: &dyn uqa_sql::expr::EngineHook,
-        subquery_runner: &dyn ScalarSubqueryRunner,
-        params: &[SQLParam],
-    ) -> Result<Option<JoinKey>, SQLError> {
-        Ok(match self {
-            Self::Column(name) => value_to_join_key(column_value(row, name)),
-            Self::QualifiedColumn(key) => value_to_join_key(row.get(key)),
-            Self::ScalarExpr(expr) => {
-                let ctx = ScalarEvalContext::new(Some(row), params)
-                    .with_function_hook(eval_hook)
-                    .with_subquery_runner(subquery_runner);
-                match eval_scalar(expr, &ctx)? {
-                    Value::Null => None,
-                    value => Some(JoinKey::new(&value)),
-                }
-            }
+    let expected_width = result.columns.len();
+    let columns = result
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            column_aliases
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| column.clone())
         })
-    }
+        .collect::<Vec<_>>();
+    let function_name = name.to_string();
+    let qualifier = alias.map(str::to_string);
+    Ok(Box::new(result.rows.map(
+        move |values| -> uqa_execution::ExecResult<ResultRow> {
+            let values = values.map_err(uqa_execution::ExecError::from)?;
+            if values.len() != expected_width {
+                return Err(SQLError::TypeMismatch(format!(
+                "table function `{function_name}` row has {} values for {expected_width} columns",
+                values.len()
+            ))
+                .into());
+            }
+            let mut row = ResultRow::new();
+            for (column, value) in columns.iter().zip(values) {
+                row.insert(column.clone(), value);
+            }
+            Ok(qualifier
+                .as_deref()
+                .map_or(row.clone(), |qualifier| prefix_row(qualifier, &row)))
+        },
+    )))
 }
 
-fn column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
-    if let Some(value) = row.get(name) {
-        return Some(value);
-    }
-    row.iter()
-        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
-        .map(|(_, value)| value)
-}
-
-fn value_to_join_key(value: Option<&Value>) -> Option<JoinKey> {
-    match value {
-        Some(Value::Null) | None => None,
-        Some(value) => Some(JoinKey::new(value)),
-    }
-}
-
-fn composite_join_key(
-    exprs: &[&ScalarExpr],
-    row: &ResultRow,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    params: &[SQLParam],
-) -> Result<Option<JoinKey>, SQLError> {
-    let ctx = ScalarEvalContext::new(Some(row), params)
-        .with_function_hook(eval_hook)
-        .with_subquery_runner(subquery_runner);
-    let mut values = Vec::with_capacity(exprs.len());
-    for expr in exprs {
-        match eval_scalar(expr, &ctx)? {
-            Value::Null => return Ok(None),
-            value => values.push(value),
+fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
+    match expr {
+        ScalarExpr::And(items) => {
+            let mut conjuncts = Vec::with_capacity(items.len());
+            for item in items {
+                conjuncts.extend(join_conjuncts(item));
+            }
+            conjuncts
         }
-    }
-    let refs: Vec<&Value> = values.iter().collect();
-    Ok(Some(JoinKey::composite(&refs)))
-}
-
-fn join_key_for_exprs(
-    exprs: &[&ScalarExpr],
-    row: &ResultRow,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    params: &[SQLParam],
-) -> Result<Option<JoinKey>, SQLError> {
-    if exprs.len() == 1 {
-        JoinKeyAccessor::new(exprs[0]).key(row, eval_hook, subquery_runner, params)
-    } else {
-        composite_join_key(exprs, row, eval_hook, subquery_runner, params)
+        _ => vec![expr],
     }
 }
 
@@ -2378,210 +2387,29 @@ fn eval_yields_value(
     matches!(eval_scalar(expr, &ctx), Ok(v) if v != uqa_core::Value::Null)
 }
 
-fn cross_filter(
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn ScalarSubqueryRunner,
-    left_rows: &[ResultRow],
-    right_rows: &[ResultRow],
-    on: Option<&ScalarExpr>,
-    params: &[SQLParam],
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = Vec::with_capacity(left_rows.len() * right_rows.len());
-    for l in left_rows {
-        for r in right_rows {
-            let merged = merge_rows(l, r);
-            let keep = match on {
-                None => true,
-                Some(expr) => {
-                    let ctx = ScalarEvalContext::new(Some(&merged), params)
-                        .with_function_hook(eval_hook)
-                        .with_subquery_runner(subquery_runner);
-                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
-                }
-            };
-            if keep {
-                out.push(merged);
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn left_outer(
-    runtime: &JoinRuntime<'_>,
-    outer_rows: &[ResultRow],
-    inner_rows: &[ResultRow],
-    inner_from: &SourcePlan,
-    on: Option<&ScalarExpr>,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = Vec::new();
-    for l in outer_rows {
-        let mut matched = false;
-        for r in inner_rows {
-            let merged = merge_rows(l, r);
-            let keep = match on {
-                None => true,
-                Some(expr) => {
-                    let ctx = ScalarEvalContext::new(Some(&merged), runtime.params)
-                        .with_function_hook(runtime.function_hook)
-                        .with_subquery_runner(runtime.subquery_runner);
-                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
-                }
-            };
-            if keep {
-                out.push(merged);
-                matched = true;
-            }
-        }
-        if !matched {
-            // Pad with NULLs for every column the inner side would
-            // have contributed.
-            let mut pad = l.clone();
-            pad_nulls_for_from(&mut pad, inner_from, runtime.engine);
-            out.push(pad);
-        }
-    }
-    Ok(out)
-}
-
-fn full_outer(
-    runtime: &JoinRuntime<'_>,
-    left_rows: &[ResultRow],
-    right_rows: &[ResultRow],
-    left_from: &SourcePlan,
-    right_from: &SourcePlan,
-    on: Option<&ScalarExpr>,
-) -> Result<Vec<ResultRow>, SQLError> {
-    let mut out = Vec::new();
-    let mut matched_right = vec![false; right_rows.len()];
-    for left in left_rows {
-        let mut matched_left = false;
-        for (idx, right) in right_rows.iter().enumerate() {
-            let merged = merge_rows(left, right);
-            let keep = match on {
-                None => true,
-                Some(expr) => {
-                    let ctx = ScalarEvalContext::new(Some(&merged), runtime.params)
-                        .with_function_hook(runtime.function_hook)
-                        .with_subquery_runner(runtime.subquery_runner);
-                    uqa_sql::expr::truthy(&eval_scalar(expr, &ctx)?)
-                }
-            };
-            if keep {
-                out.push(merged);
-                matched_left = true;
-                matched_right[idx] = true;
-            }
-        }
-        if !matched_left {
-            let mut padded = left.clone();
-            pad_nulls_for_from(&mut padded, right_from, runtime.engine);
-            out.push(padded);
-        }
-    }
-    for (idx, right) in right_rows.iter().enumerate() {
-        if matched_right[idx] {
-            continue;
-        }
-        let mut padded = ResultRow::new();
-        pad_nulls_for_from(&mut padded, left_from, runtime.engine);
-        for (k, v) in right {
-            padded.insert(k.clone(), v.clone());
-        }
-        out.push(padded);
-    }
-    Ok(out)
-}
-
-fn pad_nulls_for_from(row: &mut ResultRow, from: &SourcePlan, engine: &Engine) {
+fn pad_nulls_for_from(
+    row: &mut ResultRow,
+    from: &SourcePlan,
+    engine: &Engine,
+) -> Result<(), SQLError> {
     let mut tables = Vec::new();
     from.collect_tables(&mut tables);
     for (name, alias) in &tables {
-        let null_keys = null_row_for(name, alias.as_deref(), engine);
+        let null_keys = null_row_for(name, alias.as_deref(), engine)?;
         for (k, v) in null_keys {
             row.entry(k).or_insert(v);
         }
     }
+    Ok(())
 }
 
-pub(super) fn project_join_row_with_plan(
-    engine: &Engine,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn PhysicalSubqueryRunner,
-    subqueries: &[QueryPlan],
-    src: &ResultRow,
-    projections: &[ProjectionPlan],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    project_join_row_inner(
-        engine,
-        eval_hook,
-        subquery_runner,
-        subqueries,
-        src,
-        projections,
-        params,
-    )
+fn join_schema_sample(columns: &[String]) -> ResultRow {
+    columns
+        .iter()
+        .map(|column| (column.clone(), Value::Int(1)))
+        .collect()
 }
 
-fn project_join_row_inner(
-    engine: &Engine,
-    eval_hook: &dyn uqa_sql::expr::EngineHook,
-    subquery_runner: &dyn PhysicalSubqueryRunner,
-    subqueries: &[QueryPlan],
-    src: &ResultRow,
-    projections: &[ProjectionPlan],
-    params: &[SQLParam],
-) -> Result<ResultRow, SQLError> {
-    let labels = projection_columns(projections);
-    let ctx = PhysicalEvalContext::new(Some(src), params)
-        .with_function_hook(eval_hook)
-        .with_subquery_runner(subquery_runner);
-    let mut out = ResultRow::new();
-    for (idx, proj) in projections.iter().enumerate() {
-        let label = labels[idx].clone();
-        if let ScalarExpr::Star = proj.expr {
-            for (k, v) in src {
-                out.insert(k.clone(), v.clone());
-            }
-            continue;
-        }
-        // Window calls are pre-evaluated in `compute_window_columns`
-        // and stored on the source row under the projection label;
-        // read the cached value through.
-        if matches!(proj.expr, ScalarExpr::WindowCall { .. }) {
-            let value = src.get(&label).cloned().unwrap_or(Value::Null);
-            out.insert(label, value);
-            continue;
-        }
-        if let Some(value) = projected_value_from_row(&proj.expr, src) {
-            out.insert(label, value);
-            continue;
-        }
-        // `uqa_highlight()` evaluates against the analyzer for the
-        // matched field, which the evaluator does not have access
-        // to. Intercept the call here, resolve the string column +
-        // query, and emit the wrapped text through
-        // `uqa_analysis::highlight`.
-        if let ScalarExpr::Func { name, args, .. } = &proj.expr {
-            let mut evaluate = |expr: &ScalarExpr| eval_physical_scalar(expr, subqueries, &ctx);
-            if let Some(value) =
-                engine_func_intercept(Some(engine), name, args, src, &mut evaluate)?
-            {
-                out.insert(label, value);
-                continue;
-            }
-        }
-        let value = eval_physical_scalar(&proj.expr, subqueries, &ctx)?;
-        out.insert(label, value);
-    }
-    Ok(out)
-}
-
-/// Intercept registry functions that need engine-level access (the
-/// scalar evaluator does not see the engine, just the row context).
-/// Returns `Ok(Some(_))` when the function was handled, `Ok(None)`
-/// to defer to the default scalar evaluator.
 pub(super) fn engine_func_intercept(
     engine: Option<&Engine>,
     name: &str,
@@ -2589,16 +2417,19 @@ pub(super) fn engine_func_intercept(
     row: &ResultRow,
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Option<Value>, SQLError> {
-    let lower = name.to_ascii_lowercase();
+    let lower = super::builtin_function_dispatch_name(name);
     match lower.as_str() {
         "uqa_highlight" => Ok(Some(run_uqa_highlight(row, args, evaluate)?)),
         "score_bm25" | "score_bayesian_bm25" => {
             validate_score_projection_args(&lower, args, evaluate)?;
-            Ok(Some(
-                row.get(SCORE_COLUMN).cloned().unwrap_or(Value::Float(0.0)),
-            ))
+            let score = score_projection_value(&lower, args, row)?;
+            Ok(Some(score))
         }
-        "deep_learn" => Ok(Some(run_deep_learn_projection(engine, args, evaluate)?)),
+        "deep_learn" => Ok(Some(run_deep_learn_projection(
+            require_projection_engine(engine, "deep_learn")?,
+            args,
+            evaluate,
+        )?)),
         "merge_action" => {
             if !args.is_empty() {
                 return Err(SQLError::BadArity {
@@ -2614,45 +2445,103 @@ pub(super) fn engine_func_intercept(
         }
         // UQA-native helpers keep their lenient semantics.
         "graph_create" => {
-            if let Some(eng) = engine {
-                let _ = run_graph_create_with_evaluator(eng, args, evaluate)?;
-            }
-            Ok(Some(Value::Bool(true)))
+            let eng = require_projection_engine(engine, "graph_create")?;
+            Ok(Some(Value::Bool(run_graph_create_with_evaluator(
+                eng, args, evaluate,
+            )?)))
         }
         "graph_drop" => {
-            if let Some(eng) = engine {
-                let _ = run_graph_drop_with_evaluator(eng, args, evaluate)?;
-            }
-            Ok(Some(Value::Bool(true)))
+            let eng = require_projection_engine(engine, "graph_drop")?;
+            Ok(Some(Value::Bool(run_graph_drop_with_evaluator(
+                eng, args, evaluate,
+            )?)))
         }
         // Apache AGE-compatible functions: strict name validation and
         // a void (SQL NULL) return value.
-        "create_graph" => match engine {
-            Some(eng) => Ok(Some(run_age_create_graph_with_evaluator(
-                eng, args, evaluate,
-            )?)),
-            None => Ok(Some(Value::Null)),
-        },
-        "drop_graph" => match engine {
-            Some(eng) => Ok(Some(run_age_drop_graph_with_evaluator(
-                eng, args, evaluate,
-            )?)),
-            None => Ok(Some(Value::Null)),
-        },
+        "create_graph" => Ok(Some(run_age_create_graph_with_evaluator(
+            require_projection_engine(engine, "create_graph")?,
+            args,
+            evaluate,
+        )?)),
+        "drop_graph" => Ok(Some(run_age_drop_graph_with_evaluator(
+            require_projection_engine(engine, "drop_graph")?,
+            args,
+            evaluate,
+        )?)),
         _ => Ok(None),
     }
 }
 
+fn score_projection_value(
+    function: &str,
+    args: &[ScalarExpr],
+    row: &ResultRow,
+) -> Result<Value, SQLError> {
+    if args.len() == 2 {
+        if let ScalarExpr::QualifiedColumn { qualifier, .. } = &args[0] {
+            let prefix = format!("{qualifier}.");
+            let mut scores = row.iter().filter_map(|(column, value)| {
+                (column.starts_with(&prefix) && is_score_provenance_column(column))
+                    .then_some(value)
+                    .and_then(|value| match value {
+                        Value::Float(score) => Some(*score),
+                        _ => None,
+                    })
+            });
+            let Some(score) = scores.next() else {
+                return Err(score_projection_context_error(function));
+            };
+            if scores.next().is_some() {
+                return Err(SQLError::Unsupported(format!(
+                    "{function}() has multiple score-bearing retrieval rows for `{qualifier}`"
+                )));
+            }
+            return Ok(Value::Float(score));
+        }
+    }
+
+    if let Some(Value::Float(score)) = row.get(SCORE_PROVENANCE_COLUMN) {
+        return Ok(Value::Float(*score));
+    }
+    let mut scores = row.iter().filter_map(|(column, value)| {
+        (is_score_provenance_column(column) && column != SCORE_PROVENANCE_COLUMN)
+            .then_some(value)
+            .and_then(|value| match value {
+                Value::Float(score) => Some(*score),
+                _ => None,
+            })
+    });
+    let Some(score) = scores.next() else {
+        return Err(score_projection_context_error(function));
+    };
+    if scores.next().is_some() {
+        return Err(SQLError::Unsupported(format!(
+            "{function}() has multiple score-bearing retrieval rows; qualify its field argument"
+        )));
+    }
+    Ok(Value::Float(score))
+}
+
+fn score_projection_context_error(function: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "{function}() requires a score-bearing retrieval row"
+    ))
+}
+
+fn require_projection_engine<'a>(
+    engine: Option<&'a Engine>,
+    function: &str,
+) -> Result<&'a Engine, SQLError> {
+    engine.ok_or_else(|| {
+        SQLError::Unsupported(format!("{function} requires an engine-backed projection"))
+    })
+}
+
 fn run_deep_learn_projection(
-    engine: Option<&Engine>,
+    engine: &Engine,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
-    let Some(engine) = engine else {
-        return Err(SQLError::Unsupported(
-            "deep_learn requires an engine-backed projection".into(),
-        ));
-    };
     if args.len() != 2 {
         return Err(SQLError::BadArity {
             name: "deep_learn".into(),
@@ -2688,14 +2577,17 @@ fn run_deep_learn_projection(
     };
     let mut report = BTreeMap::new();
     report.insert("model".into(), Value::Str(model_name));
-    report.insert("examples".into(), Value::Int(output.report.examples as i64));
+    report.insert(
+        "examples".into(),
+        checked_integer_value(output.report.examples, "training example count")?,
+    );
     report.insert(
         "feature_dimensions".into(),
-        Value::Int(output.report.feature_dimensions as i64),
+        checked_integer_value(output.report.feature_dimensions, "feature dimension count")?,
     );
     report.insert(
         "class_count".into(),
-        Value::Int(output.report.class_count as i64),
+        checked_integer_value(output.report.class_count, "class count")?,
     );
     Ok(Value::Map(report))
 }
@@ -2811,7 +2703,11 @@ fn run_uqa_highlight(
     };
     let max_fragments = match args.get(4) {
         Some(e) => match evaluate(e)? {
-            Value::Int(n) if n >= 0 => n as usize,
+            Value::Int(n) if n >= 0 => usize::try_from(n).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "uqa_highlight max_fragments {n} exceeds the platform usize range"
+                ))
+            })?,
             Value::Null => 0,
             other => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -2823,7 +2719,11 @@ fn run_uqa_highlight(
     };
     let fragment_size = match args.get(5) {
         Some(e) => match evaluate(e)? {
-            Value::Int(n) if n > 0 => n as usize,
+            Value::Int(n) if n > 0 => usize::try_from(n).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "uqa_highlight fragment_size {n} exceeds the platform usize range"
+                ))
+            })?,
             Value::Null => 150,
             other => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -2849,6 +2749,71 @@ fn run_uqa_highlight(
         .map(std::string::ToString::to_string)
         .collect();
     let analyzer = uqa_analysis::standard_analyzer("english");
-    let out = uqa_analysis::highlight(&text, &terms, Some(&analyzer), &opts);
+    let out = uqa_analysis::highlight(&text, &terms, Some(&analyzer), &opts)
+        .map_err(|error| SQLError::Internal(format!("highlight analysis failed: {error}")))?;
     Ok(Value::Str(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combine_filters_handles_empty_and_single_inputs_without_panicking() {
+        assert!(combine_filters(Vec::<ScalarExpr>::new()).is_none());
+        let combined = combine_filters([ScalarExpr::Literal(Value::Bool(true))]);
+        assert!(matches!(
+            combined,
+            Some(ScalarExpr::Literal(Value::Bool(true)))
+        ));
+    }
+
+    #[test]
+    fn engine_backed_projection_functions_reject_a_missing_engine_context() {
+        let row = ResultRow::new();
+        for function in [
+            "deep_learn",
+            "graph_create",
+            "graph_drop",
+            "create_graph",
+            "drop_graph",
+        ] {
+            let mut evaluate = |_: &ScalarExpr| Ok(Value::Null);
+            let error = engine_func_intercept(None, function, &[], &row, &mut evaluate)
+                .expect_err("engine-backed functions must not report success without an engine");
+            assert!(
+                matches!(
+                    &error,
+                    SQLError::Unsupported(message)
+                        if message == &format!("{function} requires an engine-backed projection")
+                ),
+                "unexpected {function} error: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn score_projection_uses_explicit_provenance_even_for_zero() {
+        let args = [ScalarExpr::Literal(Value::Str("query".into()))];
+        let mut evaluate = |expr: &ScalarExpr| match expr {
+            ScalarExpr::Literal(value) => Ok(value.clone()),
+            _ => Ok(Value::Null),
+        };
+        let scored_row = ResultRow::from([
+            (super::super::SCORE_COLUMN.into(), Value::Float(99.0)),
+            (SCORE_PROVENANCE_COLUMN.into(), Value::Float(0.0)),
+        ]);
+        assert_eq!(
+            engine_func_intercept(None, "score_bm25", &args, &scored_row, &mut evaluate).unwrap(),
+            Some(Value::Float(0.0))
+        );
+
+        let unscored_row = ResultRow::from([
+            (super::super::SCORE_COLUMN.into(), Value::Float(0.0)),
+            (SCORE_PROVENANCE_COLUMN.into(), Value::Null),
+        ]);
+        let error = engine_func_intercept(None, "score_bm25", &args, &unscored_row, &mut evaluate)
+            .unwrap_err();
+        assert!(error.to_string().contains("score-bearing"), "{error}");
+    }
 }

@@ -26,10 +26,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_core::DocId;
-use uqa_storage::InvertedIndex;
+use uqa_storage::{InvertedIndex, StorageBackendError, StorageBackendResult};
 
 use crate::bayesian_bm25::BayesianBM25Params;
 use crate::bm25::{BM25Params, BM25Scorer};
+use crate::error::invalid_input;
+use crate::ScoringResult;
 
 const DEFAULT_N_SAMPLES: usize = 50;
 const DEFAULT_TOKENS_PER_QUERY: usize = 5;
@@ -57,17 +59,23 @@ pub struct BayesianScoreEstimator {
 }
 
 impl BayesianScoreEstimator {
-    pub fn new(n_samples: usize, tokens_per_query: usize, seed: i64) -> Self {
-        assert!(n_samples > 0, "n_samples must be positive, got {n_samples}");
-        assert!(
-            tokens_per_query > 0,
-            "tokens_per_query must be positive, got {tokens_per_query}"
-        );
-        Self {
+    pub fn new(n_samples: usize, tokens_per_query: usize, seed: i64) -> ScoringResult<Self> {
+        if n_samples == 0 {
+            return Err(invalid_input("n_samples must be positive"));
+        }
+        if tokens_per_query == 0 {
+            return Err(invalid_input("tokens_per_query must be positive"));
+        }
+        if tokens_per_query.checked_mul(2).is_none() {
+            return Err(invalid_input(
+                "tokens_per_query is too large to construct calibration lengths",
+            ));
+        }
+        Ok(Self {
             n_samples,
             tokens_per_query,
             seed,
-        }
+        })
     }
 
     pub fn n_samples(&self) -> usize {
@@ -93,12 +101,16 @@ impl BayesianScoreEstimator {
         index: &dyn InvertedIndex,
         field: &str,
         bm25_params: BM25Params,
-    ) -> BayesianBM25Params {
+    ) -> StorageBackendResult<BayesianBM25Params> {
         let sample_size = self
             .n_samples
             .checked_mul(self.tokens_per_query)
-            .expect("n_samples * tokens_per_query must fit in usize");
-        let vocabulary = index.vocabulary_terms(field);
+            .ok_or_else(|| {
+                StorageBackendError::Other(
+                    "n_samples * tokens_per_query does not fit in usize".to_string(),
+                )
+            })?;
+        let vocabulary = index.vocabulary_terms(field)?;
         let sampled_terms = reservoir_sample(&vocabulary, sample_size, self.seed);
 
         let lengths = calibration_lengths(self.tokens_per_query);
@@ -130,13 +142,13 @@ impl BayesianScoreEstimator {
         field: &str,
         bm25_params: BM25Params,
         queries: &[Vec<String>],
-    ) -> BayesianBM25Params {
-        let doc_count = index.doc_count() as usize;
+    ) -> StorageBackendResult<BayesianBM25Params> {
+        let doc_count = index.doc_count()? as usize;
         if doc_count == 0 || queries.is_empty() {
-            return fallback_params(bm25_params);
+            return Ok(fallback_params(bm25_params));
         }
 
-        let bm25_scorer = BM25Scorer::new(bm25_params, Arc::new(index.field_stats(field)));
+        let bm25_scorer = BM25Scorer::new(bm25_params, Arc::new(index.field_stats(field)?));
         let mut scores_by_length: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
         let mut base_rate_fractions = Vec::new();
 
@@ -148,7 +160,7 @@ impl BayesianScoreEstimator {
             // capping at a top-scored sample would bias the percentile
             // boundary and the base rate on corpora with more matches
             // than the cap (Lucene PR 16410).
-            let mut query_scores = collect_scores(index, field, query_terms, &bm25_scorer);
+            let mut query_scores = collect_scores(index, field, query_terms, &bm25_scorer)?;
             if query_scores.is_empty() {
                 continue;
             }
@@ -198,7 +210,7 @@ impl BayesianScoreEstimator {
         }
 
         if boundary_points.is_empty() || total_scores < MIN_CALIBRATION_SAMPLES {
-            return fallback_params(bm25_params);
+            return Ok(fallback_params(bm25_params));
         }
 
         let reference = self.tokens_per_query as f64;
@@ -216,7 +228,7 @@ impl BayesianScoreEstimator {
             / base_rate_fractions.len() as f64)
             .clamp(BASE_RATE_MIN, BASE_RATE_MAX);
 
-        BayesianBM25Params {
+        Ok(BayesianBM25Params {
             bm25: bm25_params,
             alpha,
             beta,
@@ -224,7 +236,7 @@ impl BayesianScoreEstimator {
             calibration_tokens: reference,
             beta_slope,
             sigma_slope,
-        }
+        })
     }
 }
 
@@ -261,7 +273,11 @@ fn affine_fit(points: &[(f64, f64)]) -> (f64, f64) {
 
 impl Default for BayesianScoreEstimator {
     fn default() -> Self {
-        Self::new(DEFAULT_N_SAMPLES, DEFAULT_TOKENS_PER_QUERY, DEFAULT_SEED)
+        Self {
+            n_samples: DEFAULT_N_SAMPLES,
+            tokens_per_query: DEFAULT_TOKENS_PER_QUERY,
+            seed: DEFAULT_SEED,
+        }
     }
 }
 
@@ -297,8 +313,8 @@ fn collect_scores(
     field: &str,
     query_terms: &[String],
     scorer: &BM25Scorer,
-) -> Vec<f64> {
-    let posting_lists = index.get_posting_lists_bulk(field, query_terms);
+) -> StorageBackendResult<Vec<f64>> {
+    let posting_lists = index.get_posting_lists_bulk(field, query_terms)?;
     let idfs: Vec<f64> = posting_lists
         .iter()
         .map(|posting_list| scorer.idf(posting_list.len() as u64))
@@ -317,8 +333,8 @@ fn collect_scores(
     }
 
     let candidate_ids: Vec<DocId> = candidate_ids.into_iter().collect();
-    let doc_lengths = index.get_doc_lengths_bulk(&candidate_ids, field);
-    candidate_ids
+    let doc_lengths = index.get_doc_lengths_bulk(&candidate_ids, field)?;
+    Ok(candidate_ids
         .into_iter()
         .map(|doc_id| {
             let doc_length = doc_lengths.get(&doc_id).copied().unwrap_or(0);
@@ -331,7 +347,7 @@ fn collect_scores(
                 })
                 .sum()
         })
-        .collect()
+        .collect())
 }
 
 /// `java.util.Random`'s 48-bit generator, used so a seed selects the
@@ -396,10 +412,12 @@ mod tests {
             (4, "gamma delta eta theta"),
             (5, "alpha theta iota kappa"),
         ] {
-            index.add_document(
-                doc_id,
-                BTreeMap::from([("body".to_string(), body.to_string())]),
-            );
+            index
+                .add_document(
+                    doc_id,
+                    BTreeMap::from([("body".to_string(), body.to_string())]),
+                )
+                .unwrap();
         }
         index
     }
@@ -416,10 +434,12 @@ mod tests {
             let words: Vec<&str> = (0..4)
                 .map(|offset| vocabulary[(doc_id as usize * 3 + offset * 2) % vocabulary.len()])
                 .collect();
-            index.add_document(
-                doc_id + 1,
-                BTreeMap::from([("body".to_string(), words.join(" "))]),
-            );
+            index
+                .add_document(
+                    doc_id + 1,
+                    BTreeMap::from([("body".to_string(), words.join(" "))]),
+                )
+                .unwrap();
         }
         index
     }
@@ -427,8 +447,10 @@ mod tests {
     #[test]
     fn estimate_fits_query_length_slopes() {
         let index = co_occurring_index();
-        let params =
-            BayesianScoreEstimator::new(12, 4, 42).estimate(&index, "body", BM25Params::default());
+        let params = BayesianScoreEstimator::new(12, 4, 42)
+            .unwrap()
+            .estimate(&index, "body", BM25Params::default())
+            .unwrap();
         assert!(
             (params.calibration_tokens - 4.0).abs() < 1e-12,
             "reference length must be tokens_per_query, got {}",
@@ -446,6 +468,13 @@ mod tests {
     }
 
     #[test]
+    fn constructor_rejects_zero_and_overflowing_sizes() {
+        assert!(BayesianScoreEstimator::new(0, 1, 42).is_err());
+        assert!(BayesianScoreEstimator::new(1, 0, 42).is_err());
+        assert!(BayesianScoreEstimator::new(1, usize::MAX, 42).is_err());
+    }
+
+    #[test]
     fn affine_fit_recovers_a_line() {
         let (intercept, slope) = affine_fit(&[(2.0, 5.0), (4.0, 9.0), (8.0, 17.0)]);
         assert!((intercept - 1.0).abs() < 1e-9, "intercept {intercept}");
@@ -458,8 +487,9 @@ mod tests {
     #[test]
     fn empty_index_returns_lucene_fallback() {
         let index = MemoryInvertedIndex::new(standard_analyzer("english"));
-        let params =
-            BayesianScoreEstimator::default().estimate(&index, "body", BM25Params::default());
+        let params = BayesianScoreEstimator::default()
+            .estimate(&index, "body", BM25Params::default())
+            .unwrap();
         assert_eq!(params.alpha, 1.0);
         assert_eq!(params.beta, 0.0);
         assert_eq!(params.base_rate, 0.01);
@@ -468,9 +498,13 @@ mod tests {
     #[test]
     fn estimate_is_seed_reproducible_and_bounded() {
         let index = populated_index();
-        let estimator = BayesianScoreEstimator::new(3, 2, 42);
-        let first = estimator.estimate(&index, "body", BM25Params::default());
-        let second = estimator.estimate(&index, "body", BM25Params::default());
+        let estimator = BayesianScoreEstimator::new(3, 2, 42).unwrap();
+        let first = estimator
+            .estimate(&index, "body", BM25Params::default())
+            .unwrap();
+        let second = estimator
+            .estimate(&index, "body", BM25Params::default())
+            .unwrap();
         assert_eq!(first.alpha, second.alpha);
         assert_eq!(first.beta, second.beta);
         assert_eq!(first.base_rate, second.base_rate);
@@ -489,17 +523,21 @@ mod tests {
         let mut index = MemoryInvertedIndex::new(standard_analyzer("english"));
         for doc_id in 0..12_000u64 {
             let padding = " pad".repeat((doc_id % 24) as usize);
-            index.add_document(
-                doc_id + 1,
-                BTreeMap::from([("body".to_string(), format!("common{padding}"))]),
-            );
+            index
+                .add_document(
+                    doc_id + 1,
+                    BTreeMap::from([("body".to_string(), format!("common{padding}"))]),
+                )
+                .unwrap();
         }
-        let params = BayesianScoreEstimator::default().estimate_with_queries(
-            &index,
-            "body",
-            BM25Params::default(),
-            &[vec!["common".to_string()]],
-        );
+        let params = BayesianScoreEstimator::default()
+            .estimate_with_queries(
+                &index,
+                "body",
+                BM25Params::default(),
+                &[vec!["common".to_string()]],
+            )
+            .unwrap();
         let expected = 1_000.0 / 12_000.0;
         assert!(
             (params.base_rate - expected).abs() < 1e-9,

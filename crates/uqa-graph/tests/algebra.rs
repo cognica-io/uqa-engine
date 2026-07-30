@@ -14,7 +14,8 @@
 use std::collections::BTreeMap;
 
 use proptest::prelude::*;
-use uqa_core::{DocId, Payload, PostingEntry, PostingList};
+use uqa_core::types::{GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD, GRAPH_PHI_VERTICES_FIELD};
+use uqa_core::{DocId, Payload, PostingEntry, PostingList, Value};
 use uqa_graph::{GraphPayload, GraphPostingList};
 
 fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
@@ -22,15 +23,38 @@ fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
         let mut entries = Vec::new();
         let mut payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for id in ids {
-            entries.push(PostingEntry::new(id, Payload::with_score(1.0)));
-            payloads.insert(
+            let mut fields = BTreeMap::from([("id".into(), Value::Int(id as i64))]);
+            if id % 2 == 0 {
+                fields.insert(GRAPH_PHI_FIELD.into(), Value::Str(format!("user-{id}")));
+            }
+            if id % 3 == 0 {
+                fields.insert(GRAPH_PHI_VERTICES_FIELD.into(), Value::Null);
+            }
+            if id % 5 == 0 {
+                fields.insert(
+                    GRAPH_PHI_EDGES_FIELD.into(),
+                    Value::Map(BTreeMap::from([("edge".into(), Value::Int(id as i64))])),
+                );
+            }
+            entries.push(PostingEntry::new(
                 id,
-                GraphPayload {
-                    subgraph_vertices: vec![id],
-                    subgraph_edges: vec![id * 10],
-                    ..GraphPayload::default()
+                Payload {
+                    positions: vec![id as u32, id as u32 + 1],
+                    score: id as f64 / 8.0 - 2.0,
+                    fields,
                 },
-            );
+            ));
+            if id % 4 != 0 {
+                payloads.insert(
+                    id,
+                    GraphPayload {
+                        subgraph_vertices: vec![id, u64::MAX - id, id],
+                        subgraph_edges: vec![id * 10, id * 10],
+                        graph_name: format!("graph-{id}"),
+                        score_override: (id % 2 == 0).then_some(id as f64 + 0.25),
+                    },
+                );
+            }
         }
         GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), payloads)
     })
@@ -47,34 +71,28 @@ proptest! {
     fn phi_round_trip(g in arb_graph_posting_list()) {
         let pl = g.to_posting_list();
         let back = GraphPostingList::from_posting_list(&pl);
-        prop_assert_eq!(doc_ids(&g), doc_ids(&back));
-        for id in doc_ids(&g) {
-            let original = g.get_graph_payload(id).cloned().unwrap_or_default();
-            let restored = back.get_graph_payload(id).cloned().unwrap_or_default();
-            prop_assert_eq!(original.subgraph_vertices, restored.subgraph_vertices);
-            prop_assert_eq!(original.subgraph_edges, restored.subgraph_edges);
-        }
+        prop_assert_eq!(g, back);
     }
 
     #[test]
     fn phi_preserves_union(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
         let lhs = a.union(&b);
         let rhs = a.to_posting_list().union(&b.to_posting_list());
-        prop_assert_eq!(doc_ids(&lhs), rhs.doc_ids().collect::<Vec<_>>());
+        prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
     #[test]
     fn phi_preserves_intersect(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
         let lhs = a.intersect(&b);
         let rhs = a.to_posting_list().intersect(&b.to_posting_list());
-        prop_assert_eq!(doc_ids(&lhs), rhs.doc_ids().collect::<Vec<_>>());
+        prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
     #[test]
     fn phi_preserves_difference(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
         let lhs = a.difference(&b);
         let rhs = a.to_posting_list().difference(&b.to_posting_list());
-        prop_assert_eq!(doc_ids(&lhs), rhs.doc_ids().collect::<Vec<_>>());
+        prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
     #[test]

@@ -31,7 +31,7 @@
 //!     &["fox".into(), "dog".into()],
 //!     None,
 //!     &HighlightOptions::default(),
-//! );
+//! ).unwrap();
 //! assert!(out.contains("<b>fox</b>"));
 //! assert!(out.contains("<b>dog</b>"));
 //! ```
@@ -50,6 +50,7 @@ use std::collections::BTreeSet;
 use regex::Regex;
 
 use crate::analyzer::Analyzer;
+use crate::error::AnalysisResult;
 
 /// Per-call configuration. Defaults match the canonical UQA behavior:
 /// `<b>` / `</b>` tags, full-text highlight (no fragment cap),
@@ -76,10 +77,15 @@ impl Default for HighlightOptions {
     }
 }
 
-fn word_regex() -> &'static Regex {
+fn word_regex() -> AnalysisResult<&'static Regex> {
     use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\w+").expect("hard-coded \\w+ regex"))
+    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\w+").map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|message| crate::error::AnalysisError::BuiltInRegex {
+            component: "highlighter word scanner",
+            message: message.clone(),
+        })
 }
 
 /// Wrap matched query terms in `text` with the configured tags.
@@ -93,21 +99,24 @@ pub fn highlight(
     query_terms: &[String],
     analyzer: Option<&Analyzer>,
     opts: &HighlightOptions,
-) -> String {
+) -> AnalysisResult<String> {
     if text.is_empty() || query_terms.is_empty() {
-        return text.to_string();
+        return Ok(text.to_string());
     }
 
     let analyzed: BTreeSet<String> = match analyzer {
-        Some(a) => query_terms
-            .iter()
-            .flat_map(|qt| a.analyze(qt).into_iter())
-            .collect(),
+        Some(a) => {
+            let mut analyzed = BTreeSet::new();
+            for query_term in query_terms {
+                analyzed.extend(a.analyze(query_term)?);
+            }
+            analyzed
+        }
         None => query_terms.iter().map(|qt| qt.to_lowercase()).collect(),
     };
 
     if analyzed.is_empty() {
-        return text.to_string();
+        return Ok(text.to_string());
     }
 
     // Walk the text once, collecting (char_start, char_end) spans
@@ -144,11 +153,11 @@ pub fn highlight(
     };
 
     let mut match_spans: Vec<(usize, usize)> = Vec::new();
-    for m in word_regex().find_iter(text) {
+    for m in word_regex()?.find_iter(text) {
         let token = m.as_str();
         let hit = match analyzer {
             Some(a) => {
-                let toks = a.analyze(token);
+                let toks = a.analyze(token)?;
                 !toks.is_empty() && toks.iter().any(|t| analyzed.contains(t))
             }
             None => analyzed.contains(&token.to_lowercase()),
@@ -160,16 +169,17 @@ pub fn highlight(
 
     if match_spans.is_empty() {
         if opts.max_fragments > 0 {
-            return ellipsis_prefix(text, opts.fragment_size);
+            return Ok(ellipsis_prefix(text, opts.fragment_size));
         }
-        return text.to_string();
+        return Ok(text.to_string());
     }
 
-    if opts.max_fragments > 0 {
+    let highlighted = if opts.max_fragments > 0 {
         build_fragments(text, &match_spans, opts)
     } else {
         wrap_full(text, &match_spans, &opts.start_tag, &opts.end_tag)
-    }
+    };
+    Ok(highlighted)
 }
 
 fn ellipsis_prefix(text: &str, fragment_size: usize) -> String {
@@ -230,7 +240,7 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
             current.push(span);
             continue;
         }
-        let last_end = current.last().unwrap().1;
+        let last_end = current.last().map_or(span.0, |previous| previous.1);
         if span.0.saturating_sub(last_end) > half {
             clusters.push(std::mem::take(&mut current));
             current.push(span);
@@ -271,7 +281,10 @@ fn build_fragments(text: &str, match_spans: &[(usize, usize)], opts: &HighlightO
 
     let mut fragments: Vec<String> = Vec::new();
     for cluster in selected {
-        let centre = (cluster[0].0 + cluster.last().unwrap().1) / 2;
+        let (Some(first), Some(last)) = (cluster.first(), cluster.last()) else {
+            continue;
+        };
+        let centre = first.0 + last.1.saturating_sub(first.0) / 2;
         let mut frag_start = centre.saturating_sub(half);
         let mut frag_end = (centre + half).min(total_chars);
 
@@ -333,13 +346,14 @@ mod tests {
             &["fox".into(), "quick".into()],
             None,
             &HighlightOptions::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(out, "the <b>quick</b> brown <b>fox</b>");
     }
 
     #[test]
     fn returns_text_unchanged_when_no_query_terms() {
-        let out = highlight("untouched", &[], None, &HighlightOptions::default());
+        let out = highlight("untouched", &[], None, &HighlightOptions::default()).unwrap();
         assert_eq!(out, "untouched");
     }
 
@@ -350,7 +364,8 @@ mod tests {
             &["banana".into()],
             None,
             &HighlightOptions::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(out, "no hits here");
     }
 
@@ -366,7 +381,7 @@ mod tests {
             fragment_size: 60,
             ..Default::default()
         };
-        let out = highlight(&text, &["fox".into()], None, &opts);
+        let out = highlight(&text, &["fox".into()], None, &opts).unwrap();
         assert!(out.contains("<b>fox</b>"));
         assert!(out.starts_with("..."));
         assert!(out.ends_with("..."));
@@ -380,7 +395,7 @@ mod tests {
             fragment_size: 30,
             ..Default::default()
         };
-        let out = highlight(&text, &["zzz".into()], None, &opts);
+        let out = highlight(&text, &["zzz".into()], None, &opts).unwrap();
         assert!(out.ends_with("..."));
         assert_eq!(out.chars().take_while(|c| *c == 'a').count(), 30);
     }
@@ -394,7 +409,8 @@ mod tests {
             &["runs".into()],
             Some(&an),
             &HighlightOptions::default(),
-        );
+        )
+        .unwrap();
         assert!(out.contains("<b>running</b>"), "got: {out}");
     }
 
@@ -402,7 +418,32 @@ mod tests {
     fn cjk_character_offsets_round_trip() {
         // A multi-byte text with the matched token in the middle.
         let text = "안녕 hello 세계";
-        let out = highlight(text, &["hello".into()], None, &HighlightOptions::default());
+        let out = highlight(text, &["hello".into()], None, &HighlightOptions::default()).unwrap();
         assert_eq!(out, "안녕 <b>hello</b> 세계");
+    }
+
+    #[test]
+    fn analyzer_failure_is_returned_to_highlight_caller() {
+        let analyzer = Analyzer::new(
+            crate::Tokenizer::Pattern {
+                pattern: "[".into(),
+            },
+            Vec::new(),
+            Vec::new(),
+        );
+        let error = highlight(
+            "searchable text",
+            &["searchable".into()],
+            Some(&analyzer),
+            &HighlightOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::AnalysisError::InvalidRegex {
+                component: "pattern tokenizer",
+                ..
+            }
+        ));
     }
 }

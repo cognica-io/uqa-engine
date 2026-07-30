@@ -210,13 +210,16 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
             }
         }
         // AGE graphid allocation: (label_id << 48) | per-label sequence.
-        let vid = self.store.allocate_vertex_id(&label, &self.graph);
+        let vid = self
+            .store
+            .allocate_vertex_id(&label, &self.graph)
+            .map_err(|error| CypherError::Storage(error.to_string()))?;
         let vertex = Vertex {
             vertex_id: vid,
             label,
             properties: props,
         };
-        self.store.add_vertex(vertex.clone(), &self.graph);
+        self.store.add_vertex(vertex.clone(), &self.graph)?;
         Ok(vertex)
     }
 
@@ -239,7 +242,10 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
             }
         }
         // AGE graphid allocation: (label_id << 48) | per-label sequence.
-        let eid = self.store.allocate_edge_id(&label, &self.graph);
+        let eid = self
+            .store
+            .allocate_edge_id(&label, &self.graph)
+            .map_err(|error| CypherError::Storage(error.to_string()))?;
         let edge = Edge {
             edge_id: eid,
             source_id: src_id,
@@ -247,7 +253,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
             label,
             properties: props,
         };
-        self.store.add_edge(edge.clone(), &self.graph);
+        self.store.add_edge(edge.clone(), &self.graph)?;
         Ok(edge)
     }
 
@@ -280,18 +286,18 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                 match binding {
                     Binding::Vertex(vertex) => {
                         let mut new_props = vertex.properties.clone();
-                        apply_property_update(&mut new_props, keys, &value, item.operator);
+                        apply_property_update(&mut new_props, keys, &value, item.operator)?;
                         let updated = Vertex {
                             vertex_id: vertex.vertex_id,
                             label: vertex.label.clone(),
                             properties: new_props,
                         };
-                        self.store.add_vertex(updated.clone(), &self.graph);
+                        self.store.add_vertex(updated.clone(), &self.graph)?;
                         row.insert(variable.clone(), Binding::Vertex(updated));
                     }
                     Binding::Edge(edge) => {
                         let mut new_props = edge.properties.clone();
-                        apply_property_update(&mut new_props, keys, &value, item.operator);
+                        apply_property_update(&mut new_props, keys, &value, item.operator)?;
                         let updated = Edge {
                             edge_id: edge.edge_id,
                             source_id: edge.source_id,
@@ -299,7 +305,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                             label: edge.label.clone(),
                             properties: new_props,
                         };
-                        self.store.add_edge(updated.clone(), &self.graph);
+                        self.store.add_edge(updated.clone(), &self.graph)?;
                         row.insert(variable.clone(), Binding::Edge(updated));
                     }
                     _ => {
@@ -330,7 +336,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                         label: vertex.label.clone(),
                         properties: new_props,
                     };
-                    self.store.add_vertex(updated.clone(), &self.graph);
+                    self.store.add_vertex(updated.clone(), &self.graph)?;
                     row.insert(name.clone(), Binding::Vertex(updated));
                 } else {
                     return Err(CypherError::TypeError(format!(
@@ -381,21 +387,21 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         to_delete_edges.sort_unstable();
         to_delete_edges.dedup();
         for eid in &to_delete_edges {
-            self.store.remove_edge(*eid, &self.graph);
+            self.store.remove_edge(*eid, &self.graph)?;
         }
         to_delete_vertices.sort_unstable();
         to_delete_vertices.dedup();
         for vid in &to_delete_vertices {
             if !clause.detach {
-                let has_out = !self.store.out_edge_ids(*vid, &self.graph).is_empty();
-                let has_in = !self.store.in_edge_ids(*vid, &self.graph).is_empty();
+                let has_out = !self.store.out_edge_ids(*vid, &self.graph)?.is_empty();
+                let has_in = !self.store.in_edge_ids(*vid, &self.graph)?.is_empty();
                 if has_out || has_in {
                     return Err(CypherError::TypeError(format!(
                         "cannot delete vertex {vid}: has incident edges, use DETACH DELETE"
                     )));
                 }
             }
-            self.store.remove_vertex(*vid, &self.graph);
+            self.store.remove_vertex(*vid, &self.graph)?;
         }
         Ok(bindings)
     }
@@ -470,7 +476,12 @@ fn apply_property_update(
     keys: &[String],
     value: &Value,
     op: SetOperator,
-) {
+) -> Result<(), CypherError> {
+    if keys.is_empty() {
+        return Err(CypherError::TypeError(
+            "SET property path must contain at least one key".to_string(),
+        ));
+    }
     if keys.len() == 1 {
         let key = keys[0].clone();
         match (op, value) {
@@ -486,7 +497,7 @@ fn apply_property_update(
                 props.insert(key, value.clone());
             }
         }
-        return;
+        return Ok(());
     }
     // Nested path: descend, creating maps as needed.
     let mut cursor = props;
@@ -497,12 +508,18 @@ fn apply_property_update(
         if !matches!(entry, Value::Map(_)) {
             *entry = Value::Map(BTreeMap::new());
         }
-        if let Value::Map(inner) = entry {
-            cursor = inner;
-        } else {
-            unreachable!();
-        }
+        let Value::Map(inner) = entry else {
+            return Err(CypherError::TypeError(format!(
+                "SET property path component {key:?} is not a map"
+            )));
+        };
+        cursor = inner;
     }
-    let leaf = keys.last().unwrap().clone();
+    let Some(leaf) = keys.last().cloned() else {
+        return Err(CypherError::TypeError(
+            "SET property path must contain at least one key".to_string(),
+        ));
+    };
     cursor.insert(leaf, value.clone());
+    Ok(())
 }

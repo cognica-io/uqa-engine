@@ -50,6 +50,33 @@ pub trait EngineHook {
         true
     }
 
+    /// Resolve the first existing schema on the logical session's search
+    /// path. `None` lets standalone expression evaluation use its `public`
+    /// compatibility default.
+    fn current_schema(&self) -> std::result::Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    /// Resolve the existing schemas visible to the logical session.
+    fn current_schemas(
+        &self,
+        _include_implicit: bool,
+    ) -> std::result::Result<Option<Vec<String>>, String> {
+        Ok(None)
+    }
+
+    /// Draw from an engine-owned logical-session PRNG. `None` keeps pure,
+    /// engine-free expression evaluation available for library callers.
+    fn random_value(&self) -> std::result::Result<Option<f64>, String> {
+        Ok(None)
+    }
+
+    /// Reseed the logical-session PRNG. `false` means the hook does not own a
+    /// mutable random stream and the caller must report the unsupported call.
+    fn set_random_seed(&self, _seed: f64) -> std::result::Result<bool, String> {
+        Ok(false)
+    }
+
     /// Invoke a user-defined SQL / `PL/pgSQL` function. Consulted
     /// after built-in dispatch misses (and immediately for calls with
     /// named arguments, which built-ins never accept). `None` means
@@ -168,7 +195,7 @@ impl<'a> EvalContext<'a> {
 pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
         Expr::Literal(v) => Ok(v.clone()),
-        Expr::Param(i) => match ctx.params.get(i.saturating_sub(1)) {
+        Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(SQLParam::Scalar(v)) => Ok(v.clone()),
             Some(SQLParam::Vector(v)) => Ok(Value::List(
                 v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
@@ -407,6 +434,76 @@ pub fn eval_function_call(
     let lower = lower.as_ref();
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
 
+    if lower == "random" {
+        if !evaluated.is_empty() {
+            return Err(SQLError::TypeMismatch("random takes no arguments".into()));
+        }
+        if let Some(engine) = ctx.engine {
+            if let Some(value) = engine.random_value().map_err(SQLError::Internal)? {
+                return Ok(Value::Float(value));
+            }
+        }
+    }
+    if lower == "setseed" {
+        let [value] = evaluated.as_slice() else {
+            return Err(SQLError::TypeMismatch("setseed takes 1 arg".into()));
+        };
+        let seed = to_f64(value)?;
+        if !seed.is_finite() || !(-1.0..=1.0).contains(&seed) {
+            return Err(SQLError::Routine {
+                sqlstate: "22023".into(),
+                message: format!("setseed parameter {seed} is out of allowed range [-1,1]"),
+            });
+        }
+        let engine = ctx.engine.ok_or_else(|| {
+            SQLError::Unsupported("setseed requires a logical engine session".into())
+        })?;
+        if !engine.set_random_seed(seed).map_err(SQLError::Internal)? {
+            return Err(SQLError::Unsupported(
+                "engine hook does not provide a session random stream".into(),
+            ));
+        }
+        return Ok(Value::Str(String::new()));
+    }
+
+    if lower == "current_schema" {
+        if !evaluated.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "current_schema takes no arguments".into(),
+            ));
+        }
+        let schema = ctx
+            .engine
+            .map(|engine| engine.current_schema())
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten()
+            .unwrap_or_else(|| "public".to_string());
+        return Ok(Value::Str(schema));
+    }
+    if lower == "current_schemas" {
+        let [Value::Bool(include_implicit)] = evaluated.as_slice() else {
+            return Err(SQLError::TypeMismatch(
+                "current_schemas takes one boolean argument".into(),
+            ));
+        };
+        let schemas = ctx
+            .engine
+            .map(|engine| engine.current_schemas(*include_implicit))
+            .transpose()
+            .map_err(SQLError::Internal)?
+            .flatten()
+            .unwrap_or_else(|| {
+                let mut schemas = Vec::new();
+                if *include_implicit {
+                    schemas.push("pg_catalog".to_string());
+                }
+                schemas.push("public".to_string());
+                schemas
+            });
+        return Ok(Value::List(schemas.into_iter().map(Value::Str).collect()));
+    }
+
     // Functions registered in the operator registry (text_match,
     // knn_match, ...) are dispatched by the relational/access-path
     // executor. JSONPath fts_match is the scalar exception.
@@ -548,7 +645,11 @@ fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
         BinaryOp::LessEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_le())),
         BinaryOp::Greater => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_gt())),
         BinaryOp::GreaterEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_ge())),
-        _ => unreachable!("non-comparison op routed through eval_comparison_op"),
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "non-comparison operator {op:?} reached comparison evaluation"
+            )))
+        }
     };
     Ok(out.unwrap_or(Value::Null))
 }
@@ -601,7 +702,7 @@ fn eval_operand_borrowed<'a>(
 ) -> Result<Option<EvalOperand<'a>>> {
     match expr {
         Expr::Literal(value) => Ok(Some(EvalOperand::Owned(value.clone()))),
-        Expr::Param(i) => match ctx.params.get(i.saturating_sub(1)) {
+        Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(SQLParam::Scalar(value)) => Ok(Some(EvalOperand::Borrowed(value))),
             Some(SQLParam::Vector(_)) | Some(SQLParam::Tensor(_)) => Ok(None),
             None => Err(SQLError::MissingParam(*i)),
@@ -658,15 +759,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
 fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => None,
-        (Value::Int(x), Value::Float(y)) => Some((*x as f64) == *y),
-        (Value::Float(x), Value::Int(y)) => Some(*x == (*y as f64)),
-        (Value::Decimal(x), Value::Decimal(y)) => Some(x == y),
-        (Value::Int(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Int(x)) => {
-            Some(DecimalValue::from_i64(*x) == *y)
-        }
-        (Value::Float(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Float(x)) => {
-            Some(DecimalValue::from_f64_lossy(*x).is_some_and(|x| x == *y))
-        }
+        (
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+        ) => Some(a.cmp(b) == std::cmp::Ordering::Equal),
         (Value::Bool(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Bool(x)) => {
             Some(DecimalValue::from_bool(*x) == *y)
         }
@@ -713,23 +809,10 @@ fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::Ordering>> 
     use std::cmp::Ordering;
     match (a, b) {
         (Value::Null, _) | (_, Value::Null) => Ok(None),
-        (Value::Int(x), Value::Int(y)) => Ok(Some(x.cmp(y))),
-        (Value::Float(x), Value::Float(y)) => Ok(Some(x.partial_cmp(y).unwrap_or(Ordering::Equal))),
-        (Value::Int(x), Value::Float(y)) => {
-            Ok(Some((*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal)))
-        }
-        (Value::Float(x), Value::Int(y)) => {
-            Ok(Some(x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal)))
-        }
-        (Value::Decimal(x), Value::Decimal(y)) => Ok(Some(x.cmp(y))),
-        (Value::Int(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_i64(*x).cmp(y))),
-        (Value::Decimal(x), Value::Int(y)) => Ok(Some(x.cmp(&DecimalValue::from_i64(*y)))),
-        (Value::Float(x), Value::Decimal(y)) => DecimalValue::from_f64_lossy(*x)
-            .map(|x| Some(x.cmp(y)))
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
-        (Value::Decimal(x), Value::Float(y)) => DecimalValue::from_f64_lossy(*y)
-            .map(|y| Some(x.cmp(&y)))
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
+        (
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+        ) => Ok(Some(a.cmp(b))),
         (Value::Bool(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_bool(*x).cmp(y))),
         (Value::Decimal(x), Value::Bool(y)) => Ok(Some(x.cmp(&DecimalValue::from_bool(*y)))),
         (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
@@ -799,7 +882,11 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
                 // Integer / integer in SQL truncates toward zero.
                 li.checked_div(*ri)
             }
-            _ => unreachable!("non-arith op routed through arith"),
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "non-arithmetic operator {op:?} reached integer arithmetic"
+                )))
+            }
         };
         return out.map(Value::Int).ok_or_else(|| out_of_range("bigint"));
     }
@@ -831,7 +918,11 @@ fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
             }
             lf / rf
         }
-        _ => unreachable!("non-arith op routed through arith"),
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "non-arithmetic operator {op:?} reached floating arithmetic"
+            )))
+        }
     };
     Ok(Value::Float(result))
 }
@@ -849,7 +940,11 @@ fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
             }
             left.checked_div(&right)
         }
-        _ => unreachable!("non-arith op routed through decimal_arith"),
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "non-arithmetic operator {op:?} reached decimal arithmetic"
+            )))
+        }
     }
     .ok_or_else(|| out_of_range("numeric"))?;
     Ok(Value::Decimal(value))
@@ -868,29 +963,31 @@ fn eval_sequence_function(name: &str, args: &[Value], ctx: &EvalContext<'_>) -> 
             "sequence function `{name}` requires an engine hook on the EvalContext"
         ))
     })?;
-    if args.is_empty() {
-        return Err(SQLError::TypeMismatch(format!(
-            "{name}() requires the sequence name"
-        )));
+    let expected = match name {
+        "nextval" | "currval" => 1,
+        "setval" => 2,
+        other => {
+            return Err(SQLError::Unsupported(format!(
+                "unknown sequence function `{other}`"
+            )));
+        }
+    };
+    if args.len() != expected {
+        return Err(SQLError::BadArity {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            actual: args.len(),
+        });
     }
     let seq_name = value_to_string(&args[0]);
     let result: std::result::Result<i64, String> = match name {
         "nextval" => engine.nextval(&seq_name),
         "currval" => engine.currval(&seq_name),
         "setval" => {
-            if args.len() < 2 {
-                return Err(SQLError::TypeMismatch(
-                    "setval() requires 2 arguments".into(),
-                ));
-            }
             let n = to_i64(&args[1])?;
             engine.setval(&seq_name, n)
         }
-        other => {
-            return Err(SQLError::Unsupported(format!(
-                "unknown sequence function `{other}`"
-            )));
-        }
+        _ => unreachable!("sequence function name was validated above"),
     };
     let v = result.map_err(SQLError::Unsupported)?;
     Ok(Value::Int(v))
@@ -1061,7 +1158,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         message: "negative substring length not allowed".into(),
                     });
                 }
-                start.saturating_add(len)
+                start
+                    .checked_add(len)
+                    .ok_or_else(|| out_of_range("bigint"))?
             } else {
                 i64::MAX
             };
@@ -1107,7 +1206,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             Ok(Value::Str(chars[start..].iter().collect()))
         }
         "abs" => match &args[0] {
-            Value::Int(i) => Ok(Value::Int(i.abs())),
+            Value::Int(i) => i
+                .checked_abs()
+                .map(Value::Int)
+                .ok_or_else(|| out_of_range("bigint")),
             Value::Float(f) => Ok(Value::Float(f.abs())),
             Value::Decimal(d) => Ok(Value::Decimal(d.abs())),
             Value::Null => Ok(Value::Null),
@@ -1140,8 +1242,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         .ok_or_else(|| SQLError::TypeMismatch("decimal round overflow".into()));
                 }
                 let v = to_f64(&args[0])?;
-                let places = to_i64(&args[1])?;
-                let scale = 10f64.powi(places as i32);
+                let places =
+                    i32::try_from(to_i64(&args[1])?).map_err(|_| out_of_range("integer"))?;
+                let scale = 10f64.powi(places);
                 Ok(Value::Float((v * scale).round() / scale))
             }
             _ => Err(SQLError::TypeMismatch("round takes 1-2 args".into())),
@@ -1179,7 +1282,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             match (&args[0], &args[1]) {
                 (Value::Int(_), Value::Int(0)) => Err(division_by_zero()),
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+                (Value::Int(a), Value::Int(b)) => a
+                    .checked_rem(*b)
+                    .map(Value::Int)
+                    .ok_or_else(|| out_of_range("bigint")),
                 (a, b) if matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_)) => {
                     let divisor = to_decimal(b)?;
                     if divisor.is_zero() {
@@ -1211,13 +1317,16 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 return Err(division_by_zero());
             }
             let dividend = to_i64(&args[0])?;
-            Ok(Value::Int((dividend as f64 / divisor as f64).floor() as i64))
+            dividend
+                .checked_div(divisor)
+                .map(Value::Int)
+                .ok_or_else(|| out_of_range("bigint"))
         }
         "gcd" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("gcd takes 2 args".into()));
             }
-            Ok(Value::Int(gcd_i64(to_i64(&args[0])?, to_i64(&args[1])?)))
+            Ok(Value::Int(gcd_i64(to_i64(&args[0])?, to_i64(&args[1])?)?))
         }
         "lcm" => {
             if args.len() != 2 {
@@ -1228,7 +1337,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if a == 0 || b == 0 {
                 Ok(Value::Int(0))
             } else {
-                Ok(Value::Int((a / gcd_i64(a, b)).abs() * b.abs()))
+                let gcd = i128::from(gcd_i64(a, b)?);
+                let value = (i128::from(a) / gcd)
+                    .checked_mul(i128::from(b))
+                    .and_then(i128::checked_abs)
+                    .and_then(|value| i64::try_from(value).ok())
+                    .ok_or_else(|| out_of_range("bigint"))?;
+                Ok(Value::Int(value))
             }
         }
         "starts_with" => {
@@ -1279,7 +1394,9 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         }
         "chr" => {
             let n = to_i64(&args[0])?;
-            let c = char::from_u32(n as u32)
+            let code_point = u32::try_from(n)
+                .map_err(|_| SQLError::TypeMismatch(format!("chr: invalid code point {n}")))?;
+            let c = char::from_u32(code_point)
                 .ok_or_else(|| SQLError::TypeMismatch(format!("chr: invalid code point {n}")))?;
             Ok(Value::Str(c.to_string()))
         }
@@ -1317,9 +1434,12 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         })
                         .collect();
                     if groups.is_empty() {
-                        Ok(Value::List(vec![Value::Str(
-                            caps.get(0).unwrap().as_str().into(),
-                        )]))
+                        let full_match = caps.get(0).ok_or_else(|| {
+                            SQLError::Internal(
+                                "regex capture set omitted its mandatory full match".into(),
+                            )
+                        })?;
+                        Ok(Value::List(vec![Value::Str(full_match.as_str().into())]))
                     } else {
                         Ok(Value::List(groups))
                     }
@@ -1441,8 +1561,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         .ok_or_else(|| SQLError::TypeMismatch("decimal trunc overflow".into()));
                 }
                 let v = to_f64(&args[0])?;
-                let p = to_i64(&args[1])?;
-                let scale = 10f64.powi(p as i32);
+                let p = i32::try_from(to_i64(&args[1])?).map_err(|_| out_of_range("integer"))?;
+                let scale = 10f64.powi(p);
                 Ok(Value::Float((v * scale).trunc() / scale))
             }
             _ => Err(SQLError::TypeMismatch("trunc takes 1 or 2 args".into())),
@@ -1469,29 +1589,41 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let low = to_f64(&args[1])?;
             let high = to_f64(&args[2])?;
             let count = to_i64(&args[3])?;
-            if count <= 0 || low == high {
+            if count <= 0
+                || !low.is_finite()
+                || !high.is_finite()
+                || operand.is_nan()
+                || low == high
+            {
                 return Err(SQLError::TypeMismatch(
-                    "width_bucket requires positive bucket count and non-empty range".into(),
+                    "width_bucket requires finite bounds, a non-NaN operand, a positive bucket count, and a non-empty range".into(),
                 ));
             }
+            let overflow_bucket = count.checked_add(1).ok_or_else(|| out_of_range("bigint"))?;
             if low < high {
                 if operand < low {
                     return Ok(Value::Int(0));
                 }
                 if operand >= high {
-                    return Ok(Value::Int(count + 1));
+                    return Ok(Value::Int(overflow_bucket));
                 }
                 let width = (high - low) / count as f64;
-                Ok(Value::Int(((operand - low) / width).floor() as i64 + 1))
+                let bucket = float_to_i64_trunc(((operand - low) / width).floor())?
+                    .checked_add(1)
+                    .ok_or_else(|| out_of_range("bigint"))?;
+                Ok(Value::Int(bucket))
             } else {
                 if operand > low {
                     return Ok(Value::Int(0));
                 }
                 if operand <= high {
-                    return Ok(Value::Int(count + 1));
+                    return Ok(Value::Int(overflow_bucket));
                 }
                 let width = (low - high) / count as f64;
-                Ok(Value::Int(((low - operand) / width).floor() as i64 + 1))
+                let bucket = float_to_i64_trunc(((low - operand) / width).floor())?
+                    .checked_add(1)
+                    .ok_or_else(|| out_of_range("bigint"))?;
+                Ok(Value::Int(bucket))
             }
         }
         // Padding / formatting
@@ -1500,7 +1632,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 return Err(SQLError::TypeMismatch("[lr]pad takes 2-3 args".into()));
             }
             let s = value_to_string(&args[0]);
-            let n = to_i64(&args[1])?.max(0) as usize;
+            let n = nonnegative_usize(to_i64(&args[1])?.max(0), "lpad/rpad length")?;
             let fill = args
                 .get(2)
                 .map(value_to_string)
@@ -1514,23 +1646,52 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if fill_chars.is_empty() {
                 return Ok(Value::Str(s));
             }
-            let mut padding: String = String::with_capacity(need);
-            for i in 0..need {
-                padding.push(fill_chars[i % fill_chars.len()]);
-            }
-            Ok(Value::Str(if name == "lpad" {
-                format!("{padding}{s}")
+            let padding_bytes = need
+                // A Unicode scalar value occupies at most four UTF-8 bytes. Keep
+                // this literal for the workspace's Rust 1.85 MSRV; the equivalent
+                // `char::MAX_LEN_UTF8` constant was stabilized later.
+                .checked_mul(4)
+                .ok_or_else(|| allocation_error("lpad/rpad"))?;
+            let capacity = s
+                .len()
+                .checked_add(padding_bytes)
+                .ok_or_else(|| allocation_error("lpad/rpad"))?;
+            let mut out = String::new();
+            out.try_reserve_exact(capacity)
+                .map_err(|_| allocation_error("lpad/rpad"))?;
+            if name == "lpad" {
+                for i in 0..need {
+                    out.push(fill_chars[i % fill_chars.len()]);
+                }
+                out.push_str(&s);
             } else {
-                format!("{s}{padding}")
-            }))
+                out.push_str(&s);
+                for i in 0..need {
+                    out.push(fill_chars[i % fill_chars.len()]);
+                }
+            }
+            Ok(Value::Str(out))
         }
         "repeat" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("repeat takes 2 args".into()));
             }
             let s = value_to_string(&args[0]);
-            let n = to_i64(&args[1])?.max(0) as usize;
-            Ok(Value::Str(s.repeat(n)))
+            let n = nonnegative_usize(to_i64(&args[1])?.max(0), "repeat count")?;
+            if n == 0 || s.is_empty() {
+                return Ok(Value::Str(String::new()));
+            }
+            let capacity = s
+                .len()
+                .checked_mul(n)
+                .ok_or_else(|| allocation_error("repeat"))?;
+            let mut out = String::new();
+            out.try_reserve_exact(capacity)
+                .map_err(|_| allocation_error("repeat"))?;
+            for _ in 0..n {
+                out.push_str(&s);
+            }
+            Ok(Value::Str(out))
         }
         "translate" => {
             if args.len() != 3 {
@@ -1556,13 +1717,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             let s: Vec<char> = value_to_string(&args[0]).chars().collect();
             let placing: Vec<char> = value_to_string(&args[1]).chars().collect();
-            let start = to_i64(&args[2])?.max(1) as usize - 1;
+            let start = nonnegative_usize(to_i64(&args[2])?.max(1) - 1, "overlay start position")?;
             let len = if args.len() == 4 {
-                to_i64(&args[3])?.max(0) as usize
+                nonnegative_usize(to_i64(&args[3])?.max(0), "overlay length")?
             } else {
                 placing.len()
             };
-            let end = (start + len).min(s.len());
+            let end = start.saturating_add(len).min(s.len());
             let mut out: String = s[..start.min(s.len())].iter().collect();
             out.push_str(&placing.iter().collect::<String>());
             out.push_str(&s[end..].iter().collect::<String>());
@@ -1697,9 +1858,14 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 s.split(sep.as_str()).collect()
             };
             let idx_usize = if idx >= 1 {
-                (idx - 1) as usize
+                match usize::try_from(idx - 1) {
+                    Ok(index) => index,
+                    Err(_) => return Ok(Value::Str(String::new())),
+                }
             } else {
-                let from_end = idx.unsigned_abs() as usize;
+                let Ok(from_end) = usize::try_from(idx.unsigned_abs()) else {
+                    return Ok(Value::Str(String::new()));
+                };
                 if from_end > parts.len() {
                     return Ok(Value::Str(String::new()));
                 }
@@ -1724,7 +1890,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             let secs = to_f64(&args[0])?;
             Ok(Value::Temporal(TemporalValue::TimestampTz {
-                micros: (secs * 1e6).round() as i64,
+                micros: float_to_i64_rounded(secs * 1e6, "timestamp")?,
             }))
         }
         "extract" => {
@@ -1774,11 +1940,11 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     "make_timestamp takes 6-7 args".into(),
                 ));
             }
-            let year = to_i64(&args[0])? as i32;
-            let month = to_i64(&args[1])? as u32;
-            let day = to_i64(&args[2])? as u32;
-            let hour = to_i64(&args[3])? as u32;
-            let minute = to_i64(&args[4])? as u32;
+            let year = i32::try_from(to_i64(&args[0])?).map_err(|_| out_of_range("date"))?;
+            let month = u32::try_from(to_i64(&args[1])?).map_err(|_| out_of_range("date"))?;
+            let day = u32::try_from(to_i64(&args[2])?).map_err(|_| out_of_range("date"))?;
+            let hour = u32::try_from(to_i64(&args[3])?).map_err(|_| out_of_range("time"))?;
+            let minute = u32::try_from(to_i64(&args[4])?).map_err(|_| out_of_range("time"))?;
             let second = to_f64(&args[5])?;
             make_timestamp(year, month, day, hour, minute, second)
         }
@@ -1786,21 +1952,19 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             if args.len() != 3 {
                 return Err(SQLError::TypeMismatch("make_date takes 3 args".into()));
             }
-            let year = to_i64(&args[0])? as i32;
-            let month = to_i64(&args[1])? as u32;
-            let day = to_i64(&args[2])? as u32;
-            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
-            chrono::NaiveDate::from_ymd_opt(year, month, day)
-                .map(|d| {
-                    Value::Temporal(TemporalValue::Date {
-                        days: d.signed_duration_since(epoch).num_days() as i32,
-                    })
-                })
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "make_date: invalid date {year:04}-{month:02}-{day:02}"
-                    ))
-                })
+            let year = i32::try_from(to_i64(&args[0])?).map_err(|_| out_of_range("date"))?;
+            let month = u32::try_from(to_i64(&args[1])?).map_err(|_| out_of_range("date"))?;
+            let day = u32::try_from(to_i64(&args[2])?).map_err(|_| out_of_range("date"))?;
+            let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
+            let date = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "make_date: invalid date {year:04}-{month:02}-{day:02}"
+                ))
+            })?;
+            Ok(Value::Temporal(TemporalValue::Date {
+                days: i32::try_from(date.signed_duration_since(epoch).num_days())
+                    .map_err(|_| out_of_range("date"))?,
+            }))
         }
         "make_interval" => {
             // make_interval(years, months, weeks, days, hours, mins,
@@ -1812,11 +1976,28 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let hours = args.get(4).map(to_i64).transpose()?.unwrap_or(0);
             let mins = args.get(5).map(to_i64).transpose()?.unwrap_or(0);
             let secs = args.get(6).map(to_f64).transpose()?.unwrap_or(0.0);
-            let total_months =
-                i32::try_from(years * 12 + months).map_err(|_| out_of_range("interval"))?;
-            let total_days =
-                i32::try_from(weeks * 7 + days).map_err(|_| out_of_range("interval"))?;
-            let micros = (hours * 3_600 + mins * 60) * 1_000_000 + (secs * 1e6).round() as i64;
+            let total_months = years
+                .checked_mul(12)
+                .and_then(|value| value.checked_add(months))
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or_else(|| out_of_range("interval"))?;
+            let total_days = weeks
+                .checked_mul(7)
+                .and_then(|value| value.checked_add(days))
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or_else(|| out_of_range("interval"))?;
+            let whole_micros = hours
+                .checked_mul(3_600)
+                .and_then(|value| {
+                    mins.checked_mul(60)
+                        .and_then(|mins| value.checked_add(mins))
+                })
+                .and_then(|value| value.checked_mul(1_000_000))
+                .ok_or_else(|| out_of_range("interval"))?;
+            let fractional_micros = float_to_i64_rounded(secs * 1e6, "interval")?;
+            let micros = whole_micros
+                .checked_add(fractional_micros)
+                .ok_or_else(|| out_of_range("interval"))?;
             Ok(Value::Temporal(TemporalValue::Interval {
                 months: total_months,
                 days: total_days,
@@ -1831,9 +2012,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             })) = args.first()
             {
                 let extra_days = micros.div_euclid(86_400_000_000);
+                let extra_days = i32::try_from(extra_days).map_err(|_| out_of_range("interval"))?;
+                let days = days
+                    .checked_add(extra_days)
+                    .ok_or_else(|| out_of_range("interval"))?;
                 return Ok(Value::Temporal(TemporalValue::Interval {
                     months: *months,
-                    days: days + extra_days as i32,
+                    days,
                     micros: micros.rem_euclid(86_400_000_000),
                 }));
             }
@@ -1874,9 +2059,10 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             let fmt = pg_to_chrono_fmt(&value_to_string(&args[1]));
             let date = chrono::NaiveDate::parse_from_str(&s, &fmt)
                 .map_err(|e| SQLError::TypeMismatch(format!("to_date: {e}")))?;
-            let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch");
+            let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
             Ok(Value::Temporal(TemporalValue::Date {
-                days: date.signed_duration_since(epoch).num_days() as i32,
+                days: i32::try_from(date.signed_duration_since(epoch).num_days())
+                    .map_err(|_| out_of_range("date"))?,
             }))
         }
         "to_number" => {
@@ -2032,35 +2218,85 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
         // Array functions
         // -------------------------------------------------------------
         "array_length" | "array_upper" => {
-            if args.is_empty() {
-                return Err(SQLError::TypeMismatch("array_length takes >= 1 arg".into()));
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch(format!("{name} takes 2 args")));
             }
             match &args[0] {
-                // Empty arrays have no dimensions in PostgreSQL, so
-                // `array_length('{}', 1)` is NULL (not 0). Dimensions
-                // other than 1 are NULL for the 1-D arrays the engine
-                // stores.
                 Value::List(items) => {
-                    let dim = args.get(1).map(to_i64).transpose()?.unwrap_or(1);
-                    if items.is_empty() || dim != 1 {
+                    if matches!(args[1], Value::Null) || items.is_empty() {
                         return Ok(Value::Null);
                     }
-                    Ok(Value::Int(items.len() as i64))
+                    let dimension = to_i64(&args[1])?;
+                    if dimension <= 0 {
+                        return Ok(Value::Null);
+                    }
+                    let Ok(index) = usize::try_from(dimension - 1) else {
+                        return Ok(Value::Null);
+                    };
+                    let dimensions = array_dimensions(items)?;
+                    dimensions.get(index).map_or(Ok(Value::Null), |length| {
+                        i64::try_from(*length)
+                            .map(Value::Int)
+                            .map_err(|_| out_of_range("array length"))
+                    })
                 }
                 Value::Null => Ok(Value::Null),
                 other => Err(SQLError::TypeMismatch(format!(
-                    "array_length: not an array {other:?}"
+                    "{name}: not an array {other:?}"
                 ))),
             }
         }
-        "array_lower" => Ok(Value::Int(1)),
-        "cardinality" => match &args[0] {
-            Value::List(items) => Ok(Value::Int(items.len() as i64)),
-            Value::Null => Ok(Value::Null),
-            other => Err(SQLError::TypeMismatch(format!(
-                "cardinality: not an array {other:?}"
-            ))),
-        },
+        "array_lower" => {
+            if args.len() != 2 {
+                return Err(SQLError::TypeMismatch("array_lower takes 2 args".into()));
+            }
+            match &args[0] {
+                Value::List(items) => {
+                    if matches!(args[1], Value::Null) || items.is_empty() {
+                        return Ok(Value::Null);
+                    }
+                    let dimension = to_i64(&args[1])?;
+                    if dimension <= 0 {
+                        return Ok(Value::Null);
+                    }
+                    let Ok(index) = usize::try_from(dimension - 1) else {
+                        return Ok(Value::Null);
+                    };
+                    let dimensions = array_dimensions(items)?;
+                    Ok(if dimensions.get(index).is_some_and(|length| *length > 0) {
+                        Value::Int(1)
+                    } else {
+                        Value::Null
+                    })
+                }
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "array_lower: not an array {other:?}"
+                ))),
+            }
+        }
+        "cardinality" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("cardinality takes 1 arg".into()));
+            }
+            match &args[0] {
+                Value::List(items) => {
+                    let dimensions = array_dimensions(items)?;
+                    let cardinality = dimensions.into_iter().try_fold(1_i64, |total, length| {
+                        let length =
+                            i64::try_from(length).map_err(|_| out_of_range("array cardinality"))?;
+                        total
+                            .checked_mul(length)
+                            .ok_or_else(|| out_of_range("array cardinality"))
+                    })?;
+                    Ok(Value::Int(cardinality))
+                }
+                Value::Null => Ok(Value::Null),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "cardinality: not an array {other:?}"
+                ))),
+            }
+        }
         "array_cat" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch("array_cat takes 2 args".into()));
@@ -2069,6 +2305,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 (Value::List(a), Value::List(b)) => {
                     let mut out = a.clone();
                     out.extend(b.iter().cloned());
+                    array_dimensions(&out)?;
                     Ok(Value::List(out))
                 }
                 _ => Err(SQLError::TypeMismatch(
@@ -2084,6 +2321,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 Value::List(items) => {
                     let mut out = items.clone();
                     out.push(args[1].clone());
+                    array_dimensions(&out)?;
                     Ok(Value::List(out))
                 }
                 Value::Null => Ok(Value::List(vec![args[1].clone()])),
@@ -2100,6 +2338,7 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 Value::List(items) => {
                     let mut out = vec![args[0].clone()];
                     out.extend(items.iter().cloned());
+                    array_dimensions(&out)?;
                     Ok(Value::List(out))
                 }
                 Value::Null => Ok(Value::List(vec![args[0].clone()])),
@@ -2138,13 +2377,18 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 ))),
             }
         }
-        "unnest" => match &args[0] {
-            Value::List(items) => Ok(Value::List(items.clone())),
-            Value::Null => Ok(Value::List(Vec::new())),
-            other => Err(SQLError::TypeMismatch(format!(
-                "unnest: not an array {other:?}"
-            ))),
-        },
+        "unnest" => {
+            if args.len() != 1 {
+                return Err(SQLError::TypeMismatch("unnest takes 1 arg".into()));
+            }
+            match &args[0] {
+                Value::List(items) => Ok(Value::List(items.clone())),
+                Value::Null => Ok(Value::List(Vec::new())),
+                other => Err(SQLError::TypeMismatch(format!(
+                    "unnest: not an array {other:?}"
+                ))),
+            }
+        }
         // -------------------------------------------------------------
         // PostgreSQL scalar surface: math, strings, arrays, operators
         // lowered to internal functions.
@@ -2257,7 +2501,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
             }
             let s = value_to_string(&args[0]);
             let pat = value_to_string(&args[1]);
-            let start = args.get(2).map(to_i64).transpose()?.unwrap_or(1).max(1) as usize;
+            let start = usize::try_from(args.get(2).map(to_i64).transpose()?.unwrap_or(1).max(1))
+                .unwrap_or(usize::MAX);
             let flags = args.get(3).map(value_to_string).unwrap_or_default();
             let re = compile_pg_regex(&pat, &flags)?;
             let chars: Vec<char> = s.chars().collect();
@@ -2291,39 +2536,16 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 .map_err(|e| SQLError::TypeMismatch(format!("SIMILAR TO pattern: {e}")))?;
             Ok(Value::Bool(re.is_match(&s)))
         }
-        // setseed() reseeds PostgreSQL's per-session random() state.
-        // The engine's random() is time-derived and non-seedable, so
-        // this accepts the call for compatibility and returns void
-        // (rendered as an empty string, like psql shows void);
-        // random() reproducibility is a documented divergence.
-        "setseed" => {
-            if args.len() != 1 {
-                return Err(SQLError::TypeMismatch("setseed takes 1 arg".into()));
-            }
-            let seed = to_f64(&args[0])?;
-            if !(-1.0..=1.0).contains(&seed) {
-                return Err(SQLError::Routine {
-                    sqlstate: "22023".into(),
-                    message: format!("setseed parameter {seed} is out of allowed range [-1,1]"),
-                });
-            }
-            Ok(Value::Str(String::new()))
-        }
         "num_nulls" => Ok(Value::Int(
             args.iter().filter(|v| matches!(v, Value::Null)).count() as i64,
         )),
         "num_nonnulls" => Ok(Value::Int(
             args.iter().filter(|v| !matches!(v, Value::Null)).count() as i64,
         )),
-        // The engine has a single database and a single flat namespace;
-        // these identifiers exist for PostgreSQL client compatibility.
+        // The engine has one database and one logical user identity; schema
+        // identifiers are intercepted above because they are session-scoped.
         "current_database" | "current_catalog" => Ok(Value::Str("uqa".into())),
         "current_user" | "session_user" => Ok(Value::Str("uqa".into())),
-        "current_schema" => Ok(Value::Str("public".into())),
-        "current_schemas" => Ok(Value::List(vec![
-            Value::Str("pg_catalog".into()),
-            Value::Str("public".into()),
-        ])),
         "array_positions" => {
             if args.len() != 2 {
                 return Err(SQLError::TypeMismatch(
@@ -2414,8 +2636,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     "array_fill supports one dimension".into(),
                 ));
             }
-            let n = to_i64(&dims[0])?.max(0) as usize;
-            Ok(Value::List(vec![args[0].clone(); n]))
+            let n = nonnegative_usize(to_i64(&dims[0])?.max(0), "array_fill dimension")?;
+            let mut values = Vec::new();
+            values
+                .try_reserve_exact(n)
+                .map_err(|_| allocation_error("array_fill"))?;
+            values.resize(n, args[0].clone());
+            Ok(Value::List(values))
         }
         "trim_array" => {
             if args.len() != 2 {
@@ -2428,7 +2655,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 return Err(SQLError::TypeMismatch("trim_array: not an array".into()));
             };
             let n = to_i64(&args[1])?;
-            if n < 0 || n as usize > items.len() {
+            let n = usize::try_from(n).ok();
+            if n.is_none_or(|n| n > items.len()) {
                 return Err(SQLError::Routine {
                     sqlstate: "2202E".into(),
                     message: format!(
@@ -2437,7 +2665,8 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                     ),
                 });
             }
-            Ok(Value::List(items[..items.len() - n as usize].to_vec()))
+            let n = n.ok_or_else(|| out_of_range("array trim count"))?;
+            Ok(Value::List(items[..items.len() - n].to_vec()))
         }
         "array_sample" => {
             if args.len() != 2 {
@@ -2450,14 +2679,16 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 return Err(SQLError::TypeMismatch("array_sample: not an array".into()));
             };
             let n = to_i64(&args[1])?;
-            if n < 0 || n as usize > items.len() {
+            let n = usize::try_from(n).ok();
+            if n.is_none_or(|n| n > items.len()) {
                 return Err(SQLError::Routine {
                     sqlstate: "22023".into(),
                     message: format!("sample size must be between 0 and {}", items.len()),
                 });
             }
+            let n = n.ok_or_else(|| out_of_range("array sample size"))?;
             let mut pool = items.clone();
-            let mut out = Vec::with_capacity(n as usize);
+            let mut out = Vec::with_capacity(n);
             let mut seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.subsec_nanos() as u64 | 1)
@@ -2498,10 +2729,13 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                 (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
                 (Value::List(items), idx) => {
                     let idx = to_i64(idx)?;
-                    if idx < 1 || idx as usize > items.len() {
+                    let Ok(idx) = usize::try_from(idx) else {
+                        return Ok(Value::Null);
+                    };
+                    if idx < 1 || idx > items.len() {
                         return Ok(Value::Null);
                     }
-                    Ok(items[(idx - 1) as usize].clone())
+                    Ok(items[idx - 1].clone())
                 }
                 (Value::Map(map), key) => Ok(map
                     .get(&value_to_string(key))
@@ -2525,16 +2759,18 @@ fn eval_scalar_function(name: &str, args: &[Value]) -> Result<Value> {
                         Value::Null => 1,
                         other => to_i64(other)?,
                     }
-                    .max(1) as usize;
+                    .max(1);
                     let hi = match &args[2] {
                         Value::Null => items.len() as i64,
                         other => to_i64(other)?,
                     }
                     .min(items.len() as i64);
-                    if hi < lo as i64 {
+                    if hi < lo || lo > items.len() as i64 {
                         return Ok(Value::List(Vec::new()));
                     }
-                    Ok(Value::List(items[lo - 1..hi as usize].to_vec()))
+                    let lo = usize::try_from(lo - 1).map_err(|_| out_of_range("array slice"))?;
+                    let hi = usize::try_from(hi).map_err(|_| out_of_range("array slice"))?;
+                    Ok(Value::List(items[lo..hi].to_vec()))
                 }
                 other => Err(SQLError::TypeMismatch(format!("cannot slice {other:?}"))),
             }
@@ -3186,7 +3422,10 @@ fn cast_integer(v: &Value, target: &str) -> Result<Value> {
                 return Err(out_of_range(target));
             }
             let rounded = f.round_ties_even();
-            if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+            // `i64::MAX as f64` rounds up to 2^63.  Comparing with `>` would
+            // therefore admit 2^63 and Rust's float-to-int cast would silently
+            // saturate it to `i64::MAX`.
+            if rounded < i64::MIN as f64 || rounded >= 9_223_372_036_854_775_808.0 {
                 return Err(out_of_range(target));
             }
             rounded as i64
@@ -3250,56 +3489,201 @@ fn cast_boolean(v: &Value) -> Result<Value> {
     }
 }
 
-/// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`)
-/// into a list of string/NULL values; the caller casts elements.
-fn parse_pg_array_literal(text: &str) -> Result<Vec<Value>> {
-    let trimmed = text.trim();
-    let inner = trimmed
-        .strip_prefix('{')
-        .and_then(|rest| rest.strip_suffix('}'))
-        .ok_or_else(|| SQLError::Routine {
+/// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`,
+/// `{{1,2},{3,4}}`) into nested lists of string/NULL values; the caller
+/// casts elements.
+pub fn parse_pg_array_literal(text: &str) -> Result<Vec<Value>> {
+    let mut parser = PgArrayLiteralParser::new(text);
+    let items = parser.parse()?;
+    if let Err(error) = array_shape(&items) {
+        return Err(SQLError::Routine {
             sqlstate: "22P02".into(),
-            message: format!("malformed array literal: \"{text}\""),
-        })?;
-    let mut items: Vec<Value> = Vec::new();
-    let mut current = String::new();
-    let mut chars = inner.chars().peekable();
-    let mut in_quotes = false;
-    let mut was_quoted = false;
-    let push_item = |raw: &str, quoted: bool, items: &mut Vec<Value>| {
-        let value = raw.trim();
-        if value.is_empty() && !quoted {
-            return;
-        }
-        if !quoted && value.eq_ignore_ascii_case("null") {
-            items.push(Value::Null);
-        } else {
-            items.push(Value::Str(value.to_string()));
-        }
-    };
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                was_quoted = true;
-            }
-            '\\' if in_quotes => {
-                if let Some(next) = chars.next() {
-                    current.push(next);
-                }
-            }
-            ',' if !in_quotes => {
-                push_item(&current, was_quoted, &mut items);
-                current.clear();
-                was_quoted = false;
-            }
-            other => current.push(other),
-        }
-    }
-    if !current.is_empty() || was_quoted {
-        push_item(&current, was_quoted, &mut items);
+            message: format!("malformed array literal: \"{text}\" ({})", error.message()),
+        });
     }
     Ok(items)
+}
+
+struct PgArrayLiteralParser<'a> {
+    source: &'a str,
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+}
+
+impl<'a> PgArrayLiteralParser<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            chars: source.chars().peekable(),
+        }
+    }
+
+    fn parse(&mut self) -> Result<Vec<Value>> {
+        self.skip_whitespace();
+        let items = self.parse_array()?;
+        self.skip_whitespace();
+        if self.chars.peek().is_some() {
+            return Err(self.error("unexpected content after closing brace"));
+        }
+        Ok(items)
+    }
+
+    fn parse_array(&mut self) -> Result<Vec<Value>> {
+        if self.chars.next() != Some('{') {
+            return Err(self.error("array value must start with `{`"));
+        }
+        self.skip_whitespace();
+        if self.chars.next_if_eq(&'}').is_some() {
+            return Ok(Vec::new());
+        }
+
+        let mut items = Vec::new();
+        loop {
+            self.skip_whitespace();
+            items.push(self.parse_element()?);
+            self.skip_whitespace();
+            match self.chars.next() {
+                Some(',') => {
+                    self.skip_whitespace();
+                    if matches!(self.chars.peek(), None | Some('}')) {
+                        return Err(self.error("array contains a missing element"));
+                    }
+                }
+                Some('}') => break,
+                Some(_) => {
+                    return Err(self.error("array elements must be separated by commas"));
+                }
+                None => return Err(self.error("array is missing a closing `}`")),
+            }
+        }
+        Ok(items)
+    }
+
+    fn parse_element(&mut self) -> Result<Value> {
+        match self.chars.peek() {
+            Some('{') => self.parse_array().map(Value::List),
+            Some('"') => self.parse_quoted_element().map(Value::Str),
+            Some(',') | Some('}') | None => Err(self.error("array contains a missing element")),
+            Some(_) => self.parse_unquoted_element(),
+        }
+    }
+
+    fn parse_quoted_element(&mut self) -> Result<String> {
+        let _opening_quote = self.chars.next();
+        let mut value = String::new();
+        loop {
+            match self.chars.next() {
+                Some('"') => return Ok(value),
+                Some('\\') => value.push(
+                    self.chars
+                        .next()
+                        .ok_or_else(|| self.error("quoted element ends with an escape"))?,
+                ),
+                Some(character) => value.push(character),
+                None => return Err(self.error("array contains an unterminated quoted element")),
+            }
+        }
+    }
+
+    fn parse_unquoted_element(&mut self) -> Result<Value> {
+        let mut value = String::new();
+        while let Some(character) = self.chars.peek().copied() {
+            match character {
+                ',' | '}' => break,
+                '{' | '"' => {
+                    return Err(self.error("array contains an unescaped special character"));
+                }
+                '\\' => {
+                    let _escape = self.chars.next();
+                    value.push(
+                        self.chars
+                            .next()
+                            .ok_or_else(|| self.error("array element ends with an escape"))?,
+                    );
+                }
+                _ => {
+                    let _character = self.chars.next();
+                    value.push(character);
+                }
+            }
+        }
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(self.error("array contains a missing element"));
+        }
+        if value.eq_ignore_ascii_case("null") {
+            Ok(Value::Null)
+        } else {
+            Ok(Value::Str(value.to_string()))
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self
+            .chars
+            .next_if(|character| character.is_whitespace())
+            .is_some()
+        {}
+    }
+
+    fn error(&self, detail: &str) -> SQLError {
+        SQLError::Routine {
+            sqlstate: "22P02".into(),
+            message: format!("malformed array literal: \"{}\" ({detail})", self.source),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArrayShapeError {
+    MixedNesting,
+    MismatchedDimensions,
+}
+
+impl ArrayShapeError {
+    fn message(self) -> &'static str {
+        match self {
+            Self::MixedNesting => "cannot mix nested arrays and scalar elements",
+            Self::MismatchedDimensions => "multidimensional arrays must have matching dimensions",
+        }
+    }
+}
+
+fn array_shape(items: &[Value]) -> std::result::Result<Vec<usize>, ArrayShapeError> {
+    let mut dimensions = vec![items.len()];
+    let mut nested_shape: Option<Vec<usize>> = None;
+    let mut has_scalar = false;
+    for item in items {
+        if let Value::List(nested) = item {
+            let shape = array_shape(nested)?;
+            if has_scalar {
+                return Err(ArrayShapeError::MixedNesting);
+            }
+            if nested_shape
+                .as_ref()
+                .is_some_and(|expected| *expected != shape)
+            {
+                return Err(ArrayShapeError::MismatchedDimensions);
+            }
+            nested_shape = Some(shape);
+        } else {
+            if nested_shape.is_some() {
+                return Err(ArrayShapeError::MixedNesting);
+            }
+            has_scalar = true;
+        }
+    }
+    if let Some(shape) = nested_shape {
+        dimensions.extend(shape);
+    }
+    Ok(dimensions)
+}
+
+/// Return every dimension of a rectangular array value.
+///
+/// `PostgreSQL` arrays cannot mix scalar and nested elements or contain
+/// sub-arrays with different extents.
+pub fn array_dimensions(items: &[Value]) -> Result<Vec<usize>> {
+    array_shape(items).map_err(|error| SQLError::TypeMismatch(error.message().to_string()))
 }
 
 fn cast_temporal(v: &Value, parse: fn(&str) -> Option<TemporalValue>, ty: &str) -> Result<Value> {
@@ -3320,9 +3704,7 @@ fn value_to_string(v: &Value) -> String {
         Value::Str(s) => s.clone(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
         Value::Temporal(t) => t.to_sql_string(),
-        Value::List(_) | Value::Map(_) => {
-            serde_json::to_string(&value_to_json(v)).unwrap_or_default()
-        }
+        Value::List(_) | Value::Map(_) => value_to_json(v).to_string(),
         // bytea renders as PostgreSQL hex output in text contexts.
         Value::Bytes(b) => format!("\\x{}", hex_encode(b)),
     }
@@ -3381,7 +3763,7 @@ fn initcap_str(s: &str) -> String {
 fn to_i64(v: &Value) -> Result<i64> {
     match v {
         Value::Int(n) => Ok(*n),
-        Value::Float(f) => Ok(*f as i64),
+        Value::Float(f) => float_to_i64_trunc(*f),
         Value::Decimal(d) => d
             .to_i64_trunc()
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to integer"))),
@@ -3393,6 +3775,20 @@ fn to_i64(v: &Value) -> Result<i64> {
         other => Err(SQLError::TypeMismatch(format!(
             "expected integer, got {other:?}"
         ))),
+    }
+}
+
+fn nonnegative_usize(value: i64, label: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_| SQLError::Routine {
+        sqlstate: "22003".into(),
+        message: format!("{label} exceeds the platform addressable range"),
+    })
+}
+
+fn allocation_error(label: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "53200".into(),
+        message: format!("{label} result exceeds available memory"),
     }
 }
 
@@ -3440,15 +3836,30 @@ fn to_decimal(v: &Value) -> Result<DecimalValue> {
     }
 }
 
-fn gcd_i64(mut a: i64, mut b: i64) -> i64 {
-    a = a.abs();
-    b = b.abs();
+fn float_to_i64_trunc(value: f64) -> Result<i64> {
+    if !value.is_finite() || value < i64::MIN as f64 || value >= 9_223_372_036_854_775_808.0 {
+        return Err(out_of_range("bigint"));
+    }
+    Ok(value.trunc() as i64)
+}
+
+fn float_to_i64_rounded(value: f64, type_name: &str) -> Result<i64> {
+    let rounded = value.round();
+    if !rounded.is_finite() || rounded < i64::MIN as f64 || rounded >= 9_223_372_036_854_775_808.0 {
+        return Err(out_of_range(type_name));
+    }
+    Ok(rounded as i64)
+}
+
+fn gcd_i64(a: i64, b: i64) -> Result<i64> {
+    let mut a = a.unsigned_abs();
+    let mut b = b.unsigned_abs();
     while b != 0 {
         let r = a % b;
         a = b;
         b = r;
     }
-    a
+    i64::try_from(a).map_err(|_| out_of_range("bigint"))
 }
 
 /// Best-effort `Value -> i64`. Returns `None` for shapes that do not
@@ -3456,7 +3867,7 @@ fn gcd_i64(mut a: i64, mut b: i64) -> i64 {
 fn coerce_i64(v: &Value) -> Option<i64> {
     match v {
         Value::Int(n) => Some(*n),
-        Value::Float(f) => Some(*f as i64),
+        Value::Float(f) => float_to_i64_trunc(*f).ok(),
         Value::Decimal(d) => d.to_i64_trunc(),
         Value::Bool(b) => Some(i64::from(*b)),
         Value::Str(s) => s.parse().ok(),
@@ -3473,11 +3884,16 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
                 let x = match item {
-                    Value::Float(f) => *f as f32,
+                    Value::Float(f) => numeric_f64_to_f32(*f, item)?,
                     Value::Int(i) => *i as f32,
-                    Value::Decimal(d) => d.to_f64().map(|f| f as f32).ok_or_else(|| {
-                        SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
-                    })?,
+                    Value::Decimal(d) => numeric_f64_to_f32(
+                        d.to_f64().ok_or_else(|| {
+                            SQLError::TypeMismatch(format!(
+                                "vector element must fit f32, got {item:?}"
+                            ))
+                        })?,
+                        item,
+                    )?,
                     other => {
                         return Err(SQLError::TypeMismatch(format!(
                             "vector element must be numeric, got {other:?}"
@@ -3492,6 +3908,15 @@ pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
             "expected vector (numeric list), got {other:?}"
         ))),
     }
+}
+
+fn numeric_f64_to_f32(value: f64, source: &Value) -> Result<f32> {
+    if !value.is_finite() || value < -(f32::MAX as f64) || value > f32::MAX as f64 {
+        return Err(SQLError::TypeMismatch(format!(
+            "vector element must be finite and fit f32, got {source:?}"
+        )));
+    }
+    Ok(value as f32)
 }
 
 /// Coerce a [`Value`] into a tensor: an array of homogeneous numeric
@@ -3533,6 +3958,16 @@ mod tests {
     }
 
     #[test]
+    fn parameter_zero_is_not_aliased_to_parameter_one() {
+        let params = vec![SQLParam::Scalar(Value::Str("secret".into()))];
+        let ctx = EvalContext::new(None, &params);
+        assert!(matches!(
+            eval(&Expr::Param(0), &ctx),
+            Err(SQLError::MissingParam(0))
+        ));
+    }
+
+    #[test]
     fn array_collects_into_list() {
         let ctx = EvalContext::new(None, &[]);
         let got = eval(
@@ -3544,6 +3979,64 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got, Value::List(vec![Value::Int(1), Value::Int(2)]));
+    }
+
+    #[test]
+    fn postgres_array_literals_preserve_nesting_quotes_and_nulls() {
+        assert_eq!(
+            parse_pg_array_literal(r#"{{"a,b",NULL},{"c\"d","NULL"}}"#).unwrap(),
+            vec![
+                Value::List(vec![Value::Str("a,b".into()), Value::Null]),
+                Value::List(vec![Value::Str("c\"d".into()), Value::Str("NULL".into()),]),
+            ]
+        );
+    }
+
+    #[test]
+    fn postgres_array_literals_reject_invalid_or_ragged_shapes() {
+        for literal in ["{1,}", "{1", "{{1,2},{3}}", "{{1},2}", "{\"unterminated}"] {
+            let error = parse_pg_array_literal(literal).unwrap_err();
+            assert!(error.to_string().contains("malformed array literal"));
+        }
+    }
+
+    #[test]
+    fn multidimensional_array_functions_use_every_dimension() {
+        let matrix = Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+        ]);
+        assert_eq!(
+            eval_scalar_function("array_length", &[matrix.clone(), Value::Int(1)]).unwrap(),
+            Value::Int(2)
+        );
+        assert_eq!(
+            eval_scalar_function("array_upper", &[matrix.clone(), Value::Int(2)]).unwrap(),
+            Value::Int(2)
+        );
+        assert_eq!(
+            eval_scalar_function("array_lower", &[matrix.clone(), Value::Int(2)]).unwrap(),
+            Value::Int(1)
+        );
+        assert_eq!(
+            eval_scalar_function("cardinality", &[matrix]).unwrap(),
+            Value::Int(4)
+        );
+        assert_eq!(
+            eval_scalar_function("cardinality", &[Value::List(Vec::new())]).unwrap(),
+            Value::Int(0)
+        );
+    }
+
+    #[test]
+    fn array_functions_reject_ragged_values_and_invalid_arity() {
+        let ragged = Value::List(vec![
+            Value::List(vec![Value::Int(1)]),
+            Value::List(vec![Value::Int(2), Value::Int(3)]),
+        ]);
+        assert!(eval_scalar_function("array_length", &[ragged, Value::Int(2)]).is_err());
+        assert!(eval_scalar_function("cardinality", &[]).is_err());
+        assert!(eval_scalar_function("unnest", &[]).is_err());
     }
 
     #[test]
@@ -3622,5 +4115,180 @@ mod tests {
         ]);
         let got = value_to_tensor(&v).unwrap();
         assert_eq!(got, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
+    }
+
+    #[test]
+    fn value_to_vector_rejects_non_finite_and_out_of_range_elements() {
+        for value in [f64::NAN, f64::INFINITY, f64::MAX] {
+            assert!(value_to_vector(&Value::List(vec![Value::Float(value)])).is_err());
+        }
+    }
+
+    #[test]
+    fn json_conversion_preserves_non_finite_float_meaning() {
+        assert_eq!(
+            value_to_json(&Value::Float(f64::NAN)),
+            serde_json::Value::String("NaN".into())
+        );
+        assert_eq!(
+            value_to_json(&Value::Float(f64::INFINITY)),
+            serde_json::Value::String("Infinity".into())
+        );
+        assert_eq!(
+            value_to_json(&Value::Float(f64::NEG_INFINITY)),
+            serde_json::Value::String("-Infinity".into())
+        );
+    }
+
+    #[test]
+    fn integer_projection_rejects_float_saturation_boundaries() {
+        for value in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            9_223_372_036_854_775_808.0,
+        ] {
+            assert!(to_i64(&Value::Float(value)).is_err(), "accepted {value}");
+            assert!(cast_integer(&Value::Float(value), "bigint").is_err());
+            assert_eq!(coerce_i64(&Value::Float(value)), None);
+        }
+        assert_eq!(
+            to_i64(&Value::Float(-9_223_372_036_854_775_808.0)).unwrap(),
+            i64::MIN
+        );
+    }
+
+    #[test]
+    fn numeric_comparison_preserves_large_integer_and_nan_ordering() {
+        let rounded = Value::Float(9_007_199_254_740_992.0);
+        let next_integer = Value::Int(9_007_199_254_740_993);
+        assert_eq!(
+            eval_comparison_op(BinaryOp::Equal, &rounded, &next_integer).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            eval_comparison_op(BinaryOp::Less, &rounded, &next_integer).unwrap(),
+            Value::Bool(true)
+        );
+
+        let nan = Value::Float(f64::NAN);
+        assert_eq!(
+            eval_comparison_op(BinaryOp::Equal, &nan, &Value::Float(f64::NAN)).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            eval_comparison_op(BinaryOp::Greater, &nan, &Value::Float(f64::INFINITY)).unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn integer_builtins_report_overflow_instead_of_panicking_or_saturating() {
+        assert!(eval_scalar_function("abs", &[Value::Int(i64::MIN)]).is_err());
+        assert!(eval_scalar_function("mod", &[Value::Int(i64::MIN), Value::Int(-1)]).is_err());
+        assert!(eval_scalar_function("div", &[Value::Int(i64::MIN), Value::Int(-1)]).is_err());
+        assert!(eval_scalar_function("gcd", &[Value::Int(i64::MIN), Value::Int(0)]).is_err());
+        assert!(eval_scalar_function("lcm", &[Value::Int(i64::MAX), Value::Int(2)]).is_err());
+        assert!(eval_scalar_function("chr", &[Value::Int(-1)]).is_err());
+    }
+
+    #[test]
+    fn temporal_builtins_reject_narrowing_and_arithmetic_overflow() {
+        assert!(eval_scalar_function("to_timestamp", &[Value::Float(f64::MAX)]).is_err());
+        assert!(eval_scalar_function(
+            "make_timestamp",
+            &[
+                Value::Int(i64::MAX),
+                Value::Int(1),
+                Value::Int(1),
+                Value::Int(0),
+                Value::Int(0),
+                Value::Int(0),
+            ],
+        )
+        .is_err());
+        assert!(eval_scalar_function(
+            "make_timestamp",
+            &[
+                Value::Int(2026),
+                Value::Int(1),
+                Value::Int(1),
+                Value::Int(0),
+                Value::Int(0),
+                Value::Float(f64::NAN),
+            ],
+        )
+        .is_err());
+        assert!(
+            eval_scalar_function("make_interval", &[Value::Int(i64::MAX), Value::Int(0)],).is_err()
+        );
+        assert!(eval_scalar_function(
+            "justify_hours",
+            &[Value::Temporal(TemporalValue::Interval {
+                months: 0,
+                days: i32::MAX,
+                micros: 86_400_000_000,
+            })],
+        )
+        .is_err());
+        assert!(eval_binary_values(
+            BinaryOp::Multiply,
+            &Value::Temporal(TemporalValue::Interval {
+                months: 1,
+                days: 0,
+                micros: 0,
+            }),
+            &Value::Float(f64::INFINITY),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
+        assert!(
+            eval_scalar_function("lpad", &[Value::Str("x".into()), Value::Int(i64::MAX)],).is_err()
+        );
+        assert!(
+            eval_scalar_function("repeat", &[Value::Str("x".into()), Value::Int(i64::MAX)],)
+                .is_err()
+        );
+        assert!(eval_scalar_function(
+            "array_fill",
+            &[Value::Int(1), Value::List(vec![Value::Int(i64::MAX)]),],
+        )
+        .is_err());
+
+        let values = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        assert!(
+            eval_scalar_function("trim_array", &[values.clone(), Value::Int(i64::MAX)]).is_err()
+        );
+        assert!(
+            eval_scalar_function("array_sample", &[values.clone(), Value::Int(i64::MAX)]).is_err()
+        );
+        assert_eq!(
+            eval_scalar_function("__subscript", &[values.clone(), Value::Int(i64::MAX)]).unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            eval_scalar_function(
+                "__slice",
+                &[values, Value::Int(i64::MAX), Value::Int(i64::MAX)],
+            )
+            .unwrap(),
+            Value::List(Vec::new())
+        );
+        assert_eq!(
+            eval_scalar_function(
+                "overlay",
+                &[
+                    Value::Str("abc".into()),
+                    Value::Str("x".into()),
+                    Value::Int(i64::MAX),
+                    Value::Int(i64::MAX),
+                ],
+            )
+            .unwrap(),
+            Value::Str("abcx".into())
+        );
     }
 }

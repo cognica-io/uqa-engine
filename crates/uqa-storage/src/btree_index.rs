@@ -42,20 +42,44 @@ fn sort_and_dedup_doc_ids(doc_ids: &mut Vec<DocId>) {
     // At density >= 1/8, this bitmap is no larger than the input id
     // vector and turns comparison sorting into two linear, cache-local
     // passes. Sparse or very large id spaces stay on sort_unstable above.
-    let mut words = vec![0u64; span.div_ceil(u64::BITS as usize)];
-    for doc_id in doc_ids.iter().copied() {
-        let offset = usize::try_from(doc_id - min_doc_id).expect("dense doc-id offset fits usize");
-        words[offset / u64::BITS as usize] |= 1u64 << (offset % u64::BITS as usize);
+    let Some(offsets) = doc_ids
+        .iter()
+        .map(|doc_id| usize::try_from(*doc_id - min_doc_id).ok())
+        .collect::<Option<Vec<_>>>()
+    else {
+        doc_ids.sort_unstable();
+        doc_ids.dedup();
+        return;
+    };
+    let Ok(word_bits) = usize::try_from(u64::BITS) else {
+        doc_ids.sort_unstable();
+        doc_ids.dedup();
+        return;
+    };
+    let mut words = vec![0u64; span.div_ceil(word_bits)];
+    for offset in offsets {
+        words[offset / word_bits] |= 1u64 << (offset % word_bits);
     }
 
-    doc_ids.clear();
+    let mut dense_doc_ids = Vec::with_capacity(doc_ids.len());
     for (word_index, mut word) in words.into_iter().enumerate() {
         while word != 0 {
             let bit = word.trailing_zeros();
-            doc_ids.push(min_doc_id + word_index as u64 * u64::from(u64::BITS) + u64::from(bit));
+            let Some(doc_id) = u64::try_from(word_index)
+                .ok()
+                .and_then(|index| index.checked_mul(u64::from(u64::BITS)))
+                .and_then(|offset| offset.checked_add(u64::from(bit)))
+                .and_then(|offset| min_doc_id.checked_add(offset))
+            else {
+                doc_ids.sort_unstable();
+                doc_ids.dedup();
+                return;
+            };
+            dense_doc_ids.push(doc_id);
             word &= word - 1;
         }
     }
+    *doc_ids = dense_doc_ids;
 }
 
 #[derive(Debug, Default, Clone)]

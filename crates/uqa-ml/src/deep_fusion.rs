@@ -24,7 +24,13 @@ use std::sync::Arc;
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList, Value};
 use uqa_scoring::prob::{log_odds_conjunction_weighted, logit, sigmoid, PROB_EPSILON};
 
-use uqa_operators::{base::Direction, ExecutionContext, Operator};
+use uqa_operators::{
+    base::{Direction, OperatorResult},
+    ExecutionContext, Operator,
+};
+use uqa_storage::{StorageBackendError, StorageBackendResult};
+
+use crate::backend::{try_filled_vec, try_vec_with_capacity, MLError, MLResult};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Gating {
@@ -125,6 +131,7 @@ pub enum Layer {
     /// probabilities; the resulting logit is added as a residual on
     /// channel 0. Requires `ExecutionContext::graph`.
     Propagate {
+        /// Edge label to follow. An empty string selects every edge label.
         edge_label: String,
         aggregation: AggregationKind,
         direction: Direction,
@@ -136,6 +143,7 @@ pub enum Layer {
     /// L1-normalized; the result is converted back to logit and added
     /// as a residual.
     Conv {
+        /// Edge label to follow. An empty string selects every edge label.
         edge_label: String,
         hop_weights: Vec<f64>,
         direction: Direction,
@@ -146,6 +154,7 @@ pub enum Layer {
     /// channel vectors element-wise (`PoolMethod::{Avg, Max}`), and
     /// keeps the smallest doc id as the representative.
     Pool {
+        /// Edge label to follow. An empty string selects every edge label.
         edge_label: String,
         pool_size: usize,
         method: PoolMethod,
@@ -181,26 +190,55 @@ pub enum Layer {
 }
 
 pub struct DeepFusionOperator {
-    pub layers: Vec<Layer>,
-    pub alpha: f64,
-    pub gating: Gating,
+    layers: Vec<Layer>,
+    alpha: f64,
+    gating: Gating,
 }
 
 impl DeepFusionOperator {
-    pub fn new(layers: Vec<Layer>, alpha: f64, gating: Gating) -> Self {
-        assert!(
-            !layers.is_empty(),
-            "DeepFusionOperator requires at least one layer"
-        );
-        match &layers[0] {
-            Layer::Signal(_) | Layer::Embed(_) | Layer::Input { .. } => {}
-            _ => panic!("DeepFusionOperator: first layer must be Signal, Embed, or Input"),
-        }
-        Self {
+    pub fn new(layers: Vec<Layer>, alpha: f64, gating: Gating) -> MLResult<Self> {
+        validate_layers(&layers, alpha)?;
+        Ok(Self {
             layers,
             alpha,
             gating,
+        })
+    }
+
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    pub fn gating(&self) -> Gating {
+        self.gating
+    }
+
+    fn validate_feature_input(&self, features: &[f64]) -> StorageBackendResult<()> {
+        let Some(Layer::Input { dimensions }) = self.layers.first() else {
+            return Err(runtime_model_error(
+                "execute_features requires an Input-based deep-fusion model",
+            ));
+        };
+        if features.len() != *dimensions {
+            return Err(StorageBackendError::Other(format!(
+                "deep-fusion feature vector has dimension {}, expected {dimensions}",
+                features.len()
+            )));
         }
+        if let Some((index, value)) = features
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            return Err(StorageBackendError::Other(format!(
+                "deep-fusion feature {index} must be finite, got {value}"
+            )));
+        }
+        Ok(())
     }
 
     fn coverage_default(coverage: usize, total: usize) -> f64 {
@@ -212,13 +250,14 @@ impl DeepFusionOperator {
         doc_id: u64,
         features: Vec<f64>,
         ctx: &ExecutionContext,
-    ) -> PostingList {
+    ) -> OperatorResult {
+        self.validate_feature_input(&features)?;
         let mut state = ForwardState {
             num_channels: features.len(),
             channel_map: BTreeMap::from([(doc_id, features)]),
             softmax_applied: false,
         };
-        self.apply_layers(ctx, &mut state);
+        self.apply_layers(ctx, &mut state)?;
         build_result(
             &state.channel_map,
             state.num_channels,
@@ -226,19 +265,32 @@ impl DeepFusionOperator {
         )
     }
 
-    fn apply_layers(&self, ctx: &ExecutionContext, state: &mut ForwardState) {
+    fn apply_layers(
+        &self,
+        ctx: &ExecutionContext,
+        state: &mut ForwardState,
+    ) -> StorageBackendResult<()> {
         for layer in &self.layers {
-            self.apply_layer(ctx, state, layer);
+            self.apply_layer(ctx, state, layer)?;
+            validate_state(state)?;
         }
+        Ok(())
     }
 
-    fn apply_layer(&self, ctx: &ExecutionContext, state: &mut ForwardState, layer: &Layer) {
+    fn apply_layer(
+        &self,
+        ctx: &ExecutionContext,
+        state: &mut ForwardState,
+        layer: &Layer,
+    ) -> StorageBackendResult<()> {
         match layer {
             Layer::Input { dimensions } => {
                 state.num_channels = *dimensions;
             }
-            Layer::Embed(embedding) => apply_embed(embedding, state),
-            Layer::Signal(signals) => apply_signal(signals, ctx, self.alpha, self.gating, state),
+            Layer::Embed(embedding) => apply_embed(embedding, state)?,
+            Layer::Signal(signals) => {
+                apply_signal(signals, ctx, self.alpha, self.gating, state)?;
+            }
             Layer::Dense {
                 weights,
                 bias,
@@ -251,18 +303,14 @@ impl DeepFusionOperator {
                 *input_channels,
                 self.gating,
                 state,
-            ),
-            Layer::Flatten => apply_flatten(state),
-            Layer::GlobalPool(method) => apply_global_pool(*method, state),
-            Layer::Softmax => apply_softmax(state),
-            Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, state),
+            )?,
+            Layer::Flatten => apply_flatten(state)?,
+            Layer::GlobalPool(method) => apply_global_pool(*method, state)?,
+            Layer::Softmax => apply_softmax(state)?,
+            Layer::BatchNorm { epsilon } => apply_batch_norm(*epsilon, state)?,
             Layer::Dropout { p } => apply_dropout(*p, state),
-            Layer::CNN1D { .. } => {
-                apply_cnn_1d(Convolution1D::from_layer(layer), self.gating, state);
-            }
-            Layer::CNN2D { .. } => {
-                apply_cnn_2d(Convolution2D::from_layer(layer), self.gating, state);
-            }
+            Layer::CNN1D { .. } => apply_cnn_1d_layer(layer, self.gating, state)?,
+            Layer::CNN2D { .. } => apply_cnn_2d_layer(layer, self.gating, state)?,
             Layer::Propagate {
                 edge_label,
                 aggregation,
@@ -274,33 +322,163 @@ impl DeepFusionOperator {
                 ctx,
                 self.gating,
                 state,
-            ),
+            )?,
             Layer::Conv {
                 edge_label,
                 hop_weights,
                 direction,
-            } => apply_conv(edge_label, hop_weights, *direction, ctx, self.gating, state),
+            } => apply_conv(edge_label, hop_weights, *direction, ctx, self.gating, state)?,
             Layer::Pool {
                 edge_label,
                 pool_size,
                 method,
                 direction,
-            } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, state),
-            Layer::Attention => apply_attention(state),
-            Layer::RNN { .. } => apply_rnn(Recurrent::from_layer(layer), state),
-            Layer::LSTM { .. } => apply_lstm(LongShortTermMemory::from_layer(layer), state),
+            } => apply_pool(edge_label, *pool_size, *method, *direction, ctx, state)?,
+            Layer::Attention => apply_attention(state)?,
+            Layer::RNN { .. } => apply_rnn_layer(layer, state)?,
+            Layer::LSTM { .. } => apply_lstm_layer(layer, state)?,
         }
+        Ok(())
     }
 }
 
+fn apply_cnn_1d_layer(
+    layer: &Layer,
+    gating: Gating,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
+    let Layer::CNN1D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        kernel_size,
+        stride,
+        padding,
+    } = layer
+    else {
+        return Err(runtime_model_error("internal CNN1D execution mismatch"));
+    };
+    apply_cnn_1d(
+        Convolution1D {
+            weights,
+            bias,
+            output_channels: *output_channels,
+            input_channels: *input_channels,
+            kernel_size: *kernel_size,
+            stride: *stride,
+            padding: *padding,
+        },
+        gating,
+        state,
+    )
+}
+
+fn apply_cnn_2d_layer(
+    layer: &Layer,
+    gating: Gating,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
+    let Layer::CNN2D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        input_height,
+        input_width,
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        padding_height,
+        padding_width,
+    } = layer
+    else {
+        return Err(runtime_model_error("internal CNN2D execution mismatch"));
+    };
+    apply_cnn_2d(
+        Convolution2D {
+            weights,
+            bias,
+            output_channels: *output_channels,
+            input_channels: *input_channels,
+            input_height: *input_height,
+            input_width: *input_width,
+            kernel_height: *kernel_height,
+            kernel_width: *kernel_width,
+            stride_height: *stride_height,
+            stride_width: *stride_width,
+            padding_height: *padding_height,
+            padding_width: *padding_width,
+        },
+        gating,
+        state,
+    )
+}
+
+fn apply_rnn_layer(layer: &Layer, state: &mut ForwardState) -> StorageBackendResult<()> {
+    let Layer::RNN {
+        weights_input,
+        weights_hidden,
+        bias,
+        hidden_channels,
+        input_channels,
+        return_sequences,
+    } = layer
+    else {
+        return Err(runtime_model_error("internal RNN execution mismatch"));
+    };
+    apply_rnn(
+        Recurrent {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels: *hidden_channels,
+            input_channels: *input_channels,
+            return_sequences: *return_sequences,
+        },
+        state,
+    )
+}
+
+fn apply_lstm_layer(layer: &Layer, state: &mut ForwardState) -> StorageBackendResult<()> {
+    let Layer::LSTM {
+        weights_input,
+        weights_hidden,
+        bias,
+        hidden_channels,
+        input_channels,
+        return_sequences,
+    } = layer
+    else {
+        return Err(runtime_model_error("internal LSTM execution mismatch"));
+    };
+    apply_lstm(
+        LongShortTermMemory {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels: *hidden_channels,
+            input_channels: *input_channels,
+            return_sequences: *return_sequences,
+        },
+        state,
+    )
+}
+
 impl Operator for DeepFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if matches!(self.layers.first(), Some(Layer::Input { .. })) {
+            return Err(runtime_model_error(
+                "Input-based deep-fusion models require execute_features",
+            ));
+        }
         let mut state = ForwardState {
             channel_map: BTreeMap::new(),
             num_channels: 1,
             softmax_applied: false,
         };
-        self.apply_layers(ctx, &mut state);
+        self.apply_layers(ctx, &mut state)?;
         build_result(
             &state.channel_map,
             state.num_channels,
@@ -323,7 +501,7 @@ impl Operator for DeepFusionOperator {
                     output_channels,
                     input_channels,
                     ..
-                } => total += (*output_channels * *input_channels) as f64,
+                } => total += (*output_channels as f64) * (*input_channels as f64),
                 Layer::Flatten
                 | Layer::GlobalPool(_)
                 | Layer::Softmax
@@ -346,6 +524,383 @@ impl Operator for DeepFusionOperator {
     }
 }
 
+fn validate_layers(layers: &[Layer], alpha: f64) -> MLResult<()> {
+    let Some(first) = layers.first() else {
+        return Err(MLError::InvalidModel(
+            "DeepFusionOperator requires at least one layer".into(),
+        ));
+    };
+    if !matches!(
+        first,
+        Layer::Signal(_) | Layer::Embed(_) | Layer::Input { .. }
+    ) {
+        return Err(MLError::InvalidModel(
+            "the first deep-fusion layer must be Signal, Embed, or Input".into(),
+        ));
+    }
+    if !alpha.is_finite() {
+        return Err(MLError::InvalidModel(format!(
+            "deep-fusion alpha must be finite, got {alpha}"
+        )));
+    }
+
+    for (index, layer) in layers.iter().enumerate() {
+        validate_layer(index, layer)?;
+    }
+    Ok(())
+}
+
+fn validate_layer(index: usize, layer: &Layer) -> MLResult<()> {
+    let context = format!("deep-fusion layer {index}");
+    match layer {
+        Layer::Input { dimensions } => validate_input(index, *dimensions, &context),
+        Layer::Signal(signals) if signals.is_empty() => Err(MLError::InvalidModel(format!(
+            "{context}: Signal requires at least one operator"
+        ))),
+        Layer::Embed(values) => validate_embedding(index, values, &context),
+        Layer::Dense {
+            weights,
+            bias,
+            output_channels,
+            input_channels,
+        } => validate_dense(weights, bias, *output_channels, *input_channels, &context),
+        Layer::BatchNorm { epsilon } if !epsilon.is_finite() || *epsilon <= 0.0 => {
+            Err(MLError::InvalidModel(format!(
+                "{context}: epsilon must be finite and greater than zero"
+            )))
+        }
+        Layer::Dropout { p } if !p.is_finite() || !(0.0..=1.0).contains(p) => {
+            Err(MLError::InvalidModel(format!(
+                "{context}: dropout probability must be finite and in [0, 1]"
+            )))
+        }
+        Layer::CNN1D { .. } => validate_cnn_1d(layer, &context),
+        Layer::CNN2D { .. } => validate_cnn_2d(layer, &context),
+        Layer::Conv { hop_weights, .. } => validate_hop_weights(hop_weights, &context),
+        Layer::Pool { pool_size, .. } => require_nonzero(*pool_size, &context, "pool_size"),
+        Layer::RNN { .. } => validate_recurrent_spec(layer, 1, &context),
+        Layer::LSTM { .. } => validate_recurrent_spec(layer, 4, &context),
+        Layer::Signal(_)
+        | Layer::BatchNorm { .. }
+        | Layer::Dropout { .. }
+        | Layer::Propagate { .. }
+        | Layer::Flatten
+        | Layer::GlobalPool(_)
+        | Layer::Softmax
+        | Layer::Attention => Ok(()),
+    }
+}
+
+fn validate_input(index: usize, dimensions: usize, context: &str) -> MLResult<()> {
+    if index != 0 {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: Input is only valid as the first layer"
+        )));
+    }
+    require_nonzero(dimensions, context, "dimensions")
+}
+
+fn validate_embedding(index: usize, values: &[f64], context: &str) -> MLResult<()> {
+    if index != 0 {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: Embed is only valid as the first layer"
+        )));
+    }
+    if values.is_empty() {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: embedding must not be empty"
+        )));
+    }
+    require_finite(values, context, "embedding")
+}
+
+fn validate_dense(
+    weights: &[f64],
+    bias: &[f64],
+    output_channels: usize,
+    input_channels: usize,
+    context: &str,
+) -> MLResult<()> {
+    require_nonzero(output_channels, context, "output_channels")?;
+    require_nonzero(input_channels, context, "input_channels")?;
+    let expected = checked_product(
+        &[output_channels, input_channels],
+        context,
+        "dense weight count",
+    )?;
+    require_len(weights.len(), expected, context, "weights")?;
+    require_len(bias.len(), output_channels, context, "bias")?;
+    require_finite(weights, context, "weights")?;
+    require_finite(bias, context, "bias")
+}
+
+fn validate_cnn_1d(layer: &Layer, context: &str) -> MLResult<()> {
+    let Layer::CNN1D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        kernel_size,
+        stride,
+        padding,
+    } = layer
+    else {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: internal CNN1D validation mismatch"
+        )));
+    };
+    for (name, value) in [
+        ("output_channels", *output_channels),
+        ("input_channels", *input_channels),
+        ("kernel_size", *kernel_size),
+        ("stride", *stride),
+    ] {
+        require_nonzero(value, context, name)?;
+    }
+    padding
+        .checked_mul(2)
+        .ok_or_else(|| MLError::InvalidModel(format!("{context}: padding is too large")))?;
+    let expected = checked_product(
+        &[*output_channels, *kernel_size, *input_channels],
+        context,
+        "CNN1D weight count",
+    )?;
+    validate_weights_and_bias(weights, bias, expected, *output_channels, context)
+}
+
+fn validate_cnn_2d(layer: &Layer, context: &str) -> MLResult<()> {
+    let Layer::CNN2D {
+        weights,
+        bias,
+        output_channels,
+        input_channels,
+        input_height,
+        input_width,
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        padding_height,
+        padding_width,
+    } = layer
+    else {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: internal CNN2D validation mismatch"
+        )));
+    };
+    for (name, value) in [
+        ("output_channels", *output_channels),
+        ("input_channels", *input_channels),
+        ("input_height", *input_height),
+        ("input_width", *input_width),
+        ("kernel_height", *kernel_height),
+        ("kernel_width", *kernel_width),
+        ("stride_height", *stride_height),
+        ("stride_width", *stride_width),
+    ] {
+        require_nonzero(value, context, name)?;
+    }
+    padding_height
+        .checked_mul(2)
+        .ok_or_else(|| MLError::InvalidModel(format!("{context}: padding_height is too large")))?;
+    padding_width
+        .checked_mul(2)
+        .ok_or_else(|| MLError::InvalidModel(format!("{context}: padding_width is too large")))?;
+    checked_product(
+        &[*input_height, *input_width, *input_channels],
+        context,
+        "CNN2D input size",
+    )?;
+    let expected = checked_product(
+        &[
+            *output_channels,
+            *kernel_height,
+            *kernel_width,
+            *input_channels,
+        ],
+        context,
+        "CNN2D weight count",
+    )?;
+    validate_weights_and_bias(weights, bias, expected, *output_channels, context)
+}
+
+fn validate_weights_and_bias(
+    weights: &[f64],
+    bias: &[f64],
+    expected_weights: usize,
+    output_channels: usize,
+    context: &str,
+) -> MLResult<()> {
+    require_len(weights.len(), expected_weights, context, "weights")?;
+    require_len(bias.len(), output_channels, context, "bias")?;
+    require_finite(weights, context, "weights")?;
+    require_finite(bias, context, "bias")
+}
+
+fn validate_hop_weights(hop_weights: &[f64], context: &str) -> MLResult<()> {
+    if hop_weights.is_empty() {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: graph convolution requires at least one hop weight"
+        )));
+    }
+    require_finite(hop_weights, context, "hop_weights")?;
+    let total_weight: f64 = hop_weights.iter().sum();
+    if hop_weights.iter().any(|weight| *weight < 0.0)
+        || !total_weight.is_finite()
+        || total_weight <= 0.0
+    {
+        return Err(MLError::InvalidModel(format!(
+            "{context}: hop_weights must be non-negative with a finite positive sum"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str) -> MLResult<()> {
+    let (weights_input, weights_hidden, bias, hidden_channels, input_channels) = match layer {
+        Layer::RNN {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            ..
+        }
+        | Layer::LSTM {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            ..
+        } => (
+            weights_input,
+            weights_hidden,
+            bias,
+            *hidden_channels,
+            *input_channels,
+        ),
+        _ => {
+            return Err(MLError::InvalidModel(format!(
+                "{context}: internal recurrent validation mismatch"
+            )));
+        }
+    };
+    validate_recurrent_layer(
+        weights_input,
+        weights_hidden,
+        bias,
+        hidden_channels,
+        input_channels,
+        gates,
+        context,
+    )
+}
+
+fn validate_recurrent_layer(
+    weights_input: &[f64],
+    weights_hidden: &[f64],
+    bias: &[f64],
+    hidden_channels: usize,
+    input_channels: usize,
+    gates: usize,
+    context: &str,
+) -> MLResult<()> {
+    require_nonzero(hidden_channels, context, "hidden_channels")?;
+    require_nonzero(input_channels, context, "input_channels")?;
+    let gate_channels = checked_product(&[gates, hidden_channels], context, "gate channels")?;
+    let input_count = checked_product(
+        &[gate_channels, input_channels],
+        context,
+        "input weight count",
+    )?;
+    let hidden_count = checked_product(
+        &[gate_channels, hidden_channels],
+        context,
+        "hidden weight count",
+    )?;
+    require_len(weights_input.len(), input_count, context, "weights_input")?;
+    require_len(
+        weights_hidden.len(),
+        hidden_count,
+        context,
+        "weights_hidden",
+    )?;
+    require_len(bias.len(), gate_channels, context, "bias")?;
+    require_finite(weights_input, context, "weights_input")?;
+    require_finite(weights_hidden, context, "weights_hidden")?;
+    require_finite(bias, context, "bias")
+}
+
+fn require_nonzero(value: usize, context: &str, field: &str) -> MLResult<()> {
+    if value == 0 {
+        Err(MLError::InvalidModel(format!(
+            "{context}: {field} must be greater than zero"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_len(actual: usize, expected: usize, context: &str, field: &str) -> MLResult<()> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(MLError::InvalidModel(format!(
+            "{context}: {field} has length {actual}, expected {expected}"
+        )))
+    }
+}
+
+fn require_finite(values: &[f64], context: &str, field: &str) -> MLResult<()> {
+    if let Some((index, value)) = values
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        Err(MLError::InvalidModel(format!(
+            "{context}: {field}[{index}] must be finite, got {value}"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn checked_product(values: &[usize], context: &str, description: &str) -> MLResult<usize> {
+    values.iter().try_fold(1usize, |product, value| {
+        product.checked_mul(*value).ok_or_else(|| {
+            MLError::InvalidModel(format!("{context}: {description} overflows usize"))
+        })
+    })
+}
+
+fn validate_state(state: &ForwardState) -> StorageBackendResult<()> {
+    if state.num_channels == 0 && !state.channel_map.is_empty() {
+        return Err(StorageBackendError::Other(
+            "deep-fusion layer produced zero channels".into(),
+        ));
+    }
+    for (doc_id, values) in &state.channel_map {
+        if values.len() != state.num_channels {
+            return Err(StorageBackendError::Other(format!(
+                "deep-fusion doc {doc_id} has {} channels, expected {}",
+                values.len(),
+                state.num_channels
+            )));
+        }
+        if let Some((index, value)) = values
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            return Err(StorageBackendError::Other(format!(
+                "deep-fusion doc {doc_id} channel {index} is non-finite: {value}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 struct ForwardState {
     channel_map: BTreeMap<u64, Vec<f64>>,
     num_channels: usize,
@@ -361,32 +916,6 @@ struct Convolution1D<'a> {
     kernel_size: usize,
     stride: usize,
     padding: usize,
-}
-
-impl<'a> Convolution1D<'a> {
-    fn from_layer(layer: &'a Layer) -> Self {
-        let Layer::CNN1D {
-            weights,
-            bias,
-            output_channels,
-            input_channels,
-            kernel_size,
-            stride,
-            padding,
-        } = layer
-        else {
-            unreachable!("Convolution1D::from_layer requires Layer::CNN1D");
-        };
-        Self {
-            weights,
-            bias,
-            output_channels: *output_channels,
-            input_channels: *input_channels,
-            kernel_size: *kernel_size,
-            stride: *stride,
-            padding: *padding,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -405,42 +934,6 @@ struct Convolution2D<'a> {
     padding_width: usize,
 }
 
-impl<'a> Convolution2D<'a> {
-    fn from_layer(layer: &'a Layer) -> Self {
-        let Layer::CNN2D {
-            weights,
-            bias,
-            output_channels,
-            input_channels,
-            input_height,
-            input_width,
-            kernel_height,
-            kernel_width,
-            stride_height,
-            stride_width,
-            padding_height,
-            padding_width,
-        } = layer
-        else {
-            unreachable!("Convolution2D::from_layer requires Layer::CNN2D");
-        };
-        Self {
-            weights,
-            bias,
-            output_channels: *output_channels,
-            input_channels: *input_channels,
-            input_height: *input_height,
-            input_width: *input_width,
-            kernel_height: *kernel_height,
-            kernel_width: *kernel_width,
-            stride_height: *stride_height,
-            stride_width: *stride_width,
-            padding_height: *padding_height,
-            padding_width: *padding_width,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 struct Recurrent<'a> {
     weights_input: &'a [f64],
@@ -449,30 +942,6 @@ struct Recurrent<'a> {
     hidden_channels: usize,
     input_channels: usize,
     return_sequences: bool,
-}
-
-impl<'a> Recurrent<'a> {
-    fn from_layer(layer: &'a Layer) -> Self {
-        let Layer::RNN {
-            weights_input,
-            weights_hidden,
-            bias,
-            hidden_channels,
-            input_channels,
-            return_sequences,
-        } = layer
-        else {
-            unreachable!("Recurrent::from_layer requires Layer::RNN");
-        };
-        Self {
-            weights_input,
-            weights_hidden,
-            bias,
-            hidden_channels: *hidden_channels,
-            input_channels: *input_channels,
-            return_sequences: *return_sequences,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -485,34 +954,18 @@ struct LongShortTermMemory<'a> {
     return_sequences: bool,
 }
 
-impl<'a> LongShortTermMemory<'a> {
-    fn from_layer(layer: &'a Layer) -> Self {
-        let Layer::LSTM {
-            weights_input,
-            weights_hidden,
-            bias,
-            hidden_channels,
-            input_channels,
-            return_sequences,
-        } = layer
-        else {
-            unreachable!("LongShortTermMemory::from_layer requires Layer::LSTM");
-        };
-        Self {
-            weights_input,
-            weights_hidden,
-            bias,
-            hidden_channels: *hidden_channels,
-            input_channels: *input_channels,
-            return_sequences: *return_sequences,
-        }
-    }
-}
-
-fn apply_embed(embedding: &[f64], state: &mut ForwardState) {
+fn apply_embed(embedding: &[f64], state: &mut ForwardState) -> StorageBackendResult<()> {
     for (i, val) in embedding.iter().enumerate() {
-        state.channel_map.insert((i + 1) as u64, vec![*val]);
+        let index = u64::try_from(i)
+            .map_err(|_| runtime_model_error("embedding index exceeds the u64 range"))?;
+        let doc_id = index
+            .checked_add(1)
+            .ok_or_else(|| runtime_model_error("embedding index exceeds the document-ID range"))?;
+        state.channel_map.insert(doc_id, vec![*val]);
     }
+    state.num_channels = 1;
+    state.softmax_applied = false;
+    Ok(())
 }
 
 fn apply_signal(
@@ -521,47 +974,69 @@ fn apply_signal(
     alpha: f64,
     gating: Gating,
     state: &mut ForwardState,
-) {
-    let posting_lists: Vec<PostingList> = signals.iter().map(|s| s.execute(ctx)).collect();
-    let mut score_maps: Vec<BTreeMap<u64, f64>> = Vec::new();
+) -> StorageBackendResult<()> {
+    let mut posting_lists = runtime_vec_with_capacity(signals.len(), "deep-fusion signals")?;
+    for signal in signals {
+        posting_lists.push(signal.execute(ctx)?);
+    }
+    let mut score_maps = runtime_vec_with_capacity(signals.len(), "deep-fusion score maps")?;
     let mut all_doc_ids: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     for pl in &posting_lists {
         let mut smap: BTreeMap<u64, f64> = BTreeMap::new();
         for entry in pl.entries() {
+            if !entry.payload.score.is_finite() || !(0.0..=1.0).contains(&entry.payload.score) {
+                return Err(runtime_model_error(format!(
+                    "deep-fusion signal score for doc {} must be a finite probability in [0, 1], got {}",
+                    entry.doc_id, entry.payload.score
+                )));
+            }
             smap.insert(entry.doc_id, entry.payload.score);
             all_doc_ids.insert(entry.doc_id);
         }
         score_maps.push(smap);
     }
     if all_doc_ids.is_empty() {
-        return;
+        return Ok(());
     }
     let total = all_doc_ids.len();
-    let defaults: Vec<f64> = score_maps
-        .iter()
-        .map(|m| DeepFusionOperator::coverage_default(m.len(), total))
-        .collect();
-    for doc_id in &all_doc_ids {
-        let probs: Vec<f64> = score_maps
+    let mut defaults = runtime_vec_with_capacity(score_maps.len(), "signal defaults")?;
+    defaults.extend(
+        score_maps
             .iter()
-            .enumerate()
-            .map(|(i, m)| m.get(doc_id).copied().unwrap_or(defaults[i]))
-            .collect();
+            .map(|map| DeepFusionOperator::coverage_default(map.len(), total)),
+    );
+    for doc_id in &all_doc_ids {
+        let mut probs = runtime_vec_with_capacity(score_maps.len(), "signal probabilities")?;
+        probs.extend(
+            score_maps
+                .iter()
+                .enumerate()
+                .map(|(i, map)| map.get(doc_id).copied().unwrap_or(defaults[i])),
+        );
         let fused = if probs.len() == 1 {
             probs[0]
         } else {
             let n = probs.len();
-            let weights = vec![1.0 / n as f64; n];
-            log_odds_conjunction_weighted(&probs, &weights, alpha).unwrap_or(0.5)
+            let weights = runtime_filled_vec(
+                n,
+                1.0 / usize_to_f64_exact(n, "signal count")?,
+                "deep-fusion signal weights",
+            )?;
+            log_odds_conjunction_weighted(&probs, &weights, alpha)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?
         };
         let layer_logit = apply_gating(safe_logit(fused), gating);
         let n = state.num_channels;
-        let entry = state
-            .channel_map
-            .entry(*doc_id)
-            .or_insert_with(|| vec![0.0; n]);
+        if !state.channel_map.contains_key(doc_id) {
+            let channels = runtime_filled_vec(n, 0.0, "deep-fusion signal channels")?;
+            state.channel_map.insert(*doc_id, channels);
+        }
+        let entry = state.channel_map.get_mut(doc_id).ok_or_else(|| {
+            runtime_model_error(format!("missing signal output for doc {doc_id}"))
+        })?;
         entry[0] += layer_logit;
     }
+    Ok(())
 }
 
 fn apply_dense(
@@ -571,32 +1046,45 @@ fn apply_dense(
     input_channels: usize,
     gating: Gating,
     state: &mut ForwardState,
-) {
-    assert_eq!(weights.len(), output_channels * input_channels);
-    assert_eq!(bias.len(), output_channels);
+) -> StorageBackendResult<()> {
     let doc_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     for did in doc_ids {
-        let input = state.channel_map.get(&did).cloned().unwrap_or_default();
-        let mut out = vec![0.0f64; output_channels];
+        let input = state
+            .channel_map
+            .get(&did)
+            .ok_or_else(|| runtime_model_error(format!("missing dense input for doc {did}")))?;
+        if input.len() != input_channels {
+            return Err(runtime_model_error(format!(
+                "dense input for doc {did} has {} channels, expected {input_channels}",
+                input.len()
+            )));
+        }
+        let mut out = runtime_filled_vec(output_channels, 0.0f64, "dense output channels")?;
         for o in 0..output_channels {
             let mut acc = bias[o];
             for i in 0..input_channels {
-                let inp = input.get(i).copied().unwrap_or(0.0);
-                acc += weights[o * input_channels + i] * inp;
+                acc += weights[o * input_channels + i] * input[i];
             }
             out[o] = apply_gating(acc, gating);
         }
         state.channel_map.insert(did, out);
     }
     state.num_channels = output_channels;
+    state.softmax_applied = false;
+    Ok(())
 }
 
-fn apply_flatten(state: &mut ForwardState) {
+fn apply_flatten(state: &mut ForwardState) -> StorageBackendResult<()> {
     let sorted_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if sorted_ids.is_empty() {
-        return;
+        return Ok(());
     }
-    let mut flat: Vec<f64> = Vec::new();
+    let flat_len = sorted_ids.iter().try_fold(0usize, |length, doc_id| {
+        length
+            .checked_add(state.channel_map[doc_id].len())
+            .ok_or_else(|| runtime_model_error("flattened channel count overflows usize"))
+    })?;
+    let mut flat = runtime_vec_with_capacity(flat_len, "flattened channels")?;
     for did in &sorted_ids {
         if let Some(v) = state.channel_map.get(did) {
             flat.extend_from_slice(v);
@@ -607,32 +1095,50 @@ fn apply_flatten(state: &mut ForwardState) {
     state.channel_map.clear();
     state.channel_map.insert(rep, flat);
     state.num_channels = new_n;
+    Ok(())
 }
 
-fn apply_global_pool(method: GlobalPoolMethod, state: &mut ForwardState) {
+fn apply_global_pool(
+    method: GlobalPoolMethod,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
     let sorted_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if sorted_ids.is_empty() {
-        return;
+        return Ok(());
     }
     let n_dims = state.channel_map[&sorted_ids[0]].len();
-    let mut sums = vec![0.0f64; n_dims];
-    let mut maxes = vec![f64::NEG_INFINITY; n_dims];
+    let mut sums = runtime_filled_vec(n_dims, 0.0f64, "global-pool sums")?;
+    let mut maxes = runtime_filled_vec(n_dims, f64::NEG_INFINITY, "global-pool maxima")?;
     for did in &sorted_ids {
         let v = &state.channel_map[did];
+        if v.len() != n_dims {
+            return Err(runtime_model_error(format!(
+                "global-pool input for doc {did} has {} channels, expected {n_dims}",
+                v.len()
+            )));
+        }
         for i in 0..n_dims {
-            let x = v.get(i).copied().unwrap_or(0.0);
+            let x = v[i];
             sums[i] += x;
             if x > maxes[i] {
                 maxes[i] = x;
             }
         }
     }
-    let count = sorted_ids.len() as f64;
+    let count = usize_to_f64_exact(sorted_ids.len(), "global-pool row count")?;
     let pooled: Vec<f64> = match method {
-        GlobalPoolMethod::Avg => sums.iter().map(|s| s / count).collect(),
-        GlobalPoolMethod::Max => maxes.clone(),
+        GlobalPoolMethod::Avg => {
+            let mut averages = runtime_vec_with_capacity(n_dims, "global-pool averages")?;
+            averages.extend(sums.iter().map(|s| s / count));
+            averages
+        }
+        GlobalPoolMethod::Max => crate::backend::try_clone_slice(&maxes, "global-pool output")
+            .map_err(|error| runtime_model_error(error.to_string()))?,
         GlobalPoolMethod::AvgMax => {
-            let mut combined = Vec::with_capacity(2 * n_dims);
+            let capacity = n_dims
+                .checked_mul(2)
+                .ok_or_else(|| runtime_model_error("AvgMax output width overflows usize"))?;
+            let mut combined = runtime_vec_with_capacity(capacity, "AvgMax output channels")?;
             combined.extend(sums.iter().map(|s| s / count));
             combined.extend(maxes.iter().copied());
             combined
@@ -643,19 +1149,25 @@ fn apply_global_pool(method: GlobalPoolMethod, state: &mut ForwardState) {
     state.channel_map.clear();
     state.channel_map.insert(rep, pooled);
     state.num_channels = new_n;
+    state.softmax_applied = false;
+    Ok(())
 }
 
-fn apply_softmax(state: &mut ForwardState) {
+fn apply_softmax(state: &mut ForwardState) -> StorageBackendResult<()> {
     for vec_ref in state.channel_map.values_mut() {
+        if vec_ref.is_empty() {
+            return Err(runtime_model_error("softmax input has zero channels"));
+        }
         let max = vec_ref.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let mut exps: Vec<f64> = vec_ref.iter().map(|x| (x - max).exp()).collect();
+        let mut exps = runtime_vec_with_capacity(vec_ref.len(), "softmax exponentials")?;
+        exps.extend(vec_ref.iter().map(|x| (x - max).exp()));
         let sum: f64 = exps.iter().sum();
         if sum > 0.0 {
             for x in &mut exps {
                 *x /= sum;
             }
         } else {
-            let n = exps.len() as f64;
+            let n = usize_to_f64_exact(exps.len(), "softmax channel count")?;
             for x in &mut exps {
                 *x = 1.0 / n;
             }
@@ -663,27 +1175,28 @@ fn apply_softmax(state: &mut ForwardState) {
         *vec_ref = exps;
     }
     state.softmax_applied = true;
+    Ok(())
 }
 
-fn apply_batch_norm(epsilon: f64, state: &mut ForwardState) {
+fn apply_batch_norm(epsilon: f64, state: &mut ForwardState) -> StorageBackendResult<()> {
     if state.channel_map.len() < 2 {
-        return;
+        return Ok(());
     }
     let dim = state.channel_map.values().next().map_or(0, Vec::len);
     if dim == 0 {
-        return;
+        return Ok(());
     }
-    let mut means = vec![0.0f64; dim];
+    let mut means = runtime_filled_vec(dim, 0.0f64, "batch-normalization means")?;
     for v in state.channel_map.values() {
         for i in 0..dim {
             means[i] += v[i];
         }
     }
-    let n = state.channel_map.len() as f64;
+    let n = usize_to_f64_exact(state.channel_map.len(), "batch-normalization row count")?;
     for m in &mut means {
         *m /= n;
     }
-    let mut vars = vec![0.0f64; dim];
+    let mut vars = runtime_filled_vec(dim, 0.0f64, "batch-normalization variances")?;
     for v in state.channel_map.values() {
         for i in 0..dim {
             let d = v[i] - means[i];
@@ -698,6 +1211,7 @@ fn apply_batch_norm(epsilon: f64, state: &mut ForwardState) {
             v[i] = (v[i] - means[i]) / (vars[i] + epsilon).sqrt();
         }
     }
+    Ok(())
 }
 
 fn apply_dropout(p: f64, state: &mut ForwardState) {
@@ -709,36 +1223,50 @@ fn apply_dropout(p: f64, state: &mut ForwardState) {
     }
 }
 
-fn apply_cnn_1d(params: Convolution1D<'_>, gating: Gating, state: &mut ForwardState) {
-    assert!(
-        params.kernel_size > 0,
-        "CNN1D kernel_size must be greater than zero"
-    );
-    assert!(params.stride > 0, "CNN1D stride must be greater than zero");
-    assert_eq!(
-        params.weights.len(),
-        params.output_channels * params.kernel_size * params.input_channels
-    );
-    assert_eq!(params.bias.len(), params.output_channels);
+fn apply_cnn_1d(
+    params: Convolution1D<'_>,
+    gating: Gating,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
     let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if input_ids.is_empty() {
-        return;
+        return Ok(());
     }
-    let padded_len = input_ids.len() + 2 * params.padding;
+    for doc_id in &input_ids {
+        let channels = state.channel_map[doc_id].len();
+        if channels != params.input_channels {
+            return Err(runtime_model_error(format!(
+                "CNN1D input for doc {doc_id} has {channels} channels, expected {}",
+                params.input_channels
+            )));
+        }
+    }
+    let double_padding = params
+        .padding
+        .checked_mul(2)
+        .ok_or_else(|| runtime_model_error("CNN1D padding overflows usize"))?;
+    let padded_len = input_ids
+        .len()
+        .checked_add(double_padding)
+        .ok_or_else(|| runtime_model_error("CNN1D padded input length overflows usize"))?;
     if padded_len < params.kernel_size {
         state.channel_map.clear();
         state.num_channels = params.output_channels;
-        return;
+        state.softmax_applied = false;
+        return Ok(());
     }
     let output_len = (padded_len - params.kernel_size) / params.stride + 1;
-    let base_doc_id = input_ids[0];
+    let mut next_synthetic_id = input_ids.last().and_then(|doc_id| doc_id.checked_add(1));
     let mut output = BTreeMap::new();
     for out_pos in 0..output_len {
-        let mut row = vec![0.0f64; params.output_channels];
+        let mut row = runtime_filled_vec(params.output_channels, 0.0f64, "CNN1D output channels")?;
         for (out_ch, slot) in row.iter_mut().enumerate() {
             let mut acc = params.bias[out_ch];
             for kernel_pos in 0..params.kernel_size {
-                let raw_pos = out_pos * params.stride + kernel_pos;
+                let raw_pos = out_pos
+                    .checked_mul(params.stride)
+                    .and_then(|position| position.checked_add(kernel_pos))
+                    .ok_or_else(|| runtime_model_error("CNN1D window position overflows usize"))?;
                 if raw_pos < params.padding {
                     continue;
                 }
@@ -747,61 +1275,45 @@ fn apply_cnn_1d(params: Convolution1D<'_>, gating: Gating, state: &mut ForwardSt
                     continue;
                 }
                 let input_vec = &state.channel_map[&input_ids[input_pos]];
-                for in_ch in 0..params.input_channels {
+                for (in_ch, input_value) in input_vec.iter().enumerate() {
                     let weight_index =
                         (out_ch * params.kernel_size + kernel_pos) * params.input_channels + in_ch;
-                    acc +=
-                        params.weights[weight_index] * input_vec.get(in_ch).copied().unwrap_or(0.0);
+                    acc += params.weights[weight_index] * input_value;
                 }
             }
             *slot = apply_gating(acc, gating);
         }
-        let doc_id = input_ids
-            .get(out_pos)
-            .copied()
-            .unwrap_or(base_doc_id + out_pos as u64);
+        let doc_id = if let Some(doc_id) = input_ids.get(out_pos).copied() {
+            doc_id
+        } else {
+            let doc_id = next_synthetic_id
+                .ok_or_else(|| runtime_model_error("CNN1D output document IDs exceed u64"))?;
+            next_synthetic_id = doc_id.checked_add(1);
+            doc_id
+        };
         output.insert(doc_id, row);
     }
     state.channel_map = output;
     state.num_channels = params.output_channels;
     state.softmax_applied = false;
+    Ok(())
 }
 
-fn apply_cnn_2d(params: Convolution2D<'_>, gating: Gating, state: &mut ForwardState) {
-    assert!(
-        params.input_height > 0,
-        "CNN2D input_height must be greater than zero"
-    );
-    assert!(
-        params.input_width > 0,
-        "CNN2D input_width must be greater than zero"
-    );
-    assert!(
-        params.kernel_height > 0,
-        "CNN2D kernel_height must be greater than zero"
-    );
-    assert!(
-        params.kernel_width > 0,
-        "CNN2D kernel_width must be greater than zero"
-    );
-    assert!(
-        params.stride_height > 0,
-        "CNN2D stride_height must be greater than zero"
-    );
-    assert!(
-        params.stride_width > 0,
-        "CNN2D stride_width must be greater than zero"
-    );
-    assert_eq!(
-        params.weights.len(),
-        params.output_channels * params.kernel_height * params.kernel_width * params.input_channels
-    );
-    assert_eq!(params.bias.len(), params.output_channels);
+fn apply_cnn_2d(
+    params: Convolution2D<'_>,
+    gating: Gating,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
     let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if input_ids.is_empty() {
-        return;
+        return Ok(());
     }
-    let mut flat_input = Vec::new();
+    let expected_input = params
+        .input_height
+        .checked_mul(params.input_width)
+        .and_then(|size| size.checked_mul(params.input_channels))
+        .ok_or_else(|| runtime_model_error("CNN2D input size overflows usize"))?;
+    let mut flat_input = runtime_vec_with_capacity(expected_input, "CNN2D flattened input")?;
     if input_ids.len() == 1 {
         flat_input.extend_from_slice(&state.channel_map[&input_ids[0]]);
     } else {
@@ -810,38 +1322,63 @@ fn apply_cnn_2d(params: Convolution2D<'_>, gating: Gating, state: &mut ForwardSt
         }
     }
 
-    let padded_height = params.input_height + 2 * params.padding_height;
-    let padded_width = params.input_width + 2 * params.padding_width;
+    if flat_input.len() != expected_input {
+        return Err(runtime_model_error(format!(
+            "CNN2D input has {} scalar values, expected {expected_input}",
+            flat_input.len()
+        )));
+    }
+
+    let padded_height = params
+        .padding_height
+        .checked_mul(2)
+        .and_then(|padding| params.input_height.checked_add(padding))
+        .ok_or_else(|| runtime_model_error("CNN2D padded height overflows usize"))?;
+    let padded_width = params
+        .padding_width
+        .checked_mul(2)
+        .and_then(|padding| params.input_width.checked_add(padding))
+        .ok_or_else(|| runtime_model_error("CNN2D padded width overflows usize"))?;
     if padded_height < params.kernel_height || padded_width < params.kernel_width {
         state.channel_map.clear();
         state.num_channels = params.output_channels;
-        return;
+        state.softmax_applied = false;
+        return Ok(());
     }
     let output_height = (padded_height - params.kernel_height) / params.stride_height + 1;
     let output_width = (padded_width - params.kernel_width) / params.stride_width + 1;
-    let base_doc_id = input_ids[0];
+    let mut next_synthetic_id = input_ids.last().and_then(|doc_id| doc_id.checked_add(1));
     let mut output = BTreeMap::new();
 
     for out_row in 0..output_height {
         for out_col in 0..output_width {
-            let mut row = vec![0.0f64; params.output_channels];
+            let mut row =
+                runtime_filled_vec(params.output_channels, 0.0f64, "CNN2D output channels")?;
             for (out_ch, slot) in row.iter_mut().enumerate() {
                 *slot = apply_gating(
-                    cnn_2d_cell(&params, &flat_input, out_row, out_col, out_ch),
+                    cnn_2d_cell(&params, &flat_input, out_row, out_col, out_ch)?,
                     gating,
                 );
             }
-            let output_index = out_row * output_width + out_col;
-            let doc_id = input_ids
-                .get(output_index)
-                .copied()
-                .unwrap_or(base_doc_id + output_index as u64);
+            let output_index = out_row
+                .checked_mul(output_width)
+                .and_then(|index| index.checked_add(out_col))
+                .ok_or_else(|| runtime_model_error("CNN2D output index overflows usize"))?;
+            let doc_id = if let Some(doc_id) = input_ids.get(output_index).copied() {
+                doc_id
+            } else {
+                let doc_id = next_synthetic_id
+                    .ok_or_else(|| runtime_model_error("CNN2D output document IDs exceed u64"))?;
+                next_synthetic_id = doc_id.checked_add(1);
+                doc_id
+            };
             output.insert(doc_id, row);
         }
     }
     state.channel_map = output;
     state.num_channels = params.output_channels;
     state.softmax_applied = false;
+    Ok(())
 }
 
 fn cnn_2d_cell(
@@ -850,10 +1387,13 @@ fn cnn_2d_cell(
     out_row: usize,
     out_col: usize,
     out_ch: usize,
-) -> f64 {
+) -> StorageBackendResult<f64> {
     let mut acc = params.bias[out_ch];
     for kernel_row in 0..params.kernel_height {
-        let raw_row = out_row * params.stride_height + kernel_row;
+        let raw_row = out_row
+            .checked_mul(params.stride_height)
+            .and_then(|row| row.checked_add(kernel_row))
+            .ok_or_else(|| runtime_model_error("CNN2D row position overflows usize"))?;
         if raw_row < params.padding_height {
             continue;
         }
@@ -862,7 +1402,10 @@ fn cnn_2d_cell(
             continue;
         }
         for kernel_col in 0..params.kernel_width {
-            let raw_col = out_col * params.stride_width + kernel_col;
+            let raw_col = out_col
+                .checked_mul(params.stride_width)
+                .and_then(|column| column.checked_add(kernel_col))
+                .ok_or_else(|| runtime_model_error("CNN2D column position overflows usize"))?;
             if raw_col < params.padding_width {
                 continue;
             }
@@ -878,46 +1421,35 @@ fn cnn_2d_cell(
                     + kernel_col)
                     * params.input_channels)
                     + in_ch;
-                acc += params.weights[weight_index]
-                    * flat_input.get(input_index).copied().unwrap_or(0.0);
+                acc += params.weights[weight_index] * flat_input[input_index];
             }
         }
     }
-    acc
+    Ok(acc)
 }
 
-fn apply_rnn(params: Recurrent<'_>, state: &mut ForwardState) {
-    assert!(
-        params.hidden_channels > 0,
-        "RNN hidden_channels must be greater than zero"
-    );
-    assert!(
-        params.input_channels > 0,
-        "RNN input_channels must be greater than zero"
-    );
-    assert_eq!(
-        params.weights_input.len(),
-        params.hidden_channels * params.input_channels
-    );
-    assert_eq!(
-        params.weights_hidden.len(),
-        params.hidden_channels * params.hidden_channels
-    );
-    assert_eq!(params.bias.len(), params.hidden_channels);
+fn apply_rnn(params: Recurrent<'_>, state: &mut ForwardState) -> StorageBackendResult<()> {
     let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if input_ids.is_empty() {
-        return;
+        return Ok(());
     }
-    let mut hidden = vec![0.0f64; params.hidden_channels];
+    let mut hidden = runtime_filled_vec(params.hidden_channels, 0.0f64, "RNN hidden state")?;
     let mut output = BTreeMap::new();
     for doc_id in &input_ids {
         let input = &state.channel_map[doc_id];
-        let mut next_hidden = vec![0.0f64; params.hidden_channels];
+        if input.len() != params.input_channels {
+            return Err(runtime_model_error(format!(
+                "RNN input for doc {doc_id} has {} channels, expected {}",
+                input.len(),
+                params.input_channels
+            )));
+        }
+        let mut next_hidden =
+            runtime_filled_vec(params.hidden_channels, 0.0f64, "RNN next hidden state")?;
         for (out_ch, slot) in next_hidden.iter_mut().enumerate() {
             let mut acc = params.bias[out_ch];
-            for in_ch in 0..params.input_channels {
-                acc += params.weights_input[out_ch * params.input_channels + in_ch]
-                    * input.get(in_ch).copied().unwrap_or(0.0);
+            for (in_ch, input_value) in input.iter().enumerate() {
+                acc += params.weights_input[out_ch * params.input_channels + in_ch] * input_value;
             }
             for (hidden_ch, hidden_value) in hidden.iter().enumerate() {
                 acc += params.weights_hidden[out_ch * params.hidden_channels + hidden_ch]
@@ -927,51 +1459,53 @@ fn apply_rnn(params: Recurrent<'_>, state: &mut ForwardState) {
         }
         hidden = next_hidden;
         if params.return_sequences {
-            output.insert(*doc_id, hidden.clone());
+            let output_hidden = crate::backend::try_clone_slice(&hidden, "RNN output state")
+                .map_err(|error| runtime_model_error(error.to_string()))?;
+            output.insert(*doc_id, output_hidden);
         }
     }
     if !params.return_sequences {
-        output.insert(*input_ids.last().expect("non-empty input"), hidden);
+        let last_doc_id = input_ids
+            .last()
+            .copied()
+            .ok_or_else(|| runtime_model_error("RNN input unexpectedly became empty"))?;
+        output.insert(last_doc_id, hidden);
     }
     state.channel_map = output;
     state.num_channels = params.hidden_channels;
     state.softmax_applied = false;
+    Ok(())
 }
 
-fn apply_lstm(params: LongShortTermMemory<'_>, state: &mut ForwardState) {
-    assert!(
-        params.hidden_channels > 0,
-        "LSTM hidden_channels must be greater than zero"
-    );
-    assert!(
-        params.input_channels > 0,
-        "LSTM input_channels must be greater than zero"
-    );
-    let gate_channels = 4 * params.hidden_channels;
-    assert_eq!(
-        params.weights_input.len(),
-        gate_channels * params.input_channels
-    );
-    assert_eq!(
-        params.weights_hidden.len(),
-        gate_channels * params.hidden_channels
-    );
-    assert_eq!(params.bias.len(), gate_channels);
+fn apply_lstm(
+    params: LongShortTermMemory<'_>,
+    state: &mut ForwardState,
+) -> StorageBackendResult<()> {
+    let gate_channels = params
+        .hidden_channels
+        .checked_mul(4)
+        .ok_or_else(|| runtime_model_error("LSTM gate channel count overflows usize"))?;
     let input_ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if input_ids.is_empty() {
-        return;
+        return Ok(());
     }
-    let mut hidden = vec![0.0f64; params.hidden_channels];
-    let mut cell = vec![0.0f64; params.hidden_channels];
+    let mut hidden = runtime_filled_vec(params.hidden_channels, 0.0f64, "LSTM hidden state")?;
+    let mut cell = runtime_filled_vec(params.hidden_channels, 0.0f64, "LSTM cell state")?;
     let mut output = BTreeMap::new();
     for doc_id in &input_ids {
         let input = &state.channel_map[doc_id];
-        let mut gates = vec![0.0f64; gate_channels];
+        if input.len() != params.input_channels {
+            return Err(runtime_model_error(format!(
+                "LSTM input for doc {doc_id} has {} channels, expected {}",
+                input.len(),
+                params.input_channels
+            )));
+        }
+        let mut gates = runtime_filled_vec(gate_channels, 0.0f64, "LSTM gate channels")?;
         for (gate_ch, gate_slot) in gates.iter_mut().enumerate() {
             let mut acc = params.bias[gate_ch];
-            for in_ch in 0..params.input_channels {
-                acc += params.weights_input[gate_ch * params.input_channels + in_ch]
-                    * input.get(in_ch).copied().unwrap_or(0.0);
+            for (in_ch, input_value) in input.iter().enumerate() {
+                acc += params.weights_input[gate_ch * params.input_channels + in_ch] * input_value;
             }
             for (hidden_ch, hidden_value) in hidden.iter().enumerate() {
                 acc += params.weights_hidden[gate_ch * params.hidden_channels + hidden_ch]
@@ -980,8 +1514,10 @@ fn apply_lstm(params: LongShortTermMemory<'_>, state: &mut ForwardState) {
             *gate_slot = acc;
         }
 
-        let mut next_hidden = vec![0.0f64; params.hidden_channels];
-        let mut next_cell = vec![0.0f64; params.hidden_channels];
+        let mut next_hidden =
+            runtime_filled_vec(params.hidden_channels, 0.0f64, "LSTM next hidden state")?;
+        let mut next_cell =
+            runtime_filled_vec(params.hidden_channels, 0.0f64, "LSTM next cell state")?;
         for ch in 0..params.hidden_channels {
             let input_gate = sigmoid(gates[ch]);
             let forget_gate = sigmoid(gates[params.hidden_channels + ch]);
@@ -993,20 +1529,34 @@ fn apply_lstm(params: LongShortTermMemory<'_>, state: &mut ForwardState) {
         hidden = next_hidden;
         cell = next_cell;
         if params.return_sequences {
-            output.insert(*doc_id, hidden.clone());
+            let output_hidden = crate::backend::try_clone_slice(&hidden, "LSTM output state")
+                .map_err(|error| runtime_model_error(error.to_string()))?;
+            output.insert(*doc_id, output_hidden);
         }
     }
     if !params.return_sequences {
-        output.insert(*input_ids.last().expect("non-empty input"), hidden);
+        let last_doc_id = input_ids
+            .last()
+            .copied()
+            .ok_or_else(|| runtime_model_error("LSTM input unexpectedly became empty"))?;
+        output.insert(last_doc_id, hidden);
     }
     state.channel_map = output;
     state.num_channels = params.hidden_channels;
     state.softmax_applied = false;
+    Ok(())
 }
 
-fn neighbors_of(ctx: &ExecutionContext, vid: u64, label: &str, direction: Direction) -> Vec<u64> {
+fn neighbors_of(
+    ctx: &ExecutionContext,
+    vid: u64,
+    label: &str,
+    direction: Direction,
+) -> StorageBackendResult<Vec<u64>> {
     let Some(graph) = ctx.graph.as_ref() else {
-        return Vec::new();
+        return Err(runtime_model_error(
+            "graph-neighbor lookup requires an execution graph",
+        ));
     };
     graph.neighbors(vid, label, direction)
 }
@@ -1018,9 +1568,11 @@ fn apply_propagate(
     ctx: &ExecutionContext,
     gating: Gating,
     state: &mut ForwardState,
-) {
+) -> StorageBackendResult<()> {
     if ctx.graph.is_none() {
-        return;
+        return Err(runtime_model_error(
+            "graph propagation requires an execution graph",
+        ));
     }
     // Convert channel 0 to a probability map.
     let mut prob_map: BTreeMap<u64, f64> = BTreeMap::new();
@@ -1031,27 +1583,33 @@ fn apply_propagate(
     let mut all_vertices: std::collections::BTreeSet<u64> =
         state.channel_map.keys().copied().collect();
     for vid in state.channel_map.keys().copied().collect::<Vec<_>>() {
-        for nb in neighbors_of(ctx, vid, edge_label, direction) {
+        for nb in neighbors_of(ctx, vid, edge_label, direction)? {
             all_vertices.insert(nb);
         }
     }
     let mut new_map: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
     for vid in &all_vertices {
         let mut neighbor_probs: Vec<f64> = Vec::new();
-        for nb in neighbors_of(ctx, *vid, edge_label, direction) {
+        for nb in neighbors_of(ctx, *vid, edge_label, direction)? {
             if let Some(p) = prob_map.get(&nb) {
                 neighbor_probs.push(*p);
             }
         }
         if neighbor_probs.is_empty() {
             if let Some(existing) = state.channel_map.get(vid) {
-                new_map.insert(*vid, existing.clone());
+                let existing = crate::backend::try_clone_slice(
+                    existing,
+                    "graph-propagation unchanged channels",
+                )
+                .map_err(|error| runtime_model_error(error.to_string()))?;
+                new_map.insert(*vid, existing);
             }
             continue;
         }
         let agg = match aggregation {
             AggregationKind::Mean => {
-                neighbor_probs.iter().sum::<f64>() / neighbor_probs.len() as f64
+                neighbor_probs.iter().sum::<f64>()
+                    / usize_to_f64_exact(neighbor_probs.len(), "graph-propagation neighbor count")?
             }
             AggregationKind::Sum => neighbor_probs.iter().sum::<f64>().min(1.0 - PROB_EPSILON),
             AggregationKind::Max => neighbor_probs
@@ -1060,18 +1618,24 @@ fn apply_propagate(
                 .fold(f64::NEG_INFINITY, f64::max),
         };
         let propagated_logit = apply_gating(safe_logit(agg), gating);
-        let mut new_vec = state
-            .channel_map
-            .get(vid)
-            .cloned()
-            .unwrap_or_else(|| vec![0.0; state.num_channels]);
+        let mut new_vec = match state.channel_map.get(vid) {
+            Some(existing) => {
+                crate::backend::try_clone_slice(existing, "graph-propagation output channels")
+                    .map_err(|error| runtime_model_error(error.to_string()))?
+            }
+            None => {
+                runtime_filled_vec(state.num_channels, 0.0, "graph-propagation output channels")?
+            }
+        };
         if new_vec.is_empty() {
-            new_vec = vec![0.0; state.num_channels];
+            new_vec =
+                runtime_filled_vec(state.num_channels, 0.0, "graph-propagation output channels")?;
         }
         new_vec[0] += propagated_logit;
         new_map.insert(*vid, new_vec);
     }
     state.channel_map = new_map;
+    Ok(())
 }
 
 fn apply_conv(
@@ -1081,15 +1645,25 @@ fn apply_conv(
     ctx: &ExecutionContext,
     gating: Gating,
     state: &mut ForwardState,
-) {
-    if ctx.graph.is_none() || hop_weights.is_empty() {
-        return;
+) -> StorageBackendResult<()> {
+    if ctx.graph.is_none() {
+        return Err(runtime_model_error(
+            "graph convolution requires an execution graph",
+        ));
+    }
+    if hop_weights.is_empty() {
+        return Err(runtime_model_error(
+            "graph convolution requires at least one hop weight",
+        ));
     }
     let total_w: f64 = hop_weights.iter().sum();
-    if total_w <= 0.0 {
-        return;
+    if !total_w.is_finite() || total_w <= 0.0 {
+        return Err(runtime_model_error(
+            "graph convolution hop weights must have a finite positive sum",
+        ));
     }
-    let norm: Vec<f64> = hop_weights.iter().map(|w| w / total_w).collect();
+    let mut norm = runtime_vec_with_capacity(hop_weights.len(), "graph-convolution weights")?;
+    norm.extend(hop_weights.iter().map(|w| w / total_w));
     let mut val_map: BTreeMap<u64, f64> = BTreeMap::new();
     for (did, vec) in &state.channel_map {
         val_map.insert(*did, sigmoid(vec[0]));
@@ -1108,7 +1682,7 @@ fn apply_conv(
             let mut next_frontier: std::collections::BTreeSet<u64> =
                 std::collections::BTreeSet::new();
             for fv in &current_frontier {
-                for nb in neighbors_of(ctx, *fv, edge_label, direction) {
+                for nb in neighbors_of(ctx, *fv, edge_label, direction)? {
                     if visited.insert(nb) {
                         next_frontier.insert(nb);
                     }
@@ -1120,7 +1694,8 @@ fn apply_conv(
                     .filter_map(|nb| val_map.get(nb).copied())
                     .collect();
                 if !hop_vals.is_empty() {
-                    let mean = hop_vals.iter().sum::<f64>() / hop_vals.len() as f64;
+                    let mean = hop_vals.iter().sum::<f64>()
+                        / usize_to_f64_exact(hop_vals.len(), "graph-convolution hop count")?;
                     weighted += hop_weight * mean;
                 }
             }
@@ -1130,11 +1705,16 @@ fn apply_conv(
             safe_logit(weighted.clamp(PROB_EPSILON, 1.0 - PROB_EPSILON)),
             gating,
         );
-        let mut new_vec = state.channel_map[&vid].clone();
+        let mut new_vec = crate::backend::try_clone_slice(
+            &state.channel_map[&vid],
+            "graph-convolution output channels",
+        )
+        .map_err(|error| runtime_model_error(error.to_string()))?;
         new_vec[0] += conv_logit;
         new_map.insert(vid, new_vec);
     }
     state.channel_map = new_map;
+    Ok(())
 }
 
 fn apply_pool(
@@ -1144,9 +1724,19 @@ fn apply_pool(
     direction: Direction,
     ctx: &ExecutionContext,
     state: &mut ForwardState,
-) {
-    if ctx.graph.is_none() || pool_size < 2 {
-        return;
+) -> StorageBackendResult<()> {
+    if ctx.graph.is_none() {
+        return Err(runtime_model_error(
+            "graph pooling requires an execution graph",
+        ));
+    }
+    if pool_size == 1 {
+        return Ok(());
+    }
+    if pool_size == 0 {
+        return Err(runtime_model_error(
+            "graph pooling size must be greater than zero",
+        ));
     }
     let mut remaining: std::collections::BTreeSet<u64> =
         state.channel_map.keys().copied().collect();
@@ -1160,7 +1750,7 @@ fn apply_pool(
         while group.len() < pool_size && !frontier.is_empty() {
             let mut next: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
             for fv in &frontier {
-                for nb in neighbors_of(ctx, *fv, edge_label, direction) {
+                for nb in neighbors_of(ctx, *fv, edge_label, direction)? {
                     if visited.insert(nb) {
                         next.insert(nb);
                         if remaining.remove(&nb) {
@@ -1179,13 +1769,19 @@ fn apply_pool(
         }
         let dim = state.channel_map.get(&seed).map_or(0, Vec::len);
         let mut agg = match method {
-            PoolMethod::Avg => vec![0.0f64; dim],
-            PoolMethod::Max => vec![f64::NEG_INFINITY; dim],
+            PoolMethod::Avg => runtime_filled_vec(dim, 0.0f64, "graph-pool average")?,
+            PoolMethod::Max => runtime_filled_vec(dim, f64::NEG_INFINITY, "graph-pool maximum")?,
         };
         for g in &group {
             let v = &state.channel_map[g];
+            if v.len() != dim {
+                return Err(runtime_model_error(format!(
+                    "graph-pool input for doc {g} has {} channels, expected {dim}",
+                    v.len()
+                )));
+            }
             for (i, slot) in agg.iter_mut().enumerate() {
-                let x = v.get(i).copied().unwrap_or(0.0);
+                let x = v[i];
                 match method {
                     PoolMethod::Avg => *slot += x,
                     PoolMethod::Max => {
@@ -1197,46 +1793,69 @@ fn apply_pool(
             }
         }
         if matches!(method, PoolMethod::Avg) {
-            let n = group.len() as f64;
+            let n = usize_to_f64_exact(group.len(), "graph-pool group size")?;
             for x in &mut agg {
                 *x /= n;
             }
         }
-        let rep = *group.iter().min().unwrap_or(&seed);
-        pooled.insert(rep, agg);
+        pooled.insert(seed, agg);
     }
     state.channel_map = pooled;
+    Ok(())
 }
 
-fn apply_attention(state: &mut ForwardState) {
+fn apply_attention(state: &mut ForwardState) -> StorageBackendResult<()> {
     let ids: Vec<u64> = state.channel_map.keys().copied().collect();
     if ids.len() < 2 {
-        return;
+        return Ok(());
     }
     let dim = state.channel_map[&ids[0]].len();
     if dim == 0 {
-        return;
+        return Ok(());
     }
-    let scale = (dim as f64).sqrt();
-    let xs: Vec<Vec<f64>> = ids.iter().map(|id| state.channel_map[id].clone()).collect();
+    let scale = usize_to_f64_exact(dim, "attention channel count")?.sqrt();
+    let mut xs = runtime_vec_with_capacity(ids.len(), "attention input rows")?;
+    for id in &ids {
+        xs.push(
+            crate::backend::try_clone_slice(&state.channel_map[id], "attention input channels")
+                .map_err(|error| runtime_model_error(error.to_string()))?,
+        );
+    }
+    if let Some((row, values)) = xs
+        .iter()
+        .enumerate()
+        .find(|(_, values)| values.len() != dim)
+    {
+        return Err(runtime_model_error(format!(
+            "attention row {row} has {} channels, expected {dim}",
+            values.len()
+        )));
+    }
     // Scaled dot-product attention with Q=K=V=X.
-    let mut out_rows: Vec<Vec<f64>> = Vec::with_capacity(ids.len());
+    let mut out_rows = runtime_vec_with_capacity(ids.len(), "attention output rows")?;
     for q in &xs {
         // Compute attention logits over every key.
-        let mut logits: Vec<f64> = Vec::with_capacity(xs.len());
+        let mut logits = runtime_vec_with_capacity(xs.len(), "attention logits")?;
         for k in &xs {
             let dot: f64 = q.iter().zip(k.iter()).map(|(a, b)| a * b).sum();
             logits.push(dot / scale);
         }
         let max = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let exps: Vec<f64> = logits.iter().map(|x| (x - max).exp()).collect();
+        let mut exps = runtime_vec_with_capacity(logits.len(), "attention exponentials")?;
+        exps.extend(logits.iter().map(|x| (x - max).exp()));
         let sum: f64 = exps.iter().sum();
         let weights: Vec<f64> = if sum > 0.0 {
-            exps.iter().map(|x| x / sum).collect()
+            let mut weights = runtime_vec_with_capacity(exps.len(), "attention weights")?;
+            weights.extend(exps.iter().map(|x| x / sum));
+            weights
         } else {
-            vec![1.0 / xs.len() as f64; xs.len()]
+            runtime_filled_vec(
+                xs.len(),
+                1.0 / usize_to_f64_exact(xs.len(), "attention row count")?,
+                "attention fallback weights",
+            )?
         };
-        let mut combined = vec![0.0f64; dim];
+        let mut combined = runtime_filled_vec(dim, 0.0f64, "attention combined channels")?;
         for (w, v) in weights.iter().zip(xs.iter()) {
             for i in 0..dim {
                 combined[i] += w * v[i];
@@ -1244,28 +1863,36 @@ fn apply_attention(state: &mut ForwardState) {
         }
         out_rows.push(combined);
     }
-    for (i, did) in ids.iter().enumerate() {
-        state.channel_map.insert(*did, out_rows[i].clone());
+    for (did, row) in ids.into_iter().zip(out_rows) {
+        state.channel_map.insert(did, row);
     }
+    Ok(())
 }
 
 fn build_result(
     channel_map: &BTreeMap<u64, Vec<f64>>,
     num_channels: usize,
     softmax_applied: bool,
-) -> PostingList {
+) -> OperatorResult {
     if channel_map.is_empty() {
-        return PostingList::new();
+        return Ok(PostingList::new());
     }
-    let mut entries: Vec<PostingEntry> = Vec::with_capacity(channel_map.len());
+    let mut entries = runtime_vec_with_capacity(channel_map.len(), "deep-fusion result entries")?;
     for (doc_id, vec) in channel_map {
+        if vec.len() != num_channels || vec.is_empty() {
+            return Err(runtime_model_error(format!(
+                "deep-fusion result for doc {doc_id} has {} channels, expected {num_channels}",
+                vec.len()
+            )));
+        }
         if softmax_applied {
             let score = vec.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             let mut payload = Payload::with_score(score);
-            payload.fields.insert(
-                "class_probs".into(),
-                Value::List(vec.iter().map(|v| Value::Float(*v)).collect()),
-            );
+            let mut class_probs = runtime_vec_with_capacity(vec.len(), "class probabilities")?;
+            class_probs.extend(vec.iter().map(|value| Value::Float(*value)));
+            payload
+                .fields
+                .insert("class_probs".into(), Value::List(class_probs));
             entries.push(PostingEntry::new(*doc_id, payload));
         } else if num_channels == 1 {
             let score = sigmoid(vec[0]);
@@ -1279,7 +1906,35 @@ fn build_result(
         }
     }
     entries.sort_by_key(|e| e.doc_id);
-    PostingList::from_sorted_unchecked(entries)
+    Ok(PostingList::from_sorted_unchecked(entries))
+}
+
+fn runtime_model_error(message: impl Into<String>) -> StorageBackendError {
+    StorageBackendError::Other(message.into())
+}
+
+fn runtime_vec_with_capacity<T>(capacity: usize, context: &str) -> StorageBackendResult<Vec<T>> {
+    try_vec_with_capacity(capacity, context).map_err(|error| runtime_model_error(error.to_string()))
+}
+
+fn runtime_filled_vec<T: Clone>(
+    length: usize,
+    value: T,
+    context: &str,
+) -> StorageBackendResult<Vec<T>> {
+    try_filled_vec(length, value, context).map_err(|error| runtime_model_error(error.to_string()))
+}
+
+fn usize_to_f64_exact(value: usize, context: &str) -> StorageBackendResult<f64> {
+    const MAX_EXACT_INTEGER: u64 = 9_007_199_254_740_992;
+    let value = u64::try_from(value)
+        .map_err(|_| runtime_model_error(format!("{context} exceeds the u64 bridge")))?;
+    if value > MAX_EXACT_INTEGER {
+        return Err(runtime_model_error(format!(
+            "{context} exceeds f64's exact integer range"
+        )));
+    }
+    Ok(value as f64)
 }
 
 fn safe_logit(p: f64) -> f64 {
@@ -1318,8 +1973,8 @@ mod tests {
     struct ConstOperator(Vec<PostingEntry>);
 
     impl Operator for ConstOperator {
-        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-            PostingList::from_sorted_unchecked(self.0.clone())
+        fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+            Ok(PostingList::from_sorted_unchecked(self.0.clone()))
         }
     }
 
@@ -1348,12 +2003,17 @@ mod tests {
     }
 
     impl GraphNeighborLookup for StaticGraph {
-        fn neighbors(&self, vertex: u64, label: &str, direction: Direction) -> Vec<u64> {
+        fn neighbors(
+            &self,
+            vertex: u64,
+            label: &str,
+            direction: Direction,
+        ) -> StorageBackendResult<Vec<u64>> {
             let mut out = Vec::new();
             if matches!(direction, Direction::Out | Direction::Both) {
                 if let Some(es) = self.out_edges.get(&vertex) {
                     for (l, d) in es {
-                        if l == label {
+                        if label.is_empty() || l == label {
                             out.push(*d);
                         }
                     }
@@ -1362,7 +2022,7 @@ mod tests {
             if matches!(direction, Direction::In | Direction::Both) {
                 for (src, es) in &self.out_edges {
                     for (l, d) in es {
-                        if l == label && *d == vertex {
+                        if (label.is_empty() || l == label) && *d == vertex {
                             out.push(*src);
                         }
                     }
@@ -1370,7 +2030,7 @@ mod tests {
             }
             out.sort_unstable();
             out.dedup();
-            out
+            Ok(out)
         }
     }
 
@@ -1378,8 +2038,11 @@ mod tests {
     fn signal_only_pipeline_returns_sigmoid_of_logit() {
         let signal =
             Arc::new(ConstOperator(vec![entry(1, 0.8), entry(2, 0.2)])) as Arc<dyn Operator>;
-        let op = DeepFusionOperator::new(vec![Layer::Signal(vec![signal])], 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(vec![Layer::Signal(vec![signal])], 0.0, Gating::None)
+            .expect("valid signal model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("signal-only deep fusion should execute");
         let scores: BTreeMap<u64, f64> = result
             .entries()
             .iter()
@@ -1404,8 +2067,10 @@ mod tests {
             },
             Layer::Softmax,
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid dense model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("dense deep fusion should execute");
         assert_eq!(result.entries().len(), 1);
         let payload = &result.entries()[0].payload;
         let probs = match payload.fields.get("class_probs") {
@@ -1430,8 +2095,10 @@ mod tests {
             Layer::Dropout { p: 0.5 },
             Layer::Flatten,
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid dropout model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("dropout deep fusion should execute");
         let entry = &result.entries()[0];
         // Final layer is Flatten so num_channels=2 and result reports
         // max-sigmoid on the post-dropout values [1.0, 2.0].
@@ -1456,8 +2123,10 @@ mod tests {
                 padding: 0,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid CNN1D model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("1-D convolution should execute");
         assert_eq!(result.entries().len(), 2);
         let scores: BTreeMap<u64, f64> = result
             .entries()
@@ -1488,8 +2157,10 @@ mod tests {
                 padding_width: 0,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid CNN2D model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("2-D convolution should execute");
         assert_eq!(result.entries().len(), 1);
         assert!((result.entries()[0].payload.score - sigmoid(10.0)).abs() < 1e-9);
     }
@@ -1519,8 +2190,11 @@ mod tests {
                 padding_width: 0,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None)
+            .expect("valid multi-channel CNN2D model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("multi-channel 2-D convolution should execute");
         assert_eq!(result.entries().len(), 1);
         assert!((result.entries()[0].payload.score - sigmoid(0.12)).abs() < 1e-9);
     }
@@ -1538,8 +2212,10 @@ mod tests {
                 return_sequences: true,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid RNN model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("RNN deep fusion should execute");
         let first_hidden = 1.0_f64.tanh();
         let second_hidden = (1.0 + first_hidden).tanh();
         let scores: BTreeMap<u64, f64> = result
@@ -1564,8 +2240,10 @@ mod tests {
                 return_sequences: true,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid LSTM model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("LSTM deep fusion should execute");
         let scores: Vec<f64> = result.entries().iter().map(|e| e.payload.score).collect();
         assert_eq!(scores.len(), 2);
         assert!(scores[1] > scores[0], "{scores:?}");
@@ -1588,8 +2266,9 @@ mod tests {
                 direction: Direction::Both,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ctx);
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None)
+            .expect("valid graph-propagation model");
+        let result = op.execute(&ctx).expect("graph propagation should execute");
         let scores: BTreeMap<u64, f64> = result
             .entries()
             .iter()
@@ -1600,6 +2279,31 @@ mod tests {
         // from doc 1's neighbor probability (~0.9), the sigmoid score
         // on channel 0 should be > 0.5.
         assert!(scores[&2] > 0.5, "{scores:?}");
+    }
+
+    #[test]
+    fn empty_edge_label_propagates_across_every_label() {
+        let signal = Arc::new(ConstOperator(vec![entry(1, 0.9)])) as Arc<dyn Operator>;
+        let mut graph = StaticGraph::new();
+        graph.add(1, "knows", 2);
+        graph.add(1, "likes", 3);
+        let context = ExecutionContext::new().with_graph(Arc::new(graph));
+        let layers = vec![
+            Layer::Signal(vec![signal]),
+            Layer::Propagate {
+                edge_label: String::new(),
+                aggregation: AggregationKind::Mean,
+                direction: Direction::Both,
+            },
+        ];
+        let operator = DeepFusionOperator::new(layers, 0.0, Gating::None)
+            .expect("the empty edge-label wildcard is a valid model");
+        let result = operator
+            .execute(&context)
+            .expect("the wildcard must traverse every edge label");
+        let ids: Vec<u64> = result.entries().iter().map(|entry| entry.doc_id).collect();
+        assert!(ids.contains(&2), "{ids:?}");
+        assert!(ids.contains(&3), "{ids:?}");
     }
 
     #[test]
@@ -1623,8 +2327,9 @@ mod tests {
                 direction: Direction::Both,
             },
         ];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ctx);
+        let op =
+            DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid graph-pool model");
+        let result = op.execute(&ctx).expect("graph pooling should execute");
         let ids: Vec<u64> = result.entries().iter().map(|e| e.doc_id).collect();
         // After pooling, the representatives are {1, 3}; doc 2 is
         // absorbed into doc 1's group.
@@ -1636,8 +2341,10 @@ mod tests {
     #[test]
     fn attention_keeps_node_count_and_normalises_within_node() {
         let layers = vec![Layer::Embed(vec![1.0, 0.5, -0.5]), Layer::Attention];
-        let op = DeepFusionOperator::new(layers, 0.0, Gating::None);
-        let result = op.execute(&ExecutionContext::new());
+        let op = DeepFusionOperator::new(layers, 0.0, Gating::None).expect("valid attention model");
+        let result = op
+            .execute(&ExecutionContext::new())
+            .expect("attention deep fusion should execute");
         let ids: Vec<u64> = result.entries().iter().map(|e| e.doc_id).collect();
         assert_eq!(ids.len(), 3);
         // Self-attention over single-channel inputs leaves a weighted
@@ -1646,5 +2353,83 @@ mod tests {
         for entry in result.entries() {
             assert!((0.0..=1.0).contains(&entry.payload.score));
         }
+    }
+
+    #[test]
+    fn invalid_model_shapes_are_rejected_at_construction() {
+        let error = DeepFusionOperator::new(
+            vec![
+                Layer::Embed(vec![1.0, 2.0]),
+                Layer::Dense {
+                    weights: vec![1.0],
+                    bias: vec![0.0],
+                    output_channels: 1,
+                    input_channels: 2,
+                },
+            ],
+            0.0,
+            Gating::None,
+        )
+        .err()
+        .expect("a truncated dense matrix must be rejected");
+        assert!(error
+            .to_string()
+            .contains("weights has length 1, expected 2"));
+    }
+
+    #[test]
+    fn feature_models_reject_wrong_width_and_non_finite_inputs() {
+        let operator =
+            DeepFusionOperator::new(vec![Layer::Input { dimensions: 2 }], 0.0, Gating::None)
+                .expect("valid feature model");
+        let width_error = operator
+            .execute_features(1, vec![1.0], &ExecutionContext::new())
+            .expect_err("wrong-width features must not be padded");
+        assert!(width_error.to_string().contains("dimension 1, expected 2"));
+
+        let finite_error = operator
+            .execute_features(1, vec![1.0, f64::NAN], &ExecutionContext::new())
+            .expect_err("non-finite features must not reach inference");
+        assert!(finite_error.to_string().contains("must be finite"));
+    }
+
+    #[test]
+    fn graph_layers_require_an_execution_graph() {
+        let signal = Arc::new(ConstOperator(vec![entry(1, 0.8)])) as Arc<dyn Operator>;
+        let operator = DeepFusionOperator::new(
+            vec![
+                Layer::Signal(vec![signal]),
+                Layer::Propagate {
+                    edge_label: "knows".into(),
+                    aggregation: AggregationKind::Mean,
+                    direction: Direction::Out,
+                },
+            ],
+            0.0,
+            Gating::None,
+        )
+        .expect("valid graph model");
+        let error = operator
+            .execute(&ExecutionContext::new())
+            .expect_err("missing graph context must not become a no-op");
+        assert!(error.to_string().contains("requires an execution graph"));
+    }
+
+    #[test]
+    fn non_finite_signal_scores_are_execution_errors() {
+        let signal = Arc::new(ConstOperator(vec![entry(1, f64::NAN)])) as Arc<dyn Operator>;
+        let operator =
+            DeepFusionOperator::new(vec![Layer::Signal(vec![signal])], 0.0, Gating::None)
+                .expect("valid signal model");
+        let error = operator
+            .execute(&ExecutionContext::new())
+            .expect_err("non-finite signal output must not become a result score");
+        assert!(error.to_string().contains("finite probability"));
+
+        let out_of_range = Arc::new(ConstOperator(vec![entry(1, 1.5)])) as Arc<dyn Operator>;
+        let operator =
+            DeepFusionOperator::new(vec![Layer::Signal(vec![out_of_range])], 0.0, Gating::None)
+                .expect("valid signal model");
+        assert!(operator.execute(&ExecutionContext::new()).is_err());
     }
 }

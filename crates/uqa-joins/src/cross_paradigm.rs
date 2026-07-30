@@ -20,7 +20,10 @@ use uqa_analysis::analyzer::standard_analyzer;
 use uqa_core::{
     GeneralizedPayload, GeneralizedPostingEntry, GeneralizedPostingList, PostingEntry, Value,
 };
-use uqa_graph::{Direction, GraphStore};
+use uqa_graph::{
+    CrossParadigmError, CrossParadigmResult, Direction, GraphStore, GraphStoreError,
+    GraphStoreResult,
+};
 
 const SCORE_FIELD: &str = "_score";
 
@@ -61,7 +64,8 @@ impl<'a> TextSimilarityJoin<'a> {
         self
     }
 
-    pub fn execute(&self) -> GeneralizedPostingList {
+    pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
+        validate_threshold(self.threshold, 0.0, 1.0, "text similarity")?;
         let analyzer = standard_analyzer(self.language);
         let mut out: Vec<GeneralizedPostingEntry> = Vec::new();
         for left in self.left {
@@ -69,7 +73,7 @@ impl<'a> TextSimilarityJoin<'a> {
                 continue;
             };
             let left_tokens: std::collections::BTreeSet<String> =
-                analyzer.analyze(left_text).into_iter().collect();
+                analyzer.analyze(left_text)?.into_iter().collect();
             if left_tokens.is_empty() {
                 continue;
             }
@@ -79,7 +83,7 @@ impl<'a> TextSimilarityJoin<'a> {
                     continue;
                 };
                 let right_tokens: std::collections::BTreeSet<String> =
-                    analyzer.analyze(right_text).into_iter().collect();
+                    analyzer.analyze(right_text)?.into_iter().collect();
                 if right_tokens.is_empty() {
                     continue;
                 }
@@ -101,7 +105,7 @@ impl<'a> TextSimilarityJoin<'a> {
                 ));
             }
         }
-        GeneralizedPostingList::from_unsorted(out)
+        Ok(GeneralizedPostingList::from_unsorted(out))
     }
 }
 
@@ -135,25 +139,18 @@ impl<'a> VectorSimilarityJoin<'a> {
         self
     }
 
-    pub fn execute(&self) -> GeneralizedPostingList {
+    pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
+        validate_threshold(self.threshold, -1.0, 1.0, "vector similarity")?;
         let mut out = Vec::new();
         for left in self.left {
-            let Some(left_vec) = read_vector(&left.payload.fields, self.left_field) else {
+            let Some(left_vec) = read_vector(&left.payload.fields, self.left_field)? else {
                 continue;
             };
-            let left_norm = l2_norm(&left_vec);
-            if left_norm == 0.0 {
-                continue;
-            }
             for right in self.right {
-                let Some(right_vec) = read_vector(&right.payload.fields, self.right_field) else {
+                let Some(right_vec) = read_vector(&right.payload.fields, self.right_field)? else {
                     continue;
                 };
-                let right_norm = l2_norm(&right_vec);
-                if right_norm == 0.0 {
-                    continue;
-                }
-                let cosine = dot(&left_vec, &right_vec) / (left_norm * right_norm);
+                let cosine = cosine_similarity(&left_vec, &right_vec)?;
                 if cosine < self.threshold {
                     continue;
                 }
@@ -166,7 +163,7 @@ impl<'a> VectorSimilarityJoin<'a> {
                 ));
             }
         }
-        GeneralizedPostingList::from_unsorted(out)
+        Ok(GeneralizedPostingList::from_unsorted(out))
     }
 }
 
@@ -202,7 +199,8 @@ impl<'a> HybridJoin<'a> {
         self
     }
 
-    pub fn execute(&self) -> GeneralizedPostingList {
+    pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
+        validate_threshold(self.threshold, -1.0, 1.0, "hybrid")?;
         let mut right_index: BTreeMap<Value, Vec<&PostingEntry>> = BTreeMap::new();
         for entry in self.right {
             if let Some(key) = entry.payload.fields.get(self.structured_field) {
@@ -214,25 +212,17 @@ impl<'a> HybridJoin<'a> {
             let Some(left_key) = left.payload.fields.get(self.structured_field) else {
                 continue;
             };
-            let Some(left_vec) = read_vector(&left.payload.fields, self.vector_field) else {
+            let Some(left_vec) = read_vector(&left.payload.fields, self.vector_field)? else {
                 continue;
             };
-            let left_norm = l2_norm(&left_vec);
-            if left_norm == 0.0 {
-                continue;
-            }
             let Some(rights) = right_index.get(left_key) else {
                 continue;
             };
             for right in rights {
-                let Some(right_vec) = read_vector(&right.payload.fields, self.vector_field) else {
+                let Some(right_vec) = read_vector(&right.payload.fields, self.vector_field)? else {
                     continue;
                 };
-                let right_norm = l2_norm(&right_vec);
-                if right_norm == 0.0 {
-                    continue;
-                }
-                let cosine = dot(&left_vec, &right_vec) / (left_norm * right_norm);
+                let cosine = cosine_similarity(&left_vec, &right_vec)?;
                 if cosine < self.threshold {
                     continue;
                 }
@@ -245,7 +235,7 @@ impl<'a> HybridJoin<'a> {
                 ));
             }
         }
-        GeneralizedPostingList::from_unsorted(out)
+        Ok(GeneralizedPostingList::from_unsorted(out))
     }
 }
 
@@ -283,19 +273,37 @@ impl<'a, G: GraphStore> GraphJoin<'a, G> {
         self
     }
 
-    pub fn execute(&self) -> GeneralizedPostingList {
+    pub fn execute(&self) -> GraphStoreResult<GeneralizedPostingList> {
         let right_by_id: BTreeMap<u64, &PostingEntry> =
             self.right.iter().map(|e| (e.doc_id, e)).collect();
         let mut out = Vec::new();
         for left in self.left {
+            if !left.payload.score.is_finite() {
+                return Err(GraphStoreError::InvalidMutation(format!(
+                    "graph join left score for document {} must be finite",
+                    left.doc_id
+                )));
+            }
             for neighbor_id in
                 self.store
-                    .neighbors(left.doc_id, self.label, Direction::Out, self.graph)
+                    .neighbors(left.doc_id, self.label, Direction::Out, self.graph)?
             {
                 let Some(right) = right_by_id.get(&neighbor_id) else {
                     continue;
                 };
+                if !right.payload.score.is_finite() {
+                    return Err(GraphStoreError::InvalidMutation(format!(
+                        "graph join right score for document {} must be finite",
+                        right.doc_id
+                    )));
+                }
                 let merged_score = left.payload.score + right.payload.score;
+                if !merged_score.is_finite() {
+                    return Err(GraphStoreError::InvalidMutation(format!(
+                        "graph join score overflow for documents {} and {}",
+                        left.doc_id, right.doc_id
+                    )));
+                }
                 out.push(make_entry(
                     left.doc_id,
                     right.doc_id,
@@ -305,7 +313,7 @@ impl<'a, G: GraphStore> GraphJoin<'a, G> {
                 ));
             }
         }
-        GeneralizedPostingList::from_unsorted(out)
+        Ok(GeneralizedPostingList::from_unsorted(out))
     }
 }
 
@@ -338,7 +346,13 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
         }
     }
 
-    pub fn execute(&self) -> GeneralizedPostingList {
+    pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
+        for entry in self.left {
+            validate_payload_score(entry, "left")?;
+        }
+        for entry in self.right {
+            validate_payload_score(entry, "right")?;
+        }
         let mut right_index: BTreeMap<Value, Vec<&PostingEntry>> = BTreeMap::new();
         for entry in self.right {
             if let Some(key) = entry.payload.fields.get(self.doc_field) {
@@ -347,11 +361,13 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
         }
         let mut out = Vec::new();
         for left in self.left {
-            let vertex = self.store.get_vertex(left.doc_id);
-            let vertex_key: Option<Value> = match vertex {
-                Some(v) => v.properties.get(self.vertex_field).cloned(),
-                None => left.payload.fields.get(self.vertex_field).cloned(),
-            };
+            let vertex = self.store.get_vertex(left.doc_id).ok_or_else(|| {
+                CrossParadigmError::GraphStore(GraphStoreError::CorruptGraph(format!(
+                    "cross-paradigm join input references missing graph vertex {}",
+                    left.doc_id
+                )))
+            })?;
+            let vertex_key = vertex.properties.get(self.vertex_field).cloned();
             let Some(vertex_key) = vertex_key else {
                 continue;
             };
@@ -360,10 +376,8 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
             };
             for right in rights {
                 let mut merged: BTreeMap<String, Value> = BTreeMap::new();
-                if let Some(v) = vertex {
-                    for (k, val) in &v.properties {
-                        merged.insert(k.clone(), val.clone());
-                    }
+                for (k, val) in &vertex.properties {
+                    merged.insert(k.clone(), val.clone());
                 }
                 for (k, val) in &left.payload.fields {
                     merged.insert(k.clone(), val.clone());
@@ -372,6 +386,12 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
                     merged.insert(k.clone(), val.clone());
                 }
                 let merged_score = left.payload.score + right.payload.score;
+                if !merged_score.is_finite() {
+                    return Err(CrossParadigmError::ArithmeticOverflow(format!(
+                        "joined score for documents {} and {} is not finite",
+                        left.doc_id, right.doc_id
+                    )));
+                }
                 merged.insert(SCORE_FIELD.into(), Value::Float(merged_score));
                 out.push(GeneralizedPostingEntry {
                     doc_ids: vec![left.doc_id, right.doc_id],
@@ -379,7 +399,7 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
                 });
             }
         }
-        GeneralizedPostingList::from_unsorted(out)
+        Ok(GeneralizedPostingList::from_unsorted(out))
     }
 }
 
@@ -404,30 +424,105 @@ fn make_entry(
     }
 }
 
-fn read_vector(fields: &BTreeMap<String, Value>, name: &str) -> Option<Vec<f64>> {
-    let Value::List(items) = fields.get(name)? else {
-        return None;
+fn validate_threshold(
+    threshold: f64,
+    minimum: f64,
+    maximum: f64,
+    context: &str,
+) -> CrossParadigmResult<()> {
+    if !threshold.is_finite() || !(minimum..=maximum).contains(&threshold) {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "{context} threshold must be finite and in [{minimum}, {maximum}], got {threshold}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_payload_score(entry: &PostingEntry, side: &str) -> CrossParadigmResult<()> {
+    if !entry.payload.score.is_finite() {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "cross-paradigm join {side} score for document {} must be finite",
+            entry.doc_id
+        )));
+    }
+    Ok(())
+}
+
+fn read_vector(
+    fields: &BTreeMap<String, Value>,
+    name: &str,
+) -> CrossParadigmResult<Option<Vec<f64>>> {
+    let Some(value) = fields.get(name) else {
+        return Ok(None);
     };
-    let mut out = Vec::with_capacity(items.len());
+    let Value::List(items) = value else {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "vector field {name:?} must be a list"
+        )));
+    };
+    if items.is_empty() {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "vector field {name:?} must not be empty"
+        )));
+    }
+    let mut out = Vec::new();
+    out.try_reserve_exact(items.len()).map_err(|error| {
+        CrossParadigmError::InvalidInput(format!(
+            "cannot allocate vector field {name:?} with {} components: {error}",
+            items.len()
+        ))
+    })?;
     for v in items {
         match v {
-            Value::Float(f) => out.push(*f),
-            Value::Int(n) => out.push(*n as f64),
-            _ => return None,
+            Value::Float(f) if f.is_finite() => out.push(*f),
+            Value::Int(n) if n.unsigned_abs() <= (1_u64 << 53) => out.push(*n as f64),
+            Value::Int(n) => {
+                return Err(CrossParadigmError::InvalidInput(format!(
+                    "integer vector component {n} in field {name:?} cannot be represented exactly as f64"
+                )));
+            }
+            _ => {
+                return Err(CrossParadigmError::InvalidInput(format!(
+                    "vector field {name:?} contains a non-numeric or non-finite component"
+                )));
+            }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let mut s = 0.0;
-    for i in 0..n {
-        s += a[i] * b[i];
+fn cosine_similarity(a: &[f64], b: &[f64]) -> CrossParadigmResult<f64> {
+    if a.len() != b.len() || a.is_empty() {
+        return Err(CrossParadigmError::InvalidInput(format!(
+            "cosine vectors must have the same non-zero dimension ({} != {})",
+            a.len(),
+            b.len()
+        )));
     }
-    s
-}
-
-fn l2_norm(v: &[f64]) -> f64 {
-    v.iter().map(|x| x * x).sum::<f64>().sqrt()
+    let scale_a = a
+        .iter()
+        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+    let scale_b = b
+        .iter()
+        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+    if scale_a == 0.0 || scale_b == 0.0 {
+        return Err(CrossParadigmError::InvalidInput(
+            "cosine vectors must have non-zero norms".to_string(),
+        ));
+    }
+    let sum_sq_a = a.iter().map(|value| (value / scale_a).powi(2)).sum::<f64>();
+    let sum_sq_b = b.iter().map(|value| (value / scale_b).powi(2)).sum::<f64>();
+    let norm_a = sum_sq_a.sqrt();
+    let norm_b = sum_sq_b.sqrt();
+    let cosine = a
+        .iter()
+        .zip(b)
+        .map(|(left, right)| (left / scale_a / norm_a) * (right / scale_b / norm_b))
+        .sum::<f64>();
+    if !cosine.is_finite() {
+        return Err(CrossParadigmError::ArithmeticOverflow(
+            "cosine similarity is not finite".to_string(),
+        ));
+    }
+    Ok(cosine.clamp(-1.0, 1.0))
 }

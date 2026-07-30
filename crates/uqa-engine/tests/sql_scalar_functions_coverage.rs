@@ -223,7 +223,8 @@ fn extended_math_coverage_cases() {
     assert!((as_float(&scalar("SELECT degrees(pi()) FROM t")) - 180.0).abs() < 0.001);
     assert!((as_float(&scalar("SELECT radians(180) FROM t")) - std::f64::consts::PI).abs() < 0.001);
     assert_eq!(scalar("SELECT div(7, 2) FROM t"), Value::Int(3));
-    assert_eq!(scalar("SELECT div(-7, 2) FROM t"), Value::Int(-4));
+    // PostgreSQL's div(numeric, numeric) truncates toward zero.
+    assert_eq!(scalar("SELECT div(-7, 2) FROM t"), Value::Int(-3));
     assert_eq!(scalar("SELECT gcd(12, 8) FROM t"), Value::Int(4));
     assert_eq!(scalar("SELECT lcm(12, 8) FROM t"), Value::Int(24));
 }

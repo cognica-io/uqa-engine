@@ -103,7 +103,7 @@ fn refresh_text_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
     let mut fixture: TextFixture = serde_json::from_slice(&bytes)?;
 
     let engine = Engine::new();
-    engine.create_default_table("articles", vec!["title".into(), "body".into()]);
+    engine.create_default_table("articles", vec!["title".into(), "body".into()])?;
     for corpus_doc in &fixture.corpus {
         let mut document = Document::new();
         document.insert("title".into(), Value::Str(corpus_doc.title.clone()));
@@ -120,7 +120,7 @@ fn refresh_text_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
                 &query.query,
                 &scoring_mode(&query.scoring),
                 query.top_k,
-            )
+            )?
             .into_iter()
             .map(|hit| FixtureHit {
                 doc_id: hit.doc_id,
@@ -139,8 +139,8 @@ fn refresh_hybrid_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
     let mut fixture: HybridFixture = serde_json::from_slice(&bytes)?;
 
     let engine = Engine::new();
-    engine.create_default_table("articles", vec!["title".into()]);
-    engine.create_vector_field("articles", "embedding", fixture.vector_dim);
+    engine.create_default_table("articles", vec!["title".into()])?;
+    engine.create_vector_field("articles", "embedding", fixture.vector_dim)?;
     for corpus_doc in &fixture.corpus {
         let mut document = Document::new();
         document.insert("title".into(), Value::Str(corpus_doc.title.clone()));
@@ -161,7 +161,7 @@ fn refresh_hybrid_fixture(path: &Path) -> Result<usize, Box<dyn Error>> {
                 knn_pool: query.knn_pool,
                 alpha: query.alpha,
                 top_k: query.top_k,
-            })
+            })?
             .into_iter()
             .map(|hit| FixtureHit {
                 doc_id: hit.doc_id,

@@ -38,7 +38,7 @@ fn doc_fields(i: u64) -> BTreeMap<String, Value> {
 }
 
 fn scorer(prior: PriorFn) -> ExternalPriorScorer {
-    ExternalPriorScorer::new(BayesianBM25Params::default(), stats(), prior)
+    ExternalPriorScorer::new(BayesianBM25Params::default(), stats(), prior).unwrap()
 }
 
 fn bench_score_with_prior(c: &mut Criterion) {
@@ -46,12 +46,16 @@ fn bench_score_with_prior(c: &mut Criterion) {
     let fields = doc_fields(0);
     c.bench_function("external_prior_score_with_prior", |bencher| {
         bencher.iter(|| {
-            black_box(scorer.score_with_prior(
-                black_box(5),
-                black_box(120),
-                black_box(1_000),
-                black_box(&fields),
-            ))
+            black_box(
+                scorer
+                    .score_with_prior(
+                        black_box(5),
+                        black_box(120),
+                        black_box(1_000),
+                        black_box(&fields),
+                    )
+                    .unwrap(),
+            )
         });
     });
 }
@@ -67,12 +71,14 @@ fn bench_score_batch(c: &mut Criterion) {
                     .iter()
                     .enumerate()
                     .map(|(i, fields)| {
-                        scorer.score_with_prior(
-                            1 + (i as u64 % 7),
-                            50 + (i as u64 % 200),
-                            100 + (i as u64 % 5_000),
-                            fields,
-                        )
+                        scorer
+                            .score_with_prior(
+                                1 + (i as u64 % 7),
+                                50 + (i as u64 % 200),
+                                100 + (i as u64 % 5_000),
+                                fields,
+                            )
+                            .unwrap()
                     })
                     .sum();
                 black_box(total)

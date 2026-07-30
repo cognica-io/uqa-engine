@@ -27,7 +27,10 @@
 //! * `hive_partitioning` -- `"true"` to enable Hive-style partition
 //!   discovery on auto-wrapped sources.
 
-use uqa_core::{TemporalValue, Value};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+
+use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::{FDWError, FDWHandler, FDWPredicate, ForeignServer, ForeignTable, PredicateOp, Row};
 
@@ -57,13 +60,16 @@ pub fn normalize_source(source: &str, hive_partitioning: bool) -> String {
     for (ext, reader) in FILE_READERS {
         if lower.ends_with(ext) {
             return if hive_partitioning {
-                format!("{reader}('{source}', hive_partitioning = true)")
+                format!(
+                    "{reader}({}, hive_partitioning = true)",
+                    quote_literal(source)
+                )
             } else {
-                format!("{reader}('{source}')")
+                format!("{reader}({})", quote_literal(source))
             };
         }
     }
-    source.to_string()
+    quote_identifier(source)
 }
 
 /// Convert pushdown predicates into a `DuckDB`-style `WHERE` clause
@@ -72,29 +78,48 @@ pub fn normalize_source(source: &str, hive_partitioning: bool) -> String {
 ///
 /// Parameterized binding shields against SQL injection; the caller
 /// ships `(sql, params)` to `duckdb::execute`.
-pub fn build_where_clause(predicates: &[FDWPredicate]) -> (String, Vec<Value>) {
+pub fn build_where_clause(
+    predicates: &[FDWPredicate],
+) -> Result<(String, Vec<Value>), DuckDBPrepareError> {
     let mut clauses: Vec<String> = Vec::with_capacity(predicates.len());
     let mut params: Vec<Value> = Vec::new();
     for p in predicates {
+        let column = quote_identifier(&p.column);
         match (&p.value, p.operator) {
             (Value::Null, PredicateOp::Eq) => {
-                clauses.push(format!("{} IS NULL", p.column));
+                clauses.push(format!("{column} IS NULL"));
             }
-            (Value::Null, _) => {
-                clauses.push(format!("{} IS NOT NULL", p.column));
+            (Value::Null, PredicateOp::NotEq) => {
+                clauses.push(format!("{column} IS NOT NULL"));
+            }
+            (Value::Null, operator) => {
+                return Err(DuckDBPrepareError::InvalidPredicate(format!(
+                    "{operator:?} cannot compare `{}` with NULL",
+                    p.column
+                )));
             }
             (Value::List(items), PredicateOp::In) => {
+                if items.is_empty() {
+                    clauses.push("FALSE".to_string());
+                    continue;
+                }
                 let placeholders = items.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-                clauses.push(format!("{} IN ({placeholders})", p.column));
+                clauses.push(format!("{column} IN ({placeholders})"));
                 params.extend(items.iter().cloned());
             }
+            (_, PredicateOp::In) => {
+                return Err(DuckDBPrepareError::InvalidPredicate(format!(
+                    "IN on `{}` requires a list",
+                    p.column
+                )));
+            }
             (_, op) => {
-                clauses.push(format!("{} {} ?", p.column, op.sql_token()));
+                clauses.push(format!("{column} {} ?", op.sql_token()));
                 params.push(p.value.clone());
             }
         }
     }
-    (clauses.join(" AND "), params)
+    Ok((clauses.join(" AND "), params))
 }
 
 /// Render a full `DuckDB` `SELECT cols FROM source` query with the
@@ -116,25 +141,34 @@ pub fn prepare_query(
         .is_some_and(|v| v.eq_ignore_ascii_case("true"));
     let normalized = normalize_source(source, hive);
 
-    let cols = match columns {
-        Some(cs) if !cs.is_empty() => cs.join(", "),
+    let column_names = match columns {
+        Some(cs) if !cs.is_empty() => cs.to_vec(),
         _ => table
             .columns
             .iter()
             .map(|c| c.name.clone())
+            .collect::<Vec<_>>(),
+    };
+    let cols = if column_names.is_empty() {
+        "*".to_string()
+    } else {
+        column_names
+            .iter()
+            .map(|column| quote_identifier(column))
             .collect::<Vec<_>>()
-            .join(", "),
+            .join(", ")
     };
 
     let mut sql = format!("SELECT {cols} FROM {normalized}");
-    let (where_sql, params) = build_where_clause(predicates);
+    let (where_sql, params) = build_where_clause(predicates)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
     }
     if let Some(n) = limit {
-        use std::fmt::Write as _;
-        let _ = write!(sql, " LIMIT {n}");
+        write!(sql, " LIMIT {n}").map_err(|error| {
+            DuckDBPrepareError::QueryConstruction(format!("append LIMIT: {error}"))
+        })?;
     }
 
     Ok((sql, params))
@@ -183,17 +217,21 @@ impl FDWHandler for DuckDBHandler {
             .map(uqa_value_to_duck_value)
             .collect::<Result<Vec<_>, _>>()?;
         let mapped = stmt.query_map(::duckdb::params_from_iter(bind_values.iter()), |row| {
-            let mut out = Row::new();
+            let mut out = Vec::with_capacity(output_columns.len());
             for (idx, name) in output_columns.iter().enumerate() {
                 let value: ::duckdb::types::Value = row.get(idx)?;
-                out.insert(name.clone(), duck_value_to_uqa(value));
+                out.push((name.clone(), value));
             }
             Ok(out)
         })?;
 
         let mut rows = Vec::new();
         for row in mapped {
-            rows.push(row?);
+            let mut converted = Row::new();
+            for (name, value) in row? {
+                converted.insert(name, duck_value_to_uqa(value)?);
+            }
+            rows.push(converted);
         }
         Ok(rows)
     }
@@ -243,6 +281,20 @@ fn quote_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
+fn quote_identifier(value: &str) -> String {
+    value
+        .split('.')
+        .map(|part| {
+            if part == "*" {
+                "*".to_string()
+            } else {
+                format!("\"{}\"", part.replace('"', "\"\""))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWError> {
     use ::duckdb::types::{TimeUnit, Value as DuckValue};
     Ok(match value {
@@ -260,8 +312,26 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
         Value::Temporal(
             TemporalValue::Timestamp { micros } | TemporalValue::TimestampTz { micros },
         ) => DuckValue::Timestamp(TimeUnit::Microsecond, *micros),
-        Value::Temporal(TemporalValue::TimeTz { .. } | TemporalValue::Interval { .. }) => {
-            DuckValue::Text(value_to_string(value))
+        Value::Temporal(TemporalValue::Interval {
+            months,
+            days,
+            micros,
+        }) => {
+            let nanos = micros.checked_mul(1_000).ok_or_else(|| {
+                FDWError::UnsupportedValue(format!(
+                    "interval microseconds {micros} exceed DuckDB's nanosecond range"
+                ))
+            })?;
+            DuckValue::Interval {
+                months: *months,
+                days: *days,
+                nanos,
+            }
+        }
+        Value::Temporal(TemporalValue::TimeTz { .. }) => {
+            return Err(FDWError::UnsupportedValue(
+                "TIME WITH TIME ZONE cannot be bound losslessly to DuckDB".into(),
+            ));
         }
         Value::List(items) => DuckValue::List(
             items
@@ -277,85 +347,121 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
     })
 }
 
-fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Value {
+fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Result<Value, FDWError> {
     use ::duckdb::types::Value as DuckValue;
-    match value {
+    Ok(match value {
         DuckValue::Null => Value::Null,
         DuckValue::Boolean(v) => Value::Bool(v),
         DuckValue::TinyInt(v) => Value::Int(i64::from(v)),
         DuckValue::SmallInt(v) => Value::Int(i64::from(v)),
         DuckValue::Int(v) => Value::Int(i64::from(v)),
         DuckValue::BigInt(v) => Value::Int(v),
-        DuckValue::HugeInt(v) => i64::try_from(v).map_or(Value::Str(v.to_string()), Value::Int),
+        DuckValue::HugeInt(v) => Value::Int(i64::try_from(v).map_err(|_| {
+            FDWError::UnsupportedValue(format!(
+                "DuckDB HUGEINT value {v} is outside UQA's signed integer range"
+            ))
+        })?),
         DuckValue::UTinyInt(v) => Value::Int(i64::from(v)),
         DuckValue::USmallInt(v) => Value::Int(i64::from(v)),
         DuckValue::UInt(v) => Value::Int(i64::from(v)),
-        DuckValue::UBigInt(v) => i64::try_from(v).map_or(Value::Str(v.to_string()), Value::Int),
+        DuckValue::UBigInt(v) => Value::Int(i64::try_from(v).map_err(|_| {
+            FDWError::UnsupportedValue(format!(
+                "DuckDB UBIGINT value {v} is outside UQA's signed integer range"
+            ))
+        })?),
         DuckValue::Float(v) => Value::Float(f64::from(v)),
         DuckValue::Double(v) => Value::Float(v),
         DuckValue::Decimal(v) => {
             let text = v.to_string();
-            text.parse::<f64>()
-                .map_or_else(|_| Value::Str(text), Value::Float)
+            Value::Decimal(DecimalValue::parse(&text).ok_or_else(|| {
+                FDWError::UnsupportedValue(format!(
+                    "DuckDB DECIMAL value `{text}` exceeds UQA's decimal range"
+                ))
+            })?)
         }
         DuckValue::Timestamp(unit, v) => Value::Temporal(TemporalValue::Timestamp {
-            micros: unit.to_micros(v),
+            micros: duck_time_to_micros(unit, v, "timestamp")?,
         }),
         DuckValue::Text(v) | DuckValue::Enum(v) => Value::Str(v),
         DuckValue::Blob(v) => Value::Bytes(v),
         DuckValue::Date32(days) => Value::Temporal(TemporalValue::Date { days }),
         DuckValue::Time64(unit, v) => Value::Temporal(TemporalValue::Time {
-            micros: unit.to_micros(v),
+            micros: duck_time_to_micros(unit, v, "time")?,
         }),
         DuckValue::Interval {
             months,
             days,
             nanos,
-        } => Value::Str(format!("{months} months {days} days {nanos} nanos")),
-        DuckValue::List(items) | DuckValue::Array(items) => {
-            Value::List(items.into_iter().map(duck_value_to_uqa).collect())
+        } => {
+            if nanos % 1_000 != 0 {
+                return Err(FDWError::UnsupportedValue(format!(
+                    "DuckDB interval has sub-microsecond precision: {nanos} nanoseconds"
+                )));
+            }
+            Value::Temporal(TemporalValue::Interval {
+                months,
+                days,
+                micros: nanos / 1_000,
+            })
         }
+        DuckValue::List(items) | DuckValue::Array(items) => Value::List(
+            items
+                .into_iter()
+                .map(duck_value_to_uqa)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         DuckValue::Struct(fields) => Value::Map(
             fields
                 .iter()
-                .map(|(k, v)| (k.clone(), duck_value_to_uqa(v.clone())))
-                .collect(),
+                .map(|(key, value)| Ok((key.clone(), duck_value_to_uqa(value.clone())?)))
+                .collect::<Result<BTreeMap<_, _>, FDWError>>()?,
         ),
         DuckValue::Map(fields) => Value::Map(
             fields
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        duck_value_key_to_string(k.clone()),
-                        duck_value_to_uqa(v.clone()),
-                    )
+                .map(|(key, value)| {
+                    Ok((
+                        duck_value_key_to_string(key.clone())?,
+                        duck_value_to_uqa(value.clone())?,
+                    ))
                 })
-                .collect(),
+                .collect::<Result<BTreeMap<_, _>, FDWError>>()?,
         ),
-        DuckValue::Union(v) => duck_value_to_uqa(*v),
+        DuckValue::Union(v) => duck_value_to_uqa(*v)?,
+    })
+}
+
+fn duck_value_key_to_string(value: ::duckdb::types::Value) -> Result<String, FDWError> {
+    match duck_value_to_uqa(value)? {
+        Value::Str(value) => Ok(value),
+        other => Err(FDWError::UnsupportedValue(format!(
+            "DuckDB MAP key {other:?} cannot be represented as a UQA string key"
+        ))),
     }
 }
 
-fn duck_value_key_to_string(value: ::duckdb::types::Value) -> String {
-    match duck_value_to_uqa(value) {
-        Value::Str(s) => s,
-        Value::Int(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Decimal(d) => d.to_sql_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Temporal(t) => t.to_sql_string(),
-        Value::Null => "null".into(),
-        Value::Bytes(bytes) => format!("<{} bytes>", bytes.len()),
-        Value::List(items) => format!("{items:?}"),
-        Value::Map(map) => format!("{map:?}"),
-    }
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::Temporal(t) => t.to_sql_string(),
-        Value::Decimal(d) => d.to_sql_string(),
-        other => format!("{other:?}"),
+fn duck_time_to_micros(
+    unit: ::duckdb::types::TimeUnit,
+    value: i64,
+    context: &str,
+) -> Result<i64, FDWError> {
+    use ::duckdb::types::TimeUnit;
+    match unit {
+        TimeUnit::Second => value.checked_mul(1_000_000).ok_or_else(|| {
+            FDWError::UnsupportedValue(format!(
+                "DuckDB {context} value {value} is outside UQA's microsecond range"
+            ))
+        }),
+        TimeUnit::Millisecond => value.checked_mul(1_000).ok_or_else(|| {
+            FDWError::UnsupportedValue(format!(
+                "DuckDB {context} value {value} is outside UQA's microsecond range"
+            ))
+        }),
+        TimeUnit::Microsecond => Ok(value),
+        TimeUnit::Nanosecond if value % 1_000 == 0 => Ok(value / 1_000),
+        TimeUnit::Nanosecond => Err(FDWError::UnsupportedValue(format!(
+            "DuckDB {context} value {value} has sub-microsecond precision"
+        ))),
     }
 }
 
@@ -363,6 +469,10 @@ fn value_to_string(value: &Value) -> String {
 pub enum DuckDBPrepareError {
     #[error("Foreign table `{0}` missing required option `source`")]
     MissingSource(String),
+    #[error("Invalid DuckDB pushdown predicate: {0}")]
+    InvalidPredicate(String),
+    #[error("Failed to construct DuckDB query: {0}")]
+    QueryConstruction(String),
 }
 
 #[cfg(test)]
@@ -415,7 +525,7 @@ mod tests {
     #[test]
     fn normalize_source_passes_table_names_through() {
         let s = normalize_source("attached_db.books", false);
-        assert_eq!(s, "attached_db.books");
+        assert_eq!(s, "\"attached_db\".\"books\"");
     }
 
     #[test]
@@ -432,8 +542,8 @@ mod tests {
                 value: Value::List(vec![Value::Str("US".into()), Value::Str("KR".into())]),
             },
         ];
-        let (sql, params) = build_where_clause(&preds);
-        assert_eq!(sql, "year = ? AND country IN (?, ?)");
+        let (sql, params) = build_where_clause(&preds).unwrap();
+        assert_eq!(sql, "\"year\" = ? AND \"country\" IN (?, ?)");
         assert_eq!(params.len(), 3);
     }
 
@@ -444,8 +554,8 @@ mod tests {
             operator: PredicateOp::Eq,
             value: Value::Null,
         }];
-        let (sql, params) = build_where_clause(&preds);
-        assert_eq!(sql, "deleted_at IS NULL");
+        let (sql, params) = build_where_clause(&preds).unwrap();
+        assert_eq!(sql, "\"deleted_at\" IS NULL");
         assert!(params.is_empty());
     }
 
@@ -459,7 +569,7 @@ mod tests {
         }];
         let (sql, params) = prepare_query(&table, None, &preds, Some(10)).unwrap();
         assert!(sql.contains("read_parquet('/data/books.parquet')"));
-        assert!(sql.contains(" WHERE year = ?"));
+        assert!(sql.contains(" WHERE \"year\" = ?"));
         assert!(sql.ends_with(" LIMIT 10"));
         assert_eq!(params.len(), 1);
     }
@@ -473,9 +583,10 @@ mod tests {
             options: BTreeMap::new(),
         };
         let err = prepare_query(&table, None, &[], None).unwrap_err();
-        match err {
-            DuckDBPrepareError::MissingSource(name) => assert_eq!(name, "books"),
-        }
+        assert!(matches!(
+            err,
+            DuckDBPrepareError::MissingSource(name) if name == "books"
+        ));
     }
 
     #[test]
@@ -483,7 +594,29 @@ mod tests {
         let table = books_table_with_source("books");
         let cols = ["title".to_string()];
         let (sql, _) = prepare_query(&table, Some(&cols), &[], None).unwrap();
-        assert!(sql.starts_with("SELECT title FROM"));
+        assert!(sql.starts_with("SELECT \"title\" FROM"));
+    }
+
+    #[test]
+    fn malformed_predicates_and_out_of_range_values_fail() {
+        let predicate = FDWPredicate {
+            column: "id".into(),
+            operator: PredicateOp::In,
+            value: Value::Int(1),
+        };
+        assert!(build_where_clause(&[predicate]).is_err());
+        assert!(duck_value_to_uqa(::duckdb::types::Value::UBigInt(u64::MAX)).is_err());
+        assert!(duck_value_to_uqa(::duckdb::types::Value::Timestamp(
+            ::duckdb::types::TimeUnit::Second,
+            i64::MAX,
+        ))
+        .is_err());
+        let nanos_error = duck_value_to_uqa(::duckdb::types::Value::Timestamp(
+            ::duckdb::types::TimeUnit::Nanosecond,
+            1_001,
+        ))
+        .expect_err("sub-microsecond timestamps must not be truncated");
+        assert!(nanos_error.to_string().contains("sub-microsecond"));
     }
 
     #[test]

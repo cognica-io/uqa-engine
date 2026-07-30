@@ -569,6 +569,20 @@ fn bool_and_with_group_by() {
     assert_eq!(by_cat.get("veggie").copied(), Some(false));
 }
 
+#[test]
+fn aggregate_type_errors_are_not_silently_ignored() {
+    let eng = engine_with_table();
+    let sum_error = eng
+        .sql("SELECT SUM(name) FROM t", &[])
+        .expect_err("SUM over text must fail");
+    assert!(sum_error.to_string().contains("numeric"), "{sum_error}");
+
+    let bool_error = eng
+        .sql("SELECT BOOL_AND(val) FROM t", &[])
+        .expect_err("BOOL_AND over integers must fail");
+    assert!(bool_error.to_string().contains("boolean"), "{bool_error}");
+}
+
 // =====================================================================
 // BOOL_OR
 // =====================================================================

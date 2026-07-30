@@ -30,6 +30,8 @@ use std::sync::Arc;
 use uqa_core::{IndexStats, Value};
 
 use crate::bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
+use crate::error::invalid_input;
+use crate::ScoringResult;
 
 /// User-supplied prior. Returns a probability in `(0, 1)`.
 pub type PriorFn = Arc<dyn Fn(&BTreeMap<String, Value>) -> f64 + Send + Sync>;
@@ -45,13 +47,13 @@ impl ExternalPriorScorer {
         params: BayesianBM25Params,
         index_stats: Arc<IndexStats>,
         prior_fn: PriorFn,
-    ) -> Self {
-        let bm25 = BayesianBM25Scorer::new(params, index_stats);
-        Self {
+    ) -> ScoringResult<Self> {
+        let bm25 = BayesianBM25Scorer::new(params, index_stats)?;
+        Ok(Self {
             params,
             bm25,
             prior_fn,
-        }
+        })
     }
 
     /// Fused posterior with the external prior. Mirrors
@@ -62,9 +64,14 @@ impl ExternalPriorScorer {
         doc_length: u64,
         doc_freq: u64,
         doc_fields: &BTreeMap<String, Value>,
-    ) -> f64 {
+    ) -> ScoringResult<f64> {
         let likelihood = self.bm25.score(term_freq, doc_length, doc_freq);
-        let prior = (self.prior_fn)(doc_fields).clamp(1e-10, 1.0 - 1e-10);
+        let prior = (self.prior_fn)(doc_fields);
+        if !prior.is_finite() || !(0.0..1.0).contains(&prior) || prior == 0.0 {
+            return Err(invalid_input(format!(
+                "external prior must be finite and in (0, 1), got {prior}"
+            )));
+        }
 
         let logit_likelihood = if likelihood > 0.0 && likelihood < 1.0 {
             (likelihood / (1.0 - likelihood)).ln()
@@ -75,7 +82,12 @@ impl ExternalPriorScorer {
         };
         let logit_prior = (prior / (1.0 - prior)).ln();
         let logit_posterior = logit_likelihood + logit_prior;
-        1.0 / (1.0 + (-logit_posterior).exp())
+        let posterior = 1.0 / (1.0 + (-logit_posterior).exp());
+        if posterior.is_finite() {
+            Ok(posterior)
+        } else {
+            Err(invalid_input("external-prior posterior is non-finite"))
+        }
     }
 }
 
@@ -153,9 +165,10 @@ mod tests {
     #[test]
     fn prior_higher_than_neutral_lifts_posterior() {
         let prior = Arc::new(|_: &BTreeMap<String, Value>| 0.9_f64);
-        let s = ExternalPriorScorer::new(BayesianBM25Params::default(), stats(1000, 10.0), prior);
+        let s = ExternalPriorScorer::new(BayesianBM25Params::default(), stats(1000, 10.0), prior)
+            .unwrap();
         let map = BTreeMap::new();
-        let with_prior = s.score_with_prior(3, 10, 50, &map);
+        let with_prior = s.score_with_prior(3, 10, 50, &map).unwrap();
         let without = s.bm25.score(3, 10, 50);
         assert!(with_prior > without, "{with_prior} <= {without}");
     }
@@ -163,11 +176,25 @@ mod tests {
     #[test]
     fn neutral_prior_recovers_likelihood() {
         let prior = Arc::new(|_: &BTreeMap<String, Value>| 0.5_f64);
-        let s = ExternalPriorScorer::new(BayesianBM25Params::default(), stats(1000, 10.0), prior);
+        let s = ExternalPriorScorer::new(BayesianBM25Params::default(), stats(1000, 10.0), prior)
+            .unwrap();
         let map = BTreeMap::new();
-        let with_prior = s.score_with_prior(3, 10, 50, &map);
+        let with_prior = s.score_with_prior(3, 10, 50, &map).unwrap();
         let without = s.bm25.score(3, 10, 50);
         assert!((with_prior - without).abs() < 1e-9);
+    }
+
+    #[test]
+    fn invalid_external_prior_is_an_error() {
+        for invalid in [f64::NAN, f64::NEG_INFINITY, 0.0, 1.0, 2.0] {
+            let prior = Arc::new(move |_: &BTreeMap<String, Value>| invalid);
+            let scorer =
+                ExternalPriorScorer::new(BayesianBM25Params::default(), stats(1000, 10.0), prior)
+                    .unwrap();
+            assert!(scorer
+                .score_with_prior(3, 10, 50, &BTreeMap::new())
+                .is_err());
+        }
     }
 
     #[test]

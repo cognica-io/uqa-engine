@@ -32,29 +32,31 @@ fn build_engine() -> Engine {
         let _ = write!(values, "({id}, 'v_{id}')");
     }
     engine.sql(&values, &[]).expect("insert seeds");
-    engine.create_graph(GRAPH);
+    engine.create_graph(GRAPH).unwrap();
     engine
         .graph_with_mut(GRAPH, |store| {
             store.create_graph(GRAPH);
             for id in 1..=500 {
-                store.add_vertex(Vertex::new(id, "Person"), GRAPH);
+                store.add_vertex(Vertex::new(id, "Person"), GRAPH)?;
             }
             let mut edge_id = 1;
             for id in 1..500 {
                 let mut edge = Edge::new(edge_id, id, id + 1, "knows");
                 edge.properties
                     .insert("weight".to_string(), Value::Float((id % 10) as f64 / 10.0));
-                store.add_edge(edge, GRAPH);
+                store.add_edge(edge, GRAPH)?;
                 edge_id += 1;
             }
             for id in 1..=450 {
                 if id % 25 == 0 {
-                    store.add_edge(Edge::new(edge_id, id, id + 50, "knows"), GRAPH);
+                    store.add_edge(Edge::new(edge_id, id, id + 50, "knows"), GRAPH)?;
                     edge_id += 1;
                 }
             }
+            Ok(())
         })
-        .expect("graph");
+        .expect("graph storage")
+        .expect("graph exists");
     engine
 }
 

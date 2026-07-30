@@ -116,6 +116,20 @@ pub enum AccessPathPlan {
     Hybrid,
 }
 
+/// Physical strategy selected for a relational join.
+///
+/// `Auto` is used for an unreordered SQL join and lets physical lowering pick
+/// hash execution for a splittable equality predicate or nested-loop execution
+/// otherwise. `Hash` is an optimizer commitment produced by DPccp and must be
+/// executable; physical lowering reports an internal planning error if that
+/// invariant is violated.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum JoinExecutionStrategy {
+    #[default]
+    Auto,
+    Hash,
+}
+
 /// The row-producing source below a query block.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SourcePlan {
@@ -129,6 +143,8 @@ pub enum SourcePlan {
         kind: uqa_sql::ast::JoinKind,
         on: Option<ScalarExpr>,
         lateral: bool,
+        #[serde(default)]
+        strategy: JoinExecutionStrategy,
     },
     Values {
         rows: Vec<Vec<ScalarExpr>>,
@@ -647,9 +663,368 @@ impl UnifiedPlan {
             Self::Command(command) => command.name(),
         }
     }
+
+    /// Rewrite every physical scalar slot owned by this plan, including
+    /// CTEs, scalar subqueries, mutation sources, prepared/explained bodies,
+    /// and routine-call arguments.  This is the plan-native binding hook used
+    /// by SQL-language routines; callers never need to reconstruct an AST to
+    /// specialize a stored plan.
+    pub fn rewrite_scalar_expressions(&mut self, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+        match self {
+            Self::Query(query) => rewrite_query_scalars(query, rewrite),
+            Self::Command(command) => rewrite_command_scalars(command, rewrite),
+        }
+    }
+}
+
+fn rewrite_query_scalars(query: &mut QueryPlan, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    for cte in &mut query.ctes {
+        rewrite_query_scalars(&mut cte.query, rewrite);
+    }
+    match &mut query.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &mut block.from {
+                rewrite_source_scalars(source, rewrite);
+            }
+            rewrite_optional_scalar(&mut block.r#where, rewrite);
+            for projection in &mut block.projections {
+                rewrite_scalar(&mut projection.expr, rewrite);
+            }
+            for expression in &mut block.group_by {
+                rewrite_scalar(expression, rewrite);
+            }
+            for set in &mut block.grouping_sets {
+                for expression in set {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
+            rewrite_optional_scalar(&mut block.having, rewrite);
+            rewrite_orders(&mut block.order_by, rewrite);
+            rewrite_optional_scalar(&mut block.limit, rewrite);
+            rewrite_optional_scalar(&mut block.offset, rewrite);
+            for expression in &mut block.distinct_on {
+                rewrite_scalar(expression, rewrite);
+            }
+            for subquery in &mut block.subqueries {
+                rewrite_query_scalars(subquery, rewrite);
+            }
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            subqueries,
+            ..
+        } => {
+            rewrite_query_scalars(left, rewrite);
+            rewrite_query_scalars(right, rewrite);
+            rewrite_orders(order_by, rewrite);
+            if let Some(limit) = limit {
+                rewrite_scalar(limit, rewrite);
+            }
+            if let Some(offset) = offset {
+                rewrite_scalar(offset, rewrite);
+            }
+            for subquery in subqueries {
+                rewrite_query_scalars(subquery, rewrite);
+            }
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            for row in rows {
+                for expression in row {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
+            for subquery in subqueries {
+                rewrite_query_scalars(subquery, rewrite);
+            }
+        }
+    }
+}
+
+fn rewrite_source_scalars(source: &mut SourcePlan, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    match source {
+        SourcePlan::Table { .. } => {}
+        SourcePlan::Join {
+            left, right, on, ..
+        } => {
+            rewrite_source_scalars(left, rewrite);
+            rewrite_source_scalars(right, rewrite);
+            rewrite_optional_scalar(on, rewrite);
+        }
+        SourcePlan::Values { rows, .. } => {
+            for row in rows {
+                for expression in row {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
+        }
+        SourcePlan::Function { args, .. } => {
+            for expression in args {
+                rewrite_scalar(expression, rewrite);
+            }
+        }
+        SourcePlan::Subquery { body, .. } => rewrite_query_scalars(body, rewrite),
+    }
+}
+
+fn rewrite_command_scalars(command: &mut CommandPlan, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    match command {
+        CommandPlan::Insert(plan) => {
+            for cte in &mut plan.ctes {
+                rewrite_query_scalars(&mut cte.query, rewrite);
+            }
+            for row in &mut plan.rows {
+                for expression in row {
+                    rewrite_scalar(expression, rewrite);
+                }
+            }
+            if let Some(source) = &mut plan.source {
+                rewrite_query_scalars(source, rewrite);
+            }
+            if let Some(conflict) = &mut plan.on_conflict {
+                if let ConflictActionPlan::Update {
+                    assignments,
+                    predicate,
+                } = &mut conflict.action
+                {
+                    rewrite_assignments(assignments, rewrite);
+                    rewrite_optional_scalar(predicate, rewrite);
+                }
+            }
+            rewrite_projections(&mut plan.returning, rewrite);
+            rewrite_subqueries(&mut plan.subqueries, rewrite);
+        }
+        CommandPlan::Update(plan) => {
+            for cte in &mut plan.ctes {
+                rewrite_query_scalars(&mut cte.query, rewrite);
+            }
+            if let Some(source) = &mut plan.source {
+                rewrite_source_scalars(source, rewrite);
+            }
+            rewrite_assignments(&mut plan.assignments, rewrite);
+            rewrite_optional_scalar(&mut plan.predicate, rewrite);
+            rewrite_projections(&mut plan.returning, rewrite);
+            rewrite_subqueries(&mut plan.subqueries, rewrite);
+        }
+        CommandPlan::Delete(plan) => {
+            for cte in &mut plan.ctes {
+                rewrite_query_scalars(&mut cte.query, rewrite);
+            }
+            if let Some(source) = &mut plan.source {
+                rewrite_source_scalars(source, rewrite);
+            }
+            rewrite_optional_scalar(&mut plan.predicate, rewrite);
+            rewrite_projections(&mut plan.returning, rewrite);
+            rewrite_subqueries(&mut plan.subqueries, rewrite);
+        }
+        CommandPlan::Merge(plan) => {
+            rewrite_source_scalars(&mut plan.source, rewrite);
+            rewrite_scalar(&mut plan.join_condition, rewrite);
+            for clause in &mut plan.when_clauses {
+                match clause {
+                    MergeWhenPlan::UpdateMatched {
+                        condition,
+                        assignments,
+                    } => {
+                        rewrite_optional_scalar(condition, rewrite);
+                        rewrite_assignments(assignments, rewrite);
+                    }
+                    MergeWhenPlan::DeleteMatched { condition }
+                    | MergeWhenPlan::NothingMatched { condition }
+                    | MergeWhenPlan::NothingNotMatched { condition } => {
+                        rewrite_optional_scalar(condition, rewrite);
+                    }
+                    MergeWhenPlan::InsertNotMatched {
+                        condition, values, ..
+                    } => {
+                        rewrite_optional_scalar(condition, rewrite);
+                        for value in values {
+                            rewrite_scalar(value, rewrite);
+                        }
+                    }
+                }
+            }
+            rewrite_projections(&mut plan.returning, rewrite);
+            rewrite_subqueries(&mut plan.subqueries, rewrite);
+        }
+        CommandPlan::CreateView { query, .. } | CommandPlan::CreateTableAs { query, .. } => {
+            rewrite_query_scalars(query, rewrite);
+        }
+        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+            body.rewrite_scalar_expressions(rewrite);
+        }
+        CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
+            for expression in params {
+                rewrite_scalar(&mut expression.scalar, rewrite);
+                rewrite_subqueries(&mut expression.subqueries, rewrite);
+            }
+        }
+        CommandPlan::CreateTable(_)
+        | CommandPlan::CreateIndex(_)
+        | CommandPlan::Drop(_)
+        | CommandPlan::AlterTable(_)
+        | CommandPlan::CreateSchema { .. }
+        | CommandPlan::SetVariable { .. }
+        | CommandPlan::ShowVariable { .. }
+        | CommandPlan::Discard { .. }
+        | CommandPlan::Analyze { .. }
+        | CommandPlan::Truncate { .. }
+        | CommandPlan::Transaction(_)
+        | CommandPlan::CreateSequence(_)
+        | CommandPlan::AlterSequence(_)
+        | CommandPlan::Deallocate { .. }
+        | CommandPlan::CreateForeignServer(_)
+        | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateFunction(_)
+        | CommandPlan::DropFunction(_)
+        | CommandPlan::DoBlock { .. } => {}
+    }
+}
+
+fn rewrite_assignments(
+    assignments: &mut [AssignmentPlan],
+    rewrite: &mut dyn FnMut(&mut ScalarExpr),
+) {
+    for assignment in assignments {
+        rewrite_scalar(&mut assignment.value, rewrite);
+    }
+}
+
+fn rewrite_projections(
+    projections: &mut [ProjectionPlan],
+    rewrite: &mut dyn FnMut(&mut ScalarExpr),
+) {
+    for projection in projections {
+        rewrite_scalar(&mut projection.expr, rewrite);
+    }
+}
+
+fn rewrite_orders(orders: &mut [OrderPlan], rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    for order in orders {
+        rewrite_scalar(&mut order.expr, rewrite);
+    }
+}
+
+fn rewrite_subqueries(subqueries: &mut [QueryPlan], rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    for subquery in subqueries {
+        rewrite_query_scalars(subquery, rewrite);
+    }
+}
+
+fn rewrite_optional_scalar(
+    expression: &mut Option<ScalarExpr>,
+    rewrite: &mut dyn FnMut(&mut ScalarExpr),
+) {
+    if let Some(expression) = expression {
+        rewrite_scalar(expression, rewrite);
+    }
+}
+
+fn rewrite_scalar(expression: &mut ScalarExpr, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    match expression {
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for argument in args {
+                rewrite_scalar(argument, rewrite);
+            }
+            for order in order_by {
+                rewrite_scalar(&mut order.expr, rewrite);
+            }
+            if let Some(filter) = filter {
+                rewrite_scalar(filter, rewrite);
+            }
+        }
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            for item in items {
+                rewrite_scalar(item, rewrite);
+            }
+        }
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            rewrite_scalar(lhs, rewrite);
+            rewrite_scalar(rhs, rewrite);
+        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => rewrite_scalar(inner, rewrite),
+        ScalarExpr::Between { expr, low, high } => {
+            rewrite_scalar(expr, rewrite);
+            rewrite_scalar(low, rewrite);
+            rewrite_scalar(high, rewrite);
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            rewrite_scalar(expr, rewrite);
+            for item in list {
+                rewrite_scalar(item, rewrite);
+            }
+        }
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            for argument in args {
+                rewrite_scalar(argument, rewrite);
+            }
+            for expression in &mut spec.partition_by {
+                rewrite_scalar(expression, rewrite);
+            }
+            for order in &mut spec.order_by {
+                rewrite_scalar(&mut order.expr, rewrite);
+            }
+            if let Some(frame) = &mut spec.frame {
+                rewrite_frame_bound(&mut frame.start, rewrite);
+                rewrite_frame_bound(&mut frame.end, rewrite);
+            }
+        }
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base {
+                rewrite_scalar(base, rewrite);
+            }
+            for (condition, result) in when {
+                rewrite_scalar(condition, rewrite);
+                rewrite_scalar(result, rewrite);
+            }
+            if let Some(branch) = else_branch {
+                rewrite_scalar(branch, rewrite);
+            }
+        }
+        ScalarExpr::InSubquery { expr, .. } => rewrite_scalar(expr, rewrite),
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::QualifiedColumn { .. }
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => {}
+    }
+    rewrite(expression);
+}
+
+fn rewrite_frame_bound(bound: &mut ScalarFrameBound, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+    match bound {
+        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
+            rewrite_scalar(expression, rewrite);
+        }
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => {}
+    }
 }
 
 impl QueryPlan {
+    /// Rewrite every physical scalar node owned by this query exactly once,
+    /// including CTEs, relational sources, and scalar-subquery plans.
+    pub fn rewrite_scalar_expressions(&mut self, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+        rewrite_query_scalars(self, rewrite);
+    }
+
     #[must_use]
     pub fn lower(statement: SelectStmt) -> Self {
         Self::lower_with(statement, &NoRegisteredAggregates)
@@ -910,6 +1285,7 @@ impl SourcePlan {
                 kind,
                 on: on.map(|expr| lower_scalar_expression(expr, aggregates, subqueries)),
                 lateral,
+                strategy: JoinExecutionStrategy::Auto,
             },
             FromClause::Values {
                 rows,
@@ -1307,6 +1683,7 @@ impl CommandPlan {
 
 #[cfg(test)]
 mod tests {
+    use uqa_execution::ScalarExpr;
     use uqa_sql::compile;
 
     use super::{CommandPlan, ComputePlan, RelationalPlan, SourcePlan, UnifiedPlan};
@@ -1398,5 +1775,49 @@ mod tests {
             panic!("expected MERGE plan");
         };
         assert!(matches!(merge.source.as_ref(), SourcePlan::Subquery { .. }));
+    }
+
+    #[test]
+    fn scalar_rewriter_reaches_ctes_subqueries_and_relational_slots() {
+        let mut plan = one("WITH q AS (SELECT arg AS x) \
+             SELECT arg + (SELECT arg) FROM q \
+             WHERE arg > 0 ORDER BY arg LIMIT arg");
+        plan.rewrite_scalar_expressions(&mut |expression| {
+            if matches!(expression, ScalarExpr::Column(name) if name == "arg") {
+                *expression = ScalarExpr::Param(1);
+            }
+        });
+
+        let mut named = 0;
+        let mut parameters = 0;
+        plan.rewrite_scalar_expressions(&mut |expression| match expression {
+            ScalarExpr::Column(name) if name == "arg" => named += 1,
+            ScalarExpr::Param(1) => parameters += 1,
+            _ => {}
+        });
+        assert_eq!(named, 0);
+        assert!(parameters >= 6, "all nested scalar slots must be visited");
+    }
+
+    #[test]
+    fn query_scalar_rewriter_visits_every_node_once() {
+        let UnifiedPlan::Query(mut query) = one("SELECT x + 5 FROM (VALUES (1 + 2)) AS v(x) \
+             WHERE x + 3 > 0 ORDER BY x + 4 LIMIT 6 + 7")
+        else {
+            panic!("expected query plan");
+        };
+        let mut visits = std::collections::BTreeMap::<usize, usize>::new();
+        query.rewrite_scalar_expressions(&mut |expression| {
+            *visits
+                .entry(std::ptr::from_mut::<ScalarExpr>(expression) as usize)
+                .or_default() += 1;
+        });
+
+        // Five expression roots own 17 nodes in total: the VALUES source,
+        // projection, predicate, ordering, and limit. Pointer identity proves
+        // that recursive traversal did not invoke the callback twice for any
+        // node (including a binary lhs or VALUES cell).
+        assert_eq!(visits.len(), 17);
+        assert!(visits.values().all(|visits| *visits == 1), "{visits:?}");
     }
 }

@@ -55,14 +55,17 @@ impl Binding {
         }
     }
 
-    fn to_value(&self) -> Value {
+    fn to_value(&self) -> Result<Value, CypherError> {
         match self {
-            Binding::Vertex(v) => agtype::vertex_to_value(v),
-            Binding::Edge(e) => agtype::edge_to_value(e),
-            Binding::Value(v) => v.clone(),
-            Binding::EdgeList(edges) => {
-                Value::List(edges.iter().map(agtype::edge_to_value).collect())
-            }
+            Binding::Vertex(v) => agtype::vertex_to_value(v).map_err(Into::into),
+            Binding::Edge(e) => agtype::edge_to_value(e).map_err(Into::into),
+            Binding::Value(v) => Ok(v.clone()),
+            Binding::EdgeList(edges) => Ok(Value::List(
+                edges
+                    .iter()
+                    .map(agtype::edge_to_value)
+                    .collect::<Result<_, _>>()?,
+            )),
         }
     }
 }
@@ -99,11 +102,25 @@ pub enum CypherError {
     TypeError(String),
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("storage error: {0}")]
+    Storage(String),
 }
 
 impl From<crate::cypher::parser::ParseError> for CypherError {
     fn from(err: crate::cypher::parser::ParseError) -> Self {
         CypherError::Parse(err.to_string())
+    }
+}
+
+impl From<agtype::AgtypeConversionError> for CypherError {
+    fn from(err: agtype::AgtypeConversionError) -> Self {
+        CypherError::Storage(err.to_string())
+    }
+}
+
+impl From<crate::store::GraphStoreError> for CypherError {
+    fn from(err: crate::store::GraphStoreError) -> Self {
+        CypherError::Storage(err.to_string())
     }
 }
 
@@ -122,6 +139,59 @@ fn strict_bool(value: &Value) -> Result<Option<bool>, CypherError> {
         Value::Null => Ok(None),
         other => Err(boolean_cast_error(other)),
     }
+}
+
+const MAX_EXACT_F64_INTEGER: i64 = 9_007_199_254_740_992;
+
+fn usize_to_i64(value: usize, context: &str) -> Result<i64, CypherError> {
+    i64::try_from(value).map_err(|_| {
+        CypherError::TypeError(format!(
+            "{context} {value} exceeds the agtype integer range"
+        ))
+    })
+}
+
+fn nonnegative_i64_to_usize(value: i64, context: &str) -> Result<usize, CypherError> {
+    if value < 0 {
+        return Err(CypherError::TypeError(format!(
+            "{context} must not be negative, got {value}"
+        )));
+    }
+    usize::try_from(value).map_err(|_| {
+        CypherError::TypeError(format!(
+            "{context} {value} exceeds the platform index range"
+        ))
+    })
+}
+
+fn nonnegative_i64_to_u64(value: i64, context: &str) -> Result<u64, CypherError> {
+    u64::try_from(value)
+        .map_err(|_| CypherError::TypeError(format!("{context} must not be negative, got {value}")))
+}
+
+fn exact_i64_to_f64(value: i64, context: &str) -> Result<f64, CypherError> {
+    if (-MAX_EXACT_F64_INTEGER..=MAX_EXACT_F64_INTEGER).contains(&value) {
+        Ok(value as f64)
+    } else {
+        Err(CypherError::TypeError(format!(
+            "{context} {value} cannot be represented exactly as a float"
+        )))
+    }
+}
+
+fn trunc_f64_to_i64(value: f64, context: &str) -> Result<i64, CypherError> {
+    if !value.is_finite() {
+        return Err(CypherError::TypeError(format!(
+            "{context} must be finite, got {value}"
+        )));
+    }
+    let truncated = value.trunc();
+    if !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&truncated) {
+        return Err(CypherError::TypeError(format!(
+            "{context} {value} is outside the agtype integer range"
+        )));
+    }
+    Ok(truncated as i64)
 }
 
 /// Read-only execution context.
@@ -319,10 +389,10 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     ) -> Result<Vec<MatchState>, CypherError> {
         // Candidate vertex set: by label if specified, else everything in the graph.
         let candidate_ids: Vec<VertexId> = if let Some(label) = np.labels.first() {
-            self.store.vertex_ids_by_label(label, self.graph)
+            self.store.vertex_ids_by_label(label, self.graph)?
         } else {
             self.store
-                .vertex_ids_in_graph(self.graph)
+                .vertex_ids_in_graph(self.graph)?
                 .into_iter()
                 .collect()
         };
@@ -335,7 +405,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     let vertex = prev.clone();
                     if self.node_matches(np, &vertex, &state.row)? {
                         let mut new_state = state.clone();
-                        new_state.trail.push(agtype::vertex_to_value(&vertex));
+                        new_state.trail.push(agtype::vertex_to_value(&vertex)?);
                         new_state.position = Some(vertex);
                         out.push(new_state);
                     }
@@ -356,7 +426,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     continue;
                 }
                 let mut new_state = state.clone();
-                new_state.trail.push(agtype::vertex_to_value(&vertex));
+                new_state.trail.push(agtype::vertex_to_value(&vertex)?);
                 if let Some(var) = &np.variable {
                     new_state
                         .row
@@ -463,7 +533,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 for hop in 1..=max_hops {
                     let mut next_buffer = Vec::new();
                     for (vertex_id, edges_so_far, trail_so_far) in &buffer {
-                        for edge in self.outgoing_edges(*vertex_id, direction) {
+                        for edge in self.outgoing_edges(*vertex_id, direction)? {
                             if !self.rel_matches(rp, &edge, &state.row)? {
                                 continue;
                             }
@@ -478,8 +548,8 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                             let mut new_edges = edges_so_far.clone();
                             new_edges.push(edge.clone());
                             let mut new_trail = trail_so_far.clone();
-                            new_trail.push(agtype::edge_to_value(&edge));
-                            new_trail.push(agtype::vertex_to_value(neighbor_vertex));
+                            new_trail.push(agtype::edge_to_value(&edge)?);
+                            new_trail.push(agtype::vertex_to_value(neighbor_vertex)?);
                             if hop >= min_hops {
                                 all_paths.push((neighbor, new_edges.clone(), new_trail.clone()));
                             }
@@ -498,7 +568,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     // The trail extension already ends with the reached
                     // vertex except for zero-hop paths.
                     if trail_ext.is_empty() {
-                        trail_ext.push(agtype::vertex_to_value(&end_vertex));
+                        trail_ext.push(agtype::vertex_to_value(&end_vertex)?);
                     }
                     self.push_reached_vertex(
                         &mut out,
@@ -511,7 +581,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     )?;
                 }
             } else {
-                for edge in self.outgoing_edges(start.vertex_id, direction) {
+                for edge in self.outgoing_edges(start.vertex_id, direction)? {
                     if !self.rel_matches(rp, &edge, &state.row)? {
                         continue;
                     }
@@ -524,8 +594,8 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                         continue;
                     };
                     let trail_ext = vec![
-                        agtype::edge_to_value(&edge),
-                        agtype::vertex_to_value(&end_vertex),
+                        agtype::edge_to_value(&edge)?,
+                        agtype::vertex_to_value(&end_vertex)?,
                     ];
                     self.push_reached_vertex(
                         &mut out,
@@ -577,22 +647,30 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         Ok(())
     }
 
-    fn outgoing_edges(&self, vertex_id: VertexId, direction: Direction) -> Vec<Edge> {
+    fn outgoing_edges(
+        &self,
+        vertex_id: VertexId,
+        direction: Direction,
+    ) -> Result<Vec<Edge>, CypherError> {
         let mut ids: BTreeSet<EdgeId> = BTreeSet::new();
         match direction {
             Direction::Out => {
-                ids.extend(self.store.out_edge_ids(vertex_id, self.graph));
+                ids.extend(self.store.out_edge_ids(vertex_id, self.graph)?);
             }
             Direction::In => {
-                ids.extend(self.store.in_edge_ids(vertex_id, self.graph));
+                ids.extend(self.store.in_edge_ids(vertex_id, self.graph)?);
             }
             Direction::Both => {
-                ids.extend(self.store.out_edge_ids(vertex_id, self.graph));
-                ids.extend(self.store.in_edge_ids(vertex_id, self.graph));
+                ids.extend(self.store.out_edge_ids(vertex_id, self.graph)?);
+                ids.extend(self.store.in_edge_ids(vertex_id, self.graph)?);
             }
         }
         ids.into_iter()
-            .filter_map(|eid| self.store.get_edge(eid).cloned())
+            .map(|eid| {
+                self.store.get_edge(eid).cloned().ok_or_else(|| {
+                    CypherError::Storage(format!("graph adjacency references missing edge {eid}"))
+                })
+            })
             .collect()
     }
 
@@ -661,7 +739,8 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 self.sort_binding_rows(&mut binding_rows, order, items, &columns)?;
             }
             if let Some(skip_expr) = skip {
-                let n = self.eval_int(skip_expr, &BTreeMap::new())? as usize;
+                let n =
+                    nonnegative_i64_to_usize(self.eval_int(skip_expr, &BTreeMap::new())?, "SKIP")?;
                 if n >= binding_rows.len() {
                     binding_rows.clear();
                 } else {
@@ -669,7 +748,10 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 }
             }
             if let Some(limit_expr) = limit {
-                let n = self.eval_int(limit_expr, &BTreeMap::new())? as usize;
+                let n = nonnegative_i64_to_usize(
+                    self.eval_int(limit_expr, &BTreeMap::new())?,
+                    "LIMIT",
+                )?;
                 binding_rows.truncate(n);
             }
             let mut out = Vec::with_capacity(binding_rows.len());
@@ -697,7 +779,8 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
 
         if has_aggregate {
             if let Some(skip_expr) = skip {
-                let n = self.eval_int(skip_expr, &BTreeMap::new())? as usize;
+                let n =
+                    nonnegative_i64_to_usize(self.eval_int(skip_expr, &BTreeMap::new())?, "SKIP")?;
                 if n >= rows.len() {
                     rows.clear();
                 } else {
@@ -705,7 +788,10 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 }
             }
             if let Some(limit_expr) = limit {
-                let n = self.eval_int(limit_expr, &BTreeMap::new())? as usize;
+                let n = nonnegative_i64_to_usize(
+                    self.eval_int(limit_expr, &BTreeMap::new())?,
+                    "LIMIT",
+                )?;
                 rows.truncate(n);
             }
         }
@@ -778,7 +864,10 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     .iter()
                     .any(|a| matches!(a, CypherExpr::Variable(v) if v.name == "*"));
             if is_star {
-                return Ok(Value::Int(members.len() as i64));
+                return Ok(Value::Int(usize_to_i64(
+                    members.len(),
+                    "aggregate row count",
+                )?));
             }
             let mut count = 0i64;
             let mut seen: BTreeSet<Value> = BTreeSet::new();
@@ -789,10 +878,14 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 }
                 if fc.distinct {
                     if seen.insert(v) {
-                        count += 1;
+                        count = count.checked_add(1).ok_or_else(|| {
+                            CypherError::TypeError("count() result exceeds bigint range".into())
+                        })?;
                     }
                 } else {
-                    count += 1;
+                    count = count.checked_add(1).ok_or_else(|| {
+                        CypherError::TypeError("count() result exceeds bigint range".into())
+                    })?;
                 }
             }
             return Ok(Value::Int(count));
@@ -884,7 +977,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
     fn eval_int(&self, expr: &CypherExpr, row: &BindingRow) -> Result<i64, CypherError> {
         match self.eval(expr, row)? {
             Value::Int(n) => Ok(n),
-            Value::Float(f) => Ok(f as i64),
+            Value::Float(f) => trunc_f64_to_i64(f, "integer expression"),
             other => Err(CypherError::TypeError(format!(
                 "expected integer, got {other:?}"
             ))),
@@ -904,7 +997,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 .cloned()
                 .ok_or_else(|| CypherError::UndefinedParameter(name.clone())),
             CypherExpr::Variable(Variable { name }) => match row.get(name) {
-                Some(b) => Ok(b.to_value()),
+                Some(b) => b.to_value(),
                 None => Err(CypherError::UndefinedVariable(name.clone())),
             },
             CypherExpr::PropertyAccess(PropertyAccess { variable, keys }) => {
@@ -1134,13 +1227,16 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         match (&target, &index) {
             (Value::List(items), Value::Int(n)) => {
                 let idx = if *n < 0 {
-                    let adjusted = items.len() as i64 + n;
+                    let len = usize_to_i64(items.len(), "list length")?;
+                    let adjusted = len.checked_add(*n).ok_or_else(|| {
+                        CypherError::TypeError("list index arithmetic overflow".into())
+                    })?;
                     if adjusted < 0 {
                         return Ok(Value::Null);
                     }
-                    adjusted as usize
+                    nonnegative_i64_to_usize(adjusted, "list index")?
                 } else {
-                    *n as usize
+                    nonnegative_i64_to_usize(*n, "list index")?
                 };
                 Ok(items.get(idx).cloned().unwrap_or(Value::Null))
             }
@@ -1166,7 +1262,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 return Err(CypherError::TypeError("slice must access a list".into()));
             }
         };
-        let len = items.len() as i64;
+        let len = usize_to_i64(items.len(), "list length")?;
         let resolve = |expr: &Option<Box<CypherExpr>>, default: i64| -> Result<i64, CypherError> {
             match expr {
                 Some(e) => match self.eval(e, row)? {
@@ -1184,7 +1280,9 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         if start >= end {
             return Ok(Value::List(Vec::new()));
         }
-        Ok(Value::List(items[start as usize..end as usize].to_vec()))
+        let start = nonnegative_i64_to_usize(start, "slice start")?;
+        let end = nonnegative_i64_to_usize(end, "slice end")?;
+        Ok(Value::List(items[start..end].to_vec()))
     }
 
     fn eval_case(&self, c: &CaseExpr, row: &BindingRow) -> Result<Value, CypherError> {
@@ -1313,9 +1411,16 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     } else {
                         agtype::edge_end_id(v)
                     };
-                    Ok(id
-                        .and_then(|id| self.store.get_vertex(id as u64))
-                        .map_or(Value::Null, agtype::vertex_to_value))
+                    let Some(id) = id else {
+                        return Err(CypherError::Storage(
+                            "edge entity is missing a valid endpoint id".into(),
+                        ));
+                    };
+                    let id = nonnegative_i64_to_u64(id, "edge endpoint id")?;
+                    match self.store.get_vertex(id) {
+                        Some(vertex) => Ok(agtype::vertex_to_value(vertex)?),
+                        None => Ok(Value::Null),
+                    }
                 }
                 Some(_) => Err(CypherError::TypeError(format!(
                     "{}() argument must be an edge or null",
@@ -1329,8 +1434,11 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             "length" => match arg {
                 Some(Value::Null) | None => Ok(Value::Null),
                 Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
-                    let elements = agtype::path_elements(v).map_or(0, <[Value]>::len);
-                    Ok(Value::Int((elements.saturating_sub(1) / 2) as i64))
+                    let elements = validated_path_elements(v)?;
+                    Ok(Value::Int(usize_to_i64(
+                        (elements.len() - 1) / 2,
+                        "path length",
+                    )?))
                 }
                 Some(Value::List(_) | Value::Map(_)) => Err(CypherError::TypeError(
                     "length() argument must resolve to a scalar".into(),
@@ -1341,9 +1449,9 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             },
             "size" => match arg {
                 Some(Value::Null) | None => Ok(Value::Null),
-                Some(Value::List(items)) => Ok(Value::Int(items.len() as i64)),
+                Some(Value::List(items)) => Ok(Value::Int(usize_to_i64(items.len(), "list size")?)),
                 // AGE's size() counts string BYTES, not characters.
-                Some(Value::Str(s)) => Ok(Value::Int(s.len() as i64)),
+                Some(Value::Str(s)) => Ok(Value::Int(usize_to_i64(s.len(), "string byte size")?)),
                 Some(_) => Err(CypherError::TypeError("size() unsupported argument".into())),
             },
             "coalesce" => {
@@ -1400,7 +1508,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                                 "{name}() negative values are not supported for length"
                             )));
                         }
-                        let n = *n as usize;
+                        let n = nonnegative_i64_to_usize(*n, &format!("{name} length"))?;
                         let chars: Vec<char> = s.chars().collect();
                         let taken: String = if name == "left" {
                             chars.iter().take(n).collect()
@@ -1438,9 +1546,13 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                             ));
                         }
                         let chars: Vec<char> = s.chars().collect();
-                        let start = start as usize;
+                        let start = nonnegative_i64_to_usize(start, "substring offset")?;
                         let out: String = match count {
-                            Some(c) => chars.iter().skip(start).take(c as usize).collect(),
+                            Some(c) => chars
+                                .iter()
+                                .skip(start)
+                                .take(nonnegative_i64_to_usize(c, "substring length")?)
+                                .collect(),
                             None => chars.iter().skip(start).collect(),
                         };
                         Ok(Value::Str(out))
@@ -1480,22 +1592,22 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 Some(Value::Null) | None => Ok(Value::Null),
                 Some(Value::Int(n)) => Ok(Value::Int(*n)),
                 // toInteger truncates toward zero (AGE: toInteger(-4.9) = -4).
-                Some(Value::Float(f)) => Ok(Value::Int(f.trunc() as i64)),
-                Some(Value::Str(s)) => Ok(s
-                    .trim()
-                    .parse::<i64>()
-                    .map(Value::Int)
-                    .or_else(|_| {
-                        s.trim()
-                            .parse::<f64>()
-                            .map(|f| Value::Int(f.trunc() as i64))
-                    })
-                    .unwrap_or(Value::Null)),
+                Some(Value::Float(f)) => Ok(Value::Int(trunc_f64_to_i64(*f, "toInteger input")?)),
+                Some(Value::Str(s)) => {
+                    let input = s.trim();
+                    if let Ok(value) = input.parse::<i64>() {
+                        Ok(Value::Int(value))
+                    } else if let Ok(value) = input.parse::<f64>() {
+                        Ok(Value::Int(trunc_f64_to_i64(value, "toInteger input")?))
+                    } else {
+                        Ok(Value::Null)
+                    }
+                }
                 Some(v) => Err(unsupported_argument("toInteger", v)),
             },
             "tofloat" => match arg {
                 Some(Value::Null) | None => Ok(Value::Null),
-                Some(Value::Int(n)) => Ok(Value::Float(*n as f64)),
+                Some(Value::Int(n)) => Ok(Value::Float(exact_i64_to_f64(*n, "toFloat input")?)),
                 Some(Value::Float(f)) => Ok(Value::Float(*f)),
                 Some(Value::Str(s)) => {
                     Ok(s.trim().parse::<f64>().map_or(Value::Null, Value::Float))
@@ -1568,20 +1680,31 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                 // range() is end-INCLUSIVE in AGE.
                 while (step > 0 && current <= end) || (step < 0 && current >= end) {
                     out.push(Value::Int(current));
-                    current += step;
+                    if current == end {
+                        break;
+                    }
+                    let Some(next) = current.checked_add(step) else {
+                        break;
+                    };
+                    current = next;
                 }
                 Ok(Value::List(out))
             }
             "timestamp" => {
-                let ms = std::time::SystemTime::now()
+                let duration = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_millis() as i64);
+                    .map_err(|error| {
+                        CypherError::Storage(format!("system clock precedes Unix epoch: {error}"))
+                    })?;
+                let ms = i64::try_from(duration.as_millis()).map_err(|_| {
+                    CypherError::TypeError("timestamp exceeds agtype integer range".into())
+                })?;
                 Ok(Value::Int(ms))
             }
             "nodes" => match arg {
                 Some(Value::Null) | None => Ok(Value::Null),
                 Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
-                    let elements = agtype::path_elements(v).unwrap_or(&[]);
+                    let elements = validated_path_elements(v)?;
                     Ok(Value::List(elements.iter().step_by(2).cloned().collect()))
                 }
                 Some(_) => Err(CypherError::TypeError(
@@ -1591,7 +1714,7 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             "relationships" => match arg {
                 Some(Value::Null) | None => Ok(Value::Null),
                 Some(v) if agtype::entity_kind(v) == Some(agtype::EntityKind::Path) => {
-                    let elements = agtype::path_elements(v).unwrap_or(&[]);
+                    let elements = validated_path_elements(v)?;
                     Ok(Value::List(
                         elements.iter().skip(1).step_by(2).cloned().collect(),
                     ))
@@ -1608,6 +1731,35 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
 // ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
+
+fn validated_path_elements(value: &Value) -> Result<&[Value], CypherError> {
+    let elements = agtype::path_elements(value)
+        .ok_or_else(|| CypherError::Storage("path entity is missing its elements".into()))?;
+    if elements.is_empty() || elements.len() % 2 == 0 {
+        return Err(CypherError::Storage(format!(
+            "path entity has invalid element count {}",
+            elements.len()
+        )));
+    }
+    for (index, element) in elements.iter().enumerate() {
+        let expected = if index % 2 == 0 {
+            agtype::EntityKind::Vertex
+        } else {
+            agtype::EntityKind::Edge
+        };
+        if agtype::entity_kind(element) != Some(expected) {
+            return Err(CypherError::Storage(format!(
+                "path entity element {index} is not a {}",
+                if index % 2 == 0 {
+                    "vertex"
+                } else {
+                    "relationship"
+                }
+            )));
+        }
+    }
+    Ok(elements)
+}
 
 /// Variables declared by a set of path patterns (node, relationship,
 /// and path variables), used to pad OPTIONAL MATCH misses with nulls.
@@ -1687,12 +1839,16 @@ fn is_aggregate_name(name: &str) -> bool {
     )
 }
 
-fn number_as_f64(v: &Value) -> Option<f64> {
+fn number_as_f64(v: &Value) -> Result<Option<f64>, CypherError> {
     match v {
-        Value::Int(n) => Some(*n as f64),
-        Value::Float(f) => Some(*f),
-        Value::Decimal(d) => d.to_f64(),
-        _ => None,
+        Value::Int(n) => exact_i64_to_f64(*n, "integer operand").map(Some),
+        Value::Float(f) => Ok(Some(*f)),
+        Value::Decimal(d) => d.to_f64().map(Some).ok_or_else(|| {
+            CypherError::TypeError(format!(
+                "numeric value {d:?} cannot be represented as a float"
+            ))
+        }),
+        _ => Ok(None),
     }
 }
 
@@ -1725,35 +1881,25 @@ fn aggregate_sum(values: &[Value]) -> Result<Value, CypherError> {
     if values.is_empty() {
         return Ok(Value::Null);
     }
-    let mut int_sum: i64 = 0;
-    let mut float_sum: f64 = 0.0;
-    let mut all_ints = true;
-    for v in values {
-        match v {
-            Value::Int(n) => {
-                int_sum = int_sum.wrapping_add(*n);
-                float_sum += *n as f64;
-            }
-            Value::Float(f) => {
-                all_ints = false;
-                float_sum += f;
-            }
-            Value::Decimal(d) => {
-                all_ints = false;
-                float_sum += d.to_f64().unwrap_or(0.0);
-            }
-            _ => {
-                return Err(CypherError::TypeError(
-                    "arguments must resolve to a number".into(),
+    if values.iter().all(|value| matches!(value, Value::Int(_))) {
+        let mut sum = 0_i64;
+        for value in values {
+            let Value::Int(integer) = value else {
+                return Err(CypherError::Storage(
+                    "integer aggregate validation became inconsistent".into(),
                 ));
-            }
+            };
+            sum = sum.wrapping_add(*integer);
         }
+        return Ok(Value::Int(sum));
     }
-    if all_ints {
-        Ok(Value::Int(int_sum))
-    } else {
-        Ok(Value::Float(float_sum))
+
+    let mut sum = 0.0;
+    for value in values {
+        sum += number_as_f64(value)?
+            .ok_or_else(|| CypherError::TypeError("arguments must resolve to a number".into()))?;
     }
+    Ok(Value::Float(sum))
 }
 
 fn aggregate_avg(values: &[Value]) -> Result<Value, CypherError> {
@@ -1762,10 +1908,14 @@ fn aggregate_avg(values: &[Value]) -> Result<Value, CypherError> {
     }
     let mut total = 0.0;
     for v in values {
-        total += number_as_f64(v)
+        total += number_as_f64(v)?
             .ok_or_else(|| CypherError::TypeError("arguments must resolve to a number".into()))?;
     }
-    Ok(Value::Float(total / values.len() as f64))
+    let count = exact_i64_to_f64(
+        usize_to_i64(values.len(), "average count")?,
+        "average count",
+    )?;
+    Ok(Value::Float(total / count))
 }
 
 /// Concatenation contribution of a scalar joined to a string with `+`.
@@ -1817,7 +1967,7 @@ fn agtype_add(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
                 )),
             }
         }
-        _ => match (number_as_f64(lhs), number_as_f64(rhs)) {
+        _ => match (number_as_f64(lhs)?, number_as_f64(rhs)?) {
             (Some(a), Some(b)) => Ok(Value::Float(a + b)),
             _ => Err(CypherError::TypeError(
                 "Invalid input parameter types for agtype_add".into(),
@@ -1839,7 +1989,7 @@ fn numeric_op(
     if let (Value::Int(a), Value::Int(b)) = (lhs, rhs) {
         return Ok(Value::Int(f_int(*a, *b)));
     }
-    match (number_as_f64(lhs), number_as_f64(rhs)) {
+    match (number_as_f64(lhs)?, number_as_f64(rhs)?) {
         (Some(a), Some(b)) => Ok(Value::Float(f_float(a, b))),
         _ => Err(CypherError::TypeError(format!(
             "Invalid input parameter types for {age_name}"
@@ -1855,10 +2005,9 @@ fn agtype_div(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
         if *b == 0 {
             return Err(CypherError::TypeError("division by zero".into()));
         }
-        // i64::MIN / -1 overflows; AGE wraps.
         return Ok(Value::Int(a.wrapping_div(*b)));
     }
-    match (number_as_f64(lhs), number_as_f64(rhs)) {
+    match (number_as_f64(lhs)?, number_as_f64(rhs)?) {
         (Some(a), Some(b)) => {
             if b == 0.0 {
                 return Err(CypherError::TypeError("division by zero".into()));
@@ -1883,7 +2032,7 @@ fn agtype_mod(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
         }
         return Ok(Value::Int(a.wrapping_rem(*b)));
     }
-    match (number_as_f64(lhs), number_as_f64(rhs)) {
+    match (number_as_f64(lhs)?, number_as_f64(rhs)?) {
         // fmod semantics: sign follows the dividend; x % 0.0 = NaN.
         (Some(a), Some(b)) => Ok(Value::Float(a % b)),
         _ => Err(CypherError::TypeError(
@@ -1896,7 +2045,7 @@ fn agtype_pow(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
     if *lhs == Value::Null || *rhs == Value::Null {
         return Ok(Value::Null);
     }
-    match (number_as_f64(lhs), number_as_f64(rhs)) {
+    match (number_as_f64(lhs)?, number_as_f64(rhs)?) {
         // `^` ALWAYS yields a float in AGE (2^2 = 4.0).
         (Some(a), Some(b)) => Ok(Value::Float(a.powf(b))),
         _ => Err(CypherError::TypeError(
@@ -1952,7 +2101,7 @@ fn string_fn(
 fn float_fn(arg: Option<&Value>, name: &str, f: impl Fn(f64) -> f64) -> Result<Value, CypherError> {
     match arg {
         Some(Value::Null) | None => Ok(Value::Null),
-        Some(v) => match number_as_f64(v) {
+        Some(v) => match number_as_f64(v)? {
             Some(x) => Ok(Value::Float(f(x))),
             None => Err(unsupported_argument(name, v)),
         },
@@ -1968,7 +2117,7 @@ fn domain_float_fn(
 ) -> Result<Value, CypherError> {
     match arg {
         Some(Value::Null) | None => Ok(Value::Null),
-        Some(v) => match number_as_f64(v) {
+        Some(v) => match number_as_f64(v)? {
             Some(x) => Ok(f(x).map_or(Value::Null, Value::Float)),
             None => Err(unsupported_argument(name, v)),
         },

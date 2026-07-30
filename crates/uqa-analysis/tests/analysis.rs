@@ -12,8 +12,8 @@
 use std::collections::BTreeMap;
 
 use uqa_analysis::{
-    keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
-    CharFilter, TokenFilter, Tokenizer,
+    keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, AnalysisError,
+    Analyzer, CharFilter, SynonymFileError, TokenFilter, Tokenizer,
 };
 
 // =====================================================================
@@ -23,19 +23,22 @@ use uqa_analysis::{
 #[test]
 fn whitespace_tokenizer_basic() {
     let t = Tokenizer::Whitespace;
-    assert_eq!(t.tokenize("hello world"), vec!["hello", "world"]);
+    assert_eq!(t.tokenize("hello world").unwrap(), vec!["hello", "world"]);
 }
 
 #[test]
 fn whitespace_tokenizer_multiple_spaces() {
     let t = Tokenizer::Whitespace;
-    assert_eq!(t.tokenize("  hello   world  "), vec!["hello", "world"]);
+    assert_eq!(
+        t.tokenize("  hello   world  ").unwrap(),
+        vec!["hello", "world"]
+    );
 }
 
 #[test]
 fn whitespace_tokenizer_empty() {
     let t = Tokenizer::Whitespace;
-    assert!(t.tokenize("").is_empty());
+    assert!(t.tokenize("").unwrap().is_empty());
 }
 
 #[test]
@@ -50,19 +53,25 @@ fn whitespace_tokenizer_roundtrip() {
 #[test]
 fn standard_tokenizer_basic() {
     let t = Tokenizer::Standard;
-    assert_eq!(t.tokenize("Hello, World!"), vec!["Hello", "World"]);
+    assert_eq!(t.tokenize("Hello, World!").unwrap(), vec!["Hello", "World"]);
 }
 
 #[test]
 fn standard_tokenizer_unicode() {
     let t = Tokenizer::Standard;
-    assert_eq!(t.tokenize("cafe_latte 42"), vec!["cafe_latte", "42"]);
+    assert_eq!(
+        t.tokenize("cafe_latte 42").unwrap(),
+        vec!["cafe_latte", "42"]
+    );
 }
 
 #[test]
 fn standard_tokenizer_punctuation() {
     let t = Tokenizer::Standard;
-    assert_eq!(t.tokenize("it's a test."), vec!["it", "s", "a", "test"]);
+    assert_eq!(
+        t.tokenize("it's a test.").unwrap(),
+        vec!["it", "s", "a", "test"]
+    );
 }
 
 #[test]
@@ -76,13 +85,13 @@ fn standard_tokenizer_roundtrip() {
 #[test]
 fn letter_tokenizer_basic() {
     let t = Tokenizer::Letter;
-    assert_eq!(t.tokenize("hello123world"), vec!["hello", "world"]);
+    assert_eq!(t.tokenize("hello123world").unwrap(), vec!["hello", "world"]);
 }
 
 #[test]
 fn letter_tokenizer_only_letters() {
     let t = Tokenizer::Letter;
-    assert!(t.tokenize("42!!").is_empty());
+    assert!(t.tokenize("42!!").unwrap().is_empty());
 }
 
 #[test]
@@ -91,7 +100,7 @@ fn ngram_tokenizer_bigrams() {
         min_gram: 2,
         max_gram: 2,
     };
-    assert_eq!(t.tokenize("abc"), vec!["ab", "bc"]);
+    assert_eq!(t.tokenize("abc").unwrap(), vec!["ab", "bc"]);
 }
 
 #[test]
@@ -100,7 +109,7 @@ fn ngram_tokenizer_unigrams_and_bigrams() {
         min_gram: 1,
         max_gram: 2,
     };
-    assert_eq!(t.tokenize("ab"), vec!["a", "b", "ab"]);
+    assert_eq!(t.tokenize("ab").unwrap(), vec!["a", "b", "ab"]);
 }
 
 #[test]
@@ -119,7 +128,7 @@ fn pattern_tokenizer_default_pattern() {
     let t = Tokenizer::Pattern {
         pattern: r"-".into(),
     };
-    assert_eq!(t.tokenize("hello-world"), vec!["hello", "world"]);
+    assert_eq!(t.tokenize("hello-world").unwrap(), vec!["hello", "world"]);
 }
 
 #[test]
@@ -127,7 +136,7 @@ fn pattern_tokenizer_custom_pattern() {
     let t = Tokenizer::Pattern {
         pattern: r",\s*".into(),
     };
-    assert_eq!(t.tokenize("a, b, c"), vec!["a", "b", "c"]);
+    assert_eq!(t.tokenize("a, b, c").unwrap(), vec!["a", "b", "c"]);
 }
 
 #[test]
@@ -143,13 +152,13 @@ fn pattern_tokenizer_roundtrip() {
 #[test]
 fn keyword_tokenizer_single_token() {
     let t = Tokenizer::Keyword;
-    assert_eq!(t.tokenize("hello world"), vec!["hello world"]);
+    assert_eq!(t.tokenize("hello world").unwrap(), vec!["hello world"]);
 }
 
 #[test]
 fn keyword_tokenizer_empty() {
     let t = Tokenizer::Keyword;
-    assert!(t.tokenize("").is_empty());
+    assert!(t.tokenize("").unwrap().is_empty());
 }
 
 // =====================================================================
@@ -160,7 +169,7 @@ fn keyword_tokenizer_empty() {
 fn lowercase_filter_basic() {
     let f = TokenFilter::Lowercase;
     assert_eq!(
-        f.filter(vec!["Hello".into(), "WORLD".into()]),
+        f.filter(vec!["Hello".into(), "WORLD".into()]).unwrap(),
         vec!["hello", "world"]
     );
 }
@@ -179,12 +188,14 @@ fn stopword_filter_english_defaults() {
         language: "english".into(),
         custom_words: Vec::new(),
     };
-    let result = f.filter(vec![
-        "the".into(),
-        "quick".into(),
-        "brown".into(),
-        "fox".into(),
-    ]);
+    let result = f
+        .filter(vec![
+            "the".into(),
+            "quick".into(),
+            "brown".into(),
+            "fox".into(),
+        ])
+        .unwrap();
     assert_eq!(result, vec!["quick", "brown", "fox"]);
 }
 
@@ -194,7 +205,9 @@ fn stopword_filter_custom_words() {
         language: "english".into(),
         custom_words: vec!["quick".into()],
     };
-    let result = f.filter(vec!["the".into(), "quick".into(), "brown".into()]);
+    let result = f
+        .filter(vec!["the".into(), "quick".into(), "brown".into()])
+        .unwrap();
     assert_eq!(result, vec!["brown"]);
 }
 
@@ -206,25 +219,27 @@ fn stopword_filter_roundtrip() {
     };
     let json = serde_json::to_string(&f).unwrap();
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
-    let result = back.filter(vec!["extra".into()]);
+    let result = back.filter(vec!["extra".into()]).unwrap();
     assert!(result.is_empty());
 }
 
 #[test]
 fn porter_stem_filter_basic_stemming() {
     let f = TokenFilter::PorterStem;
-    assert_eq!(f.filter(vec!["running".into()]), vec!["run"]);
-    assert_eq!(f.filter(vec!["cats".into()]), vec!["cat"]);
+    assert_eq!(f.filter(vec!["running".into()]).unwrap(), vec!["run"]);
+    assert_eq!(f.filter(vec!["cats".into()]).unwrap(), vec!["cat"]);
 }
 
 #[test]
 fn porter_stem_filter_complex_stemming() {
     let f = TokenFilter::PorterStem;
-    let result = f.filter(vec![
-        "connections".into(),
-        "generalization".into(),
-        "relational".into(),
-    ]);
+    let result = f
+        .filter(vec![
+            "connections".into(),
+            "generalization".into(),
+            "relational".into(),
+        ])
+        .unwrap();
     assert!(result.contains(&"connect".to_string()));
     assert!(result.contains(&"gener".to_string()));
 }
@@ -232,7 +247,7 @@ fn porter_stem_filter_complex_stemming() {
 #[test]
 fn ascii_folding_filter_accented_chars() {
     let f = TokenFilter::ASCIIFolding;
-    assert_eq!(f.filter(vec!["café".into()]), vec!["cafe"]);
+    assert_eq!(f.filter(vec!["café".into()]).unwrap(), vec!["cafe"]);
 }
 
 #[test]
@@ -261,7 +276,7 @@ fn synonym_filter_expansion() {
         synonyms: syn_map(&[("fast", &["quick", "rapid"])]),
         synonyms_path: None,
     };
-    let result = f.filter(vec!["fast".into(), "car".into()]);
+    let result = f.filter(vec!["fast".into(), "car".into()]).unwrap();
     assert_eq!(result, vec!["fast", "quick", "rapid", "car"]);
 }
 
@@ -271,7 +286,7 @@ fn synonym_filter_no_match() {
         synonyms: syn_map(&[("fast", &["quick"])]),
         synonyms_path: None,
     };
-    let result = f.filter(vec!["slow".into(), "car".into()]);
+    let result = f.filter(vec!["slow".into(), "car".into()]).unwrap();
     assert_eq!(result, vec!["slow", "car"]);
 }
 
@@ -293,7 +308,7 @@ fn ngram_filter_default() {
         max_gram: 3,
         keep_short: false,
     };
-    let result = f.filter(vec!["hello".into()]);
+    let result = f.filter(vec!["hello".into()]).unwrap();
     for expected in ["he", "el", "ll", "lo", "hel", "ell", "llo"] {
         assert!(
             result.contains(&expected.to_string()),
@@ -309,7 +324,7 @@ fn ngram_filter_short_token_dropped() {
         max_gram: 3,
         keep_short: false,
     };
-    assert!(f.filter(vec!["a".into()]).is_empty());
+    assert!(f.filter(vec!["a".into()]).unwrap().is_empty());
 }
 
 #[test]
@@ -319,7 +334,7 @@ fn ngram_filter_keep_short() {
         max_gram: 3,
         keep_short: true,
     };
-    let result = f.filter(vec!["a".into(), "hello".into()]);
+    let result = f.filter(vec!["a".into(), "hello".into()]).unwrap();
     assert_eq!(result[0], "a");
     assert!(result.contains(&"he".to_string()));
 }
@@ -331,7 +346,9 @@ fn ngram_filter_keep_short_mixed() {
         max_gram: 4,
         keep_short: true,
     };
-    let result = f.filter(vec!["ab".into(), "cd".into(), "hello".into()]);
+    let result = f
+        .filter(vec!["ab".into(), "cd".into(), "hello".into()])
+        .unwrap();
     assert!(result.contains(&"ab".to_string()));
     assert!(result.contains(&"cd".to_string()));
     assert!(result.contains(&"hel".to_string()));
@@ -347,8 +364,8 @@ fn ngram_filter_roundtrip() {
     let json = serde_json::to_string(&f).unwrap();
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        back.filter(vec!["abc".into()]),
-        f.filter(vec!["abc".into()])
+        back.filter(vec!["abc".into()]).unwrap(),
+        f.filter(vec!["abc".into()]).unwrap()
     );
 }
 
@@ -362,7 +379,10 @@ fn ngram_filter_roundtrip_keep_short() {
     let json = serde_json::to_string(&f).unwrap();
     assert!(json.contains("\"keep_short\":true"));
     let back: TokenFilter = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.filter(vec!["a".into()]), vec!["a".to_string()]);
+    assert_eq!(
+        back.filter(vec!["a".into()]).unwrap(),
+        vec!["a".to_string()]
+    );
 }
 
 #[test]
@@ -371,7 +391,10 @@ fn edge_ngram_filter_default() {
         min_gram: 1,
         max_gram: 3,
     };
-    assert_eq!(f.filter(vec!["hello".into()]), vec!["h", "he", "hel"]);
+    assert_eq!(
+        f.filter(vec!["hello".into()]).unwrap(),
+        vec!["h", "he", "hel"]
+    );
 }
 
 #[test]
@@ -380,7 +403,7 @@ fn edge_ngram_filter_min_gram() {
         min_gram: 2,
         max_gram: 4,
     };
-    assert_eq!(f.filter(vec!["abc".into()]), vec!["ab", "abc"]);
+    assert_eq!(f.filter(vec!["abc".into()]).unwrap(), vec!["ab", "abc"]);
 }
 
 #[test]
@@ -401,7 +424,8 @@ fn length_filter_min_length() {
         max_length: 0,
     };
     assert_eq!(
-        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()]),
+        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()])
+            .unwrap(),
         vec!["abc", "abcd"]
     );
 }
@@ -413,7 +437,8 @@ fn length_filter_max_length() {
         max_length: 3,
     };
     assert_eq!(
-        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()]),
+        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()])
+            .unwrap(),
         vec!["a", "ab", "abc"]
     );
 }
@@ -425,7 +450,8 @@ fn length_filter_both() {
         max_length: 3,
     };
     assert_eq!(
-        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()]),
+        f.filter(vec!["a".into(), "ab".into(), "abc".into(), "abcd".into()])
+            .unwrap(),
         vec!["ab", "abc"]
     );
 }
@@ -437,7 +463,7 @@ fn length_filter_both() {
 #[test]
 fn html_strip_strip_tags() {
     let f = CharFilter::HTMLStrip;
-    let result = f.filter("<p>Hello <b>world</b></p>");
+    let result = f.filter("<p>Hello <b>world</b></p>").unwrap();
     assert!(result.contains("Hello"));
     assert!(result.contains("world"));
     assert!(!result.contains('<'));
@@ -446,13 +472,13 @@ fn html_strip_strip_tags() {
 #[test]
 fn html_strip_no_tags() {
     let f = CharFilter::HTMLStrip;
-    assert_eq!(f.filter("plain text"), "plain text");
+    assert_eq!(f.filter("plain text").unwrap(), "plain text");
 }
 
 #[test]
 fn html_strip_entities() {
     let f = CharFilter::HTMLStrip;
-    assert_eq!(f.filter("a &amp; b"), "a & b");
+    assert_eq!(f.filter("a &amp; b").unwrap(), "a & b");
 }
 
 #[test]
@@ -469,7 +495,7 @@ fn mapping_char_filter_mapping() {
     m.insert("&".to_string(), "and".to_string());
     m.insert("@".to_string(), "at".to_string());
     let f = CharFilter::Mapping { mapping: m };
-    assert_eq!(f.filter("you & me @ home"), "you and me at home");
+    assert_eq!(f.filter("you & me @ home").unwrap(), "you and me at home");
 }
 
 #[test]
@@ -488,7 +514,7 @@ fn pattern_replace_replace() {
         pattern: r"\d+".into(),
         replacement: "#".into(),
     };
-    assert_eq!(f.filter("abc123def456"), "abc#def#");
+    assert_eq!(f.filter("abc123def456").unwrap(), "abc#def#");
 }
 
 #[test]
@@ -509,7 +535,7 @@ fn pattern_replace_roundtrip() {
 #[test]
 fn default_analyzer_is_standard() {
     let standard = standard_analyzer("english");
-    let result = standard.analyze("The Quick BROWN Fox");
+    let result = standard.analyze("The Quick BROWN Fox").unwrap();
     assert!(!result.contains(&"the".to_string()));
     assert!(result.contains(&"quick".to_string()));
     assert!(result.contains(&"brown".to_string()));
@@ -519,13 +545,13 @@ fn default_analyzer_is_standard() {
 #[test]
 fn whitespace_analyzer_run() {
     let a = whitespace_analyzer();
-    assert_eq!(a.analyze("Hello World"), vec!["hello", "world"]);
+    assert_eq!(a.analyze("Hello World").unwrap(), vec!["hello", "world"]);
 }
 
 #[test]
 fn standard_analyzer_run() {
     let a = standard_analyzer("english");
-    let result = a.analyze("The quick brown fox");
+    let result = a.analyze("The quick brown fox").unwrap();
     assert!(!result.contains(&"the".to_string()));
     assert!(result.contains(&"quick".to_string()));
 }
@@ -533,7 +559,7 @@ fn standard_analyzer_run() {
 #[test]
 fn standard_analyzer_stemming() {
     let a = standard_analyzer("english");
-    let result = a.analyze("Running transformers efficiently");
+    let result = a.analyze("Running transformers efficiently").unwrap();
     assert!(result.contains(&"run".to_string()));
     assert!(result.contains(&"transform".to_string()));
 }
@@ -541,7 +567,7 @@ fn standard_analyzer_stemming() {
 #[test]
 fn standard_analyzer_ascii_folding() {
     let a = standard_analyzer("english");
-    let result = a.analyze("café résumé");
+    let result = a.analyze("café résumé").unwrap();
     assert!(result.contains(&"cafe".to_string()));
     assert!(result.contains(&"resum".to_string()));
 }
@@ -549,7 +575,7 @@ fn standard_analyzer_ascii_folding() {
 #[test]
 fn standard_cjk_analyzer_run() {
     let a = standard_cjk_analyzer("english");
-    let result = a.analyze("hello world");
+    let result = a.analyze("hello world").unwrap();
     assert!(result.contains(&"he".to_string()));
     assert!(result.contains(&"hel".to_string()));
     assert!(result.contains(&"wo".to_string()));
@@ -559,7 +585,7 @@ fn standard_cjk_analyzer_run() {
 #[test]
 fn standard_cjk_analyzer_stemming() {
     let a = standard_cjk_analyzer("english");
-    let result = a.analyze("Running");
+    let result = a.analyze("Running").unwrap();
     assert!(result.contains(&"ru".to_string()));
     assert!(result.contains(&"run".to_string()));
 }
@@ -567,7 +593,7 @@ fn standard_cjk_analyzer_stemming() {
 #[test]
 fn standard_cjk_analyzer_keep_short() {
     let a = standard_cjk_analyzer("english");
-    let result = a.analyze("x marks");
+    let result = a.analyze("x marks").unwrap();
     assert!(result.contains(&"x".to_string()));
     assert!(result.contains(&"ma".to_string()));
     assert!(result.contains(&"mar".to_string()));
@@ -576,7 +602,7 @@ fn standard_cjk_analyzer_keep_short() {
 #[test]
 fn keyword_analyzer_run() {
     let a = keyword_analyzer();
-    assert_eq!(a.analyze("hello world"), vec!["hello world"]);
+    assert_eq!(a.analyze("hello world").unwrap(), vec!["hello world"]);
 }
 
 #[test]
@@ -586,7 +612,7 @@ fn analyzer_custom_pipeline() {
         vec![TokenFilter::Lowercase, TokenFilter::PorterStem],
         vec![CharFilter::HTMLStrip],
     );
-    let result = a.analyze("<p>Running Connections</p>");
+    let result = a.analyze("<p>Running Connections</p>").unwrap();
     assert!(result.contains(&"run".to_string()));
     assert!(result.contains(&"connect".to_string()));
 }
@@ -607,7 +633,7 @@ fn analyzer_serialization_roundtrip() {
     let json = serde_json::to_string(&a).unwrap();
     let back: Analyzer = serde_json::from_str(&json).unwrap();
     let text = "<p>The quick brown fox</p>";
-    assert_eq!(back.analyze(text), a.analyze(text));
+    assert_eq!(back.analyze(text).unwrap(), a.analyze(text).unwrap());
 }
 
 #[test]
@@ -616,7 +642,7 @@ fn analyzer_json_roundtrip() {
     let j = serde_json::to_string(&a).unwrap();
     let back: Analyzer = serde_json::from_str(&j).unwrap();
     let text = "The quick brown fox";
-    assert_eq!(back.analyze(text), a.analyze(text));
+    assert_eq!(back.analyze(text).unwrap(), a.analyze(text).unwrap());
 }
 
 // =====================================================================
@@ -629,7 +655,10 @@ fn registry_register_and_get() {
     let custom = Analyzer::new(Tokenizer::Letter, vec![TokenFilter::Lowercase], Vec::new());
     register_analyzer("rs_test_custom_reg".to_string(), custom).unwrap();
     let retrieved = get_analyzer("rs_test_custom_reg").unwrap();
-    assert_eq!(retrieved.analyze("hello123world"), vec!["hello", "world"]);
+    assert_eq!(
+        retrieved.analyze("hello123world").unwrap(),
+        vec!["hello", "world"]
+    );
     drop_analyzer("rs_test_custom_reg").unwrap();
 }
 
@@ -662,14 +691,19 @@ fn registry_list_includes_registered() {
 
 #[test]
 fn ngram_filter_validation_zero_min() {
-    // Rust uses debug_assert, so a panic on min_gram=0 is the contract;
-    // we exercise the working path here to keep the test deterministic.
     let f = TokenFilter::Ngram {
-        min_gram: 1,
+        min_gram: 0,
         max_gram: 1,
         keep_short: false,
     };
-    assert_eq!(f.filter(vec!["a".into()]), vec!["a"]);
+    assert!(matches!(
+        f.filter(vec!["a".into()]),
+        Err(AnalysisError::InvalidGramBounds {
+            component: "n-gram token filter",
+            min_gram: 0,
+            max_gram: 1,
+        })
+    ));
 }
 
 #[test]
@@ -687,7 +721,7 @@ fn synonym_filter_chain_with_lowercase() {
         ],
         Vec::new(),
     );
-    let result = pipeline.analyze("Used CAR for sale");
+    let result = pipeline.analyze("Used CAR for sale").unwrap();
     assert!(result.contains(&"car".to_string()));
     assert!(result.contains(&"automobile".to_string()));
 }
@@ -716,14 +750,14 @@ mod synonym_file {
         );
         let f = TokenFilter::synonym_from_path(&path).unwrap();
         assert_eq!(
-            f.filter(vec!["car".into()]),
+            f.filter(vec!["car".into()]).unwrap(),
             vec!["car", "automobile", "vehicle"]
         );
         assert_eq!(
-            f.filter(vec!["fast".into()]),
+            f.filter(vec!["fast".into()]).unwrap(),
             vec!["fast", "quick", "speedy"]
         );
-        assert_eq!(f.filter(vec!["slow".into()]), vec!["slow"]);
+        assert_eq!(f.filter(vec!["slow".into()]).unwrap(), vec!["slow"]);
     }
 
     #[test]
@@ -732,15 +766,15 @@ mod synonym_file {
         let path = write_synonyms(&dir, "car, automobile, vehicle\n");
         let f = TokenFilter::synonym_from_path(&path).unwrap();
         assert_eq!(
-            f.filter(vec!["car".into()]),
+            f.filter(vec!["car".into()]).unwrap(),
             vec!["car", "automobile", "vehicle"]
         );
         assert_eq!(
-            f.filter(vec!["automobile".into()]),
+            f.filter(vec!["automobile".into()]).unwrap(),
             vec!["automobile", "car", "vehicle"]
         );
         assert_eq!(
-            f.filter(vec!["vehicle".into()]),
+            f.filter(vec!["vehicle".into()]).unwrap(),
             vec!["vehicle", "car", "automobile"]
         );
     }
@@ -753,15 +787,15 @@ mod synonym_file {
             "# explicit\nbig => large\n\n# equivalent\nfast, quick, speedy\n",
         );
         let f = TokenFilter::synonym_from_path(&path).unwrap();
-        assert_eq!(f.filter(vec!["big".into()]), vec!["big", "large"]);
+        assert_eq!(f.filter(vec!["big".into()]).unwrap(), vec!["big", "large"]);
         // explicit one-way: large does not expand
-        assert_eq!(f.filter(vec!["large".into()]), vec!["large"]);
+        assert_eq!(f.filter(vec!["large".into()]).unwrap(), vec!["large"]);
         assert_eq!(
-            f.filter(vec!["fast".into()]),
+            f.filter(vec!["fast".into()]).unwrap(),
             vec!["fast", "quick", "speedy"]
         );
         assert_eq!(
-            f.filter(vec!["quick".into()]),
+            f.filter(vec!["quick".into()]).unwrap(),
             vec!["quick", "fast", "speedy"]
         );
     }
@@ -774,7 +808,7 @@ mod synonym_file {
             "# this is a comment\n\n   \n# another comment\na => b\n",
         );
         let f = TokenFilter::synonym_from_path(&path).unwrap();
-        assert_eq!(f.filter(vec!["a".into()]), vec!["a", "b"]);
+        assert_eq!(f.filter(vec!["a".into()]).unwrap(), vec!["a", "b"]);
     }
 
     #[test]
@@ -783,7 +817,7 @@ mod synonym_file {
         let path = write_synonyms(&dir, "car => automobile\ncar => automobile, vehicle\n");
         let f = TokenFilter::synonym_from_path(&path).unwrap();
         assert_eq!(
-            f.filter(vec!["car".into()]),
+            f.filter(vec!["car".into()]).unwrap(),
             vec!["car", "automobile", "vehicle"]
         );
     }
@@ -799,7 +833,10 @@ mod synonym_file {
         // omitted by the skip-if-empty serde attribute.
         assert!(!json.contains("\"synonyms\":{"));
         let back: TokenFilter = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.filter(vec!["car".into()]), vec!["car", "automobile"]);
+        assert_eq!(
+            back.filter(vec!["car".into()]).unwrap(),
+            vec!["car", "automobile"]
+        );
     }
 
     #[test]
@@ -828,8 +865,11 @@ mod synonym_file {
         let dir = TempDir::new().unwrap();
         let path = write_synonyms(&dir, "lonely\ncar, automobile\n");
         let f = TokenFilter::synonym_from_path(&path).unwrap();
-        assert_eq!(f.filter(vec!["lonely".into()]), vec!["lonely"]);
-        assert_eq!(f.filter(vec!["car".into()]), vec!["car", "automobile"]);
+        assert_eq!(f.filter(vec!["lonely".into()]).unwrap(), vec!["lonely"]);
+        assert_eq!(
+            f.filter(vec!["car".into()]).unwrap(),
+            vec!["car", "automobile"]
+        );
     }
 
     #[test]
@@ -850,9 +890,24 @@ mod synonym_file {
             vec![TokenFilter::Lowercase, synonym],
             Vec::new(),
         );
-        let result = pipe.analyze("Fast running");
+        let result = pipe.analyze("Fast running").unwrap();
         assert!(result.contains(&"fast".to_string()));
         assert!(result.contains(&"quick".to_string()));
+    }
+
+    #[test]
+    fn deleting_synonym_file_is_an_execution_error() {
+        let dir = TempDir::new().unwrap();
+        let path = write_synonyms(&dir, "fast, quick\n");
+        let filter = TokenFilter::synonym_from_path(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        let error = filter.filter(vec!["fast".into()]).unwrap_err();
+        assert!(matches!(
+            error,
+            AnalysisError::SynonymFile(SynonymFileError::NotFound(missing))
+                if missing == path
+        ));
     }
 }
 
@@ -861,55 +916,92 @@ mod synonym_file {
 // =====================================================================
 
 #[test]
-fn ngram_filter_min_zero_is_caught_by_debug_assert() {
-    // `min_gram = 0` triggers a debug_assert in the filter path.
-    // Build a Release-friendly probe by using min_gram=1 and confirming
-    // the filter still produces output: the panic surface is a
-    // separate concern owned by debug builds.
+fn deserialized_zero_ngram_filter_is_an_execution_error() {
+    let f: TokenFilter =
+        serde_json::from_str(r#"{"type":"ngram","min_gram":0,"max_gram":1,"keep_short":false}"#)
+            .unwrap();
+    assert!(matches!(
+        f.filter(vec!["a".into()]),
+        Err(AnalysisError::InvalidGramBounds { .. })
+    ));
+}
+
+#[test]
+fn ngram_filter_max_smaller_than_min_is_an_error() {
     let f = TokenFilter::Ngram {
-        min_gram: 1,
-        max_gram: 1,
+        min_gram: 3,
+        max_gram: 2,
         keep_short: false,
     };
-    assert_eq!(f.filter(vec!["a".into()]), vec!["a".to_string()]);
+    assert!(matches!(
+        f.filter(vec!["abc".into()]),
+        Err(AnalysisError::InvalidGramBounds { .. })
+    ));
 }
 
 #[test]
-fn ngram_filter_max_smaller_than_min_panics() {
-    // Mirror the canonical UQA implementation's ValueError contract via Rust panic catch.
-    let result = std::panic::catch_unwind(|| {
-        let f = TokenFilter::Ngram {
-            min_gram: 3,
-            max_gram: 2,
-            keep_short: false,
-        };
-        f.filter(vec!["abc".into()])
-    });
-    assert!(result.is_err());
+fn ngram_tokenizer_max_smaller_than_min_is_an_error() {
+    let t = Tokenizer::NGram {
+        min_gram: 3,
+        max_gram: 2,
+    };
+    assert!(matches!(
+        t.tokenize("abc"),
+        Err(AnalysisError::InvalidGramBounds { .. })
+    ));
 }
 
 #[test]
-fn ngram_tokenizer_max_smaller_than_min_panics() {
-    let result = std::panic::catch_unwind(|| {
-        let t = Tokenizer::NGram {
-            min_gram: 3,
-            max_gram: 2,
-        };
-        t.tokenize("abc")
-    });
-    assert!(result.is_err());
+fn ngram_tokenizer_min_zero_is_an_error() {
+    let t = Tokenizer::NGram {
+        min_gram: 0,
+        max_gram: 2,
+    };
+    assert!(matches!(
+        t.tokenize("abc"),
+        Err(AnalysisError::InvalidGramBounds { .. })
+    ));
 }
 
 #[test]
-fn ngram_tokenizer_min_zero_panics() {
-    let result = std::panic::catch_unwind(|| {
-        let t = Tokenizer::NGram {
-            min_gram: 0,
-            max_gram: 2,
-        };
-        t.tokenize("abc")
-    });
-    assert!(result.is_err());
+fn deserialized_invalid_pattern_tokenizer_is_an_execution_error() {
+    let t: Tokenizer = serde_json::from_str(r#"{"type":"pattern","pattern":"["}"#).unwrap();
+    assert!(matches!(
+        t.tokenize("abc"),
+        Err(AnalysisError::InvalidRegex {
+            component: "pattern tokenizer",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn invalid_pattern_character_filter_is_an_execution_error() {
+    let f = CharFilter::PatternReplace {
+        pattern: "[".into(),
+        replacement: "x".into(),
+    };
+    assert!(matches!(
+        f.filter("abc"),
+        Err(AnalysisError::InvalidRegex {
+            component: "pattern-replace character filter",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn edge_ngram_invalid_bounds_are_errors() {
+    for (min_gram, max_gram) in [(0, 2), (3, 2)] {
+        let f = TokenFilter::EdgeNgram { min_gram, max_gram };
+        assert!(matches!(
+            f.filter(vec!["abc".into()]),
+            Err(AnalysisError::InvalidGramBounds {
+                component: "edge n-gram token filter",
+                ..
+            })
+        ));
+    }
 }
 
 #[test]

@@ -8,8 +8,8 @@
 
 use uqa_core::{Edge, Value, Vertex, VertexId};
 use uqa_graph::{
-    AggFn, EdgePattern, GMatch, GraphPattern, GraphStore, MemoryGraphStore, Traverse,
-    VertexAggregation, VertexMatch, VertexPattern, VertexPredicate,
+    AggFn, EdgePattern, GMatch, GraphPattern, GraphStore, GraphStoreError, MemoryGraphStore,
+    Traverse, VertexAggregation, VertexMatch, VertexPattern, VertexPredicate,
 };
 
 fn corpus() -> MemoryGraphStore {
@@ -34,21 +34,25 @@ fn corpus() -> MemoryGraphStore {
         v
     };
     let acme = Vertex::new(4, "company");
-    g.add_vertex(alice, "g");
-    g.add_vertex(bob, "g");
-    g.add_vertex(carol, "g");
-    g.add_vertex(acme, "g");
-    g.add_edge(Edge::new(10, 1, 2, "knows"), "g");
-    g.add_edge(Edge::new(11, 2, 3, "knows"), "g");
-    g.add_edge(Edge::new(12, 1, 4, "works_at"), "g");
-    g.add_edge(Edge::new(13, 2, 4, "works_at"), "g");
+    g.add_vertex(alice, "g").unwrap();
+    g.add_vertex(bob, "g").unwrap();
+    g.add_vertex(carol, "g").unwrap();
+    g.add_vertex(acme, "g").unwrap();
+    g.add_edge(Edge::new(10, 1, 2, "knows"), "g").unwrap();
+    g.add_edge(Edge::new(11, 2, 3, "knows"), "g").unwrap();
+    g.add_edge(Edge::new(12, 1, 4, "works_at"), "g").unwrap();
+    g.add_edge(Edge::new(13, 2, 4, "works_at"), "g").unwrap();
     g
 }
 
 #[test]
 fn traverse_one_hop_returns_only_direct_neighbors() {
     let g = corpus();
-    let result = Traverse::new(1, "g").label("knows").max_hops(1).execute(&g);
+    let result = Traverse::new(1, "g")
+        .label("knows")
+        .max_hops(1)
+        .execute(&g)
+        .unwrap();
     let ids: Vec<VertexId> = result.inner().doc_ids().collect();
     // includes start vertex 1 plus 1-hop neighbor 2.
     assert_eq!(ids, vec![1, 2]);
@@ -57,10 +61,23 @@ fn traverse_one_hop_returns_only_direct_neighbors() {
 #[test]
 fn traverse_two_hops_extends_frontier() {
     let g = corpus();
-    let result = Traverse::new(1, "g").label("knows").max_hops(2).execute(&g);
+    let result = Traverse::new(1, "g")
+        .label("knows")
+        .max_hops(2)
+        .execute(&g)
+        .unwrap();
     let mut ids: Vec<VertexId> = result.inner().doc_ids().collect();
     ids.sort_unstable();
     assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[test]
+fn zero_hop_traverse_rejects_a_missing_start_vertex() {
+    let g = corpus();
+    assert!(matches!(
+        Traverse::new(999, "g").max_hops(0).execute(&g),
+        Err(GraphStoreError::InvalidQuery(message)) if message.contains("999")
+    ));
 }
 
 #[test]
@@ -73,7 +90,8 @@ fn traverse_predicate_filters_neighbors() {
             key: "salary".into(),
             value: Value::Int(120_000),
         })
-        .execute(&g);
+        .execute(&g)
+        .unwrap();
     let mut ids: Vec<VertexId> = result.inner().doc_ids().collect();
     ids.sort_unstable();
     // Start (1) + carol (3) — bob (80k) is filtered out, so carol can't be
@@ -91,7 +109,8 @@ fn vertex_match_filters_by_label_and_property() {
             key: "salary".into(),
             value: Value::Int(120_000),
         })
-        .execute(&g);
+        .execute(&g)
+        .unwrap();
     let ids: Vec<VertexId> = result.inner().doc_ids().collect();
     assert_eq!(ids, vec![3]);
 }
@@ -103,7 +122,7 @@ fn gmatch_simple_two_vertex_pattern() {
         .add_vertex(VertexPattern::new("a").with(VertexPredicate::LabelEq("person".into())))
         .add_vertex(VertexPattern::new("b").with(VertexPredicate::LabelEq("person".into())))
         .add_edge(EdgePattern::new("a", "b").with_label("knows"));
-    let result = GMatch::new(pattern, "g").execute(&g);
+    let result = GMatch::new(pattern, "g").execute(&g).unwrap();
     // 1->2 and 2->3 each yield a single subgraph match.
     assert_eq!(result.inner().len(), 2);
     let assignments: Vec<(i64, i64)> = result
@@ -128,7 +147,7 @@ fn gmatch_negated_edge_excludes_existing_pairs() {
         .add_vertex(VertexPattern::new("a").with(VertexPredicate::LabelEq("person".into())))
         .add_vertex(VertexPattern::new("b").with(VertexPredicate::LabelEq("person".into())))
         .add_edge(EdgePattern::new("a", "b").with_label("knows").negated());
-    let result = GMatch::new(pattern, "g").execute(&g);
+    let result = GMatch::new(pattern, "g").execute(&g).unwrap();
     // (1->2) and (2->3) have a knows edge, so they are excluded. All other
     // ordered pairs of distinct people remain.
     let pairs: Vec<(i64, i64)> = result
@@ -151,9 +170,15 @@ fn gmatch_negated_edge_excludes_existing_pairs() {
 #[test]
 fn vertex_aggregation_sum_over_traversal() {
     let g = corpus();
-    let traversed = Traverse::new(1, "g").label("knows").max_hops(2).execute(&g);
+    let traversed = Traverse::new(1, "g")
+        .label("knows")
+        .max_hops(2)
+        .execute(&g)
+        .unwrap();
     // visited vertices: {1, 2, 3} — salaries 100k, 80k, 120k -> sum 300k.
-    let agg = VertexAggregation::new(traversed, "salary", AggFn::Sum, "g").execute(&g);
+    let agg = VertexAggregation::new(traversed, "salary", AggFn::Sum, "g")
+        .execute(&g)
+        .unwrap();
     let entry = &agg.inner().entries()[0];
     let result = match entry.payload.fields.get("_vertex_agg_result") {
         Some(Value::Float(v)) => *v,

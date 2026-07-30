@@ -48,12 +48,21 @@ fn update_from_applies_per_join_match() {
         )
         .unwrap();
     assert_eq!(r.affected_rows, 2);
-    let row1 = eng.get_document("accounts", 1).unwrap();
+    let row1 = eng
+        .get_document("accounts", 1)
+        .unwrap()
+        .expect("updated row 1");
     assert_eq!(row1.get("balance"), Some(&Value::Int(105)));
-    let row2 = eng.get_document("accounts", 2).unwrap();
+    let row2 = eng
+        .get_document("accounts", 2)
+        .unwrap()
+        .expect("updated row 2");
     assert_eq!(row2.get("balance"), Some(&Value::Int(210)));
     // owner_id 30 has no matching bonus -> balance stays at 50.
-    let row3 = eng.get_document("accounts", 3).unwrap();
+    let row3 = eng
+        .get_document("accounts", 3)
+        .unwrap()
+        .expect("unmatched row 3");
     assert_eq!(row3.get("balance"), Some(&Value::Int(50)));
 }
 
@@ -68,8 +77,8 @@ fn delete_using_removes_matching_rows() {
         )
         .unwrap();
     assert_eq!(r.affected_rows, 2);
-    assert!(eng.get_document("accounts", 1).is_none());
-    assert!(eng.get_document("accounts", 2).is_none());
+    assert!(eng.get_document("accounts", 1).unwrap().is_none());
+    assert!(eng.get_document("accounts", 2).unwrap().is_none());
     // owner_id 30 has no bonus -> row stays.
-    assert!(eng.get_document("accounts", 3).is_some());
+    assert!(eng.get_document("accounts", 3).unwrap().is_some());
 }

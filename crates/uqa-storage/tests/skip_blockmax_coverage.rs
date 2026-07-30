@@ -49,7 +49,8 @@ fn scorer(total_docs: u64, avg_doc_length: f64) -> BM25Scorer {
 fn test_skip_table_created() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn.clone(), "docs");
-    idx.add_document(1, fields(&[("body", "hello world".into())]));
+    idx.add_document(1, fields(&[("body", "hello world".into())]))
+        .unwrap();
     conn.with(|c| {
         let count: i64 = c.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = '_skip_docs_body'",
@@ -67,10 +68,11 @@ fn test_skip_entries_for_small_posting_list() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn.clone(), "docs");
     for i in 1..=3 {
-        idx.add_document(i, fields(&[("body", "hello".into())]));
+        idx.add_document(i, fields(&[("body", "hello".into())]))
+            .unwrap();
     }
-    idx.flush_skip_pointers();
-    assert_eq!(idx.skip_to("body", "hello", 10), (1, 0));
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "hello", 10).unwrap(), (1, 0));
 }
 
 #[test]
@@ -78,9 +80,10 @@ fn test_skip_entries_for_large_posting_list() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn.clone(), "docs");
     for i in 1..=300 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.flush_skip_pointers();
+    idx.flush_skip_pointers().unwrap();
     conn.with(|c| {
         let mut stmt = c.prepare(
             "SELECT skip_doc_id, skip_offset FROM \"_skip_docs_body\"
@@ -100,15 +103,16 @@ fn test_skip_rebuilt_on_remove() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..200 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.flush_skip_pointers();
-    assert_eq!(idx.skip_to("body", "alpha", 150), (129, 128));
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (129, 128));
     for i in 1..73 {
-        idx.remove_document(i);
+        idx.remove_document(i).unwrap();
     }
-    idx.flush_skip_pointers();
-    assert_eq!(idx.skip_to("body", "alpha", 150), (73, 0));
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (73, 0));
 }
 
 #[test]
@@ -116,9 +120,11 @@ fn test_skip_to_finds_nearest() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=300 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    assert_eq!(idx.skip_to("body", "alpha", 150), (129, 128));
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (129, 128));
 }
 
 #[test]
@@ -126,9 +132,31 @@ fn test_skip_to_exact_match() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=300 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    assert_eq!(idx.skip_to("body", "alpha", 129), (129, 128));
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 129).unwrap(), (129, 128));
+}
+
+#[test]
+fn skip_lookup_never_materializes_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("read-only-skip.db");
+    let conn = file_conn(&db);
+    let observer = conn.new_session();
+    let mut idx = make_index(conn, "docs");
+    for i in 1..=300 {
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
+    }
+
+    let before = observer.data_version().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (0, 0));
+    assert_eq!(observer.data_version().unwrap(), before);
+
+    idx.flush_skip_pointers().unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (129, 128));
 }
 
 #[test]
@@ -136,25 +164,28 @@ fn test_skip_to_before_first() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 100..200 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    assert_eq!(idx.skip_to("body", "alpha", 50), (0, 0));
+    assert_eq!(idx.skip_to("body", "alpha", 50).unwrap(), (0, 0));
 }
 
 #[test]
 fn test_skip_to_nonexistent_field_or_term() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
-    idx.add_document(1, fields(&[("body", "hello".into())]));
-    assert_eq!(idx.skip_to("body", "alpha", 100), (0, 0));
-    assert_eq!(idx.skip_to("body", "nonexistent", 1), (0, 0));
+    idx.add_document(1, fields(&[("body", "hello".into())]))
+        .unwrap();
+    assert_eq!(idx.skip_to("body", "alpha", 100).unwrap(), (0, 0));
+    assert_eq!(idx.skip_to("body", "nonexistent", 1).unwrap(), (0, 0));
 }
 
 #[test]
 fn test_blockmax_table_created() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn.clone(), "docs");
-    idx.add_document(1, fields(&[("body", "hello world".into())]));
+    idx.add_document(1, fields(&[("body", "hello world".into())]))
+        .unwrap();
     conn.with(|c| {
         let count: i64 = c.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = '_blockmax_docs_body'",
@@ -172,10 +203,12 @@ fn test_build_block_max_single_block() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=10 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0));
-    let scores = idx.get_all_block_max_scores("body", "alpha");
+    idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0))
+        .unwrap();
+    let scores = idx.get_all_block_max_scores("body", "alpha").unwrap();
     assert_eq!(scores.len(), 1);
     assert!(scores[0] > 0.0);
 }
@@ -185,10 +218,12 @@ fn test_build_block_max_multiple_blocks() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=300 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.build_block_max_scores("body", "alpha", &scorer(300, 5.0));
-    let scores = idx.get_all_block_max_scores("body", "alpha");
+    idx.build_block_max_scores("body", "alpha", &scorer(300, 5.0))
+        .unwrap();
+    let scores = idx.get_all_block_max_scores("body", "alpha").unwrap();
     assert_eq!(scores.len(), 3);
     assert!(scores.iter().all(|score| *score > 0.0));
 }
@@ -198,21 +233,27 @@ fn test_get_block_max_score_by_index() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=300 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.build_block_max_scores("body", "alpha", &scorer(300, 5.0));
-    assert!(idx.get_block_max_score("body", "alpha", 0) > 0.0);
-    assert!(idx.get_block_max_score("body", "alpha", 1) > 0.0);
-    assert_eq!(idx.get_block_max_score("body", "alpha", 99), 0.0);
+    idx.build_block_max_scores("body", "alpha", &scorer(300, 5.0))
+        .unwrap();
+    assert!(idx.get_block_max_score("body", "alpha", 0).unwrap() > 0.0);
+    assert!(idx.get_block_max_score("body", "alpha", 1).unwrap() > 0.0);
+    assert_eq!(idx.get_block_max_score("body", "alpha", 99).unwrap(), 0.0);
 }
 
 #[test]
 fn test_get_block_max_nonexistent_field() {
     let conn = sqlite_conn();
     let idx = make_index(conn, "docs");
-    assert_eq!(idx.get_block_max_score("nonexistent", "alpha", 0), 0.0);
+    assert_eq!(
+        idx.get_block_max_score("nonexistent", "alpha", 0).unwrap(),
+        0.0
+    );
     assert!(idx
         .get_all_block_max_scores("nonexistent", "alpha")
+        .unwrap()
         .is_empty());
 }
 
@@ -220,20 +261,32 @@ fn test_get_block_max_nonexistent_field() {
 fn test_build_all_block_max_scores() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
-    idx.add_document(1, fields(&[("body", "hello world".into())]));
-    idx.add_document(2, fields(&[("body", "hello there".into())]));
-    idx.add_document(3, fields(&[("body", "goodbye world".into())]));
-    idx.build_all_block_max_scores("body", &scorer(3, 5.0));
-    assert_eq!(idx.get_all_block_max_scores("body", "hello").len(), 1);
-    assert_eq!(idx.get_all_block_max_scores("body", "world").len(), 1);
+    idx.add_document(1, fields(&[("body", "hello world".into())]))
+        .unwrap();
+    idx.add_document(2, fields(&[("body", "hello there".into())]))
+        .unwrap();
+    idx.add_document(3, fields(&[("body", "goodbye world".into())]))
+        .unwrap();
+    idx.build_all_block_max_scores("body", &scorer(3, 5.0))
+        .unwrap();
+    assert_eq!(
+        idx.get_all_block_max_scores("body", "hello").unwrap().len(),
+        1
+    );
+    assert_eq!(
+        idx.get_all_block_max_scores("body", "world").unwrap().len(),
+        1
+    );
 }
 
 #[test]
 fn test_build_block_max_for_nonexistent_field() {
     let conn = sqlite_conn();
     let idx = make_index(conn, "docs");
-    idx.build_block_max_scores("nonexistent", "alpha", &scorer(10, 5.0));
-    idx.build_all_block_max_scores("nonexistent", &scorer(10, 5.0));
+    idx.build_block_max_scores("nonexistent", "alpha", &scorer(10, 5.0))
+        .unwrap();
+    idx.build_all_block_max_scores("nonexistent", &scorer(10, 5.0))
+        .unwrap();
 }
 
 #[test]
@@ -244,13 +297,14 @@ fn test_skip_pointers_survive_reconnection() {
         let conn = file_conn(&db);
         let mut idx = make_index(conn, "docs");
         for i in 1..200 {
-            idx.add_document(i, fields(&[("body", "alpha".into())]));
+            idx.add_document(i, fields(&[("body", "alpha".into())]))
+                .unwrap();
         }
-        idx.flush_skip_pointers();
+        idx.flush_skip_pointers().unwrap();
     }
     let conn = file_conn(&db);
     let idx = make_index(conn, "docs");
-    assert_eq!(idx.skip_to("body", "alpha", 150), (129, 128));
+    assert_eq!(idx.skip_to("body", "alpha", 150).unwrap(), (129, 128));
 }
 
 #[test]
@@ -261,13 +315,15 @@ fn test_block_max_scores_survive_reconnection() {
         let conn = file_conn(&db);
         let mut idx = make_index(conn, "docs");
         for i in 1..=10 {
-            idx.add_document(i, fields(&[("body", "alpha".into())]));
+            idx.add_document(i, fields(&[("body", "alpha".into())]))
+                .unwrap();
         }
-        idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0));
+        idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0))
+            .unwrap();
     }
     let conn = file_conn(&db);
     let idx = make_index(conn, "docs");
-    let scores = idx.get_all_block_max_scores("body", "alpha");
+    let scores = idx.get_all_block_max_scores("body", "alpha").unwrap();
     assert_eq!(scores.len(), 1);
     assert!(scores[0] > 0.0);
 }
@@ -277,11 +333,13 @@ fn test_load_block_max_into_memory_index() {
     let conn = sqlite_conn();
     let mut idx = make_index(conn, "docs");
     for i in 1..=10 {
-        idx.add_document(i, fields(&[("body", "alpha".into())]));
+        idx.add_document(i, fields(&[("body", "alpha".into())]))
+            .unwrap();
     }
-    idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0));
+    idx.build_block_max_scores("body", "alpha", &scorer(10, 5.0))
+        .unwrap();
     let mut blockmax = BlockMaxIndex::default();
-    idx.load_block_max_into(&mut blockmax);
+    idx.load_block_max_into(&mut blockmax).unwrap();
     assert_eq!(blockmax.num_blocks("docs", "body", "alpha"), 1);
     assert!(blockmax.block_max("docs", "body", "alpha", 0) > 0.0);
 }
@@ -290,8 +348,12 @@ fn test_load_block_max_into_memory_index() {
 fn test_block_max_save_and_load() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     let mut blockmax = BlockMaxIndex::default();
-    blockmax.set_block_maxes("articles", "body", "hello", vec![1.5, 2.3, 0.9]);
-    blockmax.set_block_maxes("articles", "title", "world", vec![3.0]);
+    blockmax
+        .set_block_maxes("articles", "body", "hello", vec![1.5, 2.3, 0.9])
+        .unwrap();
+    blockmax
+        .set_block_maxes("articles", "title", "world", vec![3.0])
+        .unwrap();
     blockmax.save_to_sqlite(&conn).unwrap();
 
     let mut loaded = BlockMaxIndex::default();
@@ -308,8 +370,12 @@ fn test_block_max_save_and_load() {
 fn test_block_max_save_and_load_multi_table_isolation() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     let mut blockmax = BlockMaxIndex::default();
-    blockmax.set_block_maxes("articles", "body", "hello", vec![1.5]);
-    blockmax.set_block_maxes("comments", "body", "hello", vec![9.9]);
+    blockmax
+        .set_block_maxes("articles", "body", "hello", vec![1.5])
+        .unwrap();
+    blockmax
+        .set_block_maxes("comments", "body", "hello", vec![9.9])
+        .unwrap();
     blockmax.save_to_sqlite(&conn).unwrap();
     let mut loaded = BlockMaxIndex::default();
     loaded.load_from_sqlite(&conn).unwrap();
@@ -321,10 +387,14 @@ fn test_block_max_save_and_load_multi_table_isolation() {
 fn test_block_max_save_overwrites_previous() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     let mut first = BlockMaxIndex::default();
-    first.set_block_maxes("", "body", "hello", vec![1.0]);
+    first
+        .set_block_maxes("", "body", "hello", vec![1.0])
+        .unwrap();
     first.save_to_sqlite(&conn).unwrap();
     let mut second = BlockMaxIndex::default();
-    second.set_block_maxes("", "body", "hello", vec![9.9]);
+    second
+        .set_block_maxes("", "body", "hello", vec![9.9])
+        .unwrap();
     second.save_to_sqlite(&conn).unwrap();
     let mut loaded = BlockMaxIndex::default();
     loaded.load_from_sqlite(&conn).unwrap();
@@ -374,12 +444,14 @@ fn test_default_block_size() {
 #[test]
 fn block_max_empty_posting_list_records_no_scores() {
     let mut blockmax = BlockMaxIndex::default();
-    blockmax.build(
-        &PostingList::new(),
-        &scorer(10, 5.0),
-        "body",
-        "missing",
-        "docs",
-    );
+    blockmax
+        .build(
+            &PostingList::new(),
+            &scorer(10, 5.0),
+            "body",
+            "missing",
+            "docs",
+        )
+        .unwrap();
     assert_eq!(blockmax.num_blocks("docs", "body", "missing"), 0);
 }

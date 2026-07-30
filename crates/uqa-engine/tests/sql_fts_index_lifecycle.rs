@@ -15,7 +15,7 @@ use rusqlite::params;
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::{document_store::Document, ManagedConnection};
+use uqa_storage::{document_store::Document, ManagedConnection, RelationIdentity};
 
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result
@@ -33,6 +33,12 @@ fn int_col(row: &uqa_sql::ResultRow, name: &str) -> i64 {
         Some(Value::Int(value)) => *value,
         other => panic!("expected integer column {name}, got {other:?}"),
     }
+}
+
+fn physical_relation_name(table: &str) -> String {
+    RelationIdentity::from_legacy_name(table)
+        .unwrap()
+        .qualified_name()
 }
 
 fn create_notes_gin_fixture(db: &Path) {
@@ -143,6 +149,7 @@ fn assert_legacy_gin_reopens_with_restored_index(db: &Path) {
 
 fn overwrite_document_body(db: &Path, table: &str, doc_id: i64, document: &Document) {
     let body = serde_json::to_string(&document).unwrap();
+    let table = physical_relation_name(table);
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
         c.execute(
@@ -155,6 +162,7 @@ fn overwrite_document_body(db: &Path, table: &str, doc_id: i64, document: &Docum
 }
 
 fn delete_ivf_metadata(db: &Path, table: &str, field: &str) {
+    let table = physical_relation_name(table);
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
         c.execute(
@@ -175,6 +183,7 @@ fn delete_ivf_metadata(db: &Path, table: &str, field: &str) {
 }
 
 fn ivf_metadata_count(db: &Path, table: &str, field: &str) -> i64 {
+    let table = physical_relation_name(table);
     let conn = ManagedConnection::open(db).unwrap();
     conn.with(|c| {
         let n = c.query_row(
@@ -576,7 +585,9 @@ fn drop_index_removes_ivf_backend_metadata_and_reopen_stays_bruteforce() {
         eng.sql("DROP INDEX docs_embedding_ivf", &[]).unwrap();
         assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
 
-        let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 1);
+        let hits = eng
+            .knn_search("docs", "embedding", vec![1.0, 0.0], 1)
+            .unwrap();
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
 
         eng.sql(
@@ -592,7 +603,9 @@ fn drop_index_removes_ivf_backend_metadata_and_reopen_stays_bruteforce() {
     assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
     let reopened = Engine::open(&db).unwrap();
     assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
-    let hits = reopened.knn_search("docs", "embedding", vec![1.0, 0.0], 1);
+    let hits = reopened
+        .knn_search("docs", "embedding", vec![1.0, 0.0], 1)
+        .unwrap();
     assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
 }
 

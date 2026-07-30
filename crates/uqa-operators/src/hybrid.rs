@@ -16,8 +16,11 @@ use uqa_fusion::{
     AdaptiveLogOddsFusion as AdaptiveLogOddsFuser, LogOddsFusion, LogitGating,
     ProbabilisticBoolean, SignalQuality,
 };
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{
+    missing_backend, require_probability, ExecutionContext, Operator, OperatorResult,
+};
 use crate::primitive::TermOperator;
 use crate::vector::VectorSimilarityOperator;
 
@@ -35,6 +38,16 @@ pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 
     }
     let r = n_hits as f64 / n_total as f64;
     f64::midpoint(1.0 - r, 0.0) + floor * r
+}
+
+fn validate_probability_postings(
+    postings: &PostingList,
+    operation: &str,
+) -> StorageBackendResult<()> {
+    for entry in postings.entries() {
+        require_probability(entry.payload.score, operation)?;
+    }
+    Ok(())
 }
 
 /// Share of the adaptive weight mass distributed by gated-evidence
@@ -109,10 +122,11 @@ impl HybridTextVectorOperator {
 }
 
 impl Operator for HybridTextVectorOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        self.term_op
-            .execute(ctx)
-            .intersect_owned(&self.vector_op.execute(ctx))
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        Ok(self
+            .term_op
+            .execute(ctx)?
+            .intersect_owned(&self.vector_op.execute(ctx)?))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -135,10 +149,11 @@ impl SemanticFilterOperator {
 }
 
 impl Operator for SemanticFilterOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        self.source
-            .execute(ctx)
-            .intersect_owned(&self.vector_op.execute(ctx))
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        Ok(self
+            .source
+            .execute(ctx)?
+            .intersect_owned(&self.vector_op.execute(ctx)?))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -176,7 +191,6 @@ pub struct LogOddsFusionOperator {
 
 impl LogOddsFusionOperator {
     pub fn new(signals: Vec<Arc<dyn Operator>>, alpha: f64) -> Self {
-        LogOddsFusion::new(alpha);
         Self {
             signals,
             alpha,
@@ -202,33 +216,16 @@ impl LogOddsFusionOperator {
 
     /// Fusion-level relevance prior, applied exactly once.
     pub fn with_base_rate(mut self, base_rate: f64) -> Self {
-        LogOddsFusion::new(self.alpha).with_base_rate(base_rate);
         self.base_rate = Some(base_rate);
         self
     }
 
     pub fn with_weights(mut self, weights: Vec<f64>) -> Self {
-        LogOddsFusion::new(self.alpha)
-            .validate_configuration(
-                self.signals.len(),
-                Some(&weights),
-                self.logit_min.as_deref(),
-                self.logit_max.as_deref(),
-            )
-            .expect("log-odds fusion weights must be valid");
         self.weights = Some(weights);
         self
     }
 
     pub fn with_logit_normalization(mut self, logit_min: Vec<f64>, logit_max: Vec<f64>) -> Self {
-        LogOddsFusion::new(self.alpha)
-            .validate_configuration(
-                self.signals.len(),
-                self.weights.as_deref(),
-                Some(&logit_min),
-                Some(&logit_max),
-            )
-            .expect("log-odds fusion bounds must be valid");
         self.logit_min = Some(logit_min);
         self.logit_max = Some(logit_max);
         self
@@ -241,11 +238,32 @@ impl LogOddsFusionOperator {
 }
 
 impl Operator for LogOddsFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let mut fuser = LogOddsFusion::new(self.alpha);
-        fuser.gating = self.gating;
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if self.signals.is_empty() {
+            return Err(StorageBackendError::Other(
+                "log-odds fusion requires at least one signal".to_string(),
+            ));
+        }
+        if !self.alpha.is_finite() || !(0.0..=1.0).contains(&self.alpha) {
+            return Err(StorageBackendError::Other(format!(
+                "log-odds fusion alpha must be finite and in [0, 1], got {}",
+                self.alpha
+            )));
+        }
         if let Some(base_rate) = self.base_rate {
-            fuser = fuser.with_base_rate(base_rate);
+            if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
+                return Err(StorageBackendError::Other(format!(
+                    "log-odds fusion base_rate must be finite and in (0, 1), got {base_rate}"
+                )));
+            }
+        }
+        let mut fuser = LogOddsFusion::new(self.alpha)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            .with_logit_gating(self.gating);
+        if let Some(base_rate) = self.base_rate {
+            fuser = fuser
+                .with_base_rate(base_rate)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
         fuser
             .validate_configuration(
@@ -254,9 +272,15 @@ impl Operator for LogOddsFusionOperator {
                 self.logit_min.as_deref(),
                 self.logit_max.as_deref(),
             )
-            .expect("log-odds fusion configuration must be valid");
-        let posting_lists: Vec<PostingList> =
-            self.signals.iter().map(|sig| sig.execute(ctx)).collect();
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let posting_lists: Vec<PostingList> = self
+            .signals
+            .iter()
+            .map(|sig| sig.execute(ctx))
+            .collect::<StorageBackendResult<_>>()?;
+        for posting_list in &posting_lists {
+            validate_probability_postings(posting_list, "log-odds fusion")?;
+        }
 
         // Build per-signal score maps and the universal doc id set.
         let mut all_doc_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
@@ -273,7 +297,7 @@ impl Operator for LogOddsFusionOperator {
             .collect();
 
         if all_doc_ids.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
 
         // A signal with no matches still contributes neutral evidence to
@@ -301,14 +325,14 @@ impl Operator for LogOddsFusionOperator {
                     self.logit_min.as_deref(),
                     self.logit_max.as_deref(),
                 )
-                .expect("log-odds fusion configuration must be valid");
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused_score)));
         }
         let result = PostingList::from_sorted_unchecked(entries);
-        match self.top_k {
+        Ok(match self.top_k {
             Some(k) => result.top_k(k),
             None => result,
-        }
+        })
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -339,9 +363,20 @@ impl ProbBoolFusionOperator {
 }
 
 impl Operator for ProbBoolFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let posting_lists: Vec<PostingList> =
-            self.signals.iter().map(|sig| sig.execute(ctx)).collect();
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if self.signals.is_empty() {
+            return Err(StorageBackendError::Other(
+                "probabilistic boolean fusion requires at least one signal".to_string(),
+            ));
+        }
+        let posting_lists: Vec<PostingList> = self
+            .signals
+            .iter()
+            .map(|sig| sig.execute(ctx))
+            .collect::<StorageBackendResult<_>>()?;
+        for posting_list in &posting_lists {
+            validate_probability_postings(posting_list, "probabilistic boolean fusion")?;
+        }
         let mut all_doc_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
         let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
             .iter()
@@ -355,7 +390,7 @@ impl Operator for ProbBoolFusionOperator {
             })
             .collect();
         if all_doc_ids.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
         let num_docs = all_doc_ids.len();
         let defaults: Vec<f64> = score_maps
@@ -375,7 +410,7 @@ impl Operator for ProbBoolFusionOperator {
             };
             entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused)));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -402,8 +437,10 @@ impl ProbNotOperator {
 }
 
 impl Operator for ProbNotOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let pl = self.signal.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        require_probability(self.default_prob, "probabilistic NOT default")?;
+        let pl = self.signal.execute(ctx)?;
+        validate_probability_postings(&pl, "probabilistic NOT")?;
         let mut score_map: BTreeMap<DocId, f64> = BTreeMap::new();
         let mut all_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
         for entry in &pl {
@@ -411,7 +448,7 @@ impl Operator for ProbNotOperator {
             all_ids.insert(entry.doc_id);
         }
         if let Some(store) = ctx.document_store.as_ref() {
-            for id in store.doc_ids() {
+            for id in store.doc_ids()? {
                 all_ids.insert(id);
             }
         }
@@ -420,7 +457,7 @@ impl Operator for ProbNotOperator {
             let p = score_map.get(doc_id).copied().unwrap_or(self.default_prob);
             entries.push(PostingEntry::new(*doc_id, Payload::with_score(1.0 - p)));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -453,9 +490,9 @@ impl VectorExclusionOperator {
 }
 
 impl Operator for VectorExclusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let positive_pl = self.positive.execute(ctx);
-        let negative_pl = self.negative_op.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let positive_pl = self.positive.execute(ctx)?;
+        let negative_pl = self.negative_op.execute(ctx)?;
         let negative_ids: std::collections::BTreeSet<DocId> =
             negative_pl.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
@@ -464,7 +501,7 @@ impl Operator for VectorExclusionOperator {
                 entries.push(entry.clone());
             }
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -500,12 +537,12 @@ impl FacetVectorOperator {
 }
 
 impl Operator for FacetVectorOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let vector_pl = self.vector_op.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let vector_pl = self.vector_op.execute(ctx)?;
         let vector_ids: std::collections::BTreeSet<DocId> =
             vector_pl.entries().iter().map(|e| e.doc_id).collect();
         let candidate_ids: Vec<DocId> = if let Some(src) = &self.source {
-            src.execute(ctx)
+            src.execute(ctx)?
                 .entries()
                 .iter()
                 .filter(|e| vector_ids.contains(&e.doc_id))
@@ -517,28 +554,52 @@ impl Operator for FacetVectorOperator {
             v
         };
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "vector facet"));
         };
         let mut value_counts: BTreeMap<String, u64> = BTreeMap::new();
         for doc_id in candidate_ids {
-            if let Some(value) = doc_store.get_field(doc_id, &self.facet_field) {
+            if doc_store.get(doc_id)?.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "vector facet candidate {doc_id} is missing from the document store"
+                )));
+            }
+            if let Some(value) = doc_store.get_field(doc_id, &self.facet_field)? {
                 if !matches!(value, Value::Null) {
                     let key = value_to_facet_string(&value);
-                    *value_counts.entry(key).or_insert(0) += 1;
+                    let count = value_counts.entry(key).or_insert(0);
+                    *count = count.checked_add(1).ok_or_else(|| {
+                        StorageBackendError::Other("vector facet count overflowed u64".to_string())
+                    })?;
                 }
             }
         }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(value_counts.len());
         for (i, (value, count)) in value_counts.into_iter().enumerate() {
+            if count > 9_007_199_254_740_992 {
+                return Err(StorageBackendError::Other(format!(
+                    "vector facet count {count} cannot be represented exactly as an f64 score"
+                )));
+            }
             let mut fields = BTreeMap::new();
             fields.insert(
                 "_facet_field".to_string(),
                 Value::Str(self.facet_field.clone()),
             );
             fields.insert("_facet_value".to_string(), Value::Str(value));
-            fields.insert("_facet_count".to_string(), Value::Int(count as i64));
+            fields.insert(
+                "_facet_count".to_string(),
+                Value::Int(i64::try_from(count).map_err(|_| {
+                    StorageBackendError::Other(format!(
+                        "vector facet count {count} exceeds the Value::Int range"
+                    ))
+                })?),
+            );
             entries.push(PostingEntry::new(
-                i as DocId,
+                DocId::try_from(i).map_err(|_| {
+                    StorageBackendError::Other(format!(
+                        "vector facet bucket index {i} exceeds the document-id range"
+                    ))
+                })?,
                 Payload {
                     positions: Vec::new(),
                     score: count as f64,
@@ -546,7 +607,7 @@ impl Operator for FacetVectorOperator {
                 },
             ));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -589,9 +650,26 @@ impl AdaptiveLogOddsFusionOperator {
 }
 
 impl Operator for AdaptiveLogOddsFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let posting_lists: Vec<PostingList> =
-            self.signals.iter().map(|sig| sig.execute(ctx)).collect();
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if self.signals.is_empty() {
+            return Err(StorageBackendError::Other(
+                "adaptive log-odds fusion requires at least one signal".to_string(),
+            ));
+        }
+        if !self.base_alpha.is_finite() || !(0.0..=1.0).contains(&self.base_alpha) {
+            return Err(StorageBackendError::Other(format!(
+                "adaptive log-odds fusion alpha must be finite and in [0, 1], got {}",
+                self.base_alpha
+            )));
+        }
+        let posting_lists: Vec<PostingList> = self
+            .signals
+            .iter()
+            .map(|sig| sig.execute(ctx))
+            .collect::<StorageBackendResult<_>>()?;
+        for posting_list in &posting_lists {
+            validate_probability_postings(posting_list, "adaptive log-odds fusion")?;
+        }
         let mut all_doc_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
         let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
             .iter()
@@ -605,7 +683,7 @@ impl Operator for AdaptiveLogOddsFusionOperator {
             })
             .collect();
         if all_doc_ids.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
         let num_docs = all_doc_ids.len();
         let qualities: Vec<SignalQuality> = score_maps
@@ -641,8 +719,9 @@ impl Operator for AdaptiveLogOddsFusionOperator {
             .collect();
         let mut fusion = AdaptiveLogOddsFuser::new(self.base_alpha);
         if let Some(name) = &self.gating {
-            let gating = LogitGating::parse(name)
-                .unwrap_or_else(|| panic!("unknown logit gating function: {name}"));
+            let gating = LogitGating::parse(name).ok_or_else(|| {
+                StorageBackendError::Other(format!("unknown logit gating function: {name}"))
+            })?;
             fusion = fusion.with_gating(gating);
         }
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(num_docs);
@@ -652,10 +731,12 @@ impl Operator for AdaptiveLogOddsFusionOperator {
                 .zip(&defaults)
                 .map(|(m, def)| m.get(doc_id).copied().unwrap_or(*def))
                 .collect();
-            let fused = fusion.fuse(&probs, &qualities).unwrap_or(0.5);
+            let fused = fusion
+                .fuse(&probs, &qualities)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             entries.push(PostingEntry::new(*doc_id, Payload::with_score(fused)));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -688,8 +769,8 @@ impl IndexScanOperator {
 }
 
 impl Operator for IndexScanOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        self.index.scan(&self.predicate)
+    fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+        Ok(self.index.scan(&self.predicate))
     }
 
     fn cost_estimate(&self, _stats: &IndexStats) -> f64 {
@@ -704,13 +785,13 @@ mod tests {
     struct LiteralOperator(Vec<(DocId, f64)>);
 
     impl Operator for LiteralOperator {
-        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-            PostingList::from_sorted_unchecked(
+        fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+            Ok(PostingList::from_sorted_unchecked(
                 self.0
                     .iter()
                     .map(|(doc_id, score)| PostingEntry::new(*doc_id, Payload::with_score(*score)))
                     .collect(),
-            )
+            ))
         }
 
         fn cost_estimate(&self, _stats: &IndexStats) -> f64 {
@@ -720,7 +801,7 @@ mod tests {
 
     #[test]
     fn adaptive_weights_favor_the_discriminating_signal() {
-        let fuser = LogOddsFusion::new(0.5);
+        let fuser = LogOddsFusion::new(0.5).expect("test alpha is valid");
         let flat: BTreeMap<DocId, f64> = [(1, 0.7), (2, 0.7), (3, 0.7)].into_iter().collect();
         let spread: BTreeMap<DocId, f64> = [(1, 0.9), (2, 0.5), (3, 0.1)].into_iter().collect();
         let weights = adaptive_signal_weights(&fuser, &[flat.clone(), spread])
@@ -743,9 +824,11 @@ mod tests {
             Arc::new(LiteralOperator(vec![(1, 0.3)])),
         ];
         let softplus = AdaptiveLogOddsFusionOperator::new(signals.clone(), 0.5, None)
-            .execute(&ExecutionContext::new());
+            .execute(&ExecutionContext::new())
+            .unwrap();
         let pass = AdaptiveLogOddsFusionOperator::new(signals, 0.5, Some("pass".into()))
-            .execute(&ExecutionContext::new());
+            .execute(&ExecutionContext::new())
+            .unwrap();
         let softplus_score = softplus.entries()[0].payload.score;
         let pass_score = pass.entries()[0].payload.score;
         assert!(
@@ -756,6 +839,36 @@ mod tests {
             pass_score < 0.5,
             "pass gating lets weak evidence sink, got {pass_score}"
         );
+    }
+
+    fn two_literal_signals() -> Vec<Arc<dyn Operator>> {
+        vec![
+            Arc::new(LiteralOperator(vec![(1, 0.8)])),
+            Arc::new(LiteralOperator(vec![(1, 0.7)])),
+        ]
+    }
+
+    #[test]
+    fn malformed_log_odds_configuration_returns_operator_error() {
+        let context = ExecutionContext::new();
+        let cases = [
+            LogOddsFusionOperator::new(two_literal_signals(), f64::NAN),
+            LogOddsFusionOperator::new(two_literal_signals(), 0.5).with_weights(vec![0.8, 0.8]),
+            LogOddsFusionOperator::new(two_literal_signals(), 0.5)
+                .with_logit_normalization(vec![0.0, 1.0], vec![0.0, 2.0]),
+        ];
+
+        for operator in cases {
+            let error = operator
+                .execute(&context)
+                .expect_err("malformed log-odds configuration must fail");
+            assert!(
+                error.to_string().contains("log-odds")
+                    || error.to_string().contains("weights")
+                    || error.to_string().contains("bounds"),
+                "unexpected error: {error}"
+            );
+        }
     }
 
     #[test]

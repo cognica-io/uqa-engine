@@ -29,7 +29,7 @@ proptest! {
     #[test]
     fn n1_identity(p in safe_prob()) {
         let scaled = LogOddsFusion::default();
-        let mean = LogOddsFusion::new(0.0);
+        let mean = LogOddsFusion::new(0.0).unwrap();
         prop_assert!(
             (scaled.fuse(&[p]) - p).abs() < 1e-12,
             "scaled.fuse([p]) != p"
@@ -54,7 +54,7 @@ proptest! {
     /// 0.5.
     #[test]
     fn pass_gating_sign_preserved_when_all_below_half(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
-        let f = LogOddsFusion::with_gating(0.5, Some("pass"));
+        let f = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
         let fused = f.fuse(&probs);
         prop_assert!(fused < 0.5, "fuse {probs:?} -> {fused} should be < 0.5");
     }
@@ -74,7 +74,7 @@ proptest! {
     /// (it scales toward 0.5 but never crosses it).
     #[test]
     fn irrelevance_preserves_sign(p in safe_prob(), pad in 1usize..8) {
-        let mean = LogOddsFusion::new(0.0);
+        let mean = LogOddsFusion::new(0.0).unwrap();
         let mut padded = vec![p];
         padded.extend(std::iter::repeat_n(0.5, pad));
         let fused = mean.fuse_mean(&padded);
@@ -93,7 +93,7 @@ proptest! {
     /// neutral fused score than a single occurrence.
     #[test]
     fn relevance_preservation(p in safe_prob(), n in 1usize..6) {
-        let mean = LogOddsFusion::new(0.0);
+        let mean = LogOddsFusion::new(0.0).unwrap();
         let single = mean.fuse_mean(&[p]);
         let many: Vec<f64> = std::iter::repeat_n(p, n).collect();
         let fused = mean.fuse_mean(&many);
@@ -111,7 +111,7 @@ proptest! {
     /// zero — i.e. the fused mean is exactly 0.5.
     #[test]
     fn symmetric_disagreement_collapses(p in safe_prob()) {
-        let mean = LogOddsFusion::new(0.0);
+        let mean = LogOddsFusion::new(0.0).unwrap();
         let pair = mean.fuse_mean(&[p, 1.0 - p]);
         prop_assert!(
             (pair - 0.5).abs() < 1e-9,
@@ -131,13 +131,13 @@ proptest! {
 #[test]
 fn empty_input_returns_neutral() {
     assert_eq!(LogOddsFusion::default().fuse(&[]), 0.5);
-    assert_eq!(LogOddsFusion::new(0.0).fuse_mean(&[]), 0.5);
+    assert_eq!(LogOddsFusion::new(0.0).unwrap().fuse_mean(&[]), 0.5);
 }
 
 #[test]
 fn confidence_scaling_amplifies_agreement() {
-    let scaled = LogOddsFusion::new(0.5);
-    let mean = LogOddsFusion::new(0.0);
+    let scaled = LogOddsFusion::new(0.5).unwrap();
+    let mean = LogOddsFusion::new(0.0).unwrap();
     let agreeing = [0.8, 0.8, 0.8];
     let s = scaled.fuse(&agreeing);
     let m = mean.fuse_mean(&agreeing);

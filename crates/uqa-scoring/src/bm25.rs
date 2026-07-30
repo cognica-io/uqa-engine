@@ -16,7 +16,7 @@ use std::sync::Arc;
 use uqa_core::IndexStats;
 use uqa_storage::BlockMaxScorer;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BM25Params {
     pub k1: f64,
     pub b: f64,

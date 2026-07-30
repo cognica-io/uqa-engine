@@ -14,15 +14,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uqa_sql::ast::{CreateFunction, DropFunctionStmt, Expr, FunctionReturns, Statement};
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
-    bind_expr, bind_statement, condition_sqlstate, IntoTarget, PLpgSQLBlock, PLpgSQLDatum,
-    PLpgSQLFunction, PLpgSQLStmt, RaiseLevel, VariableResolver,
+    bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
+    PLpgSQLDatum, PLpgSQLFunction, PLpgSQLStmt, RaiseLevel, VariableResolver,
 };
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
-use crate::engine_user_functions::{CompiledFunctionBody, SQLUserFunction};
+use crate::engine_user_functions::{
+    canonical_routine_type_name, routine_local_name, CompiledFunctionBody, SQLUserFunction,
+};
 use crate::{Engine, SQLTableFunctionResult};
 
 use super::execute_compiled_statement;
+use super::plan_executor::UnifiedPlanExecutor;
 use super::scalar::eval_lowered_expression;
 use std::sync::Arc;
 
@@ -152,9 +155,25 @@ pub(crate) fn call_user_scalar_function(
         Err(e) => return Some(Err(e)),
     };
     let out_params = function.def.output_params();
+    if outcome.out_values.len() != out_params.len() {
+        return Some(Err(SQLError::Internal(format!(
+            "routine `{}` produced {} OUT values for {} OUT parameters",
+            function.def.name,
+            outcome.out_values.len(),
+            out_params.len()
+        ))));
+    }
     let value = match out_params.len() {
         0 => outcome.value,
-        1 => outcome.out_values.into_iter().next().unwrap_or(Value::Null),
+        1 => match outcome.out_values.into_iter().next() {
+            Some(value) => value,
+            None => {
+                return Some(Err(SQLError::Internal(format!(
+                    "routine `{}` lost its validated OUT value",
+                    function.def.name
+                ))));
+            }
+        },
         _ => {
             let mut record = BTreeMap::new();
             for (column, value) in output_column_names(&function.def)
@@ -191,7 +210,10 @@ pub(crate) fn call_user_table_function(
     }
     let out_params = function.def.output_params();
     let columns = if out_params.is_empty() {
-        vec![function.def.name.clone()]
+        match routine_local_name(&function.def.name) {
+            Ok(name) => vec![name],
+            Err(error) => return Some(Err(error)),
+        }
     } else {
         output_column_names(&function.def)
     };
@@ -269,6 +291,42 @@ enum ArgSlot {
     NeedsDefault(usize),
 }
 
+fn argument_type_cost(value: &Value, declared_type: &str) -> Option<u32> {
+    if matches!(value, Value::Null) {
+        // NULL has no concrete input type, so it cannot prefer one overload
+        // over another but remains coercible to every declared type.
+        return Some(1);
+    }
+    let actual = canonical_routine_type_name(value_type_name(value));
+    let declared = canonical_routine_type_name(declared_type);
+    if actual == declared {
+        return Some(0);
+    }
+    let actual_is_numeric = matches!(
+        actual.as_str(),
+        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
+    );
+    let declared_is_numeric = matches!(
+        declared.as_str(),
+        "int2" | "int4" | "int8" | "float4" | "float8" | "numeric"
+    );
+    if actual_is_numeric && declared_is_numeric {
+        return best_effort_cast(value, declared_type).ok().map(|_| 1);
+    }
+    best_effort_cast(value, declared_type).ok().map(|_| 2)
+}
+
+fn overload_match_cost(def: &CreateFunction, slots: &[ArgSlot]) -> Option<u32> {
+    let signature = def.signature_params();
+    let mut cost = 0_u32;
+    for (parameter, slot) in signature.iter().zip(slots) {
+        if let ArgSlot::Filled(value) = slot {
+            cost = cost.checked_add(argument_type_cost(value, &parameter.type_name)?)?;
+        }
+    }
+    Some(cost)
+}
+
 /// Match a call's argument list against a routine signature without
 /// evaluating defaults. `None` = not a candidate.
 fn try_match_arguments(
@@ -330,21 +388,38 @@ fn resolve_routine(
     let Some(overloads) = engine.lookup_sql_functions(name) else {
         return Ok(None);
     };
-    let mut candidates: Vec<(Arc<SQLUserFunction>, Vec<ArgSlot>)> = Vec::new();
+    let requested_is_procedure = kind == "procedure";
+    let mut candidates: Vec<(Arc<SQLUserFunction>, Vec<ArgSlot>, u32)> = Vec::new();
     for function in overloads {
         if let Some(slots) = try_match_arguments(&function.def, args) {
-            candidates.push((function, slots));
+            if let Some(cost) = overload_match_cost(&function.def, &slots) {
+                candidates.push((function, slots, cost));
+            }
         }
     }
-    match candidates.len() {
-        0 => Err(routine_resolution_error(kind, name, args, "does not exist")),
-        1 => {
-            let (function, slots) = candidates.remove(0);
-            let bound = materialize_arguments(engine, &function.def, slots)?;
-            Ok(Some((function, bound)))
-        }
-        _ => Err(routine_resolution_error(kind, name, args, "is not unique")),
+    if candidates.is_empty() {
+        return Err(routine_resolution_error(kind, name, args, "does not exist"));
     }
+    let has_requested_kind = candidates
+        .iter()
+        .any(|(function, _, _)| function.def.is_procedure == requested_is_procedure);
+    if has_requested_kind {
+        candidates.retain(|(function, _, _)| function.def.is_procedure == requested_is_procedure);
+    }
+    let best_cost = candidates
+        .iter()
+        .map(|(_, _, cost)| *cost)
+        .min()
+        .ok_or_else(|| SQLError::Internal("routine candidate set lost its score".into()))?;
+    candidates.retain(|(_, _, cost)| *cost == best_cost);
+    if candidates.len() != 1 {
+        return Err(routine_resolution_error(kind, name, args, "is not unique"));
+    }
+    let (function, slots, _) = candidates
+        .pop()
+        .ok_or_else(|| SQLError::Internal("winning routine candidate disappeared".into()))?;
+    let bound = materialize_arguments(engine, &function.def, slots)?;
+    Ok(Some((function, bound)))
 }
 
 /// Evaluate defaults and apply declared-type casts for the winning
@@ -471,14 +546,13 @@ fn execute_routine(
 fn execute_sql_language(
     engine: &Engine,
     def: &CreateFunction,
-    statements: &[Statement],
+    plans: &[uqa_planner::UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
-    let mut resolver = SQLFunctionResolver { def, bound };
+    let params: Vec<SQLParam> = bound.iter().cloned().map(SQLParam::Scalar).collect();
     let mut last = SQLResult::empty();
-    for statement in statements {
-        let statement = bind_statement(statement, &mut resolver)?;
-        last = execute_compiled_statement(engine, statement, &[])?;
+    for plan in plans {
+        last = UnifiedPlanExecutor::new(engine, &params).execute(plan)?;
     }
     let out_params = def.output_params();
     let returns_void = matches!(
@@ -538,10 +612,7 @@ fn execute_sql_language(
         });
     }
     let value = match first {
-        Some(values) if returns_void => {
-            let _ = values;
-            Value::Null
-        }
+        Some(_) if returns_void => Value::Null,
         Some(mut values) => {
             if values.is_empty() {
                 Value::Null
@@ -573,45 +644,6 @@ fn sql_body_shape_error(def: &CreateFunction) -> SQLError {
     SQLError::Routine {
         sqlstate: "42P13".into(),
         message: format!("return type mismatch in function declared to return {declared}"),
-    }
-}
-
-/// Resolver for `LANGUAGE sql` bodies: parameter names and `$n`
-/// references bind to the call's argument values.
-struct SQLFunctionResolver<'a> {
-    def: &'a CreateFunction,
-    bound: &'a [Value],
-}
-
-impl VariableResolver for SQLFunctionResolver<'_> {
-    fn resolve_name(&mut self, name: &str) -> Result<Option<Value>, SQLError> {
-        let position = self
-            .def
-            .signature_params()
-            .iter()
-            .position(|p| !p.name.is_empty() && p.name.eq_ignore_ascii_case(name));
-        Ok(position.and_then(|idx| self.bound.get(idx).cloned()))
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Value>, SQLError> {
-        // `fname.param` qualification is accepted by PostgreSQL; the
-        // qualifier must be the function name.
-        if qualifier.eq_ignore_ascii_case(&self.def.name) {
-            return self.resolve_name(column);
-        }
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, index: usize) -> Result<Option<Value>, SQLError> {
-        if index >= 1 && index <= self.bound.len() {
-            Ok(Some(self.bound[index - 1].clone()))
-        } else {
-            Ok(None)
-        }
     }
 }
 
@@ -657,6 +689,14 @@ impl<'a> Interpreter<'a> {
                 "PL/pgSQL datum table is smaller than the parameter list".into(),
             ));
         }
+        let signature_arity = def.signature_arity();
+        if bound.len() != signature_arity {
+            return Err(SQLError::Internal(format!(
+                "PL/pgSQL routine `{}` received {} bound arguments for a signature of {signature_arity}",
+                def.name,
+                bound.len()
+            )));
+        }
         let loop_vars: BTreeSet<usize> = parsed.fori_variable_datums();
         let mut bindings: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, datum) in datums.iter().enumerate() {
@@ -697,7 +737,7 @@ impl<'a> Interpreter<'a> {
         // Bind call arguments onto the leading parameter datums.
         // Procedure OUT arguments start NULL (the placeholder value a
         // caller passes is discarded, matching PostgreSQL 14+).
-        let mut next_arg = 0usize;
+        let mut bound = bound.into_iter();
         for (idx, param) in def.params.iter().enumerate() {
             let takes_argument = match param.mode {
                 uqa_sql::ast::FunctionParamMode::In | uqa_sql::ast::FunctionParamMode::InOut => {
@@ -707,12 +747,23 @@ impl<'a> Interpreter<'a> {
                 uqa_sql::ast::FunctionParamMode::Table => false,
             };
             if takes_argument {
-                let value = bound.get(next_arg).cloned().unwrap_or(Value::Null);
-                next_arg += 1;
+                let value = bound.next().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "PL/pgSQL routine `{}` ran out of validated arguments while binding parameter {}",
+                        def.name,
+                        idx + 1
+                    ))
+                })?;
                 if !matches!(param.mode, uqa_sql::ast::FunctionParamMode::Out) {
                     interpreter.values[idx] = value;
                 }
             }
+        }
+        if bound.next().is_some() {
+            return Err(SQLError::Internal(format!(
+                "PL/pgSQL routine `{}` left validated arguments unbound",
+                def.name
+            )));
         }
         // Initialize FOUND and declared-variable defaults.
         if let Some(found) = interpreter.found {
@@ -833,8 +884,15 @@ impl<'a> Interpreter<'a> {
 
     // -- datum assignment ----------------------------------------------
 
-    fn datum_name(&self, idx: usize) -> String {
-        self.datums[idx].name().unwrap_or("?").to_string()
+    fn datum_name(&self, idx: usize) -> Result<String, SQLError> {
+        let datum = self.datums.get(idx).ok_or_else(|| {
+            SQLError::Internal(format!("PL/pgSQL references missing datum {idx}"))
+        })?;
+        datum.name().map(ToString::to_string).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "PL/pgSQL datum {idx} does not have a bindable name"
+            ))
+        })
     }
 
     /// Store into a datum applying CONSTANT / type / NOT NULL rules.
@@ -871,7 +929,7 @@ impl<'a> Interpreter<'a> {
                 }),
             },
             PLpgSQLDatum::RecField { field, parent } => {
-                let parent_name = self.datum_name(*parent);
+                let parent_name = self.datum_name(*parent)?;
                 match &mut self.values[*parent] {
                     Value::Map(map) => {
                         let key = map
@@ -937,21 +995,62 @@ impl<'a> Interpreter<'a> {
     // -- blocks and statements -------------------------------------------
 
     /// Run one block, routing failures through its EXCEPTION arms.
-    ///
-    /// Divergence from `PostgreSQL`: a caught error does not roll
-    /// back data changes the block made before failing (stock
-    /// `PL/pgSQL` wraps exception-guarded blocks in a
-    /// subtransaction). Handlers here only recover control flow.
     fn exec_block(&mut self, block: &PLpgSQLBlock) -> Result<Flow, SQLError> {
-        let result = self.exec_stmts(&block.body);
-        let result = match result {
-            Err(error) if !block.exceptions.is_empty() && catchable(&error) => {
-                let state = error.sqlstate().unwrap_or("XX000").to_string();
+        let result = if block.exceptions.is_empty() {
+            self.exec_stmts(&block.body)
+        } else {
+            self.exec_exception_block(block)
+        };
+        match result {
+            Ok(Flow::Exit(Some(label))) if block.label.as_deref() == Some(label.as_str()) => {
+                Ok(Flow::Normal)
+            }
+            other => other,
+        }
+    }
+
+    /// `PostgreSQL` executes the guarded body of a block with `EXCEPTION`
+    /// inside a subtransaction. Database changes made before an error are
+    /// rolled back before its handler runs, while PL/pgSQL datum values stay
+    /// unchanged. The engine's nested transaction frame provides those same
+    /// memory-snapshot and persistent-backend savepoint semantics.
+    fn exec_exception_block(&mut self, block: &PLpgSQLBlock) -> Result<Flow, SQLError> {
+        if self.engine.transaction_depth() == 0 {
+            return Err(SQLError::Internal(
+                "PL/pgSQL exception block executed outside a statement transaction".into(),
+            ));
+        }
+        self.engine.begin()?;
+        match self.exec_stmts(&block.body) {
+            Ok(flow) => {
+                self.engine.commit()?;
+                Ok(flow)
+            }
+            Err(error) => {
+                if let Err(rollback_error) = self.engine.rollback() {
+                    return Err(SQLError::Internal(format!(
+                        "PL/pgSQL exception-block rollback failed: {rollback_error}; original error: {error}"
+                    )));
+                }
+                if !catchable(&error) {
+                    return Err(error);
+                }
+                let state = error
+                    .sqlstate()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "caught PL/pgSQL error has no SQLSTATE: {error}"
+                        ))
+                    })?
+                    .to_string();
                 let message = routine_message(&error);
-                let arm = block
-                    .exceptions
-                    .iter()
-                    .find(|arm| arm_matches(&arm.conditions, &state));
+                let mut arm = None;
+                for candidate in &block.exceptions {
+                    if arm_matches(&candidate.conditions, &state)? {
+                        arm = Some(candidate);
+                        break;
+                    }
+                }
                 match arm {
                     Some(arm) => {
                         self.err_stack.push((state, message));
@@ -962,13 +1061,6 @@ impl<'a> Interpreter<'a> {
                     None => Err(error),
                 }
             }
-            other => other,
-        };
-        match result {
-            Ok(Flow::Exit(Some(label))) if block.label.as_deref() == Some(label.as_str()) => {
-                Ok(Flow::Normal)
-            }
-            other => other,
         }
     }
 
@@ -1059,7 +1151,7 @@ impl<'a> Interpreter<'a> {
                 reverse,
                 body,
             } => {
-                let name = self.datum_name(*var);
+                let name = self.datum_name(*var)?;
                 self.push_binding(&name, *var);
                 let result = self.exec_fori(
                     label.as_deref(),
@@ -1122,7 +1214,7 @@ impl<'a> Interpreter<'a> {
                 let result = self.exec_query(query)?;
                 self.append_query_rows(&result)?;
                 // PostgreSQL sets ROW_COUNT (but not FOUND) here.
-                self.last_row_count = result_row_count(&result);
+                self.last_row_count = result_row_count(&result)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::ReturnQueryExecute { query, params } => {
@@ -1131,7 +1223,7 @@ impl<'a> Interpreter<'a> {
                 }
                 let result = self.exec_dynamic(query, params)?;
                 self.append_query_rows(&result)?;
-                self.last_row_count = result_row_count(&result);
+                self.last_row_count = result_row_count(&result)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::Raise {
@@ -1152,7 +1244,7 @@ impl<'a> Interpreter<'a> {
                 strict,
             } => {
                 let result = self.exec_dynamic(query, params)?;
-                let row_count = result_row_count(&result);
+                let row_count = result_row_count(&result)?;
                 self.last_row_count = row_count;
                 if let Some(target) = into {
                     if *strict {
@@ -1165,7 +1257,7 @@ impl<'a> Interpreter<'a> {
             }
             PLpgSQLStmt::Perform { query } => {
                 let result = self.exec_query(query)?;
-                let row_count = result_row_count(&result);
+                let row_count = result_row_count(&result)?;
                 self.last_row_count = row_count;
                 self.set_found(row_count > 0);
                 Ok(Flow::Normal)
@@ -1429,20 +1521,27 @@ impl<'a> Interpreter<'a> {
                 }
                 format_raise_message(format, &values)?
             }
-            None => condition.unwrap_or_default().to_string(),
+            None => condition
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "non-bare PL/pgSQL RAISE has neither condition nor message".into(),
+                    )
+                })?
+                .to_string(),
         };
         if level == RaiseLevel::Error {
             let sqlstate = match condition {
-                Some(name) => condition_sqlstate(name).map_or_else(
-                    || {
-                        if looks_like_sqlstate(name) {
-                            name.to_ascii_uppercase()
-                        } else {
-                            "P0001".to_string()
-                        }
-                    },
-                    ToString::to_string,
-                ),
+                Some(name) => {
+                    if let Some(state) = condition_sqlstate(name) {
+                        state.to_string()
+                    } else if looks_like_sqlstate(name) {
+                        name.to_ascii_uppercase()
+                    } else {
+                        return Err(SQLError::Internal(format!(
+                            "unrecognized PL/pgSQL RAISE condition `{name}`"
+                        )));
+                    }
+                }
                 None => "P0001".to_string(),
             };
             return Err(SQLError::Routine {
@@ -1485,7 +1584,7 @@ impl<'a> Interpreter<'a> {
         into: Option<&IntoTarget>,
         strict: bool,
     ) -> Result<(), SQLError> {
-        let row_count = result_row_count(result);
+        let row_count = result_row_count(result)?;
         self.last_row_count = row_count;
         if let Some(target) = into {
             if strict {
@@ -1530,12 +1629,25 @@ fn row_value(row: &ResultRow, column: &str) -> Value {
         .map_or(Value::Null, |(_, value)| value.clone())
 }
 
-fn result_row_count(result: &SQLResult) -> i64 {
-    if result.columns.is_empty() {
-        i64::try_from(result.affected_rows).unwrap_or(i64::MAX)
+fn result_row_count(result: &SQLResult) -> Result<i64, SQLError> {
+    let (raw_count, source) = if result.columns.is_empty() {
+        (result.affected_rows, "affected-row")
     } else {
-        i64::try_from(result.rows.len()).unwrap_or(i64::MAX)
-    }
+        (
+            u64::try_from(result.rows.len()).map_err(|_| {
+                SQLError::Internal(format!(
+                    "result row count {} cannot be represented as u64",
+                    result.rows.len()
+                ))
+            })?,
+            "result-row",
+        )
+    };
+    i64::try_from(raw_count).map_err(|_| {
+        SQLError::Internal(format!(
+            "{source} count {raw_count} exceeds PL/pgSQL's signed 64-bit ROW_COUNT range"
+        ))
+    })
 }
 
 fn strict_into_check(row_count: i64) -> Result<(), SQLError> {
@@ -1581,31 +1693,40 @@ fn looks_like_sqlstate(text: &str) -> bool {
 }
 
 /// Match an exception arm's condition list against a `SQLSTATE`.
-fn arm_matches(conditions: &[String], state: &str) -> bool {
+fn arm_matches(conditions: &[String], state: &str) -> Result<bool, SQLError> {
     for condition in conditions {
         if condition == "others" {
             // WHEN OTHERS catches everything except QUERY_CANCELED
             // and ASSERT_FAILURE, matching PostgreSQL.
             if state != "57014" && state != "P0004" {
-                return true;
+                return Ok(true);
             }
             continue;
         }
-        let mapped = condition_sqlstate(condition)
-            .map(ToString::to_string)
-            .or_else(|| looks_like_sqlstate(condition).then(|| condition.to_ascii_uppercase()));
-        let Some(mapped) = mapped else {
-            continue;
-        };
-        if mapped == state {
-            return true;
+        let mut known_condition = false;
+        for mapped in condition_sqlstates(condition) {
+            known_condition = true;
+            if sqlstate_matches(mapped, state) {
+                return Ok(true);
+            }
         }
-        // Category codes (ending in 000) match their whole class.
-        if mapped.ends_with("000") && state.get(..2) == mapped.get(..2) {
-            return true;
+        if !known_condition {
+            if looks_like_sqlstate(condition) {
+                if sqlstate_matches(&condition.to_ascii_uppercase(), state) {
+                    return Ok(true);
+                }
+            } else {
+                return Err(SQLError::Internal(format!(
+                    "unrecognized PL/pgSQL exception condition `{condition}`"
+                )));
+            }
         }
     }
-    false
+    Ok(false)
+}
+
+fn sqlstate_matches(condition: &str, state: &str) -> bool {
+    condition == state || (condition.ends_with("000") && state.get(..2) == condition.get(..2))
 }
 
 /// Substitute `%` placeholders in a RAISE format string.
@@ -1748,5 +1869,26 @@ impl VariableResolver for DatumResolver<'_> {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plpgsql_row_count_overflow_is_an_error_not_a_saturated_success() {
+        let result = SQLResult::from_affected(u64::MAX);
+        assert!(matches!(
+            result_row_count(&result),
+            Err(SQLError::Internal(message))
+                if message.contains("exceeds PL/pgSQL's signed 64-bit ROW_COUNT range")
+        ));
+    }
+
+    #[test]
+    fn plpgsql_row_count_preserves_representable_affected_rows() {
+        let result = SQLResult::from_affected(42);
+        assert_eq!(result_row_count(&result).unwrap(), 42);
     }
 }

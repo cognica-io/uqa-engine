@@ -7,10 +7,12 @@
 //! Engine adapter for the shared scalar physical evaluator.
 
 use uqa_core::Value;
-use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId};
+use uqa_execution::{
+    eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId, SubqueryResult,
+};
 use uqa_planner::{ExpressionPlan, QueryPlan};
 use uqa_sql::expr::{EngineHook, NAMED_ARG_FUNCTION};
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 use super::{CteScope, Engine, ScopedEngineHook};
 
@@ -20,7 +22,7 @@ pub(super) trait PhysicalSubqueryRunner {
         plan: &QueryPlan,
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
-    ) -> Result<SQLResult, SQLError>;
+    ) -> Result<SubqueryResult, SQLError>;
 }
 
 pub(super) struct PhysicalEvalContext<'a> {
@@ -141,7 +143,7 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
         subquery: SubqueryId,
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
-    ) -> Result<SQLResult, SQLError> {
+    ) -> Result<SubqueryResult, SQLError> {
         let plan = self.plans.get(subquery).ok_or_else(|| {
             SQLError::Internal(format!(
                 "physical scalar subquery slot {subquery} is out of bounds"

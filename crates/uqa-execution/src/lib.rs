@@ -59,20 +59,40 @@
 )]
 
 pub mod batch;
+pub mod column_selection;
+pub mod distinct;
+pub mod external_sort;
+pub mod join;
+pub mod lateral_join;
+pub mod map_rows;
 pub mod physical;
+pub mod project_set;
 pub mod relational;
 pub mod scalar;
 pub mod scan;
+pub mod set_operation;
 pub mod spill;
+pub mod spill_scan;
 
-pub use batch::{Batch, RowSchema};
+pub use batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
+pub use column_selection::ColumnSelection;
+pub use distinct::{Distinct, ExactRowSet};
+pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
+pub use join::{HashJoin, NestedLoopJoin};
+pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
+pub use map_rows::{MapRows, SharedRowMapper};
 pub use physical::{ExecError, ExecResult, PhysicalOperator};
+pub use project_set::{ProjectRows, ProjectSet, SetProjector};
 pub use relational::{
-    AggregateKind, Filter, HashAggregate, Limit, Project, Sort, SortKey, Window, WindowKind,
+    AggregateExecutor, AggregateKind, AggregateSpec, ExpressionEvaluator, Filter, HashAggregate,
+    Limit, Project, RowPredicate, SetOperation, SharedExpressionEvaluator, SharedRowPredicate,
+    Sort, SortKey, Window, WindowExecutor, WindowKind,
 };
 pub use scalar::{
     eval_call_arguments, eval_scalar, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder,
-    ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,
+    ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec, SubqueryId, SubqueryResult,
 };
-pub use scan::{RowSource, TableScan};
-pub use spill::SpillBuffer;
+pub use scan::{RowIteratorScan, RowSource, TableScan};
+pub use set_operation::ExternalSetOperation;
+pub use spill::{IndexedSpill, SharedSpill, SpillBuffer};
+pub use spill_scan::{SharedSpillScan, SpillScan};

@@ -235,7 +235,9 @@ impl QueryOptimizer {
                     absorbed.push(child.clone());
                 }
                 if absorbed.len() == 1 {
-                    return absorbed.into_iter().next().unwrap();
+                    if let Some(only) = absorbed.pop() {
+                        return only;
+                    }
                 }
                 OperatorTree::Intersect(absorbed)
             }
@@ -273,7 +275,9 @@ impl QueryOptimizer {
                     absorbed.push(child.clone());
                 }
                 if absorbed.len() == 1 {
-                    return absorbed.into_iter().next().unwrap();
+                    if let Some(only) = absorbed.pop() {
+                        return only;
+                    }
                 }
                 if absorbed.is_empty() {
                     return OperatorTree::Union(Vec::new());
@@ -570,10 +574,16 @@ impl QueryOptimizer {
                 let mut merged: Vec<OperatorTree> = Vec::with_capacity(pattern_ops.len());
                 merged.push(pattern_ops.remove(0));
                 for pm in pattern_ops {
-                    let last = merged.last().unwrap().clone();
+                    let Some(last) = merged.pop() else {
+                        merged.push(pm);
+                        continue;
+                    };
                     match Self::merge_patterns(&last, &pm) {
-                        Some(fused) => *merged.last_mut().unwrap() = fused,
-                        None => merged.push(pm),
+                        Some(fused) => merged.push(fused),
+                        None => {
+                            merged.push(last);
+                            merged.push(pm);
+                        }
                     }
                 }
                 pattern_ops = merged;
@@ -581,7 +591,9 @@ impl QueryOptimizer {
             let mut all = other_ops;
             all.extend(pattern_ops);
             if all.len() == 1 {
-                return all.into_iter().next().unwrap();
+                if let Some(only) = all.pop() {
+                    return only;
+                }
             }
             return OperatorTree::Intersect(all);
         }
@@ -675,7 +687,7 @@ impl QueryOptimizer {
                 if used[i] {
                     continue;
                 }
-                let (mut q, mut t, mut f) = (
+                let (q, mut t, f) = (
                     vector_ops[i].0.clone(),
                     vector_ops[i].1,
                     vector_ops[i].2.clone(),
@@ -690,7 +702,6 @@ impl QueryOptimizer {
                     }
                 }
                 used[i] = true;
-                let _ = (&mut q, &mut f);
                 merged_vectors.push(OperatorTree::VectorSimilarity {
                     query_vector: q,
                     threshold: t,
@@ -700,7 +711,9 @@ impl QueryOptimizer {
             let mut all = other_ops;
             all.extend(merged_vectors);
             if all.len() == 1 {
-                return all.into_iter().next().unwrap();
+                if let Some(only) = all.pop() {
+                    return only;
+                }
             }
             return OperatorTree::Intersect(all);
         }
@@ -727,7 +740,7 @@ impl QueryOptimizer {
             children.sort_by(|a, b| {
                 let ca = self.cost_model.estimate(a, &cost_stats);
                 let cb = self.cost_model.estimate(b, &cost_stats);
-                ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+                ca.total_cmp(&cb)
             });
             return OperatorTree::Intersect(children);
         }
@@ -747,6 +760,7 @@ impl QueryOptimizer {
                 weights,
                 logit_min,
                 logit_max,
+                adaptive_weights,
             } => {
                 let mut indexed_signals: Vec<(usize, OperatorTree)> = signals
                     .into_iter()
@@ -756,7 +770,7 @@ impl QueryOptimizer {
                 indexed_signals.sort_by(|(_, left), (_, right)| {
                     let ca = self.graph_aware_signal_cost(left);
                     let cb = self.graph_aware_signal_cost(right);
-                    ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+                    ca.total_cmp(&cb)
                 });
                 let order: Vec<usize> = indexed_signals
                     .iter()
@@ -778,6 +792,7 @@ impl QueryOptimizer {
                     weights: reordered_weights,
                     logit_min: reordered_logit_min,
                     logit_max: reordered_logit_max,
+                    adaptive_weights,
                 }
             }
             OperatorTree::ProbBoolFusion { signals, mode } => {
@@ -788,7 +803,7 @@ impl QueryOptimizer {
                 sigs.sort_by(|a, b| {
                     let ca = self.graph_aware_signal_cost(a);
                     let cb = self.graph_aware_signal_cost(b);
-                    ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+                    ca.total_cmp(&cb)
                 });
                 OperatorTree::ProbBoolFusion {
                     signals: sigs,
@@ -972,6 +987,7 @@ fn map_operator_children(
             weights,
             logit_min,
             logit_max,
+            adaptive_weights,
         } => OperatorTree::LogOddsFusion {
             signals: signals.into_iter().map(&mut map).collect(),
             alpha,
@@ -979,6 +995,7 @@ fn map_operator_children(
             weights,
             logit_min,
             logit_max,
+            adaptive_weights,
         },
         OperatorTree::ProbBoolFusion { signals, mode } => OperatorTree::ProbBoolFusion {
             signals: signals.into_iter().map(&mut map).collect(),
@@ -1159,6 +1176,17 @@ fn map_operator_children(
             field,
             scoring,
         },
+        OperatorTree::BayesianMatchWithPrior {
+            field,
+            query,
+            prior_field,
+            mode,
+        } => OperatorTree::BayesianMatchWithPrior {
+            field,
+            query,
+            prior_field,
+            mode,
+        },
         OperatorTree::VectorSimilarity {
             query_vector,
             threshold,
@@ -1177,6 +1205,17 @@ fn map_operator_children(
             k,
             field,
         },
+        OperatorTree::CalibratedVectorMatch {
+            query_vector,
+            k,
+            field,
+            threshold,
+        } => OperatorTree::CalibratedVectorMatch {
+            query_vector,
+            k,
+            field,
+            threshold,
+        },
         OperatorTree::Traverse {
             start_vertex,
             graph,
@@ -1190,6 +1229,18 @@ fn map_operator_children(
             max_hops,
             vertex_predicate,
         },
+        OperatorTree::GraphNeighbors {
+            vertex,
+            graph,
+            label,
+            direction,
+        } => OperatorTree::GraphNeighbors {
+            vertex,
+            graph,
+            label,
+            direction,
+        },
+        OperatorTree::GraphEdges { graph, label } => OperatorTree::GraphEdges { graph, label },
         OperatorTree::PatternMatch { pattern, graph } => {
             OperatorTree::PatternMatch { pattern, graph }
         }
@@ -1213,11 +1264,11 @@ fn map_operator_children(
         },
         OperatorTree::MultiFieldSearch {
             fields,
-            query,
+            queries,
             weights,
         } => OperatorTree::MultiFieldSearch {
             fields,
-            query,
+            queries,
             weights,
         },
         OperatorTree::WeightedPathQuery {
@@ -1268,6 +1319,7 @@ fn map_operator_children(
             graph,
             temporal_filter,
         },
+        OperatorTree::DeepPredict { model } => OperatorTree::DeepPredict { model },
     }
 }
 
@@ -1303,6 +1355,22 @@ mod tests {
         let op = OperatorTree::Intersect(vec![term("a"), OperatorTree::Intersect(vec![])]);
         let optimised = QueryOptimizer::new().optimize(op);
         assert!(optimised.is_empty());
+    }
+
+    #[test]
+    fn empty_composition_has_the_same_empty_semantics_as_execution() {
+        let empty_composition = OperatorTree::Composed(vec![]);
+        assert!(empty_composition.is_empty());
+
+        let intersection = QueryOptimizer::new().optimize(OperatorTree::Intersect(vec![
+            term("a"),
+            empty_composition.clone(),
+        ]));
+        assert!(intersection.is_empty());
+
+        let union =
+            QueryOptimizer::new().optimize(OperatorTree::Union(vec![term("a"), empty_composition]));
+        assert!(matches!(union, OperatorTree::Term { .. }));
     }
 
     #[test]

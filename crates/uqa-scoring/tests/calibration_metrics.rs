@@ -55,21 +55,21 @@ proptest! {
     /// `log_loss >= 0` for any input.
     #[test]
     fn log_loss_non_negative((probs, labels) in arb_probs_labels()) {
-        let l = CalibrationMetrics::log_loss(&probs, &labels);
+        let l = CalibrationMetrics::log_loss(&probs, &labels).unwrap();
         prop_assert!(l >= 0.0, "log_loss returned {l}");
     }
 
     /// `brier in [0, 1]` for any input drawn from valid probabilities.
     #[test]
     fn brier_bounded((probs, labels) in arb_probs_labels()) {
-        let b = CalibrationMetrics::brier(&probs, &labels);
+        let b = CalibrationMetrics::brier(&probs, &labels).unwrap();
         prop_assert!((0.0..=1.0).contains(&b), "brier = {b} out of [0, 1]");
     }
 
     /// `ece in [0, 1]` for any (input, n_bins).
     #[test]
     fn ece_bounded((probs, labels) in arb_probs_labels(), n_bins in 1usize..=20) {
-        let e = CalibrationMetrics::ece(&probs, &labels, n_bins);
+        let e = CalibrationMetrics::ece(&probs, &labels, n_bins).unwrap();
         prop_assert!((0.0..=1.0).contains(&e), "ece = {e} out of [0, 1]");
     }
 
@@ -84,19 +84,19 @@ proptest! {
         let permuted_probs: Vec<f64> = order.iter().map(|&i| probs[i]).collect();
         let permuted_labels: Vec<u8> = order.iter().map(|&i| labels[i]).collect();
 
-        let l1 = CalibrationMetrics::log_loss(&probs, &labels);
-        let l2 = CalibrationMetrics::log_loss(&permuted_probs, &permuted_labels);
+        let l1 = CalibrationMetrics::log_loss(&probs, &labels).unwrap();
+        let l2 = CalibrationMetrics::log_loss(&permuted_probs, &permuted_labels).unwrap();
         prop_assert!((l1 - l2).abs() < 1e-9, "log_loss changed under permutation: {l1} vs {l2}");
 
-        let b1 = CalibrationMetrics::brier(&probs, &labels);
-        let b2 = CalibrationMetrics::brier(&permuted_probs, &permuted_labels);
+        let b1 = CalibrationMetrics::brier(&probs, &labels).unwrap();
+        let b2 = CalibrationMetrics::brier(&permuted_probs, &permuted_labels).unwrap();
         prop_assert!((b1 - b2).abs() < 1e-9, "brier changed under permutation: {b1} vs {b2}");
     }
 
     /// `brier` equals `mean((p - y)^2)` exactly.
     #[test]
     fn brier_matches_closed_form((probs, labels) in arb_probs_labels()) {
-        let direct = CalibrationMetrics::brier(&probs, &labels);
+        let direct = CalibrationMetrics::brier(&probs, &labels).unwrap();
         let closed: f64 = probs
             .iter()
             .zip(&labels)
@@ -116,8 +116,8 @@ proptest! {
             .iter()
             .map(|&y| if y == 1 { 1.0 - 1e-6 } else { 1e-6 })
             .collect();
-        let b = CalibrationMetrics::brier(&probs, &labels);
-        let l = CalibrationMetrics::log_loss(&probs, &labels);
+        let b = CalibrationMetrics::brier(&probs, &labels).unwrap();
+        let l = CalibrationMetrics::log_loss(&probs, &labels).unwrap();
         prop_assert!(b < 1e-9, "brier on perfect predictions = {b}");
         prop_assert!(l < 1e-3, "log_loss on perfect predictions = {l}");
     }
@@ -126,13 +126,13 @@ proptest! {
 /// Empty inputs return 0 for all three metrics.
 #[test]
 fn empty_input_returns_zero() {
-    assert_eq!(CalibrationMetrics::log_loss(&[], &[]), 0.0);
-    assert_eq!(CalibrationMetrics::brier(&[], &[]), 0.0);
-    assert_eq!(CalibrationMetrics::ece(&[], &[], 10), 0.0);
+    assert_eq!(CalibrationMetrics::log_loss(&[], &[]).unwrap(), 0.0);
+    assert_eq!(CalibrationMetrics::brier(&[], &[]).unwrap(), 0.0);
+    assert_eq!(CalibrationMetrics::ece(&[], &[], 10).unwrap(), 0.0);
 }
 
-/// `n_bins == 0` returns 0 for ECE (degenerate).
+/// `n_bins == 0` is an invalid metric configuration.
 #[test]
-fn ece_zero_bins_returns_zero() {
-    assert_eq!(CalibrationMetrics::ece(&[0.5; 10], &[0u8; 10], 0), 0.0);
+fn ece_zero_bins_is_an_error() {
+    assert!(CalibrationMetrics::ece(&[0.5; 10], &[0u8; 10], 0).is_err());
 }

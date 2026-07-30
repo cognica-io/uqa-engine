@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::porter;
+use crate::{AnalysisError, AnalysisResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -63,11 +64,38 @@ pub enum TokenFilter {
 pub enum SynonymFileError {
     #[error("synonym file not found: {0}")]
     NotFound(PathBuf),
-    #[error("synonym file io: {0}")]
-    Io(#[from] io::Error),
+    #[error("failed to read synonym file `{path}`: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 impl TokenFilter {
+    /// Validate configuration without filtering tokens. File-backed synonym
+    /// filters are read here so registration rejects missing/unreadable paths;
+    /// [`Self::filter`] reads them again on every execution to detect later
+    /// deletion, permission changes, and edits.
+    pub fn validate(&self) -> AnalysisResult<()> {
+        match self {
+            TokenFilter::Synonym {
+                synonyms_path: Some(path),
+                ..
+            } => {
+                Self::parse_synonym_file(path)?;
+                Ok(())
+            }
+            TokenFilter::Ngram {
+                min_gram, max_gram, ..
+            } => validate_gram_bounds("n-gram token filter", *min_gram, *max_gram),
+            TokenFilter::EdgeNgram { min_gram, max_gram } => {
+                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Build a `Synonym` filter from a Solr / Elasticsearch synonym
     /// file. The file format follows UQA behavior for `SynonymFilter`:
     /// blank lines and `#` comments are skipped, `a => b, c` defines a
@@ -78,9 +106,10 @@ impl TokenFilter {
         if !path.exists() {
             return Err(SynonymFileError::NotFound(path.to_path_buf()));
         }
-        // Touch the file once at construction so a missing path raises
-        // up front instead of at first filter() call.
-        let _ = fs::read_to_string(path)?;
+        // Read once at construction so unreadable paths fail before the
+        // analyzer is registered. Execution reads it again to support reloads
+        // and to make deletion/revocation visible to callers.
+        read_synonym_file(path)?;
         Ok(TokenFilter::Synonym {
             synonyms: BTreeMap::new(),
             synonyms_path: Some(path.to_path_buf()),
@@ -92,7 +121,7 @@ impl TokenFilter {
     pub fn parse_synonym_file(
         path: &Path,
     ) -> Result<BTreeMap<String, Vec<String>>, SynonymFileError> {
-        let body = fs::read_to_string(path)?;
+        let body = read_synonym_file(path)?;
         Ok(parse_synonym_body(&body))
     }
 }
@@ -158,8 +187,8 @@ fn default_stop_language() -> String {
 }
 
 impl TokenFilter {
-    pub fn filter(&self, tokens: Vec<String>) -> Vec<String> {
-        match self {
+    pub fn filter(&self, tokens: Vec<String>) -> AnalysisResult<Vec<String>> {
+        let tokens = match self {
             TokenFilter::Lowercase => tokens.into_iter().map(|t| t.to_lowercase()).collect(),
             TokenFilter::Stop {
                 language,
@@ -181,7 +210,7 @@ impl TokenFilter {
                 synonyms_path,
             } => {
                 let resolved: BTreeMap<String, Vec<String>> = if let Some(path) = synonyms_path {
-                    TokenFilter::parse_synonym_file(path).unwrap_or_default()
+                    TokenFilter::parse_synonym_file(path)?
                 } else {
                     synonyms.clone()
                 };
@@ -201,8 +230,7 @@ impl TokenFilter {
                 max_gram,
                 keep_short,
             } => {
-                debug_assert!(*min_gram >= 1, "min_gram must be >= 1");
-                debug_assert!(max_gram >= min_gram, "max_gram must be >= min_gram");
+                validate_gram_bounds("n-gram token filter", *min_gram, *max_gram)?;
                 let mut out = Vec::new();
                 for t in tokens {
                     let chars: Vec<char> = t.chars().collect();
@@ -224,6 +252,7 @@ impl TokenFilter {
                 out
             }
             TokenFilter::EdgeNgram { min_gram, max_gram } => {
+                validate_gram_bounds("edge n-gram token filter", *min_gram, *max_gram)?;
                 let mut out = Vec::new();
                 for t in tokens {
                     let chars: Vec<char> = t.chars().collect();
@@ -250,8 +279,37 @@ impl TokenFilter {
                     true
                 })
                 .collect(),
-        }
+        };
+        Ok(tokens)
     }
+}
+
+fn read_synonym_file(path: &Path) -> Result<String, SynonymFileError> {
+    fs::read_to_string(path).map_err(|source| {
+        if source.kind() == io::ErrorKind::NotFound {
+            SynonymFileError::NotFound(path.to_path_buf())
+        } else {
+            SynonymFileError::Io {
+                path: path.to_path_buf(),
+                source,
+            }
+        }
+    })
+}
+
+fn validate_gram_bounds(
+    component: &'static str,
+    min_gram: usize,
+    max_gram: usize,
+) -> AnalysisResult<()> {
+    if min_gram == 0 || max_gram < min_gram {
+        return Err(AnalysisError::InvalidGramBounds {
+            component,
+            min_gram,
+            max_gram,
+        });
+    }
+    Ok(())
 }
 
 fn ascii_fold(token: &str) -> String {
@@ -302,7 +360,10 @@ mod tests {
     #[test]
     fn lowercase_lowers_each_token() {
         let f = TokenFilter::Lowercase;
-        assert_eq!(f.filter(v(&["Hello", "WORLD"])), v(&["hello", "world"]));
+        assert_eq!(
+            f.filter(v(&["Hello", "WORLD"])).unwrap(),
+            v(&["hello", "world"])
+        );
     }
 
     #[test]
@@ -312,7 +373,7 @@ mod tests {
             custom_words: vec![],
         };
         assert_eq!(
-            f.filter(v(&["the", "rust", "is", "fast"])),
+            f.filter(v(&["the", "rust", "is", "fast"])).unwrap(),
             v(&["rust", "fast"])
         );
     }
@@ -323,25 +384,31 @@ mod tests {
             language: "english".to_string(),
             custom_words: vec!["foo".to_string()],
         };
-        assert_eq!(f.filter(v(&["foo", "bar", "the"])), v(&["bar"]));
+        assert_eq!(f.filter(v(&["foo", "bar", "the"])).unwrap(), v(&["bar"]));
     }
 
     #[test]
     fn porter_stem_runs() {
         let f = TokenFilter::PorterStem;
-        assert_eq!(f.filter(v(&["caresses", "ponies"])), v(&["caress", "poni"]));
+        assert_eq!(
+            f.filter(v(&["caresses", "ponies"])).unwrap(),
+            v(&["caress", "poni"])
+        );
     }
 
     #[test]
     fn ascii_folding_strips_diacritics() {
         let f = TokenFilter::ASCIIFolding;
-        assert_eq!(f.filter(v(&["café", "naïve"])), v(&["cafe", "naive"]));
+        assert_eq!(
+            f.filter(v(&["café", "naïve"])).unwrap(),
+            v(&["cafe", "naive"])
+        );
     }
 
     #[test]
     fn ascii_folding_preserves_cjk() {
         let f = TokenFilter::ASCIIFolding;
-        assert_eq!(f.filter(v(&["한글"])), v(&["한글"]));
+        assert_eq!(f.filter(v(&["한글"])).unwrap(), v(&["한글"]));
     }
 
     #[test]
@@ -356,7 +423,7 @@ mod tests {
             synonyms_path: None,
         };
         assert_eq!(
-            f.filter(v(&["fast", "car"])),
+            f.filter(v(&["fast", "car"])).unwrap(),
             v(&["fast", "car", "auto", "vehicle"])
         );
     }
@@ -368,7 +435,7 @@ mod tests {
             max_gram: 3,
             keep_short: false,
         };
-        assert_eq!(f.filter(v(&["abc"])), v(&["ab", "bc", "abc"]));
+        assert_eq!(f.filter(v(&["abc"])).unwrap(), v(&["ab", "bc", "abc"]));
     }
 
     #[test]
@@ -378,14 +445,14 @@ mod tests {
             max_gram: 4,
             keep_short: false,
         };
-        assert!(f_drop.filter(v(&["ab"])).is_empty());
+        assert!(f_drop.filter(v(&["ab"])).unwrap().is_empty());
 
         let f_keep = TokenFilter::Ngram {
             min_gram: 3,
             max_gram: 4,
             keep_short: true,
         };
-        assert_eq!(f_keep.filter(v(&["ab"])), v(&["ab"]));
+        assert_eq!(f_keep.filter(v(&["ab"])).unwrap(), v(&["ab"]));
     }
 
     #[test]
@@ -394,7 +461,7 @@ mod tests {
             min_gram: 1,
             max_gram: 3,
         };
-        assert_eq!(f.filter(v(&["abcd"])), v(&["a", "ab", "abc"]));
+        assert_eq!(f.filter(v(&["abcd"])).unwrap(), v(&["a", "ab", "abc"]));
     }
 
     #[test]
@@ -404,7 +471,7 @@ mod tests {
             max_length: 4,
         };
         assert_eq!(
-            f.filter(v(&["a", "ab", "abcd", "abcde"])),
+            f.filter(v(&["a", "ab", "abcd", "abcde"])).unwrap(),
             v(&["ab", "abcd"])
         );
     }

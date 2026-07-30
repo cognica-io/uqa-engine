@@ -15,13 +15,54 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
+use crate::{StorageBackendError, StorageBackendResult};
+
+pub(crate) fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
+    let dimensions = usize::try_from(dimensions).map_err(|_| {
+        StorageBackendError::Other(format!(
+            "vector dimension {dimensions} exceeds the platform usize range"
+        ))
+    })?;
+    if vector.len() != dimensions {
+        return Err(StorageBackendError::Other(format!(
+            "vector dimension mismatch: expected {dimensions}, got {}",
+            vector.len()
+        )));
+    }
+    if let Some((index, value)) = vector
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(StorageBackendError::Other(format!(
+            "vector component {index} must be finite, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+fn checked_vector_count(counts: impl IntoIterator<Item = usize>) -> StorageBackendResult<usize> {
+    counts.into_iter().try_fold(0_usize, |total, count| {
+        total
+            .checked_add(count)
+            .ok_or_else(|| StorageBackendError::Other("vector count overflow".into()))
+    })
+}
+
+fn validate_threshold(threshold: f32) -> StorageBackendResult<()> {
+    if threshold.is_finite() {
+        Ok(())
+    } else {
+        Err(StorageBackendError::Other(format!(
+            "vector similarity threshold must be finite, got {threshold}"
+        )))
+    }
+}
+
 pub(crate) fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
     if scored.len() > k {
-        scored.select_nth_unstable_by(k, |a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
+        scored.select_nth_unstable_by(k, |a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         scored.truncate(k);
     }
 }
@@ -55,16 +96,33 @@ pub trait VectorIndex: Send + Sync {
     fn index_kind(&self) -> &'static str {
         "vector"
     }
-    fn add(&mut self, doc_id: DocId, vector: Vec<f32>);
-    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>);
-    fn delete(&mut self, doc_id: DocId);
-    fn clear(&mut self);
-    fn search_knn(&self, query: &[f32], k: usize) -> PostingList;
-    fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList;
-    fn count(&self) -> usize;
+    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()>;
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()>;
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
+    fn clear(&mut self) -> StorageBackendResult<()>;
+    fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList>;
+    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList>;
+    fn count(&self) -> StorageBackendResult<usize>;
+
+    /// Build any auxiliary physical metadata required by this index from its
+    /// current vector contents. Brute-force indexes need no extra work;
+    /// persistent IVF implementations use this during explicit index
+    /// creation, while restore paths deliberately skip it.
+    fn initialize(&mut self) -> StorageBackendResult<()> {
+        Ok(())
+    }
 
     /// Read-only handle suitable for an `ExecutionContext`.
-    fn snapshot(&self) -> Arc<dyn VectorIndex>;
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>>;
+
+    /// Independent writable copy used by in-memory engine rollback. The
+    /// default keeps third-party and persistent implementations source
+    /// compatible; only indexes hosted by a memory engine need to support it.
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "writable vector-index snapshots are not supported by this backend".into(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,42 +153,39 @@ impl VectorIndex for MemoryVectorIndex {
         "memory-bruteforce"
     }
 
-    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) {
-        debug_assert_eq!(
-            vector.len() as u32,
-            self.dimensions,
-            "vector dimension mismatch"
-        );
+    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
+        self.validate_dimensions(&vector)?;
         self.vectors.insert(doc_id, vec![vector]);
+        Ok(())
     }
 
-    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) {
+    fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
         for vector in &vectors {
-            debug_assert_eq!(
-                vector.len() as u32,
-                self.dimensions,
-                "vector dimension mismatch"
-            );
+            self.validate_dimensions(vector)?;
         }
         if vectors.is_empty() {
             self.vectors.remove(&doc_id);
         } else {
             self.vectors.insert(doc_id, vectors);
         }
+        Ok(())
     }
 
-    fn delete(&mut self, doc_id: DocId) {
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         self.vectors.remove(&doc_id);
+        Ok(())
     }
 
-    fn clear(&mut self) {
+    fn clear(&mut self) -> StorageBackendResult<()> {
         self.vectors.clear();
+        Ok(())
     }
 
     /// Brute-force top-k by cosine similarity, descending.
-    fn search_knn(&self, query: &[f32], k: usize) -> PostingList {
+    fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
+        self.validate_dimensions(query)?;
         if k == 0 || self.vectors.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
         let mut scored: Vec<(DocId, f32)> = self
             .vectors
@@ -145,11 +200,13 @@ impl VectorIndex for MemoryVectorIndex {
             .into_iter()
             .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
             .collect::<Vec<_>>();
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     /// Brute-force threshold scan: keep all docs with `cosine >= threshold`.
-    fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList {
+    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
+        self.validate_dimensions(query)?;
+        validate_threshold(threshold)?;
         let mut entries: Vec<PostingEntry> = self
             .vectors
             .iter()
@@ -168,15 +225,25 @@ impl VectorIndex for MemoryVectorIndex {
         // The BTreeMap iteration is already doc_id-ascending, so the
         // filter preserves the invariant.
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
-    fn count(&self) -> usize {
-        self.vectors.values().map(Vec::len).sum()
+    fn count(&self) -> StorageBackendResult<usize> {
+        checked_vector_count(self.vectors.values().map(Vec::len))
     }
 
-    fn snapshot(&self) -> Arc<dyn VectorIndex> {
-        Arc::new(self.clone())
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        Ok(Arc::new(self.clone()))
+    }
+
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Ok(Box::new(self.clone()))
+    }
+}
+
+impl MemoryVectorIndex {
+    fn validate_dimensions(&self, vector: &[f32]) -> StorageBackendResult<()> {
+        validate_vector_values(self.dimensions, vector)
     }
 }
 
@@ -184,7 +251,7 @@ fn best_vector_score(query: &[f32], vectors: &[Vec<f32>]) -> Option<f32> {
     vectors
         .iter()
         .map(|vector| cosine_similarity(query, vector))
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(f32::total_cmp)
 }
 
 #[cfg(test)]
@@ -199,6 +266,12 @@ mod tests {
     fn cosine_identity_is_one() {
         let v = vec![1.0, 2.0, 3.0];
         approx_eq(cosine_similarity(&v, &v), 1.0, 1e-6);
+    }
+
+    #[test]
+    fn vector_count_overflow_is_reported() {
+        let error = checked_vector_count([usize::MAX, 1]).unwrap_err();
+        assert!(error.to_string().contains("vector count overflow"));
     }
 
     #[test]
@@ -218,10 +291,10 @@ mod tests {
     #[test]
     fn knn_orders_by_similarity_descending_then_doc_id() {
         let mut idx = MemoryVectorIndex::new(2);
-        idx.add(1, vec![1.0, 0.0]);
-        idx.add(2, vec![0.5, 0.5]);
-        idx.add(3, vec![0.0, 1.0]);
-        let pl = idx.search_knn(&[1.0, 0.0], 2);
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+        idx.add(2, vec![0.5, 0.5]).unwrap();
+        idx.add(3, vec![0.0, 1.0]).unwrap();
+        let pl = idx.search_knn(&[1.0, 0.0], 2).unwrap();
         let docs: Vec<_> = pl.iter().map(|e| e.doc_id).collect();
         // posting list is doc_id-sorted but the top-2 should be {1, 2}.
         assert_eq!(docs, vec![1, 2]);
@@ -241,10 +314,10 @@ mod tests {
     #[test]
     fn threshold_filters_below_cutoff() {
         let mut idx = MemoryVectorIndex::new(2);
-        idx.add(1, vec![1.0, 0.0]);
-        idx.add(2, vec![0.5, 0.5]);
-        idx.add(3, vec![0.0, 1.0]);
-        let pl = idx.search_threshold(&[1.0, 0.0], 0.5);
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+        idx.add(2, vec![0.5, 0.5]).unwrap();
+        idx.add(3, vec![0.0, 1.0]).unwrap();
+        let pl = idx.search_threshold(&[1.0, 0.0], 0.5).unwrap();
         let docs: Vec<_> = pl.iter().map(|e| e.doc_id).collect();
         assert_eq!(docs, vec![1, 2]);
     }
@@ -252,8 +325,19 @@ mod tests {
     #[test]
     fn delete_removes_vector() {
         let mut idx = MemoryVectorIndex::new(2);
-        idx.add(1, vec![1.0, 0.0]);
-        idx.delete(1);
-        assert_eq!(idx.count(), 0);
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+        idx.delete(1).unwrap();
+        assert_eq!(idx.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn non_finite_vectors_queries_and_thresholds_are_errors() {
+        let mut idx = MemoryVectorIndex::new(2);
+        assert!(idx.add(1, vec![f32::NAN, 0.0]).is_err());
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+        assert!(idx.search_knn(&[f32::INFINITY, 0.0], 1).is_err());
+        assert!(idx
+            .search_threshold(&[1.0, 0.0], f32::NEG_INFINITY)
+            .is_err());
     }
 }

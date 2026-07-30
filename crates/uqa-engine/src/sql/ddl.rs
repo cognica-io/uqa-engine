@@ -10,8 +10,7 @@ use super::scalar::eval_lowered_expression;
 use super::{
     index_vectors_for_type, value_to_tensor, value_to_vector, AlterTableAction, AlterTableStmt,
     BTreeMap, ColumnType, CreateIndex, CreateTable, DecimalValue, Document, DropKind, DropStmt,
-    Engine, IVFIndexParams, RowUpdateVectors, SQLColumnDef, SQLError, SQLParam, SQLResult,
-    TemporalValue, Value,
+    Engine, IVFIndexParams, RowUpdateVectors, SQLError, SQLParam, SQLResult, TemporalValue, Value,
 };
 use crate::CatalogIndexRow;
 
@@ -19,12 +18,9 @@ pub(super) fn run_create_sequence(
     engine: &Engine,
     s: uqa_sql::ast::CreateSequence,
 ) -> Result<SQLResult, SQLError> {
-    if !engine.create_sequence(&s.name, s.start, s.increment, s.if_not_exists) {
-        return Err(SQLError::Unsupported(format!(
-            "Sequence `{}` already exists",
-            s.name
-        )));
-    }
+    engine
+        .create_sequence(&s.name, s.start, s.increment, s.if_not_exists)
+        .map_err(SQLError::Unsupported)?;
     Ok(SQLResult::empty())
 }
 
@@ -33,7 +29,7 @@ pub(super) fn run_alter_sequence(
     s: uqa_sql::ast::AlterSequence,
 ) -> Result<SQLResult, SQLError> {
     engine
-        .alter_sequence(&s.name, s.restart, s.increment, s.start)
+        .alter_sequence_if_exists(&s.name, s.restart, s.increment, s.start, s.if_exists)
         .map_err(SQLError::Unsupported)?;
     Ok(SQLResult::empty())
 }
@@ -45,7 +41,10 @@ pub(super) fn run_create_table_as(
     query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if engine.table(&name).is_some() {
+    if engine
+        .try_has_table(&name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?
+    {
         if if_not_exists {
             return Ok(SQLResult::empty());
         }
@@ -70,10 +69,18 @@ pub(super) fn run_create_table_as(
         })
         .collect();
     let analyzer = uqa_analysis::analyzer::standard_analyzer("english");
-    engine.create_table(name.clone(), analyzer, Vec::new());
-    if let Some(t) = engine.table(&name) {
+    engine
+        .create_table(name.clone(), analyzer, Vec::new())
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS", err))?;
+    if let Some(t) = engine
+        .try_table(&name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS schema", err))?
+    {
         (*t.columns.write()).clone_from(&cols);
     }
+    engine
+        .try_persist_table_schema(&name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE AS schema", err))?;
     let mut affected: u64 = 0;
     for (idx, row) in result.rows.iter().enumerate() {
         let doc_id = (idx as u64) + 1;
@@ -88,50 +95,53 @@ pub(super) fn run_create_table_as(
 }
 
 pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
+    if stmt.cascade && matches!(stmt.kind, DropKind::View | DropKind::Schema) {
+        return Err(SQLError::Unsupported(format!(
+            "DROP {} CASCADE is not supported; no objects were changed",
+            match stmt.kind {
+                DropKind::View => "VIEW",
+                DropKind::Schema => "SCHEMA",
+                DropKind::Table | DropKind::Index => unreachable!(),
+            }
+        )));
+    }
+    engine.with_implicit_transaction(move |engine| run_drop_inner(engine, stmt))
+}
+
+fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     match stmt.kind {
         DropKind::Table => {
+            let mut tables = Vec::new();
             for name in &stmt.names {
-                if !engine.has_table(name) {
-                    if stmt.if_exists {
-                        continue;
+                match engine
+                    .try_resolve_relation_kind(name)
+                    .map_err(|err| ddl_storage_error("DROP TABLE", err))?
+                {
+                    Some((canonical, "table")) => tables.push(canonical),
+                    Some((canonical, kind)) => {
+                        return Err(SQLError::Unsupported(format!(
+                            "DROP TABLE: relation `{canonical}` is a {kind}, not a table"
+                        )));
                     }
-                    return Err(SQLError::Unsupported(format!(
-                        "DROP TABLE: relation `{name}` does not exist"
-                    )));
-                }
-                let referrers = engine.referrers_to(name);
-                if !referrers.is_empty() {
-                    if stmt.cascade {
-                        // CASCADE: drop every referrer first. The
-                        // recursive walk catches transitive
-                        // dependencies (A -> B -> C).
-                        let referrer_names: Vec<String> =
-                            referrers.iter().map(|(n, _)| n.clone()).collect();
-                        let mut queue: Vec<String> = referrer_names;
-                        while let Some(other) = queue.pop() {
-                            for (next, _) in engine.referrers_to(&other) {
-                                queue.push(next);
-                            }
-                            engine
-                                .try_drop_table(&other)
-                                .map_err(|e| ddl_storage_error("DROP TABLE", e))?;
-                        }
-                    } else {
-                        let names: Vec<String> = referrers.iter().map(|(n, _)| n.clone()).collect();
-                        return Err(SQLError::TypeMismatch(format!(
-                            "DROP TABLE `{name}` rejected: still referenced by `{}`. Use CASCADE.",
-                            names.join(", ")
+                    None if stmt.if_exists => {}
+                    None => {
+                        return Err(SQLError::Unsupported(format!(
+                            "DROP TABLE: relation `{name}` does not exist"
                         )));
                     }
                 }
-                engine
-                    .try_drop_table(name)
-                    .map_err(|e| ddl_storage_error("DROP TABLE", e))?;
             }
+            engine
+                .try_drop_tables(&tables, stmt.cascade)
+                .map_err(|err| ddl_storage_error("DROP TABLE", err))?;
         }
         DropKind::Index => {
+            let mut indexes = Vec::new();
             for name in &stmt.names {
-                let Some(row) = engine.catalog_index(name) else {
+                let Some(row) = engine
+                    .catalog_index(name)
+                    .map_err(|err| ddl_storage_error("DROP INDEX", err))?
+                else {
                     if stmt.if_exists {
                         continue;
                     }
@@ -139,28 +149,76 @@ pub(super) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQL
                         "DROP INDEX: index `{name}` does not exist"
                     )));
                 };
+                indexes.push(row);
+            }
+            for row in indexes {
                 drop_index_side_effects(engine, &row)?;
                 engine
-                    .try_drop_catalog_index(name)
+                    .try_drop_catalog_index(&row.name)
                     .map_err(|e| ddl_storage_error("DROP INDEX", e))?;
             }
         }
         DropKind::View => {
+            let mut views = Vec::new();
             for name in &stmt.names {
-                if !engine.drop_view(name) && !stmt.if_exists {
+                match engine
+                    .try_resolve_relation_kind(name)
+                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                {
+                    Some((canonical, "view")) => views.push(canonical),
+                    Some((canonical, kind)) => {
+                        return Err(SQLError::Unsupported(format!(
+                            "DROP VIEW: relation `{canonical}` is a {kind}, not a view"
+                        )));
+                    }
+                    None if stmt.if_exists => {}
+                    None => {
+                        return Err(SQLError::Unsupported(format!(
+                            "DROP VIEW: relation `{name}` does not exist"
+                        )));
+                    }
+                }
+            }
+            let drop_set = views
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            for view in &views {
+                let dependents = engine
+                    .views_depending_on_relation(view)
+                    .map_err(|err| ddl_storage_error("DROP VIEW", err))?
+                    .into_iter()
+                    .filter(|dependent| !drop_set.contains(dependent))
+                    .collect::<Vec<_>>();
+                if !dependents.is_empty() {
                     return Err(SQLError::Unsupported(format!(
-                        "DROP VIEW: relation `{name}` does not exist"
+                        "DROP VIEW `{view}` rejected: dependent view(s) `{}` still reference it",
+                        dependents.join("`, `")
                     )));
                 }
             }
+            engine.drop_views(&views)?;
         }
         DropKind::Schema => {
+            let mut schemas = Vec::new();
             for name in &stmt.names {
-                if !engine.drop_schema(name) && !stmt.if_exists {
-                    return Err(SQLError::Unsupported(format!(
-                        "DROP SCHEMA: schema `{name}` does not exist"
-                    )));
+                match engine
+                    .preflight_drop_schema(name)
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?
+                {
+                    true => schemas.push(name.clone()),
+                    false if stmt.if_exists => {}
+                    false => {
+                        return Err(SQLError::Unsupported(format!(
+                            "DROP SCHEMA: schema `{name}` does not exist"
+                        )));
+                    }
                 }
+            }
+            for schema in schemas {
+                engine
+                    .drop_schema(&schema)
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
             }
         }
     }
@@ -172,23 +230,76 @@ fn ddl_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
 }
 
 fn drop_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
-    if row.index_type.eq_ignore_ascii_case("ivf") || row.index_type.eq_ignore_ascii_case("hnsw") {
+    if row.index_type.eq_ignore_ascii_case("gin") {
+        drop_gin_index_side_effects(engine, row)?;
+    } else if row.index_type.eq_ignore_ascii_case("ivf")
+        || row.index_type.eq_ignore_ascii_case("hnsw")
+    {
         drop_ivf_index_side_effects(engine, row)?;
     }
     Ok(())
 }
 
-fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
-    let columns: Vec<String> = serde_json::from_str(&row.columns_json).map_err(|e| {
+fn catalog_index_columns(row: &CatalogIndexRow, action: &str) -> Result<Vec<String>, SQLError> {
+    serde_json::from_str(&row.columns_json).map_err(|e| {
         SQLError::Internal(format!(
-            "DROP INDEX `{}`: invalid index column metadata: {e}",
+            "{action} `{}`: invalid index column metadata: {e}",
             row.name
         ))
-    })?;
+    })
+}
+
+fn drop_gin_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
+    let fields: std::collections::BTreeSet<String> = catalog_index_columns(row, "DROP INDEX")?
+        .into_iter()
+        .collect();
+    let indexes = engine
+        .list_catalog_indexes()
+        .map_err(|err| ddl_storage_error("DROP INDEX", err))?;
+
+    for field in fields {
+        let mut still_referenced = false;
+        for candidate in &indexes {
+            if candidate.name == row.name
+                || candidate.table_name != row.table_name
+                || !candidate.index_type.eq_ignore_ascii_case("gin")
+            {
+                continue;
+            }
+            if catalog_index_columns(candidate, "DROP INDEX")?
+                .iter()
+                .any(|candidate_field| candidate_field == &field)
+            {
+                still_referenced = true;
+                break;
+            }
+        }
+        if !still_referenced {
+            engine
+                .drop_fts_field(&row.table_name, &field)
+                .map_err(|err| {
+                    SQLError::Internal(format!(
+                        "DROP INDEX `{}`: failed to remove FTS field `{}`.`{field}`: {err}",
+                        row.name, row.table_name
+                    ))
+                })?;
+        }
+    }
+    Ok(())
+}
+
+fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
+    let columns = catalog_index_columns(row, "DROP INDEX")?;
     for col in columns {
-        match engine.column_type(&row.table_name, &col) {
+        match engine
+            .column_type(&row.table_name, &col)
+            .map_err(|err| ddl_storage_error("DROP INDEX", err))?
+        {
             Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
-                if !engine.drop_ivf_vector_field_index(&row.table_name, col.clone(), dim) {
+                if !engine
+                    .drop_ivf_vector_field_index(&row.table_name, col.clone(), dim)
+                    .map_err(|err| ddl_storage_error("DROP INDEX vector field", err))?
+                {
                     return Err(SQLError::Unsupported(format!(
                         "DROP INDEX `{}`: relation `{}` does not exist",
                         row.name, row.table_name
@@ -224,14 +335,36 @@ pub(super) fn run_alter_table(
     engine: &Engine,
     stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    if !engine.has_table(&stmt.table) {
-        if stmt.if_exists {
-            return Ok(SQLResult::empty());
+    if matches!(
+        &stmt.action,
+        AlterTableAction::DropColumn { cascade: true, .. }
+    ) {
+        return Err(SQLError::Unsupported(
+            "ALTER TABLE DROP COLUMN CASCADE is not supported; no schema or data was changed"
+                .into(),
+        ));
+    }
+    engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQLResult, SQLError> {
+    match engine
+        .try_resolve_relation_kind(&stmt.table)
+        .map_err(|err| ddl_storage_error("ALTER TABLE", err))?
+    {
+        Some((canonical, "table")) => stmt.table = canonical,
+        Some((canonical, kind)) => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER TABLE: relation `{canonical}` is a {kind}, not a table"
+            )));
         }
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE: relation `{}` does not exist",
-            stmt.table
-        )));
+        None if stmt.if_exists => return Ok(SQLResult::empty()),
+        None => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER TABLE: relation `{}` does not exist",
+                stmt.table
+            )));
+        }
     }
     match stmt.action {
         AlterTableAction::AddColumn {
@@ -239,7 +372,10 @@ pub(super) fn run_alter_table(
             if_not_exists,
         } => {
             let col_name = column.name.clone();
-            if engine.table_has_column(&stmt.table, &col_name) {
+            if engine
+                .try_table_has_column(&stmt.table, &col_name)
+                .map_err(|err| ddl_storage_error("ALTER TABLE ADD COLUMN", err))?
+            {
                 if if_not_exists {
                     return Ok(SQLResult::empty());
                 }
@@ -249,7 +385,9 @@ pub(super) fn run_alter_table(
             }
             match column.ty {
                 ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
-                    engine.create_vector_field(&stmt.table, col_name.clone(), dim);
+                    engine
+                        .create_vector_field(&stmt.table, col_name.clone(), dim)
+                        .map_err(|err| ddl_storage_error("ALTER TABLE vector field", err))?;
                 }
                 ColumnType::Text => {
                     if let Err(e) = engine.add_fts_field(&stmt.table, col_name.clone()) {
@@ -263,11 +401,13 @@ pub(super) fn run_alter_table(
             // existing rows. PostgreSQL evaluates the default once per
             // existing row at ALTER TABLE time, which keeps NOT NULL
             // constraints satisfiable for non-empty tables.
-            let default_expr = column.default.clone();
             let column_not_null = column.not_null;
             engine
                 .try_register_column(&stmt.table, column)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
+            let default_expr = engine
+                .try_column_default_expr(&stmt.table, &col_name)
+                .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
             backfill_added_column(
                 engine,
                 &stmt.table,
@@ -282,9 +422,12 @@ pub(super) fn run_alter_table(
         AlterTableAction::DropColumn {
             name,
             if_exists,
-            cascade: _,
+            cascade: false,
         } => {
-            if !engine.table_has_column(&stmt.table, &name) {
+            if !engine
+                .try_table_has_column(&stmt.table, &name)
+                .map_err(|err| ddl_storage_error("ALTER TABLE DROP COLUMN", err))?
+            {
                 if if_exists {
                     return Ok(SQLResult::empty());
                 }
@@ -296,13 +439,20 @@ pub(super) fn run_alter_table(
                 .try_drop_column(&stmt.table, &name)
                 .map_err(|e| ddl_storage_error("ALTER TABLE DROP COLUMN", e))?;
         }
+        AlterTableAction::DropColumn { cascade: true, .. } => unreachable!(),
         AlterTableAction::RenameColumn { from, to } => {
-            if !engine.table_has_column(&stmt.table, &from) {
+            if !engine
+                .try_table_has_column(&stmt.table, &from)
+                .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
                 )));
             }
-            if engine.table_has_column(&stmt.table, &to) {
+            if engine
+                .try_table_has_column(&stmt.table, &to)
+                .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME COLUMN: column `{to}` already exists"
                 )));
@@ -312,7 +462,10 @@ pub(super) fn run_alter_table(
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME COLUMN", e))?;
         }
         AlterTableAction::RenameTable { to } => {
-            if engine.has_table(&to) {
+            if engine
+                .try_has_table(&to)
+                .map_err(|err| ddl_storage_error("ALTER TABLE RENAME", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE RENAME: relation `{to}` already exists"
                 )));
@@ -328,7 +481,10 @@ pub(super) fn run_alter_table(
             }
         }
         AlterTableAction::SetDefault { name, default } => {
-            if !engine.set_column_default(&stmt.table, &name, Some(default)) {
+            if !engine
+                .set_column_default(&stmt.table, &name, Some(default))
+                .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
@@ -338,7 +494,10 @@ pub(super) fn run_alter_table(
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::DropDefault { name } => {
-            if !engine.set_column_default(&stmt.table, &name, None) {
+            if !engine
+                .set_column_default(&stmt.table, &name, None)
+                .map_err(|err| ddl_storage_error("ALTER COLUMN DROP DEFAULT", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
@@ -350,13 +509,18 @@ pub(super) fn run_alter_table(
         AlterTableAction::SetNotNull { name } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
             ensure_existing_values_not_null(engine, &stmt.table, &name)?;
-            engine.set_column_not_null(&stmt.table, &name, true);
+            engine
+                .set_column_not_null(&stmt.table, &name, true)
+                .map_err(|err| ddl_storage_error("ALTER COLUMN SET NOT NULL", err))?;
             engine
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
         }
         AlterTableAction::DropNotNull { name } => {
-            if !engine.set_column_not_null(&stmt.table, &name, false) {
+            if !engine
+                .set_column_not_null(&stmt.table, &name, false)
+                .map_err(|err| ddl_storage_error("ALTER COLUMN DROP NOT NULL", err))?
+            {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
                 )));
@@ -367,18 +531,30 @@ pub(super) fn run_alter_table(
         }
         AlterTableAction::AlterColumnType { name, ty } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
-            let old_ty = engine.column_type(&stmt.table, &name);
-            rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
-            engine.set_column_type(&stmt.table, &name, &ty);
+            let old_ty = engine
+                .column_type(&stmt.table, &name)
+                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?;
             let old_was_vector =
                 matches!(old_ty, Some(ColumnType::Vector(_) | ColumnType::Tensor(_)));
+            let new_is_vector = matches!(&ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
+
+            // Row rewrites maintain every currently registered vector index.
+            // Detach a vector/tensor index before converting its values to a
+            // scalar type, otherwise the first converted scalar is fed back
+            // into the old vector index. The enclosing ALTER transaction
+            // restores both catalog and physical index state if conversion
+            // of any row subsequently fails.
+            if old_was_vector && !new_is_vector {
+                engine
+                    .try_drop_vector_indexes_for_column(&stmt.table, &name)
+                    .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
+            }
+            rewrite_column_values_to_type(engine, &stmt.table, &name, &ty)?;
+            engine
+                .set_column_type(&stmt.table, &name, &ty)
+                .map_err(|err| ddl_storage_error("ALTER COLUMN TYPE", err))?;
             match ty {
                 ColumnType::Text => {
-                    if old_was_vector {
-                        engine
-                            .try_drop_vector_indexes_for_column(&stmt.table, &name)
-                            .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
-                    }
                     if let Err(e) = engine.add_fts_field(&stmt.table, name.clone()) {
                         return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                     }
@@ -386,11 +562,6 @@ pub(super) fn run_alter_table(
                 ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
                     engine
                         .try_rebuild_vector_index_for_column(&stmt.table, &name, dim)
-                        .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
-                }
-                _ if old_was_vector => {
-                    engine
-                        .try_drop_vector_indexes_for_column(&stmt.table, &name)
                         .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
                 }
                 _ => {}
@@ -404,7 +575,10 @@ pub(super) fn run_alter_table(
 }
 
 fn ensure_column_exists(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
-    if engine.table_has_column(table, column) {
+    if engine
+        .try_table_has_column(table, column)
+        .map_err(|err| ddl_storage_error("ALTER COLUMN", err))?
+    {
         Ok(())
     } else {
         Err(SQLError::Unsupported(format!(
@@ -419,8 +593,8 @@ fn ensure_existing_values_not_null(
     column: &str,
 ) -> Result<(), SQLError> {
     let mut null_rows = 0usize;
-    for doc_id in engine.table_doc_ids(table) {
-        let Some(doc) = engine.get_document(table, doc_id) else {
+    for doc_id in engine.table_doc_ids(table)? {
+        let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };
         if matches!(doc.get(column), None | Some(Value::Null)) {
@@ -442,67 +616,40 @@ pub(super) fn coerce_to_column_type(
     column: &str,
     value: Value,
 ) -> Result<Value, SQLError> {
-    let cols = match engine.describe_table(table) {
+    let cols = match engine
+        .try_describe_table(table)
+        .map_err(|err| ddl_storage_error("column type coercion", err))?
+    {
         Some(c) => c,
         None => return Ok(value),
     };
     let Some(def) = cols.iter().find(|c| c.name == column) else {
         return Ok(value);
     };
-    if matches!(&def.ty, ColumnType::Numeric { .. }) {
-        return convert_value_to_column_type(value, &def.ty);
-    }
-    if matches!(&def.ty, ColumnType::Integer) {
-        // Numeric literals arrive as Decimal from the parser while bind
-        // parameters arrive as Int; normalise so an integer column reads
-        // back one Value variant regardless of the write path.
-        return Ok(match value {
-            Value::Decimal(decimal) => decimal
-                .to_i64_trunc()
-                .map(Value::Int)
-                .unwrap_or(Value::Decimal(decimal)),
-            Value::Float(float) if float.is_finite() => Value::Int(float as i64),
-            other => other,
-        });
-    }
-    if matches!(&def.ty, ColumnType::Real) {
-        return match value {
-            Value::Float(_) => Ok(value),
-            Value::Int(i) => Ok(Value::Float(i as f64)),
-            Value::Decimal(d) => d
-                .to_f64()
-                .map(Value::Float)
-                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to real".into())),
-            Value::Str(s) => Ok(s.parse::<f64>().map(Value::Float).unwrap_or(Value::Str(s))),
-            other => Ok(other),
-        };
-    }
-    if matches!(&def.ty, ColumnType::Json | ColumnType::JsonB) {
-        return Ok(coerce_json_value(value));
-    }
-    if matches!(&def.ty, ColumnType::Bytea) {
-        return match value {
-            Value::Bytes(_) => Ok(value),
-            Value::Str(s) => Ok(Value::Bytes(s.into_bytes())),
-            other => Ok(other),
-        };
-    }
-    if matches!(&def.ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-        return convert_value_to_column_type(value, &def.ty);
-    }
-    if is_temporal_column_type(&def.ty) {
-        return convert_value_to_column_type(value, &def.ty);
-    }
-    Ok(value)
+    convert_value_to_column_type(value, &def.ty)
 }
 
-fn coerce_json_value(value: Value) -> Value {
+fn coerce_json_value(value: Value) -> Result<Value, SQLError> {
     match value {
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(&s)
             .map(json_to_core_value)
-            .unwrap_or(Value::Str(s)),
-        other => other,
+            .map_err(|error| {
+                SQLError::TypeMismatch(format!("cannot cast string to JSON: {error}"))
+            }),
+        other => Ok(other),
     }
+}
+
+fn float_to_integer(value: f64) -> Result<i64, SQLError> {
+    // `i64::MAX as f64` rounds to 2^63, which itself is outside the range.
+    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
+    if !value.is_finite() || !(I64_LOWER_INCLUSIVE..I64_UPPER_EXCLUSIVE).contains(&value) {
+        return Err(SQLError::TypeMismatch(format!(
+            "cannot cast {value:?} to integer: value is outside BIGINT range"
+        )));
+    }
+    Ok(value as i64)
 }
 
 fn rewrite_column_values_to_type(
@@ -511,8 +658,8 @@ fn rewrite_column_values_to_type(
     column: &str,
     ty: &ColumnType,
 ) -> Result<(), SQLError> {
-    for doc_id in engine.table_doc_ids(table) {
-        let Some(doc) = engine.get_document(table, doc_id) else {
+    for doc_id in engine.table_doc_ids(table)? {
+        let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };
         let Some(value) = doc.get(column).cloned() else {
@@ -522,22 +669,25 @@ fn rewrite_column_values_to_type(
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), converted.clone());
         let mut vectors: RowUpdateVectors = BTreeMap::new();
-        if let Ok(values) = index_vectors_for_type(&converted, ty) {
-            vectors.insert(column.to_string(), values);
+        if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+            vectors.insert(column.to_string(), index_vectors_for_type(&converted, ty)?);
         }
         engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
     Ok(())
 }
 
-fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
+pub(crate) fn convert_value_to_column_type(
+    value: Value,
+    ty: &ColumnType,
+) -> Result<Value, SQLError> {
     if matches!(value, Value::Null) {
         return Ok(Value::Null);
     }
     match ty {
         ColumnType::Integer => match value {
             Value::Int(_) => Ok(value),
-            Value::Float(f) => Ok(Value::Int(f as i64)),
+            Value::Float(f) => float_to_integer(f).map(Value::Int),
             Value::Decimal(d) => d
                 .to_i64_trunc()
                 .map(Value::Int)
@@ -549,6 +699,15 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
                 .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to integer: {e}"))),
             other => Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to integer"
+            ))),
+        },
+        ColumnType::Boolean => match value {
+            Value::Bool(_) => Ok(value),
+            Value::Str(text) => parse_boolean_text(&text)
+                .map(Value::Bool)
+                .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast `{text}` to boolean"))),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to boolean"
             ))),
         },
         ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
@@ -602,12 +761,30 @@ fn convert_value_to_column_type(value: Value, ty: &ColumnType) -> Result<Value, 
             }
             Ok(Value::Decimal(rounded))
         }
-        ColumnType::Json | ColumnType::JsonB => Ok(coerce_json_value(value)),
+        ColumnType::Json | ColumnType::JsonB => coerce_json_value(value),
         ColumnType::Bytea => Ok(match value {
             Value::Bytes(_) => value,
             Value::Str(s) => Value::Bytes(s.into_bytes()),
             other => Value::Bytes(value_to_text(&other).into_bytes()),
         }),
+        ColumnType::Array(element_type) => {
+            let items = match value {
+                Value::List(items) => items,
+                Value::Str(text) => uqa_sql::expr::parse_pg_array_literal(&text)?,
+                other => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "cannot cast {other:?} to {}[]",
+                        column_type_name(element_type)
+                    )))
+                }
+            };
+            let converted = items
+                .into_iter()
+                .map(|item| convert_value_to_column_type(item, element_type))
+                .collect::<Result<Vec<_>, _>>()?;
+            uqa_sql::expr::array_dimensions(&converted)?;
+            Ok(Value::List(converted))
+        }
         ColumnType::Date
         | ColumnType::Time
         | ColumnType::TimeTz
@@ -639,8 +816,12 @@ fn vector_to_value(vector: Vec<f32>) -> Value {
     )
 }
 
-pub(super) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result<(), SQLError> {
-    let expected = expected as usize;
+pub(crate) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result<(), SQLError> {
+    let expected = usize::try_from(expected).map_err(|_| {
+        SQLError::TypeMismatch(format!(
+            "declared vector dimension {expected} exceeds the platform usize range"
+        ))
+    })?;
     if actual == expected {
         Ok(())
     } else {
@@ -648,26 +829,17 @@ pub(super) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result
     }
 }
 
-fn is_temporal_column_type(ty: &ColumnType) -> bool {
-    matches!(
-        ty,
-        ColumnType::Date
-            | ColumnType::Time
-            | ColumnType::TimeTz
-            | ColumnType::Timestamp
-            | ColumnType::TimestampTz
-    )
-}
-
 pub(super) fn column_type_name(ty: &ColumnType) -> &'static str {
     match ty {
         ColumnType::Integer => "integer",
+        ColumnType::Boolean => "boolean",
         ColumnType::Text => "text",
         ColumnType::Real => "real",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
+        ColumnType::Array(_) => "array",
         ColumnType::Date => "date",
         ColumnType::Time => "time",
         ColumnType::TimeTz => "time with time zone",
@@ -675,6 +847,14 @@ pub(super) fn column_type_name(ty: &ColumnType) -> &'static str {
         ColumnType::TimestampTz => "timestamp with time zone",
         ColumnType::Vector(_) => "vector",
         ColumnType::Tensor(_) => "tensor",
+    }
+}
+
+fn parse_boolean_text(text: &str) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "true" | "t" | "yes" | "y" | "on" | "1" => Some(true),
+        "false" | "f" | "no" | "n" | "off" | "0" => Some(false),
+        _ => None,
     }
 }
 
@@ -785,8 +965,19 @@ pub(super) fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
-        Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        Value::Float(f) => serde_json::Number::from_f64(*f).map_or_else(
+            || {
+                let label = if f.is_nan() {
+                    "NaN"
+                } else if f.is_sign_positive() {
+                    "Infinity"
+                } else {
+                    "-Infinity"
+                };
+                serde_json::Value::String(label.to_string())
+            },
+            serde_json::Value::Number,
+        ),
         Value::Decimal(d) => d
             .to_f64()
             .and_then(serde_json::Number::from_f64)
@@ -815,9 +1006,7 @@ pub(super) fn json_table_value_to_text(value: &serde_json::Value) -> Value {
         serde_json::Value::String(s) => Value::Str(s.clone()),
         serde_json::Value::Bool(b) => Value::Str(b.to_string()),
         serde_json::Value::Number(n) => Value::Str(n.to_string()),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            Value::Str(serde_json::to_string(value).unwrap_or_default())
-        }
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => Value::Str(value.to_string()),
     }
 }
 
@@ -841,7 +1030,7 @@ fn backfill_added_column(
     default_expr: Option<&uqa_sql::ast::Expr>,
     not_null: bool,
 ) -> Result<(), SQLError> {
-    let doc_ids = engine.table_doc_ids(table);
+    let doc_ids = engine.table_doc_ids(table)?;
     if doc_ids.is_empty() {
         return Ok(());
     }
@@ -857,9 +1046,15 @@ fn backfill_added_column(
         Value::Null
     };
     let default_value = coerce_to_column_type(engine, table, column, default_value)?;
-    let vector_value: Option<Vec<Vec<f32>>> = engine
+    let vector_value: Option<Vec<Vec<f32>>> = match engine
         .column_type(table, column)
-        .and_then(|ty| index_vectors_for_type(&default_value, &ty).ok());
+        .map_err(|err| ddl_storage_error("ALTER TABLE ADD COLUMN", err))?
+    {
+        Some(ty) if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) => {
+            Some(index_vectors_for_type(&default_value, &ty)?)
+        }
+        Some(_) | None => None,
+    };
     for doc_id in doc_ids {
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), default_value.clone());
@@ -876,7 +1071,14 @@ fn backfill_added_column(
 // -------------------------------------------------------------------------
 
 pub(super) fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLError> {
-    if engine.has_table(&c.name) {
+    engine.transaction(move |engine| run_create_table_inner(engine, c))
+}
+
+fn run_create_table_inner(engine: &Engine, c: CreateTable) -> Result<SQLResult, SQLError> {
+    if engine
+        .try_has_table(&c.name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE", err))?
+    {
         if c.if_not_exists {
             return Ok(SQLResult::empty());
         }
@@ -894,37 +1096,53 @@ pub(super) fn run_create_table(engine: &Engine, c: CreateTable) -> Result<SQLRes
             _ => {}
         }
     }
-    engine.create_default_table(c.name.clone(), Vec::new());
+    engine
+        .create_default_table(c.name.clone(), Vec::new())
+        .map_err(|err| ddl_storage_error("CREATE TABLE", err))?;
     for (field, dim) in vector_fields {
-        engine.create_vector_field(&c.name, field, dim);
+        engine
+            .create_vector_field(&c.name, field, dim)
+            .map_err(|err| ddl_storage_error("CREATE TABLE vector field", err))?;
     }
     for col in &c.columns {
         engine
             .try_register_column(&c.name, col.clone())
             .map_err(|e| ddl_storage_error("CREATE TABLE column", e))?;
     }
-    engine.register_table_constraints(&c.name, c.checks.clone(), c.foreign_keys.clone());
+    engine
+        .register_table_constraints(
+            &c.name,
+            c.checks.clone(),
+            c.foreign_keys.clone(),
+            c.key_constraints.clone(),
+        )
+        .map_err(|err| ddl_storage_error("CREATE TABLE constraints", err))?;
     engine
         .try_persist_table_schema(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE", e))?;
     engine
         .refresh_value_indexes_for_table(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE btree indexes", e))?;
-    let _ = column_names(&c.columns);
     Ok(SQLResult::empty())
 }
 
-fn column_names(cols: &[SQLColumnDef]) -> Vec<String> {
-    cols.iter().map(|c| c.name.clone()).collect()
-}
-
 pub(super) fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLResult, SQLError> {
-    // CREATE INDEX is metadata-bearing now: `gin` registers the column
-    // as an FTS field with the analyzer specified in `WITH (analyzer = ...)`,
-    // `ivf` rebuilds the vector field with an IVF backend, `hnsw` is a
-    // compatibility alias for the same backend, and others are informational.
-    if let Some(name) = c.name.as_ref() {
-        if engine.has_catalog_index(name) {
+    // Every accepted access method has a matching physical implementation.
+    // Reject unknown methods before allocating a name or touching any table,
+    // index, analyzer, or catalog state.
+    let am = c.access_method.to_ascii_lowercase();
+    if !matches!(am.as_str(), "" | "btree" | "gin" | "ivf" | "hnsw") {
+        return Err(SQLError::Unsupported(format!(
+            "CREATE INDEX access method `{}` is not supported",
+            c.access_method
+        )));
+    }
+
+    let name = if let Some(name) = c.name.as_ref() {
+        if engine
+            .has_catalog_index(name)
+            .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
+        {
             if c.if_not_exists {
                 return Ok(SQLResult::empty());
             }
@@ -932,9 +1150,11 @@ pub(super) fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLRes
                 "Index `{name}` already exists"
             )));
         }
-    }
+        name.clone()
+    } else {
+        allocate_default_index_name(engine, &c.table, &c.columns)?
+    };
 
-    let am = c.access_method.to_ascii_lowercase();
     match am.as_str() {
         "gin" => {
             for col in &c.columns {
@@ -949,13 +1169,19 @@ pub(super) fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLRes
                 }
             }
         }
-        "" => {}
+        "" | "btree" => {}
         "ivf" | "hnsw" => {
             let params = parse_ivf_index_params(&c.options)?;
             for col in &c.columns {
-                match engine.column_type(&c.table, col) {
+                match engine
+                    .column_type(&c.table, col)
+                    .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
+                {
                     Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
-                        if !engine.rebuild_ivf_vector_field(&c.table, col.clone(), dim, params) {
+                        if !engine
+                            .rebuild_ivf_vector_field(&c.table, col.clone(), dim, params)
+                            .map_err(|err| ddl_storage_error("CREATE INDEX vector field", err))?
+                        {
                             return Err(SQLError::Unsupported(format!(
                                 "CREATE INDEX USING ivf: relation `{}` does not exist",
                                 c.table
@@ -976,24 +1202,73 @@ pub(super) fn run_create_index(engine: &Engine, c: CreateIndex) -> Result<SQLRes
                 }
             }
         }
-        _ => {}
+        _ => unreachable!("access method was validated above"),
     }
     // Persist the CREATE INDEX statement itself so reopen sees the
     // same set of registered indexes. The engine layer parses
     // `parameters_json` back into `(key, value)` pairs and re-runs
     // any access-method-specific side effects (e.g. add_fts_field
     // for `gin`) on restore.
-    if let Some(name) = c.name.as_ref() {
-        let catalog_index_type = match am.as_str() {
-            "" => "btree",
-            "hnsw" => "ivf",
-            other => other,
-        };
-        engine
-            .try_register_catalog_index(name, catalog_index_type, &c.table, &c.columns, &c.options)
-            .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
-    }
+    let catalog_index_type = match am.as_str() {
+        "" => "btree",
+        "hnsw" => "ivf",
+        other => other,
+    };
+    engine
+        .try_register_catalog_index(&name, catalog_index_type, &c.table, &c.columns, &c.options)
+        .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
+}
+
+fn allocate_default_index_name(
+    engine: &Engine,
+    table: &str,
+    columns: &[String],
+) -> Result<String, SQLError> {
+    fn component(raw: &str) -> String {
+        let mut out = String::with_capacity(raw.len());
+        let mut previous_was_separator = false;
+        for ch in raw.chars() {
+            if ch.is_alphanumeric() || ch == '_' {
+                out.extend(ch.to_lowercase());
+                previous_was_separator = false;
+            } else if !previous_was_separator && !out.is_empty() {
+                out.push('_');
+                previous_was_separator = true;
+            }
+        }
+        while out.ends_with('_') {
+            out.pop();
+        }
+        out
+    }
+
+    let mut parts = table
+        .split('.')
+        .map(component)
+        .chain(columns.iter().map(|column| component(column)))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push("index".to_string());
+    }
+    let base = format!("{}_idx", parts.join("_"));
+    let existing = engine
+        .list_catalog_indexes()
+        .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
+        .into_iter()
+        .map(|row| row.name)
+        .collect::<std::collections::BTreeSet<_>>();
+    if !existing.contains(&base) {
+        return Ok(base);
+    }
+    for suffix in 1_u64.. {
+        let candidate = format!("{base}_{suffix}");
+        if !existing.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    unreachable!("u64 index-name suffix space is non-empty")
 }
 
 fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IVFIndexParams, SQLError> {
@@ -1029,4 +1304,33 @@ fn parse_positive_usize_option(key: &str, value: &str) -> Result<usize, SQLError
         )));
     }
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{coerce_json_value, float_to_integer};
+    use uqa_core::Value;
+
+    #[test]
+    fn integer_coercion_rejects_non_finite_and_out_of_range_floats() {
+        assert_eq!(float_to_integer(12.9).unwrap(), 12);
+        for value in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            9_223_372_036_854_775_808.0,
+            -9_223_372_036_854_777_856.0,
+        ] {
+            assert!(float_to_integer(value).is_err(), "accepted {value:?}");
+        }
+    }
+
+    #[test]
+    fn json_coercion_rejects_invalid_json_strings() {
+        assert!(coerce_json_value(Value::Str("{invalid".into())).is_err());
+        assert!(matches!(
+            coerce_json_value(Value::Str("{\"ok\":true}".into())).unwrap(),
+            Value::Map(_)
+        ));
+    }
 }

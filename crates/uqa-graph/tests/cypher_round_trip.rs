@@ -113,7 +113,7 @@ fn cypher_round_trip_carries_extra_fields() {
     assert_eq!(names, vec!["p42".to_string()]);
     // Sanity: there are exactly N vertices in the graph after the writer
     // ran.
-    let count = store.vertex_ids_in_graph("g").len();
+    let count = store.vertex_ids_in_graph("g").unwrap().len();
     assert_eq!(count, N as usize);
     let _ = BTreeMap::<i64, i64>::new(); // ensure unused-import-free
 }

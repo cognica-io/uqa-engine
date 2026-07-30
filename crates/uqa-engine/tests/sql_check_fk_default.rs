@@ -33,7 +33,10 @@ fn check_constraint_accepts_valid_row() {
     .unwrap();
     eng.sql("INSERT INTO accounts (id, balance) VALUES (1, 100)", &[])
         .unwrap();
-    let row = eng.get_document("accounts", 1).unwrap();
+    let row = eng
+        .get_document("accounts", 1)
+        .unwrap()
+        .expect("account row");
     assert_eq!(row.get("balance"), Some(&Value::Int(100)));
 }
 
@@ -69,7 +72,7 @@ fn foreign_key_accepts_existing_parent() {
     .unwrap();
     eng.sql("INSERT INTO child (id, parent_id) VALUES (10, 1)", &[])
         .unwrap();
-    let row = eng.get_document("child", 10).unwrap();
+    let row = eng.get_document("child", 10).unwrap().expect("child row");
     assert_eq!(row.get("parent_id"), Some(&Value::Int(1)));
 }
 
@@ -100,7 +103,7 @@ fn default_expression_fills_missing_column() {
     )
     .unwrap();
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
-    let row = eng.get_document("t", 1).unwrap();
+    let row = eng.get_document("t", 1).unwrap().expect("defaulted row");
     assert_eq!(row.get("status"), Some(&Value::Str("pending".into())));
 }
 

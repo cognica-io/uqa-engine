@@ -19,11 +19,11 @@ fn corpus() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
     g.create_graph("g");
     for v in 1..=4 {
-        g.add_vertex(Vertex::new(v, "Person"), "g");
+        g.add_vertex(Vertex::new(v, "Person"), "g").unwrap();
     }
-    g.add_edge(Edge::new(10, 1, 2, "knows"), "g");
-    g.add_edge(Edge::new(11, 2, 3, "knows"), "g");
-    g.add_edge(Edge::new(12, 1, 4, "likes"), "g");
+    g.add_edge(Edge::new(10, 1, 2, "knows"), "g").unwrap();
+    g.add_edge(Edge::new(11, 2, 3, "knows"), "g").unwrap();
+    g.add_edge(Edge::new(12, 1, 4, "likes"), "g").unwrap();
     g
 }
 
@@ -33,7 +33,8 @@ fn graph_embedding_writes_l2_normalized_vector() {
     let result = GraphEmbedding::new("g")
         .dimensions(8)
         .k_layers(2)
-        .execute(&g);
+        .execute(&g)
+        .unwrap();
     assert_eq!(result.inner().len(), 4);
     for entry in result.inner().entries() {
         let v = entry
@@ -60,9 +61,23 @@ fn graph_embedding_writes_l2_normalized_vector() {
 }
 
 #[test]
+fn graph_embedding_rejects_unbounded_dimensions_and_layers() {
+    let g = corpus();
+    assert!(GraphEmbedding::new("g")
+        .dimensions(usize::MAX)
+        .execute(&g)
+        .is_err());
+    assert!(GraphEmbedding::new("g").dimensions(0).execute(&g).is_err());
+    assert!(GraphEmbedding::new("g")
+        .k_layers(u32::MAX)
+        .execute(&g)
+        .is_err());
+}
+
+#[test]
 fn label_index_counts_and_groups_edges() {
     let g = corpus();
-    let idx = LabelIndex::build(&g, "g");
+    let idx = LabelIndex::build(&g, "g").unwrap();
     let mut labels = idx.labels();
     labels.sort();
     assert_eq!(labels, vec!["knows".to_string(), "likes".to_string()]);
@@ -82,7 +97,8 @@ fn path_index_reaches_pairs_per_label_sequence() {
         &g,
         "g",
         &[vec!["knows".into()], vec!["knows".into(), "knows".into()]],
-    );
+    )
+    .unwrap();
     assert!(idx.has_path(&["knows".into()]));
     let one_hop = idx.lookup(&["knows".into()]).unwrap();
     assert!(one_hop.contains(&(1, 2)));
@@ -100,19 +116,19 @@ fn incremental_matcher_drops_invalidated_and_picks_up_new() {
         .add_edge(EdgePattern::new("a", "b").with_label("knows"));
 
     let mut matcher = IncrementalPatternMatcher::new(pattern, "g");
-    matcher.seed(&g);
+    matcher.seed(&g).unwrap();
     let initial = matcher.matches().clone();
     // Two `knows` pairs: {1,2} and {2,3}.
     assert_eq!(initial.len(), 2);
 
     // Add a new vertex 5 and edge 4 -> 5 (knows). Only the new pair
     // should be added; existing matches survive.
-    g.add_vertex(Vertex::new(5, "Person"), "g");
-    g.add_edge(Edge::new(20, 4, 5, "knows"), "g");
+    g.add_vertex(Vertex::new(5, "Person"), "g").unwrap();
+    g.add_edge(Edge::new(20, 4, 5, "knows"), "g").unwrap();
     let mut delta = GraphDelta::new();
     delta.add_vertex(Vertex::new(5, "Person"));
     delta.add_edge(Edge::new(20, 4, 5, "knows"));
-    let updated = matcher.update(&g, &delta).clone();
+    let updated = matcher.update(&g, &delta).unwrap().clone();
     assert_eq!(updated.len(), 3);
     let pair_45 = updated.iter().find(|m| m.contains(&4) && m.contains(&5));
     assert!(pair_45.is_some(), "{updated:?} missing 4-5 match");
@@ -123,4 +139,16 @@ fn incremental_matcher_drops_invalidated_and_picks_up_new() {
         .filter(|m| m.contains(&1) && m.contains(&2))
         .collect();
     assert_eq!(pair_12.len(), 1);
+
+    // A remove-by-id delta carries no endpoint snapshot. The matcher must
+    // perform an exact full refresh after the edge has been deleted instead
+    // of retaining the stale 4 -> 5 match.
+    g.remove_edge(20, "g").unwrap();
+    let mut removal = GraphDelta::new();
+    removal.remove_edge(20);
+    let refreshed = matcher.update(&g, &removal).unwrap();
+    assert_eq!(refreshed.len(), 2);
+    assert!(!refreshed
+        .iter()
+        .any(|vertices| vertices.contains(&4) && vertices.contains(&5)));
 }

@@ -42,7 +42,10 @@ fn deep_model_round_trips_through_sqlite_catalog() {
         engine
             .save_model("clf", &linear_model())
             .expect("save model");
-        engine.deep_predict("clf").expect("predict from initial")
+        engine
+            .deep_predict("clf")
+            .expect("read initial prediction")
+            .expect("predict from initial")
     };
     assert!(!initial_predictions.is_empty());
 
@@ -52,9 +55,13 @@ fn deep_model_round_trips_through_sqlite_catalog() {
         let engine = Engine::open(&path).expect("reopen engine");
         let model = engine
             .load_model("clf")
+            .expect("read model catalog")
             .expect("model rehydrated from catalog");
         assert_eq!(model.layers.len(), 4);
-        let reopened_predictions = engine.deep_predict("clf").expect("predict after reopen");
+        let reopened_predictions = engine
+            .deep_predict("clf")
+            .expect("read reopened prediction")
+            .expect("predict after reopen");
         assert_eq!(initial_predictions.len(), reopened_predictions.len());
         for ((a_id, a_score), (b_id, b_score)) in
             initial_predictions.iter().zip(reopened_predictions.iter())
@@ -70,10 +77,13 @@ fn deep_model_round_trips_through_sqlite_catalog() {
     // drop_model should remove from both cache and the catalog.
     {
         let engine = Engine::open(&path).expect("reopen for drop");
-        engine.drop_model("clf");
+        engine.drop_model("clf").unwrap();
     }
     {
         let engine = Engine::open(&path).expect("reopen after drop");
-        assert!(engine.load_model("clf").is_none(), "model survived drop");
+        assert!(
+            engine.load_model("clf").unwrap().is_none(),
+            "model survived drop"
+        );
     }
 }

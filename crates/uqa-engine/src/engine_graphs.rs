@@ -4,217 +4,254 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{BTreeMap, Engine, Value, GRAPH_LABELS_METADATA_PREFIX};
+use super::{
+    BTreeMap, EdgeRow, Engine, GraphSnapshot, GraphVertexRow, StorageBackendResult, Value,
+};
+
+fn graph_store_error(error: impl std::fmt::Display) -> super::StorageBackendError {
+    super::StorageBackendError::Other(error.to_string())
+}
 
 impl Engine {
-    pub fn create_graph(&self, name: impl Into<String>) {
+    pub fn create_graph(&self, name: impl Into<String>) -> StorageBackendResult<bool> {
         let name = name.into();
+        self.with_implicit_storage_transaction(|engine| engine.create_graph_inner(&name))
+    }
+
+    fn create_graph_inner(&self, name: &str) -> StorageBackendResult<bool> {
+        use uqa_graph::GraphStore as _;
+        self.synchronize_catalog_registries()?;
         let mut graphs = self.graphs.write();
-        graphs.entry(name.clone()).or_default();
-        drop(graphs);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_named_graph(&name);
+        if graphs.contains_key(name) {
+            return Ok(false);
         }
+        let mut candidate = uqa_graph::MemoryGraphStore::new();
+        candidate.create_graph(name);
+        self.persist_graph_candidate(name, &candidate)?;
+        graphs.insert(name.to_string(), candidate);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(true)
     }
 
     /// Drop a named graph. No-op when the graph is missing.
-    pub fn drop_graph(&self, name: &str) {
-        self.graphs.write().remove(name);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.drop_named_graph(name);
-            // Vertex / edge rows survive in the global tables until
-            // every graph has detached them; sweep the orphans now so
-            // the catalog stays in sync with the in-memory view.
-            let _ = catalog.purge_orphan_graph_entities();
-            // Clear the persisted AGE label registry so a re-created
-            // graph starts from label id 3 / sequence 1 again.
-            let _ = catalog.set_metadata(&format!("{GRAPH_LABELS_METADATA_PREFIX}{name}"), "");
+    pub fn drop_graph(&self, name: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| engine.drop_graph_inner(name))
+    }
+
+    fn drop_graph_inner(&self, name: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.graphs.write();
+        if !graphs.contains_key(name) {
+            return Ok(false);
         }
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.drop_named_graph_data(name)?;
+        }
+        graphs.remove(name);
+        self.path_indexes
+            .write()
+            .retain(|key, _| !key.starts_with(&format!("{name}::")));
+        self.note_catalog_registry_changed();
+        Ok(true)
     }
 
     /// Sorted list of every named graph registered on this engine.
     /// Mirrors the canonical UQA implementation's `Engine.list_graphs`.
-    pub fn list_graphs(&self) -> Vec<String> {
-        self.graphs.read().keys().cloned().collect()
+    pub fn list_graphs(&self) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        Ok(self.graphs.read().keys().cloned().collect())
     }
 
     /// Return `true` when a graph with `name` is registered.
     /// Mirrors the canonical UQA implementation's `Engine.has_graph`.
-    pub fn has_graph(&self, name: &str) -> bool {
-        self.graphs.read().contains_key(name)
+    pub fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
+        Ok(self.graphs.read().contains_key(name))
     }
 
     /// Insert a vertex into a named graph. Auto-creates the graph if
     /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_vertex`.
-    pub fn add_graph_vertex(&self, vertex: uqa_core::Vertex, graph: &str) {
+    pub fn add_graph_vertex(
+        &self,
+        vertex: uqa_core::Vertex,
+        graph: &str,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(move |engine| {
+            engine.add_graph_vertex_inner(vertex, graph)
+        })
+    }
+
+    fn add_graph_vertex_inner(
+        &self,
+        vertex: uqa_core::Vertex,
+        graph: &str,
+    ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
-        let vertex_id = vertex.vertex_id;
-        // Snapshot the persistable shape (label + properties JSON)
-        // before moving the value into the in-memory store so the
-        // catalog write below sees the exact same data.
-        let persist = self.catalog.as_ref().and_then(|_| {
-            serde_json::to_string(&vertex.properties)
-                .ok()
-                .map(|p| (vertex.label.clone(), p))
-        });
-        {
-            let mut graphs = self.graphs.write();
-            let store = graphs.entry(graph.to_string()).or_default();
-            if !store.has_graph(graph) {
-                store.create_graph(graph);
-            }
-            store.add_vertex(vertex, graph);
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.graphs.write();
+        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        if !candidate.has_graph(graph) {
+            candidate.create_graph(graph);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_named_graph(graph);
-            if let Some((label, props_json)) = persist {
-                let _ = catalog.save_vertex(vertex_id, &label, &props_json);
-                let _ = catalog.save_graph_membership("vertex", vertex_id, graph);
-            }
-        }
+        candidate
+            .add_vertex(vertex, graph)
+            .map_err(graph_store_error)?;
+        self.persist_graph_candidate(graph, &candidate)?;
+        graphs.insert(graph.to_string(), candidate);
+        self.invalidate_graph_path_indexes(graph);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(())
     }
 
     /// Insert an edge into a named graph. Auto-creates the graph if
     /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_edge`.
-    pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) {
+    pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(move |engine| {
+            engine.add_graph_edge_inner(edge, graph)
+        })
+    }
+
+    fn add_graph_edge_inner(&self, edge: uqa_core::Edge, graph: &str) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
-        let edge_id = edge.edge_id;
-        let edge_source = edge.source_id;
-        let edge_target = edge.target_id;
-        let persist = self.catalog.as_ref().and_then(|_| {
-            serde_json::to_string(&edge.properties)
-                .ok()
-                .map(|p| (edge.label.clone(), p))
-        });
-        {
-            let mut graphs = self.graphs.write();
-            let store = graphs.entry(graph.to_string()).or_default();
-            if !store.has_graph(graph) {
-                store.create_graph(graph);
-            }
-            store.add_edge(edge, graph);
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.graphs.write();
+        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        if !candidate.has_graph(graph) {
+            candidate.create_graph(graph);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_named_graph(graph);
-            if let Some((label, props_json)) = persist {
-                let _ = catalog.save_edge(edge_id, edge_source, edge_target, &label, &props_json);
-                let _ = catalog.save_graph_membership("edge", edge_id, graph);
-            }
-        }
+        candidate.add_edge(edge, graph).map_err(graph_store_error)?;
+        self.persist_graph_candidate(graph, &candidate)?;
+        graphs.insert(graph.to_string(), candidate);
+        self.invalidate_graph_path_indexes(graph);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(())
     }
 
     /// Apply a [`uqa_graph::GraphDelta`] to a named graph as a single
     /// atomic batch of `add/remove vertex/edge` ops. Mirrors the canonical UQA implementation's
     /// `Engine.apply_graph_delta`.
-    pub fn apply_graph_delta(&self, graph: &str, delta: &uqa_graph::GraphDelta) {
+    pub fn apply_graph_delta(
+        &self,
+        graph: &str,
+        delta: &uqa_graph::GraphDelta,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.apply_graph_delta_inner(graph, delta)
+        })
+    }
+
+    fn apply_graph_delta_inner(
+        &self,
+        graph: &str,
+        delta: &uqa_graph::GraphDelta,
+    ) -> StorageBackendResult<()> {
         use uqa_graph::DeltaOp;
         use uqa_graph::GraphStore as _;
+        self.synchronize_catalog_registries()?;
         let mut graphs = self.graphs.write();
-        let store = graphs.entry(graph.to_string()).or_default();
-        if !store.has_graph(graph) {
-            store.create_graph(graph);
+        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        if !candidate.has_graph(graph) {
+            candidate.create_graph(graph);
         }
         for op in delta.ops() {
             match op {
-                DeltaOp::AddVertex(v) => store.add_vertex(v.clone(), graph),
-                DeltaOp::RemoveVertex(id) => store.remove_vertex(*id, graph),
-                DeltaOp::AddEdge(e) => store.add_edge(e.clone(), graph),
-                DeltaOp::RemoveEdge(id) => store.remove_edge(*id, graph),
+                DeltaOp::AddVertex(v) => candidate.add_vertex(v.clone(), graph),
+                DeltaOp::RemoveVertex(id) => candidate.remove_vertex(*id, graph),
+                DeltaOp::AddEdge(e) => candidate.add_edge(e.clone(), graph),
+                DeltaOp::RemoveEdge(id) => candidate.remove_edge(*id, graph),
             }
+            .map_err(graph_store_error)?;
         }
+        self.persist_graph_candidate(graph, &candidate)?;
+        graphs.insert(graph.to_string(), candidate);
+        self.invalidate_graph_path_indexes(graph);
         drop(graphs);
-        if let Some(catalog) = self.catalog.as_ref() {
-            let _ = catalog.save_named_graph(graph);
-            let mut needs_purge = false;
-            for op in delta.ops() {
-                match op {
-                    DeltaOp::AddVertex(v) => {
-                        if let Ok(props_json) = serde_json::to_string(&v.properties) {
-                            let _ = catalog.save_vertex(v.vertex_id, &v.label, &props_json);
-                            let _ = catalog.save_graph_membership("vertex", v.vertex_id, graph);
-                        }
-                    }
-                    DeltaOp::RemoveVertex(id) => {
-                        let _ = catalog.delete_graph_membership("vertex", *id, graph);
-                        needs_purge = true;
-                    }
-                    DeltaOp::AddEdge(e) => {
-                        if let Ok(props_json) = serde_json::to_string(&e.properties) {
-                            let _ = catalog.save_edge(
-                                e.edge_id,
-                                e.source_id,
-                                e.target_id,
-                                &e.label,
-                                &props_json,
-                            );
-                            let _ = catalog.save_graph_membership("edge", e.edge_id, graph);
-                        }
-                    }
-                    DeltaOp::RemoveEdge(id) => {
-                        let _ = catalog.delete_graph_membership("edge", *id, graph);
-                        needs_purge = true;
-                    }
-                }
-            }
-            if needs_purge {
-                // Vertex / edge rows survive only while at least one
-                // graph still references them via `_graph_membership`.
-                let _ = catalog.purge_orphan_graph_entities();
-            }
-        }
-        // Invalidate any cached path indexes for this graph: a path
-        // index is built against a snapshot, so the safe move is to
-        // drop them and let the caller rebuild on demand.
-        self.path_indexes
-            .write()
-            .retain(|key, _| !key.starts_with(&format!("{graph}::")));
+        self.note_catalog_registry_changed();
+        Ok(())
     }
 
     /// Build (or replace) a path index for `graph` keyed by `name`.
     /// `label_sequences` is the set of label sequences to materialise;
     /// each sequence becomes a hash-friendly direct lookup for RPQ.
     /// Mirrors the canonical UQA implementation's `Engine.build_path_index`.
-    pub fn build_path_index(&self, name: &str, graph: &str, label_sequences: &[Vec<String>]) {
+    pub fn build_path_index(
+        &self,
+        name: &str,
+        graph: &str,
+        label_sequences: &[Vec<String>],
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.build_path_index_inner(name, graph, label_sequences)
+        })
+    }
+
+    fn build_path_index_inner(
+        &self,
+        name: &str,
+        graph: &str,
+        label_sequences: &[Vec<String>],
+    ) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
         let idx = {
             let graphs = self.graphs.read();
             let Some(store) = graphs.get(graph) else {
-                return;
+                return Ok(false);
             };
-            uqa_graph::PathIndex::build(store, graph, label_sequences)
+            uqa_graph::PathIndex::build(store, graph, label_sequences).map_err(graph_store_error)?
         };
-        self.path_indexes.write().insert(key.clone(), idx);
         if let Some(catalog) = self.catalog.as_ref() {
-            let seq_json = serde_json::to_string(label_sequences).unwrap_or_else(|_| "[]".into());
-            let _ = catalog.save_path_index(&key, &seq_json);
+            let seq_json = serde_json::to_string(label_sequences)?;
+            catalog.save_path_index(&key, &seq_json)?;
         }
+        self.path_indexes.write().insert(key, idx);
+        self.note_catalog_registry_changed();
+        Ok(true)
     }
 
     /// Drop a path index by `(graph, name)`. Returns `true` when an
     /// index was removed. Mirrors the canonical UQA implementation's `Engine.drop_path_index`.
-    pub fn drop_path_index(&self, name: &str, graph: &str) -> bool {
+    pub fn drop_path_index(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| engine.drop_path_index_inner(name, graph))
+    }
+
+    fn drop_path_index_inner(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
+        self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
+        if !self.path_indexes.read().contains_key(&key) {
+            return Ok(false);
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.drop_path_index(&key)?;
+        }
         let removed = self.path_indexes.write().remove(&key).is_some();
         if removed {
-            if let Some(catalog) = self.catalog.as_ref() {
-                let _ = catalog.drop_path_index(&key);
-            }
+            self.note_catalog_registry_changed();
         }
-        removed
+        Ok(removed)
     }
 
     /// Look up a path index by `(graph, name)`. Returns a clone so the
     /// caller is not tied to the engine's lock. Mirrors the canonical UQA implementation's
     /// `Engine.get_path_index`.
-    pub fn get_path_index(&self, name: &str, graph: &str) -> Option<uqa_graph::PathIndex> {
+    pub fn get_path_index(
+        &self,
+        name: &str,
+        graph: &str,
+    ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
+        self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
-        self.path_indexes.read().get(&key).cloned()
+        Ok(self.path_indexes.read().get(&key).cloned())
     }
 
     /// Sorted list of registered path index keys. Each key has the
     /// shape `<graph>::<name>` so the caller can split as needed.
-    pub fn list_path_indexes(&self) -> Vec<String> {
-        self.path_indexes.read().keys().cloned().collect()
+    pub fn list_path_indexes(&self) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        Ok(self.path_indexes.read().keys().cloned().collect())
     }
 
     /// Read-only borrow of a named graph for ad-hoc query construction
@@ -224,25 +261,39 @@ impl Engine {
         &self,
         name: &str,
         f: impl FnOnce(&uqa_graph::MemoryGraphStore) -> R,
-    ) -> Option<R> {
+    ) -> StorageBackendResult<Option<R>> {
+        self.synchronize_catalog_registries()?;
         let graphs = self.graphs.read();
-        graphs.get(name).map(f)
+        Ok(graphs.get(name).map(f))
     }
 
     /// Mutable borrow of a named graph for vertex / edge insertion.
     pub fn graph_with_mut<R>(
         &self,
         name: &str,
-        f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> R,
-    ) -> Option<R> {
-        let result = {
-            let mut graphs = self.graphs.write();
-            graphs.get_mut(name).map(f)
+        f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> uqa_graph::GraphStoreResult<R>,
+    ) -> StorageBackendResult<Option<R>> {
+        self.with_implicit_storage_transaction(move |engine| engine.graph_with_mut_inner(name, f))
+    }
+
+    fn graph_with_mut_inner<R>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> uqa_graph::GraphStoreResult<R>,
+    ) -> StorageBackendResult<Option<R>> {
+        self.synchronize_catalog_registries()?;
+        let mut graphs = self.graphs.write();
+        let Some(store) = graphs.get(name) else {
+            return Ok(None);
         };
-        if result.is_some() {
-            self.resync_graph_to_catalog(name);
-        }
-        result
+        let mut candidate = store.clone();
+        let result = f(&mut candidate).map_err(graph_store_error)?;
+        self.persist_graph_candidate(name, &candidate)?;
+        graphs.insert(name.to_string(), candidate);
+        self.invalidate_graph_path_indexes(name);
+        drop(graphs);
+        self.note_catalog_registry_changed();
+        Ok(Some(result))
     }
 
     /// Run a Cypher query against a named graph and return the
@@ -260,68 +311,115 @@ impl Engine {
         params: BTreeMap<String, Value>,
     ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
     {
+        self.with_implicit_mapped_transaction(
+            move |engine| engine.run_cypher_inner(graph, query, params),
+            uqa_graph::cypher::CypherError::Storage,
+        )
+    }
+
+    fn run_cypher_inner(
+        &self,
+        graph: &str,
+        query: &str,
+        params: BTreeMap<String, Value>,
+    ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
+    {
         use uqa_graph::cypher::{parse_cypher, CypherWriter};
         use uqa_graph::GraphStore as _;
+        self.synchronize_catalog_registries()
+            .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
         let q = parse_cypher(query)?;
+        let mut graphs = self.graphs.write();
+        let existed = graphs.contains_key(graph);
+        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        if !candidate.has_graph(graph) {
+            candidate.create_graph(graph);
+        }
+        let mutates = q.clauses.iter().any(|clause| {
+            matches!(
+                clause,
+                uqa_graph::cypher::CypherClause::Create(_)
+                    | uqa_graph::cypher::CypherClause::Merge(_)
+                    | uqa_graph::cypher::CypherClause::Set(_)
+                    | uqa_graph::cypher::CypherClause::Delete(_)
+            )
+        });
         let result = {
-            let mut graphs = self.graphs.write();
-            let store = graphs.entry(graph.to_string()).or_default();
             // Ensure the named partition exists inside the store as
             // well. The outer map only owns the store; create_graph
             // populates the store's own partition registry that
             // mutations key off of.
-            if !store.has_graph(graph) {
-                store.create_graph(graph);
-            }
-            let mut writer = CypherWriter::new(store, graph).with_params(params);
+            let mut writer = CypherWriter::new(&mut candidate, graph).with_params(params);
             writer.execute(&q)?
         };
-        self.resync_graph_to_catalog(graph);
+        if mutates || !existed {
+            self.persist_graph_candidate(graph, &candidate)
+                .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
+            graphs.insert(graph.to_string(), candidate);
+            self.invalidate_graph_path_indexes(graph);
+            drop(graphs);
+            self.note_catalog_registry_changed();
+        }
         Ok(result)
     }
 
-    /// Mirror the in-memory graph back to the catalog after a write.
-    /// Cypher / `graph_with_mut` callers can edit the store directly,
-    /// so the simplest correct strategy is a full resync of `graph`'s
-    /// membership rows: drop every membership for the graph, re-insert
-    /// each vertex / edge currently in the partition, then garbage
-    /// collect any vertex / edge that fell out of every other graph's
-    /// membership too.
-    fn resync_graph_to_catalog(&self, graph: &str) {
+    fn persist_graph_candidate(
+        &self,
+        graph: &str,
+        store: &uqa_graph::MemoryGraphStore,
+    ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
+        let vertex_ids = store
+            .vertex_ids_in_graph(graph)
+            .map_err(graph_store_error)?;
+        for edge in store.edges_in_graph(graph).map_err(graph_store_error)? {
+            if !vertex_ids.contains(&edge.source_id) || !vertex_ids.contains(&edge.target_id) {
+                return Err(super::StorageBackendError::Other(format!(
+                    "graph `{graph}` edge {} references missing endpoint {} -> {}",
+                    edge.edge_id, edge.source_id, edge.target_id
+                )));
+            }
+        }
         let Some(catalog) = self.catalog.as_ref() else {
-            return;
+            return Ok(());
         };
-        let graphs = self.graphs.read();
-        let Some(store) = graphs.get(graph) else {
-            return;
+        let vertices = store
+            .vertices_in_graph(graph)
+            .map_err(graph_store_error)?
+            .into_iter()
+            .map(|vertex| {
+                Ok(GraphVertexRow {
+                    vertex_id: vertex.vertex_id,
+                    label: vertex.label,
+                    properties_json: serde_json::to_string(&vertex.properties)?,
+                })
+            })
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        let edges = store
+            .edges_in_graph(graph)
+            .map_err(graph_store_error)?
+            .into_iter()
+            .map(|edge| {
+                Ok(EdgeRow {
+                    edge_id: edge.edge_id,
+                    source_id: edge.source_id,
+                    target_id: edge.target_id,
+                    label: edge.label,
+                    properties_json: serde_json::to_string(&edge.properties)?,
+                })
+            })
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        let snapshot = GraphSnapshot {
+            vertices,
+            edges,
+            label_registry_json: serde_json::to_string(&store.label_registry(graph))?,
         };
-        let _ = catalog.save_named_graph(graph);
-        let _ = catalog.delete_graph_membership_for_graph(graph);
-        for vertex in store.vertices_in_graph(graph) {
-            if let Ok(props_json) = serde_json::to_string(&vertex.properties) {
-                let _ = catalog.save_vertex(vertex.vertex_id, &vertex.label, &props_json);
-                let _ = catalog.save_graph_membership("vertex", vertex.vertex_id, graph);
-            }
-        }
-        for edge in store.edges_in_graph(graph) {
-            if let Ok(props_json) = serde_json::to_string(&edge.properties) {
-                let _ = catalog.save_edge(
-                    edge.edge_id,
-                    edge.source_id,
-                    edge.target_id,
-                    &edge.label,
-                    &props_json,
-                );
-                let _ = catalog.save_graph_membership("edge", edge.edge_id, graph);
-            }
-        }
-        let _ = catalog.purge_orphan_graph_entities();
-        // Persist the AGE label registry so id allocation stays
-        // deterministic across engine restarts even when a label's
-        // entities were all deleted.
-        if let Ok(json) = serde_json::to_string(&store.label_registry(graph)) {
-            let _ = catalog.set_metadata(&format!("{GRAPH_LABELS_METADATA_PREFIX}{graph}"), &json);
-        }
+        catalog.replace_named_graph(graph, &snapshot)
+    }
+
+    fn invalidate_graph_path_indexes(&self, graph: &str) {
+        self.path_indexes
+            .write()
+            .retain(|key, _| !key.starts_with(&format!("{graph}::")));
     }
 }

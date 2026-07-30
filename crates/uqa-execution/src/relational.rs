@@ -9,16 +9,57 @@
 //! [`PhysicalOperator`] so trees can be assembled at runtime by the
 //! planner without monomorphisation per shape.
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use uqa_core::{DecimalValue, Value};
+use uqa_core::Value;
+use uqa_sql::ast::SetOpKind;
 use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
-use uqa_sql::{SQLError, SQLParam};
+use uqa_sql::SQLParam;
 
 use crate::batch::{Batch, RowSchema};
 use crate::physical::{ExecError, ExecResult, PhysicalOperator};
 use crate::scalar::{eval_scalar, ScalarEvalContext, ScalarExpr};
+
+/// Runtime scalar semantics used by relational operators.
+///
+/// The execution crate provides the default SQL evaluator, while an engine can
+/// supply the same physical expressions with its function registry and
+/// subquery arena attached. Keeping this seam at the operator boundary avoids
+/// pre-evaluating predicates, projections, or sort keys outside the Volcano
+/// tree.
+pub trait ExpressionEvaluator: Send + Sync {
+    fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value>;
+
+    fn project_star(&self, row: &ResultRow) -> ExecResult<ResultRow> {
+        Ok(row.clone())
+    }
+}
+
+pub type SharedExpressionEvaluator<'a> = Arc<dyn ExpressionEvaluator + 'a>;
+
+pub trait RowPredicate: Send + Sync {
+    fn keep(&self, row: &ResultRow) -> ExecResult<bool>;
+}
+
+pub type SharedRowPredicate<'a> = Arc<dyn RowPredicate + 'a>;
+
+struct DefaultExpressionEvaluator {
+    params: Vec<SQLParam>,
+}
+
+impl DefaultExpressionEvaluator {
+    fn shared(params: Vec<SQLParam>) -> SharedExpressionEvaluator<'static> {
+        Arc::new(Self { params })
+    }
+}
+
+impl ExpressionEvaluator for DefaultExpressionEvaluator {
+    fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value> {
+        let context = ScalarEvalContext::new(Some(row), &self.params);
+        Ok(eval_scalar(expression, &context)?)
+    }
+}
 
 // -------------------------------------------------------------------------
 // Filter
@@ -26,30 +67,61 @@ use crate::scalar::{eval_scalar, ScalarEvalContext, ScalarExpr};
 
 /// Pipelined `WHERE` operator. Drops rows whose predicate evaluates
 /// to `false` or `NULL`; truthy rows pass through unchanged.
-pub struct Filter {
-    child: Box<dyn PhysicalOperator>,
-    predicate: ScalarExpr,
-    params: Vec<SQLParam>,
+pub struct Filter<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
+    condition: FilterCondition<'a>,
     schema: RowSchema,
 }
 
-impl Filter {
+enum FilterCondition<'a> {
+    Expression {
+        predicate: ScalarExpr,
+        evaluator: SharedExpressionEvaluator<'a>,
+    },
+    Row(SharedRowPredicate<'a>),
+}
+
+impl Filter<'static> {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         predicate: ScalarExpr,
         params: Vec<SQLParam>,
     ) -> Self {
+        Self::with_evaluator(child, predicate, DefaultExpressionEvaluator::shared(params))
+    }
+}
+
+impl<'a> Filter<'a> {
+    pub fn with_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        predicate: ScalarExpr,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
         Self {
             child,
-            predicate,
-            params,
+            condition: FilterCondition::Expression {
+                predicate,
+                evaluator,
+            },
+            schema,
+        }
+    }
+
+    pub fn with_row_predicate(
+        child: Box<dyn PhysicalOperator + 'a>,
+        predicate: SharedRowPredicate<'a>,
+    ) -> Self {
+        let schema = RowSchema::new(child.schema().to_vec());
+        Self {
+            child,
+            condition: FilterCondition::Row(predicate),
             schema,
         }
     }
 }
 
-impl PhysicalOperator for Filter {
+impl PhysicalOperator for Filter<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
     }
@@ -65,8 +137,14 @@ impl PhysicalOperator for Filter {
             };
             let mut kept = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let ctx = ScalarEvalContext::new(Some(&row), &self.params);
-                if truthy(&eval_scalar(&self.predicate, &ctx)?) {
+                let keep = match &self.condition {
+                    FilterCondition::Expression {
+                        predicate,
+                        evaluator,
+                    } => truthy(&evaluator.evaluate(predicate, &row)?),
+                    FilterCondition::Row(predicate) => predicate.keep(&row)?,
+                };
+                if keep {
                     kept.push(row);
                 }
             }
@@ -88,10 +166,10 @@ impl PhysicalOperator for Filter {
 /// Per-row scalar projection. Each `(alias, expr)` pair is evaluated
 /// against the input row and written under `alias` in the output. The
 /// child schema is replaced with the output aliases.
-pub struct Project {
-    child: Box<dyn PhysicalOperator>,
+pub struct Project<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
     projections: Vec<(String, ScalarExpr)>,
-    params: Vec<SQLParam>,
+    evaluator: SharedExpressionEvaluator<'a>,
     schema: RowSchema,
     /// When `true`, every input column also flows through to the
     /// output (after any alias rewrite). Useful when projections only
@@ -99,20 +177,17 @@ pub struct Project {
     pass_through: bool,
 }
 
-impl Project {
+impl Project<'static> {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         projections: Vec<(String, ScalarExpr)>,
         params: Vec<SQLParam>,
     ) -> Self {
-        let schema = RowSchema::new(projections.iter().map(|(name, _)| name.clone()).collect());
-        Self {
+        Self::with_evaluator(
             child,
             projections,
-            params,
-            schema,
-            pass_through: false,
-        }
+            DefaultExpressionEvaluator::shared(params),
+        )
     }
 
     /// Variant that keeps every input column in the output and appends
@@ -121,6 +196,47 @@ impl Project {
         child: Box<dyn PhysicalOperator>,
         projections: Vec<(String, ScalarExpr)>,
         params: Vec<SQLParam>,
+    ) -> Self {
+        Self::appending_with_evaluator(
+            child,
+            projections,
+            DefaultExpressionEvaluator::shared(params),
+        )
+    }
+}
+
+impl<'a> Project<'a> {
+    pub fn with_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        projections: Vec<(String, ScalarExpr)>,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
+        let mut columns = Vec::new();
+        for (name, expression) in &projections {
+            if matches!(expression, ScalarExpr::Star) {
+                for column in child.schema() {
+                    if !columns.contains(column) {
+                        columns.push(column.clone());
+                    }
+                }
+            } else {
+                columns.push(name.clone());
+            }
+        }
+        let schema = RowSchema::new(columns);
+        Self {
+            child,
+            projections,
+            evaluator,
+            schema,
+            pass_through: false,
+        }
+    }
+
+    pub fn appending_with_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        projections: Vec<(String, ScalarExpr)>,
+        evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
         let mut cols = child.schema().to_vec();
         for (name, _) in &projections {
@@ -132,14 +248,14 @@ impl Project {
         Self {
             child,
             projections,
-            params,
+            evaluator,
             schema,
             pass_through: true,
         }
     }
 }
 
-impl PhysicalOperator for Project {
+impl PhysicalOperator for Project<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
     }
@@ -159,10 +275,15 @@ impl PhysicalOperator for Project {
             } else {
                 ResultRow::new()
             };
-            let ctx = ScalarEvalContext::new(Some(&row), &self.params);
             for (name, expr) in &self.projections {
-                let v = eval_scalar(expr, &ctx)?;
-                new_row.insert(name.clone(), v);
+                if matches!(expr, ScalarExpr::Star) {
+                    for (column, value) in self.evaluator.project_star(&row)? {
+                        new_row.insert(column, value);
+                    }
+                } else {
+                    let value = self.evaluator.evaluate(expr, &row)?;
+                    new_row.insert(name.clone(), value);
+                }
             }
             out.push(new_row);
         }
@@ -188,35 +309,22 @@ pub struct SortKey {
     pub nulls_first: Option<bool>,
 }
 
-/// Blocking sort. Pulls every row from the child during `open`, then
-/// emits the sorted output in [`crate::batch::DEFAULT_BATCH_SIZE`]-sized batches.
-pub struct Sort {
-    child: Box<dyn PhysicalOperator>,
-    keys: Vec<SortKey>,
-    params: Vec<SQLParam>,
-    schema: RowSchema,
-    /// When set, only the first `keep` rows of the sorted output are
-    /// retained (top-K selection instead of a full sort). Callers pass
-    /// `OFFSET + LIMIT` so a downstream [`Limit`] can still skip.
-    keep: Option<usize>,
-    materialised: Option<std::vec::IntoIter<Batch>>,
+/// Byte-bounded blocking sort backed by the external merge-sort implementation.
+/// Compatibility constructors use a 64 MiB budget; engine callers should pass
+/// the active session's `work_mem` through [`Self::with_evaluator_and_work_mem`].
+const DEFAULT_SORT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
+
+pub struct Sort<'a> {
+    inner: crate::external_sort::ExternalSort<'a>,
 }
 
-impl Sort {
+impl Sort<'static> {
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         keys: Vec<SortKey>,
         params: Vec<SQLParam>,
     ) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
-        Self {
-            child,
-            keys,
-            params,
-            schema,
-            keep: None,
-            materialised: None,
-        }
+        Self::with_evaluator(child, keys, DefaultExpressionEvaluator::shared(params))
     }
 
     /// Top-K variant: retain only the first `keep` rows of the sorted
@@ -228,9 +336,56 @@ impl Sort {
         params: Vec<SQLParam>,
         keep: usize,
     ) -> Self {
-        let mut sort = Self::new(child, keys, params);
-        sort.keep = Some(keep);
-        sort
+        Self::with_evaluator_and_keep(
+            child,
+            keys,
+            DefaultExpressionEvaluator::shared(params),
+            keep,
+        )
+    }
+}
+
+impl<'a> Sort<'a> {
+    pub fn with_evaluator(
+        child: Box<dyn PhysicalOperator + 'a>,
+        keys: Vec<SortKey>,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
+        Self::with_evaluator_and_work_mem(child, keys, evaluator, DEFAULT_SORT_WORK_MEM_BYTES)
+    }
+
+    pub fn with_evaluator_and_work_mem(
+        child: Box<dyn PhysicalOperator + 'a>,
+        keys: Vec<SortKey>,
+        evaluator: SharedExpressionEvaluator<'a>,
+        work_mem_bytes: usize,
+    ) -> Self {
+        Self {
+            inner: crate::external_sort::ExternalSort::new(
+                child,
+                keys,
+                evaluator,
+                None,
+                work_mem_bytes,
+            ),
+        }
+    }
+
+    pub fn with_evaluator_and_keep(
+        child: Box<dyn PhysicalOperator + 'a>,
+        keys: Vec<SortKey>,
+        evaluator: SharedExpressionEvaluator<'a>,
+        keep: usize,
+    ) -> Self {
+        Self {
+            inner: crate::external_sort::ExternalSort::new(
+                child,
+                keys,
+                evaluator,
+                Some(keep),
+                DEFAULT_SORT_WORK_MEM_BYTES,
+            ),
+        }
     }
 }
 
@@ -244,23 +399,18 @@ pub fn compare_sort_key_values(keys: &[SortKey], av: &[Value], bv: &[Value]) -> 
         let b_null = matches!(bv[i], Value::Null);
         let nulls_first = k.nulls_first.unwrap_or(k.descending);
         if a_null || b_null {
-            let null_cmp = match (a_null, b_null) {
-                (true, true) => Ordering::Equal,
-                (true, false) => {
-                    if nulls_first {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    }
+            let null_cmp = if a_null == b_null {
+                Ordering::Equal
+            } else if a_null {
+                if nulls_first {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
                 }
-                (false, true) => {
-                    if nulls_first {
-                        Ordering::Greater
-                    } else {
-                        Ordering::Less
-                    }
-                }
-                (false, false) => unreachable!(),
+            } else if nulls_first {
+                Ordering::Greater
+            } else {
+                Ordering::Less
             };
             if null_cmp != Ordering::Equal {
                 return null_cmp;
@@ -282,80 +432,31 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Null, Value::Null) => Equal,
         (Value::Null, _) => Less,
         (_, Value::Null) => Greater,
-        (Value::Int(x), Value::Int(y)) => x.cmp(y),
-        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
-        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
-        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
-        (Value::Decimal(x), Value::Decimal(y)) => x.cmp(y),
-        (Value::Decimal(x), Value::Int(y)) => x.cmp(&DecimalValue::from_i64(*y)),
-        (Value::Int(x), Value::Decimal(y)) => DecimalValue::from_i64(*x).cmp(y),
-        (Value::Decimal(x), Value::Float(y)) => DecimalValue::from_f64_lossy(*y)
-            .map(|yd| x.cmp(&yd))
-            .unwrap_or(Equal),
-        (Value::Float(x), Value::Decimal(y)) => DecimalValue::from_f64_lossy(*x)
-            .map(|xd| xd.cmp(y))
-            .unwrap_or(Equal),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        (Value::Temporal(x), Value::Temporal(y)) => x.cmp(y),
-        (Value::Temporal(x), Value::Str(y)) => {
-            x.parse_same_kind(y).map_or(Equal, |parsed| x.cmp(&parsed))
-        }
-        (Value::Str(x), Value::Temporal(y)) => {
-            y.parse_same_kind(x).map_or(Equal, |parsed| parsed.cmp(y))
-        }
-        _ => Equal,
+        (Value::Temporal(x), Value::Str(y)) => x
+            .parse_same_kind(y)
+            .map_or_else(|| a.cmp(b), |parsed| x.cmp(&parsed)),
+        (Value::Str(x), Value::Temporal(y)) => y
+            .parse_same_kind(x)
+            .map_or_else(|| a.cmp(b), |parsed| parsed.cmp(y)),
+        _ => a.cmp(b),
     }
 }
 
-impl PhysicalOperator for Sort {
+impl PhysicalOperator for Sort<'_> {
     fn schema(&self) -> &[String] {
-        &self.schema.columns
+        self.inner.schema()
     }
 
     fn open(&mut self) -> ExecResult<()> {
-        self.child.open()?;
-        let mut rows: Vec<ResultRow> = Vec::new();
-        while let Some(batch) = self.child.next()? {
-            rows.extend(batch.rows);
-        }
-        // Materialise sort keys per row, then sort by them.
-        let mut decorated: Vec<(Vec<Value>, ResultRow)> = Vec::with_capacity(rows.len());
-        for row in rows {
-            let ctx = ScalarEvalContext::new(Some(&row), &self.params);
-            let mut key_vals = Vec::with_capacity(self.keys.len());
-            for k in &self.keys {
-                key_vals.push(eval_scalar(&k.expr, &ctx)?);
-            }
-            decorated.push((key_vals, row));
-        }
-        if let Some(keep) = self.keep.filter(|keep| *keep < decorated.len()) {
-            if keep == 0 {
-                decorated.clear();
-            } else {
-                decorated.select_nth_unstable_by(keep - 1, |(av, _), (bv, _)| {
-                    compare_sort_key_values(&self.keys, av, bv)
-                });
-                decorated.truncate(keep);
-            }
-        }
-        decorated.sort_by(|(av, _), (bv, _)| compare_sort_key_values(&self.keys, av, bv));
-        let sorted: Vec<ResultRow> = decorated.into_iter().map(|(_, r)| r).collect();
-        let batches = Batch::chunked(self.schema.clone(), sorted);
-        self.materialised = Some(batches.into_iter());
-        Ok(())
+        self.inner.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(it) = self.materialised.as_mut() else {
-            return Ok(None);
-        };
-        Ok(it.next())
+        self.inner.next()
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.materialised = None;
-        self.child.close()
+        self.inner.close()
     }
 }
 
@@ -363,8 +464,8 @@ impl PhysicalOperator for Sort {
 // Limit / Offset
 // -------------------------------------------------------------------------
 
-pub struct Limit {
-    child: Box<dyn PhysicalOperator>,
+pub struct Limit<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
     offset: u64,
     limit: Option<u64>,
     skipped: u64,
@@ -372,8 +473,8 @@ pub struct Limit {
     schema: RowSchema,
 }
 
-impl Limit {
-    pub fn new(child: Box<dyn PhysicalOperator>, offset: u64, limit: Option<u64>) -> Self {
+impl<'a> Limit<'a> {
+    pub fn new(child: Box<dyn PhysicalOperator + 'a>, offset: u64, limit: Option<u64>) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
         Self {
             child,
@@ -386,7 +487,7 @@ impl Limit {
     }
 }
 
-impl PhysicalOperator for Limit {
+impl PhysicalOperator for Limit<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
     }
@@ -435,6 +536,66 @@ impl PhysicalOperator for Limit {
 }
 
 // -------------------------------------------------------------------------
+// Set operations
+// -------------------------------------------------------------------------
+
+/// Byte-bounded compatibility wrapper for SQL set operations.
+///
+/// All forms other than `UNION ALL` externally sort and merge their inputs;
+/// `UNION ALL` streams both children. Construction is fallible because input
+/// widths must agree.
+pub struct SetOperation<'a> {
+    inner: crate::set_operation::ExternalSetOperation<'a>,
+}
+
+impl<'a> SetOperation<'a> {
+    pub fn new(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+    ) -> ExecResult<Self> {
+        Self::new_with_work_mem(left, right, kind, all, 64 * 1024 * 1024)
+    }
+
+    pub fn new_with_work_mem(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+        work_mem_bytes: usize,
+    ) -> ExecResult<Self> {
+        Ok(Self {
+            inner: crate::set_operation::ExternalSetOperation::new(
+                left,
+                right,
+                kind,
+                all,
+                work_mem_bytes,
+            )?,
+        })
+    }
+}
+
+impl PhysicalOperator for SetOperation<'_> {
+    fn schema(&self) -> &[String] {
+        self.inner.schema()
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.inner.open()
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        self.inner.next()
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.inner.close()
+    }
+}
+
+// -------------------------------------------------------------------------
 // Hash aggregate
 // -------------------------------------------------------------------------
 
@@ -463,21 +624,55 @@ pub struct AggregateSpec {
 /// during `open`, hashes each row by its group key, and folds the
 /// aggregates over each group's row set. Groups are emitted in the
 /// order they were first observed.
-pub struct HashAggregate {
-    child: Box<dyn PhysicalOperator>,
+pub trait AggregateExecutor: Send {
+    /// Consume one child batch. Implementations that need a blocking input must
+    /// enforce their own byte budget here; the physical operator never creates
+    /// an unbounded intermediate row vector.
+    fn consume(&mut self, batch: Batch) -> ExecResult<()>;
+
+    /// Finalize all groups into a byte-bounded, disk-backed output stream.
+    /// The row-oriented SQL API may materialize that stream at its public API
+    /// boundary, but physical operators must not create an unbounded result
+    /// vector first.
+    fn finish(&mut self) -> ExecResult<crate::spill::SpillBuffer>;
+}
+
+pub struct HashAggregate<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
     group_keys: Vec<(String, ScalarExpr)>,
     aggregates: Vec<AggregateSpec>,
     params: Vec<SQLParam>,
     schema: RowSchema,
-    materialised: Option<std::vec::IntoIter<Batch>>,
+    executor: Option<Box<dyn AggregateExecutor + 'a>>,
+    work_mem_bytes: usize,
+    output: Option<crate::spill::SpillDrain>,
+    output_spilled: bool,
 }
 
-impl HashAggregate {
+impl HashAggregate<'static> {
+    const DEFAULT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
+
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         group_keys: Vec<(String, ScalarExpr)>,
         aggregates: Vec<AggregateSpec>,
         params: Vec<SQLParam>,
+    ) -> Self {
+        Self::new_with_work_mem(
+            child,
+            group_keys,
+            aggregates,
+            params,
+            Self::DEFAULT_WORK_MEM_BYTES,
+        )
+    }
+
+    pub fn new_with_work_mem(
+        child: Box<dyn PhysicalOperator>,
+        group_keys: Vec<(String, ScalarExpr)>,
+        aggregates: Vec<AggregateSpec>,
+        params: Vec<SQLParam>,
+        work_mem_bytes: usize,
     ) -> Self {
         let mut cols: Vec<String> = group_keys.iter().map(|(n, _)| n.clone()).collect();
         for a in &aggregates {
@@ -490,12 +685,43 @@ impl HashAggregate {
             aggregates,
             params,
             schema,
-            materialised: None,
+            executor: None,
+            work_mem_bytes,
+            output: None,
+            output_spilled: false,
         }
     }
 }
 
-#[derive(Default)]
+impl<'a> HashAggregate<'a> {
+    /// Construct a physical aggregate backed by the engine's full aggregate
+    /// registry. Input is delivered incrementally through
+    /// [`AggregateExecutor::consume`].
+    pub fn with_executor(
+        child: Box<dyn PhysicalOperator + 'a>,
+        output_schema: Vec<String>,
+        executor: Box<dyn AggregateExecutor + 'a>,
+    ) -> Self {
+        Self {
+            child,
+            group_keys: Vec::new(),
+            aggregates: Vec::new(),
+            params: Vec::new(),
+            schema: RowSchema::new(output_schema),
+            executor: Some(executor),
+            work_mem_bytes: 0,
+            output: None,
+            output_spilled: false,
+        }
+    }
+
+    /// Whether final aggregate rows exceeded their output budget and were
+    /// written to disk during the current/most recent invocation.
+    pub fn output_has_spilled(&self) -> bool {
+        self.output_spilled
+    }
+}
+
 struct GroupState {
     /// Folded aggregate state, one slot per `aggregates` entry.
     folds: Vec<AggFold>,
@@ -503,13 +729,24 @@ struct GroupState {
     key_values: Vec<Value>,
 }
 
-#[derive(Default, Clone)]
 struct AggFold {
     count: u64,
     sum: Option<f64>,
     min: Option<Value>,
     max: Option<Value>,
-    distinct: std::collections::BTreeSet<String>,
+    distinct: crate::distinct::SeenKeySet,
+}
+
+impl AggFold {
+    fn new(work_mem_bytes: usize) -> Self {
+        Self {
+            count: 0,
+            sum: None,
+            min: None,
+            max: None,
+            distinct: crate::distinct::SeenKeySet::new(work_mem_bytes, None),
+        }
+    }
 }
 
 fn value_to_f64(v: &Value) -> Option<f64> {
@@ -522,19 +759,6 @@ fn value_to_f64(v: &Value) -> Option<f64> {
     }
 }
 
-fn distinct_key(v: &Value) -> String {
-    // Cheap canonical encoding for `DISTINCT` bookkeeping.
-    match v {
-        Value::Null => "\x00".into(),
-        Value::Int(i) => format!("i:{i}"),
-        Value::Float(f) => format!("f:{f:.17}"),
-        Value::Str(s) => format!("s:{s}"),
-        Value::Bool(b) => format!("b:{b}"),
-        Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
-        other => format!("o:{other:?}"),
-    }
-}
-
 fn fold_into(
     state: &mut AggFold,
     spec: &AggregateSpec,
@@ -543,7 +767,10 @@ fn fold_into(
 ) -> ExecResult<()> {
     match spec.kind {
         AggregateKind::CountStar => {
-            state.count += 1;
+            state.count = state
+                .count
+                .checked_add(1)
+                .ok_or_else(|| ExecError::Other("aggregate count overflow".into()))?;
         }
         _ => {
             let arg = spec.arg.as_ref().ok_or_else(|| {
@@ -558,19 +785,27 @@ fn fold_into(
                 return Ok(());
             }
             if spec.distinct {
-                let key = distinct_key(&v);
-                if !state.distinct.insert(key) {
+                let key = crate::distinct::encode_key(std::slice::from_ref(&v))?;
+                if !state.distinct.insert(key)? {
                     return Ok(());
                 }
             }
             match spec.kind {
-                AggregateKind::Count => state.count += 1,
+                AggregateKind::Count => {
+                    state.count = state
+                        .count
+                        .checked_add(1)
+                        .ok_or_else(|| ExecError::Other("aggregate count overflow".into()))?;
+                }
                 AggregateKind::Sum | AggregateKind::Avg => {
                     let f = value_to_f64(&v).ok_or_else(|| {
                         ExecError::Other(format!("non-numeric input to SUM/AVG: {v:?}"))
                     })?;
                     state.sum = Some(state.sum.unwrap_or(0.0) + f);
-                    state.count += 1;
+                    state.count = state
+                        .count
+                        .checked_add(1)
+                        .ok_or_else(|| ExecError::Other("aggregate count overflow".into()))?;
                 }
                 AggregateKind::Min => {
                     state.min = Some(match state.min.take() {
@@ -596,16 +831,41 @@ fn fold_into(
                         }
                     });
                 }
-                AggregateKind::CountStar => unreachable!(),
+                AggregateKind::CountStar => {
+                    return Err(ExecError::Other(
+                        "COUNT(*) reached argument aggregate evaluation".into(),
+                    ))
+                }
             }
         }
     }
     Ok(())
 }
 
-fn finalise_fold(state: &AggFold, spec: &AggregateSpec) -> Value {
-    match spec.kind {
-        AggregateKind::Count | AggregateKind::CountStar => Value::Int(state.count as i64),
+fn finalise_builtin_group(
+    state: GroupState,
+    group_keys: &[(String, ScalarExpr)],
+    aggregates: &[AggregateSpec],
+) -> ExecResult<ResultRow> {
+    let mut output = ResultRow::new();
+    for (index, (alias, _)) in group_keys.iter().enumerate() {
+        output.insert(alias.clone(), state.key_values[index].clone());
+    }
+    for (index, spec) in aggregates.iter().enumerate() {
+        output.insert(
+            spec.alias.clone(),
+            finalise_fold(&state.folds[index], spec)?,
+        );
+    }
+    Ok(output)
+}
+
+fn finalise_fold(state: &AggFold, spec: &AggregateSpec) -> ExecResult<Value> {
+    Ok(match spec.kind {
+        AggregateKind::Count | AggregateKind::CountStar => Value::Int(
+            i64::try_from(state.count)
+                .map_err(|_| ExecError::Other("aggregate count exceeds BIGINT".into()))?,
+        ),
         AggregateKind::Sum => state.sum.map(Value::Float).unwrap_or(Value::Null),
         AggregateKind::Avg => match (state.sum, state.count) {
             (Some(s), c) if c > 0 => Value::Float(s / c as f64),
@@ -613,81 +873,140 @@ fn finalise_fold(state: &AggFold, spec: &AggregateSpec) -> Value {
         },
         AggregateKind::Min => state.min.clone().unwrap_or(Value::Null),
         AggregateKind::Max => state.max.clone().unwrap_or(Value::Null),
-    }
+    })
 }
 
-impl PhysicalOperator for HashAggregate {
+impl PhysicalOperator for HashAggregate<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
     }
 
     fn open(&mut self) -> ExecResult<()> {
         self.child.open()?;
-        let mut groups: BTreeMap<String, GroupState> = BTreeMap::new();
-        let mut order: Vec<String> = Vec::new();
-        while let Some(batch) = self.child.next()? {
-            for row in batch.rows {
-                let ctx = ScalarEvalContext::new(Some(&row), &self.params);
-                let mut key_vals: Vec<Value> = Vec::with_capacity(self.group_keys.len());
-                let mut key_repr = String::new();
-                for (i, (_, expr)) in self.group_keys.iter().enumerate() {
-                    let v = eval_scalar(expr, &ctx)?;
-                    if i > 0 {
-                        key_repr.push('\x1f');
-                    }
-                    key_repr.push_str(&distinct_key(&v));
-                    key_vals.push(v);
-                }
-                let st = groups.entry(key_repr.clone()).or_insert_with(|| {
-                    order.push(key_repr.clone());
-                    GroupState {
-                        folds: vec![AggFold::default(); self.aggregates.len()],
-                        key_values: key_vals.clone(),
-                    }
-                });
-                for (i, spec) in self.aggregates.iter().enumerate() {
-                    fold_into(&mut st.folds[i], spec, &row, &self.params)?;
-                }
+        self.output_spilled = false;
+        if let Some(executor) = self.executor.as_mut() {
+            while let Some(batch) = self.child.next()? {
+                executor.consume(batch)?;
             }
-        }
-        if groups.is_empty() && self.group_keys.is_empty() {
-            // SQL: scalar aggregate over empty input still yields one
-            // row with COUNT=0 and other aggregates NULL.
-            let mut out_row = ResultRow::new();
-            for (i, spec) in self.aggregates.iter().enumerate() {
-                let _ = i;
-                out_row.insert(spec.alias.clone(), finalise_fold(&AggFold::default(), spec));
-            }
-            let batches = Batch::chunked(self.schema.clone(), vec![out_row]);
-            self.materialised = Some(batches.into_iter());
+            let mut output = executor.finish()?;
+            self.output_spilled = output.has_spilled();
+            self.output = Some(output.drain()?);
             return Ok(());
         }
-        let mut out_rows: Vec<ResultRow> = Vec::with_capacity(order.len());
-        for key in order {
-            let st = groups.remove(&key).expect("group present");
-            let mut out = ResultRow::new();
-            for (i, (alias, _)) in self.group_keys.iter().enumerate() {
-                out.insert(alias.clone(), st.key_values[i].clone());
-            }
-            for (i, spec) in self.aggregates.iter().enumerate() {
-                out.insert(spec.alias.clone(), finalise_fold(&st.folds[i], spec));
-            }
-            out_rows.push(out);
+        let phase_budget = (self.work_mem_bytes / 3).max(1);
+        let mut input = crate::spill::SpillBuffer::new(phase_budget);
+        while let Some(batch) = self.child.next()? {
+            input.push(batch)?;
         }
-        let batches = Batch::chunked(self.schema.clone(), out_rows);
-        self.materialised = Some(batches.into_iter());
+        let scan: Box<dyn PhysicalOperator> = Box::new(crate::spill_scan::SpillScan::new(
+            self.child.schema().to_vec(),
+            input,
+        ));
+        let keys = self
+            .group_keys
+            .iter()
+            .map(|(_, expression)| SortKey {
+                expr: expression.clone(),
+                descending: false,
+                nulls_first: None,
+            })
+            .collect();
+        let evaluator = DefaultExpressionEvaluator::shared(self.params.clone());
+        let mut sorted =
+            crate::external_sort::ExternalSort::new(scan, keys, evaluator, None, phase_budget);
+        sorted.open()?;
+        let fold_budget = (phase_budget / self.aggregates.len().max(1)).max(1);
+        let mut current_key: Option<Vec<Value>> = None;
+        let mut current_state: Option<GroupState> = None;
+        let mut output = crate::spill::SpillBuffer::new(phase_budget);
+        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+        let execution = (|| -> ExecResult<()> {
+            while let Some(batch) = sorted.next()? {
+                for row in batch.rows {
+                    let ctx = ScalarEvalContext::new(Some(&row), &self.params);
+                    let key_values = self
+                        .group_keys
+                        .iter()
+                        .map(|(_, expression)| eval_scalar(expression, &ctx))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if current_key
+                        .as_ref()
+                        .is_some_and(|current| current != &key_values)
+                    {
+                        pending.push(finalise_builtin_group(
+                            current_state.take().ok_or_else(|| {
+                                ExecError::Other("active aggregate group has no state".into())
+                            })?,
+                            &self.group_keys,
+                            &self.aggregates,
+                        )?);
+                        if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
+                            output.push(Batch::new(
+                                self.schema.clone(),
+                                std::mem::take(&mut pending),
+                            ))?;
+                            pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+                        }
+                        current_key = None;
+                    }
+                    if current_key.is_none() {
+                        current_key = Some(key_values.clone());
+                        current_state = Some(GroupState {
+                            folds: (0..self.aggregates.len())
+                                .map(|_| AggFold::new(fold_budget))
+                                .collect(),
+                            key_values,
+                        });
+                    }
+                    let state = current_state.as_mut().ok_or_else(|| {
+                        ExecError::Other("aggregate group state was not initialized".into())
+                    })?;
+                    for (index, spec) in self.aggregates.iter().enumerate() {
+                        fold_into(&mut state.folds[index], spec, &row, &self.params)?;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        let close = sorted.close();
+        crate::physical::with_cleanup(execution, close, "close aggregate sort after failure")?;
+
+        if let Some(state) = current_state.take() {
+            pending.push(finalise_builtin_group(
+                state,
+                &self.group_keys,
+                &self.aggregates,
+            )?);
+        } else if self.group_keys.is_empty() {
+            let state = GroupState {
+                folds: (0..self.aggregates.len())
+                    .map(|_| AggFold::new(fold_budget))
+                    .collect(),
+                key_values: Vec::new(),
+            };
+            pending.push(finalise_builtin_group(
+                state,
+                &self.group_keys,
+                &self.aggregates,
+            )?);
+        }
+        if !pending.is_empty() {
+            output.push(Batch::new(self.schema.clone(), pending))?;
+        }
+        self.output_spilled = output.has_spilled();
+        self.output = Some(output.drain()?);
         Ok(())
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(it) = self.materialised.as_mut() else {
+        let Some(output) = self.output.as_mut() else {
             return Ok(None);
         };
-        Ok(it.next())
+        output.next().transpose()
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.materialised = None;
+        self.output = None;
         self.child.close()
     }
 }
@@ -717,26 +1036,48 @@ pub struct WindowSpec {
     pub order_by: Vec<SortKey>,
 }
 
-/// Window operator. Currently emits the entire input as a single batch
-/// after appending one column per `(alias, kind)`. Deterministic
-/// for tests and quickstart-class workloads; large inputs flow into
-/// the [`crate::spill::SpillBuffer`] when wired up by the planner.
-pub struct Window {
-    child: Box<dyn PhysicalOperator>,
+/// Byte-bounded window operator. Input sorting, random-access partitions, and
+/// output rows use disk-backed buffers; only fixed-size batches are decoded at
+/// the Volcano boundary.
+pub trait WindowExecutor: Send {
+    /// Consume one child batch without materializing the complete input in the
+    /// physical operator.
+    fn consume(&mut self, batch: Batch) -> ExecResult<()>;
+
+    /// Finalize window columns into a byte-bounded, disk-backed output stream.
+    fn finish(&mut self) -> ExecResult<crate::spill::SpillBuffer>;
+}
+
+pub struct Window<'a> {
+    child: Box<dyn PhysicalOperator + 'a>,
     spec: WindowSpec,
     functions: Vec<(String, WindowKind)>,
     params: Vec<SQLParam>,
     schema: RowSchema,
-    out: Option<Batch>,
-    served: bool,
+    executor: Option<Box<dyn WindowExecutor + 'a>>,
+    work_mem_bytes: usize,
+    output: Option<crate::spill::SpillDrain>,
+    output_spilled: bool,
 }
 
-impl Window {
+impl Window<'static> {
+    const DEFAULT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
+
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         spec: WindowSpec,
         functions: Vec<(String, WindowKind)>,
         params: Vec<SQLParam>,
+    ) -> Self {
+        Self::new_with_work_mem(child, spec, functions, params, Self::DEFAULT_WORK_MEM_BYTES)
+    }
+
+    pub fn new_with_work_mem(
+        child: Box<dyn PhysicalOperator>,
+        spec: WindowSpec,
+        functions: Vec<(String, WindowKind)>,
+        params: Vec<SQLParam>,
+        work_mem_bytes: usize,
     ) -> Self {
         let mut cols = child.schema().to_vec();
         for (name, _) in &functions {
@@ -751,301 +1092,376 @@ impl Window {
             functions,
             params,
             schema,
-            out: None,
-            served: false,
+            executor: None,
+            work_mem_bytes,
+            output: None,
+            output_spilled: false,
         }
     }
 }
 
-impl PhysicalOperator for Window {
+impl<'a> Window<'a> {
+    /// Construct a physical window operator backed by the engine's complete
+    /// frame and function implementation.
+    pub fn with_executor(
+        child: Box<dyn PhysicalOperator + 'a>,
+        output_schema: Vec<String>,
+        executor: Box<dyn WindowExecutor + 'a>,
+    ) -> Self {
+        Self {
+            child,
+            spec: WindowSpec {
+                partition_by: Vec::new(),
+                order_by: Vec::new(),
+            },
+            functions: Vec::new(),
+            params: Vec::new(),
+            schema: RowSchema::new(output_schema),
+            executor: Some(executor),
+            work_mem_bytes: 0,
+            output: None,
+            output_spilled: false,
+        }
+    }
+
+    /// Whether final window rows exceeded their output budget and were written
+    /// to disk during the current/most recent invocation.
+    pub fn output_has_spilled(&self) -> bool {
+        self.output_spilled
+    }
+}
+
+fn builtin_window_order_key(
+    row: &ResultRow,
+    spec: &WindowSpec,
+    params: &[SQLParam],
+) -> ExecResult<Vec<Value>> {
+    let context = ScalarEvalContext::new(Some(row), params);
+    spec.order_by
+        .iter()
+        .map(|key| Ok(eval_scalar(&key.expr, &context)?))
+        .collect()
+}
+
+fn builtin_window_partition_value(
+    kind: &WindowKind,
+    partition: &mut crate::spill::IndexedSpill,
+    params: &[SQLParam],
+) -> ExecResult<Option<Value>> {
+    let mut count = 0_i64;
+    let mut sum = 0.0_f64;
+    let mut min = None;
+    let mut max = None;
+    let expression = match kind {
+        WindowKind::AggSum(expression)
+        | WindowKind::AggAvg(expression)
+        | WindowKind::AggMin(expression)
+        | WindowKind::AggMax(expression) => Some(expression),
+        WindowKind::AggCount(expression) => expression.as_ref(),
+        _ => return Ok(None),
+    };
+    for index in 0..partition.len() {
+        let row = partition.get(index)?;
+        let value = match expression {
+            Some(expression) => {
+                eval_scalar(expression, &ScalarEvalContext::new(Some(&row), params))?
+            }
+            None => Value::Int(1),
+        };
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| ExecError::Other("window aggregate row count overflow".into()))?;
+        match kind {
+            WindowKind::AggSum(_) | WindowKind::AggAvg(_) => {
+                let number = value_to_f64(&value).ok_or_else(|| {
+                    ExecError::Other(format!("non-numeric window aggregate input: {value:?}"))
+                })?;
+                sum += number;
+            }
+            WindowKind::AggMin(_) => {
+                min = Some(match min.take() {
+                    Some(previous) if compare_values(&previous, &value).is_le() => previous,
+                    _ => value,
+                });
+            }
+            WindowKind::AggMax(_) => {
+                max = Some(match max.take() {
+                    Some(previous) if compare_values(&previous, &value).is_ge() => previous,
+                    _ => value,
+                });
+            }
+            WindowKind::AggCount(_) => {}
+            _ => {
+                return Err(ExecError::Other(
+                    "non-aggregate window kind reached aggregate evaluation".into(),
+                ))
+            }
+        }
+    }
+    Ok(Some(match kind {
+        WindowKind::AggSum(_) => {
+            if count == 0 {
+                Value::Null
+            } else {
+                Value::Float(sum)
+            }
+        }
+        WindowKind::AggCount(_) => Value::Int(count),
+        WindowKind::AggAvg(_) => {
+            if count == 0 {
+                Value::Null
+            } else {
+                Value::Float(sum / count as f64)
+            }
+        }
+        WindowKind::AggMin(_) => min.unwrap_or(Value::Null),
+        WindowKind::AggMax(_) => max.unwrap_or(Value::Null),
+        _ => {
+            return Err(ExecError::Other(
+                "non-aggregate window kind reached aggregate result construction".into(),
+            ))
+        }
+    }))
+}
+
+fn builtin_ntile(index: u64, rows: u64, buckets: i64) -> ExecResult<Value> {
+    let buckets = u64::try_from(buckets.max(1))
+        .map_err(|_| ExecError::Other("NTILE bucket count is out of range".into()))?;
+    let base = rows / buckets;
+    let extra = rows % buckets;
+    let larger_rows = if extra == 0 {
+        0
+    } else {
+        base.checked_add(1)
+            .and_then(|value| value.checked_mul(extra))
+            .ok_or_else(|| ExecError::Other("NTILE partition size overflow".into()))?
+    };
+    let bucket = if index < larger_rows {
+        index
+            .checked_div(
+                base.checked_add(1)
+                    .ok_or_else(|| ExecError::Other("NTILE bucket width overflow".into()))?,
+            )
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| ExecError::Other("NTILE bucket number overflow".into()))?
+    } else if base == 0 {
+        extra.max(1)
+    } else {
+        extra
+            .checked_add(
+                (index - larger_rows)
+                    .checked_div(base)
+                    .ok_or_else(|| ExecError::Other("invalid NTILE bucket width".into()))?,
+            )
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| ExecError::Other("NTILE bucket number overflow".into()))?
+    };
+    Ok(Value::Int(i64::try_from(bucket).map_err(|_| {
+        ExecError::Other("NTILE bucket number exceeds SQL integer range".into())
+    })?))
+}
+
+fn emit_builtin_window_partition(
+    partition: &mut crate::spill::IndexedSpill,
+    spec: &WindowSpec,
+    functions: &[(String, WindowKind)],
+    params: &[SQLParam],
+    schema: &RowSchema,
+    output: &mut crate::spill::SpillBuffer,
+) -> ExecResult<()> {
+    let aggregate_values = functions
+        .iter()
+        .map(|(_, kind)| builtin_window_partition_value(kind, partition, params))
+        .collect::<ExecResult<Vec<_>>>()?;
+    let mut previous_order_key = None;
+    let mut rank = 0_i64;
+    let mut dense_rank = 0_i64;
+    let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+    for index in 0..partition.len() {
+        let mut row = partition.get(index)?;
+        let order_key = builtin_window_order_key(&row, spec, params)?;
+        if previous_order_key.as_ref() != Some(&order_key) {
+            rank = i64::try_from(
+                index
+                    .checked_add(1)
+                    .ok_or_else(|| ExecError::Other("window rank overflow".into()))?,
+            )
+            .map_err(|_| ExecError::Other("window rank exceeds SQL integer range".into()))?;
+            dense_rank = dense_rank
+                .checked_add(1)
+                .ok_or_else(|| ExecError::Other("window dense rank overflow".into()))?;
+        }
+        for ((alias, kind), aggregate_value) in functions.iter().zip(&aggregate_values) {
+            let value = match kind {
+                WindowKind::RowNumber => {
+                    Value::Int(
+                        i64::try_from(index.checked_add(1).ok_or_else(|| {
+                            ExecError::Other("window row number overflow".into())
+                        })?)
+                        .map_err(|_| {
+                            ExecError::Other("window row number exceeds SQL integer range".into())
+                        })?,
+                    )
+                }
+                WindowKind::Rank => Value::Int(rank),
+                WindowKind::DenseRank => Value::Int(dense_rank),
+                WindowKind::Lag(expression, offset) | WindowKind::Lead(expression, offset) => {
+                    let direction = if matches!(kind, WindowKind::Lag(..)) {
+                        -1_i128
+                    } else {
+                        1_i128
+                    };
+                    let target = i128::from(index) + direction * i128::from(*offset);
+                    if target < 0 || target >= i128::from(partition.len()) {
+                        Value::Null
+                    } else {
+                        let target_row = partition.get(u64::try_from(target).map_err(|_| {
+                            ExecError::Other("window offset target is out of range".into())
+                        })?)?;
+                        eval_scalar(
+                            expression,
+                            &ScalarEvalContext::new(Some(&target_row), params),
+                        )?
+                    }
+                }
+                WindowKind::Ntile(buckets) => builtin_ntile(index, partition.len(), *buckets)?,
+                WindowKind::AggSum(_)
+                | WindowKind::AggCount(_)
+                | WindowKind::AggAvg(_)
+                | WindowKind::AggMin(_)
+                | WindowKind::AggMax(_) => aggregate_value.clone().ok_or_else(|| {
+                    ExecError::Other("aggregate window value was not precomputed".into())
+                })?,
+            };
+            row.insert(alias.clone(), value);
+        }
+        previous_order_key = Some(order_key);
+        pending.push(row);
+        if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
+            output.push(Batch::new(schema.clone(), std::mem::take(&mut pending)))?;
+            pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+        }
+    }
+    if !pending.is_empty() {
+        output.push(Batch::new(schema.clone(), pending))?;
+    }
+    Ok(())
+}
+
+impl PhysicalOperator for Window<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
     }
 
     fn open(&mut self) -> ExecResult<()> {
         self.child.open()?;
-        self.served = false;
-        let mut rows: Vec<ResultRow> = Vec::new();
+        self.output_spilled = false;
+        if let Some(executor) = self.executor.as_mut() {
+            while let Some(batch) = self.child.next()? {
+                executor.consume(batch)?;
+            }
+            let mut output = executor.finish()?;
+            self.output_spilled = output.has_spilled();
+            self.output = Some(output.drain()?);
+            return Ok(());
+        }
+
+        let phase_budget = (self.work_mem_bytes / 3).max(1);
+        let mut input = crate::spill::SpillBuffer::new(phase_budget);
         while let Some(batch) = self.child.next()? {
-            rows.extend(batch.rows);
+            input.push(batch)?;
         }
-        // Group rows by the PARTITION BY key, preserving insertion order
-        // within a partition. Pure aggregates collapse to a single value
-        // per partition; ranking functions need the ORDER BY to be
-        // applied first.
-        let mut buckets: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        let mut bucket_order: Vec<String> = Vec::new();
-        for (i, row) in rows.iter().enumerate() {
-            let ctx = ScalarEvalContext::new(Some(row), &self.params);
-            let mut key = String::new();
-            for (j, p) in self.spec.partition_by.iter().enumerate() {
-                if j > 0 {
-                    key.push('\x1f');
-                }
-                let v = eval_scalar(p, &ctx)?;
-                key.push_str(&distinct_key(&v));
-            }
-            buckets.entry(key.clone()).or_insert_with(|| {
-                bucket_order.push(key.clone());
-                Vec::new()
-            });
-            buckets.get_mut(&key).unwrap().push(i);
-        }
-        // Stable order-by within each partition.
-        for indices in buckets.values_mut() {
-            let keys: Result<Vec<Vec<Value>>, SQLError> = indices
-                .iter()
-                .map(|&i| {
-                    let ctx = ScalarEvalContext::new(Some(&rows[i]), &self.params);
-                    let mut k = Vec::with_capacity(self.spec.order_by.len());
-                    for s in &self.spec.order_by {
-                        k.push(eval_scalar(&s.expr, &ctx)?);
-                    }
-                    Ok(k)
-                })
-                .collect();
-            let keys = keys?;
-            let mut decorated: Vec<(Vec<Value>, usize)> =
-                keys.into_iter().zip(indices.iter().copied()).collect();
-            decorated.sort_by(|a, b| {
-                for (i, k) in self.spec.order_by.iter().enumerate() {
-                    let ord = compare_values(&a.0[i], &b.0[i]);
-                    let ord = if k.descending { ord.reverse() } else { ord };
-                    if ord != std::cmp::Ordering::Equal {
-                        return ord;
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
-            *indices = decorated.into_iter().map(|(_, i)| i).collect();
-        }
-        // Compute window function outputs into a parallel column map
-        // keyed by the row index.
-        let mut overlay: Vec<ResultRow> = vec![ResultRow::new(); rows.len()];
-        for key in &bucket_order {
-            let indices = buckets.get(key).expect("bucket");
-            for (alias, kind) in &self.functions {
-                match kind {
-                    WindowKind::RowNumber => {
-                        for (rank, &row_idx) in indices.iter().enumerate() {
-                            overlay[row_idx].insert(alias.clone(), Value::Int(rank as i64 + 1));
-                        }
-                    }
-                    WindowKind::Rank => {
-                        let mut last_keys: Option<Vec<Value>> = None;
-                        let mut tie_block_start = 1i64;
-                        for (i, &row_idx) in indices.iter().enumerate() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let mut k = Vec::with_capacity(self.spec.order_by.len());
-                            for s in &self.spec.order_by {
-                                k.push(eval_scalar(&s.expr, &ctx)?);
-                            }
-                            if let Some(prev) = last_keys.as_ref() {
-                                if prev != &k {
-                                    tie_block_start = i as i64 + 1;
-                                }
-                            }
-                            overlay[row_idx].insert(alias.clone(), Value::Int(tie_block_start));
-                            last_keys = Some(k);
-                        }
-                    }
-                    WindowKind::DenseRank => {
-                        let mut last_keys: Option<Vec<Value>> = None;
-                        let mut current = 0i64;
-                        for &row_idx in indices.iter() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let mut k = Vec::with_capacity(self.spec.order_by.len());
-                            for s in &self.spec.order_by {
-                                k.push(eval_scalar(&s.expr, &ctx)?);
-                            }
-                            match last_keys.as_ref() {
-                                Some(prev) if prev == &k => {}
-                                _ => current += 1,
-                            }
-                            overlay[row_idx].insert(alias.clone(), Value::Int(current));
-                            last_keys = Some(k);
-                        }
-                    }
-                    WindowKind::Lag(arg, off) => {
-                        for (i, &row_idx) in indices.iter().enumerate() {
-                            let pos = i as i64 - *off;
-                            let v = if pos >= 0 && (pos as usize) < indices.len() {
-                                let src_row = &rows[indices[pos as usize]];
-                                let ctx = ScalarEvalContext::new(Some(src_row), &self.params);
-                                eval_scalar(arg, &ctx)?
-                            } else {
-                                Value::Null
-                            };
-                            overlay[row_idx].insert(alias.clone(), v);
-                        }
-                    }
-                    WindowKind::Lead(arg, off) => {
-                        for (i, &row_idx) in indices.iter().enumerate() {
-                            let pos = i as i64 + *off;
-                            let v = if pos >= 0 && (pos as usize) < indices.len() {
-                                let src_row = &rows[indices[pos as usize]];
-                                let ctx = ScalarEvalContext::new(Some(src_row), &self.params);
-                                eval_scalar(arg, &ctx)?
-                            } else {
-                                Value::Null
-                            };
-                            overlay[row_idx].insert(alias.clone(), v);
-                        }
-                    }
-                    WindowKind::Ntile(n) => {
-                        let total = indices.len() as i64;
-                        let buckets_count = (*n).max(1);
-                        let base = total / buckets_count;
-                        let rem = total % buckets_count;
-                        let mut bucket = 1i64;
-                        let mut emitted = 0i64;
-                        for &row_idx in indices.iter() {
-                            let limit = base + i64::from(bucket <= rem);
-                            if emitted >= limit {
-                                bucket += 1;
-                                emitted = 0;
-                            }
-                            overlay[row_idx].insert(alias.clone(), Value::Int(bucket));
-                            emitted += 1;
-                        }
-                    }
-                    WindowKind::AggSum(arg) => {
-                        let mut sum = 0f64;
-                        let mut any = false;
-                        for &row_idx in indices.iter() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval_scalar(arg, &ctx)?;
-                            if let Some(n) = value_to_f64(&v) {
-                                sum += n;
-                                any = true;
-                            }
-                        }
-                        let out = if any { Value::Float(sum) } else { Value::Null };
-                        for &row_idx in indices.iter() {
-                            overlay[row_idx].insert(alias.clone(), out.clone());
-                        }
-                    }
-                    WindowKind::AggCount(arg) => {
-                        let mut c: i64 = 0;
-                        for &row_idx in indices.iter() {
-                            match arg {
-                                None => c += 1,
-                                Some(e) => {
-                                    let ctx =
-                                        ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                                    if !matches!(eval_scalar(e, &ctx)?, Value::Null) {
-                                        c += 1;
-                                    }
-                                }
-                            }
-                        }
-                        for &row_idx in indices.iter() {
-                            overlay[row_idx].insert(alias.clone(), Value::Int(c));
-                        }
-                    }
-                    WindowKind::AggAvg(arg) => {
-                        let mut sum = 0f64;
-                        let mut count: i64 = 0;
-                        for &row_idx in indices.iter() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval_scalar(arg, &ctx)?;
-                            if let Some(n) = value_to_f64(&v) {
-                                sum += n;
-                                count += 1;
-                            }
-                        }
-                        let out = if count > 0 {
-                            Value::Float(sum / count as f64)
-                        } else {
-                            Value::Null
-                        };
-                        for &row_idx in indices.iter() {
-                            overlay[row_idx].insert(alias.clone(), out.clone());
-                        }
-                    }
-                    WindowKind::AggMin(arg) => {
-                        let mut acc: Option<Value> = None;
-                        for &row_idx in indices.iter() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval_scalar(arg, &ctx)?;
-                            if matches!(v, Value::Null) {
-                                continue;
-                            }
-                            acc = Some(match acc.take() {
-                                None => v,
-                                Some(prev) => {
-                                    if compare_values(&v, &prev) == std::cmp::Ordering::Less {
-                                        v
-                                    } else {
-                                        prev
-                                    }
-                                }
-                            });
-                        }
-                        let out = acc.unwrap_or(Value::Null);
-                        for &row_idx in indices.iter() {
-                            overlay[row_idx].insert(alias.clone(), out.clone());
-                        }
-                    }
-                    WindowKind::AggMax(arg) => {
-                        let mut acc: Option<Value> = None;
-                        for &row_idx in indices.iter() {
-                            let ctx = ScalarEvalContext::new(Some(&rows[row_idx]), &self.params);
-                            let v = eval_scalar(arg, &ctx)?;
-                            if matches!(v, Value::Null) {
-                                continue;
-                            }
-                            acc = Some(match acc.take() {
-                                None => v,
-                                Some(prev) => {
-                                    if compare_values(&v, &prev) == std::cmp::Ordering::Greater {
-                                        v
-                                    } else {
-                                        prev
-                                    }
-                                }
-                            });
-                        }
-                        let out = acc.unwrap_or(Value::Null);
-                        for &row_idx in indices.iter() {
-                            overlay[row_idx].insert(alias.clone(), out.clone());
-                        }
-                    }
-                }
-            }
-        }
-        // Merge overlay back onto rows.
-        let merged: Vec<ResultRow> = rows
-            .into_iter()
-            .zip(overlay)
-            .map(|(mut row, ov)| {
-                for (k, v) in ov {
-                    row.insert(k, v);
-                }
-                row
+        let scan: Box<dyn PhysicalOperator> = Box::new(crate::spill_scan::SpillScan::new(
+            self.child.schema().to_vec(),
+            input,
+        ));
+        let mut keys = self
+            .spec
+            .partition_by
+            .iter()
+            .cloned()
+            .map(|expr| SortKey {
+                expr,
+                descending: false,
+                nulls_first: None,
             })
-            .collect();
-        self.out = Some(Batch::new(self.schema.clone(), merged));
+            .collect::<Vec<_>>();
+        keys.extend(self.spec.order_by.iter().cloned());
+        let evaluator = DefaultExpressionEvaluator::shared(self.params.clone());
+        let mut sorted =
+            crate::external_sort::ExternalSort::new(scan, keys, evaluator, None, phase_budget);
+        sorted.open()?;
+
+        let mut current_partition_key: Option<Vec<Value>> = None;
+        let mut partition = crate::spill::IndexedSpill::new()?;
+        let mut output = crate::spill::SpillBuffer::new(phase_budget);
+        let execution = (|| -> ExecResult<()> {
+            while let Some(batch) = sorted.next()? {
+                for row in batch.rows {
+                    let context = ScalarEvalContext::new(Some(&row), &self.params);
+                    let key = self
+                        .spec
+                        .partition_by
+                        .iter()
+                        .map(|expression| eval_scalar(expression, &context))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if current_partition_key
+                        .as_ref()
+                        .is_some_and(|current| current != &key)
+                    {
+                        emit_builtin_window_partition(
+                            &mut partition,
+                            &self.spec,
+                            &self.functions,
+                            &self.params,
+                            &self.schema,
+                            &mut output,
+                        )?;
+                        partition = crate::spill::IndexedSpill::new()?;
+                    }
+                    current_partition_key = Some(key);
+                    partition.push(&row)?;
+                }
+            }
+            if !partition.is_empty() {
+                emit_builtin_window_partition(
+                    &mut partition,
+                    &self.spec,
+                    &self.functions,
+                    &self.params,
+                    &self.schema,
+                    &mut output,
+                )?;
+            }
+            Ok(())
+        })();
+        let close = sorted.close();
+        crate::physical::with_cleanup(execution, close, "close window sort after failure")?;
+        self.output_spilled = output.has_spilled();
+        self.output = Some(output.drain()?);
         Ok(())
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
-        if self.served {
+        let Some(output) = self.output.as_mut() else {
             return Ok(None);
-        }
-        self.served = true;
-        Ok(self.out.take())
+        };
+        output.next().transpose()
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.out = None;
-        self.served = false;
+        self.output = None;
         self.child.close()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
@@ -1159,6 +1575,25 @@ mod tests {
     }
 
     #[test]
+    fn physical_sort_comparison_preserves_numeric_total_order() {
+        assert_eq!(
+            compare_values(
+                &Value::Int(9_007_199_254_740_993),
+                &Value::Float(9_007_199_254_740_992.0),
+            ),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            compare_values(&Value::Float(f64::NAN), &Value::Float(f64::INFINITY)),
+            std::cmp::Ordering::Greater
+        );
+        assert_ne!(
+            compare_values(&Value::Bytes(vec![1]), &Value::Bytes(vec![2])),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
     fn hash_aggregate_count_sum_per_group() {
         let scan = boxed_scan(
             vec!["g".into(), "v".into()],
@@ -1201,6 +1636,48 @@ mod tests {
         assert_eq!(by_group["a"]["total"], Value::Float(3.0));
         assert_eq!(by_group["b"]["n"], Value::Int(1));
         assert_eq!(by_group["b"]["total"], Value::Float(5.0));
+    }
+
+    #[test]
+    fn aggregate_count_finalizer_rejects_bigint_overflow() {
+        let mut fold = AggFold::new(1);
+        fold.count = i64::MAX as u64 + 1;
+        let spec = AggregateSpec {
+            kind: AggregateKind::CountStar,
+            arg: None,
+            alias: "count".into(),
+            distinct: false,
+        };
+        assert!(finalise_fold(&fold, &spec)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds BIGINT"));
+    }
+
+    #[test]
+    fn hash_aggregate_tiny_budget_spills_input_groups_and_distinct_state() {
+        let rows = (0..512_i64)
+            .map(|value| row([("g", Value::Int(value % 64)), ("v", Value::Int(value % 17))]))
+            .collect();
+        let scan = boxed_scan(vec!["g".into(), "v".into()], rows);
+        let mut aggregate = HashAggregate::new_with_work_mem(
+            scan,
+            vec![("g".into(), col("g"))],
+            vec![AggregateSpec {
+                kind: AggregateKind::Count,
+                arg: Some(col("v")),
+                alias: "unique_values".into(),
+                distinct: true,
+            }],
+            vec![],
+            1,
+        );
+        let (_, rows) = run_to_rows(&mut aggregate).unwrap();
+        assert!(aggregate.output_has_spilled());
+        assert_eq!(rows.len(), 64);
+        assert!(rows.iter().all(|row| {
+            matches!(row.get("unique_values"), Some(Value::Int(count)) if *count > 0)
+        }));
     }
 
     #[test]
@@ -1255,5 +1732,41 @@ mod tests {
         for r in twenties {
             assert_eq!(r["dr"], Value::Int(2));
         }
+    }
+
+    #[test]
+    fn window_tiny_budget_uses_disk_partition_for_random_access() {
+        let rows = (0..512_i64)
+            .map(|value| row([("g", Value::Int(1)), ("v", Value::Int(value))]))
+            .collect();
+        let scan = boxed_scan(vec!["g".into(), "v".into()], rows);
+        let mut window = Window::new_with_work_mem(
+            scan,
+            WindowSpec {
+                partition_by: vec![col("g")],
+                order_by: vec![SortKey {
+                    expr: col("v"),
+                    descending: false,
+                    nulls_first: None,
+                }],
+            },
+            vec![
+                ("rn".into(), WindowKind::RowNumber),
+                ("next".into(), WindowKind::Lead(col("v"), 1)),
+                ("total".into(), WindowKind::AggSum(col("v"))),
+            ],
+            vec![],
+            1,
+        );
+        let (_, rows) = run_to_rows(&mut window).unwrap();
+        assert!(window.output_has_spilled());
+        assert_eq!(rows.len(), 512);
+        assert_eq!(rows[0].get("rn"), Some(&Value::Int(1)));
+        assert_eq!(rows[0].get("next"), Some(&Value::Int(1)));
+        assert_eq!(rows[511].get("next"), Some(&Value::Null));
+        assert_eq!(
+            rows[511].get("total"),
+            Some(&Value::Float((0..512_i64).sum::<i64>() as f64))
+        );
     }
 }

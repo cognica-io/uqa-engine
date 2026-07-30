@@ -63,6 +63,28 @@ fn multi_field_match_returns_documents_matching_either_field() {
 }
 
 #[test]
+fn multi_field_match_preserves_distinct_query_per_field() {
+    let engine = engine_with_corpus();
+    let result = engine
+        .sql(
+            "SELECT id FROM docs \
+             WHERE multi_field_match(title, 'rust', body, 'python') \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .filter_map(|row| match row.get("id") {
+            Some(Value::Int(id)) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[test]
 fn multi_field_match_arity_must_be_even() {
     let engine = engine_with_corpus();
     let err = engine

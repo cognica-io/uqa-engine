@@ -26,7 +26,7 @@ fn bm25_scorer() -> BM25Scorer {
 }
 
 fn bayesian_scorer() -> BayesianBM25Scorer {
-    BayesianBM25Scorer::new(BayesianBM25Params::default(), stats())
+    BayesianBM25Scorer::new(BayesianBM25Params::default(), stats()).unwrap()
 }
 
 fn assert_close(a: f64, b: f64, eps: f64) {
@@ -138,7 +138,8 @@ fn test_base_rate_identity() {
             ..BayesianBM25Params::default()
         },
         stats(),
-    );
+    )
+    .unwrap();
     let default = bayesian_scorer();
     for tf in [1, 5, 10] {
         for dl in [100, 200, 500] {
@@ -161,6 +162,7 @@ fn test_base_rate_never_shifts_the_posterior() {
             },
             stats(),
         )
+        .unwrap()
         .score(5, 200, 100)
     };
     let default = posterior_for(0.0);
@@ -175,7 +177,9 @@ fn test_base_rate_shifts_the_evidence() {
             base_rate,
             ..BayesianBM25Params::default()
         };
-        BayesianBM25Scorer::new(params.evidence_params(), stats()).score(5, 200, 100)
+        BayesianBM25Scorer::new(params.evidence_params(), stats())
+            .unwrap()
+            .score(5, 200, 100)
     };
     // A smaller corpus prior makes any match stronger evidence.
     let low_prior = evidence_for(0.2);
@@ -197,7 +201,7 @@ fn test_upper_bound_at_least_score() {
 
 #[test]
 fn test_likelihood_numerically_stable() {
-    let transform = BayesianProbabilityTransform::new(1.0, 0.0, None);
+    let transform = BayesianProbabilityTransform::new(1.0, 0.0, None).unwrap();
     assert_close(transform.likelihood(500.0), 1.0, 1e-12);
     assert_close(transform.likelihood(-500.0), 0.0, 1e-12);
     assert_close(transform.likelihood(0.0), 0.5, 1e-12);
@@ -206,36 +210,52 @@ fn test_likelihood_numerically_stable() {
 #[test]
 fn test_cosine_similarity_identical() {
     let v = [1.0, 2.0, 3.0];
-    assert_close(VectorScorer::cosine_similarity(&v, &v), 1.0, 1e-9);
+    assert_close(VectorScorer::cosine_similarity(&v, &v).unwrap(), 1.0, 1e-9);
 }
 
 #[test]
 fn test_cosine_similarity_opposite() {
     let v = [1.0, 0.0, 0.0];
     let neg = [-1.0, -0.0, -0.0];
-    assert_close(VectorScorer::cosine_similarity(&v, &neg), -1.0, 1e-9);
+    assert_close(
+        VectorScorer::cosine_similarity(&v, &neg).unwrap(),
+        -1.0,
+        1e-9,
+    );
 }
 
 #[test]
 fn test_cosine_similarity_orthogonal() {
     let a = [1.0, 0.0];
     let b = [0.0, 1.0];
-    assert_close(VectorScorer::cosine_similarity(&a, &b), 0.0, 1e-9);
+    assert_close(VectorScorer::cosine_similarity(&a, &b).unwrap(), 0.0, 1e-9);
 }
 
 #[test]
 fn test_cosine_similarity_zero_vector() {
     let a = [1.0, 2.0, 3.0];
     let zero = [0.0, 0.0, 0.0];
-    assert_eq!(VectorScorer::cosine_similarity(&a, &zero), 0.0);
-    assert_eq!(VectorScorer::cosine_similarity(&zero, &zero), 0.0);
+    assert_eq!(VectorScorer::cosine_similarity(&a, &zero).unwrap(), 0.0);
+    assert_eq!(VectorScorer::cosine_similarity(&zero, &zero).unwrap(), 0.0);
 }
 
 #[test]
 fn test_similarity_to_probability_range() {
-    assert_close(VectorScorer::similarity_to_probability(1.0), 1.0, 1e-9);
-    assert_close(VectorScorer::similarity_to_probability(-1.0), 0.0, 1e-9);
-    assert_close(VectorScorer::similarity_to_probability(0.0), 0.5, 1e-9);
+    assert_close(
+        VectorScorer::similarity_to_probability(1.0).unwrap(),
+        1.0,
+        1e-9,
+    );
+    assert_close(
+        VectorScorer::similarity_to_probability(-1.0).unwrap(),
+        0.0,
+        1e-9,
+    );
+    assert_close(
+        VectorScorer::similarity_to_probability(0.0).unwrap(),
+        0.5,
+        1e-9,
+    );
 }
 
 #[test]
@@ -244,6 +264,7 @@ fn test_similarity_to_probability_monotonic() {
     let probs: Vec<f64> = sims
         .iter()
         .map(|sim| VectorScorer::similarity_to_probability(*sim))
-        .collect();
+        .collect::<Result<_, _>>()
+        .unwrap();
     assert!(probs.windows(2).all(|w| w[0] < w[1]));
 }

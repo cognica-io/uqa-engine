@@ -15,8 +15,11 @@ use uqa_core::{
     DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Predicate, Value,
 };
 use uqa_scoring::Scorer;
+use uqa_storage::StorageBackendError;
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{
+    missing_backend, require_finite_score, ExecutionContext, Operator, OperatorResult,
+};
 
 /// `T(t) = PL({d in D | t in term(d, f)})`.
 ///
@@ -37,23 +40,23 @@ impl TermOperator {
 }
 
 impl Operator for TermOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let Some(idx) = ctx.inverted_index.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("inverted-index", "term search"));
         };
         // Search-time analyzer: synonym filters etc. expand `term` into
         // a multi-token vector that gets unioned across the field's
         // posting lists. Matches UQA behavior for `TermOperator.execute`.
         let analyzer = idx.get_search_analyzer(&self.field);
-        let tokens = analyzer.analyze(&self.term);
+        let tokens = analyzer.analyze(&self.term)?;
         if tokens.is_empty() {
-            return PostingList::new();
+            return Ok(PostingList::new());
         }
-        let mut acc = idx.get_posting_list(&self.field, &tokens[0]);
+        let mut acc = idx.get_posting_list(&self.field, &tokens[0])?;
         for t in &tokens[1..] {
-            acc = acc.union(&idx.get_posting_list(&self.field, t));
+            acc = acc.union(&idx.get_posting_list(&self.field, t)?);
         }
-        acc
+        Ok(acc)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -87,24 +90,53 @@ impl SpatialWithinOperator {
 }
 
 impl Operator for SpatialWithinOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if !self.center_x.is_finite()
+            || !self.center_y.is_finite()
+            || !self.distance.is_finite()
+            || self.distance < 0.0
+        {
+            return Err(StorageBackendError::Other(format!(
+                "spatial filter requires finite coordinates and a non-negative finite distance, got ({}, {}) distance {}",
+                self.center_x, self.center_y, self.distance
+            )));
+        }
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "spatial filter"));
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
-        let mut ids = doc_store.doc_ids();
+        let mut ids = doc_store.doc_ids()?;
         ids.sort_unstable();
         for doc_id in ids {
-            let Some(pt) = doc_store.get_field(doc_id, &self.field) else {
+            if doc_store.get(doc_id)?.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "spatial filter candidate {doc_id} is missing from the document store"
+                )));
+            }
+            let Some(pt) = doc_store.get_field(doc_id, &self.field)? else {
                 continue;
             };
             let coords = match &pt {
-                Value::List(items) if items.len() == 2 => items.clone(),
-                _ => continue,
+                Value::List(items) if items.len() == 2 => items,
+                _ => {
+                    return Err(StorageBackendError::Other(format!(
+                    "spatial field {:?} for document {doc_id} must be a two-component numeric list",
+                    self.field
+                )))
+                }
             };
             let (Some(x), Some(y)) = (value_to_f64(&coords[0]), value_to_f64(&coords[1])) else {
-                continue;
+                return Err(StorageBackendError::Other(format!(
+                    "spatial field {:?} for document {doc_id} contains a non-numeric coordinate",
+                    self.field
+                )));
             };
+            if !x.is_finite() || !y.is_finite() {
+                return Err(StorageBackendError::Other(format!(
+                    "spatial field {:?} for document {doc_id} contains a non-finite coordinate",
+                    self.field
+                )));
+            }
             let dist = uqa_storage::haversine_distance(self.center_x, self.center_y, x, y);
             if dist <= self.distance {
                 let score = if self.distance > 0.0 {
@@ -121,7 +153,7 @@ impl Operator for SpatialWithinOperator {
                 ));
             }
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -160,17 +192,17 @@ impl FilterOperator {
 }
 
 impl Operator for FilterOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "field filter"));
         };
         let null_aware = self.predicate.is_null_aware();
 
         let candidates: Vec<PostingEntry> = if let Some(src) = &self.source {
-            src.execute(ctx).into_iter().collect()
+            src.execute(ctx)?.into_iter().collect()
         } else {
             doc_store
-                .doc_ids()
+                .doc_ids()?
                 .into_iter()
                 .map(|id| PostingEntry::new(id, Payload::default()))
                 .collect()
@@ -178,7 +210,13 @@ impl Operator for FilterOperator {
 
         let mut out = Vec::with_capacity(candidates.len());
         for entry in candidates {
-            let value = doc_store.get_field(entry.doc_id, &self.field);
+            if doc_store.get(entry.doc_id)?.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "field filter candidate {} is missing from the document store",
+                    entry.doc_id
+                )));
+            }
+            let value = doc_store.get_field(entry.doc_id, &self.field)?;
             let matched = if null_aware {
                 self.predicate.evaluate(value.as_ref())
             } else {
@@ -188,7 +226,7 @@ impl Operator for FilterOperator {
                 out.push(entry);
             }
         }
-        PostingList::from_sorted_unchecked(out)
+        Ok(PostingList::from_sorted_unchecked(out))
     }
 }
 
@@ -211,33 +249,57 @@ impl FacetOperator {
 }
 
 impl Operator for FacetOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "facet aggregation"));
         };
 
         let candidate_ids: Vec<DocId> = if let Some(src) = &self.source {
-            src.execute(ctx).doc_ids().collect()
+            src.execute(ctx)?.doc_ids().collect()
         } else {
-            doc_store.doc_ids()
+            doc_store.doc_ids()?
         };
 
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for doc_id in candidate_ids {
-            if let Some(v) = doc_store.get_field(doc_id, &self.field) {
+            if doc_store.get(doc_id)?.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "facet candidate {doc_id} is missing from the document store"
+                )));
+            }
+            if let Some(v) = doc_store.get_field(doc_id, &self.field)? {
                 let key = value_to_string(&v);
-                *counts.entry(key).or_insert(0) += 1;
+                let count = counts.entry(key).or_insert(0);
+                *count = count.checked_add(1).ok_or_else(|| {
+                    StorageBackendError::Other("facet count overflowed u64".to_string())
+                })?;
             }
         }
 
         let mut entries = Vec::with_capacity(counts.len());
         for (i, (value, count)) in counts.into_iter().enumerate() {
+            if count > 9_007_199_254_740_992 {
+                return Err(StorageBackendError::Other(format!(
+                    "facet count {count} cannot be represented exactly as an f64 score"
+                )));
+            }
             let mut fields = BTreeMap::new();
             fields.insert("_facet_field".to_string(), Value::Str(self.field.clone()));
             fields.insert("_facet_value".to_string(), Value::Str(value));
-            fields.insert("_facet_count".to_string(), Value::Int(count as i64));
+            fields.insert(
+                "_facet_count".to_string(),
+                Value::Int(i64::try_from(count).map_err(|_| {
+                    StorageBackendError::Other(format!(
+                        "facet count {count} exceeds the Value::Int range"
+                    ))
+                })?),
+            );
             entries.push(PostingEntry::new(
-                i as DocId,
+                DocId::try_from(i).map_err(|_| {
+                    StorageBackendError::Other(format!(
+                        "facet bucket index {i} exceeds the document-id range"
+                    ))
+                })?,
                 Payload {
                     positions: Vec::new(),
                     score: count as f64,
@@ -245,7 +307,7 @@ impl Operator for FacetOperator {
                 },
             ));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 }
 
@@ -286,25 +348,28 @@ impl ScoreOperator {
 }
 
 impl Operator for ScoreOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let source_pl = self.source.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let source_pl = self.source.execute(ctx)?;
         let Some(idx) = ctx.inverted_index.as_ref() else {
-            return source_pl;
+            return Err(missing_backend("inverted-index", "score operator"));
         };
 
         // Pre-compute per-term IDF.
-        let term_idfs: Vec<f64> = self
-            .query_terms
-            .iter()
-            .map(|t| {
-                let df = idx.doc_freq(&self.field, t);
-                self.scorer.idf(df)
-            })
-            .collect();
+        let mut term_idfs = Vec::with_capacity(self.query_terms.len());
+        for term in &self.query_terms {
+            term_idfs.push(self.scorer.idf(idx.doc_freq(&self.field, term)?));
+        }
 
         let doc_ids: Vec<DocId> = source_pl.iter().map(|entry| entry.doc_id).collect();
-        let scoring_inputs = idx.get_scoring_inputs_bulk(&doc_ids, &self.field, &self.query_terms);
-        debug_assert_eq!(source_pl.len(), scoring_inputs.len());
+        let scoring_inputs =
+            idx.get_scoring_inputs_bulk(&doc_ids, &self.field, &self.query_terms)?;
+        if source_pl.len() != scoring_inputs.len() {
+            return Err(StorageBackendError::Other(format!(
+                "score operator received {} storage inputs for {} source documents",
+                scoring_inputs.len(),
+                source_pl.len()
+            )));
+        }
         let mut entries = Vec::with_capacity(source_pl.len());
         let mut per_term_scores = Vec::with_capacity(self.query_terms.len());
         for (entry, (doc_length, term_freqs)) in source_pl.iter().zip(scoring_inputs) {
@@ -313,6 +378,7 @@ impl Operator for ScoreOperator {
                 |(term_freq, idf)| self.scorer.term_score_with_idf(term_freq, doc_length, *idf),
             ));
             let total = self.scorer.finalize_score(&per_term_scores);
+            require_finite_score(total, "score operator")?;
             entries.push(PostingEntry {
                 doc_id: entry.doc_id,
                 payload: Payload {
@@ -322,6 +388,6 @@ impl Operator for ScoreOperator {
                 },
             });
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 }

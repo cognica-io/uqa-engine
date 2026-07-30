@@ -13,27 +13,33 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::SQLResult;
-use uqa_storage::sqlite::CURRENT_SCHEMA_VERSION;
+use uqa_storage::{sqlite::CURRENT_SCHEMA_VERSION, RelationIdentity};
 
 fn persisted_index_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
+    let table = RelationIdentity::from_legacy_name(table)
+        .unwrap()
+        .qualified_name();
     rusqlite::Connection::open(path)
         .unwrap()
         .query_row(
             "SELECT COUNT(*) FROM _btree_index_entries
              WHERE table_name = ?1 AND field = ?2",
-            [table, field],
+            [&table, field],
             |row| row.get(0),
         )
         .unwrap()
 }
 
 fn persisted_index_definition_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
+    let table = RelationIdentity::from_legacy_name(table)
+        .unwrap()
+        .qualified_name();
     rusqlite::Connection::open(path)
         .unwrap()
         .query_row(
             "SELECT COUNT(*) FROM _btree_indexes
              WHERE table_name = ?1 AND field = ?2",
-            [table, field],
+            [&table, field],
             |row| row.get(0),
         )
         .unwrap()

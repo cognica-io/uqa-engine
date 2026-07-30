@@ -25,7 +25,7 @@ fn bench_log_odds(c: &mut Criterion) {
     for n_signals in [2_usize, 3, 5, 10] {
         let probs = probabilities(n_signals);
         let weights = vec![1.0 / n_signals as f64; n_signals];
-        let fusion = LogOddsFusion::new(0.5);
+        let fusion = LogOddsFusion::new(0.5).expect("benchmark alpha is valid");
         group.bench_with_input(
             BenchmarkId::from_parameter(n_signals),
             &n_signals,
@@ -42,7 +42,7 @@ fn bench_log_odds(c: &mut Criterion) {
     }
     group.finish();
 
-    let fusion = LogOddsFusion::new(0.5);
+    let fusion = LogOddsFusion::new(0.5).expect("benchmark alpha is valid");
     let samples: Vec<Vec<f64>> = (0..10_000).map(|i| probabilities(2 + i % 4)).collect();
     c.bench_function("fusion_log_odds_batch_10k", |bencher| {
         bencher.iter(|| {
@@ -62,7 +62,13 @@ fn bench_attention_fusion(c: &mut Criterion) {
             BenchmarkId::from_parameter(n_signals),
             &n_signals,
             |bencher, _| {
-                bencher.iter(|| black_box(fusion.fuse(black_box(&probs), black_box(&features))));
+                bencher.iter(|| {
+                    black_box(
+                        fusion
+                            .fuse(black_box(&probs), black_box(&features))
+                            .expect("benchmark shapes match"),
+                    )
+                });
             },
         );
     }
@@ -93,7 +99,13 @@ fn bench_learned_fusion(c: &mut Criterion) {
             BenchmarkId::from_parameter(n_signals),
             &n_signals,
             |bencher, _| {
-                bencher.iter(|| black_box(fusion.fuse(black_box(&probs))));
+                bencher.iter(|| {
+                    black_box(
+                        fusion
+                            .fuse(black_box(&probs))
+                            .expect("benchmark shapes match"),
+                    )
+                });
             },
         );
     }
@@ -114,12 +126,14 @@ fn bench_learned_fusion(c: &mut Criterion) {
     c.bench_function("fusion_learned_fit_1000", |bencher| {
         bencher.iter(|| {
             let mut fusion = LearnedFusion::new(2, 0.0);
-            fusion.fit(
-                black_box(&probs),
-                black_box(&labels),
-                black_box(0.1),
-                black_box(10),
-            );
+            fusion
+                .fit(
+                    black_box(&probs),
+                    black_box(&labels),
+                    black_box(0.1),
+                    black_box(10),
+                )
+                .expect("benchmark shapes match");
             black_box(fusion.weights[0])
         });
     });

@@ -10,16 +10,19 @@ use rusqlite::{params, Connection};
 
 use crate::sqlite::connection::Result;
 
-pub(super) fn columns_json_references(columns_json: &str, column_name: &str) -> bool {
-    serde_json::from_str::<Vec<String>>(columns_json).is_ok_and(|columns| {
-        columns
-            .iter()
-            .any(|column| column.eq_ignore_ascii_case(column_name))
-    })
+pub(super) fn columns_json_references(columns_json: &str, column_name: &str) -> Result<bool> {
+    let columns = serde_json::from_str::<Vec<String>>(columns_json)?;
+    Ok(columns
+        .iter()
+        .any(|column| column.eq_ignore_ascii_case(column_name)))
 }
 
-pub(super) fn renamed_columns_json(columns_json: &str, from: &str, to: &str) -> Option<String> {
-    let mut columns = serde_json::from_str::<Vec<String>>(columns_json).ok()?;
+pub(super) fn renamed_columns_json(
+    columns_json: &str,
+    from: &str,
+    to: &str,
+) -> Result<Option<String>> {
+    let mut columns = serde_json::from_str::<Vec<String>>(columns_json)?;
     let mut changed = false;
     for column in &mut columns {
         if column.eq_ignore_ascii_case(from) {
@@ -27,9 +30,11 @@ pub(super) fn renamed_columns_json(columns_json: &str, from: &str, to: &str) -> 
             changed = true;
         }
     }
-    changed
-        .then(|| serde_json::to_string(&columns).ok())
-        .flatten()
+    if changed {
+        Ok(Some(serde_json::to_string(&columns)?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) fn drop_fts_aux_tables_for_table(conn: &Connection, table_name: &str) -> Result<()> {
@@ -120,6 +125,20 @@ pub(super) fn rename_field_rows_or_keep_existing(
     Ok(())
 }
 
+/// Rename one logical B-tree field without relying on `SQLite`'s foreign-key
+/// cascade being enabled by the caller. Updating the parent first satisfies
+/// the child key; with `ON UPDATE CASCADE` enabled the second update is simply
+/// a no-op.
+pub(super) fn rename_btree_field_rows_or_keep_existing(
+    conn: &Connection,
+    table_name: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    rename_field_rows_or_keep_existing(conn, "_btree_indexes", "field", table_name, from, to)?;
+    rename_field_rows_or_keep_existing(conn, "_btree_index_entries", "field", table_name, from, to)
+}
+
 pub(super) fn delete_table_rows_if_exists(
     conn: &Connection,
     table: &str,
@@ -155,6 +174,19 @@ pub(super) fn update_table_name_rows_if_exists(
         params![from, to],
     )?;
     Ok(())
+}
+
+/// Move a logical B-tree and all of its entries to a new table key without
+/// depending on `PRAGMA foreign_keys`. Parent-first ordering gives the child a
+/// valid target key; when the declared cascade is active, the child update has
+/// no remaining source rows.
+pub(super) fn update_btree_table_name_rows_if_exists(
+    conn: &Connection,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    update_table_name_rows_if_exists(conn, "_btree_indexes", from, to)?;
+    update_table_name_rows_if_exists(conn, "_btree_index_entries", from, to)
 }
 
 pub(super) fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {

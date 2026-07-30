@@ -162,18 +162,23 @@ pub(super) fn validate_joined_expr_text_match_fields(
                 None => Ok(()),
             };
         }
-        let containing: Vec<&String> = tables
-            .iter()
-            .map(|(_, name)| name)
-            .filter(|name| engine.table_has_column(name, column))
-            .collect();
-        if containing.iter().any(|name| {
-            engine
-                .fts_fields_for_table(name)
+        let mut containing: Vec<&String> = Vec::new();
+        for (_, name) in &tables {
+            if engine
+                .table_has_column(name, column)
+                .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+            {
+                containing.push(name);
+            }
+        }
+        for name in &containing {
+            if engine
+                .fts_fields_for_table(name)?
                 .iter()
                 .any(|f| f == column)
-        }) {
-            return Ok(());
+            {
+                return Ok(());
+            }
         }
         if let Some(table) = containing.first() {
             return validate_text_match_field(engine, table, column, function_name);
@@ -231,58 +236,9 @@ pub(super) fn execute_function_with_top_k(
     top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.to_string()))?;
-    if let Some(tree) = crate::operator_tree_bridge::lower_sql_function(name, args, params) {
-        let posting = crate::operator_tree_bridge::expect_posting_output(
-            crate::operator_tree_bridge::execute_operator_tree(engine, table, params, &tree)?,
-            name,
-        )?;
-        let posting = match top_k {
-            Some(k) => posting.top_k(k),
-            None => posting,
-        };
-        return Ok(posting
-            .entries()
-            .iter()
-            .map(|entry| ScoredEntry {
-                doc_id: entry.doc_id,
-                score: entry.payload.score,
-            })
-            .collect());
-    }
     match kind {
-        FunctionKind::TextMatch => run_text_match(engine, table, args, params, top_k),
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, args, params, top_k),
-        FunctionKind::FTSMatch => run_fts_match(engine, table, args, params),
-        FunctionKind::BayesianMatchWithPrior => {
-            run_bayesian_match_with_prior(engine, table, args, params)
-        }
-        FunctionKind::SparseThreshold => run_sparse_threshold(engine, table, args, params),
-        FunctionKind::KNNMatch => run_knn_match(engine, table, args, params),
-        FunctionKind::CalibratedVectorMatch => {
-            run_calibrated_vector_match(engine, table, args, params)
-        }
-        FunctionKind::FuseLogOdds => run_fuse_log_odds(engine, table, args, params),
-        FunctionKind::GraphPagerank => run_graph_pagerank(engine, args, params),
-        FunctionKind::GraphHits => run_graph_hits(engine, args, params),
-        FunctionKind::GraphBetweenness => run_graph_betweenness(engine, args, params),
-        FunctionKind::GraphTraverse => run_graph_traverse(engine, args, params),
-        FunctionKind::GraphNeighbors => run_graph_neighbors(engine, args, params),
-        FunctionKind::MultiFieldMatch => run_multi_field_match(engine, table, args, params),
-        FunctionKind::StagedRetrieval => run_staged_retrieval(engine, table, args, params),
-        FunctionKind::DeepPredict => run_deep_predict(engine, args, params),
-        FunctionKind::TraverseMatch => run_graph_traverse(engine, args, params),
-        FunctionKind::TemporalTraverse => run_temporal_traverse(engine, args, params),
-        FunctionKind::RPQ => run_rpq(engine, args, params),
         FunctionKind::GraphCreate => run_graph_create(engine, args, params),
         FunctionKind::GraphDrop => run_graph_drop(engine, args, params),
-        FunctionKind::GraphEdges => run_graph_edges(engine, args, params),
-        // The remaining UQA functions either return a non-posting
-        // shape or are construction-time helpers; they reach the
-        // projection-side handler instead of this row-emitting
-        // dispatcher.
-        FunctionKind::AttentionFusion | FunctionKind::LearnedFusion => {
-            run_attention_fusion(engine, table, name, args, params)
-        }
         FunctionKind::UQAHighlight
         | FunctionKind::UQAFacets
         | FunctionKind::ScoreBM25
@@ -297,115 +253,85 @@ pub(super) fn execute_function_with_top_k(
         | FunctionKind::Model => Err(SQLError::Unsupported(format!(
             "row-emitting dispatch for `{name}` is handled elsewhere"
         ))),
+        FunctionKind::TextMatch
+        | FunctionKind::BayesianMatch
+        | FunctionKind::FTSMatch
+        | FunctionKind::BayesianMatchWithPrior
+        | FunctionKind::SparseThreshold
+        | FunctionKind::KNNMatch
+        | FunctionKind::CalibratedVectorMatch
+        | FunctionKind::FuseLogOdds
+        | FunctionKind::GraphPagerank
+        | FunctionKind::GraphHits
+        | FunctionKind::GraphBetweenness
+        | FunctionKind::GraphTraverse
+        | FunctionKind::GraphNeighbors
+        | FunctionKind::MultiFieldMatch
+        | FunctionKind::StagedRetrieval
+        | FunctionKind::DeepPredict
+        | FunctionKind::TraverseMatch
+        | FunctionKind::TemporalTraverse
+        | FunctionKind::RPQ
+        | FunctionKind::GraphEdges
+        | FunctionKind::AttentionFusion
+        | FunctionKind::LearnedFusion => {
+            let tree =
+                crate::operator_tree_bridge::lower_sql_function_bound(engine, name, args, params)?;
+            let posting = crate::operator_tree_bridge::expect_posting_output(
+                crate::operator_tree_bridge::execute_operator_tree_in_execution(
+                    engine, table, params, &tree,
+                )?,
+                name,
+            )?;
+            let posting = match top_k {
+                Some(k) => posting.top_k(k),
+                None => posting,
+            };
+            Ok(posting
+                .entries()
+                .iter()
+                .map(|entry| ScoredEntry {
+                    doc_id: entry.doc_id,
+                    score: entry.payload.score,
+                })
+                .collect())
+        }
     }
 }
 
-fn run_deep_predict(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 1 {
-        return Err(SQLError::BadArity {
-            name: "deep_predict".into(),
-            expected: "1".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let name = match eval_scalar(&args[0], &ctx)? {
-        Value::Str(s) => s,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "deep_predict.model must be a string, got {other:?}"
-            )));
-        }
-    };
-    execute_tree_entries(
-        engine,
-        &OperatorTree::Opaque {
-            kind: "deep_predict".into(),
-            children: Vec::new(),
-            meta: BTreeMap::from([("model".into(), Value::Str(name))]),
-        },
-    )
+#[derive(Clone, Copy)]
+enum RetrievalExecution {
+    Public,
+    InExecution,
 }
 
-fn run_staged_retrieval(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if matches!(args.first(), Some(ScalarExpr::Func { .. })) && !is_named_arg_expr(&args[0]) {
-        if args.is_empty() || args.len() % 2 != 0 {
-            return Err(SQLError::BadArity {
-                name: "staged_retrieval".into(),
-                expected: "pairs of (signal, top_k)".into(),
-                actual: args.len(),
-            });
+impl RetrievalExecution {
+    fn bayesian_params(
+        self,
+        engine: &Engine,
+        table: &str,
+        field: &str,
+    ) -> Result<uqa_scoring::BayesianBM25Params, SQLError> {
+        match self {
+            Self::Public => engine.bayesian_params_for(table, field),
+            Self::InExecution => engine.bayesian_params_for_in_execution(table, field),
         }
-        let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-        let mut current: Option<Vec<ScoredEntry>> = None;
-        for pair in args.chunks(2) {
-            let rows = run_scored_signal(engine, table, &pair[0], params, "staged_retrieval")?;
-            let top_k = expect_usize(&pair[1], "staged_retrieval.top_k", &ctx)?;
-            let mut scored = rows;
-            if let Some(prior) = &current {
-                let prior_ids: std::collections::BTreeSet<u64> =
-                    prior.iter().map(|e| e.doc_id).collect();
-                scored.retain(|e| prior_ids.contains(&e.doc_id));
-            }
-            scored.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            scored.truncate(top_k);
-            scored.sort_by_key(|e| e.doc_id);
-            current = Some(scored);
-        }
-        return Ok(current.unwrap_or_default());
     }
 
-    if args.is_empty() || args.len() % 3 != 0 {
-        return Err(SQLError::BadArity {
-            name: "staged_retrieval".into(),
-            expected: ">= 3, multiple of 3 (field, query, top_k)".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let mode = crate::ScoringMode::BM25(uqa_scoring::BM25Params::default());
-    let n_stages = args.len() / 3;
-    let mut current: Option<Vec<ScoredEntry>> = None;
-    for i in 0..n_stages {
-        let field = expect_column_name(&args[3 * i], "staged_retrieval.field")?;
-        let q = match eval_scalar(&args[3 * i + 1], &ctx)? {
-            Value::Str(s) => s,
-            other => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "staged_retrieval query must be string, got {other:?}"
-                )));
-            }
-        };
-        let top_k = expect_usize(&args[3 * i + 2], "staged_retrieval.top_k", &ctx)?;
-        let mut scored = engine.search(table, &field, &q, &mode, usize::MAX);
-        if let Some(prior) = &current {
-            let prior_ids: std::collections::BTreeSet<u64> =
-                prior.iter().map(|e| e.doc_id).collect();
-            scored.retain(|e| prior_ids.contains(&e.doc_id));
+    fn search(
+        self,
+        engine: &Engine,
+        table: &str,
+        field: &str,
+        query: &str,
+        mode: &crate::ScoringMode,
+        top_k: usize,
+    ) -> Result<Vec<ScoredEntry>, SQLError> {
+        match self {
+            Self::Public => engine.search(table, field, query, mode, top_k),
+            Self::InExecution => engine.search_leaf(table, field, query, mode, top_k),
         }
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        scored.truncate(top_k);
-        scored.sort_by_key(|e| e.doc_id);
-        current = Some(scored);
     }
-    Ok(current.unwrap_or_default())
 }
 
 fn run_multi_field_match(
@@ -413,6 +339,7 @@ fn run_multi_field_match(
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
+    execution: RetrievalExecution,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() < 3 {
         return Err(SQLError::BadArity {
@@ -432,7 +359,7 @@ fn run_multi_field_match(
         std::collections::BTreeMap::new();
     let mut field_priors: Vec<f64> = Vec::new();
     for (i, (field, q)) in fields.iter().zip(queries.iter()).enumerate() {
-        let calibration = engine.bayesian_params_for(table, field);
+        let calibration = execution.bayesian_params(engine, table, field)?;
         if calibration.base_rate > 0.0 {
             field_priors.push(calibration.base_rate);
         }
@@ -440,7 +367,7 @@ fn run_multi_field_match(
             base_rate: 0.0,
             ..calibration
         });
-        let scored = engine.search(table, field, q, &mode, usize::MAX);
+        let scored = execution.search(engine, table, field, q, &mode, usize::MAX)?;
         for entry in scored {
             active_fields[i] = true;
             let slot = per_doc
@@ -450,29 +377,38 @@ fn run_multi_field_match(
         }
     }
     let active_field_count = active_fields.iter().filter(|active| **active).count();
-    let mut fusion = uqa_fusion::LogOddsFusion::new(0.5);
+    let mut fusion = uqa_fusion::LogOddsFusion::new(0.5)
+        .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
     if let Some(base_rate) = crate::operator_tree_bridge::combine_signal_priors(&field_priors) {
-        fusion = fusion.with_base_rate(base_rate);
+        fusion = fusion
+            .with_base_rate(base_rate)
+            .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
     }
     let mut out: Vec<ScoredEntry> = per_doc
         .into_iter()
-        .map(|(doc_id, probabilities)| {
+        .map(|(doc_id, probabilities)| -> Result<ScoredEntry, SQLError> {
             let fused = if active_field_count == 1 {
                 // A de-facto single field passes through at n = 1,
                 // where a configured prior still enters exactly once.
-                let evidence = probabilities.into_iter().flatten().next().unwrap_or(0.5);
+                let evidence = probabilities.into_iter().flatten().next().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "multi-field fusion document {doc_id} has no active signal"
+                    ))
+                })?;
                 fusion.fuse(&[evidence])
             } else {
                 fusion
                     .fuse_weighted_sparse(&probabilities, &weights)
-                    .expect("multi-field weights are normalized")
+                    .map_err(|error| {
+                        SQLError::TypeMismatch(format!("multi-field fusion: {error}"))
+                    })?
             };
-            ScoredEntry {
+            Ok(ScoredEntry {
                 doc_id,
                 score: fused,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     out.sort_by_key(|e| e.doc_id);
     Ok(out)
 }
@@ -609,31 +545,6 @@ fn expect_f64_value(
     }
 }
 
-fn expect_f64_array(
-    expr: &ScalarExpr,
-    label: &str,
-    ctx: &ScalarEvalContext<'_>,
-) -> Result<Vec<f64>, SQLError> {
-    let Value::List(items) = eval_scalar(expr, ctx)? else {
-        return Err(SQLError::TypeMismatch(format!(
-            "{label} must be a numeric array"
-        )));
-    };
-    items
-        .into_iter()
-        .map(|item| match item {
-            Value::Float(value) => Ok(value),
-            Value::Int(value) => Ok(value as f64),
-            Value::Decimal(value) => value.to_f64().ok_or_else(|| {
-                SQLError::TypeMismatch(format!("{label} decimal is outside f64 range"))
-            }),
-            other => Err(SQLError::TypeMismatch(format!(
-                "{label} must contain only numbers, got {other:?}"
-            ))),
-        })
-        .collect()
-}
-
 fn uniform_weights(n: usize) -> Vec<f64> {
     vec![1.0 / n.max(1) as f64; n]
 }
@@ -658,7 +569,9 @@ fn normalize_weights(weights: Vec<f64>) -> Result<Vec<f64>, SQLError> {
 }
 
 fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQLError> {
-    let graphs = engine.list_graphs();
+    let graphs = engine
+        .list_graphs()
+        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?;
     match graphs.as_slice() {
         [name] => Ok(name.clone()),
         [] => Err(SQLError::Unsupported(format!(
@@ -668,26 +581,6 @@ fn default_graph_name(engine: &Engine, function_name: &str) -> Result<String, SQ
             "{function_name} requires a graph argument because multiple graphs are registered: {}",
             graphs.join(", ")
         ))),
-    }
-}
-
-fn expect_optional_graph_name(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-    function_name: &str,
-) -> Result<String, SQLError> {
-    match args {
-        [] => default_graph_name(engine, function_name),
-        [arg] => {
-            let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-            expect_string(arg, &format!("{function_name}.graph"), &ctx)
-        }
-        _ => Err(SQLError::BadArity {
-            name: function_name.into(),
-            expected: "0..=1".into(),
-            actual: args.len(),
-        }),
     }
 }
 
@@ -741,12 +634,12 @@ pub(super) fn graph_betweenness_entries(
     )
 }
 
-fn execute_tree_entries(
+pub(super) fn execute_tree_entries(
     engine: &Engine,
     tree: &OperatorTree,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let posting = crate::operator_tree_bridge::expect_posting_output(
-        crate::operator_tree_bridge::execute_operator_tree(engine, "", &[], tree)?,
+        crate::operator_tree_bridge::execute_operator_tree_in_execution(engine, "", &[], tree)?,
         "SQL table function",
     )?;
     Ok(posting
@@ -759,127 +652,21 @@ fn execute_tree_entries(
         .collect())
 }
 
-fn run_graph_pagerank(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    let name = expect_optional_graph_name(engine, args, params, "graph_pagerank")?;
-    graph_pagerank_entries(engine, &name)
-}
-
-fn run_graph_hits(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    let name = expect_optional_graph_name(engine, args, params, "graph_hits")?;
-    graph_hits_entries(engine, &name)
-}
-
-fn run_graph_betweenness(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    let name = expect_optional_graph_name(engine, args, params, "graph_betweenness")?;
-    graph_betweenness_entries(engine, &name)
-}
-
-fn run_graph_traverse(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 4 {
-        return Err(SQLError::BadArity {
-            name: "graph_traverse".into(),
-            expected: "4".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let name = expect_string(&args[0], "graph_traverse.graph", &ctx)?;
-    let start = expect_u64(&args[1], "graph_traverse.start", &ctx)?;
-    let label = expect_optional_string(&args[2], "graph_traverse.label", &ctx)?;
-    let max_hops = expect_u32(&args[3], "graph_traverse.max_hops", &ctx)?;
-    execute_tree_entries(
-        engine,
-        &OperatorTree::Traverse {
-            start_vertex: start,
-            graph: name,
-            label,
-            max_hops: max_hops as usize,
-            vertex_predicate: None,
-        },
-    )
-}
-
-fn run_graph_neighbors(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 4 {
-        return Err(SQLError::BadArity {
-            name: "graph_neighbors".into(),
-            expected: "4".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let name = expect_string(&args[0], "graph_neighbors.graph", &ctx)?;
-    let vertex = expect_u64(&args[1], "graph_neighbors.vertex", &ctx)?;
-    let label = expect_optional_string(&args[2], "graph_neighbors.label", &ctx)?;
-    let direction_str = expect_string(&args[3], "graph_neighbors.direction", &ctx)?;
-    let direction = match direction_str.to_ascii_lowercase().as_str() {
-        "out" => uqa_graph::Direction::Out,
-        "in" => uqa_graph::Direction::In,
-        "both" => uqa_graph::Direction::Both,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "graph_neighbors.direction must be 'out'/'in'/'both', got {other:?}"
-            )));
-        }
-    };
-    let neighbors = engine
-        .graph_with(&name, |store| {
-            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::neighbors(
-                store,
-                vertex,
-                label.as_deref(),
-                direction,
-                &name,
-            )
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for nid in neighbors {
-        if seen.insert(nid) {
-            out.push(ScoredEntry {
-                doc_id: nid,
-                score: 1.0,
-            });
-        }
-    }
-    Ok(out)
-}
-
 pub(super) fn run_graph_create(
     engine: &Engine,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    run_graph_create_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))
+    run_graph_create_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))?;
+    Ok(Vec::new())
 }
 
 pub(super) fn run_graph_create_with_evaluator(
     engine: &Engine,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<Vec<ScoredEntry>, SQLError> {
+) -> Result<bool, SQLError> {
     if args.len() != 1 {
         return Err(SQLError::BadArity {
             name: "graph_create".into(),
@@ -888,8 +675,9 @@ pub(super) fn run_graph_create_with_evaluator(
         });
     }
     let name = expect_evaluated_string(evaluate(&args[0])?, "graph_create.name")?;
-    engine.create_graph(name);
-    Ok(Vec::new())
+    engine
+        .create_graph(name)
+        .map_err(|err| SQLError::Internal(format!("create graph: {err}")))
 }
 
 pub(super) fn run_graph_drop(
@@ -898,14 +686,15 @@ pub(super) fn run_graph_drop(
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    run_graph_drop_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))
+    run_graph_drop_with_evaluator(engine, args, &mut |expr| eval_scalar(expr, &ctx))?;
+    Ok(Vec::new())
 }
 
 pub(super) fn run_graph_drop_with_evaluator(
     engine: &Engine,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
-) -> Result<Vec<ScoredEntry>, SQLError> {
+) -> Result<bool, SQLError> {
     if !(1..=2).contains(&args.len()) {
         return Err(SQLError::BadArity {
             name: "graph_drop".into(),
@@ -914,10 +703,13 @@ pub(super) fn run_graph_drop_with_evaluator(
         });
     }
     let name = expect_evaluated_string(evaluate(&args[0])?, "graph_drop.name")?;
+    let graph_exists = engine
+        .has_graph(&name)
+        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?;
     if let Some(cascade_expr) = args.get(1) {
         match evaluate(cascade_expr)? {
             Value::Bool(true) => {}
-            Value::Bool(false) if engine.has_graph(&name) => {
+            Value::Bool(false) if graph_exists => {
                 return Err(SQLError::Unsupported(format!(
                     "cannot drop graph {name:?} without cascade"
                 )));
@@ -930,8 +722,9 @@ pub(super) fn run_graph_drop_with_evaluator(
             }
         }
     }
-    engine.drop_graph(&name);
-    Ok(Vec::new())
+    engine
+        .drop_graph(&name)
+        .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))
 }
 
 /// Apache AGE graph name validation: at least 3 characters and the
@@ -975,12 +768,17 @@ pub(super) fn run_age_create_graph_with_evaluator(
     if !age_graph_name_is_valid(&name) {
         return Err(SQLError::Unsupported("graph name is invalid".into()));
     }
-    if engine.has_graph(&name) {
+    if engine
+        .has_graph(&name)
+        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+    {
         return Err(SQLError::Unsupported(format!(
             "graph \"{name}\" already exists"
         )));
     }
-    engine.create_graph(name);
+    engine
+        .create_graph(name)
+        .map_err(|err| SQLError::Internal(format!("create graph: {err}")))?;
     Ok(Value::Null)
 }
 
@@ -1000,7 +798,10 @@ pub(super) fn run_age_drop_graph_with_evaluator(
         });
     }
     let name = eval_age_graph_name_with(&args[0], evaluate)?;
-    if !engine.has_graph(&name) {
+    if !engine
+        .has_graph(&name)
+        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+    {
         return Err(SQLError::Unsupported(format!(
             "graph \"{name}\" does not exist"
         )));
@@ -1023,153 +824,10 @@ pub(super) fn run_age_drop_graph_with_evaluator(
             "cannot drop schema {name} because other objects depend on it"
         )));
     }
-    engine.drop_graph(&name);
+    engine
+        .drop_graph(&name)
+        .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))?;
     Ok(Value::Null)
-}
-
-/// `graph_edges(graph [, label])` -- emit one entry per edge in the
-/// named graph. The `doc_id` carries the edge id; the score is the
-/// raw edge weight (`1.0` when no `weight` property is present).
-fn run_graph_edges(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(SQLError::BadArity {
-            name: "graph_edges".into(),
-            expected: "1..=2".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let name = expect_string(&args[0], "graph_edges.graph", &ctx)?;
-    let label = if args.len() == 2 {
-        expect_optional_string(&args[1], "graph_edges.label", &ctx)?
-    } else {
-        None
-    };
-    let edges = engine
-        .graph_with(&name, |store| {
-            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::edges_in_graph(store, &name)
-        })
-        .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {name:?}")))?;
-    let mut out = Vec::new();
-    for edge in edges {
-        if let Some(target_label) = label.as_deref() {
-            if edge.label != target_label {
-                continue;
-            }
-        }
-        let weight = match edge.properties.get("weight") {
-            Some(Value::Float(f)) => *f,
-            Some(Value::Int(i)) => *i as f64,
-            Some(Value::Decimal(d)) => d.to_f64().ok_or_else(|| {
-                SQLError::TypeMismatch("graph_edges.weight decimal is outside f64 range".into())
-            })?,
-            _ => 1.0,
-        };
-        out.push(ScoredEntry {
-            doc_id: edge.edge_id,
-            score: weight,
-        });
-    }
-    Ok(out)
-}
-
-/// `temporal_traverse(graph, start, label, max_hops, t_min, t_max)`
-/// -- BFS traversal that respects edge `valid_from` / `valid_to`
-/// properties. The parsed call is lowered to the shared temporal
-/// `OperatorTree` node and executed by `EngineDriver`.
-fn run_temporal_traverse(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 6 {
-        return Err(SQLError::BadArity {
-            name: "temporal_traverse".into(),
-            expected: "6".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let name = expect_string(&args[0], "temporal_traverse.graph", &ctx)?;
-    let start = expect_u64(&args[1], "temporal_traverse.start", &ctx)?;
-    let label = expect_optional_string(&args[2], "temporal_traverse.label", &ctx)?;
-    let max_hops = expect_usize(&args[3], "temporal_traverse.max_hops", &ctx)?;
-    let t_min = match eval_scalar(&args[4], &ctx)? {
-        Value::Int(n) => n as f64,
-        Value::Float(f) => f,
-        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
-            SQLError::TypeMismatch("temporal_traverse.t_min decimal is outside f64 range".into())
-        })?,
-        Value::Null => f64::NEG_INFINITY,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "temporal_traverse.t_min must be numeric, got {other:?}"
-            )));
-        }
-    };
-    let t_max = match eval_scalar(&args[5], &ctx)? {
-        Value::Int(n) => n as f64,
-        Value::Float(f) => f,
-        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
-            SQLError::TypeMismatch("temporal_traverse.t_max decimal is outside f64 range".into())
-        })?,
-        Value::Null => f64::INFINITY,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "temporal_traverse.t_max must be numeric, got {other:?}"
-            )));
-        }
-    };
-    execute_tree_entries(
-        engine,
-        &OperatorTree::TemporalTraverse {
-            start_vertex: start,
-            graph: name,
-            label,
-            max_hops,
-            temporal_filter: Some(uqa_operators::TemporalFilterIR {
-                timestamp: None,
-                time_range: Some((t_min, t_max)),
-            }),
-        },
-    )
-}
-
-/// `rpq(expr, start [, graph])` - evaluate a Regular Path Query
-/// (Definition 5.1.2). Mirrors the canonical UQA implementation's
-/// `Engine.sql("SELECT * FROM rpq(expr, start [, graph])")`.
-fn run_rpq(
-    engine: &Engine,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if !(2..=3).contains(&args.len()) {
-        return Err(SQLError::BadArity {
-            name: "rpq".into(),
-            expected: "2..=3".into(),
-            actual: args.len(),
-        });
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let expr_str = expect_string(&args[0], "rpq.expr", &ctx)?;
-    let start = expect_u64(&args[1], "rpq.start", &ctx)?;
-    let graph = if args.len() == 3 {
-        expect_string(&args[2], "rpq.graph", &ctx)?
-    } else {
-        default_graph_name(engine, "rpq")?
-    };
-    execute_tree_entries(
-        engine,
-        &OperatorTree::RegularPathQuery {
-            rpq_source: expr_str,
-            start_vertex: start,
-            graph,
-        },
-    )
 }
 
 fn expect_string(
@@ -1189,64 +847,22 @@ fn expect_evaluated_string(value: Value, name: &str) -> Result<String, SQLError>
     }
 }
 
-fn expect_optional_string(
-    expr: &ScalarExpr,
-    name: &str,
-    ctx: &ScalarEvalContext,
-) -> Result<Option<String>, SQLError> {
-    match eval_scalar(expr, ctx)? {
-        Value::Null => Ok(None),
-        Value::Str(s) if s.is_empty() => Ok(None),
-        Value::Str(s) => Ok(Some(s)),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{name} must be a string or NULL, got {other:?}"
-        ))),
-    }
-}
-
-fn expect_u64(expr: &ScalarExpr, name: &str, ctx: &ScalarEvalContext) -> Result<u64, SQLError> {
-    match eval_scalar(expr, ctx)? {
-        Value::Int(n) if n >= 0 => Ok(n as u64),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{name} must be a non-negative integer, got {other:?}"
-        ))),
-    }
-}
-
-pub(crate) fn run_text_match_public(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_text_match(engine, table, args, params, None)
-}
-
-pub(crate) fn run_bayesian_match_public(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_match(engine, table, args, params, None)
-}
-
-pub(crate) fn run_knn_match_public(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_knn_match(engine, table, args, params)
-}
-
 pub(crate) fn run_bayesian_match_with_prior_public(
     engine: &Engine,
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_match_with_prior(engine, table, args, params)
+    run_bayesian_match_with_prior(engine, table, args, params, RetrievalExecution::Public)
+}
+
+pub(crate) fn run_bayesian_match_with_prior_in_execution(
+    engine: &Engine,
+    table: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_bayesian_match_with_prior(engine, table, args, params, RetrievalExecution::InExecution)
 }
 
 pub(crate) fn run_calibrated_vector_match_public(
@@ -1264,36 +880,16 @@ pub(crate) fn run_multi_field_match_public(
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_multi_field_match(engine, table, args, params)
+    run_multi_field_match(engine, table, args, params, RetrievalExecution::Public)
 }
 
-fn expect_u32(expr: &ScalarExpr, name: &str, ctx: &ScalarEvalContext) -> Result<u32, SQLError> {
-    let max_u32_as_i64: i64 = i64::from(u32::MAX);
-    match eval_scalar(expr, ctx)? {
-        Value::Int(n) if (0..=max_u32_as_i64).contains(&n) => Ok(n as u32),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{name} must fit in u32, got {other:?}"
-        ))),
-    }
-}
-
-fn run_text_match(
+pub(crate) fn run_multi_field_match_in_execution(
     engine: &Engine,
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
-    top_k: Option<usize>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let mode = crate::ScoringMode::BM25(uqa_scoring::BM25Params::default());
-    run_text_match_scored(
-        engine,
-        table,
-        args,
-        params,
-        "text_match",
-        &|_| mode.clone(),
-        top_k,
-    )
+    run_multi_field_match(engine, table, args, params, RetrievalExecution::InExecution)
 }
 
 fn run_bayesian_match(
@@ -1302,15 +898,23 @@ fn run_bayesian_match(
     args: &[ScalarExpr],
     params: &[SQLParam],
     top_k: Option<usize>,
+    execution: RetrievalExecution,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match_scored(
         engine,
         table,
         args,
         params,
-        "bayesian_match",
-        &|field| crate::ScoringMode::BayesianBM25(engine.bayesian_params_for(table, field)),
-        top_k,
+        TextMatchExecution {
+            function_name: "bayesian_match",
+            mode_for_field: &|field| {
+                Ok(crate::ScoringMode::BayesianBM25(
+                    execution.bayesian_params(engine, table, field)?,
+                ))
+            },
+            top_k,
+            retrieval: execution,
+        },
     )
 }
 
@@ -1322,19 +926,25 @@ fn run_bayesian_evidence_match(
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
+    execution: RetrievalExecution,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     run_text_match_scored(
         engine,
         table,
         args,
         params,
-        "bayesian_match",
-        &|field| {
-            crate::ScoringMode::BayesianBM25(
-                engine.bayesian_params_for(table, field).evidence_params(),
-            )
+        TextMatchExecution {
+            function_name: "bayesian_match",
+            mode_for_field: &|field| {
+                Ok(crate::ScoringMode::BayesianBM25(
+                    execution
+                        .bayesian_params(engine, table, field)?
+                        .evidence_params(),
+                ))
+            },
+            top_k: None,
+            retrieval: execution,
         },
-        None,
     )
 }
 
@@ -1344,28 +954,16 @@ pub(crate) fn run_bayesian_evidence_match_public(
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    run_bayesian_evidence_match(engine, table, args, params)
+    run_bayesian_evidence_match(engine, table, args, params, RetrievalExecution::Public)
 }
 
-/// The corpus relevance prior a text signal would fold into its
-/// posterior: the field's estimated base rate, or the logit-mean rate
-/// across every text-indexed field for `_all` queries.
-fn text_signal_prior(engine: &Engine, table: &str, field_expr: &ScalarExpr) -> Option<f64> {
-    let field = match field_expr {
-        ScalarExpr::Column(name) => Some(name.as_str()),
-        ScalarExpr::QualifiedColumn { column, .. } => Some(column.as_str()),
-        _ => None,
-    };
-    let rates: Vec<f64> = match field {
-        Some(field) => vec![engine.bayesian_params_for(table, field).base_rate],
-        None => engine
-            .fts_fields_for_table(table)
-            .iter()
-            .map(|field| engine.bayesian_params_for(table, field).base_rate)
-            .collect(),
-    };
-    let rates: Vec<f64> = rates.into_iter().filter(|rate| *rate > 0.0).collect();
-    crate::operator_tree_bridge::combine_signal_priors(&rates)
+pub(crate) fn run_bayesian_evidence_match_in_execution(
+    engine: &Engine,
+    table: &str,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Result<Vec<ScoredEntry>, SQLError> {
+    run_bayesian_evidence_match(engine, table, args, params, RetrievalExecution::InExecution)
 }
 
 /// Reject silently-empty text searches up front: a match function whose
@@ -1377,21 +975,31 @@ fn validate_text_match_field(
     field: &str,
     function_name: &str,
 ) -> Result<(), SQLError> {
-    if engine.table_columns(table).is_empty() {
+    if !engine
+        .has_table(table)
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
         return Err(SQLError::TypeMismatch(format!(
             "{function_name}: unknown table `{table}`"
         )));
     }
-    if !engine.table_has_column(table, field) {
-        return Err(SQLError::TypeMismatch(format!(
-            "{function_name}: column `{field}` does not exist on table `{table}`"
-        )));
-    }
-    if !engine
-        .fts_fields_for_table(table)
+    let indexed = engine
+        .fts_fields_for_table(table)?
         .iter()
-        .any(|fts| fts == field)
-    {
+        .any(|fts| fts == field);
+    if !indexed {
+        if !engine
+            .table_has_column(table, field)
+            .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+            && !engine
+                .table_columns(table)
+                .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+                .is_empty()
+        {
+            return Err(SQLError::TypeMismatch(format!(
+                "{function_name}: column `{field}` does not exist on table `{table}`"
+            )));
+        }
         return Err(SQLError::TypeMismatch(format!(
             "{function_name}: column `{table}.{field}` has no text index; \
              create one with CREATE INDEX ... ON {table} USING gin ({field})"
@@ -1405,12 +1013,15 @@ fn validate_text_match_all_fields(
     table: &str,
     function_name: &str,
 ) -> Result<(), SQLError> {
-    if engine.table_columns(table).is_empty() {
+    if !engine
+        .has_table(table)
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
         return Err(SQLError::TypeMismatch(format!(
             "{function_name}: unknown table `{table}`"
         )));
     }
-    if engine.fts_fields_for_table(table).is_empty() {
+    if engine.fts_fields_for_table(table)?.is_empty() {
         return Err(SQLError::TypeMismatch(format!(
             "{function_name}: table `{table}` has no text-indexed columns; \
              create one with CREATE INDEX ... ON {table} USING gin (...)"
@@ -1419,15 +1030,21 @@ fn validate_text_match_all_fields(
     Ok(())
 }
 
+struct TextMatchExecution<'a> {
+    function_name: &'a str,
+    mode_for_field: &'a dyn Fn(&str) -> Result<crate::ScoringMode, SQLError>,
+    top_k: Option<usize>,
+    retrieval: RetrievalExecution,
+}
+
 fn run_text_match_scored(
     engine: &Engine,
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
-    function_name: &str,
-    mode_for_field: &dyn Fn(&str) -> crate::ScoringMode,
-    top_k: Option<usize>,
+    execution: TextMatchExecution<'_>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    let function_name = execution.function_name;
     if args.len() != 2 {
         return Err(SQLError::BadArity {
             name: function_name.into(),
@@ -1462,9 +1079,13 @@ fn run_text_match_scored(
     };
     if field == "_all" || field.is_empty() {
         let mut by_doc: BTreeMap<DocId, f64> = BTreeMap::new();
-        for field_name in engine.fts_fields_for_table(table) {
-            let mode = mode_for_field(&field_name);
-            for entry in engine.search(table, &field_name, &query, &mode, usize::MAX) {
+        for field_name in engine.fts_fields_for_table(table)? {
+            let mode = (execution.mode_for_field)(&field_name)?;
+            for entry in
+                execution
+                    .retrieval
+                    .search(engine, table, &field_name, &query, &mode, usize::MAX)?
+            {
                 by_doc
                     .entry(entry.doc_id)
                     .and_modify(|score| *score = (*score).max(entry.score))
@@ -1476,60 +1097,14 @@ fn run_text_match_scored(
             .map(|(doc_id, score)| ScoredEntry { doc_id, score })
             .collect());
     }
-    let mode = mode_for_field(&field);
-    Ok(engine.search(table, &field, &query, &mode, top_k.unwrap_or(usize::MAX)))
-}
-
-fn run_fts_match(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 2 {
-        return Err(SQLError::BadArity {
-            name: "fts_match".into(),
-            expected: "2".into(),
-            actual: args.len(),
-        });
-    }
-    let default_field = match &args[0] {
-        ScalarExpr::Column(name) => Some(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Some(column.clone()),
-        ScalarExpr::Literal(Value::Str(s)) if s.is_empty() || s == "_all" => None,
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "fts_match.field must be a column reference, got {other:?}"
-            )));
-        }
-    };
-    if !fts_query_is_jsonpath(args.get(1)) {
-        match default_field.as_deref() {
-            Some(field) if !field.is_empty() && field != "_all" => {
-                validate_text_match_field(engine, table, field, "fts_match")?;
-            }
-            _ => validate_text_match_all_fields(engine, table, "fts_match")?,
-        }
-    }
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let query = expect_string(&args[1], "fts_match.query", &ctx)?;
-    let tokenizer = |_field: Option<&str>, phrase: &str| {
-        phrase
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>()
-    };
-    uqa_sql::compile_fts_query_string(&query, default_field.as_deref(), &tokenizer)?;
-    let expr = ScalarExpr::Func {
-        name: "fts_match".into(),
-        args: args.to_vec(),
-        distinct: false,
-        order_by: Vec::new(),
-        filter: None,
-    };
-    Ok(
-        crate::operator_tree_bridge::run_optimised(engine, table, Some(&expr), params)?
-            .unwrap_or_default(),
+    let mode = (execution.mode_for_field)(&field)?;
+    execution.retrieval.search(
+        engine,
+        table,
+        &field,
+        &query,
+        &mode,
+        execution.top_k.unwrap_or(usize::MAX),
     )
 }
 
@@ -1538,6 +1113,7 @@ fn run_bayesian_match_with_prior(
     table: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
+    execution: RetrievalExecution,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     if args.len() != 4 {
         return Err(SQLError::BadArity {
@@ -1561,19 +1137,24 @@ fn run_bayesian_match_with_prior(
         ],
         params,
         None,
+        execution,
     )?;
     let prior_fn = prior_fn_for_mode(&mode, &prior_field)?;
-    Ok(base
-        .into_iter()
-        .map(|entry| {
-            let document = engine.get_document(table, entry.doc_id).unwrap_or_default();
-            let prior = prior_fn(&document).clamp(1e-10, 1.0 - 1e-10);
-            ScoredEntry {
-                doc_id: entry.doc_id,
-                score: combine_probability_with_prior(entry.score, prior),
-            }
-        })
-        .collect())
+    let mut scored = Vec::with_capacity(base.len());
+    for entry in base {
+        let document = engine.get_document(table, entry.doc_id)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "bayesian prior: posting references missing document {} in table `{table}`",
+                entry.doc_id
+            ))
+        })?;
+        let prior = prior_fn(&document).clamp(1e-10, 1.0 - 1e-10);
+        scored.push(ScoredEntry {
+            doc_id: entry.doc_id,
+            score: combine_probability_with_prior(entry.score, prior),
+        });
+    }
+    Ok(scored)
 }
 
 fn prior_fn_for_mode(mode: &str, prior_field: &str) -> Result<uqa_scoring::PriorFn, SQLError> {
@@ -1589,224 +1170,6 @@ fn prior_fn_for_mode(mode: &str, prior_field: &str) -> Result<uqa_scoring::Prior
 fn combine_probability_with_prior(probability: f64, prior: f64) -> f64 {
     let p = probability.clamp(1e-10, 1.0 - 1e-10);
     uqa_scoring::sigmoid(uqa_scoring::logit(p) + uqa_scoring::logit(prior))
-}
-
-fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
-    let ScalarExpr::Func { name, args, .. } = expr else {
-        return None;
-    };
-    if name != "__named_arg" || args.len() != 2 {
-        return None;
-    }
-    let ScalarExpr::Literal(Value::Str(arg_name)) = &args[0] else {
-        return None;
-    };
-    Some((arg_name.as_str(), &args[1]))
-}
-
-fn is_named_arg_expr(expr: &ScalarExpr) -> bool {
-    named_arg_expr(expr).is_some()
-}
-
-fn run_scored_signal(
-    engine: &Engine,
-    table: &str,
-    expr: &ScalarExpr,
-    params: &[SQLParam],
-    parent: &str,
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    let ScalarExpr::Func {
-        name, args: inner, ..
-    } = expr
-    else {
-        return Err(SQLError::Unsupported(format!(
-            "{parent} signal must be a function call"
-        )));
-    };
-    match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch => run_text_match(engine, table, inner, params, None),
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None),
-        FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params),
-        FunctionKind::BayesianMatchWithPrior => {
-            run_bayesian_match_with_prior(engine, table, inner, params)
-        }
-        FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params),
-        FunctionKind::CalibratedVectorMatch => {
-            run_calibrated_vector_match(engine, table, inner, params)
-        }
-        _ => Err(SQLError::Unsupported(format!(
-            "function {name} cannot be nested under {parent}"
-        ))),
-    }
-}
-
-fn run_attention_fusion(
-    engine: &Engine,
-    table: &str,
-    function_name: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() < 2 {
-        return Err(SQLError::BadArity {
-            name: "fuse_attention".into(),
-            expected: ">=2".into(),
-            actual: args.len(),
-        });
-    }
-
-    let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
-        Vec::with_capacity(args.len());
-    let mut all_doc_ids = std::collections::BTreeSet::new();
-    for arg in args {
-        if is_named_arg_expr(arg) {
-            continue;
-        }
-        let ScalarExpr::Func {
-            name, args: inner, ..
-        } = arg
-        else {
-            return Err(SQLError::Unsupported(
-                "fuse_attention arguments must be function calls".into(),
-            ));
-        };
-        let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-            FunctionKind::TextMatch => {
-                return Err(non_probability_signal_error(name, function_name));
-            }
-            FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None)?,
-            FunctionKind::FTSMatch => run_fts_match(engine, table, inner, params)?,
-            FunctionKind::BayesianMatchWithPrior => {
-                run_bayesian_match_with_prior(engine, table, inner, params)?
-            }
-            FunctionKind::KNNMatch => {
-                if inner.len() != 3 {
-                    return Err(SQLError::BadArity {
-                        name: name.clone(),
-                        expected: "3".into(),
-                        actual: inner.len(),
-                    });
-                }
-                // Vector signals in fusion contexts contribute
-                // likelihood-ratio calibrated evidence, not the
-                // standalone (1 + cos) / 2 map.
-                run_calibrated_vector_match(engine, table, inner, params)?
-            }
-            FunctionKind::CalibratedVectorMatch => {
-                run_calibrated_vector_match(engine, table, inner, params)?
-            }
-            _ => {
-                return Err(SQLError::Unsupported(format!(
-                    "function {name} cannot be nested under fuse_attention"
-                )));
-            }
-        };
-        let mut map = std::collections::BTreeMap::new();
-        for row in rows {
-            all_doc_ids.insert(row.doc_id);
-            map.insert(row.doc_id, row.score.clamp(1e-10, 1.0 - 1e-10));
-        }
-        score_maps.push(map);
-    }
-
-    if score_maps.is_empty() {
-        return Err(SQLError::BadArity {
-            name: "fuse_attention".into(),
-            expected: ">=1 signal".into(),
-            actual: 0,
-        });
-    }
-
-    let n = score_maps.len() as f64;
-    Ok(all_doc_ids
-        .into_iter()
-        .map(|doc_id| {
-            let score = score_maps
-                .iter()
-                .map(|map| map.get(&doc_id).copied().unwrap_or(0.5))
-                .sum::<f64>()
-                / n;
-            ScoredEntry { doc_id, score }
-        })
-        .collect())
-}
-
-fn non_probability_signal_error(name: &str, parent: &str) -> SQLError {
-    SQLError::TypeMismatch(format!(
-        "{parent} requires probability-valued signals; `{name}` returns BM25 scores, use `bayesian_match`"
-    ))
-}
-
-fn run_sparse_threshold(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 2 {
-        return Err(SQLError::BadArity {
-            name: "sparse_threshold".into(),
-            expected: "2".into(),
-            actual: args.len(),
-        });
-    }
-    let ScalarExpr::Func {
-        name, args: inner, ..
-    } = &args[0]
-    else {
-        return Err(SQLError::Unsupported(
-            "sparse_threshold source must be a function call".into(),
-        ));
-    };
-    let rows = match lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))? {
-        FunctionKind::TextMatch => run_text_match(engine, table, inner, params, None)?,
-        FunctionKind::BayesianMatch => run_bayesian_match(engine, table, inner, params, None)?,
-        FunctionKind::BayesianMatchWithPrior => {
-            run_bayesian_match_with_prior(engine, table, inner, params)?
-        }
-        FunctionKind::KNNMatch => run_knn_match(engine, table, inner, params)?,
-        FunctionKind::CalibratedVectorMatch => {
-            run_calibrated_vector_match(engine, table, inner, params)?
-        }
-        _ => {
-            return Err(SQLError::Unsupported(format!(
-                "function {name} cannot be nested under sparse_threshold"
-            )));
-        }
-    };
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let threshold = expect_f64_value(&args[1], "sparse_threshold.threshold", &ctx)?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|entry| {
-            let adjusted = entry.score - threshold;
-            (adjusted > 0.0).then_some(ScoredEntry {
-                doc_id: entry.doc_id,
-                score: adjusted,
-            })
-        })
-        .collect())
-}
-
-fn run_knn_match(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() != 3 {
-        return Err(SQLError::BadArity {
-            name: "knn_match".into(),
-            expected: "3".into(),
-            actual: args.len(),
-        });
-    }
-    let field = expect_column_name(&args[0], "knn_match.field")?;
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    let vec_value = eval_scalar(&args[1], &ctx)?;
-    let query_vector = value_to_vector(&vec_value)?;
-    let k = expect_usize(&args[2], "knn_match.k", &ctx)?;
-    Ok(engine.knn_search(table, &field, query_vector, k))
 }
 
 fn run_calibrated_vector_match(
@@ -1835,12 +1198,14 @@ fn run_calibrated_vector_match(
     } else {
         None
     };
-    let Some(ctx) = engine.snapshot_context(table) else {
-        return Ok(Vec::new());
+    let Some(ctx) = engine.snapshot_context(table)? else {
+        return Err(SQLError::UnknownTable(table.to_string()));
     };
     use uqa_operators::base::Operator;
     let op = uqa_operators::CalibratedVectorOperator::new(query_vector, k, field);
-    let pl = op.execute(&ctx);
+    let pl = op
+        .execute(&ctx)
+        .map_err(|error| SQLError::Internal(format!("calibrated vector search: {error}")))?;
     let mut out: Vec<ScoredEntry> = pl
         .iter()
         .filter_map(|entry| {
@@ -1856,252 +1221,10 @@ fn run_calibrated_vector_match(
         .collect();
     out.sort_by(|a, b| {
         b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.score)
             .then_with(|| a.doc_id.cmp(&b.doc_id))
     });
     Ok(out)
-}
-
-fn run_fuse_log_odds(
-    engine: &Engine,
-    table: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    if args.len() < 2 {
-        return Err(SQLError::BadArity {
-            name: "fuse_log_odds".into(),
-            expected: ">=2".into(),
-            actual: args.len(),
-        });
-    }
-    let mut alpha = 0.5;
-    let mut gating = uqa_fusion::LogitGating::Softplus;
-    let mut weights = None;
-    let mut logit_min = None;
-    let mut logit_max = None;
-    let mut score_maps: Vec<std::collections::BTreeMap<DocId, f64>> =
-        Vec::with_capacity(args.len());
-    let mut all_doc_ids = std::collections::BTreeSet::new();
-    let mut signal_priors: Vec<f64> = Vec::new();
-    let ctx = ScalarEvalContext::new(None, params).with_function_hook(engine);
-    for arg in args {
-        if let Some((name, value_expr)) = named_arg_expr(arg) {
-            if name.eq_ignore_ascii_case("alpha") {
-                alpha = expect_f64_value(value_expr, "fuse_log_odds.alpha", &ctx)?;
-            } else if name.eq_ignore_ascii_case("gating") {
-                let gating_name = expect_string_value(value_expr, "fuse_log_odds.gating", &ctx)?;
-                gating = uqa_fusion::LogitGating::parse(&gating_name).ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "fuse_log_odds.gating has unknown value `{gating_name}`"
-                    ))
-                })?;
-            } else if name.eq_ignore_ascii_case("weights") {
-                weights = Some(expect_f64_array(value_expr, "fuse_log_odds.weights", &ctx)?);
-            } else if name.eq_ignore_ascii_case("logit_min") {
-                logit_min = Some(expect_f64_array(
-                    value_expr,
-                    "fuse_log_odds.logit_min",
-                    &ctx,
-                )?);
-            } else if name.eq_ignore_ascii_case("logit_max") {
-                logit_max = Some(expect_f64_array(
-                    value_expr,
-                    "fuse_log_odds.logit_max",
-                    &ctx,
-                )?);
-            } else {
-                return Err(SQLError::TypeMismatch(format!(
-                    "fuse_log_odds has unknown option `{name}`"
-                )));
-            }
-            continue;
-        }
-        match arg {
-            ScalarExpr::Func {
-                name, args: inner, ..
-            } => {
-                let kind = lookup(name).ok_or_else(|| SQLError::UnknownFunction(name.clone()))?;
-                let rows = match kind {
-                    FunctionKind::TextMatch | FunctionKind::BayesianMatch => {
-                        if inner.len() != 2 {
-                            return Err(SQLError::BadArity {
-                                name: name.clone(),
-                                expected: "2".into(),
-                                actual: inner.len(),
-                            });
-                        }
-                        match kind {
-                            FunctionKind::TextMatch => {
-                                return Err(non_probability_signal_error(name, "fuse_log_odds"));
-                            }
-                            FunctionKind::BayesianMatch => {
-                                if let Some(prior) = text_signal_prior(engine, table, &inner[0]) {
-                                    signal_priors.push(prior);
-                                }
-                                run_bayesian_evidence_match(engine, table, inner, params)?
-                            }
-                            _ => unreachable!("matched text scoring function"),
-                        }
-                    }
-                    FunctionKind::FTSMatch => {
-                        match crate::operator_tree_bridge::run_fts_fusion_signal(
-                            engine, table, inner, params,
-                        )? {
-                            Some((rows, prior)) => {
-                                if let Some(prior) = prior {
-                                    signal_priors.push(prior);
-                                }
-                                rows
-                            }
-                            // Non-constant arguments cannot be lowered;
-                            // the signal stays an opaque posterior.
-                            None => run_fts_match(engine, table, inner, params)?,
-                        }
-                    }
-                    FunctionKind::BayesianMatchWithPrior => {
-                        run_bayesian_match_with_prior(engine, table, inner, params)?
-                    }
-                    FunctionKind::KNNMatch => {
-                        if inner.len() != 3 {
-                            return Err(SQLError::BadArity {
-                                name: name.clone(),
-                                expected: "3".into(),
-                                actual: inner.len(),
-                            });
-                        }
-                        // Vector signals in fusion contexts contribute
-                        // likelihood-ratio calibrated evidence, not the
-                        // standalone (1 + cos) / 2 map.
-                        run_calibrated_vector_match(engine, table, inner, params)?
-                    }
-                    FunctionKind::CalibratedVectorMatch => {
-                        run_calibrated_vector_match(engine, table, inner, params)?
-                    }
-                    FunctionKind::FuseLogOdds => {
-                        return Err(SQLError::Unsupported(
-                            "nested fuse_log_odds is not supported".into(),
-                        ));
-                    }
-                    FunctionKind::GraphPagerank
-                    | FunctionKind::GraphHits
-                    | FunctionKind::GraphBetweenness
-                    | FunctionKind::GraphTraverse
-                    | FunctionKind::GraphNeighbors
-                    | FunctionKind::MultiFieldMatch
-                    | FunctionKind::StagedRetrieval
-                    | FunctionKind::DeepPredict
-                    | FunctionKind::UQAHighlight
-                    | FunctionKind::UQAFacets
-                    | FunctionKind::TraverseMatch
-                    | FunctionKind::TemporalTraverse
-                    | FunctionKind::RPQ
-                    | FunctionKind::GraphCreate
-                    | FunctionKind::GraphDrop
-                    | FunctionKind::GraphEdges
-                    | FunctionKind::AttentionFusion
-                    | FunctionKind::LearnedFusion
-                    | FunctionKind::ScoreBM25
-                    | FunctionKind::ScoreBayesianBM25
-                    | FunctionKind::SparseThreshold
-                    | FunctionKind::DeepLearn
-                    | FunctionKind::Convolve
-                    | FunctionKind::Pool
-                    | FunctionKind::Flatten
-                    | FunctionKind::Dense
-                    | FunctionKind::Softmax
-                    | FunctionKind::Layer
-                    | FunctionKind::Model => {
-                        return Err(SQLError::Unsupported(format!(
-                            "function {name} cannot be nested under fuse_log_odds"
-                        )));
-                    }
-                };
-                let mut map = std::collections::BTreeMap::new();
-                for row in rows {
-                    all_doc_ids.insert(row.doc_id);
-                    map.insert(row.doc_id, row.score);
-                }
-                score_maps.push(map);
-            }
-            ScalarExpr::Literal(Value::Float(v)) => {
-                alpha = *v;
-            }
-            ScalarExpr::Literal(Value::Int(v)) => {
-                alpha = *v as f64;
-            }
-            ScalarExpr::Literal(Value::Decimal(v)) => {
-                alpha = v.to_f64().ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "fuse_log_odds.alpha decimal is outside f64 range".into(),
-                    )
-                })?;
-            }
-            ScalarExpr::Literal(Value::Str(name)) => {
-                gating = uqa_fusion::LogitGating::parse(name).ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "fuse_log_odds.gating has unknown value `{name}`"
-                    ))
-                })?;
-            }
-            other => {
-                return Err(SQLError::Unsupported(format!(
-                    "fuse_log_odds argument must be a function call, got {other:?}"
-                )));
-            }
-        }
-    }
-    if score_maps.len() < 2 {
-        return Err(SQLError::BadArity {
-            name: "fuse_log_odds".into(),
-            expected: ">=2 signal functions".into(),
-            actual: score_maps.len(),
-        });
-    }
-    let n = score_maps.len();
-    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
-        return Err(SQLError::TypeMismatch(format!(
-            "fuse_log_odds.alpha must be in [0, 1], got {alpha}"
-        )));
-    }
-    let mut fuser = uqa_fusion::LogOddsFusion::new(alpha);
-    fuser.gating = gating;
-    if let Some(base_rate) = crate::operator_tree_bridge::combine_signal_priors(&signal_priors) {
-        fuser = fuser.with_base_rate(base_rate);
-    }
-    fuser
-        .fuse_configured(
-            &vec![None; n],
-            weights.as_deref(),
-            logit_min.as_deref(),
-            logit_max.as_deref(),
-        )
-        .map_err(|message| SQLError::TypeMismatch(format!("fuse_log_odds: {message}")))?;
-
-    // A signal with no matches still contributes neutral evidence to
-    // every document: the declared signal count governs `n^alpha` and
-    // the uniform denominator, so a document's fused score cannot
-    // depend on whether another signal happened to match elsewhere
-    // (Lucene PR 16410 semantics).
-    Ok(all_doc_ids
-        .into_iter()
-        .map(|doc_id| {
-            let probabilities: Vec<Option<f64>> = score_maps
-                .iter()
-                .map(|map| map.get(&doc_id).copied())
-                .collect();
-            let score = fuser
-                .fuse_configured(
-                    &probabilities,
-                    weights.as_deref(),
-                    logit_min.as_deref(),
-                    logit_max.as_deref(),
-                )
-                .expect("validated log-odds fusion configuration");
-            ScoredEntry { doc_id, score }
-        })
-        .collect())
 }
 
 pub(super) fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLError> {
@@ -2133,7 +1256,9 @@ fn expect_usize(
 ) -> Result<usize, SQLError> {
     let v = eval_scalar(expr, ctx)?;
     match v {
-        Value::Int(n) if n >= 0 => Ok(n as usize),
+        Value::Int(n) if n >= 0 => usize::try_from(n).map_err(|_| {
+            SQLError::TypeMismatch(format!("{label} exceeds the platform usize range"))
+        }),
         Value::Int(_) => Err(SQLError::TypeMismatch(format!("{label} must be >= 0"))),
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be an integer, got {other:?}"

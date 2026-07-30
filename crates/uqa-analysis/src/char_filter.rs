@@ -12,6 +12,8 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AnalysisError, AnalysisResult};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CharFilter {
@@ -27,10 +29,26 @@ pub enum CharFilter {
 }
 
 impl CharFilter {
-    pub fn filter(&self, text: &str) -> String {
+    /// Validate configuration without filtering input.
+    pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            CharFilter::PatternReplace { pattern, .. } => {
+                Regex::new(pattern)
+                    .map(|_| ())
+                    .map_err(|source| AnalysisError::InvalidRegex {
+                        component: "pattern-replace character filter",
+                        pattern: pattern.clone(),
+                        source,
+                    })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn filter(&self, text: &str) -> AnalysisResult<String> {
+        let filtered = match self {
             CharFilter::HTMLStrip => {
-                let stripped = html_tag_re().replace_all(text, " ").into_owned();
+                let stripped = html_tag_re()?.replace_all(text, " ").into_owned();
                 replace_entities(&stripped)
             }
             CharFilter::Mapping { mapping } => {
@@ -44,17 +62,27 @@ impl CharFilter {
             CharFilter::PatternReplace {
                 pattern,
                 replacement,
-            } => match Regex::new(pattern) {
-                Ok(re) => re.replace_all(text, replacement.as_str()).into_owned(),
-                Err(_) => text.to_owned(),
-            },
-        }
+            } => Regex::new(pattern)
+                .map_err(|source| AnalysisError::InvalidRegex {
+                    component: "pattern-replace character filter",
+                    pattern: pattern.clone(),
+                    source,
+                })?
+                .replace_all(text, replacement.as_str())
+                .into_owned(),
+        };
+        Ok(filtered)
     }
 }
 
-fn html_tag_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"<[^>]+>").expect("html tag regex compiles"))
+fn html_tag_re() -> AnalysisResult<&'static Regex> {
+    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"<[^>]+>").map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|message| AnalysisError::BuiltInRegex {
+            component: "HTML tag filter",
+            message: message.clone(),
+        })
 }
 
 const HTML_ENTITIES: &[(&str, &str)] = &[
@@ -92,7 +120,7 @@ mod tests {
     fn html_strip_removes_tags_and_decodes_entities() {
         let f = CharFilter::HTMLStrip;
         assert_eq!(
-            f.filter("<p>hello &amp; world</p>"),
+            f.filter("<p>hello &amp; world</p>").unwrap(),
             " hello & world ".to_string()
         );
     }
@@ -107,11 +135,11 @@ mod tests {
         m.insert("aa".to_string(), "X".to_string());
         m.insert("a".to_string(), "Y".to_string());
         let f = CharFilter::Mapping { mapping: m };
-        assert_eq!(f.filter("aab"), "Xb");
+        assert_eq!(f.filter("aab").unwrap(), "Xb");
 
         // A 'a' that wasn't in the longer rule's match still gets replaced
         // by the shorter rule.
-        assert_eq!(f.filter("aba"), "YbY");
+        assert_eq!(f.filter("aba").unwrap(), "YbY");
     }
 
     #[test]
@@ -120,6 +148,6 @@ mod tests {
             pattern: r"\d+".to_string(),
             replacement: "#".to_string(),
         };
-        assert_eq!(f.filter("a1b22c"), "a#b#c");
+        assert_eq!(f.filter("a1b22c").unwrap(), "a#b#c");
     }
 }

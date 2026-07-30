@@ -13,8 +13,8 @@
 
 #![allow(clippy::needless_pass_by_value, clippy::map_unwrap_or, unused_imports)]
 
+use parking_lot::Mutex;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 
 use uqa_core::{Predicate, Value};
 
@@ -33,12 +33,19 @@ pub struct BTreeIndexHandle {
 }
 
 impl BTreeIndexHandle {
-    pub fn new(def: IndexDef) -> Self {
-        let field = def.columns.first().cloned().unwrap_or_default();
-        Self {
+    pub fn new(def: IndexDef) -> Result<Self, SQLiteError> {
+        if def.columns.len() != 1 {
+            return Err(SQLiteError::StorageBackend(format!(
+                "B-tree index `{}` requires exactly one column; got {}",
+                def.name,
+                def.columns.len()
+            )));
+        }
+        let field = def.columns[0].clone();
+        Ok(Self {
             def,
             inner: BTreeIndex::new(field),
-        }
+        })
     }
 
     pub fn insert(&mut self, doc_id: u64, value: Value) {
@@ -69,8 +76,8 @@ impl Index for BTreeIndexHandle {
     fn scan(&self, predicate: &Predicate) -> uqa_core::PostingList {
         self.inner.scan(predicate)
     }
-    fn estimate_cardinality(&self, predicate: &Predicate) -> u64 {
-        self.inner.scan(predicate).len() as u64
+    fn estimate_cardinality(&self, predicate: &Predicate) -> usize {
+        self.inner.scan(predicate).len()
     }
     fn scan_cost(&self, predicate: &Predicate) -> f64 {
         // Cost proxy: equality predicates are cheap (one bucket lookup);
@@ -112,27 +119,28 @@ impl IndexManager {
     /// `index_def.name`. Returns an error if an index with the same
     /// name is already registered.
     pub fn create_index(&self, index_def: IndexDef) -> Result<(), SQLiteError> {
-        let mut guard = self.indexes.lock().unwrap();
-        if guard.contains_key(&index_def.name) {
-            return Err(SQLiteError::SQLite(rusqlite::Error::QueryReturnedNoRows));
+        if index_def.index_type != IndexType::BTree {
+            return Err(SQLiteError::StorageBackend(format!(
+                "IndexManager has no physical `{}` implementation for index `{}`; engine-specific index backends must be registered through their owning engine",
+                index_def.index_type.as_str(),
+                index_def.name
+            )));
         }
-        let mut index: Box<dyn Index> = match index_def.index_type {
-            IndexType::BTree => Box::new(BTreeIndexHandle::new(index_def.clone())),
-            other => {
-                let _ = other;
-                // Other index types live in their own modules; the
-                // engine wires them at table-creation time and the
-                // manager only owns the registry entry.
-                Box::new(BTreeIndexHandle::new(index_def.clone()))
-            }
-        };
+        let mut index: Box<dyn Index> = Box::new(BTreeIndexHandle::new(index_def.clone())?);
+        let mut guard = self.indexes.lock();
+        if guard.contains_key(&index_def.name) {
+            return Err(SQLiteError::StorageBackend(format!(
+                "index `{}` is already registered",
+                index_def.name
+            )));
+        }
         index.build()?;
         guard.insert(index_def.name.clone(), index);
         Ok(())
     }
 
     pub fn drop_index(&self, name: &str) -> Result<bool, SQLiteError> {
-        let mut guard = self.indexes.lock().unwrap();
+        let mut guard = self.indexes.lock();
         if let Some(mut idx) = guard.remove(name) {
             idx.drop_index()?;
             Ok(true)
@@ -142,7 +150,7 @@ impl IndexManager {
     }
 
     pub fn drop_indexes_for_table(&self, table_name: &str) -> Result<(), SQLiteError> {
-        let mut guard = self.indexes.lock().unwrap();
+        let mut guard = self.indexes.lock();
         let names: Vec<String> = guard
             .iter()
             .filter(|(_, idx)| idx.index_def().table_name == table_name)
@@ -177,7 +185,7 @@ impl IndexManager {
         column: &str,
         predicate: &Predicate,
     ) -> Option<(String, f64)> {
-        let guard = self.indexes.lock().unwrap();
+        let guard = self.indexes.lock();
         let mut best: Option<(String, f64)> = None;
         for (name, idx) in guard.iter() {
             let def = idx.index_def();
@@ -196,11 +204,11 @@ impl IndexManager {
     }
 
     pub fn has_index(&self, name: &str) -> bool {
-        self.indexes.lock().unwrap().contains_key(name)
+        self.indexes.lock().contains_key(name)
     }
 
     pub fn index_count(&self) -> usize {
-        self.indexes.lock().unwrap().len()
+        self.indexes.lock().len()
     }
 }
 
@@ -255,5 +263,34 @@ mod tests {
         let pred = Predicate::Equals(Value::Int(42));
         let pick = mgr.find_covering_index_name("users", "age", &pred);
         assert_eq!(pick, Some("users_age_idx".into()));
+    }
+
+    #[test]
+    fn invalid_or_unimplemented_physical_indexes_are_explicit_errors() {
+        let mgr = fresh();
+        for columns in [Vec::new(), vec!["a".into(), "b".into()]] {
+            let error = mgr
+                .create_index(IndexDef::new(
+                    "bad_btree",
+                    IndexType::BTree,
+                    "users",
+                    columns,
+                ))
+                .unwrap_err();
+            assert!(error.to_string().contains("requires exactly one column"));
+        }
+
+        let error = mgr
+            .create_index(IndexDef::new(
+                "not_a_btree",
+                IndexType::Gin,
+                "users",
+                vec!["body".into()],
+            ))
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("no physical `gin` implementation"));
+        assert_eq!(mgr.index_count(), 0);
     }
 }

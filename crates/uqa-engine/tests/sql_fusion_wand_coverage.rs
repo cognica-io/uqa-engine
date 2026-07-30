@@ -435,6 +435,7 @@ fn evidence_calibration(
     let saved: BTreeMap<String, f64> = serde_json::from_str(
         &engine
             .load_scoring_params(&format!("docs.{field}"))
+            .unwrap()
             .expect("auto-estimated params are persisted"),
     )
     .unwrap();
@@ -453,6 +454,7 @@ fn evidence_calibration(
                 &ScoringMode::BayesianBM25(params.evidence_params()),
                 usize::MAX,
             )
+            .unwrap()
             .into_iter()
             .map(|entry| (entry.doc_id, entry.score))
             .collect()
@@ -474,9 +476,9 @@ fn test_log_odds_fuses_prior_free_evidence_with_the_prior_once() {
         .unwrap();
     let (params, [learning, algorithms]) =
         evidence_calibration(&engine, "content", ["learning", "algorithms"]);
-    let mut fusion = LogOddsFusion::new(0.5);
+    let mut fusion = LogOddsFusion::new(0.5).unwrap();
     if params.base_rate > 0.0 {
-        fusion = fusion.with_base_rate(params.base_rate);
+        fusion = fusion.with_base_rate(params.base_rate).unwrap();
     }
 
     for row in result.rows {
@@ -512,9 +514,9 @@ fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
         .unwrap();
     let (params, [learning, algorithms]) =
         evidence_calibration(&engine, "content", ["learning", "algorithms"]);
-    let mut fusion = LogOddsFusion::new(0.5);
+    let mut fusion = LogOddsFusion::new(0.5).unwrap();
     if params.base_rate > 0.0 {
-        fusion = fusion.with_base_rate(params.base_rate);
+        fusion = fusion.with_base_rate(params.base_rate).unwrap();
     }
     let weights = [0.8, 0.2];
     let minimums = [-4.0, -1.0];

@@ -437,8 +437,11 @@ pub fn compile(
                 return OperatorTree::Empty;
             }
             if terms.len() == 1 {
+                let Some(query) = terms.into_iter().next() else {
+                    return OperatorTree::Empty;
+                };
                 return OperatorTree::Term {
-                    query: terms.into_iter().next().unwrap(),
+                    query,
                     field: resolved,
                     scoring: None,
                 };
@@ -477,6 +480,7 @@ pub fn compile(
                     weights: None,
                     logit_min: None,
                     logit_max: None,
+                    adaptive_weights: false,
                 }
             } else {
                 OperatorTree::Intersect(vec![l, r])

@@ -260,10 +260,12 @@ proptest! {
 
 /// Concrete edge cases.
 #[test]
-fn scan_unknown_table_returns_empty() {
+fn scan_unknown_table_returns_error() {
     let handler = MemoryHandler::new();
-    let rows = handler.scan(&table(), None, &[], None).unwrap();
-    assert!(rows.is_empty());
+    let error = handler
+        .scan(&table(), None, &[], None)
+        .expect_err("an unloaded table must not look like an empty relation");
+    assert!(matches!(error, uqa_fdw::FDWError::UnknownTable(name) if name == "t"));
 }
 
 #[test]

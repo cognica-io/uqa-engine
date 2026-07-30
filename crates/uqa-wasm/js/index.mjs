@@ -50,8 +50,15 @@ function syncFS(module, populate) {
 function rawCall(module, handle, method, args) {
   const request = JSON.stringify({ method, args });
   const ptr = module.ccall("uqa_call", "number", ["number", "string"], [handle, request]);
-  const text = module.UTF8ToString(ptr);
-  module.ccall("uqa_free", null, ["number"], [ptr]);
+  if (ptr === 0) {
+    throw new Error("uqa_call could not allocate a response");
+  }
+  let text;
+  try {
+    text = module.UTF8ToString(ptr);
+  } finally {
+    module.ccall("uqa_free", null, ["number"], [ptr]);
+  }
   const response = JSON.parse(text);
   if (response.error !== undefined) {
     throw new Error(response.error);
@@ -80,6 +87,15 @@ function decodeValue(value) {
 }
 
 function encodeValue(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`non-finite numbers cannot cross the JSON bridge: ${value}`);
+    }
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      throw new Error(`integer exceeds JavaScript's safe range: ${value}`);
+    }
+    return value;
+  }
   if (value instanceof Uint8Array) {
     return { $bytes: bytesToBase64(value) };
   }
@@ -171,12 +187,13 @@ export const UQA = {
     await loadModule();
   },
 
-  /** Flush every persistent database to IndexedDB (browser only). */
+  /** Flush every persistent database to IndexedDB; rejects when IndexedDB is unavailable. */
   async persist() {
     const module = await loadModule();
-    if (hasIndexedDB()) {
-      await syncFS(module, false);
+    if (!hasIndexedDB()) {
+      throw new Error("cannot persist UQA databases because IndexedDB is unavailable");
     }
+    await syncFS(module, false);
   },
 
   /** Directory on the virtual filesystem that persists to IndexedDB. */
@@ -216,6 +233,10 @@ export class Engine {
 
   call(method, args = {}) {
     return rawCall(this.module, this.handle, method, args);
+  }
+
+  async newSession() {
+    return new Engine(this.module, this.call("newSession", {}));
   }
 
   async sql(query, params) {

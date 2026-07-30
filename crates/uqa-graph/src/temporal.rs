@@ -19,7 +19,7 @@ use uqa_core::{DocId, EdgeId, Payload, PostingEntry, PostingList, Value, VertexI
 use crate::operators::DEFAULT_GRAPH_SCORE;
 use crate::pattern::GraphPattern;
 use crate::posting_list::{GraphPayload, GraphPostingList};
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
 /// Time-aware edge filter. `Timestamp(t)` accepts an edge if
 /// `valid_from <= t <= valid_to`; `Range(a, b)` accepts an edge whose
@@ -40,31 +40,66 @@ pub enum TemporalFilter {
 }
 
 impl TemporalFilter {
-    pub fn is_valid(&self, properties: &BTreeMap<String, Value>) -> bool {
-        let valid_from = numeric(properties.get("valid_from"));
-        let valid_to = numeric(properties.get("valid_to"));
+    pub fn is_valid(&self, properties: &BTreeMap<String, Value>) -> GraphStoreResult<bool> {
+        self.validate()?;
+        let valid_from = numeric(properties.get("valid_from"), "valid_from")?;
+        let valid_to = numeric(properties.get("valid_to"), "valid_to")?;
         if valid_from.is_none() && valid_to.is_none() {
-            return true;
+            return Ok(true);
         }
         let vf = valid_from.unwrap_or(f64::NEG_INFINITY);
         let vt = valid_to.unwrap_or(f64::INFINITY);
-        match *self {
+        Ok(match *self {
             TemporalFilter::Any => true,
             TemporalFilter::Timestamp(t) => vf <= t && t <= vt,
             TemporalFilter::Range(start, end) => vf <= end && vt >= start,
             TemporalFilter::TimestampAndRange(t, start, end) => {
                 vf <= t && t <= vt && vf <= end && vt >= start
             }
+        })
+    }
+
+    fn validate(&self) -> GraphStoreResult<()> {
+        let invalid = match *self {
+            TemporalFilter::Any => false,
+            TemporalFilter::Timestamp(timestamp) => !timestamp.is_finite(),
+            TemporalFilter::Range(start, end) => {
+                !start.is_finite() || !end.is_finite() || start > end
+            }
+            TemporalFilter::TimestampAndRange(timestamp, start, end) => {
+                !timestamp.is_finite() || !start.is_finite() || !end.is_finite() || start > end
+            }
+        };
+        if invalid {
+            Err(GraphStoreError::InvalidMutation(format!(
+                "invalid temporal filter {self:?}"
+            )))
+        } else {
+            Ok(())
         }
     }
 }
 
-fn numeric(v: Option<&Value>) -> Option<f64> {
+fn numeric(v: Option<&Value>, property: &str) -> GraphStoreResult<Option<f64>> {
     match v {
-        Some(Value::Int(n)) => Some(*n as f64),
-        Some(Value::Float(f)) => Some(*f),
-        Some(Value::Decimal(value)) => value.to_f64(),
-        _ => None,
+        None => Ok(None),
+        Some(Value::Int(n)) if n.unsigned_abs() <= (1_u64 << 53) => Ok(Some(*n as f64)),
+        Some(Value::Float(value)) if value.is_finite() => Ok(Some(*value)),
+        Some(Value::Decimal(value)) => value
+            .to_f64()
+            .filter(|converted| converted.is_finite())
+            .map(Some)
+            .ok_or_else(|| {
+                GraphStoreError::InvalidMutation(format!(
+                    "temporal property {property:?} is not representable as finite f64"
+                ))
+            }),
+        Some(Value::Int(value)) => Err(GraphStoreError::InvalidMutation(format!(
+            "temporal property {property:?} integer {value} is not exactly representable as f64"
+        ))),
+        Some(value) => Err(GraphStoreError::InvalidMutation(format!(
+            "temporal property {property:?} must be finite numeric, got {value:?}"
+        ))),
     }
 }
 
@@ -107,7 +142,10 @@ impl<'a> TemporalTraverse<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        self.filter.validate()?;
+        validate_score(self.score)?;
+        store.require_vertex_in_graph(self.start_vertex, self.graph)?;
         let mut visited: BTreeSet<VertexId> = BTreeSet::new();
         let mut frontier: BTreeSet<VertexId> = BTreeSet::new();
         frontier.insert(self.start_vertex);
@@ -116,16 +154,18 @@ impl<'a> TemporalTraverse<'a> {
         for _ in 0..self.max_hops {
             let mut next_frontier: BTreeSet<VertexId> = BTreeSet::new();
             for v in &frontier {
-                for eid in store.out_edge_ids(*v, self.graph) {
-                    let Some(edge) = store.get_edge(eid) else {
-                        continue;
-                    };
+                for eid in store.out_edge_ids(*v, self.graph)? {
+                    let edge = store.get_edge(eid).ok_or_else(|| {
+                        GraphStoreError::CorruptGraph(format!(
+                            "temporal traversal references missing edge {eid}"
+                        ))
+                    })?;
                     if let Some(want) = self.label {
                         if edge.label != want {
                             continue;
                         }
                     }
-                    if !self.filter.is_valid(&edge.properties) {
+                    if !self.filter.is_valid(&edge.properties)? {
                         continue;
                     }
                     let neighbor = edge.target_id;
@@ -159,7 +199,10 @@ impl<'a> TemporalTraverse<'a> {
                 },
             );
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 }
 
@@ -197,8 +240,10 @@ impl<'a> TemporalPatternMatch<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let candidates = self.compute_candidates(store);
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        self.temporal_filter.validate()?;
+        validate_score(self.score)?;
+        let candidates = self.compute_candidates(store)?;
 
         // Group edges by both source and target variable so the
         // backtracking validator can quickly find every edge that
@@ -227,15 +272,22 @@ impl<'a> TemporalPatternMatch<'a> {
             &mut assignment,
             &mut assigned_values,
             &mut matches,
-        );
+        )?;
 
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(matches.len());
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for (i, assn) in matches.iter().enumerate() {
-            let doc_id = (i as u64) + 1;
+            let doc_id = u64::try_from(i)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| {
+                    GraphStoreError::IdExhausted(
+                        "temporal match result id counter overflow".to_string(),
+                    )
+                })?;
             let mut fields: BTreeMap<String, Value> = BTreeMap::new();
             for (k, v) in assn {
-                fields.insert(k.clone(), Value::Int(*v as i64));
+                fields.insert(k.clone(), graph_id_value(*v));
             }
             entries.push(PostingEntry::new(
                 doc_id,
@@ -246,7 +298,7 @@ impl<'a> TemporalPatternMatch<'a> {
                 },
             ));
             let match_vertices: Vec<VertexId> = assn.values().copied().collect();
-            let match_edges = self.collect_match_edges(store, assn);
+            let match_edges = self.collect_match_edges(store, assn)?;
             graph_payloads.insert(
                 doc_id,
                 GraphPayload {
@@ -258,26 +310,38 @@ impl<'a> TemporalPatternMatch<'a> {
             );
         }
 
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        Ok(GraphPostingList::from_parts(
+            PostingList::from_sorted_unchecked(entries),
+            graph_payloads,
+        ))
     }
 
-    fn compute_candidates<G: GraphStore>(&self, store: &G) -> BTreeMap<String, Vec<VertexId>> {
+    fn compute_candidates<G: GraphStore>(
+        &self,
+        store: &G,
+    ) -> GraphStoreResult<BTreeMap<String, Vec<VertexId>>> {
         let mut out: BTreeMap<String, Vec<VertexId>> = BTreeMap::new();
-        let vids = store.vertex_ids_in_graph(self.graph);
+        let vids = store.vertex_ids_in_graph(self.graph)?;
         for vp in &self.pattern.vertex_patterns {
-            let candidates: Vec<VertexId> = vids
-                .iter()
-                .copied()
-                .filter(|vid| {
-                    let Some(vertex) = store.get_vertex(*vid) else {
-                        return false;
-                    };
-                    vp.constraints.iter().all(|c| c.matches(vertex))
-                })
-                .collect();
+            let mut candidates = Vec::new();
+            for vid in &vids {
+                let vertex = store.get_vertex(*vid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!(
+                        "graph {:?} references missing vertex {vid}",
+                        self.graph
+                    ))
+                })?;
+                if vp
+                    .constraints
+                    .iter()
+                    .all(|constraint| constraint.matches(vertex))
+                {
+                    candidates.push(*vid);
+                }
+            }
             out.insert(vp.variable.clone(), candidates);
         }
-        out
+        Ok(out)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -290,10 +354,10 @@ impl<'a> TemporalPatternMatch<'a> {
         assignment: &mut BTreeMap<String, VertexId>,
         assigned_values: &mut BTreeSet<VertexId>,
         matches: &mut Vec<BTreeMap<String, VertexId>>,
-    ) {
+    ) -> GraphStoreResult<()> {
         if unassigned.is_empty() {
             matches.push(assignment.clone());
-            return;
+            return Ok(());
         }
         // Pick the variable with the fewest candidates first (MRV
         // heuristic, same as the canonical UQA implementation's `min(unassigned, key=lambda v:
@@ -302,9 +366,17 @@ impl<'a> TemporalPatternMatch<'a> {
             .iter()
             .min_by_key(|v| candidates.get(*v).map_or(usize::MAX, Vec::len))
             .cloned()
-            .unwrap();
+            .ok_or_else(|| {
+                GraphStoreError::CorruptGraph(
+                    "temporal matcher has no variable to assign".to_string(),
+                )
+            })?;
 
-        let cands: Vec<VertexId> = candidates.get(&pick).cloned().unwrap_or_default();
+        let cands: Vec<VertexId> = candidates.get(&pick).cloned().ok_or_else(|| {
+            GraphStoreError::CorruptGraph(format!(
+                "temporal matcher has no candidates entry for variable {pick:?}"
+            ))
+        })?;
         unassigned.remove(&pick);
 
         for vid in cands {
@@ -314,7 +386,7 @@ impl<'a> TemporalPatternMatch<'a> {
             assignment.insert(pick.clone(), vid);
             assigned_values.insert(vid);
 
-            if self.validate_edges_for(store, &pick, var_edges, assignment) {
+            if self.validate_edges_for(store, &pick, var_edges, assignment)? {
                 self.backtrack(
                     store,
                     candidates,
@@ -323,7 +395,7 @@ impl<'a> TemporalPatternMatch<'a> {
                     assignment,
                     assigned_values,
                     matches,
-                );
+                )?;
             }
 
             assignment.remove(&pick);
@@ -331,6 +403,7 @@ impl<'a> TemporalPatternMatch<'a> {
         }
 
         unassigned.insert(pick);
+        Ok(())
     }
 
     fn validate_edges_for<G: GraphStore>(
@@ -339,9 +412,9 @@ impl<'a> TemporalPatternMatch<'a> {
         var: &str,
         var_edges: &BTreeMap<String, Vec<usize>>,
         assignment: &BTreeMap<String, VertexId>,
-    ) -> bool {
+    ) -> GraphStoreResult<bool> {
         let Some(edges) = var_edges.get(var) else {
-            return true;
+            return Ok(true);
         };
         for &ei in edges {
             let ep = &self.pattern.edge_patterns[ei];
@@ -352,10 +425,12 @@ impl<'a> TemporalPatternMatch<'a> {
                 continue;
             };
             let mut found = false;
-            for eid in store.out_edge_ids(src_id, self.graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(src_id, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!(
+                        "temporal matcher references missing edge {eid}"
+                    ))
+                })?;
                 if edge.target_id != tgt_id {
                     continue;
                 }
@@ -367,24 +442,24 @@ impl<'a> TemporalPatternMatch<'a> {
                 if !ep.constraints.iter().all(|c| c.matches(edge)) {
                     continue;
                 }
-                if !self.temporal_filter.is_valid(&edge.properties) {
+                if !self.temporal_filter.is_valid(&edge.properties)? {
                     continue;
                 }
                 found = true;
                 break;
             }
             if !found {
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     fn collect_match_edges<G: GraphStore>(
         &self,
         store: &G,
         assignment: &BTreeMap<String, VertexId>,
-    ) -> Vec<EdgeId> {
+    ) -> GraphStoreResult<Vec<EdgeId>> {
         let mut edge_ids: BTreeSet<EdgeId> = BTreeSet::new();
         for ep in &self.pattern.edge_patterns {
             let (Some(&src_id), Some(&tgt_id)) = (
@@ -393,19 +468,35 @@ impl<'a> TemporalPatternMatch<'a> {
             ) else {
                 continue;
             };
-            for eid in store.out_edge_ids(src_id, self.graph) {
-                let Some(edge) = store.get_edge(eid) else {
-                    continue;
-                };
+            for eid in store.out_edge_ids(src_id, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!(
+                        "temporal match result references missing edge {eid}"
+                    ))
+                })?;
                 if edge.target_id == tgt_id
                     && (ep.label.as_deref().is_none_or(|l| edge.label == l))
-                    && self.temporal_filter.is_valid(&edge.properties)
+                    && self.temporal_filter.is_valid(&edge.properties)?
                 {
                     edge_ids.insert(eid);
                     break;
                 }
             }
         }
-        edge_ids.into_iter().collect()
+        Ok(edge_ids.into_iter().collect())
     }
+}
+
+fn validate_score(score: f64) -> GraphStoreResult<()> {
+    if score.is_finite() {
+        Ok(())
+    } else {
+        Err(GraphStoreError::InvalidMutation(
+            "temporal graph score must be finite".to_string(),
+        ))
+    }
+}
+
+fn graph_id_value(id: u64) -> Value {
+    i64::try_from(id).map_or_else(|_| Value::Bytes(id.to_be_bytes().to_vec()), Value::Int)
 }

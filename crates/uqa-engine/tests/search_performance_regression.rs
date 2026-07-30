@@ -148,7 +148,9 @@ fn assert_integer_pk_conflicts(engine: &Engine, rows: usize, expected_existing: 
     };
     for id in ids {
         let value = [Value::Int(id as i64)];
-        let conflict = engine.find_conflict("pk_messages", &conflict_column, &value);
+        let conflict = engine
+            .find_conflict("pk_messages", &conflict_column, &value)
+            .unwrap();
         if expected_existing {
             assert_eq!(conflict, Some(id as u64));
         } else {
@@ -308,13 +310,15 @@ fn profile_text_search_paths(engine: &Engine, query: &SQLParam) {
     assert!(!warm_text.rows.is_empty());
 
     let api_text = profile("bayesian_api", || {
-        engine.search(
-            "messages",
-            "content",
-            "button search",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            LIMIT,
-        )
+        engine
+            .search(
+                "messages",
+                "content",
+                "button search",
+                &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+                LIMIT,
+            )
+            .unwrap()
     });
     println!("bayesian_api_hits={}", api_text.len());
     assert!(!api_text.is_empty());
@@ -360,16 +364,18 @@ fn profile_vector_hybrid_paths(
     assert!(!fused.rows.is_empty());
 
     let hybrid = profile("hybrid_api", || {
-        engine.hybrid_search(&HybridSearchParams {
-            table: "messages",
-            text_field: "content",
-            text_query: "button search",
-            vector_field: "embedding",
-            query_vector: query_vector.to_vec(),
-            knn_pool: LIMIT,
-            alpha: 0.5,
-            top_k: LIMIT,
-        })
+        engine
+            .hybrid_search(&HybridSearchParams {
+                table: "messages",
+                text_field: "content",
+                text_query: "button search",
+                vector_field: "embedding",
+                query_vector: query_vector.to_vec(),
+                knn_pool: LIMIT,
+                alpha: 0.5,
+                top_k: LIMIT,
+            })
+            .unwrap()
     });
     println!("hybrid_api_hits={}", hybrid.len());
     assert!(!hybrid.is_empty());
@@ -408,7 +414,9 @@ fn profile_maek_like_global_search_sqlite_release() {
     let query_vector = vec![1.0, 0.0, 0.2, 0.4, 0.25, 0.5, 0.75, 1.0];
     let embedding = SQLParam::vector(query_vector.clone());
 
-    let doc_ids = profile("table_doc_ids", || engine.table_doc_ids("messages"));
+    let doc_ids = profile("table_doc_ids", || {
+        engine.table_doc_ids("messages").unwrap()
+    });
     println!("table_doc_ids_count={}", doc_ids.len());
     profile_text_search_paths(&engine, &query);
     profile_vector_hybrid_paths(&engine, &query, &embedding, &query_vector);

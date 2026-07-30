@@ -28,7 +28,7 @@ fn scorer(n_fields: usize) -> MultiFieldBayesianScorer {
             weight: 1.0 + i as f64 * 0.1,
         })
         .collect();
-    MultiFieldBayesianScorer::new(configs, &stats())
+    MultiFieldBayesianScorer::new(configs, &stats()).unwrap()
 }
 
 fn field_maps(

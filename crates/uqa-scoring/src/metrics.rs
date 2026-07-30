@@ -34,7 +34,7 @@ pub fn dcg_at_k(relevances: &[f64], k: usize) -> f64 {
 /// ideal ranking is empty (no graded judgments).
 pub fn ndcg_at_k(relevances: &[f64], k: usize) -> f64 {
     let mut ideal = relevances.to_vec();
-    ideal.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    ideal.sort_by(|a, b| b.total_cmp(a));
     let idcg = dcg_at_k(&ideal, k);
     if idcg == 0.0 {
         return 0.0;

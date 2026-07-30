@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, FieldName, PathSegment, Value};
 
-use crate::backend::StorageBackendResult;
+use crate::backend::{StorageBackendError, StorageBackendResult};
 
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
@@ -27,9 +27,9 @@ pub type Document = BTreeMap<FieldName, Value>;
 /// row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()>;
-    fn get(&self, doc_id: DocId) -> Option<Document>;
-    fn contains_doc_id(&self, doc_id: DocId) -> bool {
-        self.get(doc_id).is_some()
+    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>>;
+    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.get(doc_id)?.is_some())
     }
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
     fn clear(&mut self) -> StorageBackendResult<()>;
@@ -37,17 +37,26 @@ pub trait DocumentStore: Send + Sync {
     /// Read a single field. Returns an owned [`Value`] so persistent
     /// backends (`SQLite`, ...) can decode on demand without reaching
     /// for a reference into a transient row.
-    fn get_field(&self, doc_id: DocId, field: &str) -> Option<Value> {
-        self.get(doc_id).and_then(|d| d.get(field).cloned())
+    fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        Ok(self
+            .get(doc_id)?
+            .and_then(|document| document.get(field).cloned()))
     }
 
     /// Find the first document whose top-level field equals `value`.
     /// Persistent stores can override this with an indexed or JSON-path
     /// lookup so point updates do not have to materialise every row.
-    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
-        self.doc_ids()
-            .into_iter()
-            .find(|id| self.get_field(*id, field).as_ref() == Some(value))
+    fn find_doc_id_by_field(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> StorageBackendResult<Option<DocId>> {
+        for doc_id in self.doc_ids()? {
+            if self.get_field(doc_id, field)?.as_ref() == Some(value) {
+                return Ok(Some(doc_id));
+            }
+        }
+        Ok(None)
     }
 
     /// Apply top-level field updates without requiring callers to
@@ -59,7 +68,7 @@ pub trait DocumentStore: Send + Sync {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
     ) -> StorageBackendResult<bool> {
-        let Some(mut document) = self.get(doc_id) else {
+        let Some(mut document) = self.get(doc_id)? else {
             return Ok(false);
         };
         for (field, value) in updates {
@@ -77,11 +86,14 @@ pub trait DocumentStore: Send + Sync {
     /// document are absent from the result. The default implementation
     /// walks each id one at a time; persistent backends should
     /// override to batch the reads into few queries.
-    fn get_many(&self, doc_ids: &[DocId]) -> BTreeMap<DocId, Document> {
-        doc_ids
-            .iter()
-            .filter_map(|id| self.get(*id).map(|document| (*id, document)))
-            .collect()
+    fn get_many(&self, doc_ids: &[DocId]) -> StorageBackendResult<BTreeMap<DocId, Document>> {
+        let mut out = BTreeMap::new();
+        for doc_id in doc_ids {
+            if let Some(document) = self.get(*doc_id)? {
+                out.insert(*doc_id, document);
+            }
+        }
+        Ok(out)
     }
 
     /// Fetch several top-level fields for many documents. The result
@@ -89,18 +101,23 @@ pub trait DocumentStore: Send + Sync {
     /// [`Value::Null`], ids without a document are absent. Persistent
     /// backends override this to extract all fields in one scan
     /// instead of materialising whole documents.
-    fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
-        doc_ids
-            .iter()
-            .filter_map(|id| {
-                let document = self.get(*id)?;
-                let values = fields
-                    .iter()
-                    .map(|f| document.get(*f).cloned().unwrap_or(Value::Null))
-                    .collect();
-                Some((*id, values))
-            })
-            .collect()
+    fn get_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        let mut out = BTreeMap::new();
+        for doc_id in doc_ids {
+            let Some(document) = self.get(*doc_id)? else {
+                continue;
+            };
+            let values = fields
+                .iter()
+                .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                .collect();
+            out.insert(*doc_id, values);
+        }
+        Ok(out)
     }
 
     /// Visit a column projection in the caller's document-id order.
@@ -113,8 +130,8 @@ pub trait DocumentStore: Send + Sync {
         doc_ids: &[DocId],
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
-    ) {
-        let mut projected = self.get_fields_multi(doc_ids, fields);
+    ) -> StorageBackendResult<()> {
+        let mut projected = self.get_fields_multi(doc_ids, fields)?;
         for doc_id in doc_ids {
             let values = projected
                 .remove(doc_id)
@@ -123,6 +140,7 @@ pub trait DocumentStore: Send + Sync {
                 break;
             }
         }
+        Ok(())
     }
 
     /// Visit a column projection by reference when the backend can keep
@@ -134,81 +152,133 @@ pub trait DocumentStore: Send + Sync {
         doc_ids: &[DocId],
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
-    ) {
+    ) -> StorageBackendResult<()> {
         self.for_each_fields_multi(doc_ids, fields, &mut |doc_id, values| {
             let references: Vec<&Value> = values.iter().collect();
             visitor(doc_id, &references)
-        });
+        })
     }
 
     /// Bulk variant of [`DocumentStore::get_field`]. The default
     /// implementation walks each id one at a time; persistent backends
     /// should override to run a single batched query.
-    fn get_fields_bulk(&self, doc_ids: &[DocId], field: &str) -> BTreeMap<DocId, Value> {
-        doc_ids
-            .iter()
-            .map(|id| (*id, self.get_field(*id, field).unwrap_or(Value::Null)))
-            .collect()
+    fn get_fields_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, Value>> {
+        let mut out = BTreeMap::new();
+        for doc_id in doc_ids {
+            out.insert(
+                *doc_id,
+                self.get_field(*doc_id, field)?.unwrap_or(Value::Null),
+            );
+        }
+        Ok(out)
     }
 
     /// Return `true` if any document has `field == value`.
-    fn has_value(&self, field: &str, value: &Value) -> bool {
-        self.doc_ids()
-            .into_iter()
-            .any(|id| self.get_field(id, field).as_ref() == Some(value))
+    fn has_value(&self, field: &str, value: &Value) -> StorageBackendResult<bool> {
+        for doc_id in self.doc_ids()? {
+            if self.get_field(doc_id, field)?.as_ref() == Some(value) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Find the first document whose top-level fields match every
     /// requested value.
-    fn find_doc_id_by_fields(&self, fields: &[String], values: &[Value]) -> Option<DocId> {
+    fn find_doc_id_by_fields(
+        &self,
+        fields: &[String],
+        values: &[Value],
+    ) -> StorageBackendResult<Option<DocId>> {
         if fields.is_empty() || fields.len() != values.len() {
-            return None;
+            return Ok(None);
         }
-        self.doc_ids().into_iter().find(|id| {
-            fields
-                .iter()
-                .zip(values.iter())
-                .all(|(field, value)| self.get_field(*id, field).unwrap_or(Value::Null) == *value)
-        })
+        for doc_id in self.doc_ids()? {
+            let mut matches = true;
+            for (field, value) in fields.iter().zip(values) {
+                if self.get_field(doc_id, field)?.unwrap_or(Value::Null) != *value {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                return Ok(Some(doc_id));
+            }
+        }
+        Ok(None)
     }
 
     /// Evaluate a hierarchical path expression against a document.
     /// Matches UQA behavior for `DocumentStore.eval_path` /
     /// `HierarchicalDocument.eval_path` semantics.
-    fn eval_path(&self, doc_id: DocId, path: &[PathSegment]) -> Option<Value> {
-        let doc = self.get(doc_id)?;
-        eval_path_in_document(&doc, path)
+    fn eval_path(
+        &self,
+        doc_id: DocId,
+        path: &[PathSegment],
+    ) -> StorageBackendResult<Option<Value>> {
+        let Some(document) = self.get(doc_id)? else {
+            return Ok(None);
+        };
+        Ok(eval_path_in_document(&document, path))
     }
 
-    fn doc_ids(&self) -> Vec<DocId>;
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>>;
 
-    fn max_doc_id(&self) -> DocId {
-        self.doc_ids().into_iter().max().unwrap_or(0)
+    /// Return the first stored document id strictly greater than `after`, or
+    /// the first id when `after` is `None`. Scan operators use this cursor API
+    /// so a full table scan does not need a cardinality-sized id vector before
+    /// it can yield its first row.
+    fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
+        Ok(self
+            .doc_ids()?
+            .into_iter()
+            .filter(|doc_id| after.is_none_or(|after| *doc_id > after))
+            .min())
     }
 
-    fn len(&self) -> usize;
+    fn max_doc_id(&self) -> StorageBackendResult<DocId> {
+        Ok(self.doc_ids()?.into_iter().max().unwrap_or(0))
+    }
 
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn len(&self) -> StorageBackendResult<usize>;
+
+    fn is_empty(&self) -> StorageBackendResult<bool> {
+        Ok(self.len()? == 0)
     }
 
     /// Iterate over `(doc_id, document)` pairs in id order. The default
     /// implementation fetches each document individually; SQLite-backed
     /// stores override with a single query.
-    fn iter_all(&self) -> Box<dyn Iterator<Item = (DocId, Document)> + '_> {
-        let mut ids = self.doc_ids();
+    fn iter_all(&self) -> StorageBackendResult<Box<dyn Iterator<Item = (DocId, Document)> + '_>> {
+        let mut ids = self.doc_ids()?;
         ids.sort_unstable();
-        let snapshot = self.snapshot();
-        Box::new(
-            ids.into_iter()
-                .filter_map(move |id| snapshot.get(id).map(|doc| (id, doc))),
-        )
+        let snapshot = self.snapshot()?;
+        let mut rows = Vec::with_capacity(ids.len());
+        for doc_id in ids {
+            if let Some(document) = snapshot.get(doc_id)? {
+                rows.push((doc_id, document));
+            }
+        }
+        Ok(Box::new(rows.into_iter()))
     }
 
     /// Read-only handle suitable for an `ExecutionContext`. Persistent
     /// backends share their connection; memory backends deep-clone so the
     /// snapshot is isolated from later mutations.
-    fn snapshot(&self) -> Arc<dyn DocumentStore>;
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>>;
+
+    /// Independent writable copy used by the in-memory engine transaction
+    /// rollback path. Persistent engines restore through their backend
+    /// transaction and need not implement this operation.
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+        Err(StorageBackendError::Other(
+            "writable document-store snapshots are not supported by this backend".into(),
+        ))
+    }
 }
 
 /// Walk a document along a [`PathSegment`] sequence. Matches UQA behavior for
@@ -351,22 +421,27 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(())
     }
 
-    fn get(&self, doc_id: DocId) -> Option<Document> {
-        self.documents.get(&doc_id).cloned()
+    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+        Ok(self.documents.get(&doc_id).cloned())
     }
 
-    fn contains_doc_id(&self, doc_id: DocId) -> bool {
-        self.documents.contains_key(&doc_id)
+    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.documents.contains_key(&doc_id))
     }
 
-    fn get_field(&self, doc_id: DocId, field: &str) -> Option<Value> {
-        self.documents
+    fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        Ok(self
+            .documents
             .get(&doc_id)
-            .and_then(|d| d.get(field).cloned())
+            .and_then(|d| d.get(field).cloned()))
     }
 
-    fn get_fields_multi(&self, doc_ids: &[DocId], fields: &[&str]) -> BTreeMap<DocId, Vec<Value>> {
-        doc_ids
+    fn get_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
                 let document = self.documents.get(doc_id)?;
@@ -376,7 +451,7 @@ impl DocumentStore for MemoryDocumentStore {
                     .collect();
                 Some((*doc_id, values))
             })
-            .collect()
+            .collect())
     }
 
     fn for_each_fields_multi(
@@ -384,7 +459,7 @@ impl DocumentStore for MemoryDocumentStore {
         doc_ids: &[DocId],
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
-    ) {
+    ) -> StorageBackendResult<()> {
         for doc_id in doc_ids {
             let values = self.documents.get(doc_id).map_or_else(
                 || vec![Value::Null; fields.len()],
@@ -399,6 +474,7 @@ impl DocumentStore for MemoryDocumentStore {
                 break;
             }
         }
+        Ok(())
     }
 
     fn for_each_fields_multi_ref(
@@ -406,7 +482,7 @@ impl DocumentStore for MemoryDocumentStore {
         doc_ids: &[DocId],
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
-    ) {
+    ) -> StorageBackendResult<()> {
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let fields_are_sorted = fields.windows(2).all(|pair| pair[0] <= pair[1]);
@@ -458,10 +534,10 @@ impl DocumentStore for MemoryDocumentStore {
                     );
                 }
                 if !visitor(*doc_id, &values) {
-                    return;
+                    return Ok(());
                 }
             }
-            return;
+            return Ok(());
         }
 
         for doc_id in doc_ids {
@@ -482,28 +558,38 @@ impl DocumentStore for MemoryDocumentStore {
                 );
             }
             if !visitor(*doc_id, &values) {
-                return;
+                return Ok(());
             }
         }
+        Ok(())
     }
 
-    fn find_doc_id_by_field(&self, field: &str, value: &Value) -> Option<DocId> {
-        self.documents
+    fn find_doc_id_by_field(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> StorageBackendResult<Option<DocId>> {
+        Ok(self
+            .documents
             .iter()
-            .find_map(|(doc_id, doc)| (doc.get(field) == Some(value)).then_some(*doc_id))
+            .find_map(|(doc_id, doc)| (doc.get(field) == Some(value)).then_some(*doc_id)))
     }
 
-    fn find_doc_id_by_fields(&self, fields: &[String], values: &[Value]) -> Option<DocId> {
+    fn find_doc_id_by_fields(
+        &self,
+        fields: &[String],
+        values: &[Value],
+    ) -> StorageBackendResult<Option<DocId>> {
         if fields.is_empty() || fields.len() != values.len() {
-            return None;
+            return Ok(None);
         }
-        self.documents.iter().find_map(|(doc_id, doc)| {
+        Ok(self.documents.iter().find_map(|(doc_id, doc)| {
             fields
                 .iter()
                 .zip(values.iter())
                 .all(|(field, value)| doc.get(field).unwrap_or(&Value::Null) == value)
                 .then_some(*doc_id)
-        })
+        }))
     }
 
     fn patch_fields(
@@ -541,16 +627,33 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(())
     }
 
-    fn doc_ids(&self) -> Vec<DocId> {
-        self.documents.keys().copied().collect()
+    fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        Ok(self.documents.keys().copied().collect())
     }
 
-    fn len(&self) -> usize {
-        self.documents.len()
+    fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        Ok(match after {
+            Some(after) => self
+                .documents
+                .range((Excluded(after), Unbounded))
+                .next()
+                .map(|(doc_id, _)| *doc_id),
+            None => self.documents.keys().next().copied(),
+        })
     }
 
-    fn snapshot(&self) -> Arc<dyn DocumentStore> {
-        Arc::new(self.clone())
+    fn len(&self) -> StorageBackendResult<usize> {
+        Ok(self.documents.len())
+    }
+
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        Ok(Arc::new(self.clone()))
+    }
+
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+        Ok(Box::new(self.clone()))
     }
 }
 
@@ -567,7 +670,7 @@ mod tests {
         let mut s = MemoryDocumentStore::new();
         s.put(1, doc([("title", Value::Str("rust".into()))]))
             .unwrap();
-        let got = s.get(1).unwrap();
+        let got = s.get(1).unwrap().unwrap();
         assert_eq!(got.get("title"), Some(&Value::Str("rust".into())));
     }
 
@@ -575,9 +678,9 @@ mod tests {
     fn get_field_returns_value() {
         let mut s = MemoryDocumentStore::new();
         s.put(1, doc([("year", Value::Int(2026))])).unwrap();
-        assert_eq!(s.get_field(1, "year"), Some(Value::Int(2026)));
-        assert_eq!(s.get_field(1, "missing"), None);
-        assert_eq!(s.get_field(99, "year"), None);
+        assert_eq!(s.get_field(1, "year").unwrap(), Some(Value::Int(2026)));
+        assert_eq!(s.get_field(1, "missing").unwrap(), None);
+        assert_eq!(s.get_field(99, "year").unwrap(), None);
     }
 
     #[test]
@@ -585,8 +688,8 @@ mod tests {
         let mut s = MemoryDocumentStore::new();
         s.put(1, doc([("a", Value::Int(1))])).unwrap();
         s.delete(1).unwrap();
-        assert!(s.get(1).is_none());
-        assert_eq!(s.len(), 0);
+        assert!(s.get(1).unwrap().is_none());
+        assert_eq!(s.len().unwrap(), 0);
     }
 
     #[test]
@@ -595,7 +698,7 @@ mod tests {
         s.put(2, Document::new()).unwrap();
         s.put(1, Document::new()).unwrap();
         s.put(3, Document::new()).unwrap();
-        assert_eq!(s.doc_ids(), vec![1, 2, 3]);
+        assert_eq!(s.doc_ids().unwrap(), vec![1, 2, 3]);
     }
 
     #[test]
@@ -603,7 +706,7 @@ mod tests {
         let mut s = MemoryDocumentStore::new();
         s.put(1, doc([("year", Value::Int(2026))])).unwrap();
         s.put(2, doc([("year", Value::Int(2025))])).unwrap();
-        let got = s.get_fields_bulk(&[1, 2, 99], "year");
+        let got = s.get_fields_bulk(&[1, 2, 99], "year").unwrap();
         assert_eq!(got.get(&1), Some(&Value::Int(2026)));
         assert_eq!(got.get(&2), Some(&Value::Int(2025)));
         assert_eq!(got.get(&99), Some(&Value::Null));
@@ -622,7 +725,9 @@ mod tests {
         )
         .unwrap();
 
-        let got = s.get_fields_multi(&[1, 99], &["title", "missing", "year"]);
+        let got = s
+            .get_fields_multi(&[1, 99], &["title", "missing", "year"])
+            .unwrap();
         assert_eq!(
             got.get(&1),
             Some(&vec![
@@ -644,7 +749,8 @@ mod tests {
         s.for_each_fields_multi(&[2, 99, 1], &["value"], &mut |doc_id, values| {
             visited.push((doc_id, values));
             doc_id != 99
-        });
+        })
+        .unwrap();
 
         assert_eq!(
             visited,
@@ -666,7 +772,8 @@ mod tests {
             }
             visited.push((doc_id, values[0].clone()));
             true
-        });
+        })
+        .unwrap();
 
         assert_eq!(
             visited,
@@ -700,7 +807,8 @@ mod tests {
                 ));
                 true
             },
-        );
+        )
+        .unwrap();
         assert_eq!(
             dense,
             vec![
@@ -718,7 +826,8 @@ mod tests {
                 values.iter().map(|value| (*value).clone()).collect(),
             ));
             true
-        });
+        })
+        .unwrap();
         assert_eq!(
             unsorted,
             vec![
@@ -752,7 +861,8 @@ mod tests {
                 values.iter().map(|value| (*value).clone()).collect(),
             ));
             true
-        });
+        })
+        .unwrap();
         assert_eq!(
             projected,
             vec![
@@ -773,7 +883,8 @@ mod tests {
         s.for_each_fields_multi_ref(&[2], &["alpha", "zulu"], &mut |_doc_id, values| {
             patched.extend(values.iter().map(|value| (*value).clone()));
             true
-        });
+        })
+        .unwrap();
         assert_eq!(patched, vec![Value::Int(2), Value::Str("patched".into())]);
     }
 
@@ -784,8 +895,8 @@ mod tests {
             .unwrap();
         s.put(2, doc([("color", Value::Str("blue".into()))]))
             .unwrap();
-        assert!(s.has_value("color", &Value::Str("red".into())));
-        assert!(!s.has_value("color", &Value::Str("green".into())));
+        assert!(s.has_value("color", &Value::Str("red".into())).unwrap());
+        assert!(!s.has_value("color", &Value::Str("green".into())).unwrap());
     }
 
     #[test]
@@ -797,11 +908,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            s.find_doc_id_by_field("public_id", &Value::Str("m-7".into())),
+            s.find_doc_id_by_field("public_id", &Value::Str("m-7".into()))
+                .unwrap(),
             Some(7)
         );
         assert_eq!(
-            s.find_doc_id_by_field("public_id", &Value::Str("missing".into())),
+            s.find_doc_id_by_field("public_id", &Value::Str("missing".into()))
+                .unwrap(),
             None
         );
     }
@@ -825,7 +938,7 @@ mod tests {
         ]);
         assert!(s.patch_fields(1, &updates).unwrap());
 
-        let got = s.get(1).unwrap();
+        let got = s.get(1).unwrap().unwrap();
         assert_eq!(got.get("public_id"), Some(&Value::Str("m-1".into())));
         assert_eq!(got.get("content"), Some(&Value::Str("new".into())));
         assert!(!got.contains_key("token_count"));
@@ -841,7 +954,10 @@ mod tests {
             uqa_core::PathSegment::Key("user".into()),
             uqa_core::PathSegment::Key("name".into()),
         ];
-        assert_eq!(s.eval_path(1, &path), Some(Value::Str("alice".into())));
+        assert_eq!(
+            s.eval_path(1, &path).unwrap(),
+            Some(Value::Str("alice".into()))
+        );
     }
 
     #[test]
@@ -850,7 +966,7 @@ mod tests {
         s.put(3, doc([("k", Value::Int(3))])).unwrap();
         s.put(1, doc([("k", Value::Int(1))])).unwrap();
         s.put(2, doc([("k", Value::Int(2))])).unwrap();
-        let collected: Vec<u64> = s.iter_all().map(|(id, _)| id).collect();
+        let collected: Vec<u64> = s.iter_all().unwrap().map(|(id, _)| id).collect();
         assert_eq!(collected, vec![1, 2, 3]);
     }
 }

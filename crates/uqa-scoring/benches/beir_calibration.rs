@@ -144,30 +144,32 @@ fn synthetic_fixture() -> Fixture {
 }
 
 fn fixture() -> Fixture {
-    if env::var("UQA_BENCH_REAL_BEIR").ok().as_deref() == Some("1") {
-        if let Some(real) = load_real_beir_fixture() {
-            return real;
-        }
+    match optional_env("UQA_BENCH_REAL_BEIR")
+        .unwrap_or_else(|error| panic!("invalid BEIR benchmark environment: {error}"))
+        .as_deref()
+    {
+        Some("1") => load_real_beir_fixture()
+            .unwrap_or_else(|error| panic!("failed to load requested real BEIR fixture: {error}")),
+        None | Some("0") => synthetic_fixture(),
+        Some(value) => panic!("UQA_BENCH_REAL_BEIR must be `0` or `1`, got `{value}`"),
     }
-    synthetic_fixture()
 }
 
-fn load_real_beir_fixture() -> Option<Fixture> {
-    if env::var("UQA_BENCH_REAL_BEIR").ok().as_deref() != Some("1") {
-        return None;
+fn load_real_beir_fixture() -> Result<Fixture, String> {
+    let dataset = optional_env("UQA_BENCH_BEIR_DATASET")?.unwrap_or_else(|| "nfcorpus".to_string());
+    let root = optional_env("UQA_BENCH_BEIR_DIR")?.map_or_else(
+        || PathBuf::from("/Users/jaepil/work/research/uqa/benchmarks/data/beir"),
+        PathBuf::from,
+    );
+    load_beir_dataset(&dataset, &root.join(&dataset))
+}
+
+fn optional_env(name: &str) -> Result<Option<String>, String> {
+    match env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(format!("{name}: {error}")),
     }
-    let mut roots = Vec::new();
-    if let Ok(dir) = env::var("UQA_BENCH_BEIR_DIR") {
-        roots.push(PathBuf::from(dir));
-    }
-    roots.push(PathBuf::from(
-        "/Users/jaepil/work/research/uqa/benchmarks/data/beir",
-    ));
-    let dataset = env::var("UQA_BENCH_BEIR_DATASET").unwrap_or_else(|_| "nfcorpus".to_string());
-    roots
-        .into_iter()
-        .map(|root| root.join(&dataset))
-        .find_map(|path| load_beir_dataset(&dataset, &path).ok())
 }
 
 fn load_beir_dataset(name: &str, path: &Path) -> Result<Fixture, String> {
@@ -315,15 +317,23 @@ fn read_npy_matrix(path: &Path) -> Result<Vec<Vec<f32>>, String> {
     } else {
         return Err(format!("{} uses unsupported dtype {descr}", path.display()));
     };
-    if data.len() < rows * cols * width {
-        return Err(format!("{} has truncated NPY data", path.display()));
+    let expected_bytes = rows
+        .checked_mul(cols)
+        .and_then(|elements| elements.checked_mul(width))
+        .ok_or_else(|| format!("{} has an overflowing NPY shape", path.display()))?;
+    if data.len() != expected_bytes {
+        return Err(format!(
+            "{} NPY data length mismatch: expected {expected_bytes}, got {}",
+            path.display(),
+            data.len()
+        ));
     }
     let mut out = Vec::with_capacity(rows);
     for row in 0..rows {
         let mut values = Vec::with_capacity(cols);
         for col in 0..cols {
             let offset = (row * cols + col) * width;
-            let v = if width == 4 {
+            let value = if width == 4 {
                 f32::from_le_bytes([
                     data[offset],
                     data[offset + 1],
@@ -331,7 +341,7 @@ fn read_npy_matrix(path: &Path) -> Result<Vec<Vec<f32>>, String> {
                     data[offset + 3],
                 ])
             } else {
-                f64::from_le_bytes([
+                let value = f64::from_le_bytes([
                     data[offset],
                     data[offset + 1],
                     data[offset + 2],
@@ -340,9 +350,22 @@ fn read_npy_matrix(path: &Path) -> Result<Vec<Vec<f32>>, String> {
                     data[offset + 5],
                     data[offset + 6],
                     data[offset + 7],
-                ]) as f32
+                ]);
+                if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+                    return Err(format!(
+                        "{} value at ({row}, {col}) is outside f32 range: {value}",
+                        path.display()
+                    ));
+                }
+                value as f32
             };
-            values.push(v);
+            if !value.is_finite() {
+                return Err(format!(
+                    "{} value at ({row}, {col}) is not finite",
+                    path.display()
+                ));
+            }
+            values.push(value);
         }
         out.push(values);
     }
@@ -372,15 +395,14 @@ fn parse_shape(header: &str) -> Result<(usize, usize), String> {
         + start;
     let dims: Vec<usize> = header[start + 1..end]
         .split(',')
-        .filter_map(|part| {
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| {
             let trimmed = part.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                trimmed.parse::<usize>().ok()
-            }
+            trimmed
+                .parse::<usize>()
+                .map_err(|error| format!("invalid NPY shape dimension `{trimmed}`: {error}"))
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     if dims.len() == 2 {
         Ok((dims[0], dims[1]))
     } else {
@@ -396,7 +418,7 @@ fn ranked_dense(fx: &Fixture, query: &QueryCase) -> Vec<(usize, f64)> {
         .map(|(doc_id, doc)| {
             (
                 doc_id,
-                VectorScorer::cosine_similarity(&query.vector, &doc.vector),
+                VectorScorer::cosine_similarity(&query.vector, &doc.vector).unwrap(),
             )
         })
         .collect();
@@ -442,11 +464,11 @@ fn ranked_bm25(fx: &Fixture, query: &QueryCase) -> Vec<(usize, f64)> {
 }
 
 fn sort_and_truncate(scored: &mut Vec<(usize, f64)>, k: usize) {
-    scored.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
+    assert!(
+        scored.iter().all(|(_, score)| score.is_finite()),
+        "benchmark ranking produced a non-finite score"
+    );
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     scored.truncate(k);
 }
 
@@ -529,7 +551,11 @@ fn distance_gap_weights(distances: &[f64]) -> Vec<f64> {
         return vec![1.0; distances.len()];
     }
     let mut sorted = distances.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    assert!(
+        sorted.iter().all(|distance| distance.is_finite()),
+        "distance-gap weighting received a non-finite distance"
+    );
+    sorted.sort_by(f64::total_cmp);
     let mut max_gap = 0.0;
     let mut gap_value = sorted[0];
     for pair in sorted.windows(2) {
@@ -580,7 +606,7 @@ fn calibration_weights(source: CalibrationSource, distances: &[f64], sparse_p: &
 }
 
 fn calibrated_dense_report(fx: &Fixture, source: CalibrationSource) -> MethodReport {
-    let calibrator = VectorProbabilityTransform::new(0.02, 0.55, 0.20, 0.05);
+    let calibrator = VectorProbabilityTransform::new(0.02, 0.55, 0.20, 0.05).unwrap();
     let mut naive_probs = Vec::new();
     let mut calibrated_probs = Vec::new();
     let mut labels = Vec::new();
@@ -597,7 +623,7 @@ fn calibrated_dense_report(fx: &Fixture, source: CalibrationSource) -> MethodRep
             .map(|(doc_id, _)| sparse_p.get(doc_id).copied().unwrap_or(1e-10))
             .collect();
         let weights = calibration_weights(source, &distances, &sparse_weights);
-        let calibrated = calibrator.calibrate(&distances, Some(&weights));
+        let calibrated = calibrator.calibrate(&distances, Some(&weights)).unwrap();
 
         let mut calibrated_ranked: Vec<(usize, f64)> = dense
             .iter()
@@ -629,9 +655,9 @@ fn calibrated_dense_report(fx: &Fixture, source: CalibrationSource) -> MethodRep
         ndcg: ndcg_calibrated / q,
         map: map_calibrated / q,
         recall: recall_calibrated / q,
-        ece: CalibrationMetrics::ece(&calibrated_probs, &labels, 10),
-        brier: CalibrationMetrics::brier(&calibrated_probs, &labels),
-        log_loss: CalibrationMetrics::log_loss(&calibrated_probs, &labels),
+        ece: CalibrationMetrics::ece(&calibrated_probs, &labels, 10).unwrap(),
+        brier: CalibrationMetrics::brier(&calibrated_probs, &labels).unwrap(),
+        log_loss: CalibrationMetrics::log_loss(&calibrated_probs, &labels).unwrap(),
     }
 }
 
@@ -702,9 +728,9 @@ fn method_report(runs: &[QueryRun]) -> MethodReport {
         ndcg: ndcg / n,
         map: ap / n,
         recall: recall / n,
-        ece: CalibrationMetrics::ece(&probs, &labels, 10),
-        brier: CalibrationMetrics::brier(&probs, &labels),
-        log_loss: CalibrationMetrics::log_loss(&probs, &labels),
+        ece: CalibrationMetrics::ece(&probs, &labels, 10).unwrap(),
+        brier: CalibrationMetrics::brier(&probs, &labels).unwrap(),
+        log_loss: CalibrationMetrics::log_loss(&probs, &labels).unwrap(),
     }
 }
 

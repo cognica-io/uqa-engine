@@ -13,7 +13,25 @@ use std::collections::{BTreeMap, VecDeque};
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Value, VertexId};
 
 use crate::posting_list::{GraphPayload, GraphPostingList};
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
+
+const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_992;
+
+fn usize_as_f64(value: usize, context: &str) -> GraphStoreResult<f64> {
+    let value = u64::try_from(value)
+        .map_err(|_| GraphStoreError::CorruptGraph(format!("{context} exceeds the u64 range")))?;
+    u64_as_f64(value, context)
+}
+
+fn u64_as_f64(value: u64, context: &str) -> GraphStoreResult<f64> {
+    if value <= MAX_EXACT_F64_INTEGER {
+        Ok(value as f64)
+    } else {
+        Err(GraphStoreError::CorruptGraph(format!(
+            "{context} {value} exceeds the exact f64 integer range"
+        )))
+    }
+}
 
 /// `PageRank` centrality (power iteration with damping).
 ///
@@ -53,28 +71,46 @@ impl<'a> PageRank<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph).into_iter().collect();
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        if !self.damping.is_finite() || !(0.0..=1.0).contains(&self.damping) {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "PageRank damping must be finite and in [0, 1], got {}",
+                self.damping
+            )));
+        }
+        if !self.tolerance.is_finite() || self.tolerance < 0.0 {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "PageRank tolerance must be finite and non-negative, got {}",
+                self.tolerance
+            )));
+        }
+        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph)?.into_iter().collect();
         let n = vertices.len();
         if n == 0 {
-            return GraphPostingList::new();
+            return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            let vid = vertices[0];
-            return single_vertex_result(vid, 1.0, &vertices, self.graph);
+            return Ok(single_vertex_result(
+                vertices[0],
+                1.0,
+                &vertices,
+                self.graph,
+            ));
         }
 
+        let n_f64 = usize_as_f64(n, "PageRank vertex count")?;
         let mut rank: BTreeMap<VertexId, f64> =
-            vertices.iter().map(|v| (*v, 1.0 / n as f64)).collect();
+            vertices.iter().map(|v| (*v, 1.0 / n_f64)).collect();
         let mut out_degree: BTreeMap<VertexId, usize> = BTreeMap::new();
         let mut in_neighbors: BTreeMap<VertexId, Vec<VertexId>> = BTreeMap::new();
         for v in &vertices {
-            out_degree.insert(*v, store.out_edge_ids(*v, self.graph).len());
+            out_degree.insert(*v, store.out_edge_ids(*v, self.graph)?.len());
             let mut ins: Vec<VertexId> = Vec::new();
-            for eid in store.in_edge_ids(*v, self.graph) {
-                if let Some(edge) = store.get_edge(eid) {
-                    ins.push(edge.source_id);
-                }
+            for eid in store.in_edge_ids(*v, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing PageRank edge {eid}"))
+                })?;
+                ins.push(edge.source_id);
             }
             in_neighbors.insert(*v, ins);
         }
@@ -88,11 +124,11 @@ impl<'a> PageRank<'a> {
                     for u in ins {
                         let deg = *out_degree.get(u).unwrap_or(&0);
                         if deg > 0 {
-                            incoming += rank[u] / deg as f64;
+                            incoming += rank[u] / usize_as_f64(deg, "PageRank out-degree")?;
                         }
                     }
                 }
-                new_rank.insert(*v, (1.0 - d) / n as f64 + d * incoming);
+                new_rank.insert(*v, (1.0 - d) / n_f64 + d * incoming);
             }
             let delta: f64 = vertices.iter().map(|v| (new_rank[v] - rank[v]).abs()).sum();
             rank = new_rank;
@@ -101,8 +137,8 @@ impl<'a> PageRank<'a> {
             }
         }
 
-        let normalized = min_max_normalize(&rank, &vertices);
-        build_score_result(&vertices, &normalized, &[], self.graph, &BTreeMap::new())
+        let normalized = min_max_normalize(&rank, &vertices)?;
+        build_score_result(&vertices, &normalized, self.graph, &BTreeMap::new())
     }
 }
 
@@ -138,10 +174,16 @@ impl<'a> HITS<'a> {
         self
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph).into_iter().collect();
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        if !self.tolerance.is_finite() || self.tolerance < 0.0 {
+            return Err(GraphStoreError::InvalidMutation(format!(
+                "HITS tolerance must be finite and non-negative, got {}",
+                self.tolerance
+            )));
+        }
+        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph)?.into_iter().collect();
         if vertices.is_empty() {
-            return GraphPostingList::new();
+            return Ok(GraphPostingList::new());
         }
 
         let mut hub: BTreeMap<VertexId, f64> = vertices.iter().map(|v| (*v, 1.0)).collect();
@@ -150,17 +192,19 @@ impl<'a> HITS<'a> {
         let mut out_neighbors: BTreeMap<VertexId, Vec<VertexId>> = BTreeMap::new();
         for v in &vertices {
             let mut ins = Vec::new();
-            for eid in store.in_edge_ids(*v, self.graph) {
-                if let Some(edge) = store.get_edge(eid) {
-                    ins.push(edge.source_id);
-                }
+            for eid in store.in_edge_ids(*v, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing HITS edge {eid}"))
+                })?;
+                ins.push(edge.source_id);
             }
             in_neighbors.insert(*v, ins);
             let mut outs = Vec::new();
-            for eid in store.out_edge_ids(*v, self.graph) {
-                if let Some(edge) = store.get_edge(eid) {
-                    outs.push(edge.target_id);
-                }
+            for eid in store.out_edge_ids(*v, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing HITS edge {eid}"))
+                })?;
+                outs.push(edge.target_id);
             }
             out_neighbors.insert(*v, outs);
         }
@@ -180,12 +224,22 @@ impl<'a> HITS<'a> {
             let hub_norm = new_hub.values().map(|x| x * x).sum::<f64>().sqrt();
             if auth_norm > 0.0 {
                 for v in &vertices {
-                    *new_auth.get_mut(v).unwrap() /= auth_norm;
+                    let value = new_auth.get_mut(v).ok_or_else(|| {
+                        GraphStoreError::CorruptGraph(format!(
+                            "missing HITS authority state for vertex {v}"
+                        ))
+                    })?;
+                    *value /= auth_norm;
                 }
             }
             if hub_norm > 0.0 {
                 for v in &vertices {
-                    *new_hub.get_mut(v).unwrap() /= hub_norm;
+                    let value = new_hub.get_mut(v).ok_or_else(|| {
+                        GraphStoreError::CorruptGraph(format!(
+                            "missing HITS hub state for vertex {v}"
+                        ))
+                    })?;
+                    *value /= hub_norm;
                 }
             }
             let delta: f64 = vertices
@@ -199,8 +253,8 @@ impl<'a> HITS<'a> {
             }
         }
 
-        let auth_n = min_max_normalize(&auth, &vertices);
-        let hub_n = min_max_normalize(&hub, &vertices);
+        let auth_n = min_max_normalize(&auth, &vertices)?;
+        let hub_n = min_max_normalize(&hub, &vertices)?;
         let mut extra_fields: BTreeMap<VertexId, BTreeMap<String, Value>> = BTreeMap::new();
         for v in &vertices {
             let mut m: BTreeMap<String, Value> = BTreeMap::new();
@@ -208,7 +262,7 @@ impl<'a> HITS<'a> {
             m.insert("authority_score".into(), Value::Float(auth_n[v]));
             extra_fields.insert(*v, m);
         }
-        build_score_result(&vertices, &auth_n, &[], self.graph, &extra_fields)
+        build_score_result(&vertices, &auth_n, self.graph, &extra_fields)
     }
 }
 
@@ -226,14 +280,19 @@ impl<'a> BetweennessCentrality<'a> {
         Self { graph }
     }
 
-    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphPostingList {
-        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph).into_iter().collect();
+    pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
+        let vertices: Vec<VertexId> = store.vertex_ids_in_graph(self.graph)?.into_iter().collect();
         let n = vertices.len();
         if n == 0 {
-            return GraphPostingList::new();
+            return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            return single_vertex_result(vertices[0], 0.0, &vertices, self.graph);
+            return Ok(single_vertex_result(
+                vertices[0],
+                0.0,
+                &vertices,
+                self.graph,
+            ));
         }
 
         let vertex_index: BTreeMap<VertexId, usize> = vertices
@@ -243,11 +302,12 @@ impl<'a> BetweennessCentrality<'a> {
             .collect();
         let mut out_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (idx, vertex_id) in vertices.iter().enumerate() {
-            for eid in store.out_edge_ids(*vertex_id, self.graph) {
-                if let Some(edge) = store.get_edge(eid) {
-                    if let Some(target_idx) = vertex_index.get(&edge.target_id) {
-                        out_neighbors[idx].push(*target_idx);
-                    }
+            for eid in store.out_edge_ids(*vertex_id, self.graph)? {
+                let edge = store.get_edge(eid).ok_or_else(|| {
+                    GraphStoreError::CorruptGraph(format!("missing betweenness edge {eid}"))
+                })?;
+                if let Some(target_idx) = vertex_index.get(&edge.target_id) {
+                    out_neighbors[idx].push(*target_idx);
                 }
             }
         }
@@ -266,11 +326,19 @@ impl<'a> BetweennessCentrality<'a> {
                 stack.push(v);
                 for &w in &out_neighbors[v] {
                     if dist[w] < 0 {
-                        dist[w] = dist[v] + 1;
+                        dist[w] = dist[v].checked_add(1).ok_or_else(|| {
+                            GraphStoreError::CorruptGraph(
+                                "betweenness path distance exceeds bigint range".into(),
+                            )
+                        })?;
                         queue.push_back(w);
                     }
                     if dist[w] == dist[v] + 1 {
-                        sigma[w] += sigma[v];
+                        sigma[w] = sigma[w].checked_add(sigma[v]).ok_or_else(|| {
+                            GraphStoreError::CorruptGraph(
+                                "betweenness shortest-path count exceeds u64".into(),
+                            )
+                        })?;
                         predecessors[w].push(v);
                     }
                 }
@@ -279,7 +347,9 @@ impl<'a> BetweennessCentrality<'a> {
             while let Some(w) = stack.pop() {
                 for &v in &predecessors[w] {
                     if sigma[w] > 0 {
-                        let contrib = (sigma[v] as f64 / sigma[w] as f64) * (1.0 + delta[w]);
+                        let contrib = (u64_as_f64(sigma[v], "betweenness path count")?
+                            / u64_as_f64(sigma[w], "betweenness path count")?)
+                            * (1.0 + delta[w]);
                         delta[v] += contrib;
                     }
                 }
@@ -289,7 +359,10 @@ impl<'a> BetweennessCentrality<'a> {
             }
         }
 
-        let normalization = ((n - 1) * n.saturating_sub(2)) as f64;
+        let normalization_count = (n - 1).checked_mul(n - 2).ok_or_else(|| {
+            GraphStoreError::CorruptGraph("betweenness normalization count overflow".into())
+        })?;
+        let normalization = usize_as_f64(normalization_count, "betweenness normalization")?;
         if normalization > 0.0 {
             for value in &mut cb {
                 *value /= normalization;
@@ -300,23 +373,33 @@ impl<'a> BetweennessCentrality<'a> {
             .zip(cb)
             .map(|(vertex_id, score)| (*vertex_id, score.clamp(0.0, 1.0)))
             .collect();
-        build_score_result(&vertices, &cb, &[], self.graph, &BTreeMap::new())
+        build_score_result(&vertices, &cb, self.graph, &BTreeMap::new())
     }
 }
 
 fn min_max_normalize(
     scores: &BTreeMap<VertexId, f64>,
     vertices: &[VertexId],
-) -> BTreeMap<VertexId, f64> {
+) -> GraphStoreResult<BTreeMap<VertexId, f64>> {
     let min_s = scores.values().copied().fold(f64::INFINITY, f64::min);
     let max_s = scores.values().copied().fold(f64::NEG_INFINITY, f64::max);
     if max_s - min_s > 0.0 {
         vertices
             .iter()
-            .map(|v| (*v, (scores[v] - min_s) / (max_s - min_s)))
+            .map(|v| {
+                scores
+                    .get(v)
+                    .copied()
+                    .map(|score| (*v, (score - min_s) / (max_s - min_s)))
+                    .ok_or_else(|| {
+                        GraphStoreError::CorruptGraph(format!(
+                            "missing centrality score for vertex {v}"
+                        ))
+                    })
+            })
             .collect()
     } else {
-        vertices.iter().map(|v| (*v, 1.0)).collect()
+        Ok(vertices.iter().map(|v| (*v, 1.0)).collect())
     }
 }
 
@@ -346,16 +429,17 @@ fn single_vertex_result(
 fn build_score_result(
     vertices: &[VertexId],
     scores: &BTreeMap<VertexId, f64>,
-    _edges: &[u64],
     graph: &str,
     extra_fields: &BTreeMap<VertexId, BTreeMap<String, Value>>,
-) -> GraphPostingList {
+) -> GraphStoreResult<GraphPostingList> {
     let mut entries: Vec<PostingEntry> = Vec::with_capacity(vertices.len());
     let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
     let mut sorted = vertices.to_vec();
     sorted.sort_unstable();
     for vid in &sorted {
-        let score = *scores.get(vid).unwrap_or(&0.0);
+        let score = *scores.get(vid).ok_or_else(|| {
+            GraphStoreError::CorruptGraph(format!("missing centrality score for vertex {vid}"))
+        })?;
         let mut payload = Payload::with_score(score);
         if let Some(fields) = extra_fields.get(vid) {
             payload.fields = fields.clone();
@@ -371,5 +455,8 @@ fn build_score_result(
             },
         );
     }
-    GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+    Ok(GraphPostingList::from_parts(
+        PostingList::from_sorted_unchecked(entries),
+        graph_payloads,
+    ))
 }

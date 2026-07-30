@@ -85,7 +85,9 @@ fn parse_mode(name: &str) -> ScoringMode {
 
 fn build_engine(fx: &Fixture) -> Engine {
     let engine = Engine::new();
-    engine.create_default_table("docs", vec![fx.field.clone()]);
+    engine
+        .create_default_table("docs", vec![fx.field.clone()])
+        .unwrap();
     for c in &fx.corpus {
         let mut d = Document::new();
         d.insert(fx.field.clone(), Value::Str(c.body.clone()));
@@ -99,11 +101,20 @@ fn measure_relevance(engine: &Engine, fx: &Fixture, mode: &ScoringMode) -> (f64,
     let mut map_sum = 0.0;
     let mut q_count: u32 = 0;
     for q in &fx.queries {
-        let hits = engine.search("docs", &fx.field, &q.text, mode, fx.k);
+        let hits = engine
+            .search("docs", &fx.field, &q.text, mode, fx.k)
+            .expect("benchmark search");
         let judgments: BTreeMap<u64, f64> = q
             .judgments
             .iter()
-            .filter_map(|(k, v)| k.parse::<u64>().ok().map(|id| (id, *v)))
+            .map(|(key, value)| {
+                (
+                    key.parse::<u64>().unwrap_or_else(|error| {
+                        panic!("invalid judgment document id `{key}`: {error}")
+                    }),
+                    *value,
+                )
+            })
             .collect();
         let relevances: Vec<f64> = hits
             .iter()
@@ -168,7 +179,7 @@ fn bench_relevance(c: &mut Criterion) {
                         &mode,
                         fx.k,
                     );
-                    black_box(hits);
+                    black_box(hits.expect("benchmark search"));
                 }
             });
         });

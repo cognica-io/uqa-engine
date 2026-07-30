@@ -14,8 +14,8 @@ use uqa_operators::{Cutoff, ExecutionContext, MultiStageOperator, Operator};
 struct FixedScoreOperator(Vec<(u64, f64)>);
 
 impl Operator for FixedScoreOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        PostingList::from_unsorted(
+    fn execute(&self, _ctx: &ExecutionContext) -> uqa_storage::StorageBackendResult<PostingList> {
+        Ok(PostingList::from_unsorted(
             self.0
                 .iter()
                 .map(|(doc_id, score)| {
@@ -28,7 +28,7 @@ impl Operator for FixedScoreOperator {
                     )
                 })
                 .collect(),
-        )
+        ))
     }
 }
 
@@ -39,8 +39,9 @@ fn op(entries: &[(u64, f64)]) -> Arc<dyn Operator> {
 #[test]
 fn test_single_stage_top_k() {
     let pipeline =
-        MultiStageOperator::new(vec![(op(&[(1, 0.9), (2, 0.5), (3, 0.3)]), Cutoff::TopK(2))]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 2);
+        MultiStageOperator::new(vec![(op(&[(1, 0.9), (2, 0.5), (3, 0.3)]), Cutoff::TopK(2))])
+            .unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 2);
 }
 
 #[test]
@@ -48,8 +49,9 @@ fn test_single_stage_threshold() {
     let pipeline = MultiStageOperator::new(vec![(
         op(&[(1, 0.9), (2, 0.5), (3, 0.3)]),
         Cutoff::Threshold(0.4),
-    )]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 2);
+    )])
+    .unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 2);
 }
 
 #[test]
@@ -60,8 +62,9 @@ fn test_two_stage_pipeline() {
             Cutoff::TopK(3),
         ),
         (op(&[(1, 0.95), (2, 0.6), (3, 0.4)]), Cutoff::TopK(2)),
-    ]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 2);
+    ])
+    .unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 2);
 }
 
 #[test]
@@ -69,8 +72,9 @@ fn test_stage_rescoring() {
     let pipeline = MultiStageOperator::new(vec![
         (op(&[(1, 0.5), (2, 0.9)]), Cutoff::TopK(2)),
         (op(&[(1, 0.95), (2, 0.3)]), Cutoff::TopK(1)),
-    ]);
-    let result = pipeline.execute(&ExecutionContext::new());
+    ])
+    .unwrap();
+    let result = pipeline.execute(&ExecutionContext::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result.entries()[0].doc_id, 1);
 }
@@ -80,21 +84,22 @@ fn test_threshold_stage() {
     let pipeline = MultiStageOperator::new(vec![
         (op(&[(1, 0.9), (2, 0.5), (3, 0.1)]), Cutoff::Threshold(0.3)),
         (op(&[(1, 0.8), (2, 0.6), (3, 0.2)]), Cutoff::Threshold(0.5)),
-    ]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 2);
+    ])
+    .unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 2);
 }
 
 #[test]
 fn test_empty_after_cutoff() {
     let pipeline =
-        MultiStageOperator::new(vec![(op(&[(1, 0.3), (2, 0.2)]), Cutoff::Threshold(0.5))]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 0);
+        MultiStageOperator::new(vec![(op(&[(1, 0.3), (2, 0.2)]), Cutoff::Threshold(0.5))]).unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 0);
 }
 
 #[test]
-#[should_panic(expected = "at least one")]
 fn test_requires_at_least_one_stage() {
-    MultiStageOperator::new(Vec::new());
+    let error = MultiStageOperator::new(Vec::new()).err().unwrap();
+    assert!(error.to_string().contains("at least one stage"));
 }
 
 #[test]
@@ -102,7 +107,8 @@ fn test_cost_estimate_cascading() {
     let pipeline = MultiStageOperator::new(vec![
         (op(&[(1, 0.9)]), Cutoff::TopK(10)),
         (op(&[(1, 0.8)]), Cutoff::TopK(5)),
-    ]);
+    ])
+    .unwrap();
     assert!(pipeline.cost_estimate(&IndexStats::new(100)) > 0.0);
 }
 
@@ -114,6 +120,7 @@ fn test_three_stages() {
         (op(&stage1), Cutoff::TopK(5)),
         (op(&stage2), Cutoff::TopK(3)),
         (op(&[(1, 0.99), (2, 0.5)]), Cutoff::TopK(1)),
-    ]);
-    assert_eq!(pipeline.execute(&ExecutionContext::new()).len(), 1);
+    ])
+    .unwrap();
+    assert_eq!(pipeline.execute(&ExecutionContext::new()).unwrap().len(), 1);
 }

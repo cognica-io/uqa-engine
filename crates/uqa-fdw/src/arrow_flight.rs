@@ -27,6 +27,8 @@
 //! * `source` -- table name on the remote server.
 //! * `query`  -- pre-built SQL query (takes precedence over `source`).
 
+use std::fmt::Write as _;
+
 use uqa_core::Value;
 
 use crate::{FDWPredicate, ForeignTable, PredicateOp};
@@ -38,9 +40,9 @@ use crate::{FDWPredicate, ForeignTable, PredicateOp};
 /// `Display` form. `Value::Null` returns `NULL` -- callers usually
 /// route through the IS NULL / IS NOT NULL branch instead, but
 /// emitting `NULL` keeps the single-value codepath total.
-pub fn quote_literal(value: &Value) -> String {
-    match value {
-        Value::Null | Value::Map(_) => "NULL".into(),
+pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
+    Ok(match value {
+        Value::Null => "NULL".into(),
         Value::Bool(b) => {
             if *b {
                 "TRUE".into()
@@ -49,15 +51,37 @@ pub fn quote_literal(value: &Value) -> String {
             }
         }
         Value::Int(i) => i.to_string(),
-        Value::Float(f) => format!("{f}"),
+        Value::Float(f) if f.is_finite() => format!("{f}"),
+        Value::Float(f) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(format!(
+                "non-finite float {f}"
+            )));
+        }
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => {
             let escaped = s.replace('\'', "''");
             format!("'{escaped}'")
         }
         Value::Bytes(b) => {
-            let escaped = format!("<{} bytes>", b.len()).replace('\'', "''");
-            format!("'{escaped}'")
+            let capacity = b.len().checked_mul(2).ok_or_else(|| {
+                ArrowFlightPrepareError::UnsupportedLiteral(
+                    "binary literal length overflows usize".into(),
+                )
+            })?;
+            let mut hex = String::new();
+            hex.try_reserve_exact(capacity).map_err(|error| {
+                ArrowFlightPrepareError::UnsupportedLiteral(format!(
+                    "failed to allocate binary literal: {error}"
+                ))
+            })?;
+            for byte in b {
+                write!(hex, "{byte:02X}").map_err(|error| {
+                    ArrowFlightPrepareError::UnsupportedLiteral(format!(
+                        "failed to encode binary literal: {error}"
+                    ))
+                })?;
+            }
+            format!("X'{hex}'")
         }
         Value::Temporal(t) => {
             let escaped = t.to_sql_string().replace('\'', "''");
@@ -69,80 +93,115 @@ pub fn quote_literal(value: &Value) -> String {
             items
                 .iter()
                 .map(quote_literal)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         }
-    }
+        Value::Map(_) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "map values have no portable Flight SQL literal".into(),
+            ));
+        }
+    })
 }
 
 /// Render a Flight-SQL `WHERE` fragment from pushdown predicates.
 /// Mirrors `_build_where_clause` in the canonical UQA behavior. Flight
 /// SQL has no parameter binding API, so literal values are inlined
 /// via [`quote_literal`].
-pub fn build_where_clause(predicates: &[FDWPredicate]) -> String {
+pub fn build_where_clause(predicates: &[FDWPredicate]) -> Result<String, ArrowFlightPrepareError> {
     let mut clauses: Vec<String> = Vec::with_capacity(predicates.len());
     for p in predicates {
+        let column = quote_identifier(&p.column);
         match (&p.value, p.operator) {
             (Value::Null, PredicateOp::Eq) => {
-                clauses.push(format!("{} IS NULL", p.column));
+                clauses.push(format!("{column} IS NULL"));
             }
-            (Value::Null, _) => {
-                clauses.push(format!("{} IS NOT NULL", p.column));
+            (Value::Null, PredicateOp::NotEq) => {
+                clauses.push(format!("{column} IS NOT NULL"));
+            }
+            (Value::Null, operator) => {
+                return Err(ArrowFlightPrepareError::InvalidPredicate(format!(
+                    "{operator:?} cannot compare `{}` with NULL",
+                    p.column
+                )));
             }
             (Value::List(items), PredicateOp::In) => {
+                if items.is_empty() {
+                    clauses.push("FALSE".to_string());
+                    continue;
+                }
                 let inner = items
                     .iter()
                     .map(quote_literal)
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
-                clauses.push(format!("{} IN ({inner})", p.column));
+                clauses.push(format!("{column} IN ({inner})"));
+            }
+            (_, PredicateOp::In) => {
+                return Err(ArrowFlightPrepareError::InvalidPredicate(format!(
+                    "IN on `{}` requires a list",
+                    p.column
+                )));
             }
             (_, op) => {
                 clauses.push(format!(
-                    "{} {} {}",
-                    p.column,
+                    "{column} {} {}",
                     op.sql_token(),
-                    quote_literal(&p.value)
+                    quote_literal(&p.value)?
                 ));
             }
         }
     }
-    clauses.join(" AND ")
+    Ok(clauses.join(" AND "))
 }
 
 /// Build the SQL query the handler ships to the remote Flight SQL
 /// server. The `query` option, when present, takes precedence over
-/// `source` -- matching the canonical UQA behavior. Predicates and limit
-/// are appended only when the prepared query doesn't already
-/// contain `WHERE` / `LIMIT` (case-insensitive).
+/// `source`. A prebuilt query is wrapped as a subquery so projection,
+/// predicates, and limits are always applied at this boundary.
 pub fn prepare_query(
     table: &ForeignTable,
     columns: Option<&[String]>,
     predicates: &[FDWPredicate],
     limit: Option<u64>,
 ) -> Result<String, ArrowFlightPrepareError> {
-    let mut query = if let Some(q) = table.options.get("query") {
-        q.clone()
+    let (source, default_to_star) = if let Some(query) = table.options.get("query") {
+        let query = query.trim().trim_end_matches(';').trim();
+        if query.is_empty() {
+            return Err(ArrowFlightPrepareError::EmptyQuery(table.name.clone()));
+        }
+        (format!("({query}) AS uqa_fdw_source"), true)
     } else {
         let Some(source) = table.options.get("source") else {
             return Err(ArrowFlightPrepareError::MissingSourceOrQuery(
                 table.name.clone(),
             ));
         };
-        let cols = match columns {
-            Some(cs) if !cs.is_empty() => cs.join(", "),
-            _ => table
-                .columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect::<Vec<_>>()
-                .join(", "),
-        };
-        format!("SELECT {cols} FROM {source}")
+        (quote_identifier(source), false)
     };
 
-    if !predicates.is_empty() && !contains_keyword(&query, "WHERE") {
-        let where_sql = build_where_clause(predicates);
+    let column_names = match columns {
+        Some(columns) if !columns.is_empty() => columns.to_vec(),
+        _ if default_to_star => Vec::new(),
+        _ => table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect(),
+    };
+    let columns = if column_names.is_empty() {
+        "*".to_string()
+    } else {
+        column_names
+            .iter()
+            .map(|column| quote_identifier(column))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut query = format!("SELECT {columns} FROM {source}");
+
+    if !predicates.is_empty() {
+        let where_sql = build_where_clause(predicates)?;
         if !where_sql.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&where_sql);
@@ -150,25 +209,39 @@ pub fn prepare_query(
     }
 
     if let Some(n) = limit {
-        if !contains_keyword(&query, "LIMIT") {
-            use std::fmt::Write as _;
-            let _ = write!(query, " LIMIT {n}");
-        }
+        use std::fmt::Write as _;
+        write!(query, " LIMIT {n}").map_err(|error| {
+            ArrowFlightPrepareError::UnsupportedLiteral(format!("failed to append LIMIT: {error}"))
+        })?;
     }
 
     Ok(query)
 }
 
-fn contains_keyword(haystack: &str, keyword: &str) -> bool {
-    let upper = haystack.to_ascii_uppercase();
-    let key = keyword.to_ascii_uppercase();
-    upper.contains(&format!(" {key} ")) || upper.ends_with(&format!(" {key}"))
+fn quote_identifier(value: &str) -> String {
+    value
+        .split('.')
+        .map(|part| {
+            if part == "*" {
+                "*".to_string()
+            } else {
+                format!("\"{}\"", part.replace('"', "\"\""))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArrowFlightPrepareError {
     #[error("Foreign table `{0}` missing required option `source` or `query`")]
     MissingSourceOrQuery(String),
+    #[error("Foreign table `{0}` has an empty `query` option")]
+    EmptyQuery(String),
+    #[error("Invalid Arrow Flight pushdown predicate: {0}")]
+    InvalidPredicate(String),
+    #[error("Unsupported Arrow Flight SQL literal: {0}")]
+    UnsupportedLiteral(String),
 }
 
 #[cfg(test)]
@@ -200,13 +273,16 @@ mod tests {
 
     #[test]
     fn quote_literal_escapes_single_quotes() {
-        assert_eq!(quote_literal(&Value::Str("it's".into())), "'it''s'");
+        assert_eq!(
+            quote_literal(&Value::Str("it's".into())).unwrap(),
+            "'it''s'"
+        );
     }
 
     #[test]
     fn quote_literal_renders_int_and_bool() {
-        assert_eq!(quote_literal(&Value::Int(42)), "42");
-        assert_eq!(quote_literal(&Value::Bool(true)), "TRUE");
+        assert_eq!(quote_literal(&Value::Int(42)).unwrap(), "42");
+        assert_eq!(quote_literal(&Value::Bool(true)).unwrap(), "TRUE");
     }
 
     #[test]
@@ -223,8 +299,8 @@ mod tests {
                 value: Value::Str("alpha%".into()),
             },
         ];
-        let sql = build_where_clause(&preds);
-        assert_eq!(sql, "year = 2024 AND name LIKE 'alpha%'");
+        let sql = build_where_clause(&preds).unwrap();
+        assert_eq!(sql, "\"year\" = 2024 AND \"name\" LIKE 'alpha%'");
     }
 
     #[test]
@@ -234,29 +310,30 @@ mod tests {
             operator: PredicateOp::In,
             value: Value::List(vec![Value::Str("US".into()), Value::Str("KR".into())]),
         }];
-        let sql = build_where_clause(&preds);
-        assert_eq!(sql, "country IN ('US', 'KR')");
+        let sql = build_where_clause(&preds).unwrap();
+        assert_eq!(sql, "\"country\" IN ('US', 'KR')");
     }
 
     #[test]
     fn prepare_query_assembles_select_when_no_query_option() {
         let table = table_with_options([("source", "books")]);
         let q = prepare_query(&table, None, &[], None).unwrap();
-        assert_eq!(q, "SELECT id, name FROM books");
+        assert_eq!(q, "SELECT \"id\", \"name\" FROM \"books\"");
     }
 
     #[test]
-    fn prepare_query_uses_query_option_verbatim_when_present() {
+    fn prepare_query_wraps_query_option_and_preserves_pushdown() {
         let table = table_with_options([("query", "SELECT id FROM books WHERE year = 2024")]);
         let preds = vec![FDWPredicate {
             column: "year".into(),
             operator: PredicateOp::Eq,
             value: Value::Int(2025),
         }];
-        // The pre-built query already has WHERE -- predicates are
-        // dropped, mirroring the canonical UQA behavior.
         let q = prepare_query(&table, None, &preds, None).unwrap();
-        assert_eq!(q, "SELECT id FROM books WHERE year = 2024");
+        assert_eq!(
+            q,
+            "SELECT * FROM (SELECT id FROM books WHERE year = 2024) AS uqa_fdw_source WHERE \"year\" = 2025"
+        );
     }
 
     #[test]
@@ -270,10 +347,21 @@ mod tests {
     fn prepare_query_errors_when_source_and_query_missing() {
         let table = table_with_options([]);
         let err = prepare_query(&table, None, &[], None).unwrap_err();
-        match err {
-            ArrowFlightPrepareError::MissingSourceOrQuery(name) => {
-                assert_eq!(name, "remote");
-            }
-        }
+        assert!(matches!(
+            err,
+            ArrowFlightPrepareError::MissingSourceOrQuery(name) if name == "remote"
+        ));
+    }
+
+    #[test]
+    fn unsupported_literals_and_malformed_in_predicates_fail() {
+        assert!(quote_literal(&Value::Map(BTreeMap::new())).is_err());
+        assert!(quote_literal(&Value::Float(f64::NAN)).is_err());
+        let predicate = FDWPredicate {
+            column: "id".into(),
+            operator: PredicateOp::In,
+            value: Value::Int(1),
+        };
+        assert!(build_where_clause(&[predicate]).is_err());
     }
 }

@@ -12,6 +12,32 @@
 //! lookups can use bitmasks directly. With 64 relations max this
 //! suffices for every shape the UQA SQL compiler can build.
 
+use thiserror::Error;
+
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum JoinGraphError {
+    #[error("join-order optimization requires at least one relation")]
+    EmptyGraph,
+    #[error("JoinGraph supports at most 64 relations; cannot add `{name}` at index {index}")]
+    TooManyRelations { name: String, index: usize },
+    #[error(
+        "join edge references relation index {index}, but the graph contains {relation_count} relations"
+    )]
+    UnknownRelation { index: usize, relation_count: usize },
+    #[error("relation `{name}` has invalid cardinality estimate {rows}; expected a finite non-negative value")]
+    InvalidCardinality { name: String, rows: f64 },
+    #[error("join selectivity must be finite and between 0 and 1, got {selectivity}")]
+    InvalidSelectivity { selectivity: f64 },
+    #[error("duplicate join relation alias `{alias}`")]
+    DuplicateAlias { alias: String },
+    #[error("join predicate references unknown relation alias `{alias}`")]
+    UnknownAlias { alias: String },
+    #[error("invalid join plan: {detail}")]
+    InvalidPlan { detail: String },
+}
+
+pub type JoinGraphResult<T> = Result<T, JoinGraphError>;
+
 #[derive(Debug, Clone)]
 pub struct JoinEdge {
     /// Bitmask of relations on the left side of the equijoin.
@@ -27,12 +53,12 @@ pub struct JoinEdge {
 pub struct JoinGraph {
     /// Relation labels in declaration order. The bit index of a
     /// relation is its position in this vector.
-    pub relations: Vec<String>,
+    pub(crate) relations: Vec<String>,
     /// Per-relation row count estimate.
-    pub cardinalities: Vec<f64>,
+    pub(crate) cardinalities: Vec<f64>,
     /// Connecting edges. Order is irrelevant; the enumerator probes
     /// them by bitmask membership.
-    pub edges: Vec<JoinEdge>,
+    pub(crate) edges: Vec<JoinEdge>,
 }
 
 impl JoinGraph {
@@ -40,26 +66,43 @@ impl JoinGraph {
         Self::default()
     }
 
-    pub fn add_relation(&mut self, name: impl Into<String>, rows: f64) -> usize {
+    pub fn add_relation(&mut self, name: impl Into<String>, rows: f64) -> JoinGraphResult<usize> {
         let idx = self.relations.len();
+        let name = name.into();
         if idx >= 64 {
-            panic!(
-                "JoinGraph supports up to 64 relations; got `{}` when adding {}",
-                self.relations.len(),
-                name.into()
-            );
+            return Err(JoinGraphError::TooManyRelations { name, index: idx });
         }
-        self.relations.push(name.into());
+        if !rows.is_finite() || rows < 0.0 {
+            return Err(JoinGraphError::InvalidCardinality { name, rows });
+        }
+        self.relations.push(name);
         self.cardinalities.push(rows);
-        idx
+        Ok(idx)
     }
 
-    pub fn add_edge(&mut self, left_idx: usize, right_idx: usize, selectivity: f64) {
+    pub fn add_edge(
+        &mut self,
+        left_idx: usize,
+        right_idx: usize,
+        selectivity: f64,
+    ) -> JoinGraphResult<()> {
+        for index in [left_idx, right_idx] {
+            if index >= self.relations.len() {
+                return Err(JoinGraphError::UnknownRelation {
+                    index,
+                    relation_count: self.relations.len(),
+                });
+            }
+        }
+        if !selectivity.is_finite() || !(0.0..=1.0).contains(&selectivity) {
+            return Err(JoinGraphError::InvalidSelectivity { selectivity });
+        }
         self.edges.push(JoinEdge {
             left: 1u64 << left_idx,
             right: 1u64 << right_idx,
             selectivity,
         });
+        Ok(())
     }
 
     pub fn relation_count(&self) -> usize {
@@ -83,10 +126,10 @@ impl JoinGraph {
     }
 
     pub fn full_set(&self) -> u64 {
-        if self.relations.is_empty() {
-            0
-        } else {
-            (1u64 << self.relations.len()) - 1
+        match self.relations.len() {
+            0 => 0,
+            64 => u64::MAX,
+            count => (1u64 << count) - 1,
         }
     }
 
@@ -94,6 +137,9 @@ impl JoinGraph {
     /// edge. Mirrors the canonical UQA implementation's `JoinGraph.neighbors`. Each call walks
     /// the edge list once; O(|edges|).
     pub fn neighbors(&self, node: usize) -> Vec<usize> {
+        if node >= self.relations.len() {
+            return Vec::new();
+        }
         let mark = 1u64 << node;
         let mut out: Vec<usize> = Vec::new();
         let mut seen: u64 = 0;
@@ -109,7 +155,9 @@ impl JoinGraph {
                 continue;
             }
             // `other` is a singleton bitmask of the other side.
-            let idx = other.trailing_zeros() as usize;
+            let Ok(idx) = usize::try_from(other.trailing_zeros()) else {
+                continue;
+            };
             if seen & (1u64 << idx) != 0 {
                 continue;
             }
@@ -129,7 +177,7 @@ mod tests {
     fn full_set_covers_every_relation() {
         let mut g = JoinGraph::new();
         for i in 0..3 {
-            g.add_relation(format!("t{i}"), 100.0);
+            g.add_relation(format!("t{i}"), 100.0).unwrap();
         }
         assert_eq!(g.full_set(), 0b111);
     }
@@ -137,14 +185,49 @@ mod tests {
     #[test]
     fn edges_between_finds_predicates_across_partition() {
         let mut g = JoinGraph::new();
-        let a = g.add_relation("a", 100.0);
-        let b = g.add_relation("b", 100.0);
-        let c = g.add_relation("c", 100.0);
-        g.add_edge(a, b, 0.01);
-        g.add_edge(b, c, 0.01);
+        let a = g.add_relation("a", 100.0).unwrap();
+        let b = g.add_relation("b", 100.0).unwrap();
+        let c = g.add_relation("c", 100.0).unwrap();
+        g.add_edge(a, b, 0.01).unwrap();
+        g.add_edge(b, c, 0.01).unwrap();
         let s1 = 1u64 << a;
         let s2 = (1u64 << b) | (1u64 << c);
         let between = g.edges_between(s1, s2);
         assert_eq!(between.len(), 1);
+    }
+
+    #[test]
+    fn capacity_and_edge_errors_are_returned_without_panicking() {
+        let mut graph = JoinGraph::new();
+        for index in 0..64 {
+            graph.add_relation(format!("t{index}"), 1.0).unwrap();
+        }
+        assert_eq!(graph.full_set(), u64::MAX);
+        assert!(matches!(
+            graph.add_relation("overflow", 1.0),
+            Err(JoinGraphError::TooManyRelations { index: 64, .. })
+        ));
+        assert!(matches!(
+            graph.add_edge(0, 64, 1.0),
+            Err(JoinGraphError::UnknownRelation { index: 64, .. })
+        ));
+        assert!(graph.neighbors(64).is_empty());
+    }
+
+    #[test]
+    fn rejects_non_finite_cost_inputs_before_enumeration() {
+        let mut graph = JoinGraph::new();
+        assert!(matches!(
+            graph.add_relation("bad", f64::NAN),
+            Err(JoinGraphError::InvalidCardinality { .. })
+        ));
+        let left = graph.add_relation("left", 1.0).unwrap();
+        let right = graph.add_relation("right", 1.0).unwrap();
+        for selectivity in [f64::NAN, -0.1, 1.1] {
+            assert!(matches!(
+                graph.add_edge(left, right, selectivity),
+                Err(JoinGraphError::InvalidSelectivity { .. })
+            ));
+        }
     }
 }

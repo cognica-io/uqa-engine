@@ -18,7 +18,23 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 
-use super::{ManagedConnection, Result};
+use super::{ManagedConnection, Result, SQLiteError};
+
+fn encode_doc_id(doc_id: DocId) -> Result<i64> {
+    i64::try_from(doc_id).map_err(|_| {
+        SQLiteError::StorageBackend(format!(
+            "document id {doc_id} does not fit in SQLite INTEGER"
+        ))
+    })
+}
+
+fn decode_doc_id(doc_id: i64) -> Result<DocId> {
+    DocId::try_from(doc_id).map_err(|_| {
+        SQLiteError::StorageBackend(format!(
+            "invalid negative document id {doc_id} in persisted B-tree index"
+        ))
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
@@ -139,7 +155,7 @@ impl SQLiteBTreeIndexStore {
             let mut rows = stmt.query(params![table, field])?;
             let mut values = Vec::new();
             while let Some(row) = rows.next()? {
-                let doc_id = row.get::<_, i64>(0)? as DocId;
+                let doc_id = decode_doc_id(row.get::<_, i64>(0)?)?;
                 let encoded = row.get::<_, String>(1)?;
                 values.push((doc_id, decode_value(&encoded)?));
             }
@@ -151,7 +167,7 @@ impl SQLiteBTreeIndexStore {
     pub fn replace(&self, table: &str, field: &str, values: &[(DocId, Value)]) -> Result<()> {
         let encoded = values
             .iter()
-            .map(|(doc_id, value)| Ok((*doc_id, encode_value(value)?)))
+            .map(|(doc_id, value)| Ok((encode_doc_id(*doc_id)?, encode_value(value)?)))
             .collect::<Result<Vec<_>>>()?;
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
@@ -172,7 +188,7 @@ impl SQLiteBTreeIndexStore {
                      VALUES (?1, ?2, ?3, ?4)",
                 )?;
                 for (doc_id, value_json) in &encoded {
-                    stmt.execute(params![table, field, *doc_id as i64, value_json])?;
+                    stmt.execute(params![table, field, doc_id, value_json])?;
                 }
             }
             tx.commit()?;
@@ -189,6 +205,7 @@ impl SQLiteBTreeIndexStore {
         doc_id: DocId,
         values: Option<&BTreeMap<String, Value>>,
     ) -> Result<()> {
+        let doc_id = encode_doc_id(doc_id)?;
         let encoded = values
             .map(|values| {
                 values
@@ -213,14 +230,14 @@ impl SQLiteBTreeIndexStore {
                          DO UPDATE SET value_json = excluded.value_json",
                     )?;
                     for (field, value_json) in values {
-                        stmt.execute(params![table, field, doc_id as i64, value_json])?;
+                        stmt.execute(params![table, field, doc_id, value_json])?;
                     }
                 }
                 None => {
                     tx.execute(
                         "DELETE FROM _btree_index_entries
                          WHERE table_name = ?1 AND doc_id = ?2",
-                        params![table, doc_id as i64],
+                        params![table, doc_id],
                     )?;
                 }
             }
@@ -330,5 +347,68 @@ mod tests {
         assert_eq!(store.load("messages", "public_id").unwrap(), Some(vec![]));
         store.drop_index("messages", "public_id").unwrap();
         assert_eq!(store.load("messages", "public_id").unwrap(), None);
+    }
+
+    #[test]
+    fn out_of_range_document_ids_fail_before_replacing_existing_entries() {
+        let store = store();
+        store
+            .replace("messages", "public_id", &[(1, Value::Str("m1".into()))])
+            .unwrap();
+
+        let error = store
+            .replace(
+                "messages",
+                "public_id",
+                &[(u64::MAX, Value::Str("overflow".into()))],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("does not fit in SQLite INTEGER"));
+        assert_eq!(
+            store.load("messages", "public_id").unwrap(),
+            Some(vec![(1, Value::Str("m1".into()))])
+        );
+
+        let error = store
+            .apply_write(
+                "messages",
+                u64::MAX,
+                Some(&BTreeMap::from([(
+                    "public_id".into(),
+                    Value::Str("overflow".into()),
+                )])),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("does not fit in SQLite INTEGER"));
+    }
+
+    #[test]
+    fn negative_persisted_document_id_is_reported_as_corruption() {
+        let store = store();
+        store
+            .replace("messages", "public_id", &[(1, Value::Str("m1".into()))])
+            .unwrap();
+        store
+            .conn
+            .with(|conn| {
+                conn.execute(
+                    "INSERT INTO _btree_index_entries
+                       (table_name, field, doc_id, value_json)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        "messages",
+                        "public_id",
+                        -1_i64,
+                        encode_value(&Value::Str("corrupt".into()))?
+                    ],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let error = store.load("messages", "public_id").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid negative document id -1"));
     }
 }

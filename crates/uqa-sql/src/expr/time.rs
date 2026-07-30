@@ -10,13 +10,13 @@
 //! months/days/micros model, and `age()` produces the symbolic
 //! year/month decomposition.
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
 use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 
-use super::{division_by_zero, out_of_range, to_f64};
+use super::{division_by_zero, float_to_i64_rounded, out_of_range, to_f64};
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
@@ -24,7 +24,7 @@ const MICROS_PER_HOUR: i64 = 3_600 * MICROS_PER_SECOND;
 const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
 
 fn epoch_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid epoch date")
+    DateTime::<Utc>::UNIX_EPOCH.date_naive()
 }
 
 fn naive_from_micros(micros: i64) -> Result<NaiveDateTime> {
@@ -41,9 +41,13 @@ fn micros_from_naive(naive: NaiveDateTime) -> i64 {
 /// of the target month exactly like `PostgreSQL` (`Jan 31 + 1 mon` ->
 /// `Feb 29` in a leap year).
 fn shift_months(date: NaiveDate, months: i32) -> Result<NaiveDate> {
-    let total = date.year() * 12 + date.month0() as i32 + months;
-    let year = total.div_euclid(12);
-    let month = total.rem_euclid(12) as u32 + 1;
+    let total = i64::from(date.year())
+        .checked_mul(12)
+        .and_then(|value| value.checked_add(i64::from(date.month0())))
+        .and_then(|value| value.checked_add(i64::from(months)))
+        .ok_or_else(|| out_of_range("date"))?;
+    let year = i32::try_from(total.div_euclid(12)).map_err(|_| out_of_range("date"))?;
+    let month = u32::try_from(total.rem_euclid(12)).map_err(|_| out_of_range("date"))? + 1;
     let day = date.day();
     let last = days_in_month(year, month);
     NaiveDate::from_ymd_opt(year, month, day.min(last)).ok_or_else(|| out_of_range("date"))
@@ -169,15 +173,22 @@ pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value
         },
         // date +/- integer days.
         (Value::Temporal(T::Date { days }), Value::Int(n)) => match op {
-            BinaryOp::Add => date_value(i64::from(*days) + n),
-            BinaryOp::Subtract => date_value(i64::from(*days) - n),
+            BinaryOp::Add => i64::from(*days)
+                .checked_add(*n)
+                .ok_or_else(|| out_of_range("date"))
+                .and_then(date_value),
+            BinaryOp::Subtract => i64::from(*days)
+                .checked_sub(*n)
+                .ok_or_else(|| out_of_range("date"))
+                .and_then(date_value),
             _ => Err(SQLError::TypeMismatch(format!(
                 "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
             ))),
         },
-        (Value::Int(n), Value::Temporal(T::Date { days })) if matches!(op, BinaryOp::Add) => {
-            date_value(n + i64::from(*days))
-        }
+        (Value::Int(n), Value::Temporal(T::Date { days })) if matches!(op, BinaryOp::Add) => n
+            .checked_add(i64::from(*days))
+            .ok_or_else(|| out_of_range("date"))
+            .and_then(date_value),
         // interval * number / number * interval.
         (
             Value::Temporal(T::Interval {
@@ -198,7 +209,7 @@ pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value
             };
             Ok(Value::Temporal(scale_interval(
                 *months, *days, *micros, factor,
-            )))
+            )?))
         }
         (
             other,
@@ -211,7 +222,7 @@ pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value
             let factor = to_f64(other)?;
             Ok(Value::Temporal(scale_interval(
                 *months, *days, *micros, factor,
-            )))
+            )?))
         }
         _ => Err(SQLError::TypeMismatch(format!(
             "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
@@ -228,17 +239,29 @@ fn date_value(days: i64) -> Result<Value> {
 /// Multiply an interval by a factor, cascading fractional months into
 /// days and fractional days into microseconds (`PostgreSQL`
 /// `interval_mul` semantics).
-fn scale_interval(months: i32, days: i32, micros: i64, factor: f64) -> TemporalValue {
+fn scale_interval(months: i32, days: i32, micros: i64, factor: f64) -> Result<TemporalValue> {
+    if !factor.is_finite() {
+        return Err(out_of_range("interval"));
+    }
     let month_total = f64::from(months) * factor;
     let month_whole = month_total.trunc();
     let day_total = f64::from(days) * factor + (month_total - month_whole) * 30.0;
     let day_whole = day_total.trunc();
     let micro_total = micros as f64 * factor + (day_total - day_whole) * MICROS_PER_DAY as f64;
-    TemporalValue::Interval {
+    if !month_whole.is_finite()
+        || month_whole < f64::from(i32::MIN)
+        || month_whole >= 2_147_483_648.0
+        || !day_whole.is_finite()
+        || day_whole < f64::from(i32::MIN)
+        || day_whole >= 2_147_483_648.0
+    {
+        return Err(out_of_range("interval"));
+    }
+    Ok(TemporalValue::Interval {
         months: month_whole as i32,
         days: day_whole as i32,
-        micros: micro_total.round() as i64,
-    }
+        micros: float_to_i64_rounded(micro_total, "interval")?,
+    })
 }
 
 fn add_interval_to_temporal(
@@ -264,19 +287,23 @@ fn add_interval_to_temporal(
         })),
         // time +/- interval wraps within the day; months/days vanish.
         T::Time { micros: t } => Ok(Value::Temporal(T::Time {
-            micros: (t + micros).rem_euclid(MICROS_PER_DAY),
+            micros: wrap_time(*t, micros),
         })),
         T::TimeTz {
             micros: t,
             offset_minutes,
         } => Ok(Value::Temporal(T::TimeTz {
-            micros: (t + micros).rem_euclid(MICROS_PER_DAY),
+            micros: wrap_time(*t, micros),
             offset_minutes: *offset_minutes,
         })),
         T::Interval { .. } => Err(SQLError::TypeMismatch(
             "cannot add interval to interval through this path".into(),
         )),
     }
+}
+
+fn wrap_time(left: i64, right: i64) -> i64 {
+    (i128::from(left) + i128::from(right)).rem_euclid(i128::from(MICROS_PER_DAY)) as i64
 }
 
 /// Absolute timestamp microseconds for datetime-like temporal values.
@@ -549,13 +576,20 @@ pub(super) fn make_timestamp(
     minute: u32,
     second: f64,
 ) -> Result<Value> {
-    let secs = second.trunc() as u32;
-    let nanos = (second.fract() * 1e9).round() as u32;
+    if !second.is_finite() || !(0.0..60.0).contains(&second) {
+        return Err(SQLError::TypeMismatch(
+            "make_timestamp: seconds must be finite and between 0 and 60".into(),
+        ));
+    }
     let date = NaiveDate::from_ymd_opt(year, month, day)
         .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad date".into()))?;
-    let naive = date
-        .and_hms_nano_opt(hour, minute, secs, nanos)
+    let base = date
+        .and_hms_opt(hour, minute, 0)
         .ok_or_else(|| SQLError::TypeMismatch("make_timestamp: bad time".into()))?;
+    let micros = float_to_i64_rounded(second * MICROS_PER_SECOND as f64, "time")?;
+    let naive = base
+        .checked_add_signed(chrono::Duration::microseconds(micros))
+        .ok_or_else(|| out_of_range("timestamp"))?;
     Ok(Value::Temporal(TemporalValue::Timestamp {
         micros: micros_from_naive(naive),
     }))
@@ -592,12 +626,12 @@ pub(super) fn format_pg_number(n: f64, fmt: &str) -> String {
     if digits == 0 {
         return n.to_string();
     }
-    let int_part = n.trunc() as i64;
     if fmt.contains('.') {
         let frac_digits = fmt.split('.').nth(1).map(str::len).unwrap_or(0);
         format!("{n:.frac_digits$}")
     } else {
-        format!("{int_part:0digits$}")
+        let truncated = n.trunc();
+        format!("{truncated:0digits$.0}")
     }
 }
 

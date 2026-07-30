@@ -33,6 +33,24 @@ impl SQLScalarFunction for CountCalls {
     }
 }
 
+struct ObserveValue {
+    calls: Arc<AtomicUsize>,
+}
+
+impl SQLScalarFunction for ObserveValue {
+    fn call(&self, args: &[Value]) -> Result<Value, SQLError> {
+        let [value] = args else {
+            return Err(SQLError::BadArity {
+                name: "observe_value".into(),
+                expected: "1 argument".into(),
+                actual: args.len(),
+            });
+        };
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(value.clone())
+    }
+}
+
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
     engine.sql(sql, &[]).unwrap()
 }
@@ -80,7 +98,7 @@ fn create_view_basic() {
         "CREATE VIEW eng_employees AS
          SELECT name, salary FROM employees WHERE dept = 'eng'",
     );
-    assert!(engine.view("eng_employees").is_some());
+    assert!(engine.view("eng_employees").unwrap().is_some());
 }
 
 #[test]
@@ -185,8 +203,8 @@ fn view_does_not_leak_temp_table() {
     let engine = engine();
     exec(&engine, "CREATE VIEW v AS SELECT name FROM employees");
     exec(&engine, "SELECT name FROM v");
-    assert!(!engine.has_table("v"));
-    assert!(engine.view("v").is_some());
+    assert!(!engine.has_table("v").unwrap());
+    assert!(engine.view("v").unwrap().is_some());
 }
 
 #[test]
@@ -219,7 +237,7 @@ fn drop_view() {
     let engine = engine();
     exec(&engine, "CREATE VIEW v AS SELECT name FROM employees");
     exec(&engine, "DROP VIEW v");
-    assert!(engine.view("v").is_none());
+    assert!(engine.view("v").unwrap().is_none());
 }
 
 #[test]
@@ -338,7 +356,7 @@ fn cte_and_view_together() {
 }
 
 #[test]
-fn view_materializes_once_per_statement() {
+fn volatile_registered_callback_view_is_not_cached_per_statement() {
     let engine = engine();
     let calls = Arc::new(AtomicUsize::new(0));
     engine
@@ -362,16 +380,16 @@ fn view_materializes_once_per_statement() {
 
     assert_eq!(r.rows.len(), 1);
     assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
-    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 
     let r = exec(&engine, "SELECT marker FROM counted");
-    assert_eq!(r.rows[0]["marker"], Value::Int(2));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(r.rows[0]["marker"], Value::Int(3));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 #[test]
-fn nested_view_cache_is_shared_by_parent_statement() {
+fn volatile_dependency_is_transitive_through_nested_views() {
     let engine = engine();
     let calls = Arc::new(AtomicUsize::new(0));
     engine
@@ -403,12 +421,12 @@ fn nested_view_cache_is_shared_by_parent_statement() {
 
     assert_eq!(r.rows.len(), 1);
     assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
-    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[test]
-fn filtered_nested_view_cache_reuses_unspecialized_base_view() {
+fn filtered_nested_views_do_not_cache_volatile_dependency() {
     let engine = engine();
     let calls = Arc::new(AtomicUsize::new(0));
     engine
@@ -441,6 +459,144 @@ fn filtered_nested_view_cache_reuses_unspecialized_base_view() {
 
     assert_eq!(r.rows.len(), 1);
     assert_eq!(r.rows[0]["left_marker"], Value::Int(1));
-    assert_eq!(r.rows[0]["right_marker"], Value::Int(1));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(r.rows[0]["right_marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn volatile_projection_is_not_duplicated_by_outer_filter_pushdown() {
+    let engine = engine();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "observe_value",
+            ObserveValue {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(
+        &engine,
+        "CREATE VIEW observed AS
+         SELECT id, observe_value(id) AS marker FROM employees",
+    );
+
+    let result = exec(
+        &engine,
+        "SELECT id FROM observed WHERE marker > 0 ORDER BY id",
+    );
+
+    assert_eq!(result.rows.len(), 6);
+    assert_eq!(calls.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn declared_volatile_sql_function_is_not_hidden_by_view_cache() {
+    let engine = engine();
+    exec(&engine, "CREATE SEQUENCE volatile_view_seq START 1");
+    exec(
+        &engine,
+        "CREATE FUNCTION volatile_view_tick() RETURNS BIGINT AS $$
+             SELECT nextval('volatile_view_seq')
+         $$ LANGUAGE sql VOLATILE",
+    );
+    exec(
+        &engine,
+        "CREATE VIEW volatile_ticks AS
+         SELECT volatile_view_tick() AS marker",
+    );
+
+    let result = exec(
+        &engine,
+        "SELECT a.marker AS left_marker, b.marker AS right_marker
+         FROM volatile_ticks a CROSS JOIN volatile_ticks b",
+    );
+
+    assert_eq!(result.rows[0]["left_marker"], Value::Int(1));
+    assert_eq!(result.rows[0]["right_marker"], Value::Int(2));
+}
+
+#[test]
+fn view_sequence_literals_bind_to_creation_namespace_and_block_drop() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE SCHEMA s1");
+    exec(&engine, "CREATE SCHEMA s2");
+    exec(&engine, "CREATE SEQUENCE s1.ids START 10");
+    exec(&engine, "CREATE SEQUENCE s2.ids START 100");
+    exec(&engine, "SET search_path TO s1");
+    exec(
+        &engine,
+        "CREATE VIEW public.sequence_values AS
+         SELECT nextval('ids') AS next_value,
+                currval('ids') AS current_value,
+                setval('ids', 41) AS set_value",
+    );
+
+    let mut plan = engine.view("public.sequence_values").unwrap().unwrap();
+    let mut references = Vec::new();
+    plan.rewrite_scalar_expressions(&mut |expression| {
+        let uqa_execution::ScalarExpr::Func { name, args, .. } = expression else {
+            return;
+        };
+        if matches!(name.as_str(), "nextval" | "currval" | "setval") {
+            let Some(uqa_execution::ScalarExpr::Literal(Value::Str(reference))) = args.first()
+            else {
+                panic!("sequence function must retain a literal reference");
+            };
+            references.push(reference.clone());
+        }
+    });
+    assert_eq!(references, ["s1.ids", "s1.ids", "s1.ids"]);
+
+    exec(&engine, "SET search_path TO s2");
+    let result = exec(
+        &engine,
+        "SELECT next_value, current_value, set_value FROM public.sequence_values",
+    );
+    assert_eq!(result.rows[0]["next_value"], Value::Int(10));
+    assert_eq!(result.rows[0]["current_value"], Value::Int(10));
+    assert_eq!(result.rows[0]["set_value"], Value::Int(41));
+    assert_eq!(
+        exec(&engine, "SELECT nextval('s1.ids') AS value").rows[0]["value"],
+        Value::Int(42)
+    );
+    assert_eq!(
+        exec(&engine, "SELECT nextval('ids') AS value").rows[0]["value"],
+        Value::Int(100)
+    );
+
+    assert!(engine.drop_sequence("s2.ids").unwrap());
+    let error = engine.drop_sequence("s1.ids").unwrap_err();
+    assert!(error.contains("public.sequence_values"), "{error}");
+}
+
+#[test]
+fn persisted_view_sequence_binding_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("view-sequence-binding.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(&engine, "CREATE SCHEMA s1");
+        exec(&engine, "CREATE SCHEMA s2");
+        exec(&engine, "CREATE SEQUENCE s1.ids START 10");
+        exec(&engine, "CREATE SEQUENCE s2.ids START 100");
+        exec(&engine, "SET search_path TO s1");
+        exec(
+            &engine,
+            "CREATE VIEW public.sequence_value AS SELECT nextval('ids') AS value",
+        );
+    }
+
+    let engine = Engine::open(&path).unwrap();
+    exec(&engine, "SET search_path TO s2");
+    assert_eq!(
+        exec(&engine, "SELECT value FROM public.sequence_value").rows[0]["value"],
+        Value::Int(10)
+    );
+    assert_eq!(
+        exec(&engine, "SELECT nextval('ids') AS value").rows[0]["value"],
+        Value::Int(100)
+    );
+    let error = engine.drop_sequence("s1.ids").unwrap_err();
+    assert!(error.contains("public.sequence_value"), "{error}");
 }

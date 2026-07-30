@@ -38,10 +38,16 @@ fn create_server_then_create_foreign_table() {
         &[],
     )
     .unwrap();
-    let server = eng.foreign_server("s1").expect("server registered");
+    let server = eng
+        .foreign_server("s1")
+        .unwrap()
+        .expect("server registered");
     assert_eq!(server.fdw_type, "duckdb_fdw");
     assert_eq!(server.options.get("database").unwrap(), "sample.db");
-    let table = eng.foreign_table("remote_books").expect("foreign table");
+    let table = eng
+        .foreign_table("remote_books")
+        .unwrap()
+        .expect("foreign table");
     assert_eq!(table.server_name, "s1");
     assert_eq!(table.options.get("source").unwrap(), "books.parquet");
     assert_eq!(table.columns.len(), 2);
@@ -57,6 +63,36 @@ fn unsupported_fdw_type_rejected() {
         )
         .unwrap_err();
     assert!(format!("{err:?}").contains("Unsupported FDW type"));
+}
+
+#[test]
+fn unknown_foreign_table_metadata_is_an_error() {
+    let eng = Engine::new();
+    let error = eng
+        .foreign_table_columns("missing_table")
+        .expect_err("an unknown foreign table must not look like a zero-column table");
+    assert!(error.contains("does not exist"), "{error}");
+}
+
+#[test]
+fn unloaded_memory_foreign_table_is_an_error() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE SERVER mem FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE FOREIGN TABLE unloaded_rows (id INTEGER) \
+         SERVER mem OPTIONS (source 'memory')",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql("SELECT * FROM unloaded_rows", &[])
+        .expect_err("unloaded memory data must not be reported as an empty relation");
+    assert!(format!("{error:?}").contains("no loaded memory data"));
 }
 
 #[test]
@@ -108,6 +144,40 @@ fn select_from_memory_foreign_table() {
         Some(&Value::Str("Rust".into()))
     );
     assert_eq!(result.rows[1].get("title"), Some(&Value::Str("UQA".into())));
+}
+
+#[test]
+fn memory_foreign_scan_is_pull_based_under_tiny_work_mem() {
+    let eng = Engine::new();
+    eng.sql("SET work_mem TO '1B'", &[]).unwrap();
+    eng.sql(
+        "CREATE SERVER mem FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE FOREIGN TABLE remote_numbers (id INTEGER, parity INTEGER) \
+         SERVER mem OPTIONS (source 'memory')",
+        &[],
+    )
+    .unwrap();
+    eng.load_memory_foreign_table(
+        "remote_numbers",
+        (0..4096_i64)
+            .map(|id| row(&[("id", Value::Int(id)), ("parity", Value::Int(id % 2))]))
+            .collect(),
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT count(*) AS total, max(id) AS maximum \
+             FROM remote_numbers WHERE parity = 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["total"], Value::Int(2_048));
+    assert_eq!(result.rows[0]["maximum"], Value::Int(4_095));
 }
 
 #[test]

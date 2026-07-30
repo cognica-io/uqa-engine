@@ -41,8 +41,10 @@ fn deterministic_vec(seed: u64) -> Vec<f32> {
 
 fn build_engine() -> Engine {
     let engine = Engine::new();
-    engine.create_default_table("docs", Vec::new());
-    engine.create_vector_field("docs", "emb", DIMS as u32);
+    engine.create_default_table("docs", Vec::new()).unwrap();
+    engine
+        .create_vector_field("docs", "emb", DIMS as u32)
+        .unwrap();
     for i in 0..N {
         let mut doc = Document::new();
         doc.insert("id".into(), Value::Int(i as i64));
@@ -61,7 +63,9 @@ fn bench_knn(c: &mut Criterion) {
     let query = deterministic_vec(N + 1);
     c.bench_function("knn_top10_10k_dim32", |bencher| {
         bencher.iter(|| {
-            let hits = engine.knn_search("docs", "emb", query.clone(), 10);
+            let hits = engine
+                .knn_search("docs", "emb", query.clone(), 10)
+                .expect("benchmark KNN search");
             black_box(hits.len())
         });
     });

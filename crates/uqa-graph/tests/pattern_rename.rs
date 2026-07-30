@@ -28,12 +28,12 @@ fn corpus() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
     g.create_graph(GRAPH);
     for id in 1..=4 {
-        g.add_vertex(Vertex::new(id, "person"), GRAPH);
+        g.add_vertex(Vertex::new(id, "person"), GRAPH).unwrap();
     }
-    g.add_edge(Edge::new(10, 1, 2, "knows"), GRAPH);
-    g.add_edge(Edge::new(11, 2, 3, "knows"), GRAPH);
-    g.add_edge(Edge::new(12, 1, 3, "knows"), GRAPH);
-    g.add_edge(Edge::new(13, 1, 4, "knows"), GRAPH);
+    g.add_edge(Edge::new(10, 1, 2, "knows"), GRAPH).unwrap();
+    g.add_edge(Edge::new(11, 2, 3, "knows"), GRAPH).unwrap();
+    g.add_edge(Edge::new(12, 1, 3, "knows"), GRAPH).unwrap();
+    g.add_edge(Edge::new(13, 1, 4, "knows"), GRAPH).unwrap();
     g
 }
 
@@ -116,8 +116,8 @@ proptest! {
         let p1 = two_hop_pattern(&a1, &b1);
         let p2 = two_hop_pattern(&a2, &b2);
 
-        let r1 = GMatch::new(p1, GRAPH).execute(&store);
-        let r2 = GMatch::new(p2, GRAPH).execute(&store);
+        let r1 = GMatch::new(p1, GRAPH).execute(&store).unwrap();
+        let r2 = GMatch::new(p2, GRAPH).execute(&store).unwrap();
 
         prop_assert_eq!(match_signatures(&r1), match_signatures(&r2));
     }
@@ -133,8 +133,8 @@ proptest! {
         let p1 = three_hop_chain(&a1, &b1, &c1);
         let p2 = three_hop_chain(&a2, &b2, &c2);
 
-        let r1 = GMatch::new(p1, GRAPH).execute(&store);
-        let r2 = GMatch::new(p2, GRAPH).execute(&store);
+        let r1 = GMatch::new(p1, GRAPH).execute(&store).unwrap();
+        let r2 = GMatch::new(p2, GRAPH).execute(&store).unwrap();
 
         prop_assert_eq!(match_signatures(&r1), match_signatures(&r2));
     }
@@ -151,8 +151,8 @@ proptest! {
         let baseline = three_hop_chain("a", "b", "c");
         let renamed = three_hop_chain(&a, &b, &c);
 
-        let r_baseline = GMatch::new(baseline, GRAPH).execute(&store);
-        let r_renamed = GMatch::new(renamed, GRAPH).execute(&store);
+        let r_baseline = GMatch::new(baseline, GRAPH).execute(&store).unwrap();
+        let r_renamed = GMatch::new(renamed, GRAPH).execute(&store).unwrap();
 
         let sigs_baseline = match_signatures(&r_baseline);
         let sigs_renamed = match_signatures(&r_renamed);
@@ -167,7 +167,7 @@ proptest! {
 fn baseline_two_hop_is_non_empty() {
     let store = corpus();
     let pattern = two_hop_pattern("a", "b");
-    let r = GMatch::new(pattern, GRAPH).execute(&store);
+    let r = GMatch::new(pattern, GRAPH).execute(&store).unwrap();
     let sigs = match_signatures(&r);
     assert!(!sigs.is_empty(), "expected non-empty matches, got {sigs:?}");
 }

@@ -9,13 +9,17 @@
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr};
 use uqa_sql::registry::registered_names;
-use uqa_sql::ResultRow;
+use uqa_sql::{ResultRow, SQLError};
 
-use crate::Engine;
+use crate::engine_user_functions::{canonical_routine_type_name, routine_signature_types};
+use crate::{Engine, RelationIdentity};
 
 use super::{column_type_name, value_to_text};
 
-pub(super) fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<ResultRow>> {
+pub(super) fn build_info_schema_rows(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<Vec<ResultRow>>, SQLError> {
     let lower = name.to_ascii_lowercase();
     let is_information_schema = lower.starts_with("information_schema.");
     let is_pg_catalog = lower.starts_with("pg_catalog.");
@@ -23,47 +27,64 @@ pub(super) fn build_info_schema_rows(engine: &Engine, name: &str) -> Option<Vec<
         .strip_prefix("information_schema.")
         .or_else(|| lower.strip_prefix("pg_catalog."))
         .unwrap_or(&lower);
-    match (is_information_schema, is_pg_catalog, stripped) {
-        (true, _, "schemata") => Some(build_info_schemata(engine)),
-        (true, _, "tables") => Some(build_info_tables(engine)),
-        (true, _, "columns") => Some(build_info_columns(engine)),
-        (true, _, "views") => Some(build_info_views(engine)),
-        (true, _, "routines") => Some(build_info_routines(engine)),
-        (true, _, "sequences") => Some(build_info_sequences(engine)),
-        (true, _, "table_constraints") => Some(build_info_table_constraints(engine)),
-        (true, _, "key_column_usage") => Some(build_info_key_column_usage(engine)),
+    Ok(match (is_information_schema, is_pg_catalog, stripped) {
+        (true, _, "schemata") => Some(build_info_schemata(engine)?),
+        (true, _, "tables") => Some(build_info_tables(engine)?),
+        (true, _, "columns") => Some(build_info_columns(engine)?),
+        (true, _, "views") => Some(build_info_views(engine)?),
+        (true, _, "routines") => Some(build_info_routines(engine)?),
+        (true, _, "sequences") => Some(build_info_sequences(engine)?),
+        (true, _, "table_constraints") => Some(build_info_table_constraints(engine)?),
+        (true, _, "key_column_usage") => Some(build_info_key_column_usage(engine)?),
         (_, true, "pg_namespace") | (false, false, "pg_namespace") => {
-            Some(build_pg_namespace(engine))
+            Some(build_pg_namespace(engine)?)
         }
-        (_, true, "pg_class") | (false, false, "pg_class") => Some(build_pg_class(engine)),
+        (_, true, "pg_class") | (false, false, "pg_class") => Some(build_pg_class(engine)?),
         (_, true, "pg_attribute") | (false, false, "pg_attribute") => {
-            Some(build_pg_attribute(engine))
+            Some(build_pg_attribute(engine)?)
         }
-        (_, true, "pg_attrdef") | (false, false, "pg_attrdef") => Some(build_pg_attrdef(engine)),
+        (_, true, "pg_attrdef") | (false, false, "pg_attrdef") => Some(build_pg_attrdef(engine)?),
         (_, true, "pg_constraint") | (false, false, "pg_constraint") => {
-            Some(build_pg_constraint(engine))
+            Some(build_pg_constraint(engine)?)
         }
-        (_, true, "pg_index") | (false, false, "pg_index") => Some(build_pg_index(engine)),
-        (_, true, "pg_tables") | (false, false, "pg_tables") => Some(build_pg_tables(engine)),
-        (_, true, "pg_views") | (false, false, "pg_views") => Some(build_pg_views(engine)),
-        (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(build_pg_indexes(engine)),
+        (_, true, "pg_index") | (false, false, "pg_index") => Some(build_pg_index(engine)?),
+        (_, true, "pg_tables") | (false, false, "pg_tables") => Some(build_pg_tables(engine)?),
+        (_, true, "pg_views") | (false, false, "pg_views") => Some(build_pg_views(engine)?),
+        (_, true, "pg_indexes") | (false, false, "pg_indexes") => Some(build_pg_indexes(engine)?),
         (_, true, "pg_type") | (false, false, "pg_type") => Some(build_pg_type()),
-        (_, true, "pg_proc") | (false, false, "pg_proc") => Some(build_pg_proc(engine)),
+        (_, true, "pg_proc") | (false, false, "pg_proc") => Some(build_pg_proc(engine)?),
         (_, true, "pg_database") | (false, false, "pg_database") => Some(build_pg_database()),
         (_, true, "pg_roles") | (false, false, "pg_roles") => Some(build_pg_roles()),
         (_, true, "pg_user") | (false, false, "pg_user") => Some(build_pg_user()),
-        (_, true, "pg_settings") | (false, false, "pg_settings") => Some(build_pg_settings(engine)),
+        (_, true, "pg_settings") | (false, false, "pg_settings") => {
+            Some(build_pg_settings(engine)?)
+        }
         (_, true, "pg_description") | (false, false, "pg_description") => Some(Vec::new()),
         (_, true, "pg_matviews") | (false, false, "pg_matviews") => Some(Vec::new()),
         (_, true, "pg_sequences") | (false, false, "pg_sequences") => {
-            Some(build_pg_sequences(engine))
+            Some(build_pg_sequences(engine)?)
         }
         _ => None,
-    }
+    })
 }
 
 fn catalog_name() -> Value {
     Value::Str("uqa".into())
+}
+
+fn catalog_usize(value: usize, label: &str) -> Result<i64, SQLError> {
+    i64::try_from(value).map_err(|_| {
+        SQLError::Internal(format!(
+            "{label} exceeds the SQL catalog BIGINT representation"
+        ))
+    })
+}
+
+fn catalog_ordinal(index: usize, label: &str) -> Result<i64, SQLError> {
+    let ordinal = index
+        .checked_add(1)
+        .ok_or_else(|| SQLError::Internal(format!("{label} ordinal overflow")))?;
+    catalog_usize(ordinal, label)
 }
 
 fn str_value(value: impl Into<String>) -> Value {
@@ -90,18 +111,18 @@ fn row(entries: impl IntoIterator<Item = (&'static str, Value)>) -> ResultRow {
     out
 }
 
-fn split_schema_name(name: &str) -> (String, String) {
-    name.split_once('.').map_or_else(
-        || ("public".to_string(), name.to_string()),
-        |(schema, rel)| (schema.to_string(), rel.to_string()),
-    )
+fn split_schema_name(name: &str) -> Result<(String, String), SQLError> {
+    let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
+        SQLError::Internal(format!("invalid catalog relation `{name}`: {error}"))
+    })?;
+    Ok((relation.schema, relation.name))
 }
 
-fn split_index_name(index_name: &str, table_schema: &str) -> (String, String) {
-    index_name.split_once('.').map_or_else(
-        || (table_schema.to_string(), index_name.to_string()),
-        |(schema, rel)| (schema.to_string(), rel.to_string()),
-    )
+fn split_index_name(index_name: &str, table_schema: &str) -> Result<(String, String), SQLError> {
+    let (schema, name) = RelationIdentity::parse_reference(index_name).map_err(|error| {
+        SQLError::Internal(format!("invalid catalog index `{index_name}`: {error}"))
+    })?;
+    Ok((schema.unwrap_or_else(|| table_schema.to_string()), name))
 }
 
 fn stable_oid(kind: &str, name: &str) -> i64 {
@@ -134,27 +155,53 @@ fn current_user_name() -> &'static str {
     "uqa"
 }
 
-fn all_schema_names(engine: &Engine) -> Vec<String> {
+fn all_schema_names(engine: &Engine) -> Result<Vec<String>, SQLError> {
     let mut schemas = vec!["pg_catalog".to_string(), "information_schema".to_string()];
-    schemas.extend(engine.list_schemas());
+    schemas.extend(
+        engine
+            .list_schemas()
+            .map_err(|err| SQLError::Internal(format!("read schema catalog: {err}")))?,
+    );
     schemas.sort();
     schemas.dedup();
-    schemas
+    Ok(schemas)
 }
 
-fn table_columns_for(engine: &Engine, table: &str) -> Vec<SQLColumnDef> {
-    engine.describe_table(table).unwrap_or_default()
+fn table_columns_for(engine: &Engine, table: &str) -> Result<Vec<SQLColumnDef>, SQLError> {
+    Ok(engine
+        .describe_table(table)
+        .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+        .unwrap_or_default())
 }
 
 fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
         ColumnType::Integer => 23,
+        ColumnType::Boolean => 16,
         ColumnType::Text => 25,
         ColumnType::Real => 701,
         ColumnType::Numeric { .. } => 1700,
         ColumnType::Json => 114,
         ColumnType::JsonB => 3802,
         ColumnType::Bytea => 17,
+        ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::Integer => 1007,
+            ColumnType::Boolean => 1000,
+            ColumnType::Text => 1009,
+            ColumnType::Real => 1022,
+            ColumnType::Numeric { .. } => 1231,
+            ColumnType::Json => 199,
+            ColumnType::JsonB => 3807,
+            ColumnType::Bytea => 1001,
+            ColumnType::Date => 1182,
+            ColumnType::Time => 1183,
+            ColumnType::TimeTz => 1270,
+            ColumnType::Timestamp => 1115,
+            ColumnType::TimestampTz => 1185,
+            ColumnType::Vector(_) => 380_002,
+            ColumnType::Tensor(_) => 380_003,
+            ColumnType::Array(_) => pg_type_oid(element),
+        },
         ColumnType::Date => 1082,
         ColumnType::Time => 1083,
         ColumnType::TimeTz => 1266,
@@ -165,9 +212,37 @@ fn pg_type_oid(ty: &ColumnType) -> i64 {
     }
 }
 
+fn routine_type_oid(type_name: &str) -> i64 {
+    let canonical = canonical_routine_type_name(type_name);
+    match canonical.as_str() {
+        "bool" => 16,
+        "bytea" => 17,
+        "int8" => 20,
+        "int2" => 21,
+        "int4" => 23,
+        "text" => 25,
+        "json" => 114,
+        "float4" => 700,
+        "float8" => 701,
+        "varchar" => 1043,
+        "date" => 1082,
+        "time" => 1083,
+        "timestamp" => 1114,
+        "timestamptz" => 1184,
+        "timetz" => 1266,
+        "numeric" => 1700,
+        "record" => 2249,
+        "void" => 2278,
+        "jsonb" => 3802,
+        "vector" => 380_000,
+        other => stable_oid("type", other),
+    }
+}
+
 fn pg_type_len(ty: &ColumnType) -> i64 {
     match ty {
         ColumnType::Integer => 4,
+        ColumnType::Boolean => 1,
         ColumnType::Real | ColumnType::Timestamp | ColumnType::TimestampTz => 8,
         ColumnType::Date => 4,
         ColumnType::Time | ColumnType::TimeTz => 8,
@@ -208,12 +283,31 @@ fn info_numeric_scale(ty: &ColumnType) -> Value {
 fn info_udt_name(ty: &ColumnType) -> &'static str {
     match ty {
         ColumnType::Integer => "int4",
+        ColumnType::Boolean => "bool",
         ColumnType::Text => "text",
         ColumnType::Real => "float8",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
         ColumnType::JsonB => "jsonb",
         ColumnType::Bytea => "bytea",
+        ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::Integer => "_int4",
+            ColumnType::Boolean => "_bool",
+            ColumnType::Text => "_text",
+            ColumnType::Real => "_float8",
+            ColumnType::Numeric { .. } => "_numeric",
+            ColumnType::Json => "_json",
+            ColumnType::JsonB => "_jsonb",
+            ColumnType::Bytea => "_bytea",
+            ColumnType::Date => "_date",
+            ColumnType::Time => "_time",
+            ColumnType::TimeTz => "_timetz",
+            ColumnType::Timestamp => "_timestamp",
+            ColumnType::TimestampTz => "_timestamptz",
+            ColumnType::Vector(_) => "_vector",
+            ColumnType::Tensor(_) => "_tensor",
+            ColumnType::Array(_) => info_udt_name(element),
+        },
         ColumnType::Date => "date",
         ColumnType::Time => "time",
         ColumnType::TimeTz => "timetz",
@@ -224,12 +318,31 @@ fn info_udt_name(ty: &ColumnType) -> &'static str {
     }
 }
 
+fn info_data_type(ty: &ColumnType) -> &'static str {
+    if matches!(ty, ColumnType::Array(_)) {
+        "ARRAY"
+    } else {
+        column_type_name(ty)
+    }
+}
+
+fn array_dimension_count(ty: &ColumnType) -> i64 {
+    let mut dimensions = 0_i64;
+    let mut current = ty;
+    while let ColumnType::Array(element) = current {
+        dimensions += 1;
+        current = element;
+    }
+    dimensions
+}
+
 fn default_expr_text(expr: Option<&Expr>) -> Value {
     expr.map_or(Value::Null, |expr| Value::Str(format!("{expr:?}")))
 }
 
-fn index_columns(columns_json: &str) -> Vec<String> {
-    serde_json::from_str(columns_json).unwrap_or_default()
+fn index_columns(columns_json: &str) -> Result<Vec<String>, SQLError> {
+    serde_json::from_str(columns_json)
+        .map_err(|err| SQLError::Internal(format!("decode index column catalog: {err}")))
 }
 
 fn indexdef(name: &str, index_type: &str, table: &str, columns: &[String]) -> String {
@@ -244,8 +357,8 @@ fn indexdef(name: &str, index_type: &str, table: &str, columns: &[String]) -> St
     )
 }
 
-fn build_info_schemata(engine: &Engine) -> Vec<ResultRow> {
-    all_schema_names(engine)
+fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(all_schema_names(engine)?
         .into_iter()
         .map(|schema| {
             row([
@@ -258,13 +371,16 @@ fn build_info_schemata(engine: &Engine) -> Vec<ResultRow> {
                 ("sql_path", Value::Null),
             ])
         })
-        .collect()
+        .collect())
 }
 
-fn build_info_tables(engine: &Engine) -> Vec<ResultRow> {
+fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for name in engine.table_names() {
-        let (schema, table) = split_schema_name(&name);
+    for name in engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
+        let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -280,8 +396,8 @@ fn build_info_tables(engine: &Engine) -> Vec<ResultRow> {
             ("commit_action", Value::Null),
         ]));
     }
-    for name in engine.list_views() {
-        let (schema, view) = split_schema_name(&name);
+    for name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -297,8 +413,8 @@ fn build_info_tables(engine: &Engine) -> Vec<ResultRow> {
             ("commit_action", Value::Null),
         ]));
     }
-    for name in engine.list_foreign_tables() {
-        let (schema, table) = split_schema_name(&name);
+    for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
+        let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -324,15 +440,17 @@ fn build_info_tables(engine: &Engine) -> Vec<ResultRow> {
                     .cmp(&value_to_text(b.get("table_name").unwrap_or(&Value::Null)))
             })
     });
-    out
+    Ok(out)
 }
 
-fn build_pg_tables(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
-    let mut names = engine.table_names();
+    let mut names = engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?;
     names.sort();
     for name in names {
-        let (schema, table) = split_schema_name(&name);
+        let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("schemaname", str_value(schema.clone())),
             ("tablename", str_value(table)),
@@ -343,6 +461,7 @@ fn build_pg_tables(engine: &Engine) -> Vec<ResultRow> {
                 bool_value(
                     engine
                         .list_catalog_indexes()
+                        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
                         .iter()
                         .any(|idx| idx.table_name == name),
                 ),
@@ -355,25 +474,33 @@ fn build_pg_tables(engine: &Engine) -> Vec<ResultRow> {
             ("table_type", str_value("BASE TABLE")),
         ]));
     }
-    out
+    Ok(out)
 }
 
-fn build_info_columns(engine: &Engine) -> Vec<ResultRow> {
+fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
-    let mut tables = engine.table_names();
+    let mut tables = engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?;
     tables.sort();
     for tname in tables {
-        let Some(cols) = engine.describe_table(&tname) else {
+        let Some(cols) = engine
+            .describe_table(&tname)
+            .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+        else {
             continue;
         };
         for (idx, col) in cols.iter().enumerate() {
-            let (schema, table) = split_schema_name(&tname);
+            let (schema, table) = split_schema_name(&tname)?;
             out.push(row([
                 ("table_catalog", catalog_name()),
                 ("table_schema", str_value(schema)),
                 ("table_name", str_value(table)),
                 ("column_name", str_value(col.name.clone())),
-                ("ordinal_position", int_value((idx + 1) as i64)),
+                (
+                    "ordinal_position",
+                    int_value(catalog_ordinal(idx, "information_schema column")?),
+                ),
                 ("column_default", default_expr_text(col.default.as_ref())),
                 (
                     "is_nullable",
@@ -383,7 +510,7 @@ fn build_info_columns(engine: &Engine) -> Vec<ResultRow> {
                         "YES"
                     }),
                 ),
-                ("data_type", str_value(column_type_name(&col.ty))),
+                ("data_type", str_value(info_data_type(&col.ty))),
                 ("character_maximum_length", Value::Null),
                 ("character_octet_length", Value::Null),
                 ("numeric_precision", info_numeric_precision(&col.ty)),
@@ -433,39 +560,33 @@ fn build_info_columns(engine: &Engine) -> Vec<ResultRow> {
             ]));
         }
     }
-    out
+    Ok(out)
 }
 
-fn build_info_views(engine: &Engine) -> Vec<ResultRow> {
-    engine
-        .list_views()
-        .into_iter()
-        .map(|name| {
-            let (schema, view) = split_schema_name(&name);
-            row([
-                ("table_catalog", catalog_name()),
-                ("table_schema", str_value(schema)),
-                ("table_name", str_value(view)),
-                (
-                    "view_definition",
-                    str_value(
-                        engine
-                            .view(&name)
-                            .map_or_else(String::new, |stmt| format!("{stmt:?}")),
-                    ),
-                ),
-                ("check_option", str_value("NONE")),
-                ("is_updatable", str_value("NO")),
-                ("is_insertable_into", str_value("NO")),
-                ("is_trigger_updatable", str_value("NO")),
-                ("is_trigger_deletable", str_value("NO")),
-                ("is_trigger_insertable_into", str_value("NO")),
-            ])
-        })
-        .collect()
+fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&name)?;
+        let definition = engine
+            .view(&name)?
+            .map_or_else(String::new, |stmt| format!("{stmt:?}"));
+        rows.push(row([
+            ("table_catalog", catalog_name()),
+            ("table_schema", str_value(schema)),
+            ("table_name", str_value(view)),
+            ("view_definition", str_value(definition)),
+            ("check_option", str_value("NONE")),
+            ("is_updatable", str_value("NO")),
+            ("is_insertable_into", str_value("NO")),
+            ("is_trigger_updatable", str_value("NO")),
+            ("is_trigger_deletable", str_value("NO")),
+            ("is_trigger_insertable_into", str_value("NO")),
+        ]));
+    }
+    Ok(rows)
 }
 
-fn build_info_routines(engine: &Engine) -> Vec<ResultRow> {
+fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = registered_names()
         .into_iter()
         .map(|name| {
@@ -500,6 +621,18 @@ fn build_info_routines(engine: &Engine) -> Vec<ResultRow> {
         .collect();
     for function in engine.list_sql_functions() {
         let def = &function.def;
+        let (routine_schema, routine_name) = split_schema_name(&def.name)?;
+        let signature = routine_signature_types(def);
+        let identity = format!(
+            "{}:{}:{}",
+            def.name,
+            if def.is_procedure {
+                "procedure"
+            } else {
+                "function"
+            },
+            signature.join(",")
+        );
         let routine_type = if def.is_procedure {
             "PROCEDURE"
         } else {
@@ -522,14 +655,18 @@ fn build_info_routines(engine: &Engine) -> Vec<ResultRow> {
         };
         rows.push(row([
             ("specific_catalog", catalog_name()),
-            ("specific_schema", str_value("public")),
+            ("specific_schema", str_value(routine_schema.clone())),
             (
                 "specific_name",
-                str_value(format!("{}_{}", def.name, def.signature_arity())),
+                str_value(format!(
+                    "{}_{}",
+                    routine_name,
+                    stable_oid("routine", &identity)
+                )),
             ),
             ("routine_catalog", catalog_name()),
-            ("routine_schema", str_value("public")),
-            ("routine_name", str_value(def.name.clone())),
+            ("routine_schema", str_value(routine_schema)),
+            ("routine_name", str_value(routine_name)),
             ("routine_type", str_value(routine_type)),
             ("module_catalog", Value::Null),
             ("module_schema", Value::Null),
@@ -563,16 +700,17 @@ fn build_info_routines(engine: &Engine) -> Vec<ResultRow> {
             ("result_cast_from_null", Value::Null),
         ]));
     }
-    rows
+    Ok(rows)
 }
 
-fn build_info_sequences(engine: &Engine) -> Vec<ResultRow> {
+fn build_info_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     engine
         .list_sequences()
+        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
         .into_iter()
         .map(|name| {
-            let (schema, sequence) = split_schema_name(&name);
-            row([
+            let (schema, sequence) = split_schema_name(&name)?;
+            Ok(row([
                 ("sequence_catalog", catalog_name()),
                 ("sequence_schema", str_value(schema)),
                 ("sequence_name", str_value(sequence)),
@@ -585,17 +723,31 @@ fn build_info_sequences(engine: &Engine) -> Vec<ResultRow> {
                 ("maximum_value", Value::Null),
                 ("increment", Value::Null),
                 ("cycle_option", str_value("NO")),
-            ])
+            ]))
         })
-        .collect()
+        .collect::<Result<Vec<_>, SQLError>>()
 }
 
-fn column_constraint_rows(engine: &Engine) -> Vec<(String, String, String, String, String, i64)> {
+type ColumnConstraintRow = (String, String, String, String, String, i64);
+
+fn column_constraint_rows(engine: &Engine) -> Result<Vec<ColumnConstraintRow>, SQLError> {
     let mut out = Vec::new();
-    for table_name in engine.table_names() {
-        let (schema, table) = split_schema_name(&table_name);
-        for (idx, col) in table_columns_for(engine, &table_name).iter().enumerate() {
-            let ordinal = (idx + 1) as i64;
+    for table_name in engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
+        let (schema, table) = split_schema_name(&table_name)?;
+        for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
+            let ordinal = i64::try_from(idx.checked_add(1).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "column ordinal overflow while reading catalog table `{table_name}`"
+                ))
+            })?)
+            .map_err(|_| {
+                SQLError::Internal(format!(
+                    "column ordinal exceeds SQL BIGINT while reading catalog table `{table_name}`"
+                ))
+            })?;
             if col.primary_key {
                 out.push((
                     schema.clone(),
@@ -638,11 +790,11 @@ fn column_constraint_rows(engine: &Engine) -> Vec<(String, String, String, Strin
             }
         }
     }
-    out
+    Ok(out)
 }
 
-fn build_info_table_constraints(engine: &Engine) -> Vec<ResultRow> {
-    column_constraint_rows(engine)
+fn build_info_table_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(column_constraint_rows(engine)?
         .into_iter()
         .map(|(schema, table, _column, constraint, kind, _ordinal)| {
             row([
@@ -658,11 +810,11 @@ fn build_info_table_constraints(engine: &Engine) -> Vec<ResultRow> {
                 ("nulls_distinct", str_value("YES")),
             ])
         })
-        .collect()
+        .collect())
 }
 
-fn build_info_key_column_usage(engine: &Engine) -> Vec<ResultRow> {
-    column_constraint_rows(engine)
+fn build_info_key_column_usage(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(column_constraint_rows(engine)?
         .into_iter()
         .filter(|(_, _, _, _, kind, _)| kind != "CHECK")
         .map(|(schema, table, column, constraint, _kind, ordinal)| {
@@ -678,11 +830,11 @@ fn build_info_key_column_usage(engine: &Engine) -> Vec<ResultRow> {
                 ("position_in_unique_constraint", Value::Null),
             ])
         })
-        .collect()
+        .collect())
 }
 
-fn build_pg_namespace(engine: &Engine) -> Vec<ResultRow> {
-    all_schema_names(engine)
+fn build_pg_namespace(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(all_schema_names(engine)?
         .into_iter()
         .map(|schema| {
             row([
@@ -692,51 +844,67 @@ fn build_pg_namespace(engine: &Engine) -> Vec<ResultRow> {
                 ("nspacl", Value::Null),
             ])
         })
-        .collect()
+        .collect())
 }
 
-fn build_pg_class(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for name in engine.table_names() {
-        let (schema, table) = split_schema_name(&name);
-        let columns = table_columns_for(engine, &name);
+    for name in engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
+        let (schema, table) = split_schema_name(&name)?;
+        let columns = table_columns_for(engine, &name)?;
         out.push(pg_class_row(
             &schema,
             &table,
             "r",
-            columns.len() as i64,
-            engine.document_count(&name) as f64,
+            catalog_usize(columns.len(), "pg_class column count")?,
+            engine.document_count(&name)? as f64,
             engine
                 .list_catalog_indexes()
+                .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
                 .iter()
                 .any(|idx| idx.table_name == name),
         ));
     }
-    for name in engine.list_views() {
-        let (schema, view) = split_schema_name(&name);
+    for name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&name)?;
         out.push(pg_class_row(&schema, &view, "v", 0, 0.0, false));
     }
-    for name in engine.list_foreign_tables() {
-        let (schema, table) = split_schema_name(&name);
+    for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
+        let (schema, table) = split_schema_name(&name)?;
         out.push(pg_class_row(
             &schema,
             &table,
             "f",
-            engine.foreign_table_columns(&name).len() as i64,
+            catalog_usize(
+                engine
+                    .foreign_table_columns(&name)
+                    .map_err(SQLError::Internal)?
+                    .len(),
+                "pg_class foreign-table column count",
+            )?,
             0.0,
             false,
         ));
     }
-    for sequence in engine.list_sequences() {
-        let (schema, name) = split_schema_name(&sequence);
+    for sequence in engine
+        .list_sequences()
+        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
+    {
+        let (schema, name) = split_schema_name(&sequence)?;
         out.push(pg_class_row(&schema, &name, "S", 0, 0.0, false));
     }
-    for idx in engine.list_catalog_indexes() {
-        let (table_schema, _) = split_schema_name(&idx.table_name);
-        let (schema, index_name) = split_index_name(&idx.name, &table_schema);
+    for idx in engine
+        .list_catalog_indexes()
+        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
+    {
+        let (table_schema, _) = split_schema_name(&idx.table_name)?;
+        let (schema, index_name) = split_index_name(&idx.name, &table_schema)?;
         out.push(pg_class_row(&schema, &index_name, "i", 0, 0.0, false));
     }
-    out
+    Ok(out)
 }
 
 fn pg_class_row(
@@ -787,19 +955,31 @@ fn pg_class_row(
     ])
 }
 
-fn build_pg_attribute(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_attribute(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for table_name in engine.table_names() {
-        let (schema, table) = split_schema_name(&table_name);
+    for table_name in engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
+        let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("r", &schema, &table);
-        for (idx, col) in table_columns_for(engine, &table_name).iter().enumerate() {
-            out.push(pg_attribute_row(relid, (idx + 1) as i64, col));
+        for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute column")?,
+                col,
+            ));
         }
     }
-    for table_name in engine.list_foreign_tables() {
-        let (schema, table) = split_schema_name(&table_name);
+    for table_name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
+        let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("f", &schema, &table);
-        for (idx, col) in engine.foreign_table_columns(&table_name).iter().enumerate() {
+        for (idx, col) in engine
+            .foreign_table_columns(&table_name)
+            .map_err(SQLError::Internal)?
+            .iter()
+            .enumerate()
+        {
             let col = SQLColumnDef {
                 name: col.clone(),
                 ty: ColumnType::Text,
@@ -811,10 +991,14 @@ fn build_pg_attribute(engine: &Engine) -> Vec<ResultRow> {
                 check: None,
                 references: None,
             };
-            out.push(pg_attribute_row(relid, (idx + 1) as i64, &col));
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute foreign-table column")?,
+                &col,
+            ));
         }
     }
-    out
+    Ok(out)
 }
 
 fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRow {
@@ -825,12 +1009,15 @@ fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRow {
         ("attstattarget", int_value(-1)),
         ("attlen", int_value(pg_type_len(&col.ty))),
         ("attnum", int_value(attnum)),
-        ("attndims", int_value(0)),
+        ("attndims", int_value(array_dimension_count(&col.ty))),
         ("attcacheoff", int_value(-1)),
         ("atttypmod", int_value(-1)),
         (
             "attbyval",
-            bool_value(matches!(col.ty, ColumnType::Integer | ColumnType::Real)),
+            bool_value(matches!(
+                col.ty,
+                ColumnType::Integer | ColumnType::Boolean | ColumnType::Real
+            )),
         ),
         ("attalign", str_value("i")),
         ("attstorage", str_value("x")),
@@ -856,12 +1043,15 @@ fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRow {
     ])
 }
 
-fn build_pg_attrdef(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for table_name in engine.table_names() {
-        let (schema, table) = split_schema_name(&table_name);
+    for table_name in engine
+        .table_names()
+        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
+    {
+        let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("r", &schema, &table);
-        for (idx, col) in table_columns_for(engine, &table_name).iter().enumerate() {
+        for (idx, col) in table_columns_for(engine, &table_name)?.iter().enumerate() {
             if col.default.is_none() && !col.auto_increment {
                 continue;
             }
@@ -876,17 +1066,20 @@ fn build_pg_attrdef(engine: &Engine) -> Vec<ResultRow> {
                     int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
                 ),
                 ("adrelid", int_value(relid)),
-                ("adnum", int_value((idx + 1) as i64)),
+                (
+                    "adnum",
+                    int_value(catalog_ordinal(idx, "pg_attrdef column")?),
+                ),
                 ("adbin", str_value(default.clone())),
                 ("adsrc", str_value(default)),
             ]));
         }
     }
-    out
+    Ok(out)
 }
 
-fn build_pg_constraint(engine: &Engine) -> Vec<ResultRow> {
-    column_constraint_rows(engine)
+fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(column_constraint_rows(engine)?
         .into_iter()
         .map(|(schema, table, _column, constraint, kind, ordinal)| {
             let contype = match kind.as_str() {
@@ -927,99 +1120,99 @@ fn build_pg_constraint(engine: &Engine) -> Vec<ResultRow> {
                 ("conbin", Value::Null),
             ])
         })
-        .collect()
+        .collect())
 }
 
-fn build_pg_index(engine: &Engine) -> Vec<ResultRow> {
-    engine
+fn build_pg_index(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for idx in engine
         .list_catalog_indexes()
-        .into_iter()
-        .map(|idx| {
-            let columns = index_columns(&idx.columns_json);
-            let (schema, table) = split_schema_name(&idx.table_name);
-            let (index_schema, index_name) = split_index_name(&idx.name, &schema);
-            let table_cols = engine.table_columns(&idx.table_name);
-            let keys: Vec<i64> = columns
-                .iter()
-                .filter_map(|col| table_cols.iter().position(|name| name == col))
-                .map(|idx| (idx + 1) as i64)
-                .collect();
-            row([
-                (
-                    "indexrelid",
-                    int_value(relation_oid("i", &index_schema, &index_name)),
-                ),
-                ("indrelid", int_value(relation_oid("r", &schema, &table))),
-                ("indnatts", int_value(columns.len() as i64)),
-                ("indnkeyatts", int_value(columns.len() as i64)),
-                ("indisunique", bool_value(false)),
-                ("indnullsnotdistinct", bool_value(false)),
-                ("indisprimary", bool_value(false)),
-                ("indisexclusion", bool_value(false)),
-                ("indimmediate", bool_value(true)),
-                ("indisclustered", bool_value(false)),
-                ("indisvalid", bool_value(true)),
-                ("indcheckxmin", bool_value(false)),
-                ("indisready", bool_value(true)),
-                ("indislive", bool_value(true)),
-                ("indisreplident", bool_value(false)),
-                (
-                    "indkey",
-                    Value::List(keys.into_iter().map(Value::Int).collect()),
-                ),
-                ("indcollation", Value::Null),
-                ("indclass", Value::Null),
-                ("indoption", Value::Null),
-                ("indexprs", Value::Null),
-                ("indpred", Value::Null),
-            ])
-        })
-        .collect()
+        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
+    {
+        let columns = index_columns(&idx.columns_json)?;
+        let (schema, table) = split_schema_name(&idx.table_name)?;
+        let (index_schema, index_name) = split_index_name(&idx.name, &schema)?;
+        let table_cols = engine
+            .table_columns(&idx.table_name)
+            .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?;
+        let mut keys = Vec::with_capacity(columns.len());
+        for column in &columns {
+            if let Some(position) = table_cols.iter().position(|name| name == column) {
+                keys.push(catalog_ordinal(position, "pg_index key column")?);
+            }
+        }
+        let column_count = catalog_usize(columns.len(), "pg_index column count")?;
+        rows.push(row([
+            (
+                "indexrelid",
+                int_value(relation_oid("i", &index_schema, &index_name)),
+            ),
+            ("indrelid", int_value(relation_oid("r", &schema, &table))),
+            ("indnatts", int_value(column_count)),
+            ("indnkeyatts", int_value(column_count)),
+            ("indisunique", bool_value(false)),
+            ("indnullsnotdistinct", bool_value(false)),
+            ("indisprimary", bool_value(false)),
+            ("indisexclusion", bool_value(false)),
+            ("indimmediate", bool_value(true)),
+            ("indisclustered", bool_value(false)),
+            ("indisvalid", bool_value(true)),
+            ("indcheckxmin", bool_value(false)),
+            ("indisready", bool_value(true)),
+            ("indislive", bool_value(true)),
+            ("indisreplident", bool_value(false)),
+            (
+                "indkey",
+                Value::List(keys.into_iter().map(Value::Int).collect()),
+            ),
+            ("indcollation", Value::Null),
+            ("indclass", Value::Null),
+            ("indoption", Value::Null),
+            ("indexprs", Value::Null),
+            ("indpred", Value::Null),
+        ]));
+    }
+    Ok(rows)
 }
 
-fn build_pg_views(engine: &Engine) -> Vec<ResultRow> {
-    engine
-        .list_views()
-        .into_iter()
-        .map(|name| {
-            let (schema, view) = split_schema_name(&name);
-            row([
-                ("schemaname", str_value(schema)),
-                ("viewname", str_value(view)),
-                ("viewowner", str_value(current_user_name())),
-                (
-                    "definition",
-                    str_value(
-                        engine
-                            .view(&name)
-                            .map_or_else(String::new, |stmt| format!("{stmt:?}")),
-                    ),
-                ),
-            ])
-        })
-        .collect()
+fn build_pg_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for name in engine.list_views()? {
+        let (schema, view) = split_schema_name(&name)?;
+        let definition = engine
+            .view(&name)?
+            .map_or_else(String::new, |stmt| format!("{stmt:?}"));
+        rows.push(row([
+            ("schemaname", str_value(schema)),
+            ("viewname", str_value(view)),
+            ("viewowner", str_value(current_user_name())),
+            ("definition", str_value(definition)),
+        ]));
+    }
+    Ok(rows)
 }
 
-fn build_pg_indexes(engine: &Engine) -> Vec<ResultRow> {
-    engine
+fn build_pg_indexes(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for idx in engine
         .list_catalog_indexes()
-        .into_iter()
-        .map(|idx| {
-            let columns = index_columns(&idx.columns_json);
-            let (schema, table) = split_schema_name(&idx.table_name);
-            let (_, index_name) = split_index_name(&idx.name, &schema);
-            row([
-                ("schemaname", str_value(schema)),
-                ("tablename", str_value(table.clone())),
-                ("indexname", str_value(index_name.clone())),
-                ("tablespace", Value::Null),
-                (
-                    "indexdef",
-                    str_value(indexdef(&index_name, &idx.index_type, &table, &columns)),
-                ),
-            ])
-        })
-        .collect()
+        .map_err(|err| SQLError::Internal(format!("read index catalog: {err}")))?
+    {
+        let columns = index_columns(&idx.columns_json)?;
+        let (schema, table) = split_schema_name(&idx.table_name)?;
+        let (_, index_name) = split_index_name(&idx.name, &schema)?;
+        rows.push(row([
+            ("schemaname", str_value(schema)),
+            ("tablename", str_value(table.clone())),
+            ("indexname", str_value(index_name.clone())),
+            ("tablespace", Value::Null),
+            (
+                "indexdef",
+                str_value(indexdef(&index_name, &idx.index_type, &table, &columns)),
+            ),
+        ]));
+    }
+    Ok(rows)
 }
 
 fn build_pg_type() -> Vec<ResultRow> {
@@ -1085,7 +1278,7 @@ fn build_pg_type() -> Vec<ResultRow> {
         .collect()
 }
 
-fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = registered_names()
         .into_iter()
         .map(|name| {
@@ -1125,6 +1318,18 @@ fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
         .collect();
     for function in engine.list_sql_functions() {
         let def = &function.def;
+        let (routine_schema, routine_name) = split_schema_name(&def.name)?;
+        let signature = routine_signature_types(def);
+        let identity = format!(
+            "{}:{}:{}",
+            def.name,
+            if def.is_procedure {
+                "procedure"
+            } else {
+                "function"
+            },
+            signature.join(",")
+        );
         let source = match &def.body {
             uqa_sql::ast::FunctionBody::Source(source) => source.clone(),
             uqa_sql::ast::FunctionBody::Statements(_) => String::new(),
@@ -1152,16 +1357,15 @@ fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
             })
             .collect();
         let defaults = def.params.iter().filter(|p| p.default.is_some()).count();
+        let argument_type_oids = def
+            .signature_params()
+            .iter()
+            .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
+            .collect::<Vec<_>>();
         rows.push(row([
-            (
-                "oid",
-                int_value(stable_oid(
-                    "proc",
-                    &format!("{}_{}", def.name, def.signature_arity()),
-                )),
-            ),
-            ("proname", str_value(def.name.clone())),
-            ("pronamespace", int_value(schema_oid("public"))),
+            ("oid", int_value(stable_oid("proc", &identity))),
+            ("proname", str_value(routine_name)),
+            ("pronamespace", int_value(schema_oid(&routine_schema))),
             ("proowner", int_value(current_user_oid())),
             ("prolang", int_value(0)),
             ("procost", Value::Float(100.0)),
@@ -1181,10 +1385,19 @@ fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
             ("proretset", bool_value(def.returns_set())),
             ("provolatile", str_value(volatile)),
             ("proparallel", str_value("u")),
-            ("pronargs", int_value(def.signature_arity() as i64)),
-            ("pronargdefaults", int_value(defaults as i64)),
+            (
+                "pronargs",
+                int_value(catalog_usize(
+                    def.signature_arity(),
+                    "pg_proc argument count",
+                )?),
+            ),
+            (
+                "pronargdefaults",
+                int_value(catalog_usize(defaults, "pg_proc default argument count")?),
+            ),
             ("prorettype", int_value(25)),
-            ("proargtypes", Value::List(Vec::new())),
+            ("proargtypes", Value::List(argument_type_oids)),
             ("proallargtypes", Value::Null),
             ("proargmodes", Value::List(arg_modes)),
             ("proargnames", Value::List(arg_names)),
@@ -1197,7 +1410,7 @@ fn build_pg_proc(engine: &Engine) -> Vec<ResultRow> {
             ("proacl", Value::Null),
         ]));
     }
-    rows
+    Ok(rows)
 }
 
 fn build_pg_database() -> Vec<ResultRow> {
@@ -1253,25 +1466,23 @@ fn build_pg_user() -> Vec<ResultRow> {
     ])]
 }
 
-fn build_pg_settings(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let settings = [
-        ("server_version", "17.0-uqa", "Version and compatibility"),
-        ("server_encoding", "UTF8", "Client connection defaults"),
-        ("client_encoding", "UTF8", "Client connection defaults"),
-        ("DateStyle", "ISO, MDY", "Locale and formatting"),
-        ("TimeZone", "UTC", "Locale and formatting"),
-        (
-            "search_path",
-            &engine.show_variable("search_path"),
-            "Client connection defaults",
-        ),
+        ("server_version", "Version and compatibility"),
+        ("server_encoding", "Client connection defaults"),
+        ("client_encoding", "Client connection defaults"),
+        ("DateStyle", "Locale and formatting"),
+        ("TimeZone", "Locale and formatting"),
+        ("work_mem", "Resource usage"),
+        ("search_path", "Client connection defaults"),
     ];
     settings
         .into_iter()
-        .map(|(name, setting, category)| {
-            row([
+        .map(|(name, category)| {
+            let setting = engine.show_variable(name)?;
+            Ok(row([
                 ("name", str_value(name)),
-                ("setting", str_value(setting)),
+                ("setting", str_value(setting.as_str())),
                 ("unit", Value::Null),
                 ("category", str_value(category)),
                 ("short_desc", str_value(name)),
@@ -1282,23 +1493,24 @@ fn build_pg_settings(engine: &Engine) -> Vec<ResultRow> {
                 ("min_val", Value::Null),
                 ("max_val", Value::Null),
                 ("enumvals", Value::Null),
-                ("boot_val", str_value(setting)),
+                ("boot_val", str_value(setting.as_str())),
                 ("reset_val", str_value(setting)),
                 ("sourcefile", Value::Null),
                 ("sourceline", Value::Null),
                 ("pending_restart", bool_value(false)),
-            ])
+            ]))
         })
         .collect()
 }
 
-fn build_pg_sequences(engine: &Engine) -> Vec<ResultRow> {
+fn build_pg_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     engine
         .list_sequences()
+        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
         .into_iter()
         .map(|name| {
-            let (schema, sequence) = split_schema_name(&name);
-            row([
+            let (schema, sequence) = split_schema_name(&name)?;
+            Ok(row([
                 ("schemaname", str_value(schema)),
                 ("sequencename", str_value(sequence)),
                 ("sequenceowner", str_value(current_user_name())),
@@ -1310,7 +1522,7 @@ fn build_pg_sequences(engine: &Engine) -> Vec<ResultRow> {
                 ("cycle", bool_value(false)),
                 ("cache_size", Value::Int(1)),
                 ("last_value", Value::Null),
-            ])
+            ]))
         })
-        .collect()
+        .collect::<Result<Vec<_>, SQLError>>()
 }

@@ -52,7 +52,9 @@ where
             {
                 acc.push(Vec::with_capacity(chunk_size));
             }
-            acc.last_mut().unwrap().push(x);
+            if let Some(chunk) = acc.last_mut() {
+                chunk.push(x);
+            }
             acc
         });
     #[cfg(not(target_os = "emscripten"))]

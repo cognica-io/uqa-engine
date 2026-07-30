@@ -33,7 +33,10 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
-use crate::vector_index::{cosine_similarity, select_top_k_scored, VectorIndex};
+use crate::vector_index::{
+    cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
+};
+use crate::{StorageBackendError, StorageBackendResult};
 
 const DEFAULT_NLIST: usize = 100;
 const DEFAULT_NPROBE: usize = 10;
@@ -41,7 +44,28 @@ const DEFAULT_TRAIN_THRESHOLD: usize = 256;
 /// Stale fraction: when the count of deleted-since-last-train vectors
 /// exceeds 20% of trained corpus size, the next query forces a
 /// retrain.
-const STALE_FRACTION: f64 = 0.20;
+const STALE_DENOMINATOR: usize = 5;
+
+fn usize_to_u64(value: usize, context: &str) -> StorageBackendResult<u64> {
+    u64::try_from(value).map_err(|_| {
+        StorageBackendError::Other(format!("IVF {context} exceeds the u64 counter range"))
+    })
+}
+
+fn validate_vector_ordinal_count(count: u64) -> StorageBackendResult<()> {
+    if count > u64::from(u32::MAX) + 1 {
+        return Err(StorageBackendError::Other(
+            "IVF vector ordinal exceeds the u32 index format".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn encode_vector_ordinal(ordinal: usize) -> StorageBackendResult<u32> {
+    u32::try_from(ordinal).map_err(|_| {
+        StorageBackendError::Other("IVF vector ordinal exceeds the u32 index format".into())
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IVFState {
@@ -145,14 +169,19 @@ impl IVFIndex {
 
     /// Recompute centroids from the currently held vectors using
     /// k-means with a deterministic seed. Resets the stale tracker.
-    pub fn train(&self) {
+    pub fn train(&self) -> StorageBackendResult<()> {
         let vectors = self.vectors.lock();
         let count = vectors.len();
         if count < self.train_threshold {
             // Not enough rows to bother with the partitioning.
-            return;
+            return Ok(());
         }
-        let dims = self.dimensions as usize;
+        let dims = usize::try_from(self.dimensions).map_err(|_| {
+            StorageBackendError::Other(format!(
+                "IVF dimension {} exceeds the addressable memory range",
+                self.dimensions
+            ))
+        })?;
         let nlist = self.nlist.min(count);
         let centroids = kmeans(
             &vectors
@@ -181,6 +210,7 @@ impl IVFIndex {
         *self.trained_size.lock() = vectors.len();
         *self.deletes_since_train.lock() = 0;
         *self.state.lock() = IVFState::Trained;
+        Ok(())
     }
 
     fn maybe_mark_stale(&self) {
@@ -189,7 +219,9 @@ impl IVFIndex {
             return;
         }
         let deletes = *self.deletes_since_train.lock();
-        if (deletes as f64) / (trained as f64) > STALE_FRACTION {
+        // `STALE_FRACTION` is exactly one fifth. This integer comparison
+        // avoids lossy large-counter casts and multiplication overflow.
+        if deletes > trained / STALE_DENOMINATOR {
             *self.state.lock() = IVFState::Stale;
         }
     }
@@ -304,12 +336,41 @@ impl VectorIndex for IVFIndex {
         "ivf"
     }
 
-    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) {
-        self.add_many(doc_id, vec![vector]);
+    fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
+        self.add_many(doc_id, vec![vector])
     }
 
-    fn add_many(&mut self, doc_id: DocId, input_vectors: Vec<Vec<f32>>) {
+    fn add_many(
+        &mut self,
+        doc_id: DocId,
+        input_vectors: Vec<Vec<f32>>,
+    ) -> StorageBackendResult<()> {
+        for vector in &input_vectors {
+            validate_vector_values(self.dimensions, vector)?;
+        }
+        validate_vector_ordinal_count(usize_to_u64(input_vectors.len(), "vector count")?)?;
         let centroids = self.centroids.lock().clone();
+        let mut staged = Vec::with_capacity(input_vectors.len());
+        for (ordinal, mut vector) in input_vectors.into_iter().enumerate() {
+            let vector_ordinal = encode_vector_ordinal(ordinal)?;
+            let raw_vector = vector.clone();
+            l2_normalise(&mut vector);
+            let centroid = if centroids.is_empty() {
+                None
+            } else {
+                Some(nearest_centroid(&vector, &centroids))
+            };
+            let key = (doc_id, vector_ordinal);
+            staged.push(StoredVector {
+                key,
+                doc_id,
+                vector_ordinal,
+                raw_vector,
+                vector,
+                centroid,
+            });
+        }
+
         let mut vectors = self.vectors.lock();
         let old_keys: Vec<VectorKey> = vectors
             .keys()
@@ -326,29 +387,10 @@ impl VectorIndex for IVFIndex {
             }
         }
 
-        for (ordinal, mut vector) in input_vectors.into_iter().enumerate() {
-            if vector.len() as u32 != self.dimensions {
-                continue;
-            }
-            let raw_vector = vector.clone();
-            l2_normalise(&mut vector);
-            let centroid = if centroids.is_empty() {
-                None
-            } else {
-                Some(nearest_centroid(&vector, &centroids))
-            };
-            let key = (doc_id, ordinal as u32);
-            vectors.insert(
-                key,
-                StoredVector {
-                    key,
-                    doc_id,
-                    vector_ordinal: ordinal as u32,
-                    raw_vector,
-                    vector,
-                    centroid,
-                },
-            );
+        for stored in staged {
+            let key = stored.key;
+            let centroid = stored.centroid;
+            vectors.insert(key, stored);
             if let Some(centroid) = centroid {
                 drop(vectors);
                 self.add_to_inverted_list(centroid, key);
@@ -360,21 +402,34 @@ impl VectorIndex for IVFIndex {
         let untrained = matches!(*self.state.lock(), IVFState::Untrained);
         drop(vectors);
         if untrained && count >= self.train_threshold {
-            self.train();
+            self.train()?;
         }
+        Ok(())
     }
 
-    fn delete(&mut self, doc_id: DocId) {
+    fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         let mut vectors = self.vectors.lock();
         let old_keys: Vec<VectorKey> = vectors
             .keys()
             .filter(|(stored_doc_id, _)| *stored_doc_id == doc_id)
             .copied()
             .collect();
-        let mut removed = 0usize;
+        let next_deletes = if old_keys.is_empty() {
+            None
+        } else {
+            Some(
+                self.deletes_since_train
+                    .lock()
+                    .checked_add(old_keys.len())
+                    .ok_or_else(|| {
+                        StorageBackendError::Other(
+                            "IVF deletes-since-train counter overflow".into(),
+                        )
+                    })?,
+            )
+        };
         for key in old_keys {
             if let Some(old) = vectors.remove(&key) {
-                removed += 1;
                 if let Some(centroid) = old.centroid {
                     drop(vectors);
                     self.remove_from_inverted_list(centroid, key);
@@ -382,25 +437,28 @@ impl VectorIndex for IVFIndex {
                 }
             }
         }
-        if removed > 0 {
-            *self.deletes_since_train.lock() += removed;
+        if let Some(next_deletes) = next_deletes {
+            *self.deletes_since_train.lock() = next_deletes;
         }
         drop(vectors);
         self.maybe_mark_stale();
+        Ok(())
     }
 
-    fn clear(&mut self) {
+    fn clear(&mut self) -> StorageBackendResult<()> {
         self.vectors.lock().clear();
         self.centroids.lock().clear();
         self.inverted_lists.lock().clear();
         *self.state.lock() = IVFState::Untrained;
         *self.trained_size.lock() = 0;
         *self.deletes_since_train.lock() = 0;
+        Ok(())
     }
 
-    fn search_knn(&self, query: &[f32], k: usize) -> PostingList {
-        if query.len() as u32 != self.dimensions || k == 0 {
-            return PostingList::default();
+    fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
+        validate_vector_values(self.dimensions, query)?;
+        if k == 0 {
+            return Ok(PostingList::default());
         }
         let raw_query = query;
         let mut q = query.to_vec();
@@ -409,7 +467,7 @@ impl VectorIndex for IVFIndex {
         // Repair stale state lazily.
         if matches!(*self.state.lock(), IVFState::Stale) {
             drop(self.state.lock());
-            self.train();
+            self.train()?;
         }
 
         let state = *self.state.lock();
@@ -441,8 +499,7 @@ impl VectorIndex for IVFIndex {
                         .enumerate()
                         .map(|(i, c)| (i, dot(&q, c)))
                         .collect();
-                    centroid_scores
-                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    centroid_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
                     let probe: std::collections::BTreeSet<usize> = centroid_scores
                         .into_iter()
                         .take(*self.nprobe.lock())
@@ -487,12 +544,15 @@ impl VectorIndex for IVFIndex {
                 )
             })
             .collect();
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
-    fn search_threshold(&self, query: &[f32], threshold: f32) -> PostingList {
-        if query.len() as u32 != self.dimensions {
-            return PostingList::default();
+    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
+        validate_vector_values(self.dimensions, query)?;
+        if !threshold.is_finite() {
+            return Err(StorageBackendError::Other(format!(
+                "vector similarity threshold must be finite, got {threshold}"
+            )));
         }
         let vectors = self.vectors.lock();
         let mut best_by_doc: BTreeMap<DocId, f32> = BTreeMap::new();
@@ -522,14 +582,18 @@ impl VectorIndex for IVFIndex {
             })
             .collect();
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
-    fn count(&self) -> usize {
-        self.vectors.lock().len()
+    fn count(&self) -> StorageBackendResult<usize> {
+        Ok(self.vectors.lock().len())
     }
 
-    fn snapshot(&self) -> Arc<dyn VectorIndex> {
+    fn initialize(&mut self) -> StorageBackendResult<()> {
+        self.train()
+    }
+
+    fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         // The IVFIndex is internally Mutex-guarded so a clone of the
         // shared state suffices; we hand back a snapshot wrapped in
         // Arc that re-uses the same posting lists by value-cloning.
@@ -545,7 +609,22 @@ impl VectorIndex for IVFIndex {
             trained_size: Mutex::new(*self.trained_size.lock()),
             deletes_since_train: Mutex::new(*self.deletes_since_train.lock()),
         };
-        Arc::new(snap)
+        Ok(Arc::new(snap))
+    }
+
+    fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Ok(Box::new(IVFIndex {
+            dimensions: self.dimensions,
+            nlist: self.nlist,
+            nprobe: Mutex::new(*self.nprobe.lock()),
+            train_threshold: self.train_threshold,
+            state: Mutex::new(*self.state.lock()),
+            vectors: Mutex::new(self.vectors.lock().clone()),
+            centroids: Mutex::new(self.centroids.lock().clone()),
+            inverted_lists: Mutex::new(self.inverted_lists.lock().clone()),
+            trained_size: Mutex::new(*self.trained_size.lock()),
+            deletes_since_train: Mutex::new(*self.deletes_since_train.lock()),
+        }))
     }
 }
 
@@ -570,10 +649,10 @@ mod tests {
     fn untrained_search_falls_back_to_brute_force() {
         let mut idx = IVFIndex::with_params(4, 8, 4, 1024);
         for i in 0..16 {
-            idx.add(i, rand_vec(i + 1, 4));
+            idx.add(i, rand_vec(i + 1, 4)).unwrap();
         }
         assert_eq!(idx.state(), IVFState::Untrained);
-        let pl = idx.search_knn(&rand_vec(1, 4), 4);
+        let pl = idx.search_knn(&rand_vec(1, 4), 4).unwrap();
         assert_eq!(pl.len(), 4);
     }
 
@@ -581,7 +660,7 @@ mod tests {
     fn auto_trains_above_threshold() {
         let mut idx = IVFIndex::with_params(4, 4, 2, 16);
         for i in 0..32 {
-            idx.add(i, rand_vec(i + 1, 4));
+            idx.add(i, rand_vec(i + 1, 4)).unwrap();
         }
         assert_eq!(idx.state(), IVFState::Trained);
     }
@@ -589,7 +668,8 @@ mod tests {
     #[test]
     fn auto_train_threshold_counts_tensor_vectors_below_nlist() {
         let mut idx = IVFIndex::with_params(2, 4, 4, 2);
-        idx.add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
+        idx.add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
+            .unwrap();
         assert_eq!(idx.state(), IVFState::Trained);
         assert_eq!(idx.metadata_snapshot().trained_size, 2);
         assert_eq!(idx.metadata_snapshot().vector_count, 2);
@@ -599,10 +679,10 @@ mod tests {
     fn search_returns_self_at_top_after_training() {
         let mut idx = IVFIndex::with_params(8, 4, 4, 16);
         for i in 0..64 {
-            idx.add(i, rand_vec(i + 1, 8));
+            idx.add(i, rand_vec(i + 1, 8)).unwrap();
         }
-        idx.train();
-        let probe = idx.search_knn(&rand_vec(1, 8), 1);
+        idx.train().unwrap();
+        let probe = idx.search_knn(&rand_vec(1, 8), 1).unwrap();
         let top: Vec<DocId> = probe.iter().map(|e| e.doc_id).collect();
         // The exact-self search should retrieve doc 0 (vector seed 1
         // matches when we re-query with the same seed).
@@ -613,11 +693,11 @@ mod tests {
     fn delete_marks_stale_above_fraction() {
         let mut idx = IVFIndex::with_params(4, 4, 2, 16);
         for i in 0..32 {
-            idx.add(i, rand_vec(i + 1, 4));
+            idx.add(i, rand_vec(i + 1, 4)).unwrap();
         }
-        idx.train();
-        for i in 0..(32 * STALE_FRACTION as usize + 4) {
-            idx.delete(i as DocId);
+        idx.train().unwrap();
+        for i in 0..(32 / STALE_DENOMINATOR + 4) {
+            idx.delete(i as DocId).unwrap();
         }
         assert!(matches!(idx.state(), IVFState::Stale | IVFState::Trained));
     }
@@ -626,11 +706,51 @@ mod tests {
     fn threshold_search_emits_only_above_cutoff() {
         let mut idx = IVFIndex::with_params(4, 4, 2, 1024);
         for i in 0..16 {
-            idx.add(i, rand_vec(i + 1, 4));
+            idx.add(i, rand_vec(i + 1, 4)).unwrap();
         }
-        let pl = idx.search_threshold(&rand_vec(1, 4), 0.999);
+        let pl = idx.search_threshold(&rand_vec(1, 4), 0.999).unwrap();
         // The query is the same shape as doc 0, so at least one
         // result is above the high threshold.
         assert!(pl.len() <= 16);
+    }
+
+    #[test]
+    fn ordinal_count_matches_zero_based_u32_format() {
+        validate_vector_ordinal_count(u64::from(u32::MAX) + 1).unwrap();
+        let error = validate_vector_ordinal_count(u64::from(u32::MAX) + 2).unwrap_err();
+        assert!(error.to_string().contains("u32 index format"));
+    }
+
+    #[test]
+    fn invalid_replacement_preserves_existing_vectors() {
+        let mut idx = IVFIndex::with_params(2, 4, 2, 1024);
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+
+        let error = idx.add(1, vec![f32::NAN, 0.0]).unwrap_err();
+        assert!(error.to_string().contains("must be finite"));
+        assert_eq!(idx.count().unwrap(), 1);
+        assert_eq!(
+            idx.search_knn(&[1.0, 0.0], 1)
+                .unwrap()
+                .doc_ids()
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn delete_counter_overflow_preserves_vector_and_assignments() {
+        let mut idx = IVFIndex::with_params(2, 1, 1, 1);
+        idx.add(1, vec![1.0, 0.0]).unwrap();
+        assert_eq!(idx.state(), IVFState::Trained);
+        *idx.deletes_since_train.lock() = usize::MAX;
+        let before = idx.metadata_snapshot();
+
+        let error = idx.delete(1).unwrap_err();
+        assert!(error.to_string().contains("counter overflow"));
+        assert_eq!(idx.count().unwrap(), 1);
+        let after = idx.metadata_snapshot();
+        assert_eq!(after.assignments, before.assignments);
+        assert_eq!(after.deletes_since_train, usize::MAX);
     }
 }

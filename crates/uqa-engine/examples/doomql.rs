@@ -26,11 +26,11 @@ type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 fn main() -> AppResult<()> {
     let root = doomql_root()?;
-    let player_count = env_usize("DOOMQL_PLAYERS", 4).max(1);
-    let ticks = env_usize("DOOMQL_TICKS", 120);
-    let render_every = env_usize("DOOMQL_RENDER_EVERY", 10);
-    let profile_views = env_list("DOOMQL_PROFILE_VIEWS");
-    let mode = env::var("DOOMQL_MODE").unwrap_or_else(|_| "native".into());
+    let player_count = env_usize("DOOMQL_PLAYERS", 4)?.max(1);
+    let ticks = env_usize("DOOMQL_TICKS", 120)?;
+    let render_every = env_usize("DOOMQL_RENDER_EVERY", 10)?;
+    let profile_views = env_list("DOOMQL_PROFILE_VIEWS")?;
+    let mode = optional_env("DOOMQL_MODE")?.unwrap_or_else(|| "native".into());
 
     if mode == "sql" {
         run_sql_game(&root, player_count, ticks, render_every, &profile_views)
@@ -78,8 +78,14 @@ fn run_sql_game(
         }
     }
 
-    let render_rows = value_as_i64(&last_render, "rows").unwrap_or_default();
-    let render_chars = value_as_i64(&last_render, "chars").unwrap_or_default();
+    let (render_rows, render_chars) = if render_samples == 0 {
+        (0, 0)
+    } else {
+        (
+            required_result_i64(&last_render, "rows")?,
+            required_result_i64(&last_render, "chars")?,
+        )
+    };
     let tick_avg = if ticks == 0 {
         0.0
     } else {
@@ -119,16 +125,30 @@ fn doomql_root() -> AppResult<PathBuf> {
     Ok(root)
 }
 
-fn env_usize(name: &str, default: usize) -> usize {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(default)
+fn optional_env(name: &str) -> AppResult<Option<String>> {
+    match env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(Box::new(error)),
+    }
 }
 
-fn env_list(name: &str) -> Vec<String> {
-    env::var(name)
-        .ok()
+fn env_usize(name: &str, default: usize) -> AppResult<usize> {
+    optional_env(name)?.map_or_else(
+        || Ok(default),
+        |value| {
+            value.parse::<usize>().map_err(|error| {
+                Box::new(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{name} must be a non-negative integer: {error}"),
+                )) as Box<dyn std::error::Error>
+            })
+        },
+    )
+}
+
+fn env_list(name: &str) -> AppResult<Vec<String>> {
+    Ok(optional_env(name)?
         .map(|value| {
             value
                 .split(',')
@@ -137,7 +157,7 @@ fn env_list(name: &str) -> Vec<String> {
                 .map(ToOwned::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 fn load_game(engine: &Engine, root: &Path) -> AppResult<()> {
@@ -334,23 +354,28 @@ fn load_native_state(engine: &Engine) -> AppResult<NativeState> {
         "SELECT player_move_speed, player_turn_speed, ammo_max FROM config",
     )?;
     let settings = NativeSettings {
-        fov: value_as_f64(&settings_row, "fov").unwrap_or(std::f64::consts::PI / 3.0),
-        step: value_as_f64(&settings_row, "step").unwrap_or(0.1),
-        max_steps: value_as_i64(&settings_row, "max_steps").unwrap_or(100) as usize,
-        view_w: value_as_i64(&settings_row, "view_w").unwrap_or(128) as i32,
-        view_h: value_as_i64(&settings_row, "view_h").unwrap_or(64) as i32,
-        move_speed: value_as_f64(&config_row, "player_move_speed").unwrap_or(0.3),
-        turn_speed: value_as_f64(&config_row, "player_turn_speed").unwrap_or(0.2),
-        ammo_max: value_as_i64(&config_row, "ammo_max").unwrap_or(10),
+        fov: required_result_f64(&settings_row, "fov")?,
+        step: required_result_f64(&settings_row, "step")?,
+        max_steps: usize::try_from(required_result_i64(&settings_row, "max_steps")?)
+            .map_err(|_| invalid_result_value("max_steps", "non-negative usize"))?,
+        view_w: i32::try_from(required_result_i64(&settings_row, "view_w")?)
+            .map_err(|_| invalid_result_value("view_w", "signed 32-bit integer"))?,
+        view_h: i32::try_from(required_result_i64(&settings_row, "view_h")?)
+            .map_err(|_| invalid_result_value("view_h", "signed 32-bit integer"))?,
+        move_speed: required_result_f64(&config_row, "player_move_speed")?,
+        turn_speed: required_result_f64(&config_row, "player_turn_speed")?,
+        ammo_max: required_result_i64(&config_row, "ammo_max")?,
     };
 
     let map_rows = run_sql(engine, "native map", "SELECT x, y, tile FROM map")?;
     let mut map = BTreeMap::new();
     let mut respawns = Vec::new();
     for row in &map_rows.rows {
-        let x = row_i64(row, "x") as i32;
-        let y = row_i64(row, "y") as i32;
-        let tile = row_char(row, "tile");
+        let x = i32::try_from(required_row_i64(row, "x")?)
+            .map_err(|_| invalid_result_value("x", "signed 32-bit integer"))?;
+        let y = i32::try_from(required_row_i64(row, "y")?)
+            .map_err(|_| invalid_result_value("y", "signed 32-bit integer"))?;
+        let tile = required_row_char(row, "tile")?;
         if tile == 'R' {
             respawns.push((f64::from(x), f64::from(y)));
         }
@@ -371,27 +396,30 @@ fn load_native_state(engine: &Engine) -> AppResult<NativeState> {
     let mut players = BTreeMap::new();
     let mut next_mob_id = 1_i64;
     for row in &mob_rows.rows {
-        let id = row_i64(row, "id");
-        next_mob_id = next_mob_id.max(id + 1);
+        let id = required_row_i64(row, "id")?;
+        let following_id = id
+            .checked_add(1)
+            .ok_or_else(|| invalid_result_value("id", "incrementable integer"))?;
+        next_mob_id = next_mob_id.max(following_id);
         mobs.insert(
             id,
             NativeMob {
                 id,
-                kind: row_string(row, "kind"),
-                owner: row.get("owner").and_then(value_to_i64),
-                x: row_f64(row, "x"),
-                y: row_f64(row, "y"),
-                dir: row_f64(row, "dir"),
-                minimap_icon: row_string(row, "minimap_icon"),
+                kind: required_row_string(row, "kind")?,
+                owner: optional_row_i64(row, "owner")?,
+                x: required_row_f64(row, "x")?,
+                y: required_row_f64(row, "y")?,
+                dir: required_row_f64(row, "dir")?,
+                minimap_icon: required_row_char(row, "minimap_icon")?.to_string(),
             },
         );
         if !matches!(row.get("score"), Some(Value::Null) | None) {
             players.insert(
                 id,
                 NativePlayer {
-                    score: row_i64(row, "score"),
-                    hp: row_i64(row, "hp"),
-                    ammo: row_i64(row, "ammo"),
+                    score: required_row_i64(row, "score")?,
+                    hp: required_row_i64(row, "hp")?,
+                    ammo: required_row_i64(row, "ammo")?,
                 },
             );
         }
@@ -652,7 +680,10 @@ fn native_minimap(state: &NativeState, viewer_id: i64) -> Vec<String> {
                     ch = if mob.id == viewer_id {
                         '@'
                     } else {
-                        mob.minimap_icon.chars().next().unwrap_or('?')
+                        mob.minimap_icon
+                            .chars()
+                            .next()
+                            .expect("native mob icons are validated while loading")
                     };
                 }
             }
@@ -756,7 +787,7 @@ fn profile_selected_views(engine: &Engine, player_id: i64, views: &[String]) -> 
             &format!("SELECT COUNT(*) AS rows FROM {view} WHERE player_id = {player_id}"),
         )?;
         let elapsed = started.elapsed();
-        let rows = value_as_i64(&result, "rows").unwrap_or_default();
+        let rows = required_result_i64(&result, "rows")?;
         println!(
             "profile_view={view} rows={rows} ms={:.3}",
             elapsed.as_secs_f64() * 1000.0
@@ -802,32 +833,75 @@ fn value_as_f64(result: &SQLResult, column: &str) -> Option<f64> {
     result.rows.first()?.get(column).and_then(value_to_f64)
 }
 
-fn row_i64(row: &BTreeMap<String, Value>, column: &str) -> i64 {
-    row.get(column).and_then(value_to_i64).unwrap_or_default()
+fn required_result_i64(result: &SQLResult, column: &str) -> io::Result<i64> {
+    value_as_i64(result, column).ok_or_else(|| invalid_result_value(column, "integer"))
 }
 
-fn row_f64(row: &BTreeMap<String, Value>, column: &str) -> f64 {
-    row.get(column).and_then(value_to_f64).unwrap_or_default()
+fn required_result_f64(result: &SQLResult, column: &str) -> io::Result<f64> {
+    value_as_f64(result, column).ok_or_else(|| invalid_result_value(column, "finite number"))
 }
 
-fn row_string(row: &BTreeMap<String, Value>, column: &str) -> String {
+fn required_row_i64(row: &BTreeMap<String, Value>, column: &str) -> io::Result<i64> {
+    row.get(column)
+        .and_then(value_to_i64)
+        .ok_or_else(|| invalid_result_value(column, "integer"))
+}
+
+fn optional_row_i64(row: &BTreeMap<String, Value>, column: &str) -> io::Result<Option<i64>> {
     match row.get(column) {
-        Some(Value::Str(value)) => value.clone(),
-        Some(Value::Int(value)) => value.to_string(),
-        Some(Value::Float(value)) => value.to_string(),
-        Some(Value::Bool(value)) => value.to_string(),
-        _ => String::new(),
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value_to_i64(value)
+            .map(Some)
+            .ok_or_else(|| invalid_result_value(column, "nullable integer")),
     }
 }
 
-fn row_char(row: &BTreeMap<String, Value>, column: &str) -> char {
-    row_string(row, column).chars().next().unwrap_or(' ')
+fn required_row_f64(row: &BTreeMap<String, Value>, column: &str) -> io::Result<f64> {
+    row.get(column)
+        .and_then(value_to_f64)
+        .ok_or_else(|| invalid_result_value(column, "finite number"))
+}
+
+fn required_row_string(row: &BTreeMap<String, Value>, column: &str) -> io::Result<String> {
+    match row.get(column) {
+        Some(Value::Str(value)) => Ok(value.clone()),
+        Some(Value::Int(value)) => Ok(value.to_string()),
+        Some(Value::Float(value)) if value.is_finite() => Ok(value.to_string()),
+        Some(Value::Bool(value)) => Ok(value.to_string()),
+        _ => Err(invalid_result_value(column, "non-null scalar string")),
+    }
+}
+
+fn required_row_char(row: &BTreeMap<String, Value>, column: &str) -> io::Result<char> {
+    let value = required_row_string(row, column)?;
+    let mut chars = value.chars();
+    let first = chars
+        .next()
+        .ok_or_else(|| invalid_result_value(column, "single character"))?;
+    if chars.next().is_some() {
+        return Err(invalid_result_value(column, "single character"));
+    }
+    Ok(first)
+}
+
+fn invalid_result_value(column: &str, expected: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("SQL result column `{column}` is missing or is not a {expected}"),
+    )
 }
 
 fn value_to_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Int(value) => Some(*value),
-        Value::Float(value) => Some(*value as i64),
+        Value::Float(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && *value >= i64::MIN as f64
+                && *value < -(i64::MIN as f64) =>
+        {
+            Some(*value as i64)
+        }
         _ => None,
     }
 }
@@ -835,7 +909,7 @@ fn value_to_i64(value: &Value) -> Option<i64> {
 fn value_to_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Int(value) => Some(*value as f64),
-        Value::Float(value) => Some(*value),
+        Value::Float(value) if value.is_finite() => Some(*value),
         _ => None,
     }
 }

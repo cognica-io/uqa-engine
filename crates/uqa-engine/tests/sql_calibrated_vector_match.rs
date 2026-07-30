@@ -105,3 +105,65 @@ fn calibrated_vector_match_invalid_threshold_errors() {
         .to_string();
     assert!(err.contains("threshold"), "{err}");
 }
+
+#[test]
+fn calibrated_vector_match_preserves_each_argument_label() {
+    let engine = engine();
+    let invalid = [
+        (
+            "calibrated_vector_match(42, ARRAY[0.9, 0.1], 3)",
+            "calibrated_vector_match.field",
+        ),
+        (
+            "calibrated_vector_match('embedding', 'bad', 3)",
+            "calibrated_vector_match.vector",
+        ),
+        (
+            "calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 'bad')",
+            "calibrated_vector_match.k",
+        ),
+        (
+            "calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 0)",
+            "calibrated_vector_match.k",
+        ),
+        (
+            "calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 3, 1.1)",
+            "calibrated_vector_match.threshold",
+        ),
+    ];
+
+    for (predicate, label) in invalid {
+        let error = engine
+            .sql(&format!("SELECT id FROM docs WHERE {predicate}"), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(label), "{predicate}: {error}");
+        assert!(
+            !error.contains("arguments cannot be lowered"),
+            "{predicate}: {error}"
+        );
+    }
+}
+
+#[test]
+fn nested_calibrated_vector_error_keeps_inner_argument_label() {
+    let engine = engine();
+    engine
+        .sql("CREATE INDEX docs_kind_gin ON docs USING gin (kind)", &[])
+        .unwrap();
+    let error = engine
+        .sql(
+            "SELECT id FROM docs WHERE fuse_log_odds(\
+                 bayesian_match(kind, 'chat'), \
+                 calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 3, 'bad')\
+             )",
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("calibrated_vector_match.threshold"),
+        "{error}"
+    );
+    assert!(!error.contains("arguments cannot be lowered"), "{error}");
+}

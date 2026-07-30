@@ -15,6 +15,7 @@ use uqa_core::Value;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ColumnType {
     Integer,
+    Boolean,
     Text,
     Real,
     /// `NUMERIC(precision, scale)` -- exact decimal storage. When
@@ -31,6 +32,9 @@ pub enum ColumnType {
     JsonB,
     /// `BYTEA` columns store opaque bytes.
     Bytea,
+    /// A `PostgreSQL` array whose elements retain their declared SQL type.
+    /// Nested array bounds are represented recursively.
+    Array(Box<ColumnType>),
     /// `DATE` columns store days since 1970-01-01.
     Date,
     /// `TIME` columns store microseconds since midnight.
@@ -108,6 +112,44 @@ pub struct CreateTable {
     pub checks: Vec<TableCheck>,
     /// Table-level `FOREIGN KEY (col, ...) REFERENCES parent(col, ...)`.
     pub foreign_keys: Vec<ForeignKey>,
+    /// Every declared `PRIMARY KEY` / `UNIQUE` constraint, including
+    /// column-level declarations. Keeping the typed key (rather than only
+    /// setting per-column flags) preserves composite-key and `NULLS NOT
+    /// DISTINCT` semantics through planning and catalog persistence.
+    #[serde(default)]
+    pub key_constraints: Vec<TableKeyConstraint>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TableKeyConstraintKind {
+    PrimaryKey,
+    Unique,
+}
+
+/// A table key whose columns are compared as one tuple.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableKeyConstraint {
+    pub name: Option<String>,
+    pub kind: TableKeyConstraintKind,
+    pub columns: Vec<String>,
+    /// `PostgreSQL` UNIQUE keys normally treat every NULL-containing tuple as
+    /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
+    #[serde(default)]
+    pub nulls_not_distinct: bool,
+}
+
+/// Durable table-level constraints that do not fit in `ColumnDef`.
+///
+/// `serde(default)` on the catalog field containing this structure keeps
+/// databases written before constraint persistence backward compatible.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TableConstraintSet {
+    #[serde(default)]
+    pub checks: Vec<TableCheck>,
+    #[serde(default)]
+    pub foreign_keys: Vec<ForeignKey>,
+    #[serde(default)]
+    pub key_constraints: Vec<TableKeyConstraint>,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
@@ -337,8 +379,8 @@ impl CreateFunction {
 pub struct DropFunctionItem {
     pub name: String,
     /// `Some(types)` when the statement spelled an argument list
-    /// (`DROP FUNCTION f(int, int)` - matched by arity, the type
-    /// names feed error messages); `None` for the bare-name form
+    /// (`DROP FUNCTION f(int, int)` - matched by canonical argument
+    /// types); `None` for the bare-name form
     /// (`DROP FUNCTION f`).
     pub arg_types: Option<Vec<String>>,
 }
@@ -349,6 +391,8 @@ pub struct DropFunctionItem {
 pub struct DropFunctionStmt {
     pub is_procedure: bool,
     pub if_exists: bool,
+    #[serde(default)]
+    pub cascade: bool,
     pub items: Vec<DropFunctionItem>,
 }
 
@@ -833,16 +877,16 @@ pub enum Statement {
         body: Box<SelectStmt>,
         or_replace: bool,
     },
-    /// `CREATE SCHEMA [IF NOT EXISTS] name`. Engine maps schemas onto
-    /// optional table prefixes; this AST entry just records the
-    /// command so callers can no-op or migrate as needed.
+    /// `CREATE SCHEMA [IF NOT EXISTS] name`. This AST entry records the
+    /// command for the engine's durable schema catalog and namespace
+    /// resolver.
     CreateSchema {
         name: String,
         if_not_exists: bool,
     },
     /// `SET <name> [TO|=] <value>` - runtime parameter assignment.
-    /// Currently the engine recognises `search_path`; everything else
-    /// is recorded as a no-op for forward compatibility.
+    /// The engine gives `search_path` resolution semantics and stores other
+    /// parameters in the logical session for subsequent `SHOW` statements.
     SetVariable {
         name: String,
         value: String,
@@ -854,13 +898,13 @@ pub enum Statement {
     },
     /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session
     /// state. Matches UQA behavior for `_compile_discard`. The engine resets
-    /// session vars, prepared statements and temp tables.
+    /// session vars, prepared statements and sequences. `TEMP` is rejected
+    /// until temporary tables are supported instead of being silently ignored.
     Discard {
         target: DiscardTarget,
     },
     /// `EXPLAIN ...`. Carries the inner statement so the engine can
-    /// emit the planner output. No-op when the engine does not have
-    /// an EXPLAIN driver.
+    /// emit the planner output.
     Explain {
         analyze: bool,
         verbose: bool,
@@ -991,12 +1035,58 @@ pub struct CreateSequence {
     pub increment: i64,
 }
 
+/// Physical restart action carried by `ALTER SEQUENCE`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceRestart {
+    /// No `RESTART` clause was specified.
+    #[default]
+    Unchanged,
+    /// Bare `RESTART`; allocate the configured start value next.
+    FromStart,
+    /// `RESTART WITH value`; allocate the supplied value next.
+    With(i64),
+}
+
+fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    enum Current {
+        Unchanged,
+        FromStart,
+        With(i64),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Representation {
+        Current(Current),
+        // Before SequenceRestart existed this field was
+        // Option<Option<i64>>, serialized as null or an integer.
+        Legacy(Option<i64>),
+    }
+
+    Ok(match Representation::deserialize(deserializer)? {
+        Representation::Current(Current::Unchanged) | Representation::Legacy(None) => {
+            SequenceRestart::Unchanged
+        }
+        Representation::Current(Current::FromStart) => SequenceRestart::FromStart,
+        Representation::Current(Current::With(value)) | Representation::Legacy(Some(value)) => {
+            SequenceRestart::With(value)
+        }
+    })
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AlterSequence {
     pub name: String,
-    /// `RESTART [WITH n]`. `Some(None)` for `RESTART` (uses `start`),
-    /// `Some(Some(n))` for explicit value, `None` when not specified.
-    pub restart: Option<Option<i64>>,
+    /// `ALTER SEQUENCE IF EXISTS` suppresses only a missing sequence.
+    #[serde(default)]
+    pub if_exists: bool,
+    /// `RESTART [WITH n]`, preserving omitted, bare, and explicit forms.
+    #[serde(default, deserialize_with = "deserialize_sequence_restart")]
+    pub restart: SequenceRestart,
     pub increment: Option<i64>,
     pub start: Option<i64>,
 }
@@ -1009,4 +1099,32 @@ pub enum TransactionStmt {
     Savepoint(String),
     ReleaseSavepoint(String),
     RollbackToSavepoint(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AlterSequence, SequenceRestart};
+
+    #[test]
+    fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
+        let omitted: AlterSequence = serde_json::from_str(r#"{"name":"s"}"#).unwrap();
+        assert_eq!(omitted.restart, SequenceRestart::Unchanged);
+
+        let legacy_none: AlterSequence =
+            serde_json::from_str(r#"{"name":"s","restart":null}"#).unwrap();
+        assert_eq!(legacy_none.restart, SequenceRestart::Unchanged);
+
+        let legacy_value: AlterSequence =
+            serde_json::from_str(r#"{"name":"s","restart":7}"#).unwrap();
+        assert_eq!(legacy_value.restart, SequenceRestart::With(7));
+
+        let current = AlterSequence {
+            name: "s".into(),
+            restart: SequenceRestart::FromStart,
+            ..AlterSequence::default()
+        };
+        let round_trip: AlterSequence =
+            serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
+        assert_eq!(round_trip.restart, SequenceRestart::FromStart);
+    }
 }

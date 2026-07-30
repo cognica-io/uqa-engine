@@ -22,8 +22,8 @@ impl FixedScoreOperator {
 }
 
 impl Operator for FixedScoreOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        PostingList::from_unsorted(self.entries.clone())
+    fn execute(&self, _ctx: &ExecutionContext) -> uqa_storage::StorageBackendResult<PostingList> {
+        Ok(PostingList::from_unsorted(self.entries.clone()))
     }
 }
 
@@ -41,7 +41,7 @@ fn filters_below_threshold() {
         source(vec![entry(1, 0.3), entry(2, 0.7), entry(3, 0.5)]),
         0.5,
     );
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result.entries()[0].doc_id, 2);
     assert!((result.entries()[0].payload.score - 0.2).abs() < 1e-9);
@@ -50,25 +50,25 @@ fn filters_below_threshold() {
 #[test]
 fn zero_threshold_keeps_all_positive() {
     let op = SparseThresholdOperator::new(source(vec![entry(1, 0.1), entry(2, 0.5)]), 0.0);
-    assert_eq!(op.execute(&ExecutionContext::new()).len(), 2);
+    assert_eq!(op.execute(&ExecutionContext::new()).unwrap().len(), 2);
 }
 
 #[test]
 fn high_threshold_excludes_all() {
     let op = SparseThresholdOperator::new(source(vec![entry(1, 0.3), entry(2, 0.5)]), 1.0);
-    assert_eq!(op.execute(&ExecutionContext::new()).len(), 0);
+    assert_eq!(op.execute(&ExecutionContext::new()).unwrap().len(), 0);
 }
 
 #[test]
 fn exact_threshold_excluded() {
     let op = SparseThresholdOperator::new(source(vec![entry(1, 0.5)]), 0.5);
-    assert_eq!(op.execute(&ExecutionContext::new()).len(), 0);
+    assert_eq!(op.execute(&ExecutionContext::new()).unwrap().len(), 0);
 }
 
 #[test]
 fn adjusted_scores() {
     let op = SparseThresholdOperator::new(source(vec![entry(1, 0.8), entry(2, 0.6)]), 0.3);
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     assert_eq!(result.len(), 2);
     let score_1 = result.get_entry(1).unwrap().payload.score;
     let score_2 = result.get_entry(2).unwrap().payload.score;
@@ -82,7 +82,11 @@ fn preserves_doc_id_order() {
         source(vec![entry(1, 0.9), entry(5, 0.8), entry(10, 0.7)]),
         0.1,
     );
-    let ids: Vec<_> = op.execute(&ExecutionContext::new()).doc_ids().collect();
+    let ids: Vec<_> = op
+        .execute(&ExecutionContext::new())
+        .unwrap()
+        .doc_ids()
+        .collect();
     assert_eq!(ids, vec![1, 5, 10]);
 }
 
@@ -97,5 +101,5 @@ fn cost_estimate() {
 #[test]
 fn empty_source() {
     let op = SparseThresholdOperator::new(source(vec![]), 0.5);
-    assert_eq!(op.execute(&ExecutionContext::new()).len(), 0);
+    assert_eq!(op.execute(&ExecutionContext::new()).unwrap().len(), 0);
 }

@@ -27,7 +27,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{BitAnd, BitOr, Sub};
 
-use crate::types::{DocId, GeneralizedPostingEntry, Payload, PostingEntry, Value};
+use crate::types::{
+    DocId, GeneralizedPostingEntry, GraphPhiEnvelope, GraphPhiPayload, Payload, PostingEntry,
+    Value, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD, GRAPH_PHI_VERTICES_FIELD,
+};
 
 /// Ordered sequence of `(doc_id, payload)` pairs.
 ///
@@ -188,8 +191,7 @@ impl PostingList {
         scored.sort_by(|a, b| {
             b.payload
                 .score
-                .partial_cmp(&a.payload.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&a.payload.score)
                 .then_with(|| a.doc_id.cmp(&b.doc_id))
         });
         let mut top: Vec<PostingEntry> = scored.into_iter().take(k).cloned().collect();
@@ -315,6 +317,12 @@ impl FromIterator<PostingEntry> for PostingList {
 ///   are stated over doc-id sets, not scores)
 /// - fields: right-hand side wins on key collision
 fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
+    let a_phi = GraphPhiEnvelope::decode(a.fields.get(GRAPH_PHI_FIELD));
+    let b_phi = GraphPhiEnvelope::decode(b.fields.get(GRAPH_PHI_FIELD));
+    if a_phi.is_some() || b_phi.is_some() {
+        return merge_phi_payloads(a, b, a_phi, b_phi);
+    }
+
     let a_score_only = a.positions.is_empty() && a.fields.is_empty();
     let b_score_only = b.positions.is_empty() && b.fields.is_empty();
     if a_score_only && b_score_only {
@@ -346,6 +354,109 @@ fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
         positions,
         score: a.score + b.score,
         fields,
+    }
+}
+
+fn merge_phi_payloads(
+    a: &Payload,
+    b: &Payload,
+    a_phi: Option<GraphPhiEnvelope>,
+    b_phi: Option<GraphPhiEnvelope>,
+) -> Payload {
+    let (a_base_score, a_graph, a_override, a_fields) = decode_phi_payload(a, a_phi);
+    let (b_base_score, b_graph, b_override, b_fields) = decode_phi_payload(b, b_phi);
+
+    let mut positions: Vec<u32> = Vec::with_capacity(a.positions.len() + b.positions.len());
+    positions.extend_from_slice(&a.positions);
+    positions.extend_from_slice(&b.positions);
+    positions.sort_unstable();
+    positions.dedup();
+
+    let mut fields = a_fields;
+    fields.extend(b_fields);
+    let original_reserved = fields.remove(GRAPH_PHI_FIELD);
+    let original_vertices = fields.remove(GRAPH_PHI_VERTICES_FIELD);
+    let original_edges = fields.remove(GRAPH_PHI_EDGES_FIELD);
+
+    let graph_payload = b_graph.or(a_graph);
+    let merged_score = a.score + b.score;
+    let score_override =
+        if graph_payload.is_some() && (a_override.is_some() || b_override.is_some()) {
+            Some(merged_score)
+        } else {
+            None
+        };
+
+    if let Some(graph) = &graph_payload {
+        fields.insert(
+            GRAPH_PHI_VERTICES_FIELD.to_string(),
+            graph.encoded_vertices(),
+        );
+        fields.insert(GRAPH_PHI_EDGES_FIELD.to_string(), graph.encoded_edges());
+    } else {
+        restore_field(
+            &mut fields,
+            GRAPH_PHI_VERTICES_FIELD,
+            original_vertices.clone(),
+        );
+        restore_field(&mut fields, GRAPH_PHI_EDGES_FIELD, original_edges.clone());
+    }
+
+    fields.insert(
+        GRAPH_PHI_FIELD.to_string(),
+        GraphPhiEnvelope {
+            base_score: a_base_score + b_base_score,
+            graph_payload,
+            score_override,
+            original_reserved,
+            original_vertices,
+            original_edges,
+        }
+        .encode(),
+    );
+
+    Payload {
+        positions,
+        score: merged_score,
+        fields,
+    }
+}
+
+fn decode_phi_payload(
+    payload: &Payload,
+    envelope: Option<GraphPhiEnvelope>,
+) -> (
+    f64,
+    Option<GraphPhiPayload>,
+    Option<f64>,
+    BTreeMap<String, Value>,
+) {
+    let Some(envelope) = envelope else {
+        return (payload.score, None, None, payload.fields.clone());
+    };
+
+    let mut fields = payload.fields.clone();
+    fields.remove(GRAPH_PHI_FIELD);
+    fields.remove(GRAPH_PHI_VERTICES_FIELD);
+    fields.remove(GRAPH_PHI_EDGES_FIELD);
+    restore_field(&mut fields, GRAPH_PHI_FIELD, envelope.original_reserved);
+    restore_field(
+        &mut fields,
+        GRAPH_PHI_VERTICES_FIELD,
+        envelope.original_vertices,
+    );
+    restore_field(&mut fields, GRAPH_PHI_EDGES_FIELD, envelope.original_edges);
+    (
+        envelope.base_score,
+        envelope.graph_payload,
+        envelope.score_override,
+        fields,
+    )
+}
+
+fn restore_field(fields: &mut BTreeMap<String, Value>, key: &str, value: Option<Value>) {
+    if let Some(value) = value {
+        fields.insert(key.to_string(), value);
     }
 }
 

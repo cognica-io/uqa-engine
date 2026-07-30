@@ -4,16 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `QueryBuilder` - assembles a SELECT statement and runs it via
-//! [`uqa_engine::Engine::sql`]. Each method returns the builder by
-//! value so calls compose linearly. The builder is transport-only;
-//! all real work happens in the engine's SQL pipeline.
+//! `QueryBuilder` assembles a `SELECT` statement and runs it via
+//! [`uqa_engine::Engine::sql`]. Infallible methods return the builder by
+//! value, while helpers that validate SQL literals or retrieval options
+//! return `Result<Self, SQLError>` and compose with `?`. The builder is
+//! transport-only; all real work happens in the engine's SQL pipeline.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
 use uqa_sql::SQLError;
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
@@ -35,6 +36,7 @@ pub struct QueryBuilder<'a> {
     table: String,
     projections: Vec<String>,
     filters: Vec<String>,
+    group_by: Vec<String>,
     order_by: Vec<(String, Order)>,
     limit: Option<u64>,
     offset: Option<u64>,
@@ -47,6 +49,7 @@ impl<'a> QueryBuilder<'a> {
             table: table.into(),
             projections: Vec::new(),
             filters: Vec::new(),
+            group_by: Vec::new(),
             order_by: Vec::new(),
             limit: None,
             offset: None,
@@ -76,29 +79,53 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Convenience: `<column> = <value>` filter.
-    pub fn where_eq(self, column: &str, value: &Value) -> Self {
-        let rendered = format!("{column} = {}", render_value(value));
-        self.r#where(rendered)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be represented losslessly as a
+    /// SQL literal, such as a map or a non-finite float.
+    pub fn where_eq(self, column: &str, value: &Value) -> Result<Self, SQLError> {
+        Ok(self.r#where(format!("{column} = {}", render_value(value)?)))
     }
 
     /// Convenience: `<column> > <value>` filter.
-    pub fn where_gt(self, column: &str, value: &Value) -> Self {
-        self.r#where(format!("{column} > {}", render_value(value)))
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be represented losslessly as a
+    /// SQL literal, such as a map or a non-finite float.
+    pub fn where_gt(self, column: &str, value: &Value) -> Result<Self, SQLError> {
+        Ok(self.r#where(format!("{column} > {}", render_value(value)?)))
     }
 
     /// Convenience: `<column> >= <value>` filter.
-    pub fn where_gte(self, column: &str, value: &Value) -> Self {
-        self.r#where(format!("{column} >= {}", render_value(value)))
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be represented losslessly as a
+    /// SQL literal, such as a map or a non-finite float.
+    pub fn where_gte(self, column: &str, value: &Value) -> Result<Self, SQLError> {
+        Ok(self.r#where(format!("{column} >= {}", render_value(value)?)))
     }
 
     /// Convenience: `<column> < <value>` filter.
-    pub fn where_lt(self, column: &str, value: &Value) -> Self {
-        self.r#where(format!("{column} < {}", render_value(value)))
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be represented losslessly as a
+    /// SQL literal, such as a map or a non-finite float.
+    pub fn where_lt(self, column: &str, value: &Value) -> Result<Self, SQLError> {
+        Ok(self.r#where(format!("{column} < {}", render_value(value)?)))
     }
 
     /// Convenience: `<column> <= <value>` filter.
-    pub fn where_lte(self, column: &str, value: &Value) -> Self {
-        self.r#where(format!("{column} <= {}", render_value(value)))
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `value` cannot be represented losslessly as a
+    /// SQL literal, such as a map or a non-finite float.
+    pub fn where_lte(self, column: &str, value: &Value) -> Result<Self, SQLError> {
+        Ok(self.r#where(format!("{column} <= {}", render_value(value)?)))
     }
 
     /// Add `text_match(field, '<query>')` to WHERE.
@@ -106,35 +133,75 @@ impl<'a> QueryBuilder<'a> {
         self.r#where(format!("text_match({field}, {})", quote_str(query)))
     }
 
-    /// Add `knn_match(field, ARRAY[v1, v2, ...], k)` to WHERE.
-    pub fn knn_match(self, field: &str, vector: &[f32], k: usize) -> Self {
+    /// Add `knn_match(field, ARRAY[v1, v2, ...], k)` to `WHERE`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `field` is empty, `vector` is empty or contains
+    /// a non-finite component, or `k` is zero or does not fit in SQL `BIGINT`.
+    pub fn knn_match(self, field: &str, vector: &[f32], k: usize) -> Result<Self, SQLError> {
+        validate_vector_query("knn_match", field, vector, k)?;
         let arr = vector
             .iter()
             .map(f32::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        self.r#where(format!("knn_match({field}, ARRAY[{arr}], {k})"))
+        Ok(self.r#where(format!("knn_match({field}, ARRAY[{arr}], {k})")))
     }
 
-    /// Add `multi_field_match(field_1, '<q1>', field_2, '<q2>', ...)` to WHERE.
-    pub fn multi_field_match(self, fields_and_queries: &[(&str, &str)]) -> Self {
+    /// Add `multi_field_match(field_1, '<q1>', field_2, '<q2>', ...)` to
+    /// `WHERE`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless at least two field/query pairs are supplied,
+    /// or when any field name is empty.
+    pub fn multi_field_match(self, fields_and_queries: &[(&str, &str)]) -> Result<Self, SQLError> {
+        if fields_and_queries.len() < 2 {
+            return Err(SQLError::BadArity {
+                name: "multi_field_match".into(),
+                expected: ">=2 field/query pairs".into(),
+                actual: fields_and_queries.len(),
+            });
+        }
+        if fields_and_queries
+            .iter()
+            .any(|(field, _)| field.trim().is_empty())
+        {
+            return Err(SQLError::TypeMismatch(
+                "multi_field_match field names cannot be empty".into(),
+            ));
+        }
         let mut parts = Vec::with_capacity(fields_and_queries.len() * 2);
         for (field, query) in fields_and_queries {
             parts.push((*field).to_string());
             parts.push(quote_str(query));
         }
-        self.r#where(format!("multi_field_match({})", parts.join(", ")))
+        Ok(self.r#where(format!("multi_field_match({})", parts.join(", "))))
     }
 
-    /// Add `staged_retrieval(f1, '<q1>', k1, f2, '<q2>', k2, ...)` to WHERE.
-    pub fn staged_retrieval(self, stages: &[(&str, &str, usize)]) -> Self {
+    /// Add `staged_retrieval(f1, '<q1>', k1, f2, '<q2>', k2, ...)` to
+    /// `WHERE`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when there are no stages, a field name is empty, or
+    /// a stage cutoff is zero or does not fit in SQL `BIGINT`.
+    pub fn staged_retrieval(self, stages: &[(&str, &str, usize)]) -> Result<Self, SQLError> {
+        validate_stage_count(stages.len())?;
+        validate_stage_cutoffs(stages.iter().map(|(_, _, top_k)| *top_k))?;
+        if stages.iter().any(|(field, _, _)| field.trim().is_empty()) {
+            return Err(SQLError::TypeMismatch(
+                "staged_retrieval field names cannot be empty".into(),
+            ));
+        }
         let mut parts = Vec::with_capacity(stages.len() * 3);
         for (field, query, top_k) in stages {
             parts.push((*field).to_string());
             parts.push(quote_str(query));
             parts.push(top_k.to_string());
         }
-        self.r#where(format!("staged_retrieval({})", parts.join(", ")))
+        Ok(self.r#where(format!("staged_retrieval({})", parts.join(", "))))
     }
 
     /// Add `graph_pagerank('<graph>')` to WHERE.
@@ -221,6 +288,10 @@ impl<'a> QueryBuilder<'a> {
             sql.push_str(" WHERE ");
             sql.push_str(&self.filters.join(" AND "));
         }
+        if !self.group_by.is_empty() {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&self.group_by.join(", "));
+        }
         if !self.order_by.is_empty() {
             sql.push_str(" ORDER BY ");
             let pieces: Vec<String> = self
@@ -233,7 +304,6 @@ impl<'a> QueryBuilder<'a> {
                 .collect();
             sql.push_str(&pieces.join(", "));
         }
-        use std::fmt::Write as _;
         if let Some(limit) = self.limit {
             let _ = write!(sql, " LIMIT {limit}");
         }
@@ -295,7 +365,7 @@ impl<'a> QueryBuilder<'a> {
     pub fn term(self, term: &str, field: Option<&str>) -> Self {
         match field {
             Some(f) => self.text_match(f, term),
-            None => self.r#where(format!("text_match({})", quote_str(term))),
+            None => self.r#where(format!("fts_match('_all', {})", quote_str(term))),
         }
     }
 
@@ -339,13 +409,14 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Add a vector similarity filter via the
-    /// `vector_similarity_match` SQL function.
-    pub fn vector(self, query: &[f32], threshold: f32, field: &str) -> Self {
-        let arr = render_vector(query);
-        self.r#where(format!(
-            "vector_similarity_match({field}, ARRAY[{arr}], {threshold})"
-        ))
+    /// Add a nearest-neighbor vector retrieval predicate. This compatibility
+    /// name delegates to the registered `knn_match` SQL function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as [`Self::knn_match`].
+    pub fn vector(self, query: &[f32], k: usize, field: &str) -> Result<Self, SQLError> {
+        self.knn_match(field, query, k)
     }
 
     /// Promote the projection list to a single aggregate over `field`,
@@ -353,6 +424,7 @@ impl<'a> QueryBuilder<'a> {
     /// projections.
     pub fn aggregate(mut self, field: &str, agg: &str) -> Self {
         self.projections.clear();
+        self.group_by.clear();
         self.projections.push(format!("{agg}({field})"));
         self
     }
@@ -364,9 +436,7 @@ impl<'a> QueryBuilder<'a> {
         self.projections.clear();
         self.projections.push(field.to_string());
         self.projections.push("count(*) AS _facet_count".into());
-        // The engine's grouping picks the leading non-aggregate column
-        // automatically; for explicitness we surface a deterministic
-        // ORDER BY on the count.
+        self.group_by = vec![field.to_string()];
         self.order_by_desc("_facet_count")
     }
 
@@ -391,60 +461,103 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Add a `fuse_log_odds(...)` projection over a list of signals.
+    /// Add a `fuse_log_odds(...)` retrieval predicate over a list of signals.
     /// `signals` is a sequence of pre-rendered SQL expressions (e.g.
-    /// `text_match(...)`, `knn_match(...)`); the wrapper adds the
-    /// `alpha` argument verbatim.
-    pub fn fuse_log_odds(mut self, signals: &[&str], alpha: f64) -> Self {
+    /// `bayesian_match(...)`, `calibrated_vector_match(...)`); the wrapper
+    /// adds the `alpha` argument verbatim. The predicate executes through the
+    /// shared posting-list IR and supplies `_score` to the selected rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless at least two non-empty signal expressions are
+    /// supplied, or when `alpha` is non-finite or outside `[0, 1]`.
+    pub fn fuse_log_odds(self, signals: &[&str], alpha: f64) -> Result<Self, SQLError> {
+        validate_retrieval_signals("fuse_log_odds", signals, 2)?;
+        validate_fusion_alpha("fuse_log_odds", alpha)?;
         let inner = signals.join(", ");
-        self.projections
-            .push(format!("fuse_log_odds({inner}, {alpha})"));
-        self
+        Ok(self.r#where(format!("fuse_log_odds({inner}, {alpha})")))
     }
 
-    /// Add a `multi_stage(...)` projection that mirrors the canonical UQA implementation's
-    /// `multi_stage` builder. Each stage is `(signal, top_k)`.
-    pub fn multi_stage(mut self, stages: &[(&str, usize)]) -> Self {
+    /// Add a `staged_retrieval(...)` predicate from pre-rendered retrieval
+    /// signals paired with their `top_k` cutoffs. The builder method retains
+    /// its established name, while the generated SQL uses the registered
+    /// shared-IR function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when there are no stages, a signal expression is
+    /// empty, or a cutoff is zero or does not fit in SQL `BIGINT`.
+    pub fn multi_stage(self, stages: &[(&str, usize)]) -> Result<Self, SQLError> {
+        validate_stage_count(stages.len())?;
+        validate_stage_cutoffs(stages.iter().map(|(_, top_k)| *top_k))?;
+        if stages.iter().any(|(signal, _)| signal.trim().is_empty()) {
+            return Err(SQLError::TypeMismatch(
+                "staged_retrieval signal expressions cannot be empty".into(),
+            ));
+        }
         let mut parts: Vec<String> = Vec::with_capacity(stages.len() * 2);
         for (signal, top_k) in stages {
             parts.push((*signal).to_string());
             parts.push(top_k.to_string());
         }
-        self.projections
-            .push(format!("multi_stage({})", parts.join(", ")));
-        self
+        Ok(self.r#where(format!("staged_retrieval({})", parts.join(", "))))
     }
 
-    /// Multi-signal attention fusion. `signals` are pre-rendered SQL
-    /// expressions like `text_match('q')`, `knn_match('field', '[..]', k)`.
-    /// Matches UQA behavior for `QueryBuilder.fuse_attention`.
-    pub fn fuse_attention(mut self, signals: &[&str]) -> Self {
-        self.projections
-            .push(format!("attention({})", signals.join(", ")));
-        self
+    /// Add a multi-signal attention-fusion retrieval predicate. `signals`
+    /// must be probability-valued expressions such as `bayesian_match(...)`
+    /// or `calibrated_vector_match(...)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless at least two non-empty signal expressions are
+    /// supplied.
+    pub fn fuse_attention(self, signals: &[&str]) -> Result<Self, SQLError> {
+        validate_retrieval_signals("fuse_attention", signals, 2)?;
+        Ok(self.r#where(format!("fuse_attention({})", signals.join(", "))))
     }
 
-    /// Learned per-feature fusion using a saved `LearnedFusion` model.
-    /// Matches UQA behavior for `QueryBuilder.fuse_learned`.
-    pub fn fuse_learned(mut self, model: &str, signals: &[&str]) -> Self {
-        let mut parts = vec![quote_str(model)];
-        parts.extend(signals.iter().map(|s| (*s).to_string()));
-        self.projections
-            .push(format!("learned_fusion({})", parts.join(", ")));
-        self
+    /// Add a learned-fusion retrieval predicate over probability-valued
+    /// signals. `alpha` controls the conjunction strength and defaults to the
+    /// engine's `0.5` when omitted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless at least two non-empty signal expressions are
+    /// supplied, or when `alpha` is non-finite or outside `[0, 1]`.
+    pub fn fuse_learned(self, signals: &[&str], alpha: Option<f64>) -> Result<Self, SQLError> {
+        validate_retrieval_signals("fuse_learned", signals, 2)?;
+        let mut parts = signals
+            .iter()
+            .map(|signal| (*signal).to_string())
+            .collect::<Vec<_>>();
+        if let Some(alpha) = alpha {
+            validate_fusion_alpha("fuse_learned", alpha)?;
+            parts.push(format!("alpha => {alpha}"));
+        }
+        Ok(self.r#where(format!("fuse_learned({})", parts.join(", "))))
     }
 
-    /// Calibrated KNN with cosine probabilities. Matches UQA behavior for
-    /// `QueryBuilder.calibrated_vector_match`.
+    /// Add calibrated KNN retrieval to `WHERE`. Scores are probabilities, so
+    /// an optional threshold must be finite and in `[0, 1]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `field` is empty, `vector` is empty or contains
+    /// a non-finite component, `k` is zero or does not fit in SQL `BIGINT`, or
+    /// `threshold` is non-finite or outside `[0, 1]`.
     pub fn calibrated_vector_match(
-        mut self,
+        self,
         field: &str,
         vector: &[f32],
         k: usize,
         threshold: Option<f32>,
-    ) -> Self {
+    ) -> Result<Self, SQLError> {
+        validate_vector_query("calibrated_vector_match", field, vector, k)?;
+        if let Some(threshold) = threshold {
+            validate_probability_threshold("calibrated_vector_match", f64::from(threshold))?;
+        }
         let v = render_vector(vector);
-        let proj = match threshold {
+        let predicate = match threshold {
             Some(t) => format!(
                 "calibrated_vector_match({}, ARRAY[{v}], {k}, {t})",
                 quote_str(field)
@@ -454,8 +567,7 @@ impl<'a> QueryBuilder<'a> {
                 quote_str(field)
             ),
         };
-        self.projections.push(proj);
-        self
+        Ok(self.r#where(predicate))
     }
 
     /// `RPQ` (Regular Path Query) over a named graph. Matches UQA behavior for
@@ -505,25 +617,38 @@ impl<'a> QueryBuilder<'a> {
     /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
     /// fragment_size])` projection. Matches UQA behavior for `QueryBuilder`'s
     /// highlight helper.
-    pub fn highlight(mut self, field: &str, query: &str) -> Self {
-        self.projections.push(format!(
-            "uqa_highlight({}, {})",
-            quote_str(field),
-            quote_str(query)
-        ));
-        self
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `field` is empty.
+    pub fn highlight(mut self, field: &str, query: &str) -> Result<Self, SQLError> {
+        validate_field_name("uqa_highlight", field)?;
+        self.projections
+            .push(format!("uqa_highlight({field}, {})", quote_str(query)));
+        Ok(self)
     }
 
-    /// `uqa_facets(field [, field2, ...])` projection. Mirrors the canonical UQA implementation's
-    /// facet builder.
-    pub fn facets(mut self, fields: &[&str]) -> Self {
-        let inner = fields
-            .iter()
-            .map(|f| quote_str(f))
-            .collect::<Vec<_>>()
-            .join(", ");
+    /// `uqa_facets(field [, field2, ...])` projection. Fields are emitted as
+    /// column references because the engine groups the values in those
+    /// columns; string literals would facet the field names themselves.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no fields are supplied or a field name is empty.
+    pub fn facets(mut self, fields: &[&str]) -> Result<Self, SQLError> {
+        if fields.is_empty() {
+            return Err(SQLError::BadArity {
+                name: "uqa_facets".into(),
+                expected: ">=1 field".into(),
+                actual: 0,
+            });
+        }
+        for field in fields {
+            validate_field_name("uqa_facets", field)?;
+        }
+        let inner = fields.join(", ");
         self.projections.push(format!("uqa_facets({inner})"));
-        self
+        Ok(self)
     }
 
     /// `deep_learn(model, training_set)` projection. Mirrors the canonical UQA implementation's
@@ -580,12 +705,20 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn sparse_threshold(mut self, threshold: f64) -> Result<Self, SQLError> {
-        if self.filters.is_empty() {
+        if self.filters.len() != 1 {
             return Err(SQLError::TypeMismatch(
-                "sparse_threshold requires a source".into(),
+                "sparse_threshold requires a source and accepts exactly one retrieval filter"
+                    .into(),
             ));
         }
-        let source = self.filters.join(" AND ");
+        if !threshold.is_finite() {
+            return Err(SQLError::TypeMismatch(format!(
+                "sparse_threshold must be finite, got {threshold:?}"
+            )));
+        }
+        let source = self.filters.pop().ok_or_else(|| {
+            SQLError::Internal("validated sparse_threshold source disappeared".into())
+        })?;
         self.filters = vec![format!("sparse_threshold({source}, {threshold})")];
         Ok(self)
     }
@@ -607,6 +740,95 @@ impl<'a> QueryBuilder<'a> {
         }
         Ok(out)
     }
+}
+
+fn validate_retrieval_signals(
+    name: &str,
+    signals: &[&str],
+    minimum: usize,
+) -> Result<(), SQLError> {
+    if signals.len() < minimum {
+        return Err(SQLError::BadArity {
+            name: name.to_string(),
+            expected: format!(">={minimum} signals"),
+            actual: signals.len(),
+        });
+    }
+    if signals.iter().any(|signal| signal.trim().is_empty()) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} signal expressions cannot be empty"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_stage_count(count: usize) -> Result<(), SQLError> {
+    if count == 0 {
+        return Err(SQLError::BadArity {
+            name: "staged_retrieval".into(),
+            expected: ">=1 stage".into(),
+            actual: 0,
+        });
+    }
+    Ok(())
+}
+
+fn validate_stage_cutoffs(cutoffs: impl IntoIterator<Item = usize>) -> Result<(), SQLError> {
+    for cutoff in cutoffs {
+        validate_positive_sql_usize("staged_retrieval top_k", cutoff)?;
+    }
+    Ok(())
+}
+
+fn validate_vector_query(
+    name: &str,
+    field: &str,
+    vector: &[f32],
+    k: usize,
+) -> Result<(), SQLError> {
+    validate_field_name(name, field)?;
+    if vector.is_empty() || vector.iter().any(|component| !component.is_finite()) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} requires a non-empty finite query vector"
+        )));
+    }
+    validate_positive_sql_usize(&format!("{name} k"), k)
+}
+
+fn validate_field_name(name: &str, field: &str) -> Result<(), SQLError> {
+    if field.trim().is_empty() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} field name cannot be empty"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_positive_sql_usize(label: &str, value: usize) -> Result<(), SQLError> {
+    if value == 0 || i64::try_from(value).is_err() {
+        return Err(SQLError::TypeMismatch(format!(
+            "{label} must be positive and fit in a SQL BIGINT, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_fusion_alpha(name: &str, alpha: f64) -> Result<(), SQLError> {
+    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} alpha must be finite and in [0, 1], got {alpha:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_probability_threshold(name: &str, threshold: f64) -> Result<(), SQLError> {
+    if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+        return Err(SQLError::TypeMismatch(format!(
+            "{name} threshold must be finite and in [0, 1], got {threshold:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn render_vector(query: &[f32]) -> String {
@@ -670,7 +892,7 @@ fn sql_result_to_record_batch(result: &SQLResult) -> Result<RecordBatch, ArrowEr
         .iter()
         .zip(fields.iter())
         .map(|(column, field)| build_arrow_array(column, field.data_type(), result))
-        .collect();
+        .collect::<Result<_, _>>()?;
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
 }
 
@@ -702,7 +924,14 @@ fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
         ty = Some(match (ty, next) {
             (None, dt) => dt,
             (Some(DataType::Int64), DataType::Float64)
-            | (Some(DataType::Float64), DataType::Int64 | DataType::Float64) => DataType::Float64,
+            | (Some(DataType::Float64), DataType::Int64) => {
+                if column_integers_fit_f64(column, result) {
+                    DataType::Float64
+                } else {
+                    DataType::Utf8
+                }
+            }
+            (Some(DataType::Float64), DataType::Float64) => DataType::Float64,
             (Some(current), dt) if current == dt => current,
             _ => DataType::Utf8,
         });
@@ -713,39 +942,31 @@ fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
     ty.unwrap_or(DataType::Utf8)
 }
 
-fn build_arrow_array(column: &str, data_type: &DataType, result: &SQLResult) -> ArrayRef {
-    match data_type {
-        DataType::Boolean => Arc::new(BooleanArray::from(
-            result
-                .rows
-                .iter()
-                .map(|row| match row.get(column) {
-                    Some(Value::Bool(v)) => Some(*v),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-        )),
-        DataType::Int64 => Arc::new(Int64Array::from(
-            result
-                .rows
-                .iter()
-                .map(|row| match row.get(column) {
-                    Some(Value::Int(v)) => Some(*v),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-        )),
-        DataType::Float64 => Arc::new(Float64Array::from(
-            result
-                .rows
-                .iter()
-                .map(|row| match row.get(column) {
-                    Some(Value::Float(v)) => Some(*v),
-                    Some(Value::Int(v)) => Some(*v as f64),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-        )),
+fn build_arrow_array(
+    column: &str,
+    data_type: &DataType,
+    result: &SQLResult,
+) -> Result<ArrayRef, ArrowError> {
+    let array: ArrayRef = match data_type {
+        DataType::Boolean => Arc::new(BooleanArray::from(collect_typed_column(
+            column,
+            result,
+            |value| match value {
+                Value::Bool(value) => Some(*value),
+                _ => None,
+            },
+            "boolean",
+        )?)),
+        DataType::Int64 => Arc::new(Int64Array::from(collect_typed_column(
+            column,
+            result,
+            |value| match value {
+                Value::Int(value) => Some(*value),
+                _ => None,
+            },
+            "int64",
+        )?)),
+        DataType::Float64 => Arc::new(Float64Array::from(collect_float_column(column, result)?)),
         _ => Arc::new(StringArray::from(
             result
                 .rows
@@ -753,6 +974,82 @@ fn build_arrow_array(column: &str, data_type: &DataType, result: &SQLResult) -> 
                 .map(|row| row.get(column).and_then(value_to_arrow_string))
                 .collect::<Vec<_>>(),
         )),
+    };
+    Ok(array)
+}
+
+fn collect_typed_column<T, F>(
+    column: &str,
+    result: &SQLResult,
+    convert: F,
+    expected: &str,
+) -> Result<Vec<Option<T>>, ArrowError>
+where
+    F: Fn(&Value) -> Option<T>,
+{
+    result
+        .rows
+        .iter()
+        .map(|row| match row.get(column) {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => convert(value).map(Some).ok_or_else(|| {
+                ArrowError::CastError(format!(
+                    "column `{column}` contains {} where {expected} was inferred",
+                    value_kind(value)
+                ))
+            }),
+        })
+        .collect()
+}
+
+fn collect_float_column(column: &str, result: &SQLResult) -> Result<Vec<Option<f64>>, ArrowError> {
+    result
+        .rows
+        .iter()
+        .map(|row| match row.get(column) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Float(value)) => Ok(Some(*value)),
+            Some(Value::Int(value)) => i64_to_f64_exact(*value).map(Some).ok_or_else(|| {
+                ArrowError::CastError(format!(
+                    "column `{column}` integer {value} cannot be represented exactly as float64"
+                ))
+            }),
+            Some(value) => Err(ArrowError::CastError(format!(
+                "column `{column}` contains {} where float64 was inferred",
+                value_kind(value)
+            ))),
+        })
+        .collect()
+}
+
+fn column_integers_fit_f64(column: &str, result: &SQLResult) -> bool {
+    result.rows.iter().all(|row| {
+        !matches!(
+            row.get(column),
+            Some(Value::Int(value)) if i64_to_f64_exact(*value).is_none()
+        )
+    })
+}
+
+fn i64_to_f64_exact(value: i64) -> Option<f64> {
+    const MAX_SAFE_INTEGER: i64 = 1_i64 << 53;
+    (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER)
+        .contains(&value)
+        .then_some(value as f64)
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Int(_) => "integer",
+        Value::Float(_) => "float",
+        Value::Decimal(_) => "decimal",
+        Value::Str(_) => "string",
+        Value::Bytes(_) => "bytes",
+        Value::Temporal(_) => "temporal",
+        Value::List(_) => "list",
+        Value::Map(_) => "map",
     }
 }
 
@@ -771,21 +1068,49 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
     }
 }
 
-fn render_value(value: &Value) -> String {
-    match value {
-        Value::Null | Value::Map(_) => "NULL".into(),
+fn render_value(value: &Value) -> Result<String, SQLError> {
+    let rendered = match value {
+        Value::Null => "NULL".into(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Float(f) => format!("{f}"),
+        Value::Float(f) if f.is_finite() => format!("{f}"),
+        Value::Float(f) => {
+            return Err(SQLError::TypeMismatch(format!(
+                "non-finite filter value `{f}` cannot be rendered as SQL"
+            )));
+        }
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => quote_str(s),
-        Value::Bytes(b) => quote_str(&format!("<{} bytes>", b.len())),
+        Value::Bytes(bytes) => format!("decode('{}', 'hex')", hex_encode(bytes)?),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),
         Value::List(items) => {
-            let inner: Vec<String> = items.iter().map(render_value).collect();
+            let inner: Vec<String> = items.iter().map(render_value).collect::<Result<_, _>>()?;
             format!("ARRAY[{}]", inner.join(", "))
         }
+        Value::Map(_) => {
+            return Err(SQLError::TypeMismatch(
+                "map filter values do not have an unambiguous SQL literal".into(),
+            ));
+        }
+    };
+    Ok(rendered)
+}
+
+fn hex_encode(bytes: &[u8]) -> Result<String, SQLError> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| SQLError::TypeMismatch("byte literal length overflow".into()))?;
+    let mut encoded = String::new();
+    encoded
+        .try_reserve_exact(capacity)
+        .map_err(|error| SQLError::TypeMismatch(format!("allocate byte literal: {error}")))?;
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
+    Ok(encoded)
 }
 
 fn quote_str(s: &str) -> String {
@@ -795,6 +1120,8 @@ fn quote_str(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
@@ -810,8 +1137,8 @@ mod tests {
 
     #[test]
     fn render_int_and_string() {
-        assert_eq!(render_value(&Value::Int(7)), "7");
-        assert_eq!(render_value(&Value::Str("hi".into())), "'hi'");
+        assert_eq!(render_value(&Value::Int(7)).unwrap(), "7");
+        assert_eq!(render_value(&Value::Str("hi".into())).unwrap(), "'hi'");
     }
 
     #[test]
@@ -822,6 +1149,39 @@ mod tests {
     #[test]
     fn render_list_uses_array_literal() {
         let v = Value::List(vec![Value::Int(1), Value::Int(2)]);
-        assert_eq!(render_value(&v), "ARRAY[1, 2]");
+        assert_eq!(render_value(&v).unwrap(), "ARRAY[1, 2]");
+    }
+
+    #[test]
+    fn mixed_numeric_arrow_output_does_not_round_large_integers() {
+        let result = SQLResult::from_rows(
+            vec!["value".into()],
+            vec![
+                BTreeMap::from([("value".into(), Value::Int(i64::MAX))]),
+                BTreeMap::from([("value".into(), Value::Float(1.5))]),
+            ],
+        );
+        assert_eq!(infer_arrow_type("value", &result), DataType::Utf8);
+        let batch = sql_result_to_record_batch(&result).expect("lossless string batch");
+        let values = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("utf8 array");
+        assert_eq!(values.value(0), i64::MAX.to_string());
+    }
+
+    #[test]
+    fn forced_metadata_type_mismatch_is_an_arrow_error() {
+        let result = SQLResult::from_rows(
+            vec!["_doc_id".into()],
+            vec![BTreeMap::from([(
+                "_doc_id".into(),
+                Value::Str("not an id".into()),
+            )])],
+        );
+        let error = sql_result_to_record_batch(&result)
+            .expect_err("a string document id must not silently become null");
+        assert!(error.to_string().contains("int64 was inferred"));
     }
 }

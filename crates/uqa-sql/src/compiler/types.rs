@@ -69,14 +69,16 @@ pub(super) fn validate_foreign_key_set_columns(
     Ok(())
 }
 
-pub(super) fn raw_type_name(col: &pg_query::protobuf::ColumnDef) -> Option<String> {
-    let type_name = col.type_name.as_ref()?;
-    let names: Vec<String> = type_name
+pub(super) fn raw_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<Option<String>> {
+    let Some(type_name) = col.type_name.as_ref() else {
+        return Ok(None);
+    };
+    let names = type_name
         .names
         .iter()
-        .filter_map(|n| extract_string(n).ok())
-        .collect();
-    Some(names.last().cloned().unwrap_or_default().to_lowercase())
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(names.last().map(|name| name.to_lowercase()))
 }
 
 pub(super) fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<ColumnType> {
@@ -93,21 +95,34 @@ pub(super) fn compile_pg_type_name(
     type_name: &pg_query::protobuf::TypeName,
     column_name: &str,
 ) -> Result<ColumnType> {
-    let names: Vec<String> = type_name
+    let names = type_name
         .names
         .iter()
-        .filter_map(|n| extract_string(n).ok())
-        .collect();
-    let raw = names.last().cloned().unwrap_or_default().to_lowercase();
-    match raw.as_str() {
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    let raw = names
+        .last()
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "type name for `{column_name}` has no name components"
+            ))
+        })?
+        .to_lowercase();
+    let base = match raw.as_str() {
         "int" | "int4" | "integer" | "bigint" | "int8" | "smallint" | "int2" | "serial"
         | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
         "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
             Ok(ColumnType::Text)
         }
-        "bool" | "boolean" => Ok(ColumnType::Integer),
+        "bool" | "boolean" => Ok(ColumnType::Boolean),
         "real" | "float4" | "float8" | "double" | "double precision" => Ok(ColumnType::Real),
         "numeric" | "decimal" => {
+            if type_name.typmods.len() > 2 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "NUMERIC accepts at most precision and scale, got {} modifiers",
+                    type_name.typmods.len()
+                )));
+            }
             let mut typmods_iter = type_name.typmods.iter();
             let precision = typmods_iter
                 .next()
@@ -148,28 +163,54 @@ pub(super) fn compile_pg_type_name(
         "bytea" => Ok(ColumnType::Bytea),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
-            let Some(arg) = type_name.typmods.first() else {
+            let [arg] = type_name.typmods.as_slice() else {
                 return Err(SQLError::Unsupported(
-                    "VECTOR without dimension is not supported".into(),
+                    "VECTOR requires exactly one dimension".into(),
                 ));
             };
-            let dim = expect_integer_const(arg)? as u32;
+            let raw_dim = expect_integer_const(arg)?;
+            let dim = u32::try_from(raw_dim).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "VECTOR dimension must be between 1 and {}, got {raw_dim}",
+                    u32::MAX
+                ))
+            })?;
+            if dim == 0 {
+                return Err(SQLError::TypeMismatch(
+                    "VECTOR dimension must be greater than zero".into(),
+                ));
+            }
             Ok(ColumnType::Vector(dim))
         }
         "tensor" => {
             // TENSOR(N): an array of N-dimensional vectors.
-            let Some(arg) = type_name.typmods.first() else {
+            let [arg] = type_name.typmods.as_slice() else {
                 return Err(SQLError::Unsupported(
-                    "TENSOR without dimension is not supported".into(),
+                    "TENSOR requires exactly one dimension".into(),
                 ));
             };
-            let dim = expect_integer_const(arg)? as u32;
+            let raw_dim = expect_integer_const(arg)?;
+            let dim = u32::try_from(raw_dim).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "TENSOR dimension must be between 1 and {}, got {raw_dim}",
+                    u32::MAX
+                ))
+            })?;
+            if dim == 0 {
+                return Err(SQLError::TypeMismatch(
+                    "TENSOR dimension must be greater than zero".into(),
+                ));
+            }
             Ok(ColumnType::Tensor(dim))
         }
         other => Err(SQLError::Unsupported(format!(
             "column `{column_name}` type `{other}` is not supported"
         ))),
-    }
+    }?;
+    Ok(type_name
+        .array_bounds
+        .iter()
+        .fold(base, |element, _| ColumnType::Array(Box::new(element))))
 }
 
 fn expect_integer_const(node: &Node) -> Result<i64> {
@@ -179,11 +220,14 @@ fn expect_integer_const(node: &Node) -> Result<i64> {
     match inner {
         NodeEnum::AConst(c) => match &c.val {
             Some(pg_query::protobuf::a_const::Val::Ival(i)) => Ok(i64::from(i.ival)),
-            Some(pg_query::protobuf::a_const::Val::Fval(f)) => f
-                .fval
-                .parse::<f64>()
-                .map(|v| v as i64)
-                .map_err(|e| SQLError::Internal(e.to_string())),
+            Some(pg_query::protobuf::a_const::Val::Fval(f)) => {
+                f.fval.parse::<i64>().map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "type modifier must be an integer, got `{}`",
+                        f.fval
+                    ))
+                })
+            }
             other => Err(SQLError::Internal(format!(
                 "expected integer constant, got {other:?}"
             ))),

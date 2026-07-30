@@ -22,13 +22,13 @@ impl FixedOperator {
 }
 
 impl Operator for FixedOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-        PostingList::from_unsorted(
+    fn execute(&self, _ctx: &ExecutionContext) -> uqa_storage::StorageBackendResult<PostingList> {
+        Ok(PostingList::from_unsorted(
             self.entries
                 .iter()
                 .map(|(doc_id, score)| PostingEntry::new(*doc_id, Payload::with_score(*score)))
                 .collect(),
-        )
+        ))
     }
 }
 
@@ -43,7 +43,7 @@ fn two_stage_basic() {
     let sig3 = op(vec![(1, 0.7), (2, 0.5)]);
 
     let op = ProgressiveFusionOperator::new(vec![(vec![sig1, sig2], 3), (vec![sig3], 2)], 0.5);
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     let doc_ids: Vec<_> = result.doc_ids().collect();
     assert_eq!(result.len(), 2);
     assert!(doc_ids.contains(&1));
@@ -55,7 +55,7 @@ fn single_stage_equivalence() {
     let sig2 = op(vec![(1, 0.8), (2, 0.2)]);
 
     let op = ProgressiveFusionOperator::new(vec![(vec![sig1, sig2], 1)], 0.5);
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result.entries()[0].doc_id, 1);
 }
@@ -76,7 +76,7 @@ fn three_stage_narrowing() {
         vec![(vec![sig1], 8), (vec![sig2], 5), (vec![sig3], 3)],
         0.5,
     );
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     assert_eq!(result.len(), 3);
 }
 
@@ -103,10 +103,10 @@ fn gating_changes_progressive_fusion_scores() {
         Some("pass".into()),
     );
 
-    let relu_score = relu.execute(&ExecutionContext::new()).entries()[0]
+    let relu_score = relu.execute(&ExecutionContext::new()).unwrap().entries()[0]
         .payload
         .score;
-    let pass_score = pass.execute(&ExecutionContext::new()).entries()[0]
+    let pass_score = pass.execute(&ExecutionContext::new()).unwrap().entries()[0]
         .payload
         .score;
     assert!((relu_score - 0.5).abs() < 1e-12);
@@ -114,9 +114,31 @@ fn gating_changes_progressive_fusion_scores() {
 }
 
 #[test]
-#[should_panic(expected = "at least one stage")]
-fn empty_stages_raises() {
-    let _ = ProgressiveFusionOperator::new(Vec::new(), 0.5);
+fn malformed_configuration_returns_operator_errors() {
+    let empty = ProgressiveFusionOperator::new(Vec::new(), 0.5);
+    assert!(empty
+        .execute(&ExecutionContext::new())
+        .unwrap_err()
+        .to_string()
+        .contains("at least one stage"));
+
+    let nan_alpha = ProgressiveFusionOperator::new(vec![(vec![op(vec![(1, 0.8)])], 1)], f64::NAN);
+    assert!(nan_alpha
+        .execute(&ExecutionContext::new())
+        .unwrap_err()
+        .to_string()
+        .contains("alpha must be finite"));
+
+    let bad_gating = ProgressiveFusionOperator::with_gating(
+        vec![(vec![op(vec![(1, 0.8)])], 1)],
+        0.5,
+        Some("typo".into()),
+    );
+    assert!(bad_gating
+        .execute(&ExecutionContext::new())
+        .unwrap_err()
+        .to_string()
+        .contains("unknown gating"));
 }
 
 #[test]
@@ -125,7 +147,7 @@ fn scores_are_probabilities() {
     let sig2 = op(vec![(1, 0.8), (2, 0.5), (3, 0.3)]);
 
     let op = ProgressiveFusionOperator::new(vec![(vec![sig1, sig2], 3)], 0.5);
-    let result = op.execute(&ExecutionContext::new());
+    let result = op.execute(&ExecutionContext::new()).unwrap();
     for entry in &result {
         assert!(entry.payload.score > 0.0);
         assert!(entry.payload.score < 1.0);

@@ -158,7 +158,7 @@ fn cte_cleanup() {
         &engine,
         "WITH temp_cte AS (SELECT 1 AS val) SELECT val FROM temp_cte",
     );
-    assert!(!engine.has_table("temp_cte"));
+    assert!(!engine.has_table("temp_cte").unwrap());
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn recursive_count() {
 }
 
 #[test]
-fn recursive_cte_applies_output_filter_to_working_branch() {
+fn recursive_cte_does_not_push_output_filter_across_volatile_projection() {
     let engine = Engine::new();
     let calls = Arc::new(AtomicUsize::new(0));
     engine
@@ -341,11 +341,11 @@ fn recursive_cte_applies_output_filter_to_working_branch() {
     );
 
     assert_eq!(result.rows[0]["cnt"], Value::Int(3));
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 12);
 }
 
 #[test]
-fn recursive_cte_view_applies_outer_output_filter_to_working_branch() {
+fn recursive_cte_view_preserves_volatile_materialization_before_outer_filter() {
     let engine = Engine::new();
     let calls = Arc::new(AtomicUsize::new(0));
     engine
@@ -376,7 +376,34 @@ fn recursive_cte_view_applies_outer_output_filter_to_working_branch() {
     let result = exec(&engine, "SELECT cnt FROM walked WHERE player_id = 1");
 
     assert_eq!(result.rows[0]["cnt"], Value::Int(3));
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 12);
+}
+
+#[test]
+fn cte_output_filter_does_not_duplicate_registered_volatile_projection() {
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_scalar_function(
+            "count_calls",
+            CountCalls {
+                calls: Arc::clone(&calls),
+            },
+        )
+        .unwrap();
+    exec(&engine, "CREATE TABLE seeds(id INTEGER PRIMARY KEY)");
+    exec(&engine, "INSERT INTO seeds(id) VALUES (1), (2), (3), (4)");
+
+    let result = exec(
+        &engine,
+        "WITH counted AS (
+             SELECT id, count_calls() AS marker FROM seeds
+         )
+         SELECT id FROM counted WHERE marker > 0 ORDER BY id",
+    );
+
+    assert_eq!(result.rows.len(), 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]

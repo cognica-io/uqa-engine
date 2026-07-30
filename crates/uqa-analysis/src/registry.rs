@@ -17,6 +17,7 @@ use parking_lot::RwLock;
 use crate::analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
 };
+use crate::error::AnalysisError;
 
 /// Built-in default analyzer name.
 pub const DEFAULT_ANALYZER_NAME: &str = "standard";
@@ -29,6 +30,12 @@ pub enum RegistryError {
     DropBuiltin(String),
     #[error("analyzer does not exist: {0:?}")]
     NotFound(String),
+    #[error("analyzer {name:?} has invalid configuration: {source}")]
+    InvalidConfig {
+        name: String,
+        #[source]
+        source: AnalysisError,
+    },
 }
 
 fn builtins() -> &'static BTreeMap<&'static str, Analyzer> {
@@ -53,6 +60,12 @@ pub fn register_analyzer(name: impl Into<String>, analyzer: Analyzer) -> Result<
     if builtins().contains_key(name.as_str()) {
         return Err(RegistryError::OverwriteBuiltin(name));
     }
+    analyzer
+        .validate()
+        .map_err(|source| RegistryError::InvalidConfig {
+            name: name.clone(),
+            source,
+        })?;
     custom().write().insert(name, analyzer);
     Ok(())
 }
@@ -117,5 +130,23 @@ mod tests {
     fn cannot_drop_builtin() {
         let err = drop_analyzer("standard").unwrap_err();
         assert!(matches!(err, RegistryError::DropBuiltin(_)));
+    }
+
+    #[test]
+    fn invalid_custom_analyzer_is_not_published() {
+        let analyzer = Analyzer::new(
+            crate::Tokenizer::NGram {
+                min_gram: 0,
+                max_gram: 2,
+            },
+            Vec::new(),
+            Vec::new(),
+        );
+        let error = register_analyzer("invalid_custom", analyzer).unwrap_err();
+        assert!(matches!(error, RegistryError::InvalidConfig { .. }));
+        assert!(matches!(
+            get_analyzer("invalid_custom"),
+            Err(RegistryError::NotFound(_))
+        ));
     }
 }

@@ -168,6 +168,62 @@ impl KeyValueStore for SQLiteKeyValueStore {
             .map_err(StorageBackendError::from)
     }
 
+    fn first_prefix_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+    ) -> StorageBackendResult<Option<(Vec<u8>, Vec<u8>)>> {
+        self.ensure_table()?;
+        let upper = prefix_upper_bound(prefix);
+        self.conn
+            .with(|connection| {
+                let row = match (after, upper) {
+                    (Some(after), Some(upper)) => connection
+                        .prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1 AND key < ?2
+                             ORDER BY key LIMIT 1"
+                        ))?
+                        .query_row(params![after, upper], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })
+                        .optional()?,
+                    (Some(after), None) => connection
+                        .prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1
+                             ORDER BY key LIMIT 1"
+                        ))?
+                        .query_row(params![after], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })
+                        .optional()?,
+                    (None, Some(upper)) => connection
+                        .prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1 AND key < ?2
+                             ORDER BY key LIMIT 1"
+                        ))?
+                        .query_row(params![prefix, upper], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })
+                        .optional()?,
+                    (None, None) => connection
+                        .prepare_cached(&format!(
+                            "SELECT key, value FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1
+                             ORDER BY key LIMIT 1"
+                        ))?
+                        .query_row(params![prefix], |row| {
+                            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+                        })
+                        .optional()?,
+                };
+                Ok(row.filter(|(key, _)| key.starts_with(prefix)))
+            })
+            .map_err(StorageBackendError::from)
+    }
+
     fn delete_prefix(&self, prefix: &[u8]) -> StorageBackendResult<usize> {
         self.ensure_table()?;
         let upper = prefix_upper_bound(prefix);
@@ -409,18 +465,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            docs.get_field(1, "title"),
+            docs.get_field(1, "title").unwrap(),
             Some(Value::Str("rust search".into()))
         );
 
         let mut index = backend.inverted_index("articles", standard_analyzer("english"));
-        index.add_document(1, BTreeMap::from([("title".into(), "rust search".into())]));
-        assert_eq!(index.doc_freq("title", "rust"), 1);
+        index
+            .add_document(1, BTreeMap::from([("title".into(), "rust search".into())]))
+            .unwrap();
+        assert_eq!(index.doc_freq("title", "rust").unwrap(), 1);
 
         let mut vectors = backend.vector_index("articles", "embedding", 2, None);
-        vectors.add(1, vec![1.0, 0.0]);
-        vectors.add(2, vec![0.0, 1.0]);
-        let hits = vectors.search_knn(&[1.0, 0.0], 1);
+        vectors.add(1, vec![1.0, 0.0]).unwrap();
+        vectors.add(2, vec![0.0, 1.0]).unwrap();
+        let hits = vectors.search_knn(&[1.0, 0.0], 1).unwrap();
         assert_eq!(hits.entries()[0].doc_id, 1);
     }
 
@@ -429,13 +487,15 @@ mod tests {
         let storage = SQLiteKeyValueStorage::open_in_memory().unwrap();
         let catalog = storage.catalog();
         catalog.set_metadata("schema_version", "keyvalue").unwrap();
+        catalog.save_schema("public").unwrap();
         catalog
             .save_table(&TableSchema {
-                name: "docs".into(),
+                relation: uqa_storage::RelationIdentity::new("public", "docs"),
                 analyzer_json: "{}".into(),
                 fts_fields: vec!["title".into()],
                 vector_fields: Vec::new(),
                 columns_json: "[]".into(),
+                constraints_json: String::new(),
             })
             .unwrap();
         catalog
@@ -466,7 +526,10 @@ mod tests {
             catalog.get_metadata("schema_version").unwrap().as_deref(),
             Some("keyvalue")
         );
-        assert_eq!(catalog.load_tables().unwrap()[0].name, "docs");
+        assert_eq!(
+            catalog.load_tables().unwrap()[0].relation.qualified_name(),
+            "public.docs"
+        );
         assert_eq!(catalog.load_analyzers().unwrap()[0].0, "ko");
         assert_eq!(catalog.load_foreign_servers().unwrap()[0].0, "fs");
         assert_eq!(

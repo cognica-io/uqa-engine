@@ -7,7 +7,7 @@
 //! `LearnedFusion` property tests (Paper 4 Section 8).
 //!
 //! Pins:
-//! - `n = 0` returns `0.5` (neutral fallback),
+//! - `n = 0` and model/input arity mismatches return an error,
 //! - `n = 1` returns the single probability unchanged,
 //! - `fuse` output is in `[0, 1]` for any input,
 //! - when raw weights are all equal, `fuse` collapses to the
@@ -43,19 +43,19 @@ proptest! {
     #[test]
     fn fuse_output_in_unit_interval(
         (probs, weights) in arb_probs_weights(),
-        alpha in 0.0f64..2.0,
+        alpha in 0.0f64..=1.0,
     ) {
         let mut f = LearnedFusion::new(probs.len(), alpha);
         f.weights = weights;
-        let p = f.fuse(&probs);
+        let p = f.fuse(&probs).expect("generated shapes match");
         prop_assert!((0.0..=1.0).contains(&p), "fuse returned {p}");
     }
 
     /// `n = 1` is the identity: `fuse([p]) == p`.
     #[test]
-    fn n1_identity(p in safe_prob(), alpha in 0.0f64..2.0) {
+    fn n1_identity(p in safe_prob(), alpha in 0.0f64..=1.0) {
         let f = LearnedFusion::new(1, alpha);
-        let got = f.fuse(&[p]);
+        let got = f.fuse(&[p]).expect("generated shapes match");
         prop_assert!((got - p).abs() < 1e-12, "fuse([{p}]) = {got}");
     }
 
@@ -69,7 +69,7 @@ proptest! {
     ) {
         let mut f = LearnedFusion::new(probs.len(), 0.0);
         f.weights = vec![w; probs.len()];
-        let got = f.fuse(&probs);
+        let got = f.fuse(&probs).expect("generated shapes match");
         let n = probs.len() as f64;
         let expected = sigmoid(probs.iter().map(|&p| logit(p)).sum::<f64>() / n);
         prop_assert!(
@@ -83,11 +83,11 @@ proptest! {
     #[test]
     fn fuse_pair_permutation_invariant(
         (probs, weights) in arb_probs_weights(),
-        alpha in 0.0f64..2.0,
+        alpha in 0.0f64..=1.0,
     ) {
         let mut f = LearnedFusion::new(probs.len(), alpha);
         f.weights = weights.clone();
-        let direct = f.fuse(&probs);
+        let direct = f.fuse(&probs).expect("generated shapes match");
 
         let mut order: Vec<usize> = (0..probs.len()).collect();
         order.reverse();
@@ -96,7 +96,9 @@ proptest! {
 
         let mut g = LearnedFusion::new(permuted_probs.len(), alpha);
         g.weights = permuted_weights;
-        let permuted = g.fuse(&permuted_probs);
+        let permuted = g
+            .fuse(&permuted_probs)
+            .expect("generated shapes match");
         prop_assert!(
             (direct - permuted).abs() < 1e-9,
             "fuse changed under (prob, weight) permutation: {direct} vs {permuted}",
@@ -106,13 +108,36 @@ proptest! {
 
 /// Concrete edge cases.
 #[test]
-fn empty_input_returns_neutral() {
+fn empty_input_returns_error() {
     let f = LearnedFusion::new(0, 0.5);
-    assert_eq!(f.fuse(&[]), 0.5);
+    assert_eq!(
+        f.fuse(&[]),
+        Err("learned fusion requires at least one signal")
+    );
 }
 
 #[test]
 fn fuse_single_prob_returns_it() {
     let f = LearnedFusion::new(1, 0.5);
-    assert!((f.fuse(&[0.7]) - 0.7).abs() < 1e-12);
+    assert!((f.fuse(&[0.7]).expect("matching model arity") - 0.7).abs() < 1e-12);
+}
+
+#[test]
+fn mismatched_model_arity_returns_error() {
+    let f = LearnedFusion::new(2, 0.5);
+    assert_eq!(
+        f.fuse(&[0.7]),
+        Err("learned fusion signal count does not match the model")
+    );
+}
+
+#[test]
+fn invalid_learned_alpha_returns_error() {
+    for alpha in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+        let fusion = LearnedFusion::new(2, alpha);
+        assert_eq!(
+            fusion.fuse(&[0.7, 0.6]),
+            Err("learned fusion alpha must be finite and in [0, 1]")
+        );
+    }
 }

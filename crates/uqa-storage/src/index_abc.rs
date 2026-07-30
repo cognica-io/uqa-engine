@@ -24,7 +24,7 @@ use crate::index_types::IndexDef;
 pub trait Index: Send + Sync {
     fn index_def(&self) -> &IndexDef;
     fn scan(&self, predicate: &Predicate) -> PostingList;
-    fn estimate_cardinality(&self, predicate: &Predicate) -> u64;
+    fn estimate_cardinality(&self, predicate: &Predicate) -> usize;
     fn scan_cost(&self, predicate: &Predicate) -> f64;
     fn build(&mut self) -> Result<(), crate::SQLiteError>;
     /// Tear down the physical index. Avoids the name `drop` so it does

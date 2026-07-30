@@ -263,12 +263,12 @@ fn physical_subqueries_run_across_relational_scalar_sites() {
     assert_eq!(highlighted.rows[0]["h"], Value::Str("<b>Alice</b>".into()));
 
     query(&engine, "SELECT create_graph((SELECT 'physical_graph'))");
-    assert!(engine.has_graph("physical_graph"));
+    assert!(engine.has_graph("physical_graph").unwrap());
     query(
         &engine,
         "SELECT drop_graph((SELECT 'physical_graph'), (SELECT true))",
     );
-    assert!(!engine.has_graph("physical_graph"));
+    assert!(!engine.has_graph("physical_graph").unwrap());
 
     let joined = query(
         &engine,
@@ -340,4 +340,34 @@ fn multiple_subquery_conditions() {
          ORDER BY name",
     );
     assert_eq!(names(&result), vec!["Alice", "Carol"]);
+}
+
+#[test]
+fn nested_subquery_uses_the_child_query_arena() {
+    let engine = setup();
+    let result = query(
+        &engine,
+        "SELECT EXISTS (
+             SELECT 1 FROM employees e
+             WHERE e.id = (SELECT MAX(id) FROM employees)
+         ) AS found",
+    );
+    assert_eq!(result.rows[0]["found"], Value::Bool(true));
+}
+
+#[test]
+fn lateral_set_operation_uses_its_own_limit_subquery_arena() {
+    let engine = setup();
+    let result = query(
+        &engine,
+        "SELECT (
+             SELECT 7 AS n
+             UNION ALL
+             SELECT 8
+             LIMIT (SELECT 1)
+         ) AS picked
+         FROM employees
+         WHERE id = 1",
+    );
+    assert_eq!(result.rows[0]["picked"], Value::Int(7));
 }

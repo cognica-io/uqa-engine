@@ -25,6 +25,8 @@ use crate::vector_index::VectorIndex;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
+    #[error("text analysis failed: {0}")]
+    Analysis(#[from] uqa_analysis::AnalysisError),
     #[error(transparent)]
     SQLite(#[from] SQLiteError),
     #[error("payload serialization failed: {0}")]
@@ -122,6 +124,13 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn begin_transaction(&self) -> StorageBackendResult<()>;
 
+    /// Begin a transaction whose first operation is expected to be a read.
+    /// Backends with distinct lock modes may defer write-lock acquisition;
+    /// the default preserves existing transaction semantics.
+    fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.begin_transaction()
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()>;
 
     fn rollback_transaction(&self) -> StorageBackendResult<()>;
@@ -145,6 +154,13 @@ impl SQLiteStorageBackend {
 
     pub fn connection(&self) -> ManagedConnection {
         self.conn.clone()
+    }
+
+    /// Create a backend whose stores use an independent transaction session
+    /// over the same physical `SQLite` pool.
+    #[must_use]
+    pub fn new_session(&self) -> Self {
+        Self::new(self.conn.new_session())
     }
 }
 
@@ -253,6 +269,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.conn.begin_deferred_transaction()?;
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         self.conn.commit_transaction()?;
         Ok(())
@@ -300,7 +321,7 @@ mod tests {
         let mut docs = backend.document_store("articles");
         docs.put(1, doc).unwrap();
         assert_eq!(
-            docs.get_field(1, "title"),
+            docs.get_field(1, "title").unwrap(),
             Some(Value::Str("rust storage".into()))
         );
 
@@ -308,8 +329,9 @@ mod tests {
         inv.add_document(
             1,
             BTreeMap::from([("title".to_string(), "rust storage".to_string())]),
-        );
-        assert_eq!(inv.doc_freq("title", "rust"), 1);
+        )
+        .unwrap();
+        assert_eq!(inv.doc_freq("title", "rust").unwrap(), 1);
 
         let mut vectors = backend.vector_index(
             "articles",
@@ -322,8 +344,8 @@ mod tests {
                 initialize: true,
             }),
         );
-        vectors.add(1, vec![1.0, 0.0]);
-        let hits = vectors.search_knn(&[1.0, 0.0], 1);
+        vectors.add(1, vec![1.0, 0.0]).unwrap();
+        let hits = vectors.search_knn(&[1.0, 0.0], 1).unwrap();
         assert_eq!(hits.entries().len(), 1);
         assert_eq!(hits.entries()[0].doc_id, 1);
     }
@@ -345,10 +367,129 @@ mod tests {
         inv.add_document(
             1,
             BTreeMap::from([("title".to_string(), "rollback".to_string())]),
-        );
+        )
+        .unwrap();
         backend.rollback_transaction().unwrap();
 
-        assert_eq!(docs.len(), 0);
-        assert_eq!(inv.doc_freq("title", "rollback"), 0);
+        assert_eq!(docs.len().unwrap(), 0);
+        assert_eq!(inv.doc_freq("title", "rollback").unwrap(), 0);
+    }
+
+    #[test]
+    fn sqlite_sessions_isolate_and_atomically_commit_cross_store_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cross-store-isolation.sqlite3");
+        let conn = ManagedConnection::open(&path).unwrap();
+        let catalog = Catalog::open(conn.clone()).unwrap();
+        let writer = SQLiteStorageBackend::new(conn.clone());
+        let observer_conn = conn.new_session();
+        let observer_catalog = Catalog::open(observer_conn.clone()).unwrap();
+        let observer = SQLiteStorageBackend::new(observer_conn);
+
+        let mut writer_docs = writer.document_store("articles");
+        let mut writer_inv = writer.inverted_index("articles", standard_analyzer("english"));
+        let mut writer_vectors = writer.vector_index("articles", "embedding", 2, None);
+        let observer_docs = observer.document_store("articles");
+        let observer_inv = observer.inverted_index("articles", standard_analyzer("english"));
+        let observer_vectors = observer.vector_index("articles", "embedding", 2, None);
+
+        writer.begin_transaction().unwrap();
+        writer_docs
+            .put(
+                1,
+                BTreeMap::from([("title".to_string(), Value::Str("atomic rust".into()))]),
+            )
+            .unwrap();
+        writer_inv
+            .add_document(
+                1,
+                BTreeMap::from([("title".to_string(), "atomic rust".to_string())]),
+            )
+            .unwrap();
+        writer_vectors.add(1, vec![1.0, 0.0]).unwrap();
+        catalog
+            .save_scoring_params("transactional", r#"{"alpha":1.0}"#)
+            .unwrap();
+
+        assert_eq!(writer_docs.len().unwrap(), 1);
+        assert_eq!(writer_inv.doc_freq("title", "rust").unwrap(), 1);
+        assert_eq!(writer_vectors.count().unwrap(), 1);
+        assert!(catalog
+            .load_scoring_params("transactional")
+            .unwrap()
+            .is_some());
+
+        assert_eq!(observer_docs.len().unwrap(), 0);
+        assert_eq!(observer_inv.doc_freq("title", "rust").unwrap(), 0);
+        assert_eq!(observer_vectors.count().unwrap(), 0);
+        assert!(observer_catalog
+            .load_scoring_params("transactional")
+            .unwrap()
+            .is_none());
+
+        writer.commit_transaction().unwrap();
+        assert_eq!(observer_docs.len().unwrap(), 1);
+        assert_eq!(observer_inv.doc_freq("title", "rust").unwrap(), 1);
+        assert_eq!(observer_vectors.count().unwrap(), 1);
+        assert!(observer_catalog
+            .load_scoring_params("transactional")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn ignored_legacy_index_error_cannot_commit_partial_document_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ignored-index-error.sqlite3");
+        let conn = ManagedConnection::open(&path).unwrap();
+        let _catalog = Catalog::open(conn.clone()).unwrap();
+        let backend = SQLiteStorageBackend::new(conn.clone());
+        let observer = conn.new_session();
+        let mut docs = backend.document_store("articles");
+        let mut vectors = backend.vector_index("articles", "embedding", 2, None);
+
+        backend.begin_transaction().unwrap();
+        docs.put(
+            1,
+            BTreeMap::from([("title".to_string(), Value::Str("must roll back".into()))]),
+        )
+        .unwrap();
+        conn.with(|connection| {
+            connection.execute("DROP TABLE _vectors", [])?;
+            Ok(())
+        })
+        .unwrap();
+        // The vector write reports its error directly. Even if a caller
+        // ignores that Result, the managed transaction is poisoned and the
+        // partial document write cannot commit.
+        let ignored = vectors.add(1, vec![1.0, 0.0]);
+        assert!(ignored.is_err());
+        assert!(matches!(
+            backend.commit_transaction(),
+            Err(StorageBackendError::SQLite(
+                SQLiteError::TransactionAborted(_)
+            ))
+        ));
+
+        let stored_docs: i64 = observer
+            .with(|connection| {
+                Ok(connection.query_row(
+                    "SELECT COUNT(*) FROM _documents WHERE table_name = 'articles'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        let vector_table_exists: i64 = observer
+            .with(|connection| {
+                Ok(connection.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_vectors'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(stored_docs, 0);
+        assert_eq!(vector_table_exists, 1);
     }
 }

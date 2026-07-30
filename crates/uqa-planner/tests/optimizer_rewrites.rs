@@ -60,6 +60,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
 fn optimize_select(stmt: SelectStmt) -> UnifiedPlan {
     let cfg = OptimizerConfig::default();
     optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
+        .expect("optimizer succeeds")
 }
 
 fn plan_where(plan: &UnifiedPlan) -> Option<&ScalarExpr> {
@@ -113,8 +114,9 @@ proptest! {
 
         let cfg = OptimizerConfig::default();
         let stmt = select_with_where(filter);
-        let once = optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg);
-        let twice = optimize(once.clone(), &cfg);
+        let once = optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
+            .expect("first optimizer pass succeeds");
+        let twice = optimize(once.clone(), &cfg).expect("second optimizer pass succeeds");
         prop_assert!(
             expr_eq(plan_where(&once).unwrap(), plan_where(&twice).unwrap()),
             "optimize not idempotent",

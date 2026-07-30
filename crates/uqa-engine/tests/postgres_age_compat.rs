@@ -961,5 +961,5 @@ fn apache_age_mutation_parameter_and_drop_matrix(eng: &Engine) {
 
     let dropped = query(eng, "SELECT drop_graph('compat_age', true) AS ok");
     assert_eq!(dropped.rows[0].get("ok"), Some(&Value::Null));
-    assert!(!eng.has_graph("compat_age"));
+    assert!(!eng.has_graph("compat_age").unwrap());
 }

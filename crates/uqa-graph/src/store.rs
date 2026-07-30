@@ -14,6 +14,22 @@ use uqa_core::{Edge, EdgeId, Vertex, VertexId};
 
 use crate::types::Direction;
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GraphStoreError {
+    #[error("graph {0:?} does not exist")]
+    UnknownGraph(String),
+    #[error("graph id space exhausted: {0}")]
+    IdExhausted(String),
+    #[error("invalid graph mutation: {0}")]
+    InvalidMutation(String),
+    #[error("invalid graph query: {0}")]
+    InvalidQuery(String),
+    #[error("corrupt graph state: {0}")]
+    CorruptGraph(String),
+}
+
+pub type GraphStoreResult<T> = Result<T, GraphStoreError>;
+
 /// Storage interface for named property graphs.
 ///
 /// Each store hosts zero or more named graphs that share a single
@@ -38,25 +54,25 @@ pub trait GraphStore {
     // --- Algebra ---
 
     /// `target := g1 union g2` over vertex and edge sets.
-    fn union_graphs(&mut self, g1: &str, g2: &str, target: &str);
+    fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()>;
 
     /// `target := g1 intersect g2`.
-    fn intersect_graphs(&mut self, g1: &str, g2: &str, target: &str);
+    fn intersect_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()>;
 
     /// `target := g1 \ g2`.
-    fn difference_graphs(&mut self, g1: &str, g2: &str, target: &str);
+    fn difference_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()>;
 
-    fn copy_graph(&mut self, source: &str, target: &str);
+    fn copy_graph(&mut self, source: &str, target: &str) -> GraphStoreResult<()>;
 
     // --- Mutations ---
 
-    fn add_vertex(&mut self, vertex: Vertex, graph: &str);
+    fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> GraphStoreResult<()>;
 
-    fn add_edge(&mut self, edge: Edge, graph: &str);
+    fn add_edge(&mut self, edge: Edge, graph: &str) -> GraphStoreResult<()>;
 
-    fn remove_vertex(&mut self, vertex_id: VertexId, graph: &str);
+    fn remove_vertex(&mut self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<()>;
 
-    fn remove_edge(&mut self, edge_id: EdgeId, graph: &str);
+    fn remove_edge(&mut self, edge_id: EdgeId, graph: &str) -> GraphStoreResult<()>;
 
     // --- Queries ---
 
@@ -69,41 +85,60 @@ pub trait GraphStore {
         label: Option<&str>,
         direction: Direction,
         graph: &str,
-    ) -> Vec<VertexId>;
+    ) -> GraphStoreResult<Vec<VertexId>>;
 
-    fn vertices_by_label(&self, label: &str, graph: &str) -> Vec<Vertex>;
+    fn vertices_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<Vertex>>;
 
     /// Return only the vertex ids for a label. Stores with a label index should override this to avoid materializing full vertices.
-    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> Vec<VertexId> {
-        self.vertices_by_label(label, graph)
+    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<VertexId>> {
+        Ok(self
+            .vertices_by_label(label, graph)?
             .into_iter()
             .map(|vertex| vertex.vertex_id)
-            .collect()
+            .collect())
     }
 
-    fn vertices_in_graph(&self, graph: &str) -> Vec<Vertex>;
+    fn vertices_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Vertex>>;
 
-    fn edges_in_graph(&self, graph: &str) -> Vec<Edge>;
+    fn edges_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Edge>>;
 
     fn vertex_graphs(&self, vertex_id: VertexId) -> BTreeSet<String>;
 
     // --- Adjacency accessors ---
 
-    fn out_edge_ids(&self, vertex_id: VertexId, graph: &str) -> BTreeSet<EdgeId>;
+    fn out_edge_ids(&self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<BTreeSet<EdgeId>>;
 
-    fn in_edge_ids(&self, vertex_id: VertexId, graph: &str) -> BTreeSet<EdgeId>;
+    fn in_edge_ids(&self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<BTreeSet<EdgeId>>;
 
-    fn edge_ids_by_label(&self, label: &str, graph: &str) -> BTreeSet<EdgeId>;
+    fn edge_ids_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<BTreeSet<EdgeId>>;
 
-    fn vertex_ids_in_graph(&self, graph: &str) -> BTreeSet<VertexId>;
+    fn vertex_ids_in_graph(&self, graph: &str) -> GraphStoreResult<BTreeSet<VertexId>>;
+
+    /// Require an explicit query vertex to be a live member of `graph`.
+    /// Implementations may override this with a cheaper membership lookup.
+    /// Missing query input is distinct from a valid vertex with no edges and
+    /// must not be reported as an empty neighborhood/path result.
+    fn require_vertex_in_graph(&self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<()> {
+        if !self.vertex_ids_in_graph(graph)?.contains(&vertex_id) {
+            return Err(GraphStoreError::InvalidQuery(format!(
+                "vertex {vertex_id} is not a member of graph {graph:?}"
+            )));
+        }
+        if self.get_vertex(vertex_id).is_none() {
+            return Err(GraphStoreError::CorruptGraph(format!(
+                "graph {graph:?} references missing vertex {vertex_id}"
+            )));
+        }
+        Ok(())
+    }
 
     // --- Statistics ---
 
-    fn degree_distribution(&self, graph: &str) -> BTreeMap<VertexId, u64>;
+    fn degree_distribution(&self, graph: &str) -> GraphStoreResult<BTreeMap<VertexId, u64>>;
 
-    fn label_degree(&self, label: &str, graph: &str) -> f64;
+    fn label_degree(&self, label: &str, graph: &str) -> GraphStoreResult<f64>;
 
-    fn vertex_label_counts(&self, graph: &str) -> BTreeMap<String, u64>;
+    fn vertex_label_counts(&self, graph: &str) -> GraphStoreResult<BTreeMap<String, u64>>;
 
     // --- Global accessors ---
 
@@ -112,22 +147,22 @@ pub trait GraphStore {
     fn get_edge(&self, edge_id: EdgeId) -> Option<&Edge>;
 
     /// Returns and advances the next available vertex id.
-    fn next_vertex_id(&mut self) -> VertexId;
+    fn next_vertex_id(&mut self) -> GraphStoreResult<VertexId>;
 
     /// Returns and advances the next available edge id.
-    fn next_edge_id(&mut self) -> EdgeId;
+    fn next_edge_id(&mut self) -> GraphStoreResult<EdgeId>;
 
     /// Allocate a vertex id for a new entity with `label` inside
     /// `graph`. Stores that implement the Apache AGE `graphid` scheme
     /// override this to return `(label_id << 48) | sequence`; the
     /// default falls back to the store-wide counter.
-    fn allocate_vertex_id(&mut self, _label: &str, _graph: &str) -> VertexId {
+    fn allocate_vertex_id(&mut self, _label: &str, _graph: &str) -> GraphStoreResult<VertexId> {
         self.next_vertex_id()
     }
 
     /// Allocate an edge id for a new entity with `label` inside
     /// `graph`. See [`GraphStore::allocate_vertex_id`].
-    fn allocate_edge_id(&mut self, _label: &str, _graph: &str) -> EdgeId {
+    fn allocate_edge_id(&mut self, _label: &str, _graph: &str) -> GraphStoreResult<EdgeId> {
         self.next_edge_id()
     }
 

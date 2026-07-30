@@ -21,8 +21,10 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
+use crate::error::{invalid_input, require_probability};
 use crate::prob::log_odds_conjunction;
 use crate::wand::BoundTightnessAnalyzer;
+use crate::ScoringResult;
 
 /// Per-signal score map -- mirrors the dict-of-dicts shape used by the
 /// canonical UQA behavior's `score_maps`.
@@ -37,28 +39,35 @@ pub struct FusionWANDScorer {
 }
 
 impl FusionWANDScorer {
-    pub fn new(signals: Vec<SignalScoreMap>, upper_bounds: Vec<f64>, alpha: f64, k: usize) -> Self {
-        Self {
+    pub fn new(
+        signals: Vec<SignalScoreMap>,
+        upper_bounds: Vec<f64>,
+        alpha: f64,
+        k: usize,
+    ) -> ScoringResult<Self> {
+        validate_fusion_inputs(&signals, &upper_bounds, alpha)?;
+        Ok(Self {
             signals,
             upper_bounds,
             alpha,
             k,
-        }
+        })
     }
 
     /// Run the WAND pivot loop and return the top-k `(doc_id, score)`
     /// pairs sorted by descending score. Mirrors `score_top_k` in the
     /// canonical UQA behavior.
-    pub fn score_top_k(&self) -> Vec<(u64, f64)> {
+    pub fn score_top_k(&self) -> ScoringResult<Vec<(u64, f64)>> {
+        validate_fusion_inputs(&self.signals, &self.upper_bounds, self.alpha)?;
         if self.signals.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut all_doc_ids: BTreeSet<u64> = BTreeSet::new();
         for sig in &self.signals {
             all_doc_ids.extend(sig.keys().copied());
         }
         if all_doc_ids.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let num_docs = all_doc_ids.len();
         let defaults: Vec<f64> = self
@@ -88,7 +97,7 @@ impl FusionWANDScorer {
                         }
                     })
                     .collect();
-                let fused_ub = self.compute_fused_upper_bound(&doc_ubs);
+                let fused_ub = self.compute_fused_upper_bound(&doc_ubs)?;
                 if fused_ub < threshold {
                     continue;
                 }
@@ -106,6 +115,7 @@ impl FusionWANDScorer {
             } else {
                 log_odds_conjunction(&probs, self.alpha)
             };
+            require_probability(fused, "fusion WAND score")?;
 
             if heap.len() < self.k {
                 heap.push(HeapEntry {
@@ -128,19 +138,21 @@ impl FusionWANDScorer {
         // sorted ascending in Ord order, which is descending in raw
         // score order -- exactly what callers expect from a Top-K
         // loop.
-        heap.into_sorted_vec()
+        Ok(heap
+            .into_sorted_vec()
             .into_iter()
             .map(|e| (e.doc_id, e.score))
-            .collect()
+            .collect())
     }
 
-    fn compute_fused_upper_bound(&self, active_ubs: &[f64]) -> f64 {
-        let _ = active_ubs;
-        if active_ubs.is_empty() {
+    fn compute_fused_upper_bound(&self, active_ubs: &[f64]) -> ScoringResult<f64> {
+        let bound = if active_ubs.is_empty() {
             0.0
         } else {
             log_odds_conjunction(active_ubs, self.alpha)
-        }
+        };
+        require_probability(bound, "fusion WAND upper bound")?;
+        Ok(bound)
     }
 }
 
@@ -164,29 +176,39 @@ impl TightenedFusionWANDScorer {
         alpha: f64,
         k: usize,
         tightening_factor: f64,
-    ) -> Self {
+    ) -> ScoringResult<Self> {
+        validate_fusion_inputs(&signals, &upper_bounds, alpha)?;
+        if !tightening_factor.is_finite() || !(0.0..=1.0).contains(&tightening_factor) {
+            return Err(invalid_input(format!(
+                "fusion WAND tightening factor must be finite and in [0, 1], got {tightening_factor}"
+            )));
+        }
         let tightened: Vec<f64> = upper_bounds
             .iter()
-            .map(|ub| ub * tightening_factor)
+            .zip(&signals)
+            .map(|(upper_bound, signal)| {
+                let observed_max = signal.values().copied().fold(0.0_f64, f64::max);
+                (upper_bound * tightening_factor).max(observed_max)
+            })
             .collect();
         let original_bounds = upper_bounds.clone();
         let signal_upper_bounds = tightened.clone();
-        let inner = FusionWANDScorer::new(signals, tightened, alpha, k);
-        Self {
+        let inner = FusionWANDScorer::new(signals, tightened, alpha, k)?;
+        Ok(Self {
             inner,
             tightening_factor,
             original_bounds,
             signal_upper_bounds,
             analyzer: BoundTightnessAnalyzer::default(),
-        }
+        })
     }
 
-    pub fn score_top_k(&mut self) -> Vec<(u64, f64)> {
+    pub fn score_top_k(&mut self) -> ScoringResult<Vec<(u64, f64)>> {
         self.analyzer.clear();
         for (idx, sig) in self.inner.signals.iter().enumerate() {
             let actual = sig.values().copied().fold(0.0_f64, f64::max);
             if let Some(bound) = self.original_bounds.get(idx) {
-                self.analyzer.record(*bound, actual);
+                self.analyzer.record(*bound, actual)?;
             }
         }
         self.inner.score_top_k()
@@ -223,10 +245,40 @@ impl Ord for HeapEntry {
         // heap fills up.
         other
             .score
-            .partial_cmp(&self.score)
-            .unwrap_or(Ordering::Equal)
+            .total_cmp(&self.score)
             .then(self.doc_id.cmp(&other.doc_id))
     }
+}
+
+fn validate_fusion_inputs(
+    signals: &[SignalScoreMap],
+    upper_bounds: &[f64],
+    alpha: f64,
+) -> ScoringResult<()> {
+    if signals.len() != upper_bounds.len() {
+        return Err(invalid_input(format!(
+            "fusion WAND requires one upper bound per signal, got {} signals and {} bounds",
+            signals.len(),
+            upper_bounds.len()
+        )));
+    }
+    if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+        return Err(invalid_input(format!(
+            "fusion WAND alpha must be finite and in [0, 1], got {alpha}"
+        )));
+    }
+    for (signal_index, (signal, upper_bound)) in signals.iter().zip(upper_bounds).enumerate() {
+        require_probability(*upper_bound, "fusion WAND upper bound")?;
+        for (doc_id, score) in signal {
+            require_probability(*score, "fusion WAND signal score")?;
+            if score > upper_bound {
+                return Err(invalid_input(format!(
+                    "fusion WAND score {score} for document {doc_id} in signal {signal_index} exceeds upper bound {upper_bound}"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
@@ -247,8 +299,8 @@ mod tests {
 
     #[test]
     fn returns_empty_for_no_signals() {
-        let s = FusionWANDScorer::new(vec![], vec![], 0.5, 10);
-        assert!(s.score_top_k().is_empty());
+        let s = FusionWANDScorer::new(vec![], vec![], 0.5, 10).unwrap();
+        assert!(s.score_top_k().unwrap().is_empty());
     }
 
     #[test]
@@ -261,8 +313,9 @@ mod tests {
             vec![0.95, 0.95],
             0.5,
             3,
-        );
-        let result = s.score_top_k();
+        )
+        .unwrap();
+        let result = s.score_top_k().unwrap();
         assert_eq!(result.len(), 3);
         // Descending order.
         for w in result.windows(2) {
@@ -280,10 +333,19 @@ mod tests {
             0.5,
             5,
             0.5,
-        );
+        )
+        .unwrap();
         for ub in &s.inner.upper_bounds {
-            assert!((*ub - 0.45).abs() < 1e-9);
+            assert!((*ub - 0.6).abs() < 1e-9);
         }
         assert_eq!(s.original_bounds, vec![0.9, 0.9]);
+    }
+
+    #[test]
+    fn invalid_shapes_and_scores_are_rejected() {
+        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.5)])], vec![], 0.5, 1).is_err());
+        assert!(FusionWANDScorer::new(vec![map(&[(1, f64::NAN)])], vec![1.0], 0.5, 1,).is_err());
+        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.8)])], vec![0.7], 0.5, 1).is_err());
+        assert!(FusionWANDScorer::new(vec![map(&[(1, 0.5)])], vec![1.0], f64::NAN, 1).is_err());
     }
 }

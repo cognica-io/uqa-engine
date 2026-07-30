@@ -112,10 +112,14 @@ fn graph_fixture(vertices: u64) -> MemoryGraphStore {
         vertex
             .properties
             .insert("score".to_string(), Value::Int((offset % 100) as i64));
-        graph.add_vertex(vertex, GRAPH);
+        graph
+            .add_vertex(vertex, GRAPH)
+            .expect("add benchmark vertex");
     }
     for source in 1..vertices {
-        graph.add_edge(Edge::new(source, source, source + 1, "knows"), GRAPH);
+        graph
+            .add_edge(Edge::new(source, source, source + 1, "knows"), GRAPH)
+            .expect("add benchmark edge");
     }
     graph
 }
@@ -185,17 +189,23 @@ fn bench_search(c: &mut Criterion) {
         .engine
         .sql(VECTOR_QUERY, std::slice::from_ref(&vector_query))
         .expect("vector smoke");
-    let hybrid_smoke = fixture.engine.hybrid_search(&HybridSearchParams {
-        table: "messages",
-        text_field: "content",
-        text_query: "button search",
-        vector_field: "embedding",
-        query_vector: query_vector.clone(),
-        knn_pool: LIMIT,
-        alpha: 0.5,
-        top_k: LIMIT,
-    });
-    let graph_smoke = VertexMatch::new(GRAPH).label("Person").execute(&graph);
+    let hybrid_smoke = fixture
+        .engine
+        .hybrid_search(&HybridSearchParams {
+            table: "messages",
+            text_field: "content",
+            text_query: "button search",
+            vector_field: "embedding",
+            query_vector: query_vector.clone(),
+            knn_pool: LIMIT,
+            alpha: 0.5,
+            top_k: LIMIT,
+        })
+        .expect("hybrid smoke search");
+    let graph_smoke = VertexMatch::new(GRAPH)
+        .label("Person")
+        .execute(&graph)
+        .expect("graph smoke search");
     assert!(!text_smoke.rows.is_empty());
     assert_eq!(vector_smoke.rows.len(), LIMIT);
     assert!(!hybrid_smoke.is_empty());
@@ -224,7 +234,8 @@ fn bench_search(c: &mut Criterion) {
         bencher.iter(|| {
             let result = VertexMatch::new(GRAPH)
                 .label(black_box("Person"))
-                .execute(&graph);
+                .execute(&graph)
+                .expect("graph vertex match");
             black_box(result.len())
         });
     });

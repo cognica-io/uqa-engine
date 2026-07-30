@@ -168,17 +168,17 @@ impl PySQLParam {
     }
 
     #[staticmethod]
-    fn vector(values: Vec<f32>) -> Self {
-        Self {
-            inner: SQLParam::vector(values),
-        }
+    fn vector(values: Vec<f32>) -> PyResult<Self> {
+        Ok(Self {
+            inner: SQLParam::vector(validate_vector(values, "SQL vector parameter")?),
+        })
     }
 
     #[staticmethod]
-    fn tensor(values: Vec<Vec<f32>>) -> Self {
-        Self {
-            inner: SQLParam::tensor(values),
-        }
+    fn tensor(values: Vec<Vec<f32>>) -> PyResult<Self> {
+        Ok(Self {
+            inner: SQLParam::tensor(validate_tensor(values, "SQL tensor parameter")?),
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -265,6 +265,15 @@ impl PyEngine {
     fn open(path: PathBuf) -> PyResult<Self> {
         Ok(Self {
             inner: Arc::new(Engine::open(&path).map_err(runtime_error)?),
+        })
+    }
+
+    /// Create an independent SQL session over the same persistent database.
+    /// Transaction state, prepared statements, variables, search path, and
+    /// cancellation are isolated while durable data remains shared.
+    fn new_session(&self) -> PyResult<Self> {
+        Ok(Self {
+            inner: Arc::new(self.inner.new_session().map_err(runtime_error)?),
         })
     }
 
@@ -419,19 +428,22 @@ impl PyEngine {
             .map_err(runtime_error)
     }
 
-    fn create_default_table(&self, name: &str, fts_fields: Vec<String>) {
-        self.inner.create_default_table(name, fts_fields);
+    fn create_default_table(&self, name: &str, fts_fields: Vec<String>) -> PyResult<()> {
+        self.inner
+            .create_default_table(name, fts_fields)
+            .map_err(runtime_error)
     }
 
-    fn create_vector_field(&self, table: &str, field: &str, dimensions: u32) -> bool {
-        self.inner.create_vector_field(table, field, dimensions)
+    fn create_vector_field(&self, table: &str, field: &str, dimensions: u32) -> PyResult<bool> {
+        self.inner
+            .create_vector_field(table, field, dimensions)
+            .map_err(runtime_error)
     }
 
     fn add_document(&self, table: &str, doc_id: u64, document: &Bound<'_, PyAny>) -> PyResult<()> {
         self.inner
             .add_document(table, doc_id, document_from_py(document)?)
-            .unwrap();
-        Ok(())
+            .map_err(runtime_error)
     }
 
     fn add_document_with_vectors(
@@ -448,12 +460,25 @@ impl PyEngine {
                 document_from_py(document)?,
                 vector_values_from_py(vectors)?,
             )
-            .unwrap();
+            .map_err(runtime_error)?;
         Ok(())
     }
 
-    fn add_vector(&self, table: &str, doc_id: u64, field: &str, vector: Vec<f32>) -> bool {
-        self.inner.add_vector(table, doc_id, field, vector)
+    fn add_vector(
+        &self,
+        table: &str,
+        doc_id: u64,
+        field: &str,
+        vector: Vec<f32>,
+    ) -> PyResult<bool> {
+        self.inner
+            .add_vector(
+                table,
+                doc_id,
+                field,
+                validate_vector(vector, &format!("vector field `{field}`"))?,
+            )
+            .map_err(runtime_error)
     }
 
     fn add_vector_values(
@@ -462,23 +487,36 @@ impl PyEngine {
         doc_id: u64,
         field: &str,
         vectors: Vec<Vec<f32>>,
-    ) -> bool {
-        self.inner.add_vector_values(table, doc_id, field, vectors)
+    ) -> PyResult<bool> {
+        self.inner
+            .add_vector_values(
+                table,
+                doc_id,
+                field,
+                validate_tensor(vectors, &format!("vector field `{field}`"))?,
+            )
+            .map_err(runtime_error)
     }
 
     fn get_document(&self, py: Python<'_>, table: &str, doc_id: u64) -> PyResult<Py<PyAny>> {
-        match self.inner.get_document(table, doc_id) {
+        match self
+            .inner
+            .get_document(table, doc_id)
+            .map_err(runtime_error)?
+        {
             Some(document) => map_to_py(py, &document),
             None => Ok(py.None()),
         }
     }
 
-    fn delete_document(&self, table: &str, doc_id: u64) {
-        self.inner.delete_document(table, doc_id).unwrap();
+    fn delete_document(&self, table: &str, doc_id: u64) -> PyResult<()> {
+        self.inner
+            .delete_document(table, doc_id)
+            .map_err(runtime_error)
     }
 
-    fn document_count(&self, table: &str) -> u64 {
-        self.inner.document_count(table)
+    fn document_count(&self, table: &str) -> PyResult<u64> {
+        self.inner.document_count(table).map_err(runtime_error)
     }
 
     #[pyo3(signature = (table, field, query, top_k=10, scoring="bm25"))]
@@ -493,7 +531,9 @@ impl PyEngine {
     ) -> PyResult<Py<PyAny>> {
         let entries = py.detach(|| -> PyResult<Vec<ScoredEntry>> {
             let mode = scoring_mode(&self.inner, table, field, scoring)?;
-            Ok(self.inner.search(table, field, query, &mode, top_k))
+            self.inner
+                .search(table, field, query, &mode, top_k)
+                .map_err(runtime_error)
         })?;
         scored_entries_to_py(py, &entries)
     }
@@ -507,7 +547,10 @@ impl PyEngine {
         vector: Vec<f32>,
         top_k: usize,
     ) -> PyResult<Py<PyAny>> {
-        let entries = py.detach(|| self.inner.knn_search(table, field, vector, top_k));
+        let vector = validate_vector(vector, "KNN query vector")?;
+        let entries = py
+            .detach(|| self.inner.knn_search(table, field, vector, top_k))
+            .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
 
@@ -519,10 +562,18 @@ impl PyEngine {
         vector: Vec<f32>,
         threshold: f32,
     ) -> PyResult<Py<PyAny>> {
-        let entries = py.detach(|| {
-            self.inner
-                .vector_similarity_search(table, field, vector, threshold)
-        });
+        let vector = validate_vector(vector, "vector-similarity query vector")?;
+        if !threshold.is_finite() {
+            return Err(PyValueError::new_err(
+                "vector-similarity threshold must be finite",
+            ));
+        }
+        let entries = py
+            .detach(|| {
+                self.inner
+                    .vector_similarity_search(table, field, vector, threshold)
+            })
+            .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
 
@@ -540,17 +591,29 @@ impl PyEngine {
         knn_pool: Option<usize>,
         alpha: f64,
     ) -> PyResult<Py<PyAny>> {
+        let query_vector = validate_vector(query_vector, "hybrid query vector")?;
+        let knn_pool = match knn_pool {
+            Some(pool) => pool,
+            None => top_k.checked_mul(4).ok_or_else(|| {
+                PyValueError::new_err("default knn_pool exceeds the platform usize range")
+            })?,
+        };
+        if !alpha.is_finite() {
+            return Err(PyValueError::new_err("alpha must be finite"));
+        }
         let params = HybridSearchParams {
             table,
             text_field,
             text_query,
             vector_field,
             query_vector,
-            knn_pool: knn_pool.unwrap_or(top_k.saturating_mul(4).max(top_k)),
+            knn_pool,
             alpha,
             top_k,
         };
-        let entries = py.detach(|| self.inner.hybrid_search(&params));
+        let entries = py
+            .detach(|| self.inner.hybrid_search(&params))
+            .map_err(runtime_error)?;
         scored_entries_to_py(py, &entries)
     }
 
@@ -581,6 +644,7 @@ impl PyEngine {
         query: &str,
         labels: Vec<u8>,
     ) -> PyResult<Py<PyAny>> {
+        let labels = validate_binary_labels(labels)?;
         let params = py
             .detach(|| {
                 self.inner
@@ -597,6 +661,10 @@ impl PyEngine {
         score: f64,
         label: u8,
     ) -> PyResult<()> {
+        if !score.is_finite() {
+            return Err(PyValueError::new_err("score must be finite"));
+        }
+        let label = validate_binary_label(label)?;
         self.inner
             .update_scoring_params(table, field, score, label)
             .map_err(runtime_error)
@@ -610,6 +678,7 @@ impl PyEngine {
         query: &str,
         labels: Vec<u8>,
     ) -> PyResult<Py<PyAny>> {
+        let labels = validate_binary_labels(labels)?;
         let report = py
             .detach(|| self.inner.calibration_report(table, field, query, &labels))
             .map_err(runtime_error)?;
@@ -626,7 +695,11 @@ impl PyEngine {
     }
 
     fn load_scoring_params(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
-        match self.inner.load_scoring_params(name) {
+        match self
+            .inner
+            .load_scoring_params(name)
+            .map_err(runtime_error)?
+        {
             Some(json) => float_map_to_py(py, &parse_scoring_params(name, &json)?),
             None => Ok(py.None()),
         }
@@ -634,15 +707,19 @@ impl PyEngine {
 
     fn load_all_scoring_params(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
-        for (name, json) in self.inner.load_all_scoring_params() {
+        for (name, json) in self
+            .inner
+            .load_all_scoring_params()
+            .map_err(runtime_error)?
+        {
             let params = parse_scoring_params(&name, &json)?;
             dict.set_item(name, float_map_to_py(py, &params)?)?;
         }
         Ok(dict.into_any().unbind())
     }
 
-    fn drop_scoring_params(&self, name: &str) -> bool {
-        self.inner.drop_scoring_params(name)
+    fn drop_scoring_params(&self, name: &str) -> PyResult<bool> {
+        self.inner.drop_scoring_params(name).map_err(runtime_error)
     }
 
     #[pyo3(signature = (graph, query, params=None))]
@@ -667,48 +744,50 @@ impl PyEngine {
         })
     }
 
-    fn create_graph(&self, name: &str) {
-        self.inner.create_graph(name);
+    fn create_graph(&self, name: &str) -> PyResult<bool> {
+        self.inner.create_graph(name).map_err(runtime_error)
     }
 
-    fn drop_graph(&self, name: &str) {
-        self.inner.drop_graph(name);
+    fn drop_graph(&self, name: &str) -> PyResult<bool> {
+        self.inner.drop_graph(name).map_err(runtime_error)
     }
 
-    fn list_graphs(&self) -> Vec<String> {
-        self.inner.list_graphs()
+    fn list_graphs(&self) -> PyResult<Vec<String>> {
+        self.inner.list_graphs().map_err(runtime_error)
     }
 
-    fn list_path_indexes(&self) -> Vec<String> {
-        self.inner.list_path_indexes()
+    fn list_path_indexes(&self) -> PyResult<Vec<String>> {
+        self.inner.list_path_indexes().map_err(runtime_error)
     }
 
-    fn table_names(&self) -> Vec<String> {
-        self.inner.table_names()
+    fn table_names(&self) -> PyResult<Vec<String>> {
+        self.inner.table_names().map_err(runtime_error)
     }
 
-    fn list_views(&self) -> Vec<String> {
-        self.inner.list_views()
+    fn list_views(&self) -> PyResult<Vec<String>> {
+        self.inner.list_views().map_err(runtime_error)
     }
 
-    fn list_schemas(&self) -> Vec<String> {
-        self.inner.list_schemas()
+    fn list_schemas(&self) -> PyResult<Vec<String>> {
+        self.inner.list_schemas().map_err(runtime_error)
     }
 
-    fn list_sequences(&self) -> Vec<String> {
-        self.inner.list_sequences()
+    fn list_sequences(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .list_sequences()
+            .map_err(|err| PyRuntimeError::new_err(format!("list sequences: {err}")))
     }
 
-    fn list_named_analyzers(&self) -> Vec<String> {
-        self.inner.list_named_analyzers()
+    fn list_named_analyzers(&self) -> PyResult<Vec<String>> {
+        self.inner.list_named_analyzers().map_err(runtime_error)
     }
 
-    fn list_foreign_servers(&self) -> Vec<String> {
-        self.inner.list_foreign_servers()
+    fn list_foreign_servers(&self) -> PyResult<Vec<String>> {
+        self.inner.list_foreign_servers().map_err(runtime_error)
     }
 
-    fn list_foreign_tables(&self) -> Vec<String> {
-        self.inner.list_foreign_tables()
+    fn list_foreign_tables(&self) -> PyResult<Vec<String>> {
+        self.inner.list_foreign_tables().map_err(runtime_error)
     }
 
     fn take_sql_notices(&self) -> Vec<(String, String)> {
@@ -727,12 +806,17 @@ impl PyEngine {
         self.inner.cancel();
     }
 
-    fn close(&self) {
-        self.inner.close();
+    fn close(&self) -> PyResult<()> {
+        self.inner
+            .close()
+            .map_err(|err| PyRuntimeError::new_err(format!("close engine: {err}")))
     }
 
-    fn __repr__(&self) -> String {
-        format!("Engine(tables={:?})", self.inner.table_names())
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "Engine(tables={:?})",
+            self.inner.table_names().map_err(runtime_error)?
+        ))
     }
 }
 
@@ -783,12 +867,12 @@ fn open_compressed_encrypted(
 }
 
 #[pyfunction]
-fn vector(values: Vec<f32>) -> PySQLParam {
+fn vector(values: Vec<f32>) -> PyResult<PySQLParam> {
     PySQLParam::vector(values)
 }
 
 #[pyfunction]
-fn tensor(values: Vec<Vec<f32>>) -> PySQLParam {
+fn tensor(values: Vec<Vec<f32>>) -> PyResult<PySQLParam> {
     PySQLParam::tensor(values)
 }
 
@@ -856,7 +940,9 @@ fn scoring_mode(engine: &Engine, table: &str, field: &str, scoring: &str) -> PyR
     match scoring.to_ascii_lowercase().as_str() {
         "bm25" => Ok(ScoringMode::BM25(BM25Params::default())),
         "bayesian" | "bayesian_bm25" => Ok(ScoringMode::BayesianBM25(
-            engine.bayesian_params_for(table, field),
+            engine
+                .bayesian_params_for(table, field)
+                .map_err(runtime_error)?,
         )),
         other => Err(PyValueError::new_err(format!(
             "unsupported scoring mode `{other}`"
@@ -1024,9 +1110,43 @@ fn vector_values_from_py(value: &Bound<'_, PyAny>) -> PyResult<BTreeMap<String, 
         } else {
             value.extract::<Vec<Vec<f32>>>()?
         };
+        let vectors = validate_tensor(vectors, &format!("vector field `{field}`"))?;
         out.insert(field, vectors);
     }
     Ok(out)
+}
+
+fn validate_vector(values: Vec<f32>, context: &str) -> PyResult<Vec<f32>> {
+    for (index, value) in values.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "{context}[{index}] must be finite, got {value}"
+            )));
+        }
+    }
+    Ok(values)
+}
+
+fn validate_tensor(values: Vec<Vec<f32>>, context: &str) -> PyResult<Vec<Vec<f32>>> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(row, values)| validate_vector(values, &format!("{context}[{row}]")))
+        .collect()
+}
+
+fn validate_binary_label(label: u8) -> PyResult<u8> {
+    if label <= 1 {
+        Ok(label)
+    } else {
+        Err(PyValueError::new_err(
+            "labels must contain only binary values 0 or 1",
+        ))
+    }
+}
+
+fn validate_binary_labels(labels: Vec<u8>) -> PyResult<Vec<u8>> {
+    labels.into_iter().map(validate_binary_label).collect()
 }
 
 fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -1062,16 +1182,11 @@ fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         }
         return Ok(Value::Map(out));
     }
-    if let Ok(iterator) = PyIterator::from_object(value) {
-        let values = iterator
-            .map(|item| value_from_py(&item?))
-            .collect::<PyResult<Vec<_>>>()?;
-        return Ok(Value::List(values));
-    }
-    Err(PyTypeError::new_err(format!(
-        "unsupported Python value type: {}",
-        value.get_type().name()?
-    )))
+    let iterator = PyIterator::from_object(value)?;
+    let values = iterator
+        .map(|item| value_from_py(&item?))
+        .collect::<PyResult<Vec<_>>>()?;
+    Ok(Value::List(values))
 }
 
 fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
@@ -1134,7 +1249,14 @@ fn float_map_from_py(value: &Bound<'_, PyAny>) -> PyResult<BTreeMap<String, f64>
         .map_err(|_| PyTypeError::new_err("expected a dict of float scoring parameters"))?;
     let mut out = BTreeMap::new();
     for (key, value) in dict.iter() {
-        out.insert(key.extract::<String>()?, value.extract::<f64>()?);
+        let key = key.extract::<String>()?;
+        let value = value.extract::<f64>()?;
+        if !value.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "scoring parameter `{key}` must be finite, got {value}"
+            )));
+        }
+        out.insert(key, value);
     }
     Ok(out)
 }

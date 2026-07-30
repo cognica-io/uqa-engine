@@ -9,31 +9,527 @@
 //! The catalog owns a single `_metadata` table that records the schema version
 //! plus a `_tables` table holding per-table analyzer config and the lists
 //! of FTS / vector fields registered on each table. Concrete data tables
-//! (`_documents`, `_postings`, `_vectors`, ...) are created by their
-//! respective stores.
+//! (`_documents`, `_document_blobs`, `_postings`, `_vectors`, ...) are created
+//! by catalog migrations before their respective stores are exposed.
 
 use rusqlite::{params, OptionalExtension};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    TableSchema, VectorFieldSchema,
+    GraphSnapshot, RelationIdentity, RelationKind, SequenceRow, TableSchema, VectorFieldSchema,
+    ViewRow,
 };
-use crate::sqlite::connection::{ManagedConnection, Result};
+use crate::sqlite::connection::{ManagedConnection, Result, SQLiteError};
 
 use super::catalog_lifecycle::{
     columns_json_references, delete_table_rows_if_exists, drop_fts_aux_tables_for_field,
-    drop_fts_aux_tables_for_table, quote_sql_identifier, rename_field_rows_or_keep_existing,
-    rename_fts_aux_tables_for_field, renamed_columns_json, table_exists,
-    update_table_name_rows_if_exists,
+    drop_fts_aux_tables_for_table, quote_sql_identifier, rename_btree_field_rows_or_keep_existing,
+    rename_field_rows_or_keep_existing, rename_fts_aux_tables_for_field, renamed_columns_json,
+    table_exists, update_btree_table_name_rows_if_exists, update_table_name_rows_if_exists,
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 12;
+pub const CURRENT_SCHEMA_VERSION: u32 = 18;
+
+const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
+const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 
 pub struct Catalog {
     conn: ManagedConnection,
     fts_storage_was_reset: bool,
+}
+
+fn encode_catalog_id(kind: &str, id: u64) -> Result<i64> {
+    i64::try_from(id).map_err(|_| {
+        SQLiteError::StorageBackend(format!("{kind} id {id} exceeds the SQLite INTEGER range"))
+    })
+}
+
+fn decode_catalog_id(kind: &str, id: i64) -> Result<u64> {
+    u64::try_from(id).map_err(|_| {
+        SQLiteError::StorageBackend(format!("corrupt catalog: negative {kind} id {id}"))
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct LegacySequenceState {
+    start: i64,
+    increment: i64,
+    current: i64,
+}
+
+fn migration_relation(value: &str) -> Result<RelationIdentity> {
+    RelationIdentity::from_legacy_name(value).map_err(SQLiteError::StorageBackend)
+}
+
+fn register_migration_relation(
+    seen: &mut std::collections::BTreeMap<RelationIdentity, (RelationKind, String)>,
+    relation: &RelationIdentity,
+    kind: RelationKind,
+    source: String,
+) -> Result<()> {
+    if let Some((existing_kind, existing_source)) = seen.get(relation) {
+        return Err(SQLiteError::StorageBackend(format!(
+            "relation namespace migration collision for `{}`: {} `{}` and {} `{}`",
+            relation.qualified_name(),
+            existing_kind.as_str(),
+            existing_source,
+            kind.as_str(),
+            source
+        )));
+    }
+    seen.insert(relation.clone(), (kind, source));
+    Ok(())
+}
+
+type SqliteSeenRelations = std::collections::BTreeMap<RelationIdentity, (RelationKind, String)>;
+
+struct SqliteTableMigration {
+    old_name: String,
+    relation: RelationIdentity,
+    analyzer: String,
+    fts: String,
+    vectors: String,
+    columns: Option<String>,
+    constraints: String,
+}
+
+struct SqliteSequenceMigration {
+    relation: RelationIdentity,
+    start: i64,
+    increment: i64,
+    current: i64,
+}
+
+struct SqliteForeignMigration {
+    relation: RelationIdentity,
+    server: String,
+    columns: String,
+    options: String,
+}
+
+struct SqliteRelationMigrations {
+    seen: SqliteSeenRelations,
+    tables: Vec<SqliteTableMigration>,
+    sequences: Vec<SqliteSequenceMigration>,
+    foreign_tables: Vec<SqliteForeignMigration>,
+    views: Vec<(RelationIdentity, String)>,
+}
+
+fn load_legacy_tables(tx: &rusqlite::Transaction<'_>) -> Result<Vec<SqliteTableMigration>> {
+    let mut stmt = tx.prepare(
+        "SELECT name, analyzer, fts_fields, vector_fields, columns, constraints
+           FROM _tables ORDER BY name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+    let mut tables = Vec::new();
+    for row in rows {
+        let (old_name, analyzer, fts, vectors, columns, constraints) = row?;
+        tables.push(SqliteTableMigration {
+            relation: migration_relation(&old_name)?,
+            old_name,
+            analyzer,
+            fts,
+            vectors,
+            columns,
+            constraints,
+        });
+    }
+    Ok(tables)
+}
+
+fn load_legacy_sequences(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<Vec<(String, SqliteSequenceMigration)>> {
+    let mut stmt =
+        tx.prepare("SELECT name, start, increment, current FROM _sequences ORDER BY name")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    let mut sequences = Vec::new();
+    for row in rows {
+        let (name, start, increment, current) = row?;
+        sequences.push((
+            name.clone(),
+            SqliteSequenceMigration {
+                relation: migration_relation(&name)?,
+                start,
+                increment,
+                current,
+            },
+        ));
+    }
+    Ok(sequences)
+}
+
+fn load_legacy_foreign_tables(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<Vec<(String, SqliteForeignMigration)>> {
+    let mut stmt = tx.prepare(
+        "SELECT name, server_name, columns_json, options
+           FROM _foreign_tables ORDER BY name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut foreign_tables = Vec::new();
+    for row in rows {
+        let (name, server, columns, options) = row?;
+        foreign_tables.push((
+            name.clone(),
+            SqliteForeignMigration {
+                relation: migration_relation(&name)?,
+                server,
+                columns,
+                options,
+            },
+        ));
+    }
+    Ok(foreign_tables)
+}
+
+fn load_legacy_metadata<T>(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+{
+    tx.query_row(
+        "SELECT value FROM _metadata WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()?
+    .map(|json| serde_json::from_str::<T>(&json))
+    .transpose()
+    .map(Option::unwrap_or_default)
+    .map_err(SQLiteError::from)
+}
+
+fn collect_sqlite_relation_migrations(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<SqliteRelationMigrations> {
+    let tables = load_legacy_tables(tx)?;
+    let mut sequences = load_legacy_sequences(tx)?;
+    let foreign_tables = load_legacy_foreign_tables(tx)?;
+    let legacy_views = load_legacy_metadata::<serde_json::Map<String, serde_json::Value>>(
+        tx,
+        LEGACY_VIEWS_METADATA_KEY,
+    )?;
+    let legacy_sequences = load_legacy_metadata::<
+        std::collections::BTreeMap<String, LegacySequenceState>,
+    >(tx, LEGACY_SEQUENCES_METADATA_KEY)?;
+    let mut seen = SqliteSeenRelations::new();
+    for table in &tables {
+        register_migration_relation(
+            &mut seen,
+            &table.relation,
+            RelationKind::Table,
+            table.old_name.clone(),
+        )?;
+    }
+    for (source, sequence) in &sequences {
+        register_migration_relation(
+            &mut seen,
+            &sequence.relation,
+            RelationKind::Sequence,
+            source.clone(),
+        )?;
+    }
+    for (source, foreign) in &foreign_tables {
+        register_migration_relation(
+            &mut seen,
+            &foreign.relation,
+            RelationKind::ForeignTable,
+            source.clone(),
+        )?;
+    }
+    let mut views = Vec::new();
+    for (name, definition) in legacy_views {
+        let relation = migration_relation(&name)?;
+        register_migration_relation(
+            &mut seen,
+            &relation,
+            RelationKind::View,
+            format!("legacy metadata `{name}`"),
+        )?;
+        views.push((relation, serde_json::to_string(&definition)?));
+    }
+    for (name, state) in legacy_sequences {
+        let relation = migration_relation(&name)?;
+        register_migration_relation(
+            &mut seen,
+            &relation,
+            RelationKind::Sequence,
+            format!("legacy metadata `{name}`"),
+        )?;
+        sequences.push((
+            name,
+            SqliteSequenceMigration {
+                relation,
+                start: state.start,
+                increment: state.increment,
+                current: state.current,
+            },
+        ));
+    }
+    Ok(SqliteRelationMigrations {
+        seen,
+        tables,
+        sequences: sequences.into_iter().map(|(_, row)| row).collect(),
+        foreign_tables: foreign_tables.into_iter().map(|(_, row)| row).collect(),
+        views,
+    })
+}
+
+fn create_structural_relation_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE _relations (
+            schema_name   TEXT NOT NULL,
+            relation_name TEXT NOT NULL,
+            kind          TEXT NOT NULL CHECK (
+                kind IN ('table', 'view', 'sequence', 'foreign_table')
+            ),
+            PRIMARY KEY (schema_name, relation_name),
+            UNIQUE (schema_name, relation_name, kind),
+            FOREIGN KEY (schema_name) REFERENCES _schemas(name) ON DELETE RESTRICT
+        );
+        CREATE TABLE _tables_v17 (
+            schema_name   TEXT NOT NULL,
+            relation_name TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT 'table' CHECK (kind = 'table'),
+            analyzer      TEXT NOT NULL,
+            fts_fields    TEXT NOT NULL,
+            vector_fields TEXT NOT NULL,
+            columns       TEXT,
+            constraints   TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (schema_name, relation_name),
+            FOREIGN KEY (schema_name, relation_name, kind)
+                REFERENCES _relations(schema_name, relation_name, kind)
+                ON DELETE CASCADE
+        );
+        CREATE TABLE _sequences_v17 (
+            schema_name   TEXT NOT NULL,
+            relation_name TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT 'sequence' CHECK (kind = 'sequence'),
+            start         INTEGER NOT NULL,
+            increment     INTEGER NOT NULL,
+            current       INTEGER NOT NULL,
+            PRIMARY KEY (schema_name, relation_name),
+            FOREIGN KEY (schema_name, relation_name, kind)
+                REFERENCES _relations(schema_name, relation_name, kind)
+                ON DELETE CASCADE
+        );
+        CREATE TABLE _foreign_tables_v17 (
+            schema_name   TEXT NOT NULL,
+            relation_name TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT 'foreign_table' CHECK (kind = 'foreign_table'),
+            server_name   TEXT NOT NULL,
+            columns_json  TEXT NOT NULL,
+            options       TEXT NOT NULL,
+            PRIMARY KEY (schema_name, relation_name),
+            FOREIGN KEY (schema_name, relation_name, kind)
+                REFERENCES _relations(schema_name, relation_name, kind)
+                ON DELETE CASCADE
+        );
+        CREATE TABLE _views (
+            schema_name     TEXT NOT NULL,
+            relation_name   TEXT NOT NULL,
+            kind            TEXT NOT NULL DEFAULT 'view' CHECK (kind = 'view'),
+            definition_json TEXT NOT NULL,
+            PRIMARY KEY (schema_name, relation_name),
+            FOREIGN KEY (schema_name, relation_name, kind)
+                REFERENCES _relations(schema_name, relation_name, kind)
+                ON DELETE CASCADE
+        );",
+    )?;
+    Ok(())
+}
+
+fn insert_relation_parents(
+    tx: &rusqlite::Transaction<'_>,
+    seen: &SqliteSeenRelations,
+) -> Result<()> {
+    for (relation, (kind, _)) in seen {
+        tx.execute(
+            "INSERT OR IGNORE INTO _schemas(name) VALUES (?1)",
+            params![relation.schema],
+        )?;
+        tx.execute(
+            "INSERT INTO _relations(schema_name, relation_name, kind) VALUES (?1, ?2, ?3)",
+            params![relation.schema, relation.name, kind.as_str()],
+        )?;
+    }
+    Ok(())
+}
+
+fn migrate_sqlite_table_name(
+    tx: &rusqlite::Transaction<'_>,
+    table: &SqliteTableMigration,
+) -> Result<()> {
+    let canonical = table.relation.qualified_name();
+    if table.old_name == canonical {
+        return Ok(());
+    }
+    for owner_table in [
+        "_documents",
+        "_document_blobs",
+        "_postings",
+        "_doc_lengths",
+        "_field_stats",
+        "_vectors",
+        "_ivf_indexes",
+        "_ivf_centroids",
+        "_ivf_assignments",
+        "_column_stats",
+        "_table_field_analyzers",
+        "_catalog_indexes",
+    ] {
+        if table_exists(tx, owner_table)? {
+            let target_rows: i64 = tx.query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {} WHERE table_name = ?1",
+                    quote_sql_identifier(owner_table)
+                ),
+                params![canonical],
+                |row| row.get(0),
+            )?;
+            if target_rows != 0 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation namespace migration for `{canonical}` would overwrite existing rows in `{owner_table}`"
+                )));
+            }
+        }
+        update_table_name_rows_if_exists(tx, owner_table, &table.old_name, &canonical)?;
+    }
+    // `_btree_index_entries` is a child of `_btree_indexes`. Check both
+    // destinations before moving either, then update parent-first. The helper
+    // also moves children explicitly when an externally supplied SQLite
+    // connection has foreign-key enforcement disabled.
+    for owner_table in ["_btree_indexes", "_btree_index_entries"] {
+        if table_exists(tx, owner_table)? {
+            let target_rows: i64 = tx.query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {} WHERE table_name = ?1",
+                    quote_sql_identifier(owner_table)
+                ),
+                params![canonical],
+                |row| row.get(0),
+            )?;
+            if target_rows != 0 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation namespace migration for `{canonical}` would overwrite existing rows in `{owner_table}`"
+                )));
+            }
+        }
+    }
+    update_btree_table_name_rows_if_exists(tx, &table.old_name, &canonical)?;
+    drop_fts_aux_tables_for_table(tx, &table.old_name)
+}
+
+fn insert_table_migration(
+    tx: &rusqlite::Transaction<'_>,
+    table: &SqliteTableMigration,
+) -> Result<()> {
+    migrate_sqlite_table_name(tx, table)?;
+    tx.execute(
+        "INSERT INTO _tables_v17
+            (schema_name, relation_name, kind, analyzer, fts_fields,
+             vector_fields, columns, constraints)
+         VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7)",
+        params![
+            table.relation.schema,
+            table.relation.name,
+            table.analyzer,
+            table.fts,
+            table.vectors,
+            table.columns,
+            table.constraints
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_relation_children(
+    tx: &rusqlite::Transaction<'_>,
+    migrations: &SqliteRelationMigrations,
+) -> Result<()> {
+    for table in &migrations.tables {
+        insert_table_migration(tx, table)?;
+    }
+    for sequence in &migrations.sequences {
+        tx.execute(
+            "INSERT INTO _sequences_v17
+                (schema_name, relation_name, kind, start, increment, current)
+             VALUES (?1, ?2, 'sequence', ?3, ?4, ?5)",
+            params![
+                sequence.relation.schema,
+                sequence.relation.name,
+                sequence.start,
+                sequence.increment,
+                sequence.current
+            ],
+        )?;
+    }
+    for foreign in &migrations.foreign_tables {
+        tx.execute(
+            "INSERT INTO _foreign_tables_v17
+                (schema_name, relation_name, kind, server_name, columns_json, options)
+             VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5)",
+            params![
+                foreign.relation.schema,
+                foreign.relation.name,
+                foreign.server,
+                foreign.columns,
+                foreign.options
+            ],
+        )?;
+    }
+    for (relation, definition_json) in &migrations.views {
+        tx.execute(
+            "INSERT INTO _views
+                (schema_name, relation_name, kind, definition_json)
+             VALUES (?1, ?2, 'view', ?3)",
+            params![relation.schema, relation.name, definition_json],
+        )?;
+    }
+    Ok(())
+}
+
+fn finish_sqlite_relation_migration(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "DROP TABLE _tables;
+         ALTER TABLE _tables_v17 RENAME TO _tables;
+         DROP TABLE _sequences;
+         ALTER TABLE _sequences_v17 RENAME TO _sequences;
+         DROP TABLE _foreign_tables;
+         ALTER TABLE _foreign_tables_v17 RENAME TO _foreign_tables;",
+    )?;
+    for key in [LEGACY_VIEWS_METADATA_KEY, LEGACY_SEQUENCES_METADATA_KEY] {
+        tx.execute(
+            "INSERT OR REPLACE INTO _metadata(key, value) VALUES (?1, '{}')",
+            params![key],
+        )?;
+    }
+    Ok(())
 }
 
 impl Catalog {
@@ -78,19 +574,45 @@ impl Catalog {
                 )",
                 [],
             )?;
-            let current: u32 = conn
+            let current = conn
                 .query_row(
                     "SELECT value FROM _metadata WHERE key = 'schema_version'",
                     [],
                     |r| r.get::<_, String>(0),
                 )
-                .optional()?
-                .map_or(0, |s| s.parse().unwrap_or(0));
+                .optional()?;
+            let current = match current {
+                Some(version) => version
+                    .parse::<u32>()
+                    .map_err(|_| SQLiteError::InvalidSchemaVersion(version))?,
+                None => 0,
+            };
+            if current > CURRENT_SCHEMA_VERSION {
+                return Err(SQLiteError::UnsupportedSchemaVersion {
+                    found: current,
+                    supported: CURRENT_SCHEMA_VERSION,
+                });
+            }
 
             for (version, sql) in MIGRATIONS {
                 if *version > current {
+                    let schema_change_already_present = *version == 16
+                        && Self::table_columns(conn, "_tables")?
+                            .is_some_and(|columns| columns.contains_key("constraints"));
+                    let relation_namespace_already_present = *version == 17
+                        && Self::table_columns(conn, "_tables")?
+                            .is_some_and(|columns| columns.contains_key("schema_name"))
+                        && Self::table_columns(conn, "_relations")?.is_some()
+                        && Self::table_columns(conn, "_views")?.is_some();
+                    let sequence_called_already_present = *version == 18
+                        && Self::table_columns(conn, "_sequences")?
+                            .is_some_and(|columns| columns.contains_key("called"));
                     let tx = conn.transaction()?;
-                    tx.execute_batch(sql)?;
+                    if *version == 17 && !relation_namespace_already_present {
+                        Self::migrate_relation_namespace_v17(&tx)?;
+                    } else if !schema_change_already_present && !sequence_called_already_present {
+                        tx.execute_batch(sql)?;
+                    }
                     tx.execute(
                         "INSERT OR REPLACE INTO _metadata (key, value) \
                          VALUES ('schema_version', ?1)",
@@ -103,6 +625,89 @@ impl Catalog {
             let fts_storage_was_reset = Self::ensure_fts_storage_shape(conn)?;
             Ok(fts_storage_was_reset)
         })
+    }
+
+    fn migrate_relation_namespace_v17(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+        let migrations = collect_sqlite_relation_migrations(tx)?;
+        create_structural_relation_tables(tx)?;
+        insert_relation_parents(tx, &migrations.seen)?;
+        insert_relation_children(tx, &migrations)?;
+        finish_sqlite_relation_migration(tx)
+    }
+
+    fn claim_relation(
+        conn: &rusqlite::Connection,
+        relation: &RelationIdentity,
+        kind: RelationKind,
+    ) -> Result<()> {
+        let schema_exists = conn
+            .query_row(
+                "SELECT 1 FROM _schemas WHERE name = ?1",
+                params![relation.schema],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !schema_exists {
+            return Err(SQLiteError::StorageBackend(format!(
+                "schema `{}` does not exist for relation `{}`",
+                relation.schema,
+                relation.qualified_name()
+            )));
+        }
+        let existing = conn
+            .query_row(
+                "SELECT kind FROM _relations
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        match existing {
+            Some(existing) if existing == kind.as_str() => Ok(()),
+            Some(existing) => Err(SQLiteError::StorageBackend(format!(
+                "relation `{}` already exists as {existing}",
+                relation.qualified_name()
+            ))),
+            None => {
+                conn.execute(
+                    "INSERT INTO _relations(schema_name, relation_name, kind)
+                     VALUES (?1, ?2, ?3)",
+                    params![relation.schema, relation.name, kind.as_str()],
+                )?;
+                Ok(())
+            }
+        }
+    }
+
+    fn release_relation(
+        conn: &rusqlite::Connection,
+        relation: &RelationIdentity,
+        kind: RelationKind,
+    ) -> Result<()> {
+        let existing = conn
+            .query_row(
+                "SELECT kind FROM _relations
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing != kind.as_str() {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "catalog relation `{}` is {existing}, not {}",
+                    relation.qualified_name(),
+                    kind.as_str()
+                )));
+            }
+            conn.execute(
+                "DELETE FROM _relations
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )?;
+        }
+        Ok(())
     }
 
     fn ensure_fts_storage_shape(conn: &rusqlite::Connection) -> Result<bool> {
@@ -249,18 +854,70 @@ impl Catalog {
         })
     }
 
+    pub fn save_schema(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO _schemas (name) VALUES (?1)",
+                params![name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_schema(&self, name: &str) -> Result<()> {
+        self.conn.with(|c| {
+            let relation_count: i64 = c.query_row(
+                "SELECT COUNT(*) FROM _relations WHERE schema_name = ?1",
+                params![name],
+                |row| row.get(0),
+            )?;
+            if relation_count != 0 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "schema `{name}` still owns catalog relations"
+                )));
+            }
+            c.execute("DELETE FROM _schemas WHERE name = ?1", params![name])?;
+            Ok(())
+        })
+    }
+
+    pub fn load_schemas(&self) -> Result<Vec<String>> {
+        self.conn.with(|c| {
+            let mut stmt = c.prepare("SELECT name FROM _schemas ORDER BY name")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+    }
+
     pub fn save_table(&self, schema: &TableSchema) -> Result<()> {
         let analyzer = schema.analyzer_json.clone();
         let fts = serde_json::to_string(&schema.fts_fields)?;
         let vectors = serde_json::to_string(&schema.vector_fields)?;
         let columns = schema.columns_json.clone();
-        self.conn.with(|c| {
-            c.execute(
+        let constraints = schema.constraints_json.clone();
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::claim_relation(&tx, &schema.relation, RelationKind::Table)?;
+            tx.execute(
                 "INSERT OR REPLACE INTO _tables
-                    (name, analyzer, fts_fields, vector_fields, columns)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![schema.name, analyzer, fts, vectors, columns],
+                    (schema_name, relation_name, kind, analyzer, fts_fields,
+                     vector_fields, columns, constraints)
+                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    schema.relation.schema,
+                    schema.relation.name,
+                    analyzer,
+                    fts,
+                    vectors,
+                    columns,
+                    constraints
+                ],
             )?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -268,8 +925,9 @@ impl Catalog {
     pub fn load_tables(&self) -> Result<Vec<TableSchema>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT name, analyzer, fts_fields, vector_fields, columns
-                   FROM _tables ORDER BY name",
+                "SELECT schema_name, relation_name, analyzer, fts_fields,
+                        vector_fields, columns, constraints
+                   FROM _tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -277,20 +935,31 @@ impl Catalog {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
-                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    r.get::<_, String>(6)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (name, analyzer_json, fts_str, vec_str, cols_opt) = row?;
+                let (
+                    schema_name,
+                    relation_name,
+                    analyzer_json,
+                    fts_str,
+                    vec_str,
+                    cols_opt,
+                    constraints_json,
+                ) = row?;
                 let fts_fields: Vec<String> = serde_json::from_str(&fts_str)?;
                 let vector_fields: Vec<VectorFieldSchema> = serde_json::from_str(&vec_str)?;
                 out.push(TableSchema {
-                    name,
+                    relation: RelationIdentity::new(schema_name, relation_name),
                     analyzer_json,
                     fts_fields,
                     vector_fields,
                     columns_json: cols_opt.unwrap_or_default(),
+                    constraints_json,
                 });
             }
             Ok(out)
@@ -298,8 +967,15 @@ impl Catalog {
     }
 
     pub fn drop_table(&self, name: &str) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute("DELETE FROM _tables WHERE name = ?1", params![name])?;
+        let relation = migration_relation(name)?;
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "DELETE FROM _tables WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )?;
+            Self::release_relation(&tx, &relation, RelationKind::Table)?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -310,33 +986,101 @@ impl Catalog {
     /// when the engine drops the table from its in-memory registry as
     /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
-        self.conn.with(|c| {
-            for table in [
-                "_documents",
-                "_document_blobs",
-                "_postings",
-                "_doc_lengths",
-                "_field_stats",
-                "_vectors",
-                "_ivf_indexes",
-                "_ivf_centroids",
-                "_ivf_assignments",
-                "_column_stats",
-                "_btree_indexes",
-            ] {
-                delete_table_rows_if_exists(c, table, name)?;
+        let relation = migration_relation(name)?;
+        let storage_names = relation.canonical_and_legacy_public_names();
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            for storage_name in &storage_names {
+                for table in [
+                    "_documents",
+                    "_document_blobs",
+                    "_postings",
+                    "_doc_lengths",
+                    "_field_stats",
+                    "_vectors",
+                    "_ivf_indexes",
+                    "_ivf_centroids",
+                    "_ivf_assignments",
+                    "_column_stats",
+                    "_btree_index_entries",
+                    "_btree_indexes",
+                ] {
+                    delete_table_rows_if_exists(&tx, table, storage_name)?;
+                }
+                drop_fts_aux_tables_for_table(&tx, storage_name)?;
             }
-            drop_fts_aux_tables_for_table(c, name)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_table_and_data(&self, name: &str) -> Result<()> {
+        let relation = migration_relation(name)?;
+        let storage_names = relation.canonical_and_legacy_public_names();
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "DELETE FROM _tables WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )?;
+            for storage_name in &storage_names {
+                for table in [
+                    "_documents",
+                    "_document_blobs",
+                    "_postings",
+                    "_doc_lengths",
+                    "_field_stats",
+                    "_vectors",
+                    "_ivf_indexes",
+                    "_ivf_centroids",
+                    "_ivf_assignments",
+                    "_column_stats",
+                    "_btree_index_entries",
+                    "_btree_indexes",
+                ] {
+                    delete_table_rows_if_exists(&tx, table, storage_name)?;
+                }
+                tx.execute(
+                    "DELETE FROM _table_field_analyzers WHERE table_name = ?1",
+                    params![storage_name],
+                )?;
+                tx.execute(
+                    "DELETE FROM _catalog_indexes WHERE table_name = ?1",
+                    params![storage_name],
+                )?;
+                drop_fts_aux_tables_for_table(&tx, storage_name)?;
+            }
+            Self::release_relation(&tx, &relation, RelationKind::Table)?;
+            tx.commit()?;
             Ok(())
         })
     }
 
     pub fn rename_table_data(&self, from: &str, to: &str) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
-                "UPDATE _tables SET name = ?2 WHERE name = ?1",
-                params![from, to],
+        let from_relation = migration_relation(from)?;
+        let to_relation = migration_relation(to)?;
+        if from_relation == to_relation {
+            return Ok(());
+        }
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::claim_relation(&tx, &to_relation, RelationKind::Table)?;
+            let updated = tx.execute(
+                "UPDATE _tables
+                    SET schema_name = ?3, relation_name = ?4
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![
+                    from_relation.schema,
+                    from_relation.name,
+                    to_relation.schema,
+                    to_relation.name
+                ],
             )?;
+            if updated == 0 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "table `{from}` does not exist"
+                )));
+            }
             for table in [
                 "_documents",
                 "_document_blobs",
@@ -350,20 +1094,23 @@ impl Catalog {
                 "_column_stats",
                 "_table_field_analyzers",
                 "_catalog_indexes",
-                "_btree_indexes",
             ] {
-                update_table_name_rows_if_exists(c, table, from, to)?;
+                update_table_name_rows_if_exists(&tx, table, from, to)?;
             }
-            drop_fts_aux_tables_for_table(c, from)?;
+            update_btree_table_name_rows_if_exists(&tx, from, to)?;
+            drop_fts_aux_tables_for_table(&tx, from)?;
+            Self::release_relation(&tx, &from_relation, RelationKind::Table)?;
+            tx.commit()?;
             Ok(())
         })
     }
 
     pub fn drop_column_data(&self, table_name: &str, column_name: &str) -> Result<()> {
         let indexes = self.catalog_indexes_referencing_column(table_name, column_name)?;
-        self.conn.with(|c| {
-            if table_exists(c, "_document_blobs")? {
-                c.execute(
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            if table_exists(&tx, "_document_blobs")? {
+                tx.execute(
                     "DELETE FROM _document_blobs WHERE table_name = ?1 AND field_name = ?2",
                     params![table_name, column_name],
                 )?;
@@ -376,37 +1123,40 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_btree_index_entries",
                 "_btree_indexes",
             ] {
-                c.execute(
+                tx.execute(
                     &format!("DELETE FROM {table} WHERE table_name = ?1 AND field = ?2"),
                     params![table_name, column_name],
                 )?;
             }
-            c.execute(
+            tx.execute(
                 "DELETE FROM _column_stats WHERE table_name = ?1 AND column_name = ?2",
                 params![table_name, column_name],
             )?;
-            c.execute(
+            tx.execute(
                 "DELETE FROM _table_field_analyzers WHERE table_name = ?1 AND field = ?2",
                 params![table_name, column_name],
             )?;
             for index_name in indexes {
-                c.execute(
+                tx.execute(
                     "DELETE FROM _catalog_indexes WHERE name = ?1",
                     params![index_name],
                 )?;
             }
-            drop_fts_aux_tables_for_field(c, table_name, column_name)?;
+            drop_fts_aux_tables_for_field(&tx, table_name, column_name)?;
+            tx.commit()?;
             Ok(())
         })
     }
 
     pub fn rename_column_data(&self, table_name: &str, from: &str, to: &str) -> Result<()> {
         let index_updates = self.catalog_index_column_renames(table_name, from, to)?;
-        self.conn.with(|c| {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
             rename_field_rows_or_keep_existing(
-                c,
+                &tx,
                 "_document_blobs",
                 "field_name",
                 table_name,
@@ -421,12 +1171,12 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
-                "_btree_indexes",
             ] {
-                rename_field_rows_or_keep_existing(c, table, "field", table_name, from, to)?;
+                rename_field_rows_or_keep_existing(&tx, table, "field", table_name, from, to)?;
             }
+            rename_btree_field_rows_or_keep_existing(&tx, table_name, from, to)?;
             rename_field_rows_or_keep_existing(
-                c,
+                &tx,
                 "_column_stats",
                 "column_name",
                 table_name,
@@ -434,7 +1184,7 @@ impl Catalog {
                 to,
             )?;
             rename_field_rows_or_keep_existing(
-                c,
+                &tx,
                 "_table_field_analyzers",
                 "field",
                 table_name,
@@ -442,14 +1192,15 @@ impl Catalog {
                 to,
             )?;
             for (index_name, columns_json) in index_updates {
-                c.execute(
+                tx.execute(
                     "UPDATE _catalog_indexes
                         SET columns = ?2
                       WHERE name = ?1",
                     params![index_name, columns_json],
                 )?;
             }
-            rename_fts_aux_tables_for_field(c, table_name, from, to)?;
+            rename_fts_aux_tables_for_field(&tx, table_name, from, to)?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -462,7 +1213,7 @@ impl Catalog {
         let mut out = Vec::new();
         for row in self.load_catalog_indexes()? {
             if row.table_name == table_name
-                && columns_json_references(&row.columns_json, column_name)
+                && columns_json_references(&row.columns_json, column_name)?
             {
                 out.push(row.name);
             }
@@ -481,7 +1232,7 @@ impl Catalog {
             if row.table_name != table_name {
                 continue;
             }
-            if let Some(columns_json) = renamed_columns_json(&row.columns_json, from, to) {
+            if let Some(columns_json) = renamed_columns_json(&row.columns_json, from, to)? {
                 out.push((row.name, columns_json));
             }
         }
@@ -575,6 +1326,215 @@ impl Catalog {
         })
     }
 
+    pub fn create_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM _sequences
+                      WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![sequence.relation.schema, sequence.relation.name],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if exists {
+                return Ok(false);
+            }
+            Self::claim_relation(&tx, &sequence.relation, RelationKind::Sequence)?;
+            tx.execute(
+                "INSERT INTO _sequences
+                    (schema_name, relation_name, kind, start, increment, current, called)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6)",
+                params![
+                    sequence.relation.schema,
+                    sequence.relation.name,
+                    sequence.start,
+                    sequence.increment,
+                    sequence.current,
+                    sequence.called
+                ],
+            )?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
+    pub fn replace_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
+        self.conn.with(|connection| {
+            Ok(connection.execute(
+                "UPDATE _sequences
+                    SET start = ?3, increment = ?4, current = ?5, called = ?6
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![
+                    sequence.relation.schema,
+                    sequence.relation.name,
+                    sequence.start,
+                    sequence.increment,
+                    sequence.current,
+                    sequence.called
+                ],
+            )? != 0)
+        })
+    }
+
+    pub fn drop_sequence_row(&self, name: &str) -> Result<bool> {
+        let relation = migration_relation(name)?;
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            let removed = tx.execute(
+                "DELETE FROM _sequences
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )? != 0;
+            if removed {
+                Self::release_relation(&tx, &relation, RelationKind::Sequence)?;
+            }
+            tx.commit()?;
+            Ok(removed)
+        })
+    }
+
+    pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
+        self.conn.with(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT schema_name, relation_name, start, increment, current, called
+                       FROM _sequences ORDER BY schema_name, relation_name",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(SequenceRow {
+                    relation: RelationIdentity::new(
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                    ),
+                    start: row.get(2)?,
+                    increment: row.get(3)?,
+                    current: row.get(4)?,
+                    called: row.get(5)?,
+                })
+            })?;
+            let mut sequences = Vec::new();
+            for row in rows {
+                sequences.push(row?);
+            }
+            Ok(sequences)
+        })
+    }
+
+    /// Allocate one sequence value inside `SQLite` itself. `UPDATE RETURNING`
+    /// is a single atomic statement, so no engine-side read/modify/write cache
+    /// can race another connection.
+    pub fn next_sequence_value(&self, name: &str) -> Result<Option<i64>> {
+        let relation = migration_relation(name)?;
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            let value = tx
+                .query_row(
+                    "UPDATE _sequences
+                        SET current = CASE WHEN called = 0 THEN current
+                                           ELSE current + increment END,
+                            called = 1
+                      WHERE schema_name = ?1 AND relation_name = ?2
+                        AND (called = 0
+                             OR (increment > 0 AND current <= ?3 - increment)
+                             OR (increment < 0 AND current >= ?4 - increment))
+                      RETURNING current",
+                    params![relation.schema, relation.name, i64::MAX, i64::MIN],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if value.is_none() {
+                let exists = tx
+                    .query_row(
+                        "SELECT 1 FROM _sequences
+                          WHERE schema_name = ?1 AND relation_name = ?2",
+                        params![relation.schema, relation.name],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if exists {
+                    return Err(SQLiteError::StorageBackend(format!(
+                        "sequence `{name}` overflow"
+                    )));
+                }
+            }
+            tx.commit()?;
+            Ok(value)
+        })
+    }
+
+    pub fn set_sequence_value(&self, name: &str, value: i64) -> Result<Option<i64>> {
+        let relation = migration_relation(name)?;
+        self.conn.with(|connection| {
+            Ok(connection
+                .query_row(
+                    "UPDATE _sequences SET current = ?3, called = 1
+                     WHERE schema_name = ?1 AND relation_name = ?2 RETURNING current",
+                    params![relation.schema, relation.name, value],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
+    }
+
+    pub fn save_view(&self, view: &ViewRow) -> Result<()> {
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            Self::claim_relation(&tx, &view.relation, RelationKind::View)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO _views
+                    (schema_name, relation_name, kind, definition_json)
+                 VALUES (?1, ?2, 'view', ?3)",
+                params![
+                    view.relation.schema,
+                    view.relation.name,
+                    view.definition_json
+                ],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_view(&self, relation: &RelationIdentity) -> Result<bool> {
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            let removed = tx.execute(
+                "DELETE FROM _views WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )? != 0;
+            if removed {
+                Self::release_relation(&tx, relation, RelationKind::View)?;
+            }
+            tx.commit()?;
+            Ok(removed)
+        })
+    }
+
+    pub fn load_views(&self) -> Result<Vec<ViewRow>> {
+        self.conn.with(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT schema_name, relation_name, definition_json
+                   FROM _views ORDER BY schema_name, relation_name",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok(ViewRow {
+                    relation: RelationIdentity::new(
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                    ),
+                    definition_json: row.get(2)?,
+                })
+            })?;
+            let mut views = Vec::new();
+            for row in rows {
+                views.push(row?);
+            }
+            Ok(views)
+        })
+    }
+
     /// Register the existence of a named graph in the catalog.
     /// Matches UQA behavior for `Catalog.save_named_graph`.
     pub fn save_named_graph(&self, name: &str) -> Result<()> {
@@ -623,11 +1583,12 @@ impl Catalog {
     /// `Catalog.save_vertex` extended with the `label` column the
     /// `SQLiteGraphStore` writes alongside it.
     pub fn save_vertex(&self, vertex_id: u64, label: &str, properties_json: &str) -> Result<()> {
+        let vertex_id = encode_catalog_id("vertex", vertex_id)?;
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _graph_vertices (vertex_id, label, properties_json) \
                  VALUES (?1, ?2, ?3)",
-                params![vertex_id as i64, label, properties_json],
+                params![vertex_id, label, properties_json],
             )?;
             Ok(())
         })
@@ -635,10 +1596,11 @@ impl Catalog {
 
     /// Delete a vertex by global id.
     pub fn delete_vertex(&self, vertex_id: u64) -> Result<()> {
+        let vertex_id = encode_catalog_id("vertex", vertex_id)?;
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_vertices WHERE vertex_id = ?1",
-                params![vertex_id as i64],
+                params![vertex_id],
             )?;
             Ok(())
         })
@@ -663,7 +1625,7 @@ impl Catalog {
             let mut out = Vec::new();
             for row in rows {
                 let (id, label, props) = row?;
-                out.push((id as u64, label, props));
+                out.push((decode_catalog_id("vertex", id)?, label, props));
             }
             Ok(out)
         })
@@ -680,18 +1642,15 @@ impl Catalog {
         label: &str,
         properties_json: &str,
     ) -> Result<()> {
+        let edge_id = encode_catalog_id("edge", edge_id)?;
+        let source_id = encode_catalog_id("edge source vertex", source_id)?;
+        let target_id = encode_catalog_id("edge target vertex", target_id)?;
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _graph_edges \
                     (edge_id, source_id, target_id, label, properties_json) \
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    edge_id as i64,
-                    source_id as i64,
-                    target_id as i64,
-                    label,
-                    properties_json
-                ],
+                params![edge_id, source_id, target_id, label, properties_json],
             )?;
             Ok(())
         })
@@ -699,10 +1658,11 @@ impl Catalog {
 
     /// Delete an edge by global id.
     pub fn delete_edge(&self, edge_id: u64) -> Result<()> {
+        let edge_id = encode_catalog_id("edge", edge_id)?;
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_edges WHERE edge_id = ?1",
-                params![edge_id as i64],
+                params![edge_id],
             )?;
             Ok(())
         })
@@ -728,9 +1688,9 @@ impl Catalog {
             for row in rows {
                 let (id, src, tgt, label, props) = row?;
                 out.push(EdgeRow {
-                    edge_id: id as u64,
-                    source_id: src as u64,
-                    target_id: tgt as u64,
+                    edge_id: decode_catalog_id("edge", id)?,
+                    source_id: decode_catalog_id("edge source vertex", src)?,
+                    target_id: decode_catalog_id("edge target vertex", tgt)?,
                     label,
                     properties_json: props,
                 });
@@ -749,12 +1709,13 @@ impl Catalog {
         entity_id: u64,
         graph_name: &str,
     ) -> Result<()> {
+        let entity_id = encode_catalog_id("graph membership entity", entity_id)?;
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR IGNORE INTO _graph_membership \
                     (entity_type, entity_id, graph_name) \
                  VALUES (?1, ?2, ?3)",
-                params![entity_type, entity_id as i64, graph_name],
+                params![entity_type, entity_id, graph_name],
             )?;
             Ok(())
         })
@@ -767,11 +1728,12 @@ impl Catalog {
         entity_id: u64,
         graph_name: &str,
     ) -> Result<()> {
+        let entity_id = encode_catalog_id("graph membership entity", entity_id)?;
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _graph_membership \
                   WHERE entity_type = ?1 AND entity_id = ?2 AND graph_name = ?3",
-                params![entity_type, entity_id as i64, graph_name],
+                params![entity_type, entity_id, graph_name],
             )?;
             Ok(())
         })
@@ -806,7 +1768,7 @@ impl Catalog {
             let mut out = Vec::new();
             for row in rows {
                 let (ty, id, graph) = row?;
-                out.push((ty, id as u64, graph));
+                out.push((ty, decode_catalog_id("graph membership entity", id)?, graph));
             }
             Ok(out)
         })
@@ -832,6 +1794,114 @@ impl Catalog {
             )?;
             Ok(())
         })
+    }
+
+    pub fn replace_named_graph(&self, graph_name: &str, snapshot: &GraphSnapshot) -> Result<()> {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "INSERT OR IGNORE INTO _named_graphs (name) VALUES (?1)",
+                params![graph_name],
+            )?;
+            tx.execute(
+                "DELETE FROM _graph_membership WHERE graph_name = ?1",
+                params![graph_name],
+            )?;
+            tx.execute(
+                "DELETE FROM _path_indexes
+                  WHERE substr(graph_name, 1, length(?1) + 2) = ?1 || '::'",
+                params![graph_name],
+            )?;
+            for vertex in &snapshot.vertices {
+                let vertex_id = encode_catalog_id("vertex", vertex.vertex_id)?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO _graph_vertices
+                        (vertex_id, label, properties_json) VALUES (?1, ?2, ?3)",
+                    params![vertex_id, vertex.label, vertex.properties_json],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO _graph_membership
+                        (entity_type, entity_id, graph_name) VALUES ('vertex', ?1, ?2)",
+                    params![vertex_id, graph_name],
+                )?;
+            }
+            for edge in &snapshot.edges {
+                let edge_id = encode_catalog_id("edge", edge.edge_id)?;
+                let source_id = encode_catalog_id("edge source vertex", edge.source_id)?;
+                let target_id = encode_catalog_id("edge target vertex", edge.target_id)?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO _graph_edges
+                        (edge_id, source_id, target_id, label, properties_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        edge_id,
+                        source_id,
+                        target_id,
+                        edge.label,
+                        edge.properties_json
+                    ],
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO _graph_membership
+                        (entity_type, entity_id, graph_name) VALUES ('edge', ?1, ?2)",
+                    params![edge_id, graph_name],
+                )?;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?1, ?2)",
+                params![
+                    format!("graph_label_registry::{graph_name}"),
+                    snapshot.label_registry_json
+                ],
+            )?;
+            Self::purge_orphan_graph_entities_on(&tx)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_named_graph_data(&self, graph_name: &str) -> Result<()> {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "DELETE FROM _named_graphs WHERE name = ?1",
+                params![graph_name],
+            )?;
+            tx.execute(
+                "DELETE FROM _graph_membership WHERE graph_name = ?1",
+                params![graph_name],
+            )?;
+            tx.execute(
+                "DELETE FROM _metadata WHERE key = ?1",
+                params![format!("graph_label_registry::{graph_name}")],
+            )?;
+            tx.execute(
+                "DELETE FROM _path_indexes
+                  WHERE substr(graph_name, 1, length(?1) + 2) = ?1 || '::'",
+                params![graph_name],
+            )?;
+            Self::purge_orphan_graph_entities_on(&tx)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    fn purge_orphan_graph_entities_on(c: &rusqlite::Connection) -> Result<()> {
+        c.execute(
+            "DELETE FROM _graph_vertices
+              WHERE vertex_id NOT IN (
+                SELECT entity_id FROM _graph_membership WHERE entity_type = 'vertex'
+              )",
+            [],
+        )?;
+        c.execute(
+            "DELETE FROM _graph_edges
+              WHERE edge_id NOT IN (
+                SELECT entity_id FROM _graph_membership WHERE entity_type = 'edge'
+              )",
+            [],
+        )?;
+        Ok(())
     }
 
     // -- Named analyzers ---------------------------------------------------
@@ -895,6 +1965,42 @@ impl Catalog {
             c.execute(
                 "DELETE FROM _table_field_analyzers WHERE table_name = ?1",
                 params![table_name],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn replace_table_field_analyzer(
+        &self,
+        table_name: &str,
+        field: &str,
+        phase: &str,
+        analyzer_name: &str,
+    ) -> Result<()> {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "DELETE FROM _table_field_analyzers
+                  WHERE table_name = ?1 AND field = ?2",
+                params![table_name, field],
+            )?;
+            tx.execute(
+                "INSERT INTO _table_field_analyzers
+                    (table_name, field, phase, analyzer_name)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![table_name, field, phase, analyzer_name],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn drop_table_field_analyzer_field(&self, table_name: &str, field: &str) -> Result<()> {
+        self.conn.with(|c| {
+            c.execute(
+                "DELETE FROM _table_field_analyzers
+                  WHERE table_name = ?1 AND field = ?2",
+                params![table_name, field],
             )?;
             Ok(())
         })
@@ -975,25 +2081,43 @@ impl Catalog {
 
     pub fn save_foreign_table(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
     ) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::claim_relation(&tx, relation, RelationKind::ForeignTable)?;
+            tx.execute(
                 "INSERT OR REPLACE INTO _foreign_tables \
-                    (name, server_name, columns_json, options) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![name, server_name, columns_json, options_json],
+                    (schema_name, relation_name, kind, server_name, columns_json, options) \
+                 VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5)",
+                params![
+                    relation.schema,
+                    relation.name,
+                    server_name,
+                    columns_json,
+                    options_json
+                ],
             )?;
+            tx.commit()?;
             Ok(())
         })
     }
 
-    pub fn drop_foreign_table(&self, name: &str) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute("DELETE FROM _foreign_tables WHERE name = ?1", params![name])?;
+    pub fn drop_foreign_table(&self, relation: &RelationIdentity) -> Result<()> {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            let removed = tx.execute(
+                "DELETE FROM _foreign_tables
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
+            )? != 0;
+            if removed {
+                Self::release_relation(&tx, relation, RelationKind::ForeignTable)?;
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -1001,8 +2125,8 @@ impl Catalog {
     pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT name, server_name, columns_json, options FROM _foreign_tables \
-                  ORDER BY name",
+                "SELECT schema_name, relation_name, server_name, columns_json, options
+                   FROM _foreign_tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -1010,13 +2134,14 @@ impl Catalog {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (name, server, cols, opts) = row?;
+                let (schema, name, server, cols, opts) = row?;
                 out.push(ForeignTableRow {
-                    name,
+                    relation: RelationIdentity::new(schema, name),
                     server_name: server,
                     columns_json: cols,
                     options_json: opts,
@@ -1165,6 +2290,51 @@ impl Catalog {
         })
     }
 
+    pub fn replace_column_stats(
+        &self,
+        table_name: &str,
+        stats: &[ColumnStatsInput<'_>],
+    ) -> Result<()> {
+        if let Some(row) = stats.iter().find(|row| row.table_name != table_name) {
+            return Err(SQLiteError::StorageBackend(format!(
+                "column stats row for table `{}` cannot be stored in snapshot `{table_name}`",
+                row.table_name
+            )));
+        }
+        self.conn.with_mut(|connection| {
+            let transaction = connection.savepoint()?;
+            transaction.execute(
+                "DELETE FROM _column_stats WHERE table_name = ?1",
+                params![table_name],
+            )?;
+            {
+                let mut statement = transaction.prepare(
+                    "INSERT INTO _column_stats
+                        (table_name, column_name, distinct_count, null_count,
+                         min_value, max_value, row_count,
+                         histogram, mcv_values, mcv_frequencies)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                )?;
+                for row in stats {
+                    statement.execute(params![
+                        row.table_name,
+                        row.column_name,
+                        row.distinct_count,
+                        row.null_count,
+                        row.min_value,
+                        row.max_value,
+                        row.row_count,
+                        row.histogram_json,
+                        row.mcv_values_json,
+                        row.mcv_frequencies_json,
+                    ])?;
+                }
+            }
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn load_column_stats(&self, table_name: &str) -> Result<Vec<ColumnStatsRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
@@ -1224,6 +2394,68 @@ impl CatalogFacade for Catalog {
         self.fts_storage_was_reset
     }
 
+    fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
+        into_storage_result(self.conn.with(|connection| {
+            let foreign_key_violation = connection
+                .query_row("PRAGMA foreign_key_check", [], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .optional()?;
+            if let Some((table, row_id)) = foreign_key_violation {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation catalog foreign-key violation in `{table}` row {row_id}"
+                )));
+            }
+            let orphan = connection
+                .query_row(
+                    "SELECT r.schema_name, r.relation_name, r.kind
+                       FROM _relations AS r
+                       LEFT JOIN (
+                           SELECT schema_name, relation_name, 'table' AS kind FROM _tables
+                           UNION ALL
+                           SELECT schema_name, relation_name, 'view' AS kind FROM _views
+                           UNION ALL
+                           SELECT schema_name, relation_name, 'sequence' AS kind FROM _sequences
+                           UNION ALL
+                           SELECT schema_name, relation_name, 'foreign_table' AS kind
+                             FROM _foreign_tables
+                       ) AS child
+                         ON child.schema_name = r.schema_name
+                        AND child.relation_name = r.relation_name
+                        AND child.kind = r.kind
+                      WHERE child.relation_name IS NULL
+                      LIMIT 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((schema, name, kind)) = orphan {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "catalog relation `{schema}.{name}` has no {kind} child"
+                )));
+            }
+            Ok(())
+        }))
+    }
+
+    fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_schema(self, name))
+    }
+
+    fn drop_schema(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_schema(self, name))
+    }
+
+    fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
+        into_storage_result(Catalog::load_schemas(self))
+    }
+
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_table(self, schema))
     }
@@ -1234,6 +2466,10 @@ impl CatalogFacade for Catalog {
 
     fn drop_table(&self, name: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::drop_table(self, name))
+    }
+
+    fn drop_table_and_data(&self, name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_table_and_data(self, name))
     }
 
     fn purge_table_data(&self, name: &str) -> StorageBackendResult<()> {
@@ -1287,6 +2523,42 @@ impl CatalogFacade for Catalog {
 
     fn drop_scoring_params(&self, name: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::drop_scoring_params(self, name))
+    }
+
+    fn create_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::create_sequence_row(self, sequence))
+    }
+
+    fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::replace_sequence_row(self, sequence))
+    }
+
+    fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::drop_sequence_row(self, name))
+    }
+
+    fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>> {
+        into_storage_result(Catalog::load_sequence_rows(self))
+    }
+
+    fn next_sequence_value(&self, name: &str) -> StorageBackendResult<Option<i64>> {
+        into_storage_result(Catalog::next_sequence_value(self, name))
+    }
+
+    fn set_sequence_value(&self, name: &str, value: i64) -> StorageBackendResult<Option<i64>> {
+        into_storage_result(Catalog::set_sequence_value(self, name, value))
+    }
+
+    fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_view(self, view))
+    }
+
+    fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::drop_view(self, relation))
+    }
+
+    fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>> {
+        into_storage_result(Catalog::load_views(self))
     }
 
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()> {
@@ -1389,6 +2661,18 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::purge_orphan_graph_entities(self))
     }
 
+    fn replace_named_graph(
+        &self,
+        graph_name: &str,
+        snapshot: &GraphSnapshot,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::replace_named_graph(self, graph_name, snapshot))
+    }
+
+    fn drop_named_graph_data(&self, graph_name: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_named_graph_data(self, graph_name))
+    }
+
     fn save_analyzer(&self, name: &str, config_json: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_analyzer(self, name, config_json))
     }
@@ -1414,6 +2698,32 @@ impl CatalogFacade for Catalog {
             field,
             phase,
             analyzer_name,
+        ))
+    }
+
+    fn replace_table_field_analyzer(
+        &self,
+        table_name: &str,
+        field: &str,
+        phase: &str,
+        analyzer_name: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::replace_table_field_analyzer(
+            self,
+            table_name,
+            field,
+            phase,
+            analyzer_name,
+        ))
+    }
+
+    fn drop_table_field_analyzer_field(
+        &self,
+        table_name: &str,
+        field: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_table_field_analyzer_field(
+            self, table_name, field,
         ))
     }
 
@@ -1451,22 +2761,22 @@ impl CatalogFacade for Catalog {
 
     fn save_foreign_table(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
     ) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_foreign_table(
             self,
-            name,
+            relation,
             server_name,
             columns_json,
             options_json,
         ))
     }
 
-    fn drop_foreign_table(&self, name: &str) -> StorageBackendResult<()> {
-        into_storage_result(Catalog::drop_foreign_table(self, name))
+    fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_foreign_table(self, relation))
     }
 
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>> {
@@ -1525,6 +2835,14 @@ impl CatalogFacade for Catalog {
 
     fn save_column_stats(&self, stats: ColumnStatsInput<'_>) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_column_stats(self, stats))
+    }
+
+    fn replace_column_stats(
+        &self,
+        table_name: &str,
+        stats: &[ColumnStatsInput<'_>],
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::replace_column_stats(self, table_name, stats))
     }
 
     fn load_column_stats(&self, table_name: &str) -> StorageBackendResult<Vec<ColumnStatsRow>> {
@@ -1865,6 +3183,67 @@ const MIGRATIONS: &[(u32, &str)] = &[
     DROP INDEX IF EXISTS _postings_term_idx;
     ",
     ),
+    (
+        13,
+        r"
+    CREATE TABLE IF NOT EXISTS _schemas (
+        name TEXT PRIMARY KEY
+    );
+    INSERT OR IGNORE INTO _schemas (name) VALUES ('public');
+    ",
+    ),
+    (
+        14,
+        r"
+    CREATE TABLE IF NOT EXISTS _sequences (
+        name      TEXT PRIMARY KEY,
+        start     INTEGER NOT NULL,
+        increment INTEGER NOT NULL,
+        current   INTEGER NOT NULL
+    );
+    ",
+    ),
+    // Keep large binary and numeric document values out of JSON bodies. This
+    // table used to be created lazily by document reads and writes, which
+    // turned a read into schema-changing DDL and serialized WAL readers behind
+    // an active writer. Catalog migration now guarantees its existence before
+    // any document store is exposed.
+    (
+        15,
+        r"
+    CREATE TABLE IF NOT EXISTS _document_blobs (
+        table_name TEXT NOT NULL,
+        doc_id     INTEGER NOT NULL,
+        field_name TEXT NOT NULL,
+        bytes      BLOB NOT NULL,
+        PRIMARY KEY (table_name, doc_id, field_name)
+    );
+    ",
+    ),
+    // Persist table CHECK / FOREIGN KEY / composite PRIMARY KEY and UNIQUE
+    // metadata. Existing catalogs receive an empty payload which the engine
+    // interprets as the pre-v16 default constraint set.
+    (
+        16,
+        r"
+    ALTER TABLE _tables ADD COLUMN constraints TEXT NOT NULL DEFAULT '';
+    ",
+    ),
+    // Replace flat relation-name strings with a shared schema-owned relation
+    // catalog. The data rewrite and collision preflight are implemented in
+    // Rust so legacy view/sequence JSON can migrate in the same transaction.
+    (17, ""),
+    // A sequence needs an explicit first-allocation bit.  The former
+    // `current = start - increment` sentinel cannot represent valid BIGINT
+    // boundary starts. Existing rows use the old sentinel representation, so
+    // `called = 1` preserves their next-value behavior exactly.
+    (
+        18,
+        r"
+    ALTER TABLE _sequences
+        ADD COLUMN called INTEGER NOT NULL DEFAULT 1 CHECK (called IN (0, 1));
+    ",
+    ),
 ];
 
 #[cfg(test)]
@@ -1896,7 +3275,7 @@ mod tests {
     fn save_load_round_trip() {
         let cat = fresh();
         let schema = TableSchema {
-            name: "articles".into(),
+            relation: RelationIdentity::new("public", "articles"),
             analyzer_json:
                 "{\"tokenizer\":{\"type\":\"standard\"},\"token_filters\":[],\"char_filters\":[]}"
                     .into(),
@@ -1906,16 +3285,18 @@ mod tests {
                 dimensions: 768,
             }],
             columns_json: String::new(),
+            constraints_json: r#"{"checks":[],"foreign_keys":[],"key_constraints":[]}"#.into(),
         };
         cat.save_table(&schema).unwrap();
         let loaded = cat.load_tables().unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].name, "articles");
+        assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
         assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
         assert_eq!(loaded[0].vector_fields.len(), 1);
         assert_eq!(loaded[0].vector_fields[0].field, "embedding");
         assert_eq!(loaded[0].vector_fields[0].dimensions, 768);
         assert!(loaded[0].columns_json.is_empty());
+        assert_eq!(loaded[0].constraints_json, schema.constraints_json);
     }
 
     #[test]
@@ -1923,7 +3304,7 @@ mod tests {
         let cat = fresh();
         let facade: &dyn CatalogFacade = &cat;
         let schema = TableSchema {
-            name: "facade_articles".into(),
+            relation: RelationIdentity::new("public", "facade_articles"),
             analyzer_json:
                 "{\"tokenizer\":{\"type\":\"standard\"},\"token_filters\":[],\"char_filters\":[]}"
                     .into(),
@@ -1933,11 +3314,15 @@ mod tests {
                 dimensions: 128,
             }],
             columns_json: String::new(),
+            constraints_json: String::new(),
         };
         facade.save_table(&schema).unwrap();
         let loaded = facade.load_tables().unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].name, "facade_articles");
+        assert_eq!(
+            loaded[0].relation.qualified_name(),
+            "public.facade_articles"
+        );
     }
 
     #[test]
@@ -1947,6 +3332,244 @@ mod tests {
         // Reopen on the same handle: should not re-run migrations or
         // raise an error.
         let _cat2 = Catalog::open(mc).unwrap();
+    }
+
+    #[test]
+    fn migration_15_creates_document_blob_storage_for_existing_catalogs() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let _current = Catalog::open(mc.clone()).unwrap();
+        mc.with(|conn| {
+            conn.execute("DROP TABLE _document_blobs", [])?;
+            conn.execute(
+                "UPDATE _metadata SET value = '14' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let _upgraded = Catalog::open(mc.clone()).unwrap();
+        mc.with(|conn| {
+            let count: u32 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = '_document_blobs'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(count, 1);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn migration_16_adds_backward_compatible_table_constraints() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let current = Catalog::open(mc.clone()).unwrap();
+        current
+            .save_table(&TableSchema {
+                relation: RelationIdentity::new("public", "legacy"),
+                analyzer_json: "{}".into(),
+                fts_fields: Vec::new(),
+                vector_fields: Vec::new(),
+                columns_json: "[]".into(),
+                constraints_json: String::new(),
+            })
+            .unwrap();
+        drop(current);
+        mc.with(|conn| {
+            conn.execute("ALTER TABLE _tables DROP COLUMN constraints", [])?;
+            conn.execute(
+                "UPDATE _metadata SET value = '15' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let upgraded = Catalog::open(mc).unwrap();
+        let schemas = upgraded.load_tables().unwrap();
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].relation.qualified_name(), "public.legacy");
+        assert!(schemas[0].constraints_json.is_empty());
+    }
+
+    #[test]
+    fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let current = Catalog::open(connection.clone()).unwrap();
+        current
+            .create_sequence_row(&SequenceRow {
+                relation: RelationIdentity::new("public", "legacy_uncalled"),
+                start: 1,
+                increment: 1,
+                current: 0,
+                called: false,
+            })
+            .unwrap();
+        drop(current);
+        connection
+            .with(|conn| {
+                conn.execute("ALTER TABLE _sequences DROP COLUMN called", [])?;
+                conn.execute(
+                    "UPDATE _metadata SET value = '17' WHERE key = 'schema_version'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let upgraded = Catalog::open(connection.clone()).unwrap();
+        let row = upgraded.load_sequence_rows().unwrap().remove(0);
+        assert!(
+            row.called,
+            "legacy current values are already sentinel-adjusted"
+        );
+        assert_eq!(
+            upgraded
+                .next_sequence_value("public.legacy_uncalled")
+                .unwrap(),
+            Some(1)
+        );
+        connection
+            .with(|conn| {
+                let version: String = conn.query_row(
+                    "SELECT value FROM _metadata WHERE key = 'schema_version'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let _current = Catalog::open(mc.clone()).unwrap();
+        mc.with(|conn| {
+            conn.execute(
+                "UPDATE _metadata SET value = 'not-a-version' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let error = Catalog::open(mc).err();
+        assert!(matches!(
+            error,
+            Some(SQLiteError::InvalidSchemaVersion(version)) if version == "not-a-version"
+        ));
+    }
+
+    #[test]
+    fn future_schema_version_is_rejected() {
+        let mc = ManagedConnection::open_in_memory().unwrap();
+        let _current = Catalog::open(mc.clone()).unwrap();
+        let future = CURRENT_SCHEMA_VERSION + 1;
+        mc.with(|conn| {
+            conn.execute(
+                "UPDATE _metadata SET value = ?1 WHERE key = 'schema_version'",
+                [future.to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(matches!(
+            Catalog::open(mc).err(),
+            Some(SQLiteError::UnsupportedSchemaVersion { found, supported })
+                if found == future && supported == CURRENT_SCHEMA_VERSION
+        ));
+    }
+
+    #[test]
+    fn corrupt_catalog_index_columns_abort_column_lifecycle() {
+        let cat = fresh();
+        cat.save_catalog_index("broken", "btree", "docs", "not-json", "{}")
+            .unwrap();
+
+        assert!(matches!(
+            cat.drop_column_data("docs", "title"),
+            Err(SQLiteError::Serde(_))
+        ));
+        assert_eq!(cat.load_catalog_indexes().unwrap().len(), 1);
+        assert!(matches!(
+            cat.rename_column_data("docs", "title", "headline"),
+            Err(SQLiteError::Serde(_))
+        ));
+        assert_eq!(
+            cat.load_catalog_indexes().unwrap()[0].columns_json,
+            "not-json"
+        );
+    }
+
+    #[test]
+    fn negative_graph_ids_are_reported_as_catalog_corruption() {
+        let cat = fresh();
+        cat.conn
+            .with(|connection| {
+                connection.execute(
+                    "INSERT INTO _graph_vertices (vertex_id, label, properties_json)
+                     VALUES (-1, 'person', '{}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            cat.load_vertices(),
+            Err(SQLiteError::StorageBackend(message))
+                if message.contains("negative vertex id -1")
+        ));
+
+        cat.conn
+            .with(|connection| {
+                connection.execute("DELETE FROM _graph_vertices", [])?;
+                connection.execute(
+                    "INSERT INTO _graph_edges
+                        (edge_id, source_id, target_id, label, properties_json)
+                     VALUES (1, -2, 3, 'knows', '{}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            cat.load_edges(),
+            Err(SQLiteError::StorageBackend(message))
+                if message.contains("negative edge source vertex id -2")
+        ));
+
+        cat.conn
+            .with(|connection| {
+                connection.execute(
+                    "INSERT INTO _graph_membership (entity_type, entity_id, graph_name)
+                     VALUES ('vertex', -3, 'g')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            cat.load_graph_memberships(),
+            Err(SQLiteError::StorageBackend(message))
+                if message.contains("negative graph membership entity id -3")
+        ));
+    }
+
+    #[test]
+    fn graph_ids_beyond_sqlite_integer_range_are_rejected_before_write() {
+        let cat = fresh();
+
+        assert!(matches!(
+            cat.save_vertex(u64::MAX, "person", "{}"),
+            Err(SQLiteError::StorageBackend(message))
+                if message.contains("exceeds the SQLite INTEGER range")
+        ));
+        assert!(cat.load_vertices().unwrap().is_empty());
     }
 
     #[test]
@@ -1992,5 +3615,281 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    fn legacy_v16_catalog(table_names: &[&str], sequence_names: &[&str]) -> ManagedConnection {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        connection
+            .with(|conn| {
+                conn.execute_batch(
+                    "CREATE TABLE _metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                     INSERT INTO _metadata(key, value) VALUES ('schema_version', '16');
+                     CREATE TABLE _schemas (name TEXT PRIMARY KEY);
+                     INSERT INTO _schemas(name) VALUES ('public');
+                     CREATE TABLE _tables (
+                         name TEXT PRIMARY KEY,
+                         analyzer TEXT NOT NULL,
+                         fts_fields TEXT NOT NULL,
+                         vector_fields TEXT NOT NULL,
+                         columns TEXT,
+                         constraints TEXT NOT NULL DEFAULT ''
+                     );
+                     CREATE TABLE _sequences (
+                         name TEXT PRIMARY KEY,
+                         start INTEGER NOT NULL,
+                         increment INTEGER NOT NULL,
+                         current INTEGER NOT NULL
+                     );
+                     CREATE TABLE _foreign_tables (
+                         name TEXT PRIMARY KEY,
+                         server_name TEXT NOT NULL,
+                         columns_json TEXT NOT NULL,
+                         options TEXT NOT NULL
+                     );
+                     CREATE TABLE _documents (
+                         table_name TEXT NOT NULL,
+                         doc_id INTEGER NOT NULL,
+                         body TEXT NOT NULL,
+                         PRIMARY KEY(table_name, doc_id)
+                     );",
+                )?;
+                for name in table_names {
+                    conn.execute(
+                        "INSERT INTO _tables
+                            (name, analyzer, fts_fields, vector_fields, columns, constraints)
+                         VALUES (?1, '{}', '[]', '[]', '[]', '')",
+                        params![name],
+                    )?;
+                }
+                for name in sequence_names {
+                    conn.execute(
+                        "INSERT INTO _sequences(name, start, increment, current)
+                         VALUES (?1, 1, 1, 0)",
+                        params![name],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        connection
+    }
+
+    #[test]
+    fn relation_namespace_migration_is_atomic_and_moves_public_table_data() {
+        let connection = legacy_v16_catalog(&["docs"], &["seq"]);
+        connection
+            .with(|conn| {
+                conn.execute(
+                    "INSERT INTO _documents(table_name, doc_id, body)
+                     VALUES ('docs', 1, '{}')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO _foreign_tables(name, server_name, columns_json, options)
+                     VALUES ('app.remote', 'server', '[]', '{}')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO _metadata(key, value)
+                     VALUES ('sql_views_json', '{\"report\":{\"plan\":1}}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        assert_eq!(
+            catalog.load_tables().unwrap()[0].relation,
+            RelationIdentity::new("public", "docs")
+        );
+        assert_eq!(
+            catalog.load_sequence_rows().unwrap()[0].relation,
+            RelationIdentity::new("public", "seq")
+        );
+        assert_eq!(
+            catalog.load_foreign_tables().unwrap()[0].relation,
+            RelationIdentity::new("app", "remote")
+        );
+        assert_eq!(
+            catalog.load_views().unwrap()[0].relation,
+            RelationIdentity::new("public", "report")
+        );
+        assert!(catalog.load_schemas().unwrap().contains(&"app".to_string()));
+        connection
+            .with(|conn| {
+                let table_name: String = conn.query_row(
+                    "SELECT table_name FROM _documents WHERE doc_id = 1",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(table_name, "public.docs");
+                let version: String = conn.query_row(
+                    "SELECT value FROM _metadata WHERE key = 'schema_version'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn relation_namespace_migration_moves_btree_parent_and_entries_without_fk_cascade() {
+        let connection = legacy_v16_catalog(&["docs"], &[]);
+        connection
+            .with(|conn| {
+                conn.execute_batch(
+                    "CREATE TABLE _btree_indexes (
+                         table_name TEXT NOT NULL,
+                         field TEXT NOT NULL,
+                         PRIMARY KEY (table_name, field)
+                     );
+                     CREATE TABLE _btree_index_entries (
+                         table_name TEXT NOT NULL,
+                         field TEXT NOT NULL,
+                         doc_id INTEGER NOT NULL,
+                         value_json TEXT NOT NULL,
+                         PRIMARY KEY (table_name, field, doc_id),
+                         FOREIGN KEY (table_name, field)
+                             REFERENCES _btree_indexes (table_name, field)
+                             ON UPDATE CASCADE ON DELETE CASCADE
+                     );
+                     INSERT INTO _btree_indexes(table_name, field)
+                         VALUES ('docs', 'id');
+                     INSERT INTO _btree_index_entries
+                         (table_name, field, doc_id, value_json)
+                         VALUES ('docs', 'id', 1, '{\"type\":\"Int\",\"value\":1}');",
+                )?;
+                // The migration must preserve the child even for a connection
+                // that did not enable SQLite's optional FK enforcement.
+                conn.pragma_update(None, "foreign_keys", "OFF")?;
+                Ok(())
+            })
+            .unwrap();
+
+        let _catalog = Catalog::open(connection.clone()).unwrap();
+        connection
+            .with(|conn| {
+                conn.pragma_update(None, "foreign_keys", "ON")?;
+                for table in ["_btree_indexes", "_btree_index_entries"] {
+                    let canonical: i64 = conn.query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE table_name = 'public.docs'"),
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    let legacy: i64 = conn.query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE table_name = 'docs'"),
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(canonical, 1, "canonical rows in {table}");
+                    assert_eq!(legacy, 0, "legacy rows in {table}");
+                }
+                let violation = conn
+                    .query_row("PRAGMA foreign_key_check", [], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .optional()?;
+                assert!(violation.is_none(), "foreign-key violation: {violation:?}");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn table_and_column_rename_move_btree_children_without_fk_cascade() {
+        let catalog = fresh();
+        catalog
+            .save_table(&TableSchema {
+                relation: RelationIdentity::new("public", "docs"),
+                analyzer_json: "{}".into(),
+                fts_fields: Vec::new(),
+                vector_fields: Vec::new(),
+                columns_json: "[]".into(),
+                constraints_json: String::new(),
+            })
+            .unwrap();
+        catalog
+            .conn
+            .with(|conn| {
+                conn.execute(
+                    "INSERT INTO _btree_indexes(table_name, field)
+                     VALUES ('public.docs', 'id')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO _btree_index_entries
+                         (table_name, field, doc_id, value_json)
+                     VALUES ('public.docs', 'id', 1, '{\"type\":\"Int\",\"value\":1}')",
+                    [],
+                )?;
+                conn.pragma_update(None, "foreign_keys", "OFF")?;
+                Ok(())
+            })
+            .unwrap();
+
+        catalog
+            .rename_table_data("public.docs", "public.archived")
+            .unwrap();
+        catalog
+            .rename_column_data("public.archived", "id", "item_id")
+            .unwrap();
+
+        catalog
+            .conn
+            .with(|conn| {
+                conn.pragma_update(None, "foreign_keys", "ON")?;
+                for table in ["_btree_indexes", "_btree_index_entries"] {
+                    let moved: i64 = conn.query_row(
+                        &format!(
+                            "SELECT COUNT(*) FROM {table}
+                             WHERE table_name = 'public.archived' AND field = 'item_id'"
+                        ),
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(moved, 1, "renamed rows in {table}");
+                }
+                let violation = conn
+                    .query_row("PRAGMA foreign_key_check", [], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .optional()?;
+                assert!(violation.is_none(), "foreign-key violation: {violation:?}");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
+        for connection in [
+            legacy_v16_catalog(&["docs", "public.docs"], &[]),
+            legacy_v16_catalog(&["docs"], &["public.docs"]),
+        ] {
+            let error = Catalog::open(connection.clone()).err().unwrap();
+            assert!(error.to_string().contains("migration collision"));
+            assert!(error.to_string().contains("public.docs"));
+            connection
+                .with(|conn| {
+                    let version: String = conn.query_row(
+                        "SELECT value FROM _metadata WHERE key = 'schema_version'",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(version, "16");
+                    let relation_table_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM sqlite_master
+                         WHERE type = 'table' AND name = '_relations'",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(relation_table_count, 0);
+                    Ok(())
+                })
+                .unwrap();
+        }
     }
 }

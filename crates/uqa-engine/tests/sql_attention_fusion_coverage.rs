@@ -45,6 +45,17 @@ fn assert_nonempty_unit_scores(result: &uqa_sql::SQLResult) {
     }
 }
 
+fn scores(result: &uqa_sql::SQLResult) -> Vec<f64> {
+    result
+        .rows
+        .iter()
+        .map(|row| match row.get("_score") {
+            Some(Value::Float(score)) => *score,
+            other => panic!("missing float _score: {other:?}"),
+        })
+        .collect()
+}
+
 #[test]
 fn test_fuse_attention_sql() {
     let engine = engine();
@@ -78,22 +89,39 @@ fn fuse_attention_combines_with_relational_filter() {
 #[test]
 fn test_fuse_attention_normalize_sql() {
     let engine = engine();
-    let result = engine
+    let normalized = engine
         .sql(
             "SELECT title, _score FROM docs WHERE fuse_attention(\
              bayesian_match(title, 'machine'), \
-             bayesian_match(body, 'neural'), \
-             normalized => true, alpha => 0.5) ORDER BY _score DESC",
+             bayesian_match(body, 'query'), \
+             normalized => true, alpha => 0.5) ORDER BY title",
             &[],
         )
         .unwrap();
-    assert_nonempty_unit_scores(&result);
+    let unnormalized = engine
+        .sql(
+            "SELECT title, _score FROM docs WHERE fuse_attention(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'query'), \
+             normalized => false, alpha => 0.5) ORDER BY title",
+            &[],
+        )
+        .unwrap();
+    assert_nonempty_unit_scores(&normalized);
+    assert_eq!(normalized.rows.len(), unnormalized.rows.len());
+    assert!(
+        scores(&normalized)
+            .iter()
+            .zip(scores(&unnormalized))
+            .any(|(left, right)| (left - right).abs() > 1e-9),
+        "normalized option was ignored by physical execution"
+    );
 }
 
 #[test]
 fn test_fuse_attention_with_base_rate() {
     let engine = engine();
-    let result = engine
+    let with_prior = engine
         .sql(
             "SELECT title, _score FROM docs WHERE fuse_attention(\
              bayesian_match(title, 'machine'), \
@@ -102,7 +130,23 @@ fn test_fuse_attention_with_base_rate() {
             &[],
         )
         .unwrap();
-    assert_nonempty_unit_scores(&result);
+    let without_prior = engine
+        .sql(
+            "SELECT title, _score FROM docs WHERE fuse_attention(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'neural')) ORDER BY _score DESC",
+            &[],
+        )
+        .unwrap();
+    assert_nonempty_unit_scores(&with_prior);
+    assert_eq!(with_prior.rows.len(), without_prior.rows.len());
+    assert!(
+        scores(&with_prior)
+            .iter()
+            .zip(scores(&without_prior))
+            .all(|(with_prior, without_prior)| *with_prior < without_prior),
+        "base_rate prior was ignored or applied outside log-odds fusion"
+    );
 }
 
 #[test]
@@ -132,6 +176,53 @@ fn test_fuse_multihead_default_heads() {
         )
         .unwrap();
     assert_nonempty_unit_scores(&result);
+}
+
+#[test]
+fn attention_options_reject_unknown_duplicate_and_invalid_values() {
+    let engine = engine();
+    let cases = [
+        (
+            "temperature => 1.0",
+            "unknown option `temperature` for fuse_attention",
+        ),
+        (
+            "normalized => true, normalized => false",
+            "duplicate option `normalized` for fuse_attention",
+        ),
+        ("base_rate => 0.0", "base_rate must be finite and in (0, 1)"),
+        ("normalized => 1", "normalized must be a constant boolean"),
+    ];
+    for (options, expected) in cases {
+        let sql = format!(
+            "SELECT title FROM docs WHERE fuse_attention(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'neural'), {options})"
+        );
+        let error = engine.sql(&sql, &[]).expect_err("invalid option must fail");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    let cases = [
+        ("n_heads => 0", "n_heads must be greater than zero"),
+        (
+            "base_rate => 0.1",
+            "unknown option `base_rate` for fuse_multihead",
+        ),
+        (
+            "n_heads => 2, n_heads => 3",
+            "duplicate option `n_heads` for fuse_multihead",
+        ),
+    ];
+    for (options, expected) in cases {
+        let sql = format!(
+            "SELECT title FROM docs WHERE fuse_multihead(\
+             bayesian_match(title, 'machine'), \
+             bayesian_match(body, 'neural'), {options})"
+        );
+        let error = engine.sql(&sql, &[]).expect_err("invalid option must fail");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
 }
 
 #[test]

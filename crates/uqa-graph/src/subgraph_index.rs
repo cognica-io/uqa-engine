@@ -12,7 +12,7 @@ use uqa_core::VertexId;
 
 use crate::operators::GMatch;
 use crate::pattern::GraphPattern;
-use crate::store::GraphStore;
+use crate::store::{GraphStore, GraphStoreResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct SubgraphIndex {
@@ -20,11 +20,15 @@ pub struct SubgraphIndex {
 }
 
 impl SubgraphIndex {
-    pub fn build<G: GraphStore>(store: &G, patterns: &[GraphPattern], graph: &str) -> Self {
+    pub fn build<G: GraphStore>(
+        store: &G,
+        patterns: &[GraphPattern],
+        graph: &str,
+    ) -> GraphStoreResult<Self> {
         let mut index = Self::default();
         for pattern in patterns {
             let key = canonicalize(pattern);
-            let result = GMatch::new(pattern.clone(), graph).execute(store);
+            let result = GMatch::new(pattern.clone(), graph).execute(store)?;
             let mut matches = BTreeSet::new();
             for entry in result.inner().entries() {
                 if let Some(payload) = result.get_graph_payload(entry.doc_id) {
@@ -33,7 +37,7 @@ impl SubgraphIndex {
             }
             index.pattern_to_matches.insert(key, matches);
         }
-        index
+        Ok(index)
     }
 
     pub fn lookup(&self, pattern: &GraphPattern) -> Option<&BTreeSet<BTreeSet<VertexId>>> {
@@ -89,15 +93,15 @@ mod tests {
         let graph = "g";
         let mut store = MemoryGraphStore::new();
         store.create_graph(graph);
-        store.add_vertex(Vertex::new(1, "Person"), graph);
-        store.add_vertex(Vertex::new(2, "Person"), graph);
-        store.add_edge(Edge::new(10, 1, 2, "knows"), graph);
+        store.add_vertex(Vertex::new(1, "Person"), graph).unwrap();
+        store.add_vertex(Vertex::new(2, "Person"), graph).unwrap();
+        store.add_edge(Edge::new(10, 1, 2, "knows"), graph).unwrap();
 
         let pattern = GraphPattern::new()
             .add_vertex(VertexPattern::new("a"))
             .add_vertex(VertexPattern::new("b"))
             .add_edge(EdgePattern::new("a", "b").with_label("knows"));
-        let index = SubgraphIndex::build(&store, std::slice::from_ref(&pattern), graph);
+        let index = SubgraphIndex::build(&store, std::slice::from_ref(&pattern), graph).unwrap();
 
         assert!(index.has_pattern(&pattern));
         assert_eq!(index.lookup(&pattern).unwrap().len(), 1);

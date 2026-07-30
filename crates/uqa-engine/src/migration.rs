@@ -19,6 +19,7 @@ use uqa_core::{DocId, Edge, TemporalValue, Value, Vertex};
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 use uqa_storage::sqlite::ColumnStatsInput;
 
+use crate::sql::convert_value_to_column_type;
 use crate::{Engine, IVFIndexParams};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +143,7 @@ pub fn migrate_python_database(
     let specs = load_table_specs(&source_conn, &index_rows)?;
     let engine = Engine::open(destination)?;
 
-    if !engine.table_names().is_empty() || !engine.list_graphs().is_empty() {
+    if !engine.table_names()?.is_empty() || !engine.list_graphs()?.is_empty() {
         return Err(PythonMigrationError::DestinationNotEmpty(
             destination.display().to_string(),
         ));
@@ -169,21 +170,29 @@ pub fn migrate_python_database(
         column_stats: 0,
     };
 
-    report.analyzers = migrate_analyzers(&source_conn, &engine)?;
-    create_tables(&source_conn, &engine, &specs, &mut report)?;
-    report.table_field_analyzers = migrate_table_field_analyzers(&source_conn, &engine)?;
-    install_secondary_indexes(&engine, &specs, &mut report)?;
-    migrate_documents(&source_conn, &engine, &specs, &mut report)?;
-    report.indexes = persist_catalog_indexes(&engine, &index_rows);
-    report.column_stats = migrate_column_stats(&source_conn, &engine)?;
-    report.scoring_params = migrate_scoring_params(&source_conn, &engine)?;
-    report.models = migrate_models(&source_conn, &engine)?;
-    report.foreign_servers = migrate_foreign_servers(&source_conn, &engine)?;
-    report.foreign_tables = migrate_foreign_tables(&source_conn, &engine)?;
-    migrate_graphs(&source_conn, &engine, &mut report)?;
-    report.path_indexes = migrate_path_indexes(&source_conn, &engine)?;
-
-    Ok(report)
+    // The destination starts empty, so migration is one logical catalog/data
+    // replacement. Keep every table, index, registry, document, and graph
+    // write on the engine's pinned connection; a late corrupt source row must
+    // not leave a valid-looking partial destination behind.
+    engine.with_implicit_mapped_transaction(
+        |engine| {
+            report.analyzers = migrate_analyzers(&source_conn, engine)?;
+            create_tables(&source_conn, engine, &specs, &mut report)?;
+            report.table_field_analyzers = migrate_table_field_analyzers(&source_conn, engine)?;
+            install_secondary_indexes(engine, &specs, &mut report)?;
+            migrate_documents(&source_conn, engine, &specs, &mut report)?;
+            report.indexes = persist_catalog_indexes(engine, &index_rows)?;
+            report.column_stats = migrate_column_stats(&source_conn, engine)?;
+            report.scoring_params = migrate_scoring_params(&source_conn, engine)?;
+            report.models = migrate_models(&source_conn, engine)?;
+            report.foreign_servers = migrate_foreign_servers(&source_conn, engine)?;
+            report.foreign_tables = migrate_foreign_tables(&source_conn, engine)?;
+            migrate_graphs(&source_conn, engine, &mut report)?;
+            report.path_indexes = migrate_path_indexes(&source_conn, engine)?;
+            Ok(report)
+        },
+        PythonMigrationError::Invalid,
+    )
 }
 
 fn resolve_source_database(source: &Path) -> Result<PathBuf, PythonMigrationError> {
@@ -361,8 +370,8 @@ fn load_catalog_indexes(conn: &Connection) -> Result<Vec<CatalogIndex>, PythonMi
             name,
             index_type,
             table_name,
-            columns: serde_json::from_str(&columns_json).unwrap_or_default(),
-            parameters: parameters_to_string_map(&parameters_json),
+            columns: serde_json::from_str(&columns_json)?,
+            parameters: parameters_to_string_map(&parameters_json)?,
         });
     }
     Ok(out)
@@ -385,7 +394,7 @@ fn load_table_specs(
             .map(column_to_rust)
             .collect::<Result<Vec<_>, _>>()?;
         let fts_fields = infer_fts_fields(conn, &name, indexes)?;
-        let vector_fields = infer_vector_fields(&name, &columns, indexes);
+        let vector_fields = infer_vector_fields(&name, &columns, indexes)?;
         specs.push(TableSpec {
             name,
             columns,
@@ -430,7 +439,7 @@ fn infer_vector_fields(
     table: &str,
     columns: &[PythonColumnDef],
     indexes: &[CatalogIndex],
-) -> Vec<VectorSpec> {
+) -> Result<Vec<VectorSpec>, PythonMigrationError> {
     let mut params_by_field = BTreeMap::new();
     for idx in indexes.iter().filter(|idx| {
         idx.table_name == table
@@ -438,7 +447,13 @@ fn infer_vector_fields(
                 || idx.index_type.eq_ignore_ascii_case("hnsw"))
     }) {
         for col in &idx.columns {
-            params_by_field.insert(col.clone(), IVFIndexParams::from_map_lossy(&idx.parameters));
+            let params = IVFIndexParams::from_catalog_map(&idx.parameters).map_err(|error| {
+                PythonMigrationError::Invalid(format!(
+                    "invalid persisted {} index `{}` parameters for {table}.{col}: {error}",
+                    idx.index_type, idx.name
+                ))
+            })?;
+            params_by_field.insert(col.clone(), params);
         }
     }
 
@@ -459,7 +474,7 @@ fn infer_vector_fields(
             });
         }
     }
-    specs
+    Ok(specs)
 }
 
 fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonMigrationError> {
@@ -485,6 +500,34 @@ fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonMigrationErr
 
 fn rust_column_type(col: &PythonColumnDef) -> Result<ColumnType, PythonMigrationError> {
     let raw = col.type_name.to_ascii_lowercase();
+    let mut scalar_name = raw.trim();
+    let mut dimensions = 0_usize;
+    while let Some(element_name) = scalar_name.strip_suffix("[]") {
+        dimensions = dimensions.checked_add(1).ok_or_else(|| {
+            PythonMigrationError::Invalid(format!(
+                "array dimension count for column {} exceeds the supported range",
+                col.name
+            ))
+        })?;
+        scalar_name = element_name.trim_end();
+    }
+    if scalar_name.is_empty() {
+        return Err(PythonMigrationError::Invalid(format!(
+            "array column {} is missing its element type",
+            col.name
+        )));
+    }
+    let mut ty = rust_scalar_column_type(col, scalar_name)?;
+    for _ in 0..dimensions {
+        ty = ColumnType::Array(Box::new(ty));
+    }
+    Ok(ty)
+}
+
+fn rust_scalar_column_type(
+    col: &PythonColumnDef,
+    raw: &str,
+) -> Result<ColumnType, PythonMigrationError> {
     if raw == "vector" {
         let Some(dim) = col.vector_dimensions else {
             return Err(PythonMigrationError::Invalid(format!(
@@ -494,26 +537,38 @@ fn rust_column_type(col: &PythonColumnDef) -> Result<ColumnType, PythonMigration
         };
         return Ok(ColumnType::Vector(dim));
     }
-    if raw.ends_with("[]") || raw == "point" {
+    if raw == "point" {
         return Ok(ColumnType::Json);
     }
-    if let Some(ty) = python_temporal_type(&raw) {
+    if let Some(ty) = python_temporal_type(raw) {
         return Ok(ty);
     }
-    if is_python_text_type(&raw) {
+    if is_python_text_type(raw) {
         return Ok(ColumnType::Text);
     }
-    match raw.as_str() {
+    match raw {
         "integer" | "int" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "serial"
-        | "bigserial" | "serial4" | "serial8" | "bool" | "boolean" => Ok(ColumnType::Integer),
+        | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
+        "bool" | "boolean" => Ok(ColumnType::Boolean),
         "real" | "float" | "float4" | "float8" | "double precision" => Ok(ColumnType::Real),
-        "numeric" | "decimal" => Ok(ColumnType::Numeric {
-            precision: col.numeric_precision,
-            scale: col
+        "numeric" | "decimal" => {
+            let scale = col
                 .numeric_scale
-                .map(|scale| scale as i32)
-                .or(col.numeric_precision.map(|_| 0)),
-        }),
+                .map(|scale| {
+                    i32::try_from(scale).map_err(|_| {
+                        PythonMigrationError::Invalid(format!(
+                            "numeric scale {scale} for column {} exceeds the supported i32 range",
+                            col.name
+                        ))
+                    })
+                })
+                .transpose()?
+                .or(col.numeric_precision.map(|_| 0));
+            Ok(ColumnType::Numeric {
+                precision: col.numeric_precision,
+                scale,
+            })
+        }
         "json" => Ok(ColumnType::Json),
         "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
@@ -546,7 +601,7 @@ fn create_tables(
     report: &mut PythonMigrationReport,
 ) -> Result<(), PythonMigrationError> {
     for spec in specs {
-        engine.create_table(&spec.name, standard_analyzer("english"), Vec::new());
+        engine.create_table(&spec.name, standard_analyzer("english"), Vec::new())?;
         for col in &spec.rust_columns {
             engine.try_register_column(&spec.name, col.clone())?;
         }
@@ -562,7 +617,7 @@ fn create_tables(
                 vector.field.clone(),
                 vector.dimensions,
                 vector.params,
-            );
+            )?;
         }
         report.tables += 1;
         report.vector_fields += spec.vector_fields.len();
@@ -647,8 +702,15 @@ fn migrate_documents(
             rows = read_shared_documents(conn, spec)?;
         }
         let vector_fallbacks = read_vector_fallbacks(conn, spec)?;
-        for (doc_id, mut document) in rows {
-            let mut vectors = extract_vectors(&document, &spec.vector_fields);
+        for (doc_id, document) in rows {
+            let mut document =
+                coerce_migrated_document(document, &spec.rust_columns).map_err(|error| {
+                    PythonMigrationError::Invalid(format!(
+                        "coerce migrated row {doc_id} in table {}: {error}",
+                        spec.name
+                    ))
+                })?;
+            let mut vectors = extract_vectors(&document, &spec.vector_fields)?;
             for vector in &spec.vector_fields {
                 if vectors.contains_key(&vector.field) {
                     continue;
@@ -665,6 +727,22 @@ fn migrate_documents(
         }
     }
     Ok(())
+}
+
+fn coerce_migrated_document(
+    mut document: BTreeMap<String, Value>,
+    columns: &[ColumnDef],
+) -> Result<BTreeMap<String, Value>, uqa_sql::SQLError> {
+    for column in columns {
+        let Some(value) = document.remove(&column.name) else {
+            continue;
+        };
+        document.insert(
+            column.name.clone(),
+            convert_value_to_column_type(value, &column.ty)?,
+        );
+    }
+    Ok(document)
 }
 
 fn read_table_documents(
@@ -824,7 +902,11 @@ fn integer_to_temporal_value(value: i64, raw_type: &str) -> Result<Value, Python
         },
         ColumnType::Timestamp => TemporalValue::Timestamp { micros: value },
         ColumnType::TimestampTz => TemporalValue::TimestampTz { micros: value },
-        _ => unreachable!(),
+        other => {
+            return Err(PythonMigrationError::Invalid(format!(
+                "temporal type resolver returned non-temporal type {other:?} for {raw_type}"
+            )))
+        }
     };
     Ok(Value::Temporal(temporal))
 }
@@ -887,32 +969,50 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, PythonMigrationError
 fn extract_vectors(
     document: &BTreeMap<String, Value>,
     specs: &[VectorSpec],
-) -> BTreeMap<String, Vec<f32>> {
+) -> Result<BTreeMap<String, Vec<f32>>, PythonMigrationError> {
     let mut out = BTreeMap::new();
     for spec in specs {
-        if let Some(value) = document.get(&spec.field).and_then(value_to_f32_vec) {
-            out.insert(spec.field.clone(), value);
+        if let Some(value) = document.get(&spec.field) {
+            if let Some(vector) = value_to_f32_vec(value)? {
+                out.insert(spec.field.clone(), vector);
+            }
         }
     }
-    out
+    Ok(out)
 }
 
-fn value_to_f32_vec(value: &Value) -> Option<Vec<f32>> {
+fn value_to_f32_vec(value: &Value) -> Result<Option<Vec<f32>>, PythonMigrationError> {
     match value {
         Value::List(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    Value::Int(n) => out.push(*n as f32),
-                    Value::Float(n) => out.push(*n as f32),
-                    _ => return None,
+                    Value::Int(n) => out.push(migration_f32(*n as f64)?),
+                    Value::Float(n) => out.push(migration_f32(*n)?),
+                    other => {
+                        return Err(PythonMigrationError::Invalid(format!(
+                            "vector list contains non-numeric value {other:?}"
+                        )))
+                    }
                 }
             }
-            Some(out)
+            Ok(Some(out))
         }
-        Value::Bytes(bytes) => blob_to_f32_vec(bytes).ok(),
-        _ => None,
+        Value::Bytes(bytes) => blob_to_f32_vec(bytes).map(Some),
+        Value::Null => Ok(None),
+        other => Err(PythonMigrationError::Invalid(format!(
+            "vector field contains unsupported value {other:?}"
+        ))),
     }
+}
+
+fn migration_f32(value: f64) -> Result<f32, PythonMigrationError> {
+    if !value.is_finite() || value < -f64::from(f32::MAX) || value > f64::from(f32::MAX) {
+        return Err(PythonMigrationError::Invalid(format!(
+            "vector value {value:?} is outside the finite f32 range"
+        )));
+    }
+    Ok(value as f32)
 }
 
 fn vector_value(vector: &[f32]) -> Value {
@@ -959,13 +1059,24 @@ fn blob_to_f32_vec(blob: &[u8]) -> Result<Vec<f32>, PythonMigrationError> {
             blob.len()
         )));
     }
-    Ok(blob
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect())
+    blob.chunks_exact(4)
+        .map(|chunk| {
+            let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(PythonMigrationError::Invalid(format!(
+                    "vector blob contains non-finite value {value:?}"
+                )))
+            }
+        })
+        .collect()
 }
 
-fn persist_catalog_indexes(engine: &Engine, indexes: &[CatalogIndex]) -> usize {
+fn persist_catalog_indexes(
+    engine: &Engine,
+    indexes: &[CatalogIndex],
+) -> Result<usize, PythonMigrationError> {
     for idx in indexes {
         let options = idx
             .parameters
@@ -978,9 +1089,9 @@ fn persist_catalog_indexes(engine: &Engine, indexes: &[CatalogIndex]) -> usize {
             &idx.table_name,
             &idx.columns,
             &options,
-        );
+        )?;
     }
-    indexes.len()
+    Ok(indexes.len())
 }
 
 fn migrate_column_stats(conn: &Connection, engine: &Engine) -> Result<usize, PythonMigrationError> {
@@ -1119,7 +1230,7 @@ fn migrate_foreign_servers(
     let mut count = 0;
     for row in rows {
         let (name, fdw_type, options_json) = row?;
-        let options = json_object_to_pairs(&options_json);
+        let options = json_object_to_pairs(&options_json)?;
         engine
             .register_foreign_server(name, fdw_type, options, true)
             .map_err(PythonMigrationError::Invalid)?;
@@ -1154,7 +1265,7 @@ fn migrate_foreign_tables(
             .iter()
             .map(column_to_rust)
             .collect::<Result<Vec<_>, _>>()?;
-        let options = json_object_to_pairs(&options_json);
+        let options = json_object_to_pairs(&options_json)?;
         engine
             .register_foreign_table(name, server_name, rust_columns, options, true)
             .map_err(PythonMigrationError::Invalid)?;
@@ -1170,7 +1281,7 @@ fn migrate_graphs(
 ) -> Result<(), PythonMigrationError> {
     let graph_names = load_graph_names(conn)?;
     for graph in &graph_names {
-        engine.create_graph(graph);
+        engine.create_graph(graph)?;
     }
     report.graphs = graph_names.len();
 
@@ -1178,20 +1289,36 @@ fn migrate_graphs(
     let edges = load_edges(conn)?;
     let memberships = load_graph_memberships(conn)?;
 
+    let mut vertex_memberships = Vec::new();
+    let mut edge_memberships = Vec::new();
     for (entity_type, entity_id, graph_name) in memberships {
         match entity_type.as_str() {
-            "vertex" => {
-                if let Some(vertex) = vertices.get(&entity_id) {
-                    engine.add_graph_vertex(vertex.clone(), &graph_name);
-                }
+            "vertex" => vertex_memberships.push((entity_id, graph_name)),
+            "edge" => edge_memberships.push((entity_id, graph_name)),
+            other => {
+                return Err(PythonMigrationError::Invalid(format!(
+                    "unknown graph membership entity type `{other}`"
+                )))
             }
-            "edge" => {
-                if let Some(edge) = edges.get(&entity_id) {
-                    engine.add_graph_edge(edge.clone(), &graph_name);
-                }
-            }
-            _ => {}
         }
+    }
+    // Install vertices first so edge endpoint validation sees a complete graph
+    // membership, regardless of the source catalog's row order.
+    for (entity_id, graph_name) in vertex_memberships {
+        let vertex = vertices.get(&entity_id).ok_or_else(|| {
+            PythonMigrationError::Invalid(format!(
+                "graph membership references missing vertex {entity_id} in `{graph_name}`"
+            ))
+        })?;
+        engine.add_graph_vertex(vertex.clone(), &graph_name)?;
+    }
+    for (entity_id, graph_name) in edge_memberships {
+        let edge = edges.get(&entity_id).ok_or_else(|| {
+            PythonMigrationError::Invalid(format!(
+                "graph membership references missing edge {entity_id} in `{graph_name}`"
+            ))
+        })?;
+        engine.add_graph_edge(edge.clone(), &graph_name)?;
     }
     report.graph_vertices = vertices.len();
     report.graph_edges = edges.len();
@@ -1238,11 +1365,13 @@ fn load_vertices(conn: &Connection) -> Result<BTreeMap<u64, Vertex>, PythonMigra
     let mut out = BTreeMap::new();
     for row in rows {
         let (id, label, props_json) = row?;
+        let vertex_id = u64::try_from(id)
+            .map_err(|_| PythonMigrationError::Invalid(format!("negative graph vertex id {id}")))?;
         let props = json_object_to_value_map(&props_json)?;
         out.insert(
-            id as u64,
+            vertex_id,
             Vertex {
-                vertex_id: id as u64,
+                vertex_id,
                 label,
                 properties: props,
             },
@@ -1272,13 +1401,25 @@ fn load_edges(conn: &Connection) -> Result<BTreeMap<u64, Edge>, PythonMigrationE
     let mut out = BTreeMap::new();
     for row in rows {
         let (id, source_id, target_id, label, props_json) = row?;
+        let edge_id = u64::try_from(id)
+            .map_err(|_| PythonMigrationError::Invalid(format!("negative graph edge id {id}")))?;
+        let source_id = u64::try_from(source_id).map_err(|_| {
+            PythonMigrationError::Invalid(format!(
+                "edge {edge_id} has negative source vertex id {source_id}"
+            ))
+        })?;
+        let target_id = u64::try_from(target_id).map_err(|_| {
+            PythonMigrationError::Invalid(format!(
+                "edge {edge_id} has negative target vertex id {target_id}"
+            ))
+        })?;
         let props = json_object_to_value_map(&props_json)?;
         out.insert(
-            id as u64,
+            edge_id,
             Edge {
-                edge_id: id as u64,
-                source_id: source_id as u64,
-                target_id: target_id as u64,
+                edge_id,
+                source_id,
+                target_id,
                 label,
                 properties: props,
             },
@@ -1308,7 +1449,12 @@ fn load_graph_memberships(
     let mut out = Vec::new();
     for row in rows {
         let (ty, id, graph) = row?;
-        out.push((ty, id as u64, graph));
+        let id = u64::try_from(id).map_err(|_| {
+            PythonMigrationError::Invalid(format!(
+                "graph membership `{ty}` in `{graph}` has negative entity id {id}"
+            ))
+        })?;
+        out.push((ty, id, graph));
     }
     Ok(out)
 }
@@ -1326,8 +1472,8 @@ fn migrate_path_indexes(conn: &Connection, engine: &Engine) -> Result<usize, Pyt
     for row in rows {
         let (graph_name, labels_json) = row?;
         let label_sequences: Vec<Vec<String>> = serde_json::from_str(&labels_json)?;
-        if engine.has_graph(&graph_name) {
-            engine.build_path_index("default", &graph_name, &label_sequences);
+        if engine.has_graph(&graph_name)? {
+            engine.build_path_index("default", &graph_name, &label_sequences)?;
             count += 1;
         }
     }
@@ -1337,31 +1483,181 @@ fn migrate_path_indexes(conn: &Connection, engine: &Engine) -> Result<usize, Pyt
 fn json_object_to_value_map(json: &str) -> Result<BTreeMap<String, Value>, PythonMigrationError> {
     match json_to_value(&serde_json::from_str::<serde_json::Value>(json)?)? {
         Value::Map(map) => Ok(map),
-        _ => Ok(BTreeMap::new()),
+        other => Err(PythonMigrationError::Invalid(format!(
+            "catalog properties must be a JSON object, got {other:?}"
+        ))),
     }
 }
 
-fn json_object_to_pairs(json: &str) -> Vec<(String, String)> {
-    parameters_to_string_map(json).into_iter().collect()
+fn json_object_to_pairs(json: &str) -> Result<Vec<(String, String)>, PythonMigrationError> {
+    Ok(parameters_to_string_map(json)?.into_iter().collect())
 }
 
-fn parameters_to_string_map(json: &str) -> BTreeMap<String, String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return BTreeMap::new();
-    };
-    let Some(map) = value.as_object() else {
-        return BTreeMap::new();
-    };
-    map.iter()
+fn parameters_to_string_map(json: &str) -> Result<BTreeMap<String, String>, PythonMigrationError> {
+    let value = serde_json::from_str::<serde_json::Value>(json)?;
+    let map = value.as_object().ok_or_else(|| {
+        PythonMigrationError::Invalid("catalog options must be a JSON object".into())
+    })?;
+    Ok(map
+        .iter()
         .map(|(key, value)| {
             let value = value
                 .as_str()
                 .map_or_else(|| value.to_string(), str::to_string);
             (key.clone(), value)
         })
-        .collect()
+        .collect())
 }
 
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_embedded_vectors_are_migration_errors() {
+        let binary_error = value_to_f32_vec(&Value::Bytes(vec![1, 2, 3])).unwrap_err();
+        assert!(binary_error.to_string().contains("not divisible by 4"));
+
+        let list_error =
+            value_to_f32_vec(&Value::List(vec![Value::Str("bad".into())])).unwrap_err();
+        assert!(list_error.to_string().contains("non-numeric"));
+
+        let property_error = json_object_to_value_map("[]").unwrap_err();
+        assert!(property_error.to_string().contains("JSON object"));
+    }
+
+    #[test]
+    fn migration_rejects_numeric_and_vector_narrowing_overflow() {
+        let column = PythonColumnDef {
+            name: "amount".into(),
+            type_name: "numeric".into(),
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            default: None,
+            vector_dimensions: None,
+            unique: false,
+            numeric_precision: Some(10),
+            numeric_scale: Some(2_147_483_648),
+        };
+        let scale_error = rust_column_type(&column).unwrap_err();
+        assert!(scale_error.to_string().contains("scale"));
+
+        for value in [f64::MAX, f64::INFINITY, f64::NAN] {
+            let error = value_to_f32_vec(&Value::List(vec![Value::Float(value)])).unwrap_err();
+            assert!(error.to_string().contains("finite f32 range"));
+        }
+
+        let non_finite_blob = Value::Bytes(f32::INFINITY.to_le_bytes().to_vec());
+        let error = value_to_f32_vec(&non_finite_blob).unwrap_err();
+        assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn migration_rejects_invalid_persisted_vector_index_parameters() {
+        let columns = [PythonColumnDef {
+            name: "embedding".into(),
+            type_name: "vector".into(),
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            default: None,
+            vector_dimensions: Some(3),
+            unique: false,
+            numeric_precision: None,
+            numeric_scale: None,
+        }];
+        for (parameter, value) in [("lists", "invalid"), ("probes", "0")] {
+            let indexes = [CatalogIndex {
+                name: "embedding_idx".into(),
+                index_type: "hnsw".into(),
+                table_name: "items".into(),
+                columns: vec!["embedding".into()],
+                parameters: BTreeMap::from([(parameter.into(), value.into())]),
+            }];
+            let error = infer_vector_fields("items", &columns, &indexes).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("embedding_idx"), "{message}");
+            assert!(message.contains(parameter), "{message}");
+        }
+    }
+
+    #[test]
+    fn python_array_types_preserve_elements_and_dimensions() {
+        let mut column = PythonColumnDef {
+            name: "values".into(),
+            type_name: "TEXT[][]".into(),
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            default: None,
+            vector_dimensions: None,
+            unique: false,
+            numeric_precision: None,
+            numeric_scale: None,
+        };
+        assert_eq!(
+            rust_column_type(&column).unwrap(),
+            ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Text))))
+        );
+
+        column.type_name = "numeric[]".into();
+        column.numeric_precision = Some(8);
+        column.numeric_scale = Some(2);
+        assert_eq!(
+            rust_column_type(&column).unwrap(),
+            ColumnType::Array(Box::new(ColumnType::Numeric {
+                precision: Some(8),
+                scale: Some(2),
+            }))
+        );
+
+        let document = BTreeMap::from([
+            (
+                "tags".into(),
+                Value::List(vec![Value::Int(1), Value::Int(2)]),
+            ),
+            (
+                "numbers".into(),
+                Value::List(vec![Value::Str("3".into()), Value::Str("4".into())]),
+            ),
+        ]);
+        let columns = vec![
+            ColumnDef {
+                name: "tags".into(),
+                ty: ColumnType::Array(Box::new(ColumnType::Text)),
+                primary_key: false,
+                not_null: false,
+                auto_increment: false,
+                unique: false,
+                default: None,
+                check: None,
+                references: None,
+            },
+            ColumnDef {
+                name: "numbers".into(),
+                ty: ColumnType::Array(Box::new(ColumnType::Integer)),
+                primary_key: false,
+                not_null: false,
+                auto_increment: false,
+                unique: false,
+                default: None,
+                check: None,
+                references: None,
+            },
+        ];
+        let document = coerce_migrated_document(document, &columns).unwrap();
+        assert_eq!(
+            document["tags"],
+            Value::List(vec![Value::Str("1".into()), Value::Str("2".into())])
+        );
+        assert_eq!(
+            document["numbers"],
+            Value::List(vec![Value::Int(3), Value::Int(4)])
+        );
+    }
 }

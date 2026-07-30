@@ -94,7 +94,9 @@ fn parse_mode(name: &str) -> ScoringMode {
 
 fn engine_for(fx: &Fixture) -> Engine {
     let engine = Engine::new();
-    engine.create_default_table("docs", vec![fx.field.clone()]);
+    engine
+        .create_default_table("docs", vec![fx.field.clone()])
+        .unwrap();
     for c in &fx.corpus {
         let mut d = Document::new();
         d.insert(fx.field.clone(), Value::Str(c.body.clone()));
@@ -107,7 +109,9 @@ fn evaluate(engine: &Engine, fx: &Fixture, mode: &ScoringMode) -> (Vec<(String, 
     let mut per_query_ndcg = Vec::with_capacity(fx.queries.len());
     let mut map_sum = 0.0;
     for q in &fx.queries {
-        let hits = engine.search("docs", &fx.field, &q.text, mode, fx.k);
+        let hits = engine
+            .search("docs", &fx.field, &q.text, mode, fx.k)
+            .unwrap();
         let judgments: BTreeMap<u64, f64> = q
             .judgments
             .iter()

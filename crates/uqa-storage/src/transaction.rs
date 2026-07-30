@@ -63,18 +63,28 @@ impl SQLiteTransaction {
         if self.finished {
             return Err(TransactionError::Finished);
         }
-        self.conn.commit_transaction()?;
-        self.finished = true;
-        Ok(())
+        let result = self
+            .conn
+            .commit_transaction()
+            .map_err(TransactionError::from);
+        if result.is_ok() || !self.conn.in_transaction() {
+            self.finished = true;
+        }
+        result
     }
 
     pub fn rollback(&mut self) -> TxResult<()> {
         if self.finished {
             return Err(TransactionError::Finished);
         }
-        self.conn.rollback_transaction()?;
-        self.finished = true;
-        Ok(())
+        let result = self
+            .conn
+            .rollback_transaction()
+            .map_err(TransactionError::from);
+        if result.is_ok() || !self.conn.in_transaction() {
+            self.finished = true;
+        }
+        result
     }
 
     pub fn savepoint(&self, name: &str) -> TxResult<()> {
@@ -105,9 +115,7 @@ impl SQLiteTransaction {
 impl Drop for SQLiteTransaction {
     fn drop(&mut self) {
         if !self.finished {
-            // Best-effort rollback; ignore the error because we are
-            // already unwinding or the caller is at end-of-scope.
-            let _ = self.conn.rollback_transaction();
+            self.conn.rollback_transaction_on_drop();
         }
     }
 }

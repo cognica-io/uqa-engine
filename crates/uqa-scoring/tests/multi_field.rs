@@ -54,7 +54,7 @@ proptest! {
             params: BayesianBM25Params::default(),
             weight,
         };
-        let scorer = MultiFieldBayesianScorer::new(vec![cfg], &stats(10_000, 50.0));
+        let scorer = MultiFieldBayesianScorer::new(vec![cfg], &stats(10_000, 50.0)).unwrap();
         let tf_map = freq_map("title", tf);
         let dl_map = freq_map("title", dl);
         let df_map = freq_map("title", df);
@@ -84,7 +84,8 @@ proptest! {
                 },
             ],
             &stats,
-        );
+        )
+        .unwrap();
         // Empty maps mean every field is absent and contributes zero.
         let empty: BTreeMap<String, u64> = BTreeMap::new();
         let s = scorer.score_document(&empty, &empty, &empty);
@@ -122,6 +123,7 @@ proptest! {
                 ],
                 &stats,
             )
+            .unwrap()
         };
         let mut tf = BTreeMap::new();
         tf.insert("title".into(), tf_title);
@@ -154,7 +156,8 @@ fn single_field_passes_through() {
             weight: 1.0,
         }],
         &stats,
-    );
+    )
+    .unwrap();
     let tf = freq_map("title", 5);
     let dl = freq_map("title", 50);
     let df = freq_map("title", 10);
@@ -167,8 +170,8 @@ fn single_field_passes_through() {
 #[test]
 fn empty_field_list_returns_neutral() {
     let stats = stats(10_000, 50.0);
-    let scorer = MultiFieldBayesianScorer::new(Vec::new(), &stats);
+    let scorer = MultiFieldBayesianScorer::new(Vec::new(), &stats).unwrap();
     let empty: BTreeMap<String, u64> = BTreeMap::new();
-    let s = scorer.score_document(&empty, &empty, &empty);
-    assert!((s - 0.5).abs() < 1e-9, "empty fields gave {s}");
+    let score = scorer.score_document(&empty, &empty, &empty);
+    assert!((score - 0.5).abs() < 1e-9, "empty fields gave {score}");
 }

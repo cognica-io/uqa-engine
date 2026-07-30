@@ -881,6 +881,14 @@ fn cypher_output_coerces_to_declared_sql_types() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("integer out of range"), "{err}");
+    let err = eng
+        .sql(
+            "SELECT * FROM cypher('coerce', $$ RETURN 9223372036854775808.0 $$) AS (v bigint)",
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("integer out of range"), "{err}");
     // text: strings raw, non-entities agtype-rendered, entities refuse.
     assert_eq!(
         one("SELECT * FROM cypher('coerce', $$ RETURN 'abc' $$) AS (v text)"),

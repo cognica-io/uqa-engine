@@ -400,7 +400,7 @@ impl CardinalityEstimator {
         if child_cards.is_empty() {
             return 0.0;
         }
-        child_cards.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        child_cards.sort_by(f64::total_cmp);
 
         let damping = self.intersection_damping(ops);
         let mut result = child_cards[0];
@@ -567,6 +567,21 @@ impl CardinalityEstimator {
                 label, max_hops, ..
             } => self.estimate_traverse(label.as_deref(), *max_hops, n, None),
 
+            OperatorTree::GraphNeighbors { label, .. } => {
+                let degree = self
+                    .graph_stats
+                    .as_ref()
+                    .map(|stats| stats.avg_out_degree * stats.label_selectivity(label.as_deref()))
+                    .unwrap_or(GRAPH_AVG_DEGREE_DEFAULT);
+                degree.min(n).max(0.0)
+            }
+
+            OperatorTree::GraphEdges { label, .. } => self
+                .graph_stats
+                .as_ref()
+                .map(|stats| stats.num_edges as f64 * stats.label_selectivity(label.as_deref()))
+                .unwrap_or(n),
+
             OperatorTree::PatternMatch { pattern, .. } => self.estimate_pattern_match(pattern, n),
 
             OperatorTree::RegularPathQuery { rpq_source, .. } => self.estimate_rpq(rpq_source, n),
@@ -643,6 +658,15 @@ impl CardinalityEstimator {
 
             OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
             OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
+            OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
+                if stats.total_docs == 0 {
+                    0.0
+                } else {
+                    stats.doc_freq(field, query) as f64
+                }
+            }
+            OperatorTree::CalibratedVectorMatch { k, .. } => n.min(*k as f64),
+            OperatorTree::DeepPredict { .. } => n,
 
             OperatorTree::Composed(ops) => {
                 ops.last().map(|o| self.estimate(o, stats)).unwrap_or(0.0)
@@ -761,8 +785,7 @@ impl CardinalityEstimator {
 
             // Random-walk sampling for large graphs (Section 6.3, Paper 2).
             if nv > 10_000.0 && self.graph_store.is_some() {
-                let sampled = self.sample_graph_cardinality(pattern, 100);
-                if sampled >= 0.0 {
+                if let Some(sampled) = self.sample_graph_cardinality(pattern, 100) {
                     return sampled.max(1.0);
                 }
             }
@@ -785,7 +808,7 @@ impl CardinalityEstimator {
                 }
             }
 
-            let estimate = nv.powi(k as i32) * density.powi(e as i32) * label_sel * vertex_sel;
+            let estimate = nv.powf(k as f64) * density.powf(e as f64) * label_sel * vertex_sel;
             return nv.min(estimate).max(1.0);
         }
 
@@ -814,7 +837,7 @@ impl CardinalityEstimator {
                 label_sel *= gs.label_selectivity(ep.label.as_deref());
             }
 
-            let mut estimate = nv.powi(k as i32) * density.powi(e as i32) * label_sel;
+            let mut estimate = nv.powf(k as f64) * density.powf(e as f64) * label_sel;
             estimate = nv.min(estimate).max(1.0);
 
             if let Some(tf) = temporal_filter {
@@ -867,19 +890,23 @@ impl CardinalityEstimator {
         self.estimate(side, stats)
     }
 
-    /// Random-walk sampling. Returns `-1.0` when the graph store is
-    /// unavailable, mirroring the canonical UQA implementation's sentinel.
-    fn sample_graph_cardinality(&self, pattern: &GraphPatternIR, sample_size: usize) -> f64 {
+    /// Random-walk sampling. `None` means no graph store is available or an
+    /// index cannot be represented on the current target.
+    fn sample_graph_cardinality(
+        &self,
+        pattern: &GraphPatternIR,
+        sample_size: usize,
+    ) -> Option<f64> {
         let Some(store) = self.graph_store.as_ref() else {
-            return -1.0;
+            return None;
         };
         let vertex_ids = store.vertex_ids();
         if vertex_ids.is_empty() {
-            return 0.0;
+            return Some(0.0);
         }
         let k = pattern.vertex_patterns.len();
         if k == 0 {
-            return 0.0;
+            return Some(0.0);
         }
 
         let n = vertex_ids.len();
@@ -887,7 +914,7 @@ impl CardinalityEstimator {
         let mut successes = 0_usize;
 
         for _ in 0..sample_size {
-            let start = vertex_ids[rng.bounded(n)];
+            let start = vertex_ids[rng.bounded(n)?];
             let vp0 = &pattern.vertex_patterns[0];
             if !vp0
                 .constraints
@@ -928,7 +955,7 @@ impl CardinalityEstimator {
                         }
                     }
                     if !candidates.is_empty() {
-                        let picked = candidates[rng.bounded(candidates.len())];
+                        let picked = candidates[rng.bounded(candidates.len())?];
                         assignment.insert(vp.variable.clone(), picked);
                         neighbor_found = true;
                         break;
@@ -946,7 +973,7 @@ impl CardinalityEstimator {
         }
 
         let success_rate = successes as f64 / sample_size as f64;
-        success_rate * (n as f64).powi(k as i32)
+        Some(success_rate * (n as f64).powf(k as f64))
     }
 
     fn temporal_selectivity(&self, filter: &TemporalFilterIR, gs: &GraphStats) -> f64 {
@@ -1160,7 +1187,9 @@ pub fn column_entropy(cs: &ColumnStats) -> f64 {
                 entropy -= freq * freq.log2();
             }
         }
-        let remaining_ndv = (ndv as i64 - cs.mcv_frequencies.len() as i64).max(1);
+        let remaining_ndv = ndv
+            .saturating_sub(u64::try_from(cs.mcv_frequencies.len()).unwrap_or(u64::MAX))
+            .max(1);
         if remaining > 0.0 && remaining_ndv > 0 {
             let p = remaining / remaining_ndv as f64;
             if p > 0.0 {
@@ -1250,19 +1279,7 @@ fn histogram_range_selectivity(stats: &ColumnStats, op: BinaryOp, value: &Value)
 }
 
 fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
-    use std::cmp::Ordering::*;
-    match (a, b) {
-        (Value::Null, Value::Null) => Equal,
-        (Value::Null, _) => Less,
-        (_, Value::Null) => Greater,
-        (Value::Int(x), Value::Int(y)) => x.cmp(y),
-        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
-        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
-        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        _ => Equal,
-    }
+    a.cmp(b)
 }
 
 fn value_as_f64(v: &Value) -> Option<f64> {
@@ -1297,11 +1314,12 @@ impl XorShiftRng {
     }
 
     /// Uniform random index in `0..bound` (`bound` must be >= 1).
-    fn bounded(&self, bound: usize) -> usize {
+    fn bounded(&self, bound: usize) -> Option<usize> {
         if bound <= 1 {
-            return 0;
+            return Some(0);
         }
-        (self.next_u64() as usize) % bound
+        let bound = u64::try_from(bound).ok()?;
+        usize::try_from(self.next_u64() % bound).ok()
     }
 }
 
@@ -1327,7 +1345,7 @@ fn count_rpq_labels(expr: &uqa_graph::RegularPathExpr) -> usize {
         }
         RegularPathExpr::KleeneStar(inner) => count_rpq_labels(inner).saturating_mul(2),
         RegularPathExpr::Bounded { inner, max, .. } => {
-            count_rpq_labels(inner).saturating_mul(*max as usize)
+            count_rpq_labels(inner).saturating_mul(usize::try_from(*max).unwrap_or(usize::MAX))
         }
     }
 }

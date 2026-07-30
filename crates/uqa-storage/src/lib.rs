@@ -5,7 +5,7 @@
 //
 
 //! Persistent and in-memory backing stores for UQA: documents, inverted
-//! index, vector indexes (IVF), B-tree, `R*Tree`, block-max, and the
+//! index, vector indexes (IVF), B-tree, in-memory spatial scan, block-max, and the
 //! `SQLite` catalog.
 
 pub mod backend;
@@ -32,7 +32,8 @@ pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    TableSchema, VectorFieldSchema,
+    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SequenceRow, TableSchema,
+    VectorFieldSchema, ViewRow,
 };
 pub use document_store::{DocumentStore, MemoryDocumentStore};
 pub use index_abc::Index;

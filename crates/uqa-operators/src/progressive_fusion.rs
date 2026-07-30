@@ -18,8 +18,9 @@ use std::sync::Arc;
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
 use uqa_fusion::LogitGating;
 use uqa_scoring::{logit, sigmoid};
+use uqa_storage::StorageBackendError;
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{require_probability, ExecutionContext, Operator, OperatorResult};
 use crate::hybrid::coverage_based_default;
 
 pub struct ProgressiveFusionOperator {
@@ -38,20 +39,6 @@ impl ProgressiveFusionOperator {
         alpha: f64,
         gating: Option<String>,
     ) -> Self {
-        assert!(
-            !stages.is_empty(),
-            "ProgressiveFusionOperator requires at least one stage"
-        );
-        assert!(
-            alpha.is_finite() && (0.0..=1.0).contains(&alpha),
-            "ProgressiveFusionOperator alpha must be in [0, 1], got {alpha}"
-        );
-        if let Some(name) = gating.as_deref() {
-            assert!(
-                LogitGating::parse(name).is_some(),
-                "ProgressiveFusionOperator has unknown gating function {name:?}"
-            );
-        }
         Self {
             stages,
             alpha,
@@ -61,14 +48,41 @@ impl ProgressiveFusionOperator {
 }
 
 impl Operator for ProgressiveFusionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if self.stages.is_empty() {
+            return Err(StorageBackendError::Other(
+                "ProgressiveFusionOperator requires at least one stage".to_string(),
+            ));
+        }
+        if !self.alpha.is_finite() || !(0.0..=1.0).contains(&self.alpha) {
+            return Err(StorageBackendError::Other(format!(
+                "ProgressiveFusionOperator alpha must be finite and in [0, 1], got {}",
+                self.alpha
+            )));
+        }
+        let gating = match self.gating.as_deref() {
+            Some(name) => LogitGating::parse(name).ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "ProgressiveFusionOperator has unknown gating function {name:?}"
+                ))
+            })?,
+            None => LogitGating::Pass,
+        };
         let mut signal_lists: Vec<PostingList> = Vec::new();
         let mut candidate_ids: Option<BTreeSet<u64>> = None;
         let mut last_result: PostingList = PostingList::new();
 
         for (signals, k) in &self.stages {
+            if signals.is_empty() {
+                return Err(StorageBackendError::Other(
+                    "ProgressiveFusionOperator stages require at least one signal".to_string(),
+                ));
+            }
             for signal in signals {
-                let mut pl = signal.execute(ctx);
+                let mut pl = signal.execute(ctx)?;
+                for entry in pl.entries() {
+                    require_probability(entry.payload.score, "progressive fusion")?;
+                }
                 if let Some(cands) = &candidate_ids {
                     let kept: Vec<PostingEntry> = pl
                         .entries()
@@ -100,11 +114,6 @@ impl Operator for ProgressiveFusionOperator {
                 .collect();
             let n = signal_lists.len();
             let confidence = (n as f64).powf(self.alpha);
-            let gating = self
-                .gating
-                .as_deref()
-                .and_then(LogitGating::parse)
-                .unwrap_or(LogitGating::Pass);
             let mut scored: Vec<PostingEntry> = all_doc_ids
                 .into_iter()
                 .map(|doc_id| {
@@ -126,7 +135,7 @@ impl Operator for ProgressiveFusionOperator {
             candidate_ids = Some(topk.doc_ids().collect());
             last_result = topk;
         }
-        last_result
+        Ok(last_result)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -151,8 +160,8 @@ mod tests {
     struct ConstOperator(Vec<PostingEntry>);
 
     impl Operator for ConstOperator {
-        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-            PostingList::from_sorted_unchecked(self.0.clone())
+        fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+            Ok(PostingList::from_sorted_unchecked(self.0.clone()))
         }
     }
 
@@ -168,7 +177,7 @@ mod tests {
             entry(3, 0.7),
         ])) as Arc<dyn Operator>;
         let op = ProgressiveFusionOperator::new(vec![(vec![signal], 2)], 0.0);
-        let result = op.execute(&ExecutionContext::new());
+        let result = op.execute(&ExecutionContext::new()).unwrap();
         let ids: Vec<u64> = result.doc_ids().collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&1));
@@ -189,7 +198,7 @@ mod tests {
             entry(5, 0.95),
         ])) as Arc<dyn Operator>;
         let op = ProgressiveFusionOperator::new(vec![(vec![stage_0], 3), (vec![stage_1], 2)], 0.0);
-        let result = op.execute(&ExecutionContext::new());
+        let result = op.execute(&ExecutionContext::new()).unwrap();
         let ids: Vec<u64> = result.doc_ids().collect();
         // Stage 0 keeps {1,2,3}. Stage 1 contributes only doc 1 (4, 5
         // are filtered to the candidate set from stage 0). Remaining

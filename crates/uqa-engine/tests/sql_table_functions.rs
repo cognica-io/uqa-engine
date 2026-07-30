@@ -36,6 +36,21 @@ fn generate_series_basic() {
 }
 
 #[test]
+fn pg_catalog_qualified_generate_series_uses_the_builtin() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT n FROM pg_catalog.generate_series(1, 3) AS t(n)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        values(&result, "n"),
+        vec![Value::Int(1), Value::Int(2), Value::Int(3)]
+    );
+}
+
+#[test]
 fn generate_series_relation_alias_is_default_column_alias() {
     let eng = Engine::new();
     let r = eng
@@ -94,6 +109,20 @@ fn generate_series_empty_range() {
         .sql("SELECT n FROM generate_series(5, 1) AS t(n)", &[])
         .unwrap();
     assert!(r.rows.is_empty());
+}
+
+#[test]
+fn generate_series_rejects_fractional_and_non_finite_float_bounds() {
+    let eng = Engine::new();
+
+    for sql in [
+        "SELECT * FROM generate_series(1.5, 3.0)",
+        "SELECT * FROM generate_series('NaN'::REAL, 3.0)",
+        "SELECT * FROM generate_series(1.0, 'Infinity'::REAL)",
+    ] {
+        eng.sql(sql, &[])
+            .expect_err("float-to-integer series coercion must not truncate or saturate");
+    }
 }
 
 #[test]

@@ -17,10 +17,10 @@
 //! [`MAX_DP_RELATIONS`] relations.
 //!
 //! Internally relation subsets are encoded as `u64` bitmasks for
-//! O(1) hash-table lookup and set operations. The cost model uses
-//! [`INDEX_JOIN_THRESHOLD`] to switch between an index-join estimate
-//! (`smaller * log2(larger + 1)`) and a hash-join estimate
-//! (`smaller + larger`), matching the canonical UQA implementation's heuristic.
+//! O(1) hash-table lookup and set operations. Equijoins are costed as
+//! hash joins because that is the physical strategy available to the SQL
+//! execution pipeline. An index-join cost must never influence ordering unless
+//! the planner can prove that a compatible physical index join is executable.
 //!
 //! Returns a [`JoinPlan`] tree where each `Join` node records the
 //! `(left, right, edge, cost, cardinality)` tuple. Disconnected join
@@ -28,16 +28,10 @@
 //! independently and cross-joining them in cardinality-ascending
 //! order.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::cost_model::OperatorKind;
 use crate::join_graph::{JoinEdge, JoinGraph};
-
-/// Mirrors the canonical UQA implementation's `INDEX_JOIN_THRESHOLD`. When the smaller side has
-/// fewer than this many rows, `_emit_csg_cmp_pair` favours the index
-/// join cost shape `c_small * log2(c_large + 1)` over the symmetric
-/// hash join cost.
-pub const INDEX_JOIN_THRESHOLD: f64 = 100.0;
 
 /// Mirrors the canonical UQA implementation's `MAX_DP_RELATIONS`. Beyond this count the exact
 /// enumeration switches to the greedy fallback.
@@ -113,8 +107,7 @@ pub struct DPccp<'g> {
 
 impl<'g> DPccp<'g> {
     pub fn new(graph: &'g JoinGraph) -> Self {
-        let n = graph.relation_count();
-        let all_mask = if n == 0 { 0 } else { (1u64 << n) - 1 };
+        let all_mask = graph.full_set();
         Self {
             graph,
             dp: BTreeMap::new(),
@@ -144,14 +137,14 @@ impl<'g> DPccp<'g> {
             }
         }
         if n > MAX_DP_RELATIONS {
-            return Some(self.greedy_optimize());
+            return self.greedy_optimize();
         }
         self.enumerate_csg_cmp_pairs(n);
         if let Some(plan) = self.dp.get(&self.all_mask).cloned() {
             return Some(plan);
         }
         // Disconnected: cross-join the components.
-        Some(self.join_disconnected_components())
+        self.join_disconnected_components()
     }
 
     /// Enumerate every connected subgraph / complement pair and feed
@@ -160,21 +153,22 @@ impl<'g> DPccp<'g> {
     fn enumerate_csg_cmp_pairs(&mut self, n: usize) {
         let neighbors: Vec<Vec<usize>> = (0..n).map(|i| self.graph.neighbors(i)).collect();
 
-        // `connected[mask]` is `true` iff the subgraph encoded by
-        // `mask` is connected. The canonical UQA behavior uses a bytearray;
-        // a `Vec<bool>` is the closest Rust equivalent.
-        let mut connected: Vec<bool> = vec![false; 1usize << n];
+        // Keep connected subsets by their native u64 bitmask. This avoids
+        // narrowing a mask to `usize` merely to address a dense side table.
+        let mut connected = BTreeSet::new();
         let mut prev_layer: Vec<u64> = Vec::with_capacity(n);
         for i in 0..n {
             let mask = 1u64 << i;
-            connected[mask as usize] = true;
+            connected.insert(mask);
             prev_layer.push(mask);
         }
 
         for _size in 2..=n {
             let mut cur_layer: Vec<u64> = Vec::new();
             for &s_mask in &prev_layer {
-                let min_node = s_mask.trailing_zeros() as usize;
+                let Ok(min_node) = usize::try_from(s_mask.trailing_zeros()) else {
+                    return;
+                };
                 let mut node = 0usize;
                 let mut tmp = s_mask;
                 while tmp != 0 {
@@ -182,8 +176,7 @@ impl<'g> DPccp<'g> {
                         for &nb in &neighbors[node] {
                             if nb > min_node && (s_mask & (1u64 << nb)) == 0 {
                                 let new_mask = s_mask | (1u64 << nb);
-                                if !connected[new_mask as usize] {
-                                    connected[new_mask as usize] = true;
+                                if connected.insert(new_mask) {
                                     cur_layer.push(new_mask);
                                 }
                             }
@@ -202,7 +195,8 @@ impl<'g> DPccp<'g> {
 
     fn optimize_star(&self, n: usize) -> Option<JoinPlan> {
         let (centre, leaves) = self.star_shape(n)?;
-        let states = 1usize.checked_shl(leaves.len() as u32)?;
+        let shift = u32::try_from(leaves.len()).ok()?;
+        let states = 1usize.checked_shl(shift)?;
         let mut dp: Vec<Option<StarState>> = vec![None; states];
         dp[0] = Some(StarState {
             cardinality: self.graph.cardinalities[centre],
@@ -271,8 +265,8 @@ impl<'g> DPccp<'g> {
             if edge.left.count_ones() != 1 || edge.right.count_ones() != 1 {
                 return None;
             }
-            let left = edge.left.trailing_zeros() as usize;
-            let right = edge.right.trailing_zeros() as usize;
+            let left = usize::try_from(edge.left.trailing_zeros()).ok()?;
+            let right = usize::try_from(edge.right.trailing_zeros()).ok()?;
             if left == right || left >= n || right >= n {
                 return None;
             }
@@ -282,7 +276,12 @@ impl<'g> DPccp<'g> {
         let candidates: Vec<usize> = neighbor_masks
             .iter()
             .enumerate()
-            .filter_map(|(idx, mask)| (mask.count_ones() as usize == n - 1).then_some(idx))
+            .filter_map(|(idx, mask)| {
+                usize::try_from(mask.count_ones())
+                    .ok()
+                    .is_some_and(|count| count == n - 1)
+                    .then_some(idx)
+            })
             .collect();
         if candidates.len() != 1 {
             return None;
@@ -304,7 +303,7 @@ impl<'g> DPccp<'g> {
                     valid = false;
                     break;
                 }
-                let leaf = leaf_mask.trailing_zeros() as usize;
+                let leaf = usize::try_from(leaf_mask.trailing_zeros()).ok()?;
                 by_leaf.entry(leaf).or_default().push(edge.clone());
             }
             if valid && by_leaf.len() == n - 1 {
@@ -319,7 +318,7 @@ impl<'g> DPccp<'g> {
     /// checked via the `connected` table; only pairs that survive get
     /// fed through `emit_csg_cmp_pair`. Mirrors the canonical UQA implementation's
     /// `_enumerate_splits`.
-    fn enumerate_splits(&mut self, subset_mask: u64, connected: &[bool]) {
+    fn enumerate_splits(&mut self, subset_mask: u64, connected: &BTreeSet<u64>) {
         let lowest_bit = subset_mask & subset_mask.wrapping_neg();
         let rest = subset_mask ^ lowest_bit;
 
@@ -329,7 +328,7 @@ impl<'g> DPccp<'g> {
         while sub_rest != 0 {
             let sub = sub_rest | lowest_bit;
             let comp = subset_mask ^ sub;
-            if connected[sub as usize] && connected[comp as usize] {
+            if connected.contains(&sub) && connected.contains(&comp) {
                 if let (Some(plan1), Some(plan2)) =
                     (self.dp.get(&sub).cloned(), self.dp.get(&comp).cloned())
                 {
@@ -347,7 +346,7 @@ impl<'g> DPccp<'g> {
             sub_rest = sub_rest.wrapping_sub(1) & rest;
         }
         // sub_rest == 0: S1 = {min element}, S2 = rest of subset.
-        if connected[rest as usize] {
+        if connected.contains(&rest) {
             if let (Some(plan1), Some(plan2)) = (
                 self.dp.get(&lowest_bit).cloned(),
                 self.dp.get(&rest).cloned(),
@@ -365,11 +364,10 @@ impl<'g> DPccp<'g> {
         }
     }
 
-    /// Cost a candidate join, install the best variant in the DP
-    /// table. Mirrors the canonical UQA implementation's `_emit_csg_cmp_pair` exactly:
-    /// cardinality is the cross-product times every edge's
-    /// selectivity, and the cost gate prefers an index join when the
-    /// smaller side fits inside `INDEX_JOIN_THRESHOLD`.
+    /// Cost a candidate join and install the best variant in the DP table.
+    /// Cardinality is the cross-product times every edge's selectivity. The
+    /// physical SQL engine executes these equijoins as hash joins, so the
+    /// enumerator uses the same cost shape and records the executable kind.
     fn emit_csg_cmp_pair(
         &mut self,
         plan1: &JoinPlan,
@@ -401,34 +399,24 @@ impl<'g> DPccp<'g> {
             cost: join_cost + plan1.cost + plan2.cost,
             left: Some(Box::new(plan1.clone())),
             right: Some(Box::new(plan2.clone())),
-            join_edge: Some(edges[0].clone()),
+            join_edge: edges.first().cloned(),
             kind: Some(kind),
         }
     }
 
     fn join_cost(c1: f64, c2: f64) -> (f64, OperatorKind) {
-        if c1 <= c2 {
-            if c1 <= INDEX_JOIN_THRESHOLD {
-                (c1 * (c2 + 1.0).log2(), OperatorKind::IndexJoin)
-            } else {
-                (c1 + c2, OperatorKind::HashJoinInner)
-            }
-        } else if c2 <= INDEX_JOIN_THRESHOLD {
-            (c2 * (c1 + 1.0).log2(), OperatorKind::IndexJoin)
-        } else {
-            (c1 + c2, OperatorKind::HashJoinInner)
-        }
+        (c1 + c2, OperatorKind::HashJoinInner)
     }
 
     /// Cross-join every connected component in cardinality-ascending
     /// order. Mirrors the canonical UQA implementation's `_join_disconnected_components`.
-    fn join_disconnected_components(&mut self) -> JoinPlan {
+    fn join_disconnected_components(&mut self) -> Option<JoinPlan> {
         let components = self.find_connected_components();
         let mut component_plans: Vec<JoinPlan> = Vec::with_capacity(components.len());
         for comp in &components {
             if comp.len() == 1 {
-                let idx = *comp.iter().next().unwrap();
-                let plan = self.dp.get(&(1u64 << idx)).cloned().expect("base plan");
+                let idx = *comp.first()?;
+                let plan = self.dp.get(&(1u64 << idx)).cloned()?;
                 component_plans.push(plan);
                 continue;
             }
@@ -444,19 +432,13 @@ impl<'g> DPccp<'g> {
                 v.sort_unstable();
                 v
             };
-            let sub_graph = self.build_subgraph(&original_indices);
-            let sub_plan = DPccp::new(&sub_graph)
-                .optimize()
-                .expect("non-empty component");
+            let sub_graph = self.build_subgraph(&original_indices)?;
+            let sub_plan = DPccp::new(&sub_graph).optimize()?;
             component_plans.push(remap_plan(&sub_plan, &original_indices));
         }
-        component_plans.sort_by(|a, b| {
-            a.cardinality
-                .partial_cmp(&b.cardinality)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        component_plans.sort_by(|a, b| a.cardinality.total_cmp(&b.cardinality));
         let mut iter = component_plans.into_iter();
-        let mut result = iter.next().expect("at least one component");
+        let mut result = iter.next()?;
         for plan in iter {
             let combined = result.relations | plan.relations;
             let cardinality = result.cardinality * plan.cardinality;
@@ -471,7 +453,7 @@ impl<'g> DPccp<'g> {
                 kind: Some(OperatorKind::CrossJoin),
             };
         }
-        result
+        Some(result)
     }
 
     /// BFS the join graph to enumerate the connected components.
@@ -503,31 +485,34 @@ impl<'g> DPccp<'g> {
     /// Project a sub-graph containing only `nodes` (in their original
     /// indices). Edge bitmasks are remapped to the dense [0..k) range
     /// used by the recursive solve. Mirrors the canonical UQA implementation's `_build_subgraph`.
-    fn build_subgraph(&self, nodes: &[usize]) -> JoinGraph {
+    fn build_subgraph(&self, nodes: &[usize]) -> Option<JoinGraph> {
         let mut sub = JoinGraph::new();
         let mut index_map: BTreeMap<usize, usize> = BTreeMap::new();
         for &old_idx in nodes {
-            let new_idx = sub.add_relation(
-                self.graph.relations[old_idx].clone(),
-                self.graph.cardinalities[old_idx],
-            );
+            let new_idx = sub.relations.len();
+            sub.relations.push(self.graph.relations[old_idx].clone());
+            sub.cardinalities.push(self.graph.cardinalities[old_idx]);
             index_map.insert(old_idx, new_idx);
         }
         for edge in &self.graph.edges {
-            let l_idx = edge.left.trailing_zeros() as usize;
-            let r_idx = edge.right.trailing_zeros() as usize;
+            let l_idx = usize::try_from(edge.left.trailing_zeros()).ok()?;
+            let r_idx = usize::try_from(edge.right.trailing_zeros()).ok()?;
             if let (Some(&l_new), Some(&r_new)) = (index_map.get(&l_idx), index_map.get(&r_idx)) {
-                sub.add_edge(l_new, r_new, edge.selectivity);
+                sub.edges.push(JoinEdge {
+                    left: 1_u64 << l_new,
+                    right: 1_u64 << r_new,
+                    selectivity: edge.selectivity,
+                });
             }
         }
-        sub
+        Some(sub)
     }
 
     /// Greedy fallback for graphs with more than `MAX_DP_RELATIONS`
     /// relations: at every step pick the cheapest joinable pair until
     /// only one plan remains. `O(n^3)`. Mirrors the canonical UQA implementation's
     /// `_greedy_optimize`.
-    fn greedy_optimize(self) -> JoinPlan {
+    fn greedy_optimize(self) -> Option<JoinPlan> {
         let mut active: BTreeMap<u64, JoinPlan> = self.dp.clone();
         while active.len() > 1 {
             let mut best_cost = f64::INFINITY;
@@ -550,19 +535,7 @@ impl<'g> DPccp<'g> {
                     for edge in &edges {
                         cardinality *= edge.selectivity;
                     }
-                    let c1 = p1.cardinality;
-                    let c2 = p2.cardinality;
-                    let (greedy_join_cost, kind) = if c1 <= c2 {
-                        if c1 <= INDEX_JOIN_THRESHOLD {
-                            (c1 * (c2 + 1.0).log2(), OperatorKind::IndexJoin)
-                        } else {
-                            (c1 + c2, OperatorKind::HashJoinInner)
-                        }
-                    } else if c2 <= INDEX_JOIN_THRESHOLD {
-                        (c2 * (c1 + 1.0).log2(), OperatorKind::IndexJoin)
-                    } else {
-                        (c1 + c2, OperatorKind::HashJoinInner)
-                    };
+                    let (greedy_join_cost, kind) = Self::join_cost(p1.cardinality, p2.cardinality);
                     let cost = greedy_join_cost + p1.cost + p2.cost;
                     if cost < best_cost {
                         best_cost = cost;
@@ -573,7 +546,7 @@ impl<'g> DPccp<'g> {
                             cost,
                             left: Some(Box::new(p1.clone())),
                             right: Some(Box::new(p2.clone())),
-                            join_edge: Some(edges[0].clone()),
+                            join_edge: edges.first().cloned(),
                             kind: Some(kind),
                         });
                     }
@@ -583,13 +556,9 @@ impl<'g> DPccp<'g> {
                 // No more joinable edges; cross-join the rest in
                 // cardinality-ascending order.
                 let mut remaining: Vec<JoinPlan> = active.into_values().collect();
-                remaining.sort_by(|a, b| {
-                    a.cardinality
-                        .partial_cmp(&b.cardinality)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                remaining.sort_by(|a, b| a.cardinality.total_cmp(&b.cardinality));
                 let mut iter = remaining.into_iter();
-                let mut result = iter.next().expect("at least one plan");
+                let mut result = iter.next()?;
                 for plan in iter {
                     let combined = result.relations | plan.relations;
                     let cardinality = result.cardinality * plan.cardinality;
@@ -604,7 +573,7 @@ impl<'g> DPccp<'g> {
                         kind: Some(OperatorKind::CrossJoin),
                     };
                 }
-                return result;
+                return Some(result);
             };
             // Drop every plan whose mask is fully contained in the
             // newly merged mask, then insert the merged plan.
@@ -618,10 +587,7 @@ impl<'g> DPccp<'g> {
             }
             active.insert(best_combined_mask, best_plan_unwrapped);
         }
-        active
-            .into_values()
-            .next()
-            .expect("non-empty greedy result")
+        active.into_values().next()
     }
 }
 
@@ -665,23 +631,40 @@ fn remap_mask(mask: u64, original_indices: &[usize]) -> u64 {
 mod tests {
     use super::*;
 
+    fn assert_executable_join_kinds(plan: &JoinPlan) {
+        match (&plan.left, &plan.right) {
+            (Some(left), Some(right)) => {
+                if plan.join_edge.is_some() {
+                    assert_eq!(plan.kind, Some(OperatorKind::HashJoinInner));
+                } else {
+                    assert_eq!(plan.kind, Some(OperatorKind::CrossJoin));
+                }
+                assert_executable_join_kinds(left);
+                assert_executable_join_kinds(right);
+            }
+            (None, None) => assert!(plan.kind.is_none()),
+            _ => panic!("join plan contains exactly one child: {plan:?}"),
+        }
+    }
+
     #[test]
     fn three_way_chain_picks_smallest_first() {
         let mut g = JoinGraph::new();
-        let a = g.add_relation("a", 10.0);
-        let b = g.add_relation("b", 100.0);
-        let c = g.add_relation("c", 10_000.0);
-        g.add_edge(a, b, 0.01);
-        g.add_edge(b, c, 0.001);
+        let a = g.add_relation("a", 10.0).unwrap();
+        let b = g.add_relation("b", 100.0).unwrap();
+        let c = g.add_relation("c", 10_000.0).unwrap();
+        g.add_edge(a, b, 0.01).unwrap();
+        g.add_edge(b, c, 0.001).unwrap();
         let plan = enumerate_dpccp(&g).unwrap();
         assert_eq!(plan.relations, 0b111);
         assert!(plan.left.is_some() && plan.right.is_some());
+        assert_executable_join_kinds(&plan);
     }
 
     #[test]
     fn single_relation_returns_leaf() {
         let mut g = JoinGraph::new();
-        g.add_relation("solo", 1.0);
+        g.add_relation("solo", 1.0).unwrap();
         let plan = enumerate_dpccp(&g).unwrap();
         assert!(plan.left.is_none());
         assert!(plan.right.is_none());
@@ -697,15 +680,16 @@ mod tests {
     #[test]
     fn disconnected_graph_cross_joins_components() {
         let mut g = JoinGraph::new();
-        let a = g.add_relation("a", 50.0);
-        let b = g.add_relation("b", 60.0);
-        let c = g.add_relation("c", 70.0);
-        g.add_edge(a, b, 0.5);
+        let a = g.add_relation("a", 50.0).unwrap();
+        let b = g.add_relation("b", 60.0).unwrap();
+        let c = g.add_relation("c", 70.0).unwrap();
+        g.add_edge(a, b, 0.5).unwrap();
         // c is a disconnected component.
         let _ = c;
         let plan = enumerate_dpccp(&g).unwrap();
         // The cross-join must cover every relation.
         assert_eq!(plan.relations, 0b111);
+        assert_executable_join_kinds(&plan);
     }
 
     #[test]
@@ -713,16 +697,17 @@ mod tests {
         // centre as the centre, leaf_b/c/d as leaves: every connects to
         // centre.
         let mut g = JoinGraph::new();
-        let centre = g.add_relation("centre", 1_000.0);
-        let leaf_b = g.add_relation("b", 10.0);
-        let leaf_c = g.add_relation("c", 20.0);
-        let leaf_d = g.add_relation("d", 30.0);
-        g.add_edge(centre, leaf_b, 0.01);
-        g.add_edge(centre, leaf_c, 0.01);
-        g.add_edge(centre, leaf_d, 0.01);
+        let centre = g.add_relation("centre", 1_000.0).unwrap();
+        let leaf_b = g.add_relation("b", 10.0).unwrap();
+        let leaf_c = g.add_relation("c", 20.0).unwrap();
+        let leaf_d = g.add_relation("d", 30.0).unwrap();
+        g.add_edge(centre, leaf_b, 0.01).unwrap();
+        g.add_edge(centre, leaf_c, 0.01).unwrap();
+        g.add_edge(centre, leaf_d, 0.01).unwrap();
         let plan = enumerate_dpccp(&g).unwrap();
         assert_eq!(plan.relations, 0b1111);
         assert!(plan.cost > 0.0);
+        assert_executable_join_kinds(&plan);
     }
 
     #[test]
@@ -733,23 +718,26 @@ mod tests {
         let n = MAX_DP_RELATIONS + 2;
         let mut prev: usize = 0;
         for i in 0..n {
-            let idx = g.add_relation(format!("t{i}"), 100.0);
+            let idx = g.add_relation(format!("t{i}"), 100.0).unwrap();
             if i > 0 {
-                g.add_edge(prev, idx, 0.05);
+                g.add_edge(prev, idx, 0.05).unwrap();
             }
             prev = idx;
         }
         let plan = enumerate_dpccp(&g).unwrap();
         assert_eq!(plan.relations.count_ones() as usize, n);
+        assert_executable_join_kinds(&plan);
     }
 
     #[test]
     fn threshold_sized_star_uses_exact_plan() {
         let mut g = JoinGraph::new();
-        let centre = g.add_relation("centre", 1_000.0);
+        let centre = g.add_relation("centre", 1_000.0).unwrap();
         for i in 1..MAX_DP_RELATIONS {
-            let leaf = g.add_relation(format!("leaf{i}"), 100.0 + i as f64);
-            g.add_edge(centre, leaf, 0.01);
+            let leaf = g
+                .add_relation(format!("leaf{i}"), 100.0 + i as f64)
+                .unwrap();
+            g.add_edge(centre, leaf, 0.01).unwrap();
         }
 
         let plan = enumerate_dpccp(&g).unwrap();

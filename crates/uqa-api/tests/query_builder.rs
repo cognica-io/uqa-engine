@@ -6,6 +6,8 @@
 
 //! Integration tests for the `QueryBuilder` fluent API.
 
+use std::collections::BTreeMap;
+
 use uqa_api::{Order, QueryBuilder};
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -71,6 +73,36 @@ fn engine_with_docs() -> Engine {
     engine
 }
 
+fn engine_with_vectors() -> Engine {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE vector_docs (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO vector_docs (id, embedding) VALUES \
+             (1, ARRAY[0.9, 0.1]), \
+             (2, ARRAY[0.8, 0.2]), \
+             (3, ARRAY[0.1, 0.9])",
+            &[],
+        )
+        .unwrap();
+    engine
+}
+
+fn assert_probability_scores(result: &uqa_sql::SQLResult) {
+    assert!(!result.rows.is_empty());
+    for row in &result.rows {
+        match row.get("_score") {
+            Some(Value::Float(score)) => assert!(*score > 0.0 && *score < 1.0),
+            other => panic!("missing probability _score: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn select_with_text_match_and_order_runs() {
     let engine = engine_with_corpus();
@@ -98,7 +130,9 @@ fn where_filters_compose_with_and() {
     let result = QueryBuilder::new(&engine, "notes")
         .select_columns(&["id"])
         .where_gt("qty", &Value::Int(4))
+        .unwrap()
         .where_lt("qty", &Value::Int(10))
+        .unwrap()
         .order_by_asc("id")
         .execute()
         .unwrap();
@@ -115,11 +149,32 @@ fn where_filters_compose_with_and() {
 }
 
 #[test]
+fn where_gte_and_lte_execute_inclusively() {
+    let engine = engine_with_corpus();
+    let result = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id"])
+        .where_gte("qty", &Value::Int(5))
+        .unwrap()
+        .where_lte("qty", &Value::Int(7))
+        .unwrap()
+        .order_by_asc("id")
+        .execute()
+        .unwrap();
+    let ids = result
+        .rows
+        .iter()
+        .map(|row| row.get("id").cloned().expect("id projection"))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![Value::Int(1), Value::Int(4)]);
+}
+
+#[test]
 fn to_sql_renders_full_clause() {
     let engine = engine_with_corpus();
     let sql = QueryBuilder::new(&engine, "notes")
         .select_columns(&["id", "title"])
         .where_eq("id", &Value::Int(2))
+        .unwrap()
         .order_by("id", Order::Asc)
         .limit(3)
         .offset(1)
@@ -131,11 +186,37 @@ fn to_sql_renders_full_clause() {
 }
 
 #[test]
+fn value_filters_preserve_bytes_and_reject_unrepresentable_values() {
+    let engine = engine_with_corpus();
+    let sql = QueryBuilder::new(&engine, "notes")
+        .where_eq("payload", &Value::Bytes(vec![0x00, 0xab, 0xff]))
+        .unwrap()
+        .to_sql();
+    assert_eq!(
+        sql,
+        "SELECT * FROM notes WHERE payload = decode('00abff', 'hex')"
+    );
+
+    let map_error = QueryBuilder::new(&engine, "notes")
+        .where_eq("payload", &Value::Map(BTreeMap::new()))
+        .err()
+        .expect("a map must not be silently rendered as NULL");
+    assert!(map_error.to_string().contains("map filter values"));
+
+    let float_error = QueryBuilder::new(&engine, "notes")
+        .where_eq("score", &Value::Float(f64::NAN))
+        .err()
+        .expect("a non-finite value must not produce invalid SQL");
+    assert!(float_error.to_string().contains("non-finite"));
+}
+
+#[test]
 fn multi_field_match_through_builder() {
     let engine = engine_with_corpus();
     let result = QueryBuilder::new(&engine, "notes")
         .select_columns(&["id"])
         .multi_field_match(&[("title", "rust"), ("title", "embedded")])
+        .unwrap()
         .order_by_desc("_score")
         .execute()
         .unwrap();
@@ -143,23 +224,253 @@ fn multi_field_match_through_builder() {
 }
 
 #[test]
-fn fuse_attention_renders_attention_call() {
+fn multi_field_match_rejects_too_few_pairs_and_empty_fields() {
     let engine = engine_with_corpus();
-    let sql = QueryBuilder::new(&engine, "notes")
-        .select_columns(&["id"])
-        .fuse_attention(&["text_match('rust')", "text_match('embedded')"])
-        .to_sql();
-    assert!(sql.contains("attention(text_match('rust'), text_match('embedded'))"));
+    let arity_error = QueryBuilder::new(&engine, "notes")
+        .multi_field_match(&[("title", "rust")])
+        .err()
+        .expect("one field/query pair must be rejected");
+    assert!(arity_error.to_string().contains(">=2 field/query pairs"));
+
+    let field_error = QueryBuilder::new(&engine, "notes")
+        .multi_field_match(&[("title", "rust"), (" ", "embedded")])
+        .err()
+        .expect("an empty field name must be rejected");
+    assert!(field_error
+        .to_string()
+        .contains("field names cannot be empty"));
 }
 
 #[test]
-fn fuse_learned_quotes_model_name_and_includes_signals() {
+fn direct_staged_retrieval_executes_registered_field_query_form() {
     let engine = engine_with_corpus();
-    let sql = QueryBuilder::new(&engine, "notes")
-        .select_columns(&["id"])
-        .fuse_learned("my_model", &["text_match('a')", "knn_match('v', '[1]', 5)"])
-        .to_sql();
-    assert!(sql.contains("learned_fusion('my_model', text_match('a'), knn_match('v', '[1]', 5))"));
+    let query = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .staged_retrieval(&[("title", "rust", 10), ("title", "embedded", 10)])
+        .unwrap();
+    assert!(query
+        .to_sql()
+        .contains(" WHERE staged_retrieval(title, 'rust', 10, title, 'embedded', 10)"));
+    let result = query.execute().unwrap();
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].get("id"), Some(&Value::Int(3)));
+}
+
+#[test]
+fn fuse_log_odds_executes_generated_shared_ir_query() {
+    let engine = engine_with_corpus();
+    let query = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .fuse_log_odds(
+            &[
+                "bayesian_match(title, 'rust')",
+                "bayesian_match(title, 'embedded')",
+            ],
+            0.5,
+        )
+        .unwrap();
+    assert!(query.to_sql().contains(" WHERE fuse_log_odds("));
+    assert_probability_scores(&query.execute().unwrap());
+}
+
+#[test]
+fn multi_stage_executes_registered_staged_retrieval_query() {
+    let engine = engine_with_corpus();
+    let query = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .multi_stage(&[
+            ("bayesian_match(title, 'rust')", 10),
+            ("bayesian_match(title, 'embedded')", 10),
+        ])
+        .unwrap();
+    assert!(query.to_sql().contains(" WHERE staged_retrieval("));
+    assert_eq!(query.execute().unwrap().rows.len(), 1);
+}
+
+#[test]
+fn fuse_attention_executes_generated_shared_ir_query() {
+    let engine = engine_with_corpus();
+    let query = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .fuse_attention(&[
+            "bayesian_match(title, 'rust')",
+            "bayesian_match(title, 'embedded')",
+        ])
+        .unwrap();
+    assert!(query.to_sql().contains(" WHERE fuse_attention("));
+    assert_probability_scores(&query.execute().unwrap());
+}
+
+#[test]
+fn fuse_learned_executes_signals_with_optional_alpha() {
+    let engine = engine_with_corpus();
+    let signals = [
+        "bayesian_match(title, 'rust')",
+        "bayesian_match(title, 'embedded')",
+    ];
+    let with_alpha = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .fuse_learned(&signals, Some(0.7))
+        .unwrap();
+    assert!(with_alpha
+        .to_sql()
+        .contains(" WHERE fuse_learned(bayesian_match(title, 'rust'), bayesian_match(title, 'embedded'), alpha => 0.7)"));
+    assert_probability_scores(&with_alpha.execute().unwrap());
+
+    let default_alpha = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .fuse_learned(&signals, None)
+        .unwrap();
+    assert!(!default_alpha.to_sql().contains("alpha =>"));
+    assert_probability_scores(&default_alpha.execute().unwrap());
+}
+
+#[test]
+fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
+    let engine = engine_with_corpus();
+    let signals = [
+        "bayesian_match(title, 'rust')",
+        "bayesian_match(title, 'embedded')",
+    ];
+    for alpha in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
+        let log_odds_error = QueryBuilder::new(&engine, "notes")
+            .fuse_log_odds(&signals, alpha)
+            .err()
+            .expect("invalid log-odds alpha must fail");
+        assert!(log_odds_error.to_string().contains("finite and in [0, 1]"));
+
+        let learned_error = QueryBuilder::new(&engine, "notes")
+            .fuse_learned(&signals, Some(alpha))
+            .err()
+            .expect("invalid learned alpha must fail");
+        assert!(learned_error.to_string().contains("finite and in [0, 1]"));
+    }
+
+    let one_signal = ["bayesian_match(title, 'rust')"];
+    for error in [
+        QueryBuilder::new(&engine, "notes")
+            .fuse_log_odds(&one_signal, 0.5)
+            .err()
+            .expect("log odds requires two signals"),
+        QueryBuilder::new(&engine, "notes")
+            .fuse_attention(&one_signal)
+            .err()
+            .expect("attention requires two signals"),
+        QueryBuilder::new(&engine, "notes")
+            .fuse_learned(&one_signal, None)
+            .err()
+            .expect("learned fusion requires two signals"),
+    ] {
+        assert!(error.to_string().contains(">=2 signals"));
+    }
+
+    let no_signal_stages: [(&str, usize); 0] = [];
+    let multi_stage_error = QueryBuilder::new(&engine, "notes")
+        .multi_stage(&no_signal_stages)
+        .err()
+        .expect("multi-stage retrieval requires a stage");
+    assert!(multi_stage_error.to_string().contains(">=1 stage"));
+
+    let no_field_stages: [(&str, &str, usize); 0] = [];
+    let staged_error = QueryBuilder::new(&engine, "notes")
+        .staged_retrieval(&no_field_stages)
+        .err()
+        .expect("staged retrieval requires a stage");
+    assert!(staged_error.to_string().contains(">=1 stage"));
+}
+
+#[test]
+fn calibrated_vector_builder_executes_through_where_ir() {
+    let engine = engine_with_vectors();
+    let query = QueryBuilder::new(&engine, "vector_docs")
+        .select_columns(&["id", "_score"])
+        .calibrated_vector_match("embedding", &[0.9, 0.1], 3, Some(0.0))
+        .unwrap()
+        .order_by_desc("_score");
+    assert!(query
+        .to_sql()
+        .contains(" WHERE calibrated_vector_match('embedding', ARRAY[0.9, 0.1], 3, 0)"));
+    assert_probability_scores(&query.execute().unwrap());
+}
+
+#[test]
+fn vector_builders_reject_invalid_vectors_k_and_thresholds() {
+    let engine = engine_with_vectors();
+    for vector in [&[][..], &[f32::NAN, 0.1][..], &[f32::INFINITY, 0.1][..]] {
+        let error = QueryBuilder::new(&engine, "vector_docs")
+            .calibrated_vector_match("embedding", vector, 3, None)
+            .err()
+            .expect("invalid vector must fail");
+        assert!(error.to_string().contains("non-empty finite query vector"));
+    }
+
+    for k in [0, usize::MAX] {
+        let error = QueryBuilder::new(&engine, "vector_docs")
+            .calibrated_vector_match("embedding", &[0.9, 0.1], k, None)
+            .err()
+            .expect("invalid k must fail");
+        assert!(error.to_string().contains("positive"));
+    }
+
+    for threshold in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.1, 1.1] {
+        let error = QueryBuilder::new(&engine, "vector_docs")
+            .calibrated_vector_match("embedding", &[0.9, 0.1], 3, Some(threshold))
+            .err()
+            .expect("invalid threshold must fail");
+        assert!(error.to_string().contains("finite and in [0, 1]"));
+    }
+
+    let empty_field = QueryBuilder::new(&engine, "vector_docs")
+        .calibrated_vector_match(" ", &[0.9, 0.1], 3, None)
+        .err()
+        .expect("empty vector field must fail");
+    assert!(empty_field
+        .to_string()
+        .contains("field name cannot be empty"));
+}
+
+#[test]
+fn vector_compatibility_builder_emits_registered_knn_query() {
+    let engine = engine_with_vectors();
+    let query = QueryBuilder::new(&engine, "vector_docs")
+        .select_columns(&["id", "_score"])
+        .vector(&[0.9, 0.1], 3, "embedding")
+        .unwrap();
+    assert!(query.to_sql().contains(" WHERE knn_match("));
+    assert!(!query.execute().unwrap().rows.is_empty());
+}
+
+#[test]
+fn direct_knn_match_executes_registered_retrieval_predicate() {
+    let engine = engine_with_vectors();
+    let query = QueryBuilder::new(&engine, "vector_docs")
+        .select_columns(&["id", "_score"])
+        .knn_match("embedding", &[0.9, 0.1], 2)
+        .unwrap()
+        .order_by_desc("_score");
+    assert!(query
+        .to_sql()
+        .contains(" WHERE knn_match(embedding, ARRAY[0.9, 0.1], 2)"));
+    let result = query.execute().unwrap();
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0].get("id"), Some(&Value::Int(1)));
+}
+
+#[test]
+fn all_field_term_and_facet_builders_execute_their_generated_sql() {
+    let docs = engine_with_docs();
+    let all_fields = QueryBuilder::new(&docs, "docs")
+        .select_columns(&["id", "_score"])
+        .term("attention", None);
+    assert!(all_fields
+        .to_sql()
+        .contains("fts_match('_all', 'attention')"));
+    assert!(!all_fields.execute().unwrap().rows.is_empty());
+
+    let notes = engine_with_corpus();
+    let facet = QueryBuilder::new(&notes, "notes").facet("qty");
+    assert!(facet.to_sql().contains(" GROUP BY qty"));
+    assert_eq!(facet.execute().unwrap().rows.len(), 4);
 }
 
 #[test]
@@ -173,15 +484,39 @@ fn rpq_replaces_from_clause() {
 }
 
 #[test]
-fn highlight_and_facets_render_function_calls() {
-    let engine = engine_with_corpus();
-    let sql = QueryBuilder::new(&engine, "notes")
-        .select_columns(&["id"])
-        .highlight("title", "rust")
-        .facets(&["author", "year"])
-        .to_sql();
-    assert!(sql.contains("uqa_highlight('title', 'rust')"));
-    assert!(sql.contains("uqa_facets('author', 'year')"));
+fn highlight_and_facets_execute_registered_projection_forms() {
+    let engine = engine_with_docs();
+    let highlighted = QueryBuilder::new(&engine, "docs")
+        .highlight("body", "attention")
+        .unwrap();
+    assert!(highlighted
+        .to_sql()
+        .contains("uqa_highlight(body, 'attention')"));
+    assert!(highlighted.execute().unwrap().rows.iter().any(|row| {
+        row.values()
+            .any(|value| matches!(value, Value::Str(text) if text.contains("<b>attention</b>")))
+    }));
+
+    let facets = QueryBuilder::new(&engine, "docs")
+        .facets(&["year"])
+        .unwrap();
+    assert!(facets.to_sql().contains("uqa_facets(year)"));
+    assert_eq!(facets.execute().unwrap().rows.len(), 5);
+
+    let empty_fields: [&str; 0] = [];
+    let error = QueryBuilder::new(&engine, "docs")
+        .facets(&empty_fields)
+        .err()
+        .expect("facets requires at least one field");
+    assert!(error.to_string().contains(">=1 field"));
+
+    let highlight_error = QueryBuilder::new(&engine, "docs")
+        .highlight(" ", "attention")
+        .err()
+        .expect("highlight requires a non-empty field");
+    assert!(highlight_error
+        .to_string()
+        .contains("field name cannot be empty"));
 }
 
 #[test]
@@ -200,6 +535,7 @@ fn explain_returns_plan_lines() {
     let plan = QueryBuilder::new(&engine, "notes")
         .select_columns(&["id"])
         .where_eq("id", &Value::Int(1))
+        .unwrap()
         .limit(2)
         .explain()
         .unwrap();

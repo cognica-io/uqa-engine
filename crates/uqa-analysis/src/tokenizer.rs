@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::error::{AnalysisError, AnalysisResult};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Tokenizer {
@@ -26,20 +28,40 @@ pub enum Tokenizer {
 }
 
 impl Tokenizer {
-    pub fn tokenize(&self, text: &str) -> Vec<String> {
+    /// Validate configuration without tokenizing input. This is used when an
+    /// analyzer is registered, while [`Self::tokenize`] repeats the checks so
+    /// deserialized legacy values can never bypass them.
+    pub fn validate(&self) -> AnalysisResult<()> {
         match self {
+            Tokenizer::NGram { min_gram, max_gram } => {
+                validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)
+            }
+            Tokenizer::Pattern { pattern } => {
+                Regex::new(pattern)
+                    .map(|_| ())
+                    .map_err(|source| AnalysisError::InvalidRegex {
+                        component: "pattern tokenizer",
+                        pattern: pattern.clone(),
+                        source,
+                    })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn tokenize(&self, text: &str) -> AnalysisResult<Vec<String>> {
+        let tokens = match self {
             Tokenizer::Whitespace => text.split_whitespace().map(str::to_owned).collect(),
-            Tokenizer::Standard => standard_word_re()
+            Tokenizer::Standard => standard_word_re()?
                 .find_iter(text)
                 .map(|m| m.as_str().to_owned())
                 .collect(),
-            Tokenizer::Letter => letter_re()
+            Tokenizer::Letter => letter_re()?
                 .find_iter(text)
                 .map(|m| m.as_str().to_owned())
                 .collect(),
             Tokenizer::NGram { min_gram, max_gram } => {
-                debug_assert!(*min_gram >= 1, "min_gram must be >= 1");
-                debug_assert!(max_gram >= min_gram, "max_gram must be >= min_gram");
+                validate_gram_bounds("n-gram tokenizer", *min_gram, *max_gram)?;
                 let mut out = Vec::new();
                 for word in text.split_whitespace() {
                     let chars: Vec<char> = word.chars().collect();
@@ -54,14 +76,17 @@ impl Tokenizer {
                 }
                 out
             }
-            Tokenizer::Pattern { pattern } => Regex::new(pattern)
-                .map(|re| {
-                    re.split(text)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
+            Tokenizer::Pattern { pattern } => {
+                let re = Regex::new(pattern).map_err(|source| AnalysisError::InvalidRegex {
+                    component: "pattern tokenizer",
+                    pattern: pattern.clone(),
+                    source,
+                })?;
+                re.split(text)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            }
             Tokenizer::Keyword => {
                 if text.is_empty() {
                     Vec::new()
@@ -69,18 +94,44 @@ impl Tokenizer {
                     vec![text.to_owned()]
                 }
             }
-        }
+        };
+        Ok(tokens)
     }
 }
 
-fn standard_word_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\w+").expect("standard tokenizer regex compiles"))
+fn validate_gram_bounds(
+    component: &'static str,
+    min_gram: usize,
+    max_gram: usize,
+) -> AnalysisResult<()> {
+    if min_gram == 0 || max_gram < min_gram {
+        return Err(AnalysisError::InvalidGramBounds {
+            component,
+            min_gram,
+            max_gram,
+        });
+    }
+    Ok(())
 }
 
-fn letter_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"[a-zA-Z]+").expect("letter tokenizer regex compiles"))
+fn standard_word_re() -> AnalysisResult<&'static Regex> {
+    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\w+").map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|message| AnalysisError::BuiltInRegex {
+            component: "standard tokenizer",
+            message: message.clone(),
+        })
+}
+
+fn letter_re() -> AnalysisResult<&'static Regex> {
+    static RE: OnceLock<Result<Regex, String>> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[a-zA-Z]+").map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|message| AnalysisError::BuiltInRegex {
+            component: "letter tokenizer",
+            message: message.clone(),
+        })
 }
 
 #[cfg(test)]
@@ -91,7 +142,7 @@ mod tests {
     fn whitespace_splits_on_whitespace() {
         let t = Tokenizer::Whitespace;
         assert_eq!(
-            t.tokenize("hello  world\n  rust"),
+            t.tokenize("hello  world\n  rust").unwrap(),
             vec!["hello", "world", "rust"]
         );
     }
@@ -100,7 +151,7 @@ mod tests {
     fn standard_extracts_unicode_words() {
         let t = Tokenizer::Standard;
         assert_eq!(
-            t.tokenize("Rust 2024! Carácter."),
+            t.tokenize("Rust 2024! Carácter.").unwrap(),
             vec!["Rust", "2024", "Carácter"]
         );
     }
@@ -108,7 +159,7 @@ mod tests {
     #[test]
     fn letter_extracts_ascii_letters_only() {
         let t = Tokenizer::Letter;
-        assert_eq!(t.tokenize("abc123 xyz"), vec!["abc", "xyz"]);
+        assert_eq!(t.tokenize("abc123 xyz").unwrap(), vec!["abc", "xyz"]);
     }
 
     #[test]
@@ -119,7 +170,7 @@ mod tests {
         };
         // "ab" word: 2-grams [ab]
         // "abc" word: 2-grams [ab, bc], 3-grams [abc]
-        assert_eq!(t.tokenize("ab abc"), vec!["ab", "ab", "bc", "abc"]);
+        assert_eq!(t.tokenize("ab abc").unwrap(), vec!["ab", "ab", "bc", "abc"]);
     }
 
     #[test]
@@ -127,14 +178,14 @@ mod tests {
         let t = Tokenizer::Pattern {
             pattern: r"\W+".to_string(),
         };
-        assert_eq!(t.tokenize("hello, world!"), vec!["hello", "world"]);
+        assert_eq!(t.tokenize("hello, world!").unwrap(), vec!["hello", "world"]);
     }
 
     #[test]
     fn keyword_emits_whole_input() {
         let t = Tokenizer::Keyword;
-        assert_eq!(t.tokenize("a b c"), vec!["a b c"]);
-        assert!(t.tokenize("").is_empty());
+        assert_eq!(t.tokenize("a b c").unwrap(), vec!["a b c"]);
+        assert!(t.tokenize("").unwrap().is_empty());
     }
 
     #[test]
@@ -145,6 +196,9 @@ mod tests {
         };
         let s = serde_json::to_string(&t).unwrap();
         let back: Tokenizer = serde_json::from_str(&s).unwrap();
-        assert_eq!(back.tokenize("foobar"), t.tokenize("foobar"));
+        assert_eq!(
+            back.tokenize("foobar").unwrap(),
+            t.tokenize("foobar").unwrap()
+        );
     }
 }

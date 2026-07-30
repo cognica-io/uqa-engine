@@ -12,8 +12,12 @@ use uqa_storage::document_store::Document;
 fn main() {
     let engine = Engine::new();
 
-    engine.create_default_table("articles", vec!["body".to_string()]);
-    engine.create_vector_field("articles", "embedding", 3);
+    engine
+        .create_default_table("articles", vec!["body".to_string()])
+        .unwrap();
+    engine
+        .create_vector_field("articles", "embedding", 3)
+        .unwrap();
 
     let corpus = [
         (
@@ -53,16 +57,18 @@ fn main() {
             .unwrap();
     }
 
-    let hits = engine.hybrid_search(&HybridSearchParams {
-        table: "articles",
-        text_field: "body",
-        text_query: "rust async",
-        vector_field: "embedding",
-        query_vector: vec![1.0, 0.0, 0.0],
-        knn_pool: 5,
-        alpha: 0.5,
-        top_k: 3,
-    });
+    let hits = engine
+        .hybrid_search(&HybridSearchParams {
+            table: "articles",
+            text_field: "body",
+            text_query: "rust async",
+            vector_field: "embedding",
+            query_vector: vec![1.0, 0.0, 0.0],
+            knn_pool: 5,
+            alpha: 0.5,
+            top_k: 3,
+        })
+        .unwrap();
 
     println!("Hybrid (text + vector, log-odds fused, alpha=0.5) top 3:");
     for h in &hits {

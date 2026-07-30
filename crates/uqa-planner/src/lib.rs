@@ -69,12 +69,15 @@ pub use cardinality::{
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
 pub use executor::{ExecutionStats, OperatorOutput, OperatorTreeDriver, PlanExecutor};
 pub use join_enumerator::{enumerate_dpccp, JoinPlan};
-pub use join_graph::{JoinEdge, JoinGraph};
+pub use join_graph::{JoinEdge, JoinGraph, JoinGraphError, JoinGraphResult};
 pub use join_order::{
     JoinAlgorithm, JoinCondition, JoinOrderOptimizer, JoinOrderResult, JoinOrderTree,
-    JoinPredicate, JoinRelation, INDEX_JOIN_THRESHOLD,
+    JoinPredicate, JoinRelation,
 };
-pub use optimizer::{optimize, OptimizerConfig};
+pub use optimizer::{
+    optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
+    optimize_with_statistics, OptimizerConfig, SourceStatistics,
+};
 pub use parallel::{
     run_parallel, ParallelExecutor, DEFAULT_PARALLEL_WORKERS, MIN_PARALLEL_BRANCHES,
 };
@@ -83,9 +86,9 @@ pub use query_optimizer::{
 };
 pub use unified_plan::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
-    ConflictActionPlan, ConflictPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan,
-    MergeWhenPlan, OrderPlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
-    SourcePlan, UnifiedPlan, UpdatePlan,
+    ConflictActionPlan, ConflictPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan,
+    JoinExecutionStrategy, MergePlan, MergeWhenPlan, OrderPlan, ProjectionPlan, QueryBlockPlan,
+    QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
 };
 pub use uqa_execution::{
     ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, SubqueryId,

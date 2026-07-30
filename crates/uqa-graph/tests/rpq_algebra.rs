@@ -44,8 +44,8 @@ proptest! {
     /// Identity #1: `a | a == a`.
     #[test]
     fn alternation_idempotent(a in arb_expr()) {
-        let lhs = simplify(&RegularPathExpr::alt(a.clone(), a.clone()));
-        let rhs = simplify(&a);
+        let lhs = simplify(&RegularPathExpr::alt(a.clone(), a.clone())).unwrap();
+        let rhs = simplify(&a).unwrap();
         prop_assert_eq!(lhs, rhs);
     }
 
@@ -55,27 +55,27 @@ proptest! {
         let inner = RegularPathExpr::star(a.clone());
         let nested = RegularPathExpr::star(inner);
         let just_one = RegularPathExpr::star(a);
-        prop_assert_eq!(simplify(&nested), simplify(&just_one));
+        prop_assert_eq!(simplify(&nested).unwrap(), simplify(&just_one).unwrap());
     }
 
     /// Identity #3: `a* | a == a*` (and the symmetric `a | a* == a*`).
     #[test]
     fn star_subsumes_label(a in arb_expr()) {
         let star_a = RegularPathExpr::star(a.clone());
-        let lhs = simplify(&RegularPathExpr::alt(star_a.clone(), a.clone()));
-        let rhs = simplify(&star_a.clone());
+        let lhs = simplify(&RegularPathExpr::alt(star_a.clone(), a.clone())).unwrap();
+        let rhs = simplify(&star_a.clone()).unwrap();
         prop_assert_eq!(lhs, rhs);
 
-        let lhs_swap = simplify(&RegularPathExpr::alt(a, star_a.clone()));
-        prop_assert_eq!(lhs_swap, simplify(&star_a));
+        let lhs_swap = simplify(&RegularPathExpr::alt(a, star_a.clone())).unwrap();
+        prop_assert_eq!(lhs_swap, simplify(&star_a).unwrap());
     }
 
     /// `simplify` is idempotent: applying it a second time changes
     /// nothing.
     #[test]
     fn simplify_idempotent(e in arb_expr()) {
-        let once = simplify(&e);
-        let twice = simplify(&once);
+        let once = simplify(&e).unwrap();
+        let twice = simplify(&once).unwrap();
         prop_assert_eq!(once, twice);
     }
 
@@ -85,6 +85,6 @@ proptest! {
     fn concat_of_two_same_stars_collapses(a in arb_expr()) {
         let star_a = RegularPathExpr::star(a);
         let concat = RegularPathExpr::concat(star_a.clone(), star_a.clone());
-        prop_assert_eq!(simplify(&concat), simplify(&star_a));
+        prop_assert_eq!(simplify(&concat).unwrap(), simplify(&star_a).unwrap());
     }
 }

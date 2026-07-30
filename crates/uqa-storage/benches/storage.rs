@@ -61,7 +61,8 @@ fn populated_inverted(n: u64) -> MemoryInvertedIndex {
                 "body".to_string(),
                 format!("term_{:06} common topic_{}", id % 1_000, id % 10),
             )]),
-        );
+        )
+        .unwrap();
     }
     idx
 }
@@ -69,7 +70,7 @@ fn populated_inverted(n: u64) -> MemoryInvertedIndex {
 fn populated_vector(n: u64, dim: usize) -> MemoryVectorIndex {
     let mut idx = MemoryVectorIndex::new(dim as u32);
     for id in 0..n {
-        idx.add(id, vector(id + 1, dim));
+        idx.add(id, vector(id + 1, dim)).unwrap();
     }
     idx
 }
@@ -77,9 +78,9 @@ fn populated_vector(n: u64, dim: usize) -> MemoryVectorIndex {
 fn populated_ivf(n: u64, dim: usize) -> IVFIndex {
     let mut idx = IVFIndex::with_params(dim as u32, 16, 4, 256);
     for id in 0..n {
-        idx.add(id, vector(id + 1, dim));
+        idx.add(id, vector(id + 1, dim)).unwrap();
     }
-    idx.train();
+    idx.train().expect("train IVF benchmark index");
     idx
 }
 
@@ -90,7 +91,7 @@ fn bench_document_store(c: &mut Criterion) {
         bencher.iter(|| {
             store.put(next_id, doc(next_id)).unwrap();
             next_id += 1;
-            black_box(store.len())
+            black_box(store.len().unwrap())
         });
     });
 
@@ -105,7 +106,7 @@ fn bench_document_store(c: &mut Criterion) {
                     for id in 0..*batch_size {
                         store.put(id, doc(id)).unwrap();
                     }
-                    black_box(store.len())
+                    black_box(store.len().unwrap())
                 });
             },
         );
@@ -117,13 +118,13 @@ fn bench_document_store(c: &mut Criterion) {
         bencher.iter(|| {
             let mut found = 0_usize;
             for id in [17_u64, 2_003, 7_771, 9_999] {
-                found += usize::from(store.get(black_box(id)).is_some());
+                found += usize::from(store.get(black_box(id)).unwrap().is_some());
             }
             black_box(found)
         });
     });
     c.bench_function("document_store_scan_all_10k", |bencher| {
-        bencher.iter(|| black_box(store.iter_all().count()));
+        bencher.iter(|| black_box(store.iter_all().unwrap().count()));
     });
 }
 
@@ -138,21 +139,29 @@ fn bench_inverted_index(c: &mut Criterion) {
                     "body".to_string(),
                     format!("term_{:06} common", next_id % 1_000),
                 )]),
-            );
+            )
+            .unwrap();
             next_id += 1;
-            black_box(idx.doc_count())
+            black_box(idx.doc_count().unwrap())
         });
     });
 
     let idx = populated_inverted(10_000);
     c.bench_function("inverted_index_get_posting_list", |bencher| {
         bencher.iter(|| {
-            let pl = idx.get_posting_list(black_box("body"), black_box("term_000001"));
+            let pl = idx
+                .get_posting_list(black_box("body"), black_box("term_000001"))
+                .unwrap();
             black_box(pl.len())
         });
     });
     c.bench_function("inverted_index_doc_freq", |bencher| {
-        bencher.iter(|| black_box(idx.doc_freq(black_box("body"), black_box("term_000001"))));
+        bencher.iter(|| {
+            black_box(
+                idx.doc_freq(black_box("body"), black_box("term_000001"))
+                    .unwrap(),
+            )
+        });
     });
 }
 
@@ -160,7 +169,7 @@ fn bench_vector_index(c: &mut Criterion) {
     c.bench_function("vector_index_build_500", |bencher| {
         bencher.iter(|| {
             let idx = populated_vector(500, 32);
-            black_box(idx.count())
+            black_box(idx.count().unwrap())
         });
     });
 
@@ -168,9 +177,9 @@ fn bench_vector_index(c: &mut Criterion) {
         let mut idx = MemoryVectorIndex::new(32);
         let mut next_id = 0_u64;
         bencher.iter(|| {
-            idx.add(next_id, vector(next_id + 1, 32));
+            idx.add(next_id, vector(next_id + 1, 32)).unwrap();
             next_id += 1;
-            black_box(idx.count())
+            black_box(idx.count().unwrap())
         });
     });
 
@@ -181,7 +190,7 @@ fn bench_vector_index(c: &mut Criterion) {
     for k in [10_usize, 50] {
         brute_group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, k| {
             bencher.iter(|| {
-                let result = brute.search_knn(black_box(&query), black_box(*k));
+                let result = brute.search_knn(black_box(&query), black_box(*k)).unwrap();
                 black_box(result.len())
             });
         });
@@ -192,7 +201,9 @@ fn bench_vector_index(c: &mut Criterion) {
     for k in [10_usize, 50] {
         trained_group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, k| {
             bencher.iter(|| {
-                let result = trained.search_knn(black_box(&query), black_box(*k));
+                let result = trained
+                    .search_knn(black_box(&query), black_box(*k))
+                    .unwrap();
                 black_box(result.len())
             });
         });
@@ -201,7 +212,9 @@ fn bench_vector_index(c: &mut Criterion) {
 
     c.bench_function("vector_index_threshold_search", |bencher| {
         bencher.iter(|| {
-            let result = brute.search_threshold(black_box(&query), black_box(0.85));
+            let result = brute
+                .search_threshold(black_box(&query), black_box(0.85))
+                .unwrap();
             black_box(result.len())
         });
     });
@@ -209,8 +222,8 @@ fn bench_vector_index(c: &mut Criterion) {
     c.bench_function("vector_index_delete", |bencher| {
         bencher.iter(|| {
             let mut idx = populated_vector(1_000, 32);
-            idx.delete(500);
-            black_box(idx.count())
+            idx.delete(500).unwrap();
+            black_box(idx.count().unwrap())
         });
     });
 
@@ -218,10 +231,10 @@ fn bench_vector_index(c: &mut Criterion) {
         bencher.iter(|| {
             let mut idx = IVFIndex::with_params(32, 16, 4, 256);
             for id in 0..1_000 {
-                idx.add(id, vector(id + 1, 32));
+                idx.add(id, vector(id + 1, 32)).unwrap();
             }
-            idx.train();
-            black_box(idx.count())
+            idx.train().expect("train IVF benchmark index");
+            black_box(idx.count().unwrap())
         });
     });
 }
@@ -235,12 +248,12 @@ fn bench_vector_persistence(c: &mut Criterion) {
                 let conn = ManagedConnection::open(&path).expect("open sqlite");
                 let mut idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
                 for id in 0..128 {
-                    idx.add(id, vector(id + 1, 8));
+                    idx.add(id, vector(id + 1, 8)).unwrap();
                 }
             }
             let conn = ManagedConnection::open(&path).expect("reopen sqlite");
             let idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
-            black_box(idx.count())
+            black_box(idx.count().unwrap())
         });
     });
 }

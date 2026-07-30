@@ -110,7 +110,9 @@ fn simplify_algebra_pass_fires_via_recurse_children() {
     // still descend through every node without altering semantics.
     let eng = engine_with_corpus();
     let expr = where_of("SELECT id FROM notes WHERE text_match(title, 'rust') AND year = 2024");
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     // Post-optimisation the Intersect must still produce the same
     // expected shape — two leaves, one Term and one physical index scan
     // selected by the final optimizer pass.
@@ -133,7 +135,9 @@ fn reorder_intersect_pass_sorts_arms_by_cardinality() {
     // IndexScan replacement survives with both arms present.
     let eng = engine_with_corpus();
     let expr = where_of("SELECT id FROM notes WHERE text_match(body, 'tokio') AND year = 2024");
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::Intersect(arms) = optimised else {
         panic!("expected Intersect");
     };
@@ -155,7 +159,9 @@ fn or_through_optimiser_remains_union() {
         "SELECT id FROM notes \
          WHERE text_match(title, 'rust') OR text_match(body, 'flask')",
     );
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::Union(arms) = optimised else {
         panic!("expected Union");
     };
@@ -167,7 +173,9 @@ fn or_through_optimiser_remains_union() {
 fn pure_filter_uses_catalog_btree_in_final_optimizer_pass() {
     let eng = engine_with_corpus();
     let expr = where_of("SELECT id FROM notes WHERE year = 2024");
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::IndexScan {
         index_name, field, ..
     } = optimised
@@ -208,7 +216,9 @@ fn unsupported_shape_returns_none() {
     // Filter (no f(col_a, col_b) predicate); the plan therefore keeps
     // this predicate in the relational scalar compute path.
     let expr = where_of("SELECT id FROM notes WHERE id + 1 = 2");
-    assert!(optimised_tree_for(&eng, "notes", &expr, &[]).is_none());
+    assert!(optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimizer result")
+        .is_none());
 }
 
 #[test]
@@ -221,7 +231,9 @@ fn fuse_log_odds_lowers_to_logoddsfusion_and_reorder_keeps_signals() {
         "SELECT id FROM notes \
          WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'), 0.5)",
     );
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
         panic!("expected LogOddsFusion");
     };
@@ -239,7 +251,9 @@ fn fuse_log_odds_lowers_with_default_alpha() {
         "SELECT id FROM notes \
          WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'))",
     );
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
         panic!("expected LogOddsFusion");
     };
@@ -255,7 +269,9 @@ fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
          WHERE fuse_log_odds(bayesian_match(title, 'rust'), bayesian_match(body, 'tokio')) \
            AND year >= 2024",
     );
-    let optimised = optimised_tree_for(&eng, "notes", &expr, &[]).expect("optimise");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
     let OperatorTree::Intersect(parts) = optimised else {
         panic!("expected Intersect");
     };
@@ -403,6 +419,50 @@ fn attention_fusion_lowers_with_calibrated_signals() {
 }
 
 #[test]
+fn attention_options_are_encoded_in_the_shared_ir() {
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_attention( \
+             bayesian_match(title, 'rust'), \
+             bayesian_match(body, 'async'), \
+             normalized => true, alpha => 0.7, base_rate => 0.02 \
+         )",
+    );
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    let OperatorTree::AttentionFusion {
+        signals, attention, ..
+    } = lowered
+    else {
+        panic!("expected AttentionFusion");
+    };
+    assert_eq!(signals.len(), 2);
+    assert_eq!(attention.head_count(), 1);
+    assert!(attention.normalize());
+    assert!((attention.alpha() - 0.7).abs() < f64::EPSILON);
+    assert_eq!(attention.base_rate(), Some(0.02));
+}
+
+#[test]
+fn multihead_options_build_a_multihead_shared_ir_fuser() {
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_multihead( \
+             bayesian_match(title, 'rust'), \
+             bayesian_match(body, 'async'), \
+             n_heads => 3, normalized => true, alpha => 0.4 \
+         )",
+    );
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    let OperatorTree::AttentionFusion { attention, .. } = lowered else {
+        panic!("expected AttentionFusion");
+    };
+    assert_eq!(attention.head_count(), 3);
+    assert!(attention.normalize());
+    assert!((attention.alpha() - 0.4).abs() < f64::EPSILON);
+    assert_eq!(attention.base_rate(), None);
+}
+
+#[test]
 fn learned_fusion_lowers_with_calibrated_signals() {
     let expr = where_of(
         "SELECT id FROM notes \
@@ -418,6 +478,34 @@ fn learned_fusion_lowers_with_calibrated_signals() {
     assert_eq!(signals.len(), 2);
     assert!(matches!(signals[0], OperatorTree::Term { .. }));
     assert!(matches!(signals[1], OperatorTree::CosineProbability(_)));
+}
+
+#[test]
+fn fuse_learned_named_alpha_is_encoded_in_the_shared_ir() {
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE fuse_learned( \
+             bayesian_match(title, 'rust'), \
+             bayesian_match(body, 'async'), \
+             alpha => 0.7 \
+         )",
+    );
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    let OperatorTree::LearnedFusion { signals, learned } = lowered else {
+        panic!("expected LearnedFusion");
+    };
+    assert_eq!(signals.len(), 2);
+
+    let probabilities = [0.8, 0.6];
+    let actual = learned.fuse(&probabilities).expect("fuses");
+    let expected = uqa_fusion::LearnedFusion::new(2, 0.7)
+        .fuse(&probabilities)
+        .expect("reference fuses");
+    let ignored_alpha = uqa_fusion::LearnedFusion::new(2, 0.5)
+        .fuse(&probabilities)
+        .expect("default reference fuses");
+    assert!((actual - expected).abs() < 1e-12);
+    assert!((actual - ignored_alpha).abs() > 1e-6);
 }
 
 #[test]

@@ -82,6 +82,44 @@ fn command_string_unaliased_literal_displays_value() {
 }
 
 #[test]
+fn command_string_returns_failure_when_sql_execution_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&["-c", "SELECT * FROM missing_table"], "", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(stdout(&output).contains("ERROR:"), "{}", stdout(&output));
+}
+
+#[test]
+fn piped_sql_returns_failure_when_execution_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&[], "SELECT * FROM missing_table;\n", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(stdout(&output).contains("ERROR:"), "{}", stdout(&output));
+}
+
+#[test]
+fn piped_unterminated_sql_is_not_silently_discarded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&[], "SELECT 1\n", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(
+        stdout(&output).contains("unterminated SQL statement"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn piped_meta_command_failure_sets_a_failure_exit_status() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let output = run_usql(&[], "\\open\n\\definitely-not-a-command\n", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    let out = stdout(&output);
+    assert!(out.contains("ERROR: usage: \\open <path>"), "{out}");
+    assert!(out.contains("ERROR: unknown command"), "{out}");
+}
+
+#[test]
 fn db_argument_persists_between_invocations() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("uqa.db");
@@ -120,6 +158,21 @@ fn script_file_executes_and_exits_when_stdin_is_not_terminal() {
     assert!(out.contains('y'), "{out}");
     assert!(out.contains('2'), "{out}");
     assert!(!out.contains("UQA interactive SQL shell"), "{out}");
+}
+
+#[test]
+fn script_file_returns_failure_when_sql_execution_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("broken.sql");
+    std::fs::write(&script, "SELECT * FROM missing_table;").expect("write script");
+    let script_arg = script.to_string_lossy().into_owned();
+    let output = run_usql(&[&script_arg], "", dir.path());
+    assert!(!output.status.success(), "stdout: {}", stdout(&output));
+    assert!(
+        stderr(&output).contains("missing_table"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]

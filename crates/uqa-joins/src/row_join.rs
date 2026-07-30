@@ -15,8 +15,9 @@
 //! prefixed columns that the projection layer consumes verbatim.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
-use uqa_core::Value;
+use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,51 +31,142 @@ pub enum JoinKind {
     Cross,
 }
 
-/// A canonical, hashable representation of a join-key value. Keeps the
-/// hash join's lookup map fast and avoids re-hashing the underlying
-/// `Value` for every probe.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum JoinKey {
-    Bool(bool),
-    Int(i64),
-    Float(u64),
-    Str(String),
-    Bytes(Vec<u8>),
-    Other(String),
-    Composite(Vec<JoinKey>),
-}
+/// A hashable join key whose equality is exactly [`Value::cmp`].
+///
+/// In particular, SQL numeric keys compare by value across bool, integer,
+/// float, and decimal representations. Keeping the original `Value` avoids
+/// making hash joins disagree with sort-merge joins for pairs such as
+/// `1`, `1.0`, and `DECIMAL '1.00'`.
+#[derive(Debug, Clone)]
+pub struct JoinKey(Value);
 
 impl JoinKey {
     pub fn new(value: &Value) -> Self {
-        match value {
-            Value::Bool(value) => Self::Bool(*value),
-            Value::Int(value) => Self::Int(*value),
-            Value::Float(value) => Self::Float(normalized_float_bits(*value)),
-            Value::Str(value) => Self::Str(value.clone()),
-            Value::Bytes(value) => Self::Bytes(value.clone()),
-            other => Self::Other(encode_fallback(other)),
-        }
+        Self(value.clone())
     }
 
     /// Composite key for multi-column equijoins.
     pub fn composite(values: &[&Value]) -> Self {
-        Self::Composite(values.iter().map(|value| Self::new(value)).collect())
+        Self(Value::List(
+            values.iter().map(|value| (*value).clone()).collect(),
+        ))
     }
 }
 
-fn normalized_float_bits(value: f64) -> u64 {
-    if value == 0.0 {
-        0.0f64.to_bits()
+impl PartialEq for JoinKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for JoinKey {}
+
+impl PartialOrd for JoinKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for JoinKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl Hash for JoinKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_value(&self.0, state);
+    }
+}
+
+fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
+    match value {
+        Value::Null => 0_u8.hash(state),
+        Value::Bool(value) => hash_decimal_numeric(&DecimalValue::from_bool(*value), state),
+        Value::Int(value) => hash_decimal_numeric(&DecimalValue::from_i64(*value), state),
+        Value::Float(value) => hash_float_numeric(*value, state),
+        Value::Decimal(value) => hash_decimal_numeric(value, state),
+        Value::Str(value) => {
+            2_u8.hash(state);
+            value.hash(state);
+        }
+        Value::Bytes(value) => {
+            3_u8.hash(state);
+            value.hash(state);
+        }
+        Value::Temporal(value) => hash_temporal(value, state),
+        Value::List(values) => {
+            5_u8.hash(state);
+            values.len().hash(state);
+            for value in values {
+                hash_value(value, state);
+            }
+        }
+        Value::Map(values) => {
+            6_u8.hash(state);
+            values.len().hash(state);
+            for (key, value) in values {
+                key.hash(state);
+                hash_value(value, state);
+            }
+        }
+    }
+}
+
+fn hash_decimal_numeric<H: Hasher>(value: &DecimalValue, state: &mut H) {
+    1_u8.hash(state);
+    value.to_canonical_string().hash(state);
+}
+
+fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
+    if value.is_nan() {
+        7_u8.hash(state);
+    } else if value == f64::INFINITY {
+        8_u8.hash(state);
+    } else if value == f64::NEG_INFINITY {
+        9_u8.hash(state);
+    } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
+        hash_decimal_numeric(&decimal, state);
     } else {
-        value.to_bits()
+        // Finite floats outside rust_decimal's exact comparison domain (or
+        // non-zero values below its scale) only compare equal to the same
+        // f64 value. Normalize signed zero for completeness.
+        10_u8.hash(state);
+        if value == 0.0 {
+            0.0_f64.to_bits().hash(state);
+        } else {
+            value.to_bits().hash(state);
+        }
     }
 }
 
-fn encode_fallback(v: &Value) -> String {
-    match v {
-        Value::Null => "\x00".into(),
-        Value::Temporal(value) => format!("t:{}", value.to_sql_string()),
-        other => format!("o:{other:?}"),
+fn hash_temporal<H: Hasher>(value: &TemporalValue, state: &mut H) {
+    const MICROS_PER_DAY: i128 = 86_400_000_000;
+    4_u8.hash(state);
+    match value {
+        TemporalValue::Date { days } => (0_u8, i128::from(*days)).hash(state),
+        TemporalValue::Time { micros } => {
+            (1_u8, i128::from(*micros).rem_euclid(MICROS_PER_DAY)).hash(state);
+        }
+        TemporalValue::TimeTz {
+            micros,
+            offset_minutes,
+        } => {
+            let normalized = (i128::from(*micros) - i128::from(*offset_minutes) * 60_000_000)
+                .rem_euclid(MICROS_PER_DAY);
+            (2_u8, normalized).hash(state);
+        }
+        TemporalValue::Timestamp { micros } => (3_u8, i128::from(*micros)).hash(state),
+        TemporalValue::TimestampTz { micros } => (4_u8, i128::from(*micros)).hash(state),
+        TemporalValue::Interval {
+            months,
+            days,
+            micros,
+        } => {
+            let flattened = (i128::from(*months) * 30 + i128::from(*days)) * MICROS_PER_DAY
+                + i128::from(*micros);
+            (5_u8, flattened).hash(state);
+        }
     }
 }
 
@@ -395,19 +487,7 @@ pub fn cross_join(left: &[ResultRow], right: &[ResultRow]) -> Vec<ResultRow> {
 // -------------------------------------------------------------------------
 
 fn key_cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
-    use std::cmp::Ordering::*;
-    match (a, b) {
-        (Value::Null, Value::Null) => Equal,
-        (Value::Null, _) => Less,
-        (_, Value::Null) => Greater,
-        (Value::Int(x), Value::Int(y)) => x.cmp(y),
-        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Equal),
-        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Equal),
-        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Equal),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        _ => Equal,
-    }
+    a.cmp(b)
 }
 
 /// Sort-merge inner join. The caller supplies the column projections
@@ -420,26 +500,33 @@ pub fn sort_merge_inner_join(
     left_col: &str,
     right_col: &str,
 ) -> Vec<ResultRow> {
-    let mut left_sorted: Vec<&ResultRow> = left.iter().collect();
-    let mut right_sorted: Vec<&ResultRow> = right.iter().collect();
-    left_sorted.sort_by(|a, b| {
-        key_cmp(
-            a.get(left_col).unwrap_or(&Value::Null),
-            b.get(left_col).unwrap_or(&Value::Null),
-        )
-    });
-    right_sorted.sort_by(|a, b| {
-        key_cmp(
-            a.get(right_col).unwrap_or(&Value::Null),
-            b.get(right_col).unwrap_or(&Value::Null),
-        )
-    });
+    // SQL NULL never equals another value, including NULL. Missing join
+    // columns have the same non-match semantics instead of being synthesized
+    // into a shared `Value::Null` key.
+    let mut left_sorted: Vec<(&Value, &ResultRow)> = left
+        .iter()
+        .filter_map(|row| {
+            row.get(left_col)
+                .filter(|value| **value != Value::Null)
+                .map(|key| (key, row))
+        })
+        .collect();
+    let mut right_sorted: Vec<(&Value, &ResultRow)> = right
+        .iter()
+        .filter_map(|row| {
+            row.get(right_col)
+                .filter(|value| **value != Value::Null)
+                .map(|key| (key, row))
+        })
+        .collect();
+    left_sorted.sort_by(|(a, _), (b, _)| key_cmp(a, b));
+    right_sorted.sort_by(|(a, _), (b, _)| key_cmp(a, b));
 
     let mut out: Vec<ResultRow> = Vec::new();
     let (mut i, mut j) = (0usize, 0usize);
     while i < left_sorted.len() && j < right_sorted.len() {
-        let lk = left_sorted[i].get(left_col).unwrap_or(&Value::Null);
-        let rk = right_sorted[j].get(right_col).unwrap_or(&Value::Null);
+        let lk = left_sorted[i].0;
+        let rk = right_sorted[j].0;
         match key_cmp(lk, rk) {
             std::cmp::Ordering::Less => i += 1,
             std::cmp::Ordering::Greater => j += 1,
@@ -447,22 +534,18 @@ pub fn sort_merge_inner_join(
                 let key = lk.clone();
                 let mut li = i;
                 while li < left_sorted.len()
-                    && key_cmp(left_sorted[li].get(left_col).unwrap_or(&Value::Null), &key)
-                        == std::cmp::Ordering::Equal
+                    && key_cmp(left_sorted[li].0, &key) == std::cmp::Ordering::Equal
                 {
                     li += 1;
                 }
                 let mut rj = j;
                 while rj < right_sorted.len()
-                    && key_cmp(
-                        right_sorted[rj].get(right_col).unwrap_or(&Value::Null),
-                        &key,
-                    ) == std::cmp::Ordering::Equal
+                    && key_cmp(right_sorted[rj].0, &key) == std::cmp::Ordering::Equal
                 {
                     rj += 1;
                 }
-                for l in &left_sorted[i..li] {
-                    for r in &right_sorted[j..rj] {
+                for (_, l) in &left_sorted[i..li] {
+                    for (_, r) in &right_sorted[j..rj] {
                         out.push(merge(l, r));
                     }
                 }
@@ -636,6 +719,67 @@ mod tests {
         ];
         let out = sort_merge_inner_join(&l, &r, "k", "k");
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn sort_merge_never_matches_null_or_missing_keys() {
+        let left = vec![
+            row([("k", Value::Null), ("left", Value::Str("null".into()))]),
+            row([
+                ("other", Value::Int(1)),
+                ("left", Value::Str("missing".into())),
+            ]),
+            row([("k", Value::Int(1)), ("left", Value::Str("match".into()))]),
+        ];
+        let right = vec![
+            row([("k", Value::Null), ("right", Value::Str("null".into()))]),
+            row([
+                ("other", Value::Int(1)),
+                ("right", Value::Str("missing".into())),
+            ]),
+            row([
+                ("k", Value::Float(1.0)),
+                ("right", Value::Str("match".into())),
+            ]),
+        ];
+        let out = sort_merge_inner_join(&left, &right, "k", "k");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["left"], Value::Str("match".into()));
+        assert_eq!(out[0]["right"], Value::Str("match".into()));
+    }
+
+    #[test]
+    fn hash_join_key_matches_value_cross_numeric_equality() {
+        let decimal_one = DecimalValue::parse("1.00").unwrap();
+        let equivalent = [
+            Value::Bool(true),
+            Value::Int(1),
+            Value::Float(1.0),
+            Value::Decimal(decimal_one),
+        ];
+        let mut index = HashMap::new();
+        index.insert(JoinKey::new(&equivalent[0]), "found");
+        for value in &equivalent {
+            assert_eq!(equivalent[0].cmp(value), std::cmp::Ordering::Equal);
+            assert_eq!(
+                JoinKey::new(&equivalent[0]).cmp(&JoinKey::new(value)),
+                std::cmp::Ordering::Equal
+            );
+            assert_eq!(index.get(&JoinKey::new(value)), Some(&"found"));
+        }
+
+        let left = vec![row([("k", Value::Int(1))])];
+        let right = vec![row([("k", Value::Float(1.0))])];
+        assert_eq!(
+            hash_inner_join(
+                &left,
+                &right,
+                |row| row.get("k").map(JoinKey::new),
+                |row| row.get("k").map(JoinKey::new),
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]

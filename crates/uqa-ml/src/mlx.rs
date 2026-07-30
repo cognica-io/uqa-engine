@@ -17,7 +17,7 @@ use std::slice;
 use uqa_core::DocId;
 use uqa_operators::ExecutionContext;
 
-use crate::backend::{CPUBackend, MLBackend, MLError, MLResult};
+use crate::backend::{try_vec_with_capacity, CPUBackend, MLBackend, MLError, MLResult};
 use crate::model::{predict_cpu, DeepLayerSpec, DeepModel, PredictResult};
 use crate::training::{deep_learn, DeepLearnOutput, LearnOptions, TrainingSet};
 
@@ -30,18 +30,33 @@ pub struct MLXBackend {
 impl MLXBackend {
     pub fn preferred() -> MLResult<Self> {
         let device = RawDevice::preferred()?;
-        let stream = RawStream::new(&device);
+        let stream = RawStream::new(&device)?;
         Ok(Self { device, stream })
     }
 
-    pub fn cpu() -> Self {
-        let device = RawDevice::cpu();
-        let stream = RawStream::new(&device);
-        Self { device, stream }
+    pub fn cpu() -> MLResult<Self> {
+        let device = RawDevice::cpu()?;
+        let stream = RawStream::new(&device)?;
+        Ok(Self { device, stream })
     }
 
     pub fn device_kind(&self) -> MLResult<&'static str> {
         self.device.kind()
+    }
+
+    /// Release MLX stream and device handles while their C error codes can
+    /// still be reported to the caller. `Drop` remains a best-effort fallback.
+    pub fn close(mut self) -> MLResult<()> {
+        let stream_result = self.stream.close();
+        let device_result = self.device.close();
+        match (stream_result, device_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(stream), Ok(())) => Err(stream),
+            (Ok(()), Err(device)) => Err(device),
+            (Err(stream), Err(device)) => Err(MLError::Backend(format!(
+                "{stream}; additionally failed to release MLX device: {device}"
+            ))),
+        }
     }
 }
 
@@ -51,7 +66,7 @@ impl MLBackend for MLXBackend {
     }
 
     fn predict(&self, model: &DeepModel, ctx: &ExecutionContext) -> MLResult<PredictResult> {
-        Ok(predict_cpu(model, ctx))
+        predict_cpu(model, ctx)
     }
 
     fn predict_features(
@@ -83,7 +98,11 @@ impl MLXBackend {
         if examples.is_empty() {
             return Ok((Vec::new(), BTreeMap::default()));
         }
-        let mut input = Vec::with_capacity(examples.len() * plan.input_channels);
+        let input_capacity = examples
+            .len()
+            .checked_mul(plan.input_channels)
+            .ok_or_else(|| MLError::InvalidModel("MLX input size overflows usize".into()))?;
+        let mut input = try_vec_with_capacity(input_capacity, "MLX input matrix")?;
         for (doc_id, features) in examples {
             if features.len() != plan.input_channels {
                 return Err(MLError::InvalidModel(format!(
@@ -92,35 +111,79 @@ impl MLXBackend {
                     plan.input_channels
                 )));
             }
-            input.extend(features.iter().map(|value| *value as f32));
-        }
-
-        let mut weights = Vec::with_capacity(plan.input_channels * plan.output_channels);
-        for input_idx in 0..plan.input_channels {
-            for output_idx in 0..plan.output_channels {
-                weights.push(plan.weights[output_idx * plan.input_channels + input_idx] as f32);
+            for (index, value) in features.iter().enumerate() {
+                input.push(f32_from_f64(
+                    *value,
+                    &format!("feature {index} for doc {doc_id}"),
+                )?);
             }
         }
-        let bias: Vec<f32> = plan.bias.iter().map(|value| *value as f32).collect();
 
-        let input = RawArray::from_f32(&[examples.len(), plan.input_channels], &input)?;
-        let weights = RawArray::from_f32(&[plan.input_channels, plan.output_channels], &weights)?;
-        let bias = RawArray::from_f32(&[plan.output_channels], &bias)?;
+        let weight_count = plan
+            .input_channels
+            .checked_mul(plan.output_channels)
+            .ok_or_else(|| MLError::InvalidModel("MLX weight count overflows usize".into()))?;
+        let mut weights = try_vec_with_capacity(weight_count, "MLX weight matrix")?;
+        for input_idx in 0..plan.input_channels {
+            for output_idx in 0..plan.output_channels {
+                let index = output_idx
+                    .checked_mul(plan.input_channels)
+                    .and_then(|index| index.checked_add(input_idx))
+                    .ok_or_else(|| {
+                        MLError::InvalidModel("MLX weight index overflows usize".into())
+                    })?;
+                weights.push(f32_from_f64(plan.weights[index], "dense weight")?);
+            }
+        }
+        let mut bias = try_vec_with_capacity(plan.bias.len(), "MLX dense bias")?;
+        for value in plan.bias {
+            bias.push(f32_from_f64(*value, "dense bias")?);
+        }
 
-        let logits = input
-            .matmul(&weights, &self.stream)?
-            .add(&bias, &self.stream)?;
-        let probs = logits.softmax_axis(1, &self.stream)?;
-        let flat = probs.to_f32_vec(&self.stream)?;
+        let mut input = RawArray::from_f32(&[examples.len(), plan.input_channels], &input)?;
+        let mut weights =
+            RawArray::from_f32(&[plan.input_channels, plan.output_channels], &weights)?;
+        let mut bias = RawArray::from_f32(&[plan.output_channels], &bias)?;
 
-        let mut scores = Vec::with_capacity(examples.len());
+        let mut matrix_product = input.matmul(&weights, &self.stream)?;
+        let mut logits = matrix_product.add(&bias, &self.stream)?;
+        let mut probs = logits.softmax_axis(1, &self.stream)?;
+        let flat_result = probs.to_f32_vec(&self.stream);
+        let cleanup_results = [
+            probs.close(),
+            logits.close(),
+            matrix_product.close(),
+            bias.close(),
+            weights.close(),
+            input.close(),
+        ];
+        let flat = flat_result?;
+        for cleanup in cleanup_results {
+            cleanup?;
+        }
+        let expected_output = examples
+            .len()
+            .checked_mul(plan.output_channels)
+            .ok_or_else(|| MLError::Backend("MLX output size overflows usize".into()))?;
+        if flat.len() != expected_output {
+            return Err(MLError::Backend(format!(
+                "MLX returned {} probabilities, expected {expected_output}",
+                flat.len()
+            )));
+        }
+
+        let mut scores = try_vec_with_capacity(examples.len(), "MLX prediction scores")?;
         let mut class_probs = std::collections::BTreeMap::new();
         for (row, (doc_id, _)) in examples.iter().enumerate() {
-            let offset = row * plan.output_channels;
-            let row_probs: Vec<f64> = flat[offset..offset + plan.output_channels]
-                .iter()
-                .map(|value| f64::from(*value))
-                .collect();
+            let offset = row
+                .checked_mul(plan.output_channels)
+                .ok_or_else(|| MLError::Backend("MLX output offset overflows usize".into()))?;
+            let end = offset
+                .checked_add(plan.output_channels)
+                .ok_or_else(|| MLError::Backend("MLX output range overflows usize".into()))?;
+            let mut row_probs =
+                try_vec_with_capacity(plan.output_channels, "MLX class probabilities")?;
+            row_probs.extend(flat[offset..end].iter().map(|value| f64::from(*value)));
             let score = row_probs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             scores.push((*doc_id, score));
             class_probs.insert(*doc_id, row_probs);
@@ -150,7 +213,9 @@ impl<'a> DenseSoftmaxPlan<'a> {
             return None;
         };
         if *dimensions != *input_channels
-            || weights.len() != output_channels * input_channels
+            || output_channels
+                .checked_mul(*input_channels)
+                .is_none_or(|expected| weights.len() != expected)
             || bias.len() != *output_channels
         {
             return None;
@@ -167,23 +232,45 @@ impl<'a> DenseSoftmaxPlan<'a> {
 #[derive(Debug)]
 struct RawDevice {
     raw: raw::mlx_device,
+    released: bool,
 }
 
 impl RawDevice {
     fn preferred() -> MLResult<Self> {
-        let gpu = Self {
-            raw: unsafe { raw::mlx_device_new_type(raw::MLX_GPU, 0) },
-        };
-        if gpu.is_available()? {
-            return Ok(gpu);
+        let raw = unsafe { raw::mlx_device_new_type(raw::MLX_GPU, 0) };
+        if raw.ctx.is_null() {
+            return Self::cpu();
         }
-        drop(gpu);
-        Ok(Self::cpu())
+        let mut gpu = Self {
+            raw,
+            released: false,
+        };
+        match gpu.is_available() {
+            Ok(true) => return Ok(gpu),
+            Ok(false) => gpu.close()?,
+            Err(error) => {
+                return match gpu.close() {
+                    Ok(()) => Err(error),
+                    Err(cleanup) => Err(MLError::Backend(format!(
+                        "{error}; additionally failed to release unavailable MLX GPU: {cleanup}"
+                    ))),
+                };
+            }
+        }
+        Self::cpu()
     }
 
-    fn cpu() -> Self {
-        Self {
+    fn cpu() -> MLResult<Self> {
+        let device = Self {
             raw: unsafe { raw::mlx_device_new_type(raw::MLX_CPU, 0) },
+            released: false,
+        };
+        if device.raw.ctx.is_null() {
+            Err(MLError::Backend(
+                "mlx_device_new_type returned a null CPU device".into(),
+            ))
+        } else {
+            Ok(device)
         }
     }
 
@@ -212,12 +299,24 @@ impl RawDevice {
             _ => "Unknown",
         })
     }
+
+    fn close(&mut self) -> MLResult<()> {
+        if self.released {
+            return Ok(());
+        }
+        let code = unsafe { raw::mlx_device_free(self.raw) };
+        self.released = true;
+        check(code, "mlx_device_free")
+    }
 }
 
 impl Drop for RawDevice {
     fn drop(&mut self) {
-        unsafe {
-            let _ = raw::mlx_device_free(self.raw);
+        if !self.released {
+            unsafe {
+                raw::mlx_device_free(self.raw);
+            }
+            self.released = true;
         }
     }
 }
@@ -225,24 +324,45 @@ impl Drop for RawDevice {
 #[derive(Debug)]
 struct RawStream {
     raw: raw::mlx_stream,
+    released: bool,
 }
 
 impl RawStream {
-    fn new(device: &RawDevice) -> Self {
-        Self {
+    fn new(device: &RawDevice) -> MLResult<Self> {
+        let stream = Self {
             raw: unsafe { raw::mlx_stream_new_device(device.raw) },
+            released: false,
+        };
+        if stream.raw.ctx.is_null() {
+            Err(MLError::Backend(
+                "mlx_stream_new_device returned a null stream".into(),
+            ))
+        } else {
+            Ok(stream)
         }
     }
 
     fn synchronize(&self) -> MLResult<()> {
         unsafe { check(raw::mlx_synchronize(self.raw), "mlx_synchronize") }
     }
+
+    fn close(&mut self) -> MLResult<()> {
+        if self.released {
+            return Ok(());
+        }
+        let code = unsafe { raw::mlx_stream_free(self.raw) };
+        self.released = true;
+        check(code, "mlx_stream_free")
+    }
 }
 
 impl Drop for RawStream {
     fn drop(&mut self) {
-        unsafe {
-            let _ = raw::mlx_stream_free(self.raw);
+        if !self.released {
+            unsafe {
+                raw::mlx_stream_free(self.raw);
+            }
+            self.released = true;
         }
     }
 }
@@ -250,6 +370,7 @@ impl Drop for RawStream {
 #[derive(Debug)]
 struct RawArray {
     raw: raw::mlx_array,
+    released: bool,
 }
 
 impl RawArray {
@@ -260,19 +381,30 @@ impl RawArray {
     }
 
     fn from_f32(shape: &[usize], values: &[f32]) -> MLResult<Self> {
-        let expected: usize = shape.iter().product();
+        let expected = shape.iter().try_fold(1usize, |product, dimension| {
+            product
+                .checked_mul(*dimension)
+                .ok_or_else(|| MLError::Backend("MLX array shape overflows usize".into()))
+        })?;
         if expected != values.len() {
             return Err(MLError::Backend(format!(
                 "MLX array shape {shape:?} does not match {} values",
                 values.len()
             )));
         }
-        let shape: Vec<c_int> = shape.iter().map(|dim| *dim as c_int).collect();
+        let mut converted_shape = try_vec_with_capacity(shape.len(), "MLX array shape")?;
+        for dimension in shape {
+            converted_shape.push(c_int::try_from(*dimension).map_err(|_| {
+                MLError::Backend(format!("MLX array dimension {dimension} exceeds c_int"))
+            })?);
+        }
+        let rank = c_int::try_from(converted_shape.len())
+            .map_err(|_| MLError::Backend("MLX array rank exceeds c_int".into()))?;
         let raw = unsafe {
             raw::mlx_array_new_data(
                 values.as_ptr().cast(),
-                shape.as_ptr(),
-                shape.len() as c_int,
+                converted_shape.as_ptr(),
+                rank,
                 raw::MLX_FLOAT32,
             )
         };
@@ -281,40 +413,31 @@ impl RawArray {
                 "mlx_array_new_data returned a null handle".into(),
             ));
         }
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            released: false,
+        })
     }
 
     fn matmul(&self, rhs: &Self, stream: &RawStream) -> MLResult<Self> {
         let mut out = Self::empty();
-        unsafe {
-            check(
-                raw::mlx_matmul(ptr::addr_of_mut!(out), self.raw, rhs.raw, stream.raw),
-                "mlx_matmul",
-            )?;
-        }
-        Ok(Self { raw: out })
+        let code =
+            unsafe { raw::mlx_matmul(ptr::addr_of_mut!(out), self.raw, rhs.raw, stream.raw) };
+        checked_array_result(out, code, "mlx_matmul")
     }
 
     fn add(&self, rhs: &Self, stream: &RawStream) -> MLResult<Self> {
         let mut out = Self::empty();
-        unsafe {
-            check(
-                raw::mlx_add(ptr::addr_of_mut!(out), self.raw, rhs.raw, stream.raw),
-                "mlx_add",
-            )?;
-        }
-        Ok(Self { raw: out })
+        let code = unsafe { raw::mlx_add(ptr::addr_of_mut!(out), self.raw, rhs.raw, stream.raw) };
+        checked_array_result(out, code, "mlx_add")
     }
 
     fn softmax_axis(&self, axis: i32, stream: &RawStream) -> MLResult<Self> {
         let mut out = Self::empty();
-        unsafe {
-            check(
-                raw::mlx_softmax_axis(ptr::addr_of_mut!(out), self.raw, axis, true, stream.raw),
-                "mlx_softmax_axis",
-            )?;
-        }
-        Ok(Self { raw: out })
+        let code = unsafe {
+            raw::mlx_softmax_axis(ptr::addr_of_mut!(out), self.raw, axis, true, stream.raw)
+        };
+        checked_array_result(out, code, "mlx_softmax_axis")
     }
 
     fn to_f32_vec(&self, stream: &RawStream) -> MLResult<Vec<f32>> {
@@ -328,15 +451,29 @@ impl RawArray {
                     "mlx_array_data_float32 returned null".into(),
                 ));
             }
-            Ok(slice::from_raw_parts(ptr, count).to_vec())
+            let mut values = try_vec_with_capacity(count, "MLX array output")?;
+            values.extend_from_slice(slice::from_raw_parts(ptr, count));
+            Ok(values)
         }
+    }
+
+    fn close(&mut self) -> MLResult<()> {
+        if self.released {
+            return Ok(());
+        }
+        let code = unsafe { raw::mlx_array_free(self.raw) };
+        self.released = true;
+        check(code, "mlx_array_free")
     }
 }
 
 impl Drop for RawArray {
     fn drop(&mut self) {
-        unsafe {
-            let _ = raw::mlx_array_free(self.raw);
+        if !self.released {
+            unsafe {
+                raw::mlx_array_free(self.raw);
+            }
+            self.released = true;
         }
     }
 }
@@ -349,6 +486,49 @@ fn check(code: c_int, context: &str) -> MLResult<()> {
             "{context} failed with MLX error code {code}"
         )))
     }
+}
+
+fn checked_array_result(
+    raw_array: raw::mlx_array,
+    code: c_int,
+    context: &str,
+) -> MLResult<RawArray> {
+    if code != 0 {
+        let cleanup_code = if raw_array.ctx.is_null() {
+            0
+        } else {
+            unsafe { raw::mlx_array_free(raw_array) }
+        };
+        let cleanup = if cleanup_code == 0 {
+            String::new()
+        } else {
+            format!("; mlx_array_free also failed with code {cleanup_code}")
+        };
+        return Err(MLError::Backend(format!(
+            "{context} failed with MLX error code {code}{cleanup}"
+        )));
+    }
+    if raw_array.ctx.is_null() {
+        return Err(MLError::Backend(format!("{context} returned a null array")));
+    }
+    Ok(RawArray {
+        raw: raw_array,
+        released: false,
+    })
+}
+
+fn f32_from_f64(value: f64, context: &str) -> MLResult<f32> {
+    if !value.is_finite() {
+        return Err(MLError::InvalidModel(format!(
+            "{context} must be finite, got {value}"
+        )));
+    }
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(MLError::InvalidModel(format!(
+            "{context} is outside the f32 range: {value}"
+        )));
+    }
+    Ok(value as f32)
 }
 
 #[allow(non_camel_case_types)]
@@ -457,6 +637,7 @@ mod tests {
         assert!(scores.iter().all(|(_, score)| *score > 0.99), "{scores:?}");
         assert!(probs.get(&7).unwrap()[0] > 0.99);
         assert!(probs.get(&9).unwrap()[1] > 0.99);
+        backend.close().unwrap();
     }
 
     #[test]
@@ -498,5 +679,6 @@ mod tests {
         assert!(scores.iter().all(|(_, score)| *score > 0.99), "{scores:?}");
         assert!(probs.get(&7).unwrap()[0] > 0.99);
         assert!(probs.get(&9).unwrap()[1] > 0.99);
+        backend.close().unwrap();
     }
 }

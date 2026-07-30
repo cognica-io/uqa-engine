@@ -64,7 +64,10 @@ pub(super) fn build_rows(
             ))
         }
     };
-    if !engine.has_graph(&graph) {
+    if !engine
+        .has_graph(&graph)
+        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+    {
         return Err(SQLError::Unsupported(format!(
             "graph \"{graph}\" does not exist"
         )));
@@ -155,7 +158,12 @@ fn coerce_int(value: Value, min: i64, max: i64) -> Result<Value, SQLError> {
         // PostgreSQL float -> int casts round half to even.
         Value::Float(f) => {
             let rounded = f.round_ties_even();
-            if !rounded.is_finite() || rounded < min as f64 || rounded > max as f64 {
+            let above_max = if max == i64::MAX {
+                rounded >= 9_223_372_036_854_775_808.0
+            } else {
+                rounded > max as f64
+            };
+            if !rounded.is_finite() || rounded < min as f64 || above_max {
                 return Err(SQLError::TypeMismatch("integer out of range".into()));
             }
             rounded as i64

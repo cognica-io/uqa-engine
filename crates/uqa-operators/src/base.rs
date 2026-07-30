@@ -11,7 +11,37 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{FieldName, IndexStats, PostingList};
-use uqa_storage::{DocumentStore, InvertedIndex, VectorIndex};
+use uqa_storage::{
+    DocumentStore, InvertedIndex, StorageBackendError, StorageBackendResult, VectorIndex,
+};
+
+pub type OperatorResult = StorageBackendResult<PostingList>;
+
+pub(crate) fn missing_backend(backend: &str, operation: &str) -> StorageBackendError {
+    StorageBackendError::Other(format!(
+        "{operation} requires an execution-context {backend} backend"
+    ))
+}
+
+pub(crate) fn require_finite_score(score: f64, operation: &str) -> StorageBackendResult<()> {
+    if score.is_finite() {
+        Ok(())
+    } else {
+        Err(StorageBackendError::Other(format!(
+            "{operation} received a non-finite score {score}"
+        )))
+    }
+}
+
+pub(crate) fn require_probability(probability: f64, operation: &str) -> StorageBackendResult<()> {
+    if probability.is_finite() && (0.0..=1.0).contains(&probability) {
+        Ok(())
+    } else {
+        Err(StorageBackendError::Other(format!(
+            "{operation} requires probability scores in [0, 1], got {probability}"
+        )))
+    }
+}
 
 /// Storage handles passed to every operator's `execute` call.
 ///
@@ -35,8 +65,17 @@ pub struct ExecutionContext {
 /// Minimal trait capturing the only graph operation deep-fusion's
 /// graph layers need: enumerate the neighbors of a vertex along a
 /// label in a chosen direction.
+///
+/// An empty `label` is the explicit wildcard and must enumerate neighbors
+/// across every edge label. This lets IR nodes represent an omitted edge
+/// label without inventing a separate sentinel at each engine boundary.
 pub trait GraphNeighborLookup: Send + Sync {
-    fn neighbors(&self, vertex: u64, label: &str, direction: Direction) -> Vec<u64>;
+    fn neighbors(
+        &self,
+        vertex: u64,
+        label: &str,
+        direction: Direction,
+    ) -> StorageBackendResult<Vec<u64>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +121,7 @@ impl ExecutionContext {
 }
 
 pub trait Operator: Send + Sync {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList;
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult;
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
         stats.total_docs as f64
@@ -103,12 +142,12 @@ impl ComposedOperator {
 }
 
 impl Operator for ComposedOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let mut result = PostingList::new();
         for op in &self.operands {
-            result = op.execute(ctx);
+            result = op.execute(ctx)?;
         }
-        result
+        Ok(result)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

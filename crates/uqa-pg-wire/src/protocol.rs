@@ -38,6 +38,17 @@ pub enum PgWireError {
     InvalidFormatCode(i16),
     #[error("invalid transaction status byte {0:?}")]
     InvalidTransactionStatus(u8),
+    #[error("embedded nul byte in {context}")]
+    EmbeddedNul { context: &'static str },
+    #[error("invalid SQLSTATE {code:?}; expected exactly five ASCII letters or digits")]
+    InvalidSqlState { code: String },
+    #[error(
+        "Bind parameter format count {format_count} must be zero, one, or match parameter count {parameter_count}"
+    )]
+    ParameterFormatCountMismatch {
+        format_count: usize,
+        parameter_count: usize,
+    },
     #[error("{context} count {count} exceeds representable PostgreSQL i16")]
     CountTooLarge { context: &'static str, count: usize },
     #[error("{context} length {length} exceeds representable PostgreSQL i32")]

@@ -64,46 +64,148 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         query: &QueryPlan,
         or_replace: bool,
     ) -> Result<SQLResult, SQLError> {
-        if self.engine.has_table(name) {
+        if self
+            .engine
+            .has_table(name)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
+        {
             return Err(SQLError::Unsupported(format!(
                 "CREATE VIEW: relation `{name}` already exists as a table"
             )));
         }
-        if !or_replace && self.engine.view_plan(name).is_some() {
+        if !or_replace && self.engine.view_plan(name)?.is_some() {
             return Err(SQLError::Unsupported(format!(
                 "CREATE VIEW: relation `{name}` already exists"
             )));
         }
-        self.engine.register_view_plan(name, query.clone());
+        self.engine.register_view_plan(name, query.clone())?;
         Ok(SQLResult::empty())
     }
 
-    fn execute_show_variable(&self, name: &str) -> SQLResult {
+    fn execute_show_variable(&self, name: &str) -> Result<SQLResult, SQLError> {
         let mut row = ResultRow::new();
         row.insert(
             name.to_string(),
-            Value::Str(self.engine.show_variable(name)),
+            Value::Str(self.engine.show_variable(name)?),
         );
-        SQLResult {
+        Ok(SQLResult {
             columns: vec![name.to_string()],
             rows: vec![row],
             affected_rows: 0,
+        })
+    }
+
+    fn execute_explain(
+        &self,
+        body: &UnifiedPlan,
+        analyze: bool,
+        verbose: bool,
+        format: Option<&str>,
+    ) -> Result<SQLResult, SQLError> {
+        let analysis = if analyze {
+            let started = std::time::Instant::now();
+            let result = UnifiedPlanExecutor::new(self.engine, self.params).execute(body)?;
+            let rows = u64::try_from(result.rows.len())
+                .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
+            Some(super::select::ExplainAnalysis {
+                elapsed: started.elapsed(),
+                rows,
+                affected_rows: result.affected_rows,
+            })
+        } else {
+            None
+        };
+        run_explain(body, verbose, format, analysis.as_ref())
+    }
+
+    fn execute_truncate(&self, tables: &[String], cascade: bool) -> Result<SQLResult, SQLError> {
+        let mut targets = std::collections::BTreeSet::new();
+        for requested in tables {
+            let table = self
+                .engine
+                .try_resolve_table_name(requested)
+                .map_err(|err| SQLError::Internal(format!("resolve table `{requested}`: {err}")))?
+                .ok_or_else(|| {
+                    SQLError::Unsupported(format!(
+                        "TRUNCATE TABLE: relation `{requested}` does not exist"
+                    ))
+                })?;
+            targets.insert(table);
         }
-    }
-
-    fn execute_explain(&self, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
-        run_explain(self.engine, body, self.params)
-    }
-
-    fn execute_truncate(&self, tables: &[String]) -> Result<SQLResult, SQLError> {
-        for table in tables {
-            if !self.engine.has_table(table) {
-                return Err(SQLError::Unsupported(format!(
-                    "TRUNCATE TABLE: relation `{table}` does not exist"
-                )));
+        if cascade {
+            let mut pending = targets.iter().cloned().collect::<Vec<_>>();
+            while let Some(table) = pending.pop() {
+                for (referrer, _) in self
+                    .engine
+                    .referrers_to(&table)
+                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+                {
+                    if targets.insert(referrer.clone()) {
+                        pending.push(referrer);
+                    }
+                }
             }
-            self.engine.truncate_table(table)?;
+        } else {
+            for table in &targets {
+                if let Some((referrer, _)) = self
+                    .engine
+                    .referrers_to(table)
+                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+                    .into_iter()
+                    .find(|(referrer, _)| !targets.contains(referrer))
+                {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "cannot truncate `{table}` because `{referrer}` references it; truncate both tables or use CASCADE"
+                    )));
+                }
+            }
         }
+        self.engine.transaction(|engine| {
+            // Referencing relations first makes the mutation order explicit
+            // even though the low-level clear does not evaluate row FKs.
+            fn visit(
+                engine: &Engine,
+                table: &str,
+                targets: &std::collections::BTreeSet<String>,
+                visiting: &mut std::collections::BTreeSet<String>,
+                visited: &mut std::collections::BTreeSet<String>,
+                ordered: &mut Vec<String>,
+            ) -> Result<(), SQLError> {
+                if visited.contains(table) || !visiting.insert(table.to_string()) {
+                    return Ok(());
+                }
+                for (referrer, _) in engine
+                    .referrers_to(table)
+                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+                {
+                    if targets.contains(&referrer) {
+                        visit(engine, &referrer, targets, visiting, visited, ordered)?;
+                    }
+                }
+                visiting.remove(table);
+                if visited.insert(table.to_string()) {
+                    ordered.push(table.to_string());
+                }
+                Ok(())
+            }
+            let mut ordered = Vec::with_capacity(targets.len());
+            let mut visiting = std::collections::BTreeSet::new();
+            let mut visited = std::collections::BTreeSet::new();
+            for table in &targets {
+                visit(
+                    engine,
+                    table,
+                    &targets,
+                    &mut visiting,
+                    &mut visited,
+                    &mut ordered,
+                )?;
+            }
+            for table in ordered {
+                engine.truncate_table(&table)?;
+            }
+            Ok(())
+        })?;
         Ok(SQLResult::empty())
     }
 
@@ -114,7 +216,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             )));
         }
         self.engine
-            .register_prepared_plan(name.to_string(), body.clone());
+            .register_prepared_plan(name.to_string(), body.clone())?;
         Ok(SQLResult::empty())
     }
 
@@ -219,24 +321,35 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 name,
                 if_not_exists,
             } => {
-                self.engine.register_schema(name, *if_not_exists);
+                self.engine
+                    .register_schema(name, *if_not_exists)
+                    .map_err(|err| {
+                        SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {err}"))
+                    })?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::SetVariable { name, value } => {
-                self.engine.set_variable(name, value);
+                self.engine.set_variable(name, value)?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::ShowVariable { name } => Ok(self.execute_show_variable(name)),
+            CommandPlan::ShowVariable { name } => self.execute_show_variable(name),
             CommandPlan::Discard { target } => {
-                self.engine.discard(*target);
+                self.engine.discard(*target)?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Explain { body, .. } => self.execute_explain(body),
+            CommandPlan::Explain {
+                analyze,
+                verbose,
+                format,
+                body,
+            } => self.execute_explain(body, *analyze, *verbose, format.as_deref()),
             CommandPlan::Analyze { table } => {
-                self.engine.run_analyze(table.as_deref());
+                self.engine
+                    .run_analyze(table.as_deref())
+                    .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Truncate { tables, .. } => self.execute_truncate(tables),
+            CommandPlan::Truncate { tables, cascade } => self.execute_truncate(tables, *cascade),
             CommandPlan::Transaction(statement) => {
                 self.engine.run_transaction_statement(statement.clone())?;
                 Ok(SQLResult::empty())

@@ -42,7 +42,7 @@ const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
 /// Compact temporal values used by SQL `DATE`, `TIME`, and `TIMESTAMP`
 /// columns. The payload is numeric so comparison and sorting do not
 /// depend on string collation.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "$uqa_type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TemporalValue {
     Date {
@@ -182,20 +182,24 @@ impl TemporalValue {
         }
     }
 
-    fn sort_key(&self) -> (u8, i64) {
+    fn sort_key(&self) -> (u8, i128) {
         match self {
-            Self::Date { days } => (0, i64::from(*days)),
-            Self::Time { micros } => (1, micros.rem_euclid(MICROS_PER_DAY)),
+            Self::Date { days } => (0, i128::from(*days)),
+            Self::Time { micros } => (
+                1,
+                i128::from(*micros).rem_euclid(i128::from(MICROS_PER_DAY)),
+            ),
             Self::TimeTz {
                 micros,
                 offset_minutes,
             } => (
                 2,
-                (micros - i64::from(*offset_minutes) * 60 * MICROS_PER_SECOND)
-                    .rem_euclid(MICROS_PER_DAY),
+                (i128::from(*micros)
+                    - i128::from(*offset_minutes) * 60 * i128::from(MICROS_PER_SECOND))
+                .rem_euclid(i128::from(MICROS_PER_DAY)),
             ),
-            Self::Timestamp { micros } => (3, *micros),
-            Self::TimestampTz { micros } => (4, *micros),
+            Self::Timestamp { micros } => (3, i128::from(*micros)),
+            Self::TimestampTz { micros } => (4, i128::from(*micros)),
             // PostgreSQL's interval_cmp flattens to microseconds with
             // 30-day months for ordering purposes.
             Self::Interval {
@@ -204,11 +208,20 @@ impl TemporalValue {
                 micros,
             } => (
                 5,
-                (i64::from(*months) * 30 + i64::from(*days)) * MICROS_PER_DAY + micros,
+                (i128::from(*months) * 30 + i128::from(*days)) * i128::from(MICROS_PER_DAY)
+                    + i128::from(*micros),
             ),
         }
     }
 }
+
+impl PartialEq for TemporalValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for TemporalValue {}
 
 impl PartialOrd for TemporalValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -249,11 +262,14 @@ impl DecimalValue {
     }
 
     pub fn from_f64_lossy(value: f64) -> Option<Self> {
-        if value.is_finite() {
-            Self::parse(&value.to_string())
-        } else {
-            None
+        if !value.is_finite() {
+            return None;
         }
+        let parsed = Self::parse(&value.to_string())?;
+        if value != 0.0 && parsed.is_zero() {
+            return None;
+        }
+        Some(parsed)
     }
 
     pub fn is_zero(&self) -> bool {
@@ -309,7 +325,7 @@ impl DecimalValue {
 
     pub fn round_to_scale(&self, scale: i32) -> Option<Self> {
         if scale >= 0 {
-            return Some(self.round_dp(scale as u32));
+            return Some(self.round_dp(u32::try_from(scale).ok()?));
         }
         let factor = decimal_pow10(scale.unsigned_abs())?;
         self.inner
@@ -321,7 +337,9 @@ impl DecimalValue {
 
     pub fn trunc_to_scale(&self, scale: i32) -> Option<Self> {
         if scale >= 0 {
-            return Some(Self::new(self.inner.trunc_with_scale(scale as u32)));
+            return Some(Self::new(
+                self.inner.trunc_with_scale(u32::try_from(scale).ok()?),
+            ));
         }
         let factor = decimal_pow10(scale.unsigned_abs())?;
         self.inner
@@ -343,7 +361,10 @@ impl DecimalValue {
         let Some(scaled) = scaled else {
             return false;
         };
-        decimal_integer_digit_count(scaled) <= precision as usize
+        let Ok(precision) = usize::try_from(precision) else {
+            return false;
+        };
+        decimal_integer_digit_count(scaled) <= precision
     }
 
     pub fn to_sql_string(&self) -> String {
@@ -430,7 +451,7 @@ impl<'de> Deserialize<'de> for DecimalValue {
 }
 
 fn epoch_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid epoch date")
+    DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()
 }
 
 fn parse_naive_time(input: &str) -> Option<NaiveTime> {
@@ -504,9 +525,15 @@ fn format_time_micros(micros: i64) -> String {
     let normalized = micros.rem_euclid(MICROS_PER_DAY);
     let seconds = normalized / MICROS_PER_SECOND;
     let micros = normalized % MICROS_PER_SECOND;
-    let Some(time) =
-        NaiveTime::from_num_seconds_from_midnight_opt(seconds as u32, (micros * 1_000) as u32)
-    else {
+    let (Ok(seconds), Some(nanos)) = (
+        u32::try_from(seconds),
+        micros
+            .checked_mul(1_000)
+            .and_then(|value| u32::try_from(value).ok()),
+    ) else {
+        return normalized.to_string();
+    };
+    let Some(time) = NaiveTime::from_num_seconds_from_midnight_opt(seconds, nanos) else {
         return normalized.to_string();
     };
     let mut out = time.format("%H:%M:%S").to_string();
@@ -617,6 +644,54 @@ fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
         micros: i64,
     }
     impl Acc {
+        fn add_months(&mut self, value: f64) -> bool {
+            let Some(value) = rounded_f64_to_i64(value) else {
+                return false;
+            };
+            let Some(total) = self.months.checked_add(value) else {
+                return false;
+            };
+            self.months = total;
+            true
+        }
+
+        fn add_days(&mut self, value: f64) -> bool {
+            let Some(value) = truncated_f64_to_i64(value) else {
+                return false;
+            };
+            let Some(total) = self.days.checked_add(value) else {
+                return false;
+            };
+            self.days = total;
+            true
+        }
+
+        fn add_rounded_days(&mut self, value: f64) -> bool {
+            let Some(value) = rounded_f64_to_i64(value) else {
+                return false;
+            };
+            let Some(total) = self.days.checked_add(value) else {
+                return false;
+            };
+            self.days = total;
+            true
+        }
+
+        fn add_micros(&mut self, value: f64) -> bool {
+            let Some(value) = rounded_f64_to_i64(value) else {
+                return false;
+            };
+            self.add_micros_exact(value)
+        }
+
+        fn add_micros_exact(&mut self, value: i64) -> bool {
+            let Some(total) = self.micros.checked_add(value) else {
+                return false;
+            };
+            self.micros = total;
+            true
+        }
+
         // Carry a fractional remainder downward exactly like
         // PostgreSQL: month fractions become days (x30), day/week
         // fractions become microseconds (x86400s).
@@ -626,46 +701,35 @@ fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
             let whole = quantity.trunc();
             let frac = quantity - whole;
             match unit {
-                "microsecond" | "microseconds" | "us" => {
-                    self.micros += quantity.round() as i64;
-                }
-                "millisecond" | "milliseconds" | "ms" => {
-                    self.micros += (quantity * 1_000.0).round() as i64;
-                }
+                "microsecond" | "microseconds" | "us" => self.add_micros(quantity),
+                "millisecond" | "milliseconds" | "ms" => self.add_micros(quantity * 1_000.0),
                 "second" | "seconds" | "sec" | "secs" | "s" => {
-                    self.micros += (quantity * MICROS_PER_SECOND as f64).round() as i64;
+                    self.add_micros(quantity * MICROS_PER_SECOND as f64)
                 }
                 "minute" | "minutes" | "min" | "mins" | "m" => {
-                    self.micros += (quantity * MICROS_PER_MINUTE as f64).round() as i64;
+                    self.add_micros(quantity * MICROS_PER_MINUTE as f64)
                 }
                 "hour" | "hours" | "hr" | "hrs" | "h" => {
-                    self.micros += (quantity * MICROS_PER_HOUR as f64).round() as i64;
+                    self.add_micros(quantity * MICROS_PER_HOUR as f64)
                 }
                 "day" | "days" | "d" => {
-                    self.days += whole as i64;
-                    self.micros += (frac * MICROS_PER_DAY as f64).round() as i64;
+                    self.add_days(whole) && self.add_micros(frac * MICROS_PER_DAY as f64)
                 }
                 "week" | "weeks" | "w" => {
                     let total_days = quantity * 7.0;
-                    self.days += total_days.trunc() as i64;
-                    self.micros +=
-                        ((total_days - total_days.trunc()) * MICROS_PER_DAY as f64).round() as i64;
+                    self.add_days(total_days.trunc())
+                        && self
+                            .add_micros((total_days - total_days.trunc()) * MICROS_PER_DAY as f64)
                 }
                 "month" | "months" | "mon" | "mons" => {
-                    self.months += whole as i64;
-                    self.days += (frac * 30.0).round() as i64;
+                    self.add_months(whole) && self.add_rounded_days(frac * 30.0)
                 }
-                "year" | "years" | "yr" | "yrs" | "y" => {
-                    self.months += (quantity * 12.0).round() as i64;
-                }
-                "decade" | "decades" => self.months += (quantity * 120.0).round() as i64,
-                "century" | "centuries" => self.months += (quantity * 1_200.0).round() as i64,
-                "millennium" | "millenniums" | "millennia" => {
-                    self.months += (quantity * 12_000.0).round() as i64;
-                }
-                _ => return false,
+                "year" | "years" | "yr" | "yrs" | "y" => self.add_months(quantity * 12.0),
+                "decade" | "decades" => self.add_months(quantity * 120.0),
+                "century" | "centuries" => self.add_months(quantity * 1_200.0),
+                "millennium" | "millenniums" | "millennia" => self.add_months(quantity * 12_000.0),
+                _ => false,
             }
-            true
         }
     }
 
@@ -687,20 +751,31 @@ fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
             // A bare number right before it is a day count
             // (`'3 4:05:06'` = 3 days 04:05:06).
             if let Some(days) = pending.take() {
-                acc.days += days.trunc() as i64;
-                acc.micros += ((days - days.trunc()) * MICROS_PER_DAY as f64).round() as i64;
+                if !acc.add_days(days.trunc())
+                    || !acc.add_micros((days - days.trunc()) * MICROS_PER_DAY as f64)
+                {
+                    return None;
+                }
             }
-            acc.micros += rest;
+            if !acc.add_micros_exact(rest) {
+                return None;
+            }
             continue;
         }
         if let Some((y, m)) = parse_interval_year_month_token(token) {
-            acc.months += y * 12 + m;
+            let months = y.checked_mul(12)?.checked_add(m)?;
+            acc.months = acc.months.checked_add(months)?;
             continue;
         }
         if let Ok(number) = token.parse::<f64>() {
+            if !number.is_finite() {
+                return None;
+            }
             if let Some(prev) = pending.take() {
                 // Two bare numbers in a row: the first was seconds.
-                acc.micros += (prev * MICROS_PER_SECOND as f64).round() as i64;
+                if !acc.add_micros(prev * MICROS_PER_SECOND as f64) {
+                    return None;
+                }
             }
             pending = Some(number);
             continue;
@@ -712,18 +787,34 @@ fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
     }
     if let Some(number) = pending {
         // Trailing bare number: PostgreSQL reads it as seconds.
-        acc.micros += (number * MICROS_PER_SECOND as f64).round() as i64;
+        if !acc.add_micros(number * MICROS_PER_SECOND as f64) {
+            return None;
+        }
     }
     if negate_all {
-        acc.months = -acc.months;
-        acc.days = -acc.days;
-        acc.micros = -acc.micros;
+        acc.months = acc.months.checked_neg()?;
+        acc.days = acc.days.checked_neg()?;
+        acc.micros = acc.micros.checked_neg()?;
     }
     Some(TemporalValue::Interval {
         months: i32::try_from(acc.months).ok()?,
         days: i32::try_from(acc.days).ok()?,
         micros: acc.micros,
     })
+}
+
+fn truncated_f64_to_i64(value: f64) -> Option<i64> {
+    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
+    let value = value.trunc();
+    if !(I64_LOWER_INCLUSIVE..I64_UPPER_EXCLUSIVE).contains(&value) {
+        return None;
+    }
+    Some(value as i64)
+}
+
+fn rounded_f64_to_i64(value: f64) -> Option<i64> {
+    truncated_f64_to_i64(value.round())
 }
 
 /// `[+-]HH:MM[:SS[.frac]]` -> signed microseconds. Rejects minute or
@@ -746,15 +837,18 @@ fn parse_interval_time_token(token: &str) -> Option<i64> {
     if !(0..60).contains(&minutes) {
         return None;
     }
-    let mut micros = hours * 3_600 * MICROS_PER_SECOND + minutes * 60 * MICROS_PER_SECOND;
+    let mut micros = hours
+        .checked_mul(3_600)?
+        .checked_mul(MICROS_PER_SECOND)?
+        .checked_add(minutes.checked_mul(60)?.checked_mul(MICROS_PER_SECOND)?)?;
     if parts.len() == 3 {
         let seconds: f64 = parts[2].parse().ok()?;
         if !(0.0..60.0).contains(&seconds) {
             return None;
         }
-        micros += (seconds * MICROS_PER_SECOND as f64).round() as i64;
+        micros = micros.checked_add(rounded_f64_to_i64(seconds * MICROS_PER_SECOND as f64)?)?;
     }
-    Some(sign * micros)
+    sign.checked_mul(micros)
 }
 
 /// SQL-standard year-month literal `[+-]Y-M` -> `(years, months)`.
@@ -773,15 +867,14 @@ fn parse_interval_year_month_token(token: &str) -> Option<(i64, i64)> {
     if !(0..12).contains(&months) {
         return None;
     }
-    Some((sign * years, sign * months))
+    Some((sign.checked_mul(years)?, sign.checked_mul(months)?))
 }
 
 /// Dynamic value type for document fields and posting payload extras.
 ///
 /// Covers the JSON-like values the engine round-trips through a posting
 /// list. Date and datetime variants land with the SQL type system.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Default)]
 pub enum Value {
     #[default]
     Null,
@@ -796,6 +889,348 @@ pub enum Value {
     Map(BTreeMap<String, Value>),
 }
 
+/// Field used by the graph posting-list Phi encoding.
+///
+/// This is public only so `uqa-graph` and the core posting-list algebra can
+/// share one versioned codec. Applications should treat it as an opaque
+/// implementation detail.
+#[doc(hidden)]
+pub const GRAPH_PHI_FIELD: &str = "_uqa_graph_phi";
+#[doc(hidden)]
+pub const GRAPH_PHI_VERTICES_FIELD: &str = "_graph_vertices";
+#[doc(hidden)]
+pub const GRAPH_PHI_EDGES_FIELD: &str = "_graph_edges";
+
+const GRAPH_PHI_MAGIC: &str = "uqa.graph.phi";
+const GRAPH_PHI_VERSION: i64 = 1;
+const GRAPH_PHI_MAGIC_KEY: &str = "magic";
+const GRAPH_PHI_VERSION_KEY: &str = "version";
+const GRAPH_PHI_BASE_SCORE_KEY: &str = "base_score";
+const GRAPH_PHI_GRAPH_PRESENT_KEY: &str = "graph_present";
+const GRAPH_PHI_VERTICES_KEY: &str = "vertices";
+const GRAPH_PHI_EDGES_KEY: &str = "edges";
+const GRAPH_PHI_GRAPH_NAME_KEY: &str = "graph_name";
+const GRAPH_PHI_OVERRIDE_PRESENT_KEY: &str = "override_present";
+const GRAPH_PHI_OVERRIDE_SCORE_KEY: &str = "override_score";
+const GRAPH_PHI_ORIGINAL_PRESENT_KEY: &str = "original_present";
+const GRAPH_PHI_ORIGINAL_VALUE_KEY: &str = "original_value";
+const GRAPH_PHI_ORIGINAL_VERTICES_PRESENT_KEY: &str = "original_vertices_present";
+const GRAPH_PHI_ORIGINAL_VERTICES_VALUE_KEY: &str = "original_vertices_value";
+const GRAPH_PHI_ORIGINAL_EDGES_PRESENT_KEY: &str = "original_edges_present";
+const GRAPH_PHI_ORIGINAL_EDGES_VALUE_KEY: &str = "original_edges_value";
+const GRAPH_PHI_FIELD_COUNT: usize = 15;
+
+/// Graph-specific part of a versioned Phi envelope.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphPhiPayload {
+    pub vertices: Vec<VertexId>,
+    pub edges: Vec<EdgeId>,
+    pub graph_name: String,
+}
+
+impl GraphPhiPayload {
+    #[doc(hidden)]
+    pub fn encoded_vertices(&self) -> Value {
+        encode_u64_list(&self.vertices)
+    }
+
+    #[doc(hidden)]
+    pub fn encoded_edges(&self) -> Value {
+        encode_u64_list(&self.edges)
+    }
+}
+
+/// Lossless metadata carried through the ordinary posting-list algebra.
+///
+/// Scores use their IEEE-754 bit representation in [`Value`] so `-0.0` and
+/// NaN payloads survive a non-colliding round trip exactly. The original value
+/// at [`GRAPH_PHI_FIELD`] is nested in the envelope, making the reserved field
+/// collision-safe for values produced by the encoder.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct GraphPhiEnvelope {
+    pub base_score: f64,
+    pub graph_payload: Option<GraphPhiPayload>,
+    pub score_override: Option<f64>,
+    pub original_reserved: Option<Value>,
+    pub original_vertices: Option<Value>,
+    pub original_edges: Option<Value>,
+}
+
+impl GraphPhiEnvelope {
+    #[doc(hidden)]
+    pub fn encode(self) -> Value {
+        let (graph_present, vertices, edges, graph_name) = self.graph_payload.map_or_else(
+            || (false, Vec::new(), Vec::new(), String::new()),
+            |graph| (true, graph.vertices, graph.edges, graph.graph_name),
+        );
+        let (override_present, override_score) = self.score_override.map_or_else(
+            || (false, Value::Null),
+            |score| (true, encode_f64_bits(score)),
+        );
+        let (original_present, original_value) = self
+            .original_reserved
+            .map_or_else(|| (false, Value::Null), |value| (true, value));
+        let (original_vertices_present, original_vertices_value) = self
+            .original_vertices
+            .map_or_else(|| (false, Value::Null), |value| (true, value));
+        let (original_edges_present, original_edges_value) = self
+            .original_edges
+            .map_or_else(|| (false, Value::Null), |value| (true, value));
+
+        Value::Map(BTreeMap::from([
+            (
+                GRAPH_PHI_MAGIC_KEY.to_string(),
+                Value::Str(GRAPH_PHI_MAGIC.to_string()),
+            ),
+            (
+                GRAPH_PHI_VERSION_KEY.to_string(),
+                Value::Int(GRAPH_PHI_VERSION),
+            ),
+            (
+                GRAPH_PHI_BASE_SCORE_KEY.to_string(),
+                encode_f64_bits(self.base_score),
+            ),
+            (
+                GRAPH_PHI_GRAPH_PRESENT_KEY.to_string(),
+                Value::Bool(graph_present),
+            ),
+            (
+                GRAPH_PHI_VERTICES_KEY.to_string(),
+                encode_u64_list(&vertices),
+            ),
+            (GRAPH_PHI_EDGES_KEY.to_string(), encode_u64_list(&edges)),
+            (GRAPH_PHI_GRAPH_NAME_KEY.to_string(), Value::Str(graph_name)),
+            (
+                GRAPH_PHI_OVERRIDE_PRESENT_KEY.to_string(),
+                Value::Bool(override_present),
+            ),
+            (GRAPH_PHI_OVERRIDE_SCORE_KEY.to_string(), override_score),
+            (
+                GRAPH_PHI_ORIGINAL_PRESENT_KEY.to_string(),
+                Value::Bool(original_present),
+            ),
+            (GRAPH_PHI_ORIGINAL_VALUE_KEY.to_string(), original_value),
+            (
+                GRAPH_PHI_ORIGINAL_VERTICES_PRESENT_KEY.to_string(),
+                Value::Bool(original_vertices_present),
+            ),
+            (
+                GRAPH_PHI_ORIGINAL_VERTICES_VALUE_KEY.to_string(),
+                original_vertices_value,
+            ),
+            (
+                GRAPH_PHI_ORIGINAL_EDGES_PRESENT_KEY.to_string(),
+                Value::Bool(original_edges_present),
+            ),
+            (
+                GRAPH_PHI_ORIGINAL_EDGES_VALUE_KEY.to_string(),
+                original_edges_value,
+            ),
+        ]))
+    }
+
+    /// Decode only the exact current schema. A lookalike or future version is
+    /// an ordinary application field, not a partially decoded envelope.
+    #[doc(hidden)]
+    pub fn decode(value: Option<&Value>) -> Option<Self> {
+        let Value::Map(fields) = value? else {
+            return None;
+        };
+        let valid_magic = matches!(
+            fields.get(GRAPH_PHI_MAGIC_KEY),
+            Some(Value::Str(magic)) if magic == GRAPH_PHI_MAGIC
+        );
+        if fields.len() != GRAPH_PHI_FIELD_COUNT
+            || !valid_magic
+            || fields.get(GRAPH_PHI_VERSION_KEY) != Some(&Value::Int(GRAPH_PHI_VERSION))
+        {
+            return None;
+        }
+
+        let base_score = decode_f64_bits(fields.get(GRAPH_PHI_BASE_SCORE_KEY)?)?;
+        let Value::Bool(graph_present) = fields.get(GRAPH_PHI_GRAPH_PRESENT_KEY)? else {
+            return None;
+        };
+        let vertices = decode_u64_list(fields.get(GRAPH_PHI_VERTICES_KEY)?)?;
+        let edges = decode_u64_list(fields.get(GRAPH_PHI_EDGES_KEY)?)?;
+        let Value::Str(graph_name) = fields.get(GRAPH_PHI_GRAPH_NAME_KEY)? else {
+            return None;
+        };
+        let Value::Bool(override_present) = fields.get(GRAPH_PHI_OVERRIDE_PRESENT_KEY)? else {
+            return None;
+        };
+        let override_value = fields.get(GRAPH_PHI_OVERRIDE_SCORE_KEY)?;
+        let score_override = match (*override_present, override_value) {
+            (true, value) => Some(decode_f64_bits(value)?),
+            (false, Value::Null) => None,
+            (false, _) => return None,
+        };
+        let Value::Bool(original_present) = fields.get(GRAPH_PHI_ORIGINAL_PRESENT_KEY)? else {
+            return None;
+        };
+        let original_value = fields.get(GRAPH_PHI_ORIGINAL_VALUE_KEY)?;
+        let original_reserved = match (*original_present, original_value) {
+            (true, value) => Some(value.clone()),
+            (false, Value::Null) => None,
+            (false, _) => return None,
+        };
+        let original_vertices = decode_optional_shadow(
+            fields.get(GRAPH_PHI_ORIGINAL_VERTICES_PRESENT_KEY)?,
+            fields.get(GRAPH_PHI_ORIGINAL_VERTICES_VALUE_KEY)?,
+        )
+        .ok()?;
+        let original_edges = decode_optional_shadow(
+            fields.get(GRAPH_PHI_ORIGINAL_EDGES_PRESENT_KEY)?,
+            fields.get(GRAPH_PHI_ORIGINAL_EDGES_VALUE_KEY)?,
+        )
+        .ok()?;
+
+        let graph_payload = if *graph_present {
+            Some(GraphPhiPayload {
+                vertices,
+                edges,
+                graph_name: graph_name.clone(),
+            })
+        } else {
+            if !vertices.is_empty()
+                || !edges.is_empty()
+                || !graph_name.is_empty()
+                || score_override.is_some()
+            {
+                return None;
+            }
+            None
+        };
+
+        Some(Self {
+            base_score,
+            graph_payload,
+            score_override,
+            original_reserved,
+            original_vertices,
+            original_edges,
+        })
+    }
+
+    /// Whether a value claims the Phi namespace, even if its schema or
+    /// version is unsupported. Such values must not fall through to the
+    /// ambiguous legacy two-field decoder.
+    #[doc(hidden)]
+    pub fn is_recognized(value: Option<&Value>) -> bool {
+        matches!(
+            value,
+            Some(Value::Map(fields))
+                if matches!(
+                    fields.get(GRAPH_PHI_MAGIC_KEY),
+                    Some(Value::Str(magic)) if magic == GRAPH_PHI_MAGIC
+                )
+        )
+    }
+}
+
+#[derive(Debug)]
+struct InvalidGraphPhiEnvelope;
+
+fn decode_optional_shadow(
+    present: &Value,
+    value: &Value,
+) -> std::result::Result<Option<Value>, InvalidGraphPhiEnvelope> {
+    match (present, value) {
+        (Value::Bool(true), value) => Ok(Some(value.clone())),
+        (Value::Bool(false), Value::Null) => Ok(None),
+        _ => Err(InvalidGraphPhiEnvelope),
+    }
+}
+
+fn encode_f64_bits(value: f64) -> Value {
+    Value::Bytes(value.to_bits().to_be_bytes().to_vec())
+}
+
+fn decode_f64_bits(value: &Value) -> Option<f64> {
+    let Value::Bytes(bytes) = value else {
+        return None;
+    };
+    let encoded: [u8; size_of::<u64>()] = bytes.as_slice().try_into().ok()?;
+    Some(f64::from_bits(u64::from_be_bytes(encoded)))
+}
+
+fn encode_u64_list(values: &[u64]) -> Value {
+    Value::List(
+        values
+            .iter()
+            .map(|value| Value::Bytes(value.to_be_bytes().to_vec()))
+            .collect(),
+    )
+}
+
+fn decode_u64_list(value: &Value) -> Option<Vec<u64>> {
+    let Value::List(values) = value else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| {
+            let Value::Bytes(bytes) = value else {
+                return None;
+            };
+            let encoded: [u8; size_of::<u64>()] = bytes.as_slice().try_into().ok()?;
+            Some(u64::from_be_bytes(encoded))
+        })
+        .collect()
+}
+
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Null => serializer.serialize_unit(),
+            Self::Bool(value) => serializer.serialize_bool(*value),
+            Self::Int(value) => serializer.serialize_i64(*value),
+            Self::Float(value) => serializer.serialize_f64(*value),
+            Self::Str(value) => serializer.serialize_str(value),
+            Self::Bytes(value) => {
+                const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+                #[derive(Serialize)]
+                struct TaggedBytes<'a> {
+                    #[serde(rename = "$uqa_type")]
+                    kind: &'static str,
+                    hex: &'a str,
+                }
+
+                let capacity = value.len().checked_mul(2).ok_or_else(|| {
+                    <S::Error as serde::ser::Error>::custom(
+                        "byte value hex representation exceeds the addressable range",
+                    )
+                })?;
+                let mut hex = String::new();
+                hex.try_reserve_exact(capacity).map_err(|error| {
+                    <S::Error as serde::ser::Error>::custom(format!(
+                        "cannot allocate byte value hex representation: {error}"
+                    ))
+                })?;
+                for byte in value {
+                    hex.push(char::from(DIGITS[usize::from(byte >> 4)]));
+                    hex.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+                }
+                TaggedBytes {
+                    kind: "bytes",
+                    hex: &hex,
+                }
+                .serialize(serializer)
+            }
+            Self::Temporal(value) => value.serialize(serializer),
+            Self::Decimal(value) => value.serialize(serializer),
+            Self::List(value) => value.serialize(serializer),
+            Self::Map(value) => value.serialize(serializer),
+        }
+    }
+}
+
 /// Reconstruct the value a `$uqa_type`-tagged map encodes, or `None`
 /// when the map does not match any tagged encoding and must stay a
 /// plain [`Value::Map`].
@@ -805,7 +1240,10 @@ pub enum Value {
 /// every field must be an in-range integer. The decimal encoding
 /// mirrors the tolerant tagged struct in [`DecimalValue`]'s
 /// `Deserialize`: extra fields are ignored.
-fn value_from_tagged_map(tag: &str, map: &BTreeMap<String, Value>) -> Option<Value> {
+fn value_from_tagged_map(
+    tag: &str,
+    map: &BTreeMap<String, Value>,
+) -> Result<Option<Value>, String> {
     fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
         match map.get(key)? {
             Value::Int(number) => T::try_from(*number).ok(),
@@ -814,41 +1252,101 @@ fn value_from_tagged_map(tag: &str, map: &BTreeMap<String, Value>) -> Option<Val
     }
 
     let temporal = match tag {
-        "date" if map.len() == 2 => TemporalValue::Date {
-            days: int_field(map, "days")?,
-        },
-        "time" if map.len() == 2 => TemporalValue::Time {
-            micros: int_field(map, "micros")?,
-        },
-        "time_tz" if map.len() == 3 => TemporalValue::TimeTz {
-            micros: int_field(map, "micros")?,
-            offset_minutes: int_field(map, "offset_minutes")?,
-        },
-        "timestamp" if map.len() == 2 => TemporalValue::Timestamp {
-            micros: int_field(map, "micros")?,
-        },
-        "timestamp_tz" if map.len() == 2 => TemporalValue::TimestampTz {
-            micros: int_field(map, "micros")?,
-        },
-        "interval" if map.len() == 4 => TemporalValue::Interval {
-            months: int_field(map, "months")?,
-            days: int_field(map, "days")?,
-            micros: int_field(map, "micros")?,
-        },
+        "date" if map.len() == 2 => {
+            let Some(days) = int_field(map, "days") else {
+                return Ok(None);
+            };
+            TemporalValue::Date { days }
+        }
+        "time" if map.len() == 2 => {
+            let Some(micros) = int_field(map, "micros") else {
+                return Ok(None);
+            };
+            TemporalValue::Time { micros }
+        }
+        "time_tz" if map.len() == 3 => {
+            let (Some(micros), Some(offset_minutes)) =
+                (int_field(map, "micros"), int_field(map, "offset_minutes"))
+            else {
+                return Ok(None);
+            };
+            TemporalValue::TimeTz {
+                micros,
+                offset_minutes,
+            }
+        }
+        "timestamp" if map.len() == 2 => {
+            let Some(micros) = int_field(map, "micros") else {
+                return Ok(None);
+            };
+            TemporalValue::Timestamp { micros }
+        }
+        "timestamp_tz" if map.len() == 2 => {
+            let Some(micros) = int_field(map, "micros") else {
+                return Ok(None);
+            };
+            TemporalValue::TimestampTz { micros }
+        }
+        "interval" if map.len() == 4 => {
+            let (Some(months), Some(days), Some(micros)) = (
+                int_field(map, "months"),
+                int_field(map, "days"),
+                int_field(map, "micros"),
+            ) else {
+                return Ok(None);
+            };
+            TemporalValue::Interval {
+                months,
+                days,
+                micros,
+            }
+        }
         "decimal" => {
             let Some(Value::Str(text)) = map.get("value") else {
-                return None;
+                return Ok(None);
             };
-            return DecimalValue::parse(text).map(Value::Decimal);
+            return Ok(DecimalValue::parse(text).map(Value::Decimal));
         }
-        _ => return None,
+        "bytes" if map.len() == 2 => {
+            let Some(Value::Str(hex)) = map.get("hex") else {
+                return Ok(None);
+            };
+            return decode_hex_bytes(hex).map(|bytes| bytes.map(Value::Bytes));
+        }
+        _ => return Ok(None),
     };
-    Some(Value::Temporal(temporal))
+    Ok(Some(Value::Temporal(temporal)))
 }
 
-/// Hand-written [`Deserialize`] with the exact variant-resolution order
-/// of the previous `#[serde(untagged)]` derive (Null, Bool, Int, Float,
-/// Str, Bytes, Temporal, Decimal, List, Map), without the untagged
+fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
+    fn nibble(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let encoded = hex.as_bytes();
+    if encoded.len() % 2 != 0 {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(encoded.len() / 2)
+        .map_err(|error| format!("cannot allocate decoded byte value: {error}"))?;
+    for pair in encoded.chunks_exact(2) {
+        let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
+            return Ok(None);
+        };
+        bytes.push((high << 4) | low);
+    }
+    Ok(Some(bytes))
+}
+
+/// Hand-written [`Deserialize`] for scalar JSON values, explicit tagged
+/// byte/temporal/decimal values, ordinary arrays, and maps, without the untagged
 /// machinery's per-variant trial errors. Untagged deserialization
 /// buffers the input and formats a rejection error for every variant
 /// that does not match; profiling showed that error construction alone
@@ -921,25 +1419,26 @@ impl<'de> Deserialize<'de> for Value {
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let mut items: Vec<Value> = Vec::with_capacity(access.size_hint().unwrap_or(0));
+                // `SeqAccess::size_hint` is supplied by the input decoder and
+                // is not trustworthy enough to hand directly to an infallible
+                // allocation. Reserve a bounded useful prefix, then make every
+                // subsequent growth fallible as elements actually arrive.
+                let initial = access.size_hint().unwrap_or(0).min(4_096);
+                let mut items: Vec<Value> = Vec::new();
+                items.try_reserve_exact(initial).map_err(|error| {
+                    <A::Error as serde::de::Error>::custom(format!(
+                        "cannot allocate UQA value sequence: {error}"
+                    ))
+                })?;
                 while let Some(item) = access.next_element::<Value>()? {
+                    if items.len() == items.capacity() {
+                        items.try_reserve(1).map_err(|error| {
+                            <A::Error as serde::de::Error>::custom(format!(
+                                "cannot grow UQA value sequence: {error}"
+                            ))
+                        })?;
+                    }
                     items.push(item);
-                }
-                // Bytes(Vec<u8>) precedes List in the untagged variant
-                // order, so an array whose elements all fit a byte -
-                // including the empty array - resolves as Bytes.
-                let all_bytes = items
-                    .iter()
-                    .all(|item| matches!(item, Value::Int(number) if (0..=255).contains(number)));
-                if all_bytes {
-                    let bytes = items
-                        .iter()
-                        .map(|item| match item {
-                            Value::Int(number) => *number as u8,
-                            _ => unreachable!("all_bytes checked every element"),
-                        })
-                        .collect();
-                    return Ok(Value::Bytes(bytes));
                 }
                 Ok(Value::List(items))
             }
@@ -953,7 +1452,9 @@ impl<'de> Deserialize<'de> for Value {
                     map.insert(key, value);
                 }
                 if let Some(Value::Str(tag)) = map.get("$uqa_type") {
-                    if let Some(value) = value_from_tagged_map(&tag.clone(), &map) {
+                    if let Some(value) = value_from_tagged_map(tag, &map)
+                        .map_err(<A::Error as serde::de::Error>::custom)?
+                    {
                         return Ok(value);
                     }
                 }
@@ -1119,10 +1620,87 @@ impl IndexStats {
     }
 }
 
-// `Value` carries `f64`, which is not `Eq` or `Hash`. We provide a total
-// order anyway: `PartialOrd::partial_cmp` on floats falls back to `Equal`
-// for NaN. Joins that need to compare on floating values must route them
-// through scoring; the order here is only for keying joined-entry tuples.
+fn compare_floats(left: f64, right: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if left == right {
+        return Ordering::Equal;
+    }
+    if left.is_nan() {
+        return if right.is_nan() {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        };
+    }
+    if right.is_nan() || left < right {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    }
+}
+
+fn compare_integer_float(integer: i64, float: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
+
+    if float.is_nan() || float >= I64_UPPER_EXCLUSIVE {
+        return Ordering::Less;
+    }
+    if float < I64_LOWER_INCLUSIVE {
+        return Ordering::Greater;
+    }
+    let truncated = float.trunc() as i64;
+    match integer.cmp(&truncated) {
+        Ordering::Equal if float > truncated as f64 => Ordering::Less,
+        Ordering::Equal if float < truncated as f64 => Ordering::Greater,
+        ordering => ordering,
+    }
+}
+
+fn compare_float_decimal(float: f64, decimal: &DecimalValue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if float.is_nan() || float == f64::INFINITY {
+        return Ordering::Greater;
+    }
+    if float == f64::NEG_INFINITY {
+        return Ordering::Less;
+    }
+    if let Some(float_decimal) = DecimalValue::from_f64_lossy(float) {
+        return float_decimal.cmp(decimal);
+    }
+
+    // A finite f64 that rust_decimal cannot represent is either outside its
+    // magnitude or below its scale. Compare such subnormal/supernormal values
+    // against zero and the decimal sign without manufacturing an equality.
+    let decimal_vs_zero = decimal.cmp(&DecimalValue::from_i64(0));
+    if float > 0.0 {
+        if float > 1.0 {
+            Ordering::Greater
+        } else if decimal_vs_zero == Ordering::Greater {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    } else if float < -1.0 {
+        Ordering::Less
+    } else if decimal_vs_zero == Ordering::Less {
+        Ordering::Greater
+    } else {
+        Ordering::Less
+    }
+}
+
+// `Value` carries `f64`, so equality and ordering are implemented together.
+// NaN compares equal to NaN and greater than finite values, signed zeroes are
+// equal, and cross-numeric variants use numeric rather than discriminant order.
+// This keeps `Eq`/`Ord` consistent for BTree keys used by joins and DISTINCT.
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+
 impl Eq for Value {}
 
 impl PartialOrd for Value {
@@ -1138,34 +1716,22 @@ impl Ord for Value {
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             (Value::Int(a), Value::Int(b)) => a.cmp(b),
-            (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+            (Value::Float(a), Value::Float(b)) => compare_floats(*a, *b),
             (Value::Decimal(a), Value::Decimal(b)) => a.cmp(b),
             // Numeric cross-type compare: Int / Float / Bool all coerce
             // to f64 so SQL `WHERE price > 15` (Float vs Int literal)
             // and `WHERE flag > 0` line up with PostgreSQL semantics
             // instead of falling through to the discriminant order.
-            (Value::Int(a), Value::Float(b)) => {
-                (*a as f64).partial_cmp(b).unwrap_or(Ordering::Equal)
-            }
-            (Value::Float(a), Value::Int(b)) => {
-                a.partial_cmp(&(*b as f64)).unwrap_or(Ordering::Equal)
-            }
+            (Value::Int(a), Value::Float(b)) => compare_integer_float(*a, *b),
+            (Value::Float(a), Value::Int(b)) => compare_integer_float(*b, *a).reverse(),
             (Value::Int(a), Value::Decimal(b)) => DecimalValue::from_i64(*a).cmp(b),
             (Value::Decimal(a), Value::Int(b)) => a.cmp(&DecimalValue::from_i64(*b)),
-            (Value::Float(a), Value::Decimal(b)) => {
-                DecimalValue::from_f64_lossy(*a).map_or(Ordering::Equal, |a| a.cmp(b))
-            }
-            (Value::Decimal(a), Value::Float(b)) => {
-                DecimalValue::from_f64_lossy(*b).map_or(Ordering::Equal, |b| a.cmp(&b))
-            }
+            (Value::Float(a), Value::Decimal(b)) => compare_float_decimal(*a, b),
+            (Value::Decimal(a), Value::Float(b)) => compare_float_decimal(*b, a).reverse(),
             (Value::Bool(a), Value::Int(b)) => i64::from(*a).cmp(b),
             (Value::Int(a), Value::Bool(b)) => a.cmp(&i64::from(*b)),
-            (Value::Bool(a), Value::Float(b)) => f64::from(i64::from(*a) as i32)
-                .partial_cmp(b)
-                .unwrap_or(Ordering::Equal),
-            (Value::Float(a), Value::Bool(b)) => a
-                .partial_cmp(&f64::from(i64::from(*b) as i32))
-                .unwrap_or(Ordering::Equal),
+            (Value::Bool(a), Value::Float(b)) => compare_integer_float(i64::from(*a), *b),
+            (Value::Float(a), Value::Bool(b)) => compare_integer_float(i64::from(*b), *a).reverse(),
             (Value::Bool(a), Value::Decimal(b)) => DecimalValue::from_bool(*a).cmp(b),
             (Value::Decimal(a), Value::Bool(b)) => a.cmp(&DecimalValue::from_bool(*b)),
             (Value::Str(a), Value::Str(b)) => a.cmp(b),
@@ -1181,21 +1747,45 @@ impl Ord for Value {
 fn discriminant(v: &Value) -> u8 {
     match v {
         Value::Null => 0,
-        Value::Bool(_) => 1,
-        Value::Int(_) => 2,
-        Value::Float(_) => 3,
-        Value::Str(_) => 4,
-        Value::Bytes(_) => 5,
-        Value::Temporal(_) => 6,
-        Value::Decimal(_) => 7,
-        Value::List(_) => 8,
-        Value::Map(_) => 9,
+        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 1,
+        Value::Str(_) => 2,
+        Value::Bytes(_) => 3,
+        Value::Temporal(_) => 4,
+        Value::List(_) => 5,
+        Value::Map(_) => 6,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct HostileEmptySequence;
+
+    impl<'de> serde::de::SeqAccess<'de> for HostileEmptySequence {
+        type Error = serde::de::value::Error;
+
+        fn next_element_seed<T>(
+            &mut self,
+            _seed: T,
+        ) -> std::result::Result<Option<T::Value>, Self::Error>
+        where
+            T: serde::de::DeserializeSeed<'de>,
+        {
+            Ok(None)
+        }
+
+        fn size_hint(&self) -> Option<usize> {
+            Some(usize::MAX)
+        }
+    }
+
+    #[test]
+    fn value_deserializer_does_not_trust_sequence_size_hints() {
+        let decoder = serde::de::value::SeqAccessDeserializer::new(HostileEmptySequence);
+        let value = Value::deserialize(decoder).expect("bounded sequence preallocation");
+        assert_eq!(value, Value::List(Vec::new()));
+    }
 
     #[test]
     fn payload_default_is_zero_score_and_empty() {
@@ -1259,6 +1849,99 @@ mod tests {
             Value::Decimal(DecimalValue::parse("1.0").unwrap()).cmp(&Value::Int(1)),
             std::cmp::Ordering::Equal
         );
+
+        let equivalent = [
+            Value::Bool(true),
+            Value::Int(1),
+            Value::Float(1.0),
+            Value::Decimal(DecimalValue::parse("1.0").unwrap()),
+        ];
+        let text = Value::Str("numeric boundary".into());
+        for left in &equivalent {
+            for right in &equivalent {
+                assert_eq!(left.cmp(right), std::cmp::Ordering::Equal);
+                assert_eq!(left.cmp(&text), right.cmp(&text));
+            }
+        }
+    }
+
+    #[test]
+    fn value_numeric_order_is_total_and_does_not_round_large_integers() {
+        let rounded_float = Value::Float(9_007_199_254_740_992.0);
+        let next_integer = Value::Int(9_007_199_254_740_993);
+        assert!(next_integer > rounded_float);
+        assert_ne!(next_integer, rounded_float);
+
+        let nan = Value::Float(f64::NAN);
+        assert_eq!(nan, Value::Float(f64::NAN));
+        assert!(nan > Value::Float(f64::INFINITY));
+        assert!(nan > Value::Int(i64::MAX));
+        assert_eq!(Value::Float(-0.0), Value::Float(0.0));
+
+        let huge = Value::Float(f64::MAX);
+        let decimal = Value::Decimal(DecimalValue::parse("79228162514264337593543950335").unwrap());
+        assert!(huge > decimal);
+        assert!(Value::Float(f64::MIN_POSITIVE) > Value::Decimal(DecimalValue::from_i64(0)));
+    }
+
+    #[test]
+    fn temporal_ordering_is_overflow_safe_and_consistent_with_equality() {
+        let extreme_interval = TemporalValue::Interval {
+            months: i32::MAX,
+            days: i32::MAX,
+            micros: i64::MAX,
+        };
+        let smaller_interval = TemporalValue::Interval {
+            months: i32::MAX,
+            days: i32::MAX,
+            micros: i64::MAX - 1,
+        };
+        assert!(extreme_interval > smaller_interval);
+
+        let utc = TemporalValue::TimeTz {
+            micros: 0,
+            offset_minutes: 0,
+        };
+        let same_utc = TemporalValue::TimeTz {
+            micros: 60 * MICROS_PER_SECOND,
+            offset_minutes: 1,
+        };
+        assert_eq!(utc.cmp(&same_utc), std::cmp::Ordering::Equal);
+        assert_eq!(utc, same_utc);
+
+        let deserialized_extreme = TemporalValue::TimeTz {
+            micros: i64::MIN,
+            offset_minutes: i32::MAX,
+        };
+        let _ordering = deserialized_extreme.cmp(&utc);
+    }
+
+    #[test]
+    fn interval_parser_rejects_non_finite_and_overflowing_components() {
+        assert_eq!(
+            TemporalValue::parse_interval("1.5 days"),
+            Some(TemporalValue::Interval {
+                months: 0,
+                days: 1,
+                micros: MICROS_PER_DAY / 2,
+            })
+        );
+        for invalid in [
+            "nan seconds",
+            "inf seconds",
+            "1e309 seconds",
+            "9223372036854775808 microseconds",
+            "2562047789 hours",
+            "9223372036854 seconds 1000000 microseconds",
+            "9223372036854775807:00",
+            "768614336404564651-0",
+        ] {
+            assert_eq!(
+                TemporalValue::parse_interval(invalid),
+                None,
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
     }
 
     #[test]
@@ -1274,9 +1957,8 @@ mod tests {
         serde_json::from_str::<Value>(json).expect("decodable JSON value")
     }
 
-    /// The `Value` decoder must keep the exact variant-resolution order
-    /// of the original `#[serde(untagged)]` derive: Null, Bool, Int,
-    /// Float, Str, Bytes, Temporal, Decimal, List, Map.
+    /// Scalar decoding retains the numeric precedence of the original
+    /// untagged representation; byte values now use an explicit map tag.
     #[test]
     fn value_json_decoding_scalar_shapes() {
         assert_eq!(decode("null"), Value::Null);
@@ -1297,12 +1979,12 @@ mod tests {
 
     #[test]
     fn value_json_decoding_array_shapes() {
-        // Bytes(Vec<u8>) precedes List in variant order, so an all-
-        // byte-range integer array decodes as Bytes - including empty.
-        assert_eq!(decode("[]"), Value::Bytes(Vec::new()));
-        assert_eq!(decode("[1, 2, 255]"), Value::Bytes(vec![1, 2, 255]));
-        assert_eq!(decode("[0]"), Value::Bytes(vec![0]));
-        // Any element outside u8 falls through to List.
+        assert_eq!(decode("[]"), Value::List(Vec::new()));
+        assert_eq!(
+            decode("[1, 2, 255]"),
+            Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(255)])
+        );
+        assert_eq!(decode("[0]"), Value::List(vec![Value::Int(0)]));
         assert_eq!(
             decode("[1, 256]"),
             Value::List(vec![Value::Int(1), Value::Int(256)])
@@ -1319,7 +2001,22 @@ mod tests {
             decode("[\"a\", 1]"),
             Value::List(vec![Value::Str("a".into()), Value::Int(1)])
         );
-        assert_eq!(decode("[[3]]"), Value::List(vec![Value::Bytes(vec![3])]));
+        assert_eq!(
+            decode("[[3]]"),
+            Value::List(vec![Value::List(vec![Value::Int(3)])])
+        );
+    }
+
+    #[test]
+    fn byte_values_use_an_explicit_tagged_json_encoding() {
+        let value = Value::Bytes(vec![0, 1, 15, 16, 255]);
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(json, r#"{"$uqa_type":"bytes","hex":"00010f10ff"}"#);
+        assert_eq!(decode(&json), value);
+        assert_eq!(
+            decode(r#"{"$uqa_type":"bytes","hex":"00FF"}"#),
+            Value::Bytes(vec![0, 255])
+        );
     }
 
     #[test]
@@ -1472,12 +2169,8 @@ mod tests {
         );
     }
 
-    /// Differential check against the previous implementation: an
-    /// untagged derive with the same variant order must agree with the
-    /// hand-written visitor on every JSON shape. The sequence-form
-    /// quirk cases covered by
-    /// [`value_json_decoding_keeps_arrays_as_lists`] are the one
-    /// deliberate divergence and stay out of this corpus.
+    /// Differential check against the previous implementation for shapes
+    /// unaffected by the deliberate ordinary-array/explicit-bytes change.
     #[test]
     fn value_json_decoding_matches_untagged_derive() {
         #[derive(Debug, PartialEq, serde::Deserialize)]
@@ -1534,17 +2227,11 @@ mod tests {
             "\"hello\"",
             "\"2024-01-01\"",
             "\"$uqa_type\"",
-            "[]",
-            "[0]",
-            "[255]",
-            "[1,2,3]",
             "[1,2.0]",
             "[\"a\"]",
-            "[[1],[2]]",
             "[{\"a\":1}]",
             "{}",
             "{\"a\":1}",
-            "{\"a\":{\"b\":[1,2]}}",
             "{\"$uqa_type\":\"date\",\"days\":19723}",
             "{\"$uqa_type\":\"date\",\"days\":1,\"extra\":2}",
             "{\"$uqa_type\":\"date\"}",

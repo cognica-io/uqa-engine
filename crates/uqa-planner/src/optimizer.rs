@@ -10,7 +10,7 @@
 //! relational, scalar, mutation, CTE, set-operation, and query-valued command
 //! child in a [`UnifiedPlan`]. It never reconstructs a SQL AST.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::Value;
 use uqa_execution::{ScalarExpr, ScalarFrameBound};
@@ -18,8 +18,12 @@ use uqa_sql::ast::BinaryOp;
 
 use crate::unified_plan::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
-    ConflictActionPlan, ExpressionPlan, MergeWhenPlan, ProjectionPlan, QueryBlockPlan, QueryPlan,
-    RelationalPlan, SourcePlan, UnifiedPlan,
+    ConflictActionPlan, ExpressionPlan, JoinExecutionStrategy, MergeWhenPlan, ProjectionPlan,
+    QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
+};
+use crate::{
+    JoinAlgorithm, JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinOrderTree,
+    JoinPredicate, JoinRelation, RelationStats,
 };
 
 #[derive(Debug, Clone)]
@@ -27,6 +31,7 @@ pub struct OptimizerConfig {
     pub enable_filter_pushdown: bool,
     pub enable_boolean_simplify: bool,
     pub enable_vector_threshold_merge: bool,
+    pub enable_join_reordering: bool,
 }
 
 impl Default for OptimizerConfig {
@@ -35,7 +40,33 @@ impl Default for OptimizerConfig {
             enable_filter_pushdown: true,
             enable_boolean_simplify: true,
             enable_vector_threshold_merge: true,
+            enable_join_reordering: true,
         }
+    }
+}
+
+/// Cardinality and column statistics used to cost base relations during
+/// join enumeration. Engines implement this against their live catalogue;
+/// callers without a catalogue still get deterministic DPccp enumeration
+/// from the optimizer's fallback cardinality.
+pub trait SourceStatistics {
+    fn relation_statistics(&self, table: &str) -> Option<RelationStats>;
+}
+
+impl<F> SourceStatistics for F
+where
+    F: Fn(&str) -> Option<RelationStats>,
+{
+    fn relation_statistics(&self, table: &str) -> Option<RelationStats> {
+        self(table)
+    }
+}
+
+struct NoSourceStatistics;
+
+impl SourceStatistics for NoSourceStatistics {
+    fn relation_statistics(&self, _table: &str) -> Option<RelationStats> {
+        None
     }
 }
 
@@ -48,20 +79,46 @@ impl AggregateClassifier for NoRegisteredAggregates {
 }
 
 /// Optimize a fully lowered plan using the built-in aggregate catalogue.
-#[must_use]
-pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> UnifiedPlan {
-    optimize_with_aggregates(plan, config, &NoRegisteredAggregates)
+pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> JoinGraphResult<UnifiedPlan> {
+    optimize_with_aggregates_and_statistics(
+        plan,
+        config,
+        &NoRegisteredAggregates,
+        &NoSourceStatistics,
+    )
 }
 
 /// Optimize a fully lowered plan while classifying engine-local aggregates.
-#[must_use]
 pub fn optimize_with_aggregates(
+    plan: UnifiedPlan,
+    config: &OptimizerConfig,
+    aggregates: &dyn AggregateClassifier,
+) -> JoinGraphResult<UnifiedPlan> {
+    optimize_with_aggregates_and_statistics(plan, config, aggregates, &NoSourceStatistics)
+}
+
+/// Optimize a fully lowered plan with caller-provided relation statistics.
+pub fn optimize_with_statistics(
+    plan: UnifiedPlan,
+    config: &OptimizerConfig,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<UnifiedPlan> {
+    optimize_with_aggregates_and_statistics(plan, config, &NoRegisteredAggregates, statistics)
+}
+
+/// Optimize a fully lowered plan while classifying engine-local aggregates
+/// and costing join orders from the engine's relation statistics.
+pub fn optimize_with_aggregates_and_statistics(
     mut plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) -> UnifiedPlan {
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<UnifiedPlan> {
     optimize_unified_plan(&mut plan, config, aggregates);
-    plan
+    if config.enable_join_reordering {
+        reorder_unified_plan_joins(&mut plan, statistics)?;
+    }
+    Ok(plan)
 }
 
 fn optimize_unified_plan(
@@ -222,6 +279,498 @@ fn optimize_source(
         }
         SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates),
         SourcePlan::Table { .. } => {}
+    }
+}
+
+const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
+
+fn reorder_unified_plan_joins(
+    plan: &mut UnifiedPlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    match plan {
+        UnifiedPlan::Query(query) => reorder_query_joins(query, statistics),
+        UnifiedPlan::Command(command) => reorder_command_joins(command, statistics),
+    }
+}
+
+fn reorder_query_joins(
+    query: &mut QueryPlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    for cte in &mut query.ctes {
+        reorder_query_joins(&mut cte.query, statistics)?;
+    }
+    match &mut query.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &mut block.from {
+                reorder_source_joins(source, statistics)?;
+            }
+            for subquery in &mut block.subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+        RelationalPlan::SetOp { left, right, .. } => {
+            reorder_query_joins(left, statistics)?;
+            reorder_query_joins(right, statistics)?;
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            for subquery in subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reorder_command_joins(
+    command: &mut CommandPlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    match command {
+        CommandPlan::Insert(plan) => {
+            for cte in &mut plan.ctes {
+                reorder_query_joins(&mut cte.query, statistics)?;
+            }
+            if let Some(source) = &mut plan.source {
+                reorder_query_joins(source, statistics)?;
+            }
+            for subquery in &mut plan.subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+        CommandPlan::Update(plan) => {
+            for cte in &mut plan.ctes {
+                reorder_query_joins(&mut cte.query, statistics)?;
+            }
+            if let Some(source) = &mut plan.source {
+                reorder_source_joins(source, statistics)?;
+            }
+            for subquery in &mut plan.subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+        CommandPlan::Delete(plan) => {
+            for cte in &mut plan.ctes {
+                reorder_query_joins(&mut cte.query, statistics)?;
+            }
+            if let Some(source) = &mut plan.source {
+                reorder_source_joins(source, statistics)?;
+            }
+            for subquery in &mut plan.subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+        CommandPlan::Merge(plan) => {
+            reorder_source_joins(&mut plan.source, statistics)?;
+            for subquery in &mut plan.subqueries {
+                reorder_query_joins(subquery, statistics)?;
+            }
+        }
+        CommandPlan::CreateView { query, .. } | CommandPlan::CreateTableAs { query, .. } => {
+            reorder_query_joins(query, statistics)?;
+        }
+        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+            reorder_unified_plan_joins(body, statistics)?;
+        }
+        CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
+            for expression in params {
+                for subquery in &mut expression.subqueries {
+                    reorder_query_joins(subquery, statistics)?;
+                }
+            }
+        }
+        CommandPlan::CreateTable(_)
+        | CommandPlan::CreateIndex(_)
+        | CommandPlan::Drop(_)
+        | CommandPlan::AlterTable(_)
+        | CommandPlan::CreateSchema { .. }
+        | CommandPlan::SetVariable { .. }
+        | CommandPlan::ShowVariable { .. }
+        | CommandPlan::Discard { .. }
+        | CommandPlan::Analyze { .. }
+        | CommandPlan::Truncate { .. }
+        | CommandPlan::Transaction(_)
+        | CommandPlan::CreateSequence(_)
+        | CommandPlan::AlterSequence(_)
+        | CommandPlan::Deallocate { .. }
+        | CommandPlan::CreateForeignServer(_)
+        | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateFunction(_)
+        | CommandPlan::DropFunction(_)
+        | CommandPlan::DoBlock { .. } => {}
+    }
+    Ok(())
+}
+
+fn reorder_source_joins(
+    source: &mut SourcePlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            reorder_source_joins(left, statistics)?;
+            reorder_source_joins(right, statistics)?;
+        }
+        SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics)?,
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
+    }
+
+    if let Some(reordered) = reordered_inner_join_source(source, statistics)? {
+        *source = reordered;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct JoinPredicateBinding {
+    expression: ScalarExpr,
+    qualifiers: BTreeSet<String>,
+    pushable: bool,
+}
+
+fn reordered_inner_join_source(
+    source: &SourcePlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<Option<SourcePlan>> {
+    let mut atoms = Vec::new();
+    let mut expressions = Vec::new();
+    if !flatten_reorderable_inner_join(source, &mut atoms, &mut expressions)
+        || !(2..=64).contains(&atoms.len())
+    {
+        return Ok(None);
+    }
+
+    let mut aliases = BTreeSet::new();
+    let mut relations = Vec::with_capacity(atoms.len());
+    for (source_id, atom) in atoms.iter().enumerate() {
+        let SourcePlan::Table { name, alias } = atom else {
+            return Ok(None);
+        };
+        let qualifier = alias
+            .clone()
+            .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string());
+        if qualifier.is_empty() || !aliases.insert(qualifier.clone()) {
+            return Ok(None);
+        }
+        let relation_stats = statistics.relation_statistics(name);
+        let cardinality = relation_stats
+            .as_ref()
+            .map_or(DEFAULT_JOIN_CARDINALITY, |stats| stats.row_count)
+            as f64;
+        let column_stats = relation_stats.map_or_else(BTreeMap::new, |stats| stats.columns);
+        let source_id = u64::try_from(source_id).map_err(|_| JoinGraphError::InvalidPlan {
+            detail: format!("source index {source_id} exceeds the join plan identifier range"),
+        })?;
+        relations.push(JoinRelation {
+            alias: qualifier,
+            cardinality,
+            column_stats,
+            source_id,
+        });
+    }
+
+    let mut predicates = Vec::new();
+    let mut graph_predicates = Vec::new();
+    for expression in expressions {
+        let mut qualifiers = BTreeSet::new();
+        collect_scalar_qualifiers(&expression, &mut qualifiers);
+        let graph_predicate = join_predicate(&expression, &aliases);
+        let pushable = graph_predicate.is_some();
+        graph_predicates.extend(graph_predicate);
+        predicates.push(JoinPredicateBinding {
+            expression,
+            qualifiers,
+            pushable,
+        });
+    }
+
+    let result = JoinOrderOptimizer::new().optimize(relations, graph_predicates)?;
+    let mut reordered = materialize_join_order(result.tree, &atoms)?;
+    attach_join_predicates(&mut reordered, &mut predicates, true);
+    if !predicates.is_empty() {
+        return Err(JoinGraphError::InvalidPlan {
+            detail: format!(
+                "join reordering failed to retain {} predicate(s)",
+                predicates.len()
+            ),
+        });
+    }
+    Ok(Some(reordered))
+}
+
+fn flatten_reorderable_inner_join(
+    source: &SourcePlan,
+    atoms: &mut Vec<SourcePlan>,
+    predicates: &mut Vec<ScalarExpr>,
+) -> bool {
+    match source {
+        SourcePlan::Join {
+            left,
+            right,
+            kind: uqa_sql::ast::JoinKind::Inner,
+            on,
+            lateral: false,
+            strategy: _,
+        } => {
+            if !flatten_reorderable_inner_join(left, atoms, predicates)
+                || !flatten_reorderable_inner_join(right, atoms, predicates)
+            {
+                return false;
+            }
+            if let Some(on) = on {
+                collect_conjuncts(on, predicates);
+            }
+            true
+        }
+        SourcePlan::Table { .. } => {
+            atoms.push(source.clone());
+            true
+        }
+        SourcePlan::Join { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => false,
+    }
+}
+
+fn collect_conjuncts(expression: &ScalarExpr, output: &mut Vec<ScalarExpr>) {
+    if let ScalarExpr::And(items) = expression {
+        for item in items {
+            collect_conjuncts(item, output);
+        }
+    } else {
+        output.push(expression.clone());
+    }
+}
+
+fn join_predicate(expression: &ScalarExpr, aliases: &BTreeSet<String>) -> Option<JoinPredicate> {
+    let ScalarExpr::Binary {
+        op: BinaryOp::Equal,
+        lhs,
+        rhs,
+    } = expression
+    else {
+        return None;
+    };
+    let (
+        ScalarExpr::QualifiedColumn {
+            qualifier: left_alias,
+            column: left_field,
+            ..
+        },
+        ScalarExpr::QualifiedColumn {
+            qualifier: right_alias,
+            column: right_field,
+            ..
+        },
+    ) = (lhs.as_ref(), rhs.as_ref())
+    else {
+        return None;
+    };
+    if left_alias == right_alias || !aliases.contains(left_alias) || !aliases.contains(right_alias)
+    {
+        return None;
+    }
+    Some(JoinPredicate {
+        left_alias: left_alias.clone(),
+        right_alias: right_alias.clone(),
+        left_field: left_field.clone(),
+        right_field: right_field.clone(),
+    })
+}
+
+fn materialize_join_order(
+    tree: JoinOrderTree,
+    atoms: &[SourcePlan],
+) -> JoinGraphResult<SourcePlan> {
+    match tree {
+        JoinOrderTree::Scan(relation) => {
+            let source_id =
+                usize::try_from(relation.source_id).map_err(|_| JoinGraphError::InvalidPlan {
+                    detail: format!(
+                        "join source id {} exceeds the addressable source range",
+                        relation.source_id
+                    ),
+                })?;
+            atoms
+                .get(source_id)
+                .cloned()
+                .ok_or_else(|| JoinGraphError::InvalidPlan {
+                    detail: format!(
+                        "join source id {source_id} is outside {} source atom(s)",
+                        atoms.len()
+                    ),
+                })
+        }
+        JoinOrderTree::Inner {
+            algorithm,
+            left,
+            right,
+            ..
+        } => Ok(SourcePlan::Join {
+            left: Box::new(materialize_join_order(*left, atoms)?),
+            right: Box::new(materialize_join_order(*right, atoms)?),
+            kind: uqa_sql::ast::JoinKind::Inner,
+            on: None,
+            lateral: false,
+            strategy: match algorithm {
+                JoinAlgorithm::Hash => JoinExecutionStrategy::Hash,
+            },
+        }),
+        JoinOrderTree::Cross { left, right } => Ok(SourcePlan::Join {
+            left: Box::new(materialize_join_order(*left, atoms)?),
+            right: Box::new(materialize_join_order(*right, atoms)?),
+            kind: uqa_sql::ast::JoinKind::Inner,
+            on: None,
+            lateral: false,
+            strategy: JoinExecutionStrategy::Auto,
+        }),
+    }
+}
+
+fn attach_join_predicates(
+    source: &mut SourcePlan,
+    predicates: &mut Vec<JoinPredicateBinding>,
+    root: bool,
+) -> BTreeSet<String> {
+    let SourcePlan::Join {
+        left, right, on, ..
+    } = source
+    else {
+        return source_qualifiers(source);
+    };
+
+    let mut available = attach_join_predicates(left, predicates, false);
+    available.extend(attach_join_predicates(right, predicates, false));
+
+    let mut assigned = Vec::new();
+    let mut retained = Vec::new();
+    for predicate in std::mem::take(predicates) {
+        if root
+            || (predicate.pushable
+                && !predicate.qualifiers.is_empty()
+                && predicate.qualifiers.is_subset(&available))
+        {
+            assigned.push(predicate.expression);
+        } else {
+            retained.push(predicate);
+        }
+    }
+    *predicates = retained;
+    *on = match assigned.len() {
+        0 => None,
+        1 => assigned.pop(),
+        _ => Some(ScalarExpr::And(assigned)),
+    };
+    available
+}
+
+fn source_qualifiers(source: &SourcePlan) -> BTreeSet<String> {
+    let mut qualifiers = BTreeSet::new();
+    if let SourcePlan::Table { name, alias } = source {
+        qualifiers.insert(
+            alias
+                .clone()
+                .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(name).to_string()),
+        );
+    }
+    qualifiers
+}
+
+fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<String>) {
+    match expression {
+        ScalarExpr::QualifiedColumn { qualifier, .. } => {
+            output.insert(qualifier.clone());
+        }
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            for argument in args {
+                collect_scalar_qualifiers(argument, output);
+            }
+            for order in order_by {
+                collect_scalar_qualifiers(&order.expr, output);
+            }
+            if let Some(filter) = filter {
+                collect_scalar_qualifiers(filter, output);
+            }
+        }
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            for item in items {
+                collect_scalar_qualifiers(item, output);
+            }
+        }
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            collect_scalar_qualifiers(lhs, output);
+            collect_scalar_qualifiers(rhs, output);
+        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => collect_scalar_qualifiers(inner, output),
+        ScalarExpr::Between { expr, low, high } => {
+            collect_scalar_qualifiers(expr, output);
+            collect_scalar_qualifiers(low, output);
+            collect_scalar_qualifiers(high, output);
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            collect_scalar_qualifiers(expr, output);
+            for item in list {
+                collect_scalar_qualifiers(item, output);
+            }
+        }
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            for argument in args {
+                collect_scalar_qualifiers(argument, output);
+            }
+            for partition in &spec.partition_by {
+                collect_scalar_qualifiers(partition, output);
+            }
+            for order in &spec.order_by {
+                collect_scalar_qualifiers(&order.expr, output);
+            }
+            if let Some(frame) = &spec.frame {
+                collect_frame_bound_qualifiers(&frame.start, output);
+                collect_frame_bound_qualifiers(&frame.end, output);
+            }
+        }
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            if let Some(base) = base {
+                collect_scalar_qualifiers(base, output);
+            }
+            for (condition, result) in when {
+                collect_scalar_qualifiers(condition, output);
+                collect_scalar_qualifiers(result, output);
+            }
+            if let Some(branch) = else_branch {
+                collect_scalar_qualifiers(branch, output);
+            }
+        }
+        ScalarExpr::InSubquery { expr, .. } => collect_scalar_qualifiers(expr, output),
+        ScalarExpr::Star
+        | ScalarExpr::Column(_)
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => {}
+    }
+}
+
+fn collect_frame_bound_qualifiers(bound: &ScalarFrameBound, output: &mut BTreeSet<String>) {
+    match bound {
+        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
+            collect_scalar_qualifiers(expression, output);
+        }
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => {}
     }
 }
 
@@ -580,10 +1129,12 @@ fn simplify_and(items: Vec<ScalarExpr>) -> ScalarExpr {
             other => kept.push(other),
         }
     }
-    match kept.len() {
-        0 => ScalarExpr::Literal(Value::Bool(true)),
-        1 => kept.pop().expect("one item"),
-        _ => ScalarExpr::And(kept),
+    if kept.is_empty() {
+        ScalarExpr::Literal(Value::Bool(true))
+    } else if kept.len() == 1 {
+        kept.remove(0)
+    } else {
+        ScalarExpr::And(kept)
     }
 }
 
@@ -599,10 +1150,12 @@ fn simplify_or(items: Vec<ScalarExpr>) -> ScalarExpr {
             other => kept.push(other),
         }
     }
-    match kept.len() {
-        0 => ScalarExpr::Literal(Value::Bool(false)),
-        1 => kept.pop().expect("one item"),
-        _ => ScalarExpr::Or(kept),
+    if kept.is_empty() {
+        ScalarExpr::Literal(Value::Bool(false))
+    } else if kept.len() == 1 {
+        kept.remove(0)
+    } else {
+        ScalarExpr::Or(kept)
     }
 }
 
@@ -635,10 +1188,12 @@ fn merge_vector_thresholds(expression: ScalarExpr) -> ScalarExpr {
                 others.push(merge_vector_thresholds(item));
             }
             others.extend(by_field.into_values().map(|(expression, _)| expression));
-            match others.len() {
-                0 => ScalarExpr::Literal(Value::Bool(true)),
-                1 => others.pop().expect("one item"),
-                _ => ScalarExpr::And(others),
+            if others.is_empty() {
+                ScalarExpr::Literal(Value::Bool(true))
+            } else if others.len() == 1 {
+                others.remove(0)
+            } else {
+                ScalarExpr::And(others)
             }
         }
         ScalarExpr::Or(items) => {
@@ -711,7 +1266,10 @@ fn root_score_retrieval(expression: &ScalarExpr) -> bool {
     )
 }
 
-fn contains_retrieval(expression: &ScalarExpr) -> bool {
+/// Whether a scalar expression contains a posting-list retrieval operator.
+/// Relational executors use the same classification as access-path planning
+/// so registered retrieval calls never fall through to scalar evaluation.
+pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
     match expression {
         ScalarExpr::Func {
             name,
@@ -826,11 +1384,26 @@ fn retrieval_function(name: &str) -> bool {
             | "learned_fusion"
             | "fuse_learned"
             | "sparse_threshold"
+            | "graph_pagerank"
+            | "pagerank"
+            | "graph_hits"
+            | "hits"
+            | "graph_betweenness"
+            | "betweenness"
+            | "graph_traverse"
+            | "traverse_match"
+            | "graph_neighbors"
+            | "graph_edges"
+            | "temporal_traverse"
+            | "rpq"
+            | "deep_predict"
     )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use uqa_sql::compile;
 
     use super::*;
@@ -841,6 +1414,79 @@ mod tests {
             UnifiedPlan::lower(statements.remove(0)),
             &OptimizerConfig::default(),
         )
+        .expect("optimizer succeeds")
+    }
+
+    fn optimized_with_rows(sql: &str, rows: &[(&str, u64)]) -> UnifiedPlan {
+        let mut statements = compile(sql).expect("SQL compiles");
+        let rows = rows.iter().copied().collect::<BTreeMap<_, _>>();
+        optimize_with_statistics(
+            UnifiedPlan::lower(statements.remove(0)),
+            &OptimizerConfig::default(),
+            &|table: &str| {
+                rows.get(table).copied().map(|row_count| {
+                    let column = || crate::ColumnStats {
+                        distinct_count: row_count,
+                        row_count,
+                        ..crate::ColumnStats::default()
+                    };
+                    crate::RelationStats::new(row_count)
+                        .with_column("id", column())
+                        .with_column("a_id", column())
+                        .with_column("b_id", column())
+                })
+            },
+        )
+        .expect("optimizer succeeds")
+    }
+
+    fn query_block(plan: &UnifiedPlan) -> &QueryBlockPlan {
+        let UnifiedPlan::Query(query) = plan else {
+            panic!("query plan expected");
+        };
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("query block expected");
+        };
+        block
+    }
+
+    fn source_aliases(source: &SourcePlan) -> BTreeSet<String> {
+        match source {
+            SourcePlan::Table { name, alias } => {
+                BTreeSet::from([alias.clone().unwrap_or_else(|| name.clone())])
+            }
+            SourcePlan::Join { left, right, .. } => {
+                let mut aliases = source_aliases(left);
+                aliases.extend(source_aliases(right));
+                aliases
+            }
+            SourcePlan::Values { .. }
+            | SourcePlan::Function { .. }
+            | SourcePlan::Subquery { .. } => BTreeSet::new(),
+        }
+    }
+
+    fn conjunct_count(expression: &ScalarExpr) -> usize {
+        match expression {
+            ScalarExpr::And(items) => items.iter().map(conjunct_count).sum(),
+            _ => 1,
+        }
+    }
+
+    fn source_predicate_count(source: &SourcePlan) -> usize {
+        match source {
+            SourcePlan::Join {
+                left, right, on, ..
+            } => {
+                source_predicate_count(left)
+                    + source_predicate_count(right)
+                    + on.as_ref().map_or(0, conjunct_count)
+            }
+            SourcePlan::Table { .. }
+            | SourcePlan::Values { .. }
+            | SourcePlan::Function { .. }
+            | SourcePlan::Subquery { .. } => 0,
+        }
     }
 
     #[test]
@@ -948,6 +1594,124 @@ mod tests {
         assert!(matches!(
             parts.first(),
             Some(ScalarExpr::Func { name, .. }) if name == "text_match"
+        ));
+    }
+
+    #[test]
+    fn dpccp_reorders_inner_join_source_from_relation_statistics() {
+        let plan = optimized_with_rows(
+            "SELECT a.id FROM a \
+             JOIN b ON a.id = b.a_id \
+             JOIN c ON b.id = c.b_id",
+            &[("a", 1_000_000), ("b", 10_000), ("c", 10)],
+        );
+        let source = query_block(&plan).from.as_ref().expect("join source");
+        let SourcePlan::Join {
+            left, right, on, ..
+        } = source
+        else {
+            panic!("top-level join expected");
+        };
+
+        let left_aliases = source_aliases(left);
+        let right_aliases = source_aliases(right);
+        let small_pair = BTreeSet::from(["b".to_string(), "c".to_string()]);
+        assert!(
+            left_aliases == small_pair || right_aliases == small_pair,
+            "unexpected DPccp source: {source:?}"
+        );
+        assert!(on.is_some(), "a-b predicate must remain on the root join");
+        assert_eq!(source_predicate_count(source), 2);
+    }
+
+    #[test]
+    fn join_reordering_preserves_outer_join_boundary() {
+        let plan = optimized_with_rows(
+            "SELECT a.id FROM a \
+             LEFT JOIN b ON a.id = b.a_id \
+             JOIN c ON b.id = c.b_id",
+            &[("a", 1_000_000), ("b", 10_000), ("c", 1)],
+        );
+        let source = query_block(&plan).from.as_ref().expect("join source");
+        let SourcePlan::Join {
+            left,
+            right,
+            kind: uqa_sql::ast::JoinKind::Inner,
+            lateral: false,
+            ..
+        } = source
+        else {
+            panic!("original top-level inner join must remain");
+        };
+        assert!(matches!(
+            left.as_ref(),
+            SourcePlan::Join {
+                kind: uqa_sql::ast::JoinKind::Left,
+                ..
+            }
+        ));
+        assert_eq!(source_aliases(right), BTreeSet::from(["c".to_string()]));
+        assert_eq!(source_predicate_count(source), 2);
+    }
+
+    #[test]
+    fn join_reordering_preserves_lateral_boundary() {
+        let mut statements = compile(
+            "SELECT a.id FROM a \
+             JOIN b ON a.id = b.a_id \
+             JOIN c ON b.id = c.b_id",
+        )
+        .expect("SQL compiles");
+        let mut plan = UnifiedPlan::lower(statements.remove(0));
+        let UnifiedPlan::Query(query) = &mut plan else {
+            panic!("query plan expected");
+        };
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            panic!("query block expected");
+        };
+        let SourcePlan::Join { lateral, .. } = block.from.as_mut().expect("join source") else {
+            panic!("join expected");
+        };
+        *lateral = true;
+
+        let rows = BTreeMap::from([("a", 1_000_000), ("b", 10_000), ("c", 1)]);
+        let plan = optimize_with_statistics(plan, &OptimizerConfig::default(), &|table: &str| {
+            rows.get(table).copied().map(|row_count| {
+                let column = || crate::ColumnStats {
+                    distinct_count: row_count,
+                    row_count,
+                    ..crate::ColumnStats::default()
+                };
+                crate::RelationStats::new(row_count)
+                    .with_column("id", column())
+                    .with_column("a_id", column())
+                    .with_column("b_id", column())
+            })
+        })
+        .expect("optimizer succeeds");
+        let source = query_block(&plan).from.as_ref().expect("join source");
+        let SourcePlan::Join {
+            left,
+            right,
+            lateral: true,
+            strategy: JoinExecutionStrategy::Auto,
+            ..
+        } = source
+        else {
+            panic!("lateral root boundary must remain unchanged: {source:?}");
+        };
+        assert_eq!(
+            source_aliases(left),
+            BTreeSet::from(["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(source_aliases(right), BTreeSet::from(["c".to_string()]));
+        assert!(matches!(
+            left.as_ref(),
+            SourcePlan::Join {
+                strategy: JoinExecutionStrategy::Hash,
+                lateral: false,
+                ..
+            }
         ));
     }
 }

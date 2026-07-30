@@ -55,10 +55,10 @@ pub use progressive_fusion::ProgressiveFusionOperator;
 pub use sparse::SparseThresholdOperator;
 pub use tree::{
     AttentionFuserDyn, AttentionRef, DeepFusionAggregation, DeepFusionLayer, DeepFusionPoolMethod,
-    EdgeConstraint, EdgePatternIR, GatingSpec, GraphPatternIR, LearnedFuserDyn, LearnedFusionRef,
-    MultiStageCutoff, MultiStageEntry, OperatorTree, PathWeightPredicate, ProbBoolMode,
-    ProgressiveFusionEntry, ScorerRef, TemporalFilterIR, TextScoringMode, VertexConstraint,
-    VertexPatternIR, VertexPredicate,
+    EdgeConstraint, EdgePatternIR, ExternalPriorMode, GatingSpec, GraphPatternIR, LearnedFuserDyn,
+    LearnedFusionRef, MultiStageCutoff, MultiStageEntry, OperatorTree, PathWeightPredicate,
+    ProbBoolMode, ProgressiveFusionEntry, ScorerRef, TemporalFilterIR, TextScoringMode,
+    VertexConstraint, VertexPatternIR, VertexPredicate,
 };
 pub use uqa_core::{PathExpr, PathSegment};
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

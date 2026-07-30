@@ -38,6 +38,52 @@ use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 const PROMPT_PRIMARY: &str = "usql> ";
 const PROMPT_CONTINUATION: &str = "    > ";
 const HISTORY_FILE: &str = ".usql_history";
+
+struct TrackedWriter<W> {
+    inner: W,
+    first_error: Option<String>,
+}
+
+impl<W> TrackedWriter<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            first_error: None,
+        }
+    }
+
+    fn error(&self) -> Option<&str> {
+        self.first_error.as_deref()
+    }
+
+    fn remember_error(&mut self, error: &io::Error) {
+        if self.first_error.is_none() {
+            self.first_error = Some(error.to_string());
+        }
+    }
+}
+
+impl<W: Write> Write for TrackedWriter<W> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        match self.inner.write(buffer) {
+            Ok(written) => Ok(written),
+            Err(error) => {
+                self.remember_error(&error);
+                Err(error)
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self.inner.flush() {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.remember_error(&error);
+                Err(error)
+            }
+        }
+    }
+}
 const SQL_KEYWORDS: &[&str] = &[
     "CREATE",
     "TABLE",
@@ -178,7 +224,8 @@ const BACKSLASH_COMMANDS: &[(&str, &str)] = &[
     ("\\dF", "List foreign tables"),
     ("\\dS", "List foreign servers"),
     ("\\dg", "List graphs"),
-    ("\\ds", "Show statistics"),
+    ("\\ds", "List sequences"),
+    ("\\stats", "Show column statistics"),
     ("\\x", "Expanded display"),
     ("\\o", "Output to file"),
     ("\\timing", "Toggle timing"),
@@ -559,18 +606,24 @@ fn main() -> ExitCode {
         }
     };
     match action {
-        CliAction::Help => {
-            print_usage_stdout();
-            ExitCode::SUCCESS
-        }
+        CliAction::Help => match print_usage_stdout() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("write help output: {error}");
+                ExitCode::FAILURE
+            }
+        },
         CliAction::Migrate {
             source,
             destination,
         } => match migrate_python_database(&source, &destination) {
-            Ok(report) => {
-                print_migration_report_stdout(&report);
-                ExitCode::SUCCESS
-            }
+            Ok(report) => match print_migration_report_stdout(&report) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("write migration report: {error}");
+                    ExitCode::FAILURE
+                }
+            },
             Err(err) => {
                 eprintln!("migration failed: {err}");
                 ExitCode::FAILURE
@@ -597,25 +650,41 @@ fn run_cli(args: CliArgs) -> ExitCode {
     };
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut out = stdout.lock();
+    let mut out = TrackedWriter::new(stdout.lock());
 
-    if let Some(command) = args.command {
-        session.execute_text(&command, &mut out);
-        return ExitCode::SUCCESS;
-    }
-
-    for script in &args.scripts {
-        if let Err(err) = session.run_file(script, &mut out) {
-            eprintln!("{err}");
-            return ExitCode::FAILURE;
+    let exit = if let Some(command) = args.command {
+        match session.execute_text(&command, &mut out) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                let _ = writeln!(out, "ERROR: {err}");
+                ExitCode::FAILURE
+            }
         }
-    }
+    } else {
+        let mut scripts_succeeded = true;
+        for script in &args.scripts {
+            if let Err(err) = session.run_file(script, &mut out) {
+                eprintln!("{err}");
+                scripts_succeeded = false;
+                break;
+            }
+        }
 
-    if !args.scripts.is_empty() && !stdin.is_terminal() {
-        return ExitCode::SUCCESS;
-    }
+        if !scripts_succeeded {
+            ExitCode::FAILURE
+        } else if !args.scripts.is_empty() && !stdin.is_terminal() {
+            ExitCode::SUCCESS
+        } else {
+            session.run_repl(&mut out)
+        }
+    };
 
-    session.run_repl(&mut out)
+    if let Some(error) = out.error() {
+        eprintln!("write command output: {error}");
+        ExitCode::FAILURE
+    } else {
+        exit
+    }
 }
 
 #[derive(Debug)]
@@ -727,8 +796,8 @@ impl CliAction {
     }
 }
 
-fn print_usage_stdout() {
-    println!("{}", usage_text());
+fn print_usage_stdout() -> io::Result<()> {
+    writeln!(io::stdout().lock(), "{}", usage_text())
 }
 
 fn print_usage_stderr() {
@@ -741,7 +810,10 @@ fn usage_text() -> &'static str {
 
 impl Session {
     fn run_repl(&mut self, out: &mut impl Write) -> ExitCode {
-        self.print_banner();
+        if let Err(error) = self.print_banner(out) {
+            eprintln!("write banner: {error}");
+            return ExitCode::FAILURE;
+        }
         if io::stdin().is_terminal() {
             return self.run_interactive_repl(out);
         }
@@ -762,10 +834,20 @@ impl Session {
                 return ExitCode::FAILURE;
             }
         };
-        self.load_readline_history(&mut editor);
+        if let Err(error) = self.load_readline_history(&mut editor) {
+            let _ = writeln!(out, "history load error: {error}");
+            return ExitCode::FAILURE;
+        }
         let mut buffer = String::new();
         loop {
-            editor.set_helper(Some(self.repl_helper()));
+            let helper = match self.repl_helper() {
+                Ok(helper) => helper,
+                Err(err) => {
+                    let _ = writeln!(out, "completion catalog error: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            editor.set_helper(Some(helper));
             let prompt = if buffer.is_empty() {
                 PROMPT_PRIMARY
             } else {
@@ -774,12 +856,17 @@ impl Session {
             match editor.readline(prompt) {
                 Ok(line) => {
                     self.remember_prompt_line(&line);
-                    if self
-                        .handle_prompt_line_with_history(&line, &mut buffer, out, false)
-                        .is_none()
-                    {
-                        self.append_readline_history(&mut editor);
-                        return ExitCode::SUCCESS;
+                    if matches!(
+                        self.handle_prompt_line_with_history(&line, &mut buffer, out, false),
+                        PromptLineOutcome::Quit
+                    ) {
+                        return match self.append_readline_history(&mut editor) {
+                            Ok(()) => ExitCode::SUCCESS,
+                            Err(error) => {
+                                let _ = writeln!(out, "history save error: {error}");
+                                ExitCode::FAILURE
+                            }
+                        };
                     }
                 }
                 Err(ReadlineError::Interrupted) => {
@@ -788,12 +875,19 @@ impl Session {
                 }
                 Err(ReadlineError::Eof) => {
                     let _ = writeln!(out);
-                    self.append_readline_history(&mut editor);
-                    return ExitCode::SUCCESS;
+                    return match self.append_readline_history(&mut editor) {
+                        Ok(()) => ExitCode::SUCCESS,
+                        Err(error) => {
+                            let _ = writeln!(out, "history save error: {error}");
+                            ExitCode::FAILURE
+                        }
+                    };
                 }
                 Err(err) => {
                     let _ = writeln!(out, "readline error: {err}");
-                    self.append_readline_history(&mut editor);
+                    if let Err(error) = self.append_readline_history(&mut editor) {
+                        let _ = writeln!(out, "history save error: {error}");
+                    }
                     return ExitCode::FAILURE;
                 }
             }
@@ -804,6 +898,7 @@ impl Session {
         let stdin = io::stdin();
         let mut input = String::new();
         let mut buffer = String::new();
+        let mut had_error = false;
         loop {
             let prompt = if buffer.is_empty() {
                 PROMPT_PRIMARY
@@ -816,8 +911,16 @@ impl Session {
             let read = stdin.lock().read_line(&mut input);
             match read {
                 Ok(0) => {
+                    if !buffer.trim().is_empty() {
+                        let _ = writeln!(out, "ERROR: unterminated SQL statement at end of input");
+                        return ExitCode::FAILURE;
+                    }
                     let _ = writeln!(out);
-                    return ExitCode::SUCCESS;
+                    return if had_error {
+                        ExitCode::FAILURE
+                    } else {
+                        ExitCode::SUCCESS
+                    };
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -826,8 +929,16 @@ impl Session {
                 }
             }
             let line = input.trim_end_matches(['\n', '\r']);
-            if self.handle_prompt_line(line, &mut buffer, out).is_none() {
-                return ExitCode::SUCCESS;
+            match self.handle_prompt_line(line, &mut buffer, out) {
+                PromptLineOutcome::Continue => {}
+                PromptLineOutcome::Failed => had_error = true,
+                PromptLineOutcome::Quit => {
+                    return if had_error {
+                        ExitCode::FAILURE
+                    } else {
+                        ExitCode::SUCCESS
+                    };
+                }
             }
         }
     }
@@ -837,7 +948,7 @@ impl Session {
         line: &str,
         buffer: &mut String,
         out: &mut impl Write,
-    ) -> Option<()> {
+    ) -> PromptLineOutcome {
         self.handle_prompt_line_with_history(line, buffer, out, true)
     }
 
@@ -847,17 +958,14 @@ impl Session {
         buffer: &mut String,
         out: &mut impl Write,
         record_sql_history: bool,
-    ) -> Option<()> {
+    ) -> PromptLineOutcome {
         if buffer.is_empty() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
-                return Some(());
+                return PromptLineOutcome::Continue;
             }
             if let Some(rest) = trimmed.strip_prefix('\\') {
-                if !self.handle_meta(rest, out) {
-                    return None;
-                }
-                return Some(());
+                return self.handle_meta(rest, out);
             }
         }
         if !buffer.is_empty() {
@@ -865,11 +973,22 @@ impl Session {
         }
         buffer.push_str(line);
         if contains_statement_terminator(buffer) {
-            self.execute_text_with_history(buffer, out, record_sql_history);
+            if let Err(err) = self.execute_text_with_history(buffer, out, record_sql_history) {
+                let _ = writeln!(out, "ERROR: {err}");
+                buffer.clear();
+                return PromptLineOutcome::Failed;
+            }
             buffer.clear();
         }
-        Some(())
+        PromptLineOutcome::Continue
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptLineOutcome {
+    Continue,
+    Failed,
+    Quit,
 }
 
 struct Session {
@@ -889,16 +1008,23 @@ struct Session {
 impl Session {
     fn new(db_path: Option<PathBuf>, key: Option<&str>) -> Result<Self, String> {
         let history_path = history_path();
-        let history = history_path
-            .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|text| {
-                text.lines()
+        let history = match history_path.as_ref() {
+            Some(path) => match std::fs::read_to_string(path) {
+                Ok(text) => text
+                    .lines()
                     .filter(|l| !l.trim().is_empty())
                     .map(std::string::ToString::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+                    .collect(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => {
+                    return Err(format!(
+                        "failed to read history file {}: {error}",
+                        path.display()
+                    ));
+                }
+            },
+            None => Vec::new(),
+        };
         let (engine, location, db_key) = open_engine(db_path.as_deref(), key)?;
         Ok(Self {
             engine,
@@ -913,39 +1039,52 @@ impl Session {
         })
     }
 
-    fn repl_helper(&self) -> UsqlHelper {
+    fn repl_helper(&self) -> Result<UsqlHelper, String> {
         let mut columns = BTreeSet::new();
-        for table in self.engine.table_names() {
-            if let Some(defs) = self.engine.describe_table(&table) {
+        let table_names = self.engine.table_names().map_err(|err| err.to_string())?;
+        for table in &table_names {
+            if let Some(defs) = self
+                .engine
+                .describe_table(table)
+                .map_err(|err| err.to_string())?
+            {
                 columns.extend(defs.into_iter().map(|def| def.name));
             }
         }
-        let foreign_tables = self.engine.list_foreign_tables();
+        let foreign_tables = self.engine.list_foreign_tables()?;
         for table in &foreign_tables {
-            columns.extend(self.engine.foreign_table_columns(table));
+            columns.extend(self.engine.foreign_table_columns(table)?);
         }
-        UsqlHelper::new(
-            self.engine.table_names(),
+        Ok(UsqlHelper::new(
+            table_names,
             foreign_tables,
             columns.into_iter().collect(),
-        )
+        ))
     }
 
-    fn load_readline_history(&self, editor: &mut UsqlEditor) {
+    fn load_readline_history(&self, editor: &mut UsqlEditor) -> Result<(), String> {
         let Some(path) = &self.history_path else {
-            return;
+            return Ok(());
         };
-        let _ = editor.load_history(path);
+        match editor.load_history(path) {
+            Ok(()) => Ok(()),
+            Err(ReadlineError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("{}: {error}", path.display())),
+        }
     }
 
-    fn append_readline_history(&self, editor: &mut UsqlEditor) {
+    fn append_readline_history(&self, editor: &mut UsqlEditor) -> Result<(), String> {
         let Some(path) = &self.history_path else {
-            return;
+            return Ok(());
         };
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!("create history directory {}: {error}", parent.display())
+            })?;
         }
-        let _ = editor.append_history(path);
+        editor
+            .append_history(path)
+            .map_err(|error| format!("append {}: {error}", path.display()))
     }
 
     fn remember_prompt_line(&mut self, line: &str) {
@@ -959,45 +1098,52 @@ impl Session {
         self.history.push(trimmed.to_string());
     }
 
-    fn record_statement(&mut self, sql: &str) {
+    fn record_statement(&mut self, sql: &str) -> Result<(), String> {
         let trimmed = sql.trim();
         if trimmed.is_empty() {
-            return;
+            return Ok(());
         }
         if self.history.last().is_some_and(|l| l == trimmed) {
-            return;
+            return Ok(());
         }
-        self.history.push(trimmed.to_string());
         if let Some(path) = &self.history_path {
             if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    format!("create history directory {}: {error}", parent.display())
+                })?;
             }
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
-                let _ = writeln!(f, "{trimmed}");
-            }
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|error| format!("open history file {}: {error}", path.display()))?;
+            writeln!(file, "{trimmed}")
+                .map_err(|error| format!("write history file {}: {error}", path.display()))?;
         }
+        self.history.push(trimmed.to_string());
+        Ok(())
     }
 
-    fn print_banner(&self) {
-        println!(
+    fn print_banner(&self, out: &mut impl Write) -> io::Result<()> {
+        writeln!(
+            out,
             "usql {} -- UQA interactive SQL shell",
             env!("CARGO_PKG_VERSION")
-        );
-        println!("Database: {}", self.location);
-        println!("Type SQL statements terminated by ';'");
-        println!("Use \\? for help, \\q to quit.");
-        println!();
+        )?;
+        writeln!(out, "Database: {}", self.location)?;
+        writeln!(out, "Type SQL statements terminated by ';'")?;
+        writeln!(out, "Use \\? for help, \\q to quit.")?;
+        writeln!(out)
     }
 
     fn run_file(&mut self, path: &Path, out: &mut impl Write) -> Result<(), String> {
         let text = std::fs::read_to_string(path)
             .map_err(|err| format!("File not found or unreadable: {}: {err}", path.display()))?;
-        self.execute_text(&text, out);
-        Ok(())
+        self.execute_text(&text, out)
     }
 
-    fn execute_text(&mut self, text: &str, out: &mut impl Write) {
-        self.execute_text_with_history(text, out, true);
+    fn execute_text(&mut self, text: &str, out: &mut impl Write) -> Result<(), String> {
+        self.execute_text_with_history(text, out, true)
     }
 
     fn execute_text_with_history(
@@ -1005,13 +1151,14 @@ impl Session {
         text: &str,
         out: &mut impl Write,
         record_history: bool,
-    ) {
+    ) -> Result<(), String> {
         for stmt in split_statements(text) {
             if statement_is_pure_comment(&stmt) {
                 continue;
             }
-            self.run_statement_with_history(&stmt, out, record_history);
+            self.run_statement_with_history(&stmt, out, record_history)?;
         }
+        Ok(())
     }
 
     fn run_statement_with_history(
@@ -1019,77 +1166,105 @@ impl Session {
         sql: &str,
         out: &mut impl Write,
         record_history: bool,
-    ) {
+    ) -> Result<(), String> {
         if record_history {
-            self.record_statement(sql);
+            self.record_statement(sql)?;
         }
         let start = std::time::Instant::now();
         let outcome = self.engine.sql(sql, &[]);
         let elapsed = start.elapsed();
-        match outcome {
-            Ok(result) => {
-                self.write_query_output(out, |writer| {
-                    if self.expanded {
-                        print_result_expanded(&result, writer);
-                    } else {
-                        print_result(&result, writer);
-                    }
-                });
-            }
-            Err(err) => {
-                let _ = writeln!(out, "ERROR: {err}");
-            }
-        }
-        if self.show_timing {
+        let result = match outcome {
+            Ok(result) => self.write_query_output(out, |writer| {
+                if self.expanded {
+                    print_result_expanded(&result, writer);
+                } else {
+                    print_result(&result, writer);
+                }
+            }),
+            Err(err) => Err(err.to_string()),
+        };
+        let timing_result = if self.show_timing {
             let ms = elapsed.as_secs_f64() * 1000.0;
             self.write_query_output(out, |writer| {
                 let _ = writeln!(writer, "Time: {ms:.3} ms");
-            });
-        }
-    }
-
-    fn write_query_output(&self, out: &mut impl Write, write: impl FnOnce(&mut dyn Write)) {
-        if let Some(path) = &self.output_path {
-            match OpenOptions::new().create(true).append(true).open(path) {
-                Ok(mut file) => write(&mut file),
-                Err(err) => {
-                    let _ = writeln!(out, "output failed: {}: {err}", path.display());
-                }
-            }
+            })
         } else {
-            write(out);
+            Ok(())
+        };
+        result.and(timing_result)
+    }
+
+    fn write_query_output(
+        &self,
+        out: &mut impl Write,
+        write: impl FnOnce(&mut dyn Write),
+    ) -> Result<(), String> {
+        if let Some(path) = &self.output_path {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|error| format!("output failed: {}: {error}", path.display()))?;
+            let mut tracked = TrackedWriter::new(&mut file);
+            write(&mut tracked);
+            let flush_result = tracked.flush();
+            if let Some(error) = tracked.error() {
+                return Err(format!("output failed: {}: {error}", path.display()));
+            }
+            flush_result.map_err(|error| format!("output failed: {}: {error}", path.display()))
+        } else {
+            let mut tracked = TrackedWriter::new(out);
+            write(&mut tracked);
+            let flush_result = tracked.flush();
+            if let Some(error) = tracked.error() {
+                return Err(format!("write query output: {error}"));
+            }
+            flush_result.map_err(|error| format!("flush query output: {error}"))
         }
     }
 
-    /// Returns `false` when the meta command requested an exit.
     #[allow(clippy::too_many_lines)]
-    fn handle_meta(&mut self, command: &str, out: &mut impl Write) -> bool {
+    fn handle_meta(&mut self, command: &str, out: &mut impl Write) -> PromptLineOutcome {
         let mut parts = command.trim().splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");
         let arg = parts.next().unwrap_or("").trim();
-        match cmd {
-            "q" | "quit" | "exit" => return false,
-            "?" | "help" | "h" => print_backslash_help(out),
+        let result = match cmd {
+            "q" | "quit" | "exit" => return PromptLineOutcome::Quit,
+            "?" | "help" | "h" => {
+                print_backslash_help(out);
+                Ok(())
+            }
             "history" => match arg {
                 "" => {
                     for line in &self.history {
                         let _ = writeln!(out, "{line}");
                     }
+                    Ok(())
                 }
                 "clear" => {
-                    self.history.clear();
-                    if let Some(path) = &self.history_path {
-                        let _ = std::fs::remove_file(path);
+                    let removal = self.history_path.as_ref().map_or(Ok(()), |path| {
+                        std::fs::remove_file(path).or_else(|error| {
+                            if error.kind() == io::ErrorKind::NotFound {
+                                Ok(())
+                            } else {
+                                Err(error)
+                            }
+                        })
+                    });
+                    match removal {
+                        Ok(()) => {
+                            self.history.clear();
+                            let _ = writeln!(out, "history cleared");
+                            Ok(())
+                        }
+                        Err(error) => Err(format!("history clear failed: {error}")),
                     }
-                    let _ = writeln!(out, "history cleared");
                 }
-                other => {
-                    let _ = writeln!(out, "usage: \\history [clear] (got {other:?})");
-                }
+                other => Err(format!("usage: \\history [clear] (got {other:?})")),
             },
             "open" => {
                 if arg.is_empty() {
-                    let _ = writeln!(out, "usage: \\open <path>");
+                    Err("usage: \\open <path>".into())
                 } else {
                     match open_engine_with_key(Path::new(arg), None) {
                         Ok((engine, location, key)) => {
@@ -1098,10 +1273,9 @@ impl Session {
                             self.db_key = key;
                             self.location = location;
                             let _ = writeln!(out, "opened {arg}");
+                            Ok(())
                         }
-                        Err(err) => {
-                            let _ = writeln!(out, "{err}");
-                        }
+                        Err(err) => Err(err),
                     }
                 }
             }
@@ -1111,6 +1285,7 @@ impl Session {
                 self.db_key = None;
                 self.location = ":memory:".into();
                 let _ = writeln!(out, "fresh in-memory engine");
+                Ok(())
             }
             "reset" => match open_engine(self.db_path.as_deref(), self.db_key.as_deref()) {
                 Ok((engine, location, key)) => {
@@ -1118,122 +1293,143 @@ impl Session {
                     self.db_key = key;
                     self.location = location;
                     let _ = writeln!(out, "Engine reset.");
+                    Ok(())
                 }
-                Err(err) => {
-                    let _ = writeln!(out, "reset failed: {err}");
-                }
+                Err(err) => Err(format!("reset failed: {err}")),
             },
             "where" => {
                 let _ = writeln!(out, "{}", self.location);
+                Ok(())
             }
             "timing" => {
                 self.show_timing = !self.show_timing;
                 let state = if self.show_timing { "on" } else { "off" };
                 let _ = writeln!(out, "Timing is {state}.");
+                Ok(())
             }
             "expanded" | "x" => {
                 self.expanded = !self.expanded;
                 let state = if self.expanded { "on" } else { "off" };
                 let _ = writeln!(out, "Expanded display is {state}.");
+                Ok(())
             }
-            "o" => {
-                self.handle_output_redirect(arg, out);
-            }
-            "dt" | "tables" => {
-                self.cmd_list_tables(out);
-            }
-            "describe" | "d" => {
-                self.cmd_describe_table(arg, out);
-            }
-            "di" => {
-                self.cmd_list_indexes(out);
-            }
-            "stats" => {
-                self.cmd_show_stats(arg, out);
-            }
-            "ds" => {
-                self.cmd_list_sequences(arg, out);
-            }
-            "dg" | "graphs" => {
-                self.cmd_list_graphs(out);
-            }
-            "dfs" | "dS" => {
-                self.cmd_list_foreign_servers(out);
-            }
-            "dft" | "dF" => {
-                self.cmd_list_foreign_tables(out);
-            }
-            "da" | "analyzers" => {
-                let names = self.engine.list_named_analyzers();
-                if names.is_empty() {
-                    let _ = writeln!(out, "no analyzers registered");
-                } else {
-                    for name in names {
-                        let _ = writeln!(out, "  {name}");
+            "o" => self.handle_output_redirect(arg, out),
+            "dt" | "tables" => self.cmd_list_tables(out),
+            "describe" | "d" => self.cmd_describe_table(arg, out),
+            "di" => self.cmd_list_indexes(out),
+            "stats" => self.cmd_show_stats(arg, out),
+            "ds" => self.cmd_list_sequences(arg, out),
+            "dg" | "graphs" => self.cmd_list_graphs(out),
+            "dfs" | "dS" => self.cmd_list_foreign_servers(out),
+            "dft" | "dF" => self.cmd_list_foreign_tables(out),
+            "da" | "analyzers" => self
+                .engine
+                .list_named_analyzers()
+                .map_err(|err| format!("Failed to read analyzers: {err}"))
+                .map(|names| {
+                    if names.is_empty() {
+                        let _ = writeln!(out, "no analyzers registered");
+                    } else {
+                        for name in names {
+                            let _ = writeln!(out, "  {name}");
+                        }
                     }
-                }
-            }
+                }),
             "run" => {
                 if arg.is_empty() {
-                    let _ = writeln!(out, "usage: \\run <file>");
-                } else if let Err(err) = self.run_file(Path::new(arg), out) {
-                    let _ = writeln!(out, "{err}");
+                    Err("usage: \\run <file>".into())
+                } else {
+                    self.run_file(Path::new(arg), out)
                 }
             }
-            "migrate-python-db" => {
-                self.handle_migrate_python_db(arg, out);
-            }
+            "migrate-python-db" => self.handle_migrate_python_db(arg, out),
             other => {
-                let _ = writeln!(out, "Unknown command: \\{other}");
                 print_backslash_help(out);
+                Err(format!("unknown command: \\{other}"))
+            }
+        };
+        match result {
+            Ok(()) => PromptLineOutcome::Continue,
+            Err(error) => {
+                let _ = writeln!(out, "ERROR: {error}");
+                PromptLineOutcome::Failed
             }
         }
-        true
     }
 
-    fn handle_output_redirect(&mut self, arg: &str, out: &mut impl Write) {
+    fn handle_output_redirect(&mut self, arg: &str, out: &mut impl Write) -> Result<(), String> {
         if arg.is_empty() {
             if let Some(path) = self.output_path.take() {
                 let _ = writeln!(out, "Output restored to stdout (was: {}).", path.display());
             } else {
                 let _ = writeln!(out, "Output already goes to stdout.");
             }
-            return;
+            return Ok(());
         }
-        self.output_path = Some(PathBuf::from(arg));
-        let _ = writeln!(out, "Output redirected to: {arg}");
+        let path = PathBuf::from(arg);
+        match OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(_) => {
+                self.output_path = Some(path);
+                let _ = writeln!(out, "Output redirected to: {arg}");
+                Ok(())
+            }
+            Err(error) => Err(format!("Output redirection failed for {arg}: {error}")),
+        }
     }
 
-    fn cmd_list_tables(&self, out: &mut impl Write) {
+    fn cmd_list_tables(&self, out: &mut impl Write) -> Result<(), String> {
+        let table_names = self
+            .engine
+            .table_names()
+            .map_err(|err| format!("Failed to read tables: {err}"))?;
         let mut rows = Vec::new();
-        for name in self.engine.table_names() {
-            let columns = self
+        for name in table_names {
+            let columns = match self.engine.describe_table(&name) {
+                Ok(Some(columns)) => usize_count_value(columns.len()),
+                Ok(None) => {
+                    return Err(format!(
+                        "table '{name}' disappeared while listing its metadata"
+                    ));
+                }
+                Err(err) => return Err(format!("Failed to describe table '{name}': {err}")),
+            };
+            let row_count = self
                 .engine
-                .describe_table(&name)
-                .map_or(0_i64, |cols| cols.len() as i64);
+                .table_doc_ids(&name)
+                .map(|doc_ids| usize_count_value(doc_ids.len()))
+                .map_err(|err| format!("Failed to count rows in '{name}': {err}"))?;
             rows.push(result_row(vec![
                 ("table_name", Value::Str(name.clone())),
                 ("type", Value::Str("table".into())),
-                ("columns", Value::Int(columns)),
-                (
-                    "rows",
-                    Value::Int(self.engine.table_doc_ids(&name).len() as i64),
-                ),
+                ("columns", columns),
+                ("rows", row_count),
             ]));
         }
-        for name in self.engine.list_foreign_tables() {
-            if let Some(table) = self.engine.foreign_table(&name) {
-                rows.push(result_row(vec![
-                    ("table_name", Value::Str(name)),
-                    ("type", Value::Str("foreign".into())),
-                    ("columns", Value::Int(table.columns.len() as i64)),
-                    ("rows", Value::Str(String::new())),
-                ]));
+        let foreign_tables = self
+            .engine
+            .list_foreign_tables()
+            .map_err(|err| format!("Failed to read foreign tables: {err}"))?;
+        for name in foreign_tables {
+            match self.engine.foreign_table(&name) {
+                Ok(Some(table)) => {
+                    rows.push(result_row(vec![
+                        ("table_name", Value::Str(name)),
+                        ("type", Value::Str("foreign".into())),
+                        ("columns", usize_count_value(table.columns.len())),
+                        ("rows", Value::Str(String::new())),
+                    ]));
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "foreign table '{name}' disappeared while listing its metadata"
+                    ));
+                }
+                Err(err) => return Err(format!("Failed to read foreign table '{name}': {err}")),
             }
         }
         if rows.is_empty() {
             let _ = writeln!(out, "No tables.");
-            return;
+            return Ok(());
         }
         print_result(
             &SQLResult::from_rows(
@@ -1247,54 +1443,70 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_describe_table(&self, name: &str, out: &mut impl Write) {
+    fn cmd_describe_table(&self, name: &str, out: &mut impl Write) -> Result<(), String> {
         if name.is_empty() {
-            let _ = writeln!(out, "Usage: \\d <table_name>");
-            return;
+            return Err("Usage: \\d <table_name>".into());
         }
-        if let Some(cols) = self.engine.describe_table(name) {
-            let _ = writeln!(out, "Table \"{name}\"");
-            print_columns(&cols, out);
-            return;
+        match self.engine.describe_table(name) {
+            Ok(Some(cols)) => {
+                let _ = writeln!(out, "Table \"{name}\"");
+                print_columns(&cols, out);
+                return Ok(());
+            }
+            Ok(None) => {}
+            Err(err) => return Err(format!("Failed to describe table '{name}': {err}")),
         }
-        if let Some(table) = self.engine.foreign_table(name) {
-            let _ = writeln!(
-                out,
-                "Foreign table \"{name}\" (server: {})",
-                table.server_name
-            );
-            let rows = table
-                .columns
-                .iter()
-                .map(|col| {
-                    result_row(vec![
-                        ("column", Value::Str(col.name.clone())),
-                        ("type", Value::Str(fdw_type_name(col.ty).into())),
-                        ("constraints", Value::Str(String::new())),
-                    ])
-                })
-                .collect();
-            print_result(
-                &SQLResult::from_rows(
-                    vec!["column".into(), "type".into(), "constraints".into()],
-                    rows,
-                ),
-                out,
-            );
-            return;
+        match self.engine.foreign_table(name) {
+            Ok(Some(table)) => {
+                let _ = writeln!(
+                    out,
+                    "Foreign table \"{name}\" (server: {})",
+                    table.server_name
+                );
+                let rows = table
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        result_row(vec![
+                            ("column", Value::Str(col.name.clone())),
+                            ("type", Value::Str(fdw_type_name(&col.ty))),
+                            ("constraints", Value::Str(String::new())),
+                        ])
+                    })
+                    .collect();
+                print_result(
+                    &SQLResult::from_rows(
+                        vec!["column".into(), "type".into(), "constraints".into()],
+                        rows,
+                    ),
+                    out,
+                );
+                return Ok(());
+            }
+            Ok(None) => {}
+            Err(err) => return Err(format!("Failed to read foreign table '{name}': {err}")),
         }
-        let _ = writeln!(out, "Table '{name}' does not exist.");
+        Err(format!("Table '{name}' does not exist."))
     }
 
-    fn cmd_list_indexes(&self, out: &mut impl Write) {
-        if self.engine.table_names().is_empty() {
+    fn cmd_list_indexes(&self, out: &mut impl Write) -> Result<(), String> {
+        let table_names = self
+            .engine
+            .table_names()
+            .map_err(|err| format!("Failed to read tables: {err}"))?;
+        if table_names.is_empty() {
             let _ = writeln!(out, "No tables.");
-            return;
+            return Ok(());
         }
         let mut by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for stat in self.engine.fts_index_stats(None) {
+        let stats = self
+            .engine
+            .fts_index_stats(None)
+            .map_err(|err| format!("Failed to read index statistics: {err}"))?;
+        for stat in stats {
             by_table
                 .entry(stat.table_name)
                 .or_default()
@@ -1302,7 +1514,7 @@ impl Session {
         }
         if by_table.is_empty() {
             let _ = writeln!(out, "No indexed fields.");
-            return;
+            return Ok(());
         }
         let rows = by_table
             .into_iter()
@@ -1318,21 +1530,25 @@ impl Session {
             &SQLResult::from_rows(vec!["table_name".into(), "indexed_fields".into()], rows),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_show_stats(&self, name: &str, out: &mut impl Write) {
+    fn cmd_show_stats(&self, name: &str, out: &mut impl Write) -> Result<(), String> {
         if name.is_empty() {
-            let _ = writeln!(out, "Usage: \\stats <table_name>");
-            return;
+            return Err("Usage: \\stats <table_name>".into());
         }
-        if self.engine.describe_table(name).is_none() {
-            let _ = writeln!(out, "Table '{name}' does not exist.");
-            return;
+        match self.engine.describe_table(name) {
+            Ok(Some(_)) => {}
+            Ok(None) => return Err(format!("Table '{name}' does not exist.")),
+            Err(err) => return Err(format!("Failed to describe table '{name}': {err}")),
         }
-        let stats = self.engine.column_stats(name);
+        let stats = self
+            .engine
+            .column_stats(name)
+            .map_err(|err| format!("Failed to read statistics for '{name}': {err}"))?;
         if stats.is_empty() {
             let _ = writeln!(out, "No statistics for '{name}' (no declared columns).");
-            return;
+            return Ok(());
         }
         let row_count = stats.values().next().map_or(0, |s| s.row_count);
         let _ = writeln!(out, "Statistics for \"{name}\" ({row_count} rows)");
@@ -1341,8 +1557,8 @@ impl Session {
             .map(|(col, s)| {
                 result_row(vec![
                     ("column", Value::Str(col)),
-                    ("distinct", Value::Int(s.distinct_count as i64)),
-                    ("nulls", Value::Int(s.null_count as i64)),
+                    ("distinct", u64_count_value(s.distinct_count)),
+                    ("nulls", u64_count_value(s.null_count)),
                     ("min", optional_value_to_display_value(s.min_value.as_ref())),
                     ("max", optional_value_to_display_value(s.max_value.as_ref())),
                     ("selectivity", Value::Float(s.equality_selectivity())),
@@ -1363,25 +1579,30 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_list_sequences(&self, name: &str, out: &mut impl Write) {
+    fn cmd_list_sequences(&self, name: &str, out: &mut impl Write) -> Result<(), String> {
         let rows: Vec<_> = if name.is_empty() {
             self.engine
-                .sequences_snapshot()
+                .try_sequences_snapshot()
+                .map_err(|error| format!("Failed to read sequences: {error}"))?
                 .into_iter()
                 .map(sequence_row)
                 .collect()
-        } else if let Some((canonical, state)) = self.engine.sequence_state(name) {
-            vec![sequence_row((canonical, state))]
         } else {
-            let _ = writeln!(out, "Sequence '{name}' does not exist.");
-            return;
+            match self.engine.sequence_state(name) {
+                Ok(Some((canonical, state))) => vec![sequence_row((canonical, state))],
+                Ok(None) => return Err(format!("Sequence '{name}' does not exist.")),
+                Err(error) => {
+                    return Err(format!("Failed to read sequence '{name}': {error}"));
+                }
+            }
         };
 
         if rows.is_empty() {
             let _ = writeln!(out, "No sequences.");
-            return;
+            return Ok(());
         }
         print_result(
             &SQLResult::from_rows(
@@ -1395,29 +1616,40 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_list_foreign_tables(&self, out: &mut impl Write) {
-        let names = self.engine.list_foreign_tables();
+    fn cmd_list_foreign_tables(&self, out: &mut impl Write) -> Result<(), String> {
+        let names = self
+            .engine
+            .list_foreign_tables()
+            .map_err(|err| format!("Failed to read foreign tables: {err}"))?;
         if names.is_empty() {
             let _ = writeln!(out, "No foreign tables.");
-            return;
+            return Ok(());
         }
-        let rows = names
-            .into_iter()
-            .filter_map(|name| self.engine.foreign_table(&name))
-            .map(|table| {
-                let options = foreign_table_options_display(&table.options);
-                let source = table.options.get("source").cloned().unwrap_or_default();
-                result_row(vec![
-                    ("table_name", Value::Str(table.name)),
-                    ("server", Value::Str(table.server_name)),
-                    ("columns", Value::Int(table.columns.len() as i64)),
-                    ("source", Value::Str(source)),
-                    ("options", Value::Str(options)),
-                ])
-            })
-            .collect();
+        let mut rows = Vec::new();
+        for name in names {
+            match self.engine.foreign_table(&name) {
+                Ok(Some(table)) => {
+                    let options = foreign_table_options_display(&table.options);
+                    let source = table.options.get("source").cloned().unwrap_or_default();
+                    rows.push(result_row(vec![
+                        ("table_name", Value::Str(table.name)),
+                        ("server", Value::Str(table.server_name)),
+                        ("columns", usize_count_value(table.columns.len())),
+                        ("source", Value::Str(source)),
+                        ("options", Value::Str(options)),
+                    ]));
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "foreign table '{name}' disappeared while listing its metadata"
+                    ));
+                }
+                Err(err) => return Err(format!("Failed to read foreign table '{name}': {err}")),
+            }
+        }
         print_result(
             &SQLResult::from_rows(
                 vec![
@@ -1431,25 +1663,34 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_list_foreign_servers(&self, out: &mut impl Write) {
-        let names = self.engine.list_foreign_servers();
+    fn cmd_list_foreign_servers(&self, out: &mut impl Write) -> Result<(), String> {
+        let names = self
+            .engine
+            .list_foreign_servers()
+            .map_err(|err| format!("Failed to read foreign servers: {err}"))?;
         if names.is_empty() {
             let _ = writeln!(out, "No foreign servers.");
-            return;
+            return Ok(());
         }
-        let rows = names
-            .into_iter()
-            .filter_map(|name| self.engine.foreign_server(&name))
-            .map(|server| {
-                result_row(vec![
+        let mut rows = Vec::new();
+        for name in names {
+            match self.engine.foreign_server(&name) {
+                Ok(Some(server)) => rows.push(result_row(vec![
                     ("server_name", Value::Str(server.name)),
                     ("fdw_type", Value::Str(server.fdw_type)),
                     ("options", Value::Str(options_display(&server.options))),
-                ])
-            })
-            .collect();
+                ])),
+                Ok(None) => {
+                    return Err(format!(
+                        "foreign server '{name}' disappeared while listing its metadata"
+                    ));
+                }
+                Err(err) => return Err(format!("Failed to read foreign server '{name}': {err}")),
+            }
+        }
         print_result(
             &SQLResult::from_rows(
                 vec!["server_name".into(), "fdw_type".into(), "options".into()],
@@ -1457,33 +1698,42 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn cmd_list_graphs(&self, out: &mut impl Write) {
-        let names = self.engine.list_graphs();
+    fn cmd_list_graphs(&self, out: &mut impl Write) -> Result<(), String> {
+        let names = self
+            .engine
+            .list_graphs()
+            .map_err(|err| format!("Failed to read graphs: {err}"))?;
         if names.is_empty() {
             let _ = writeln!(out, "No named graphs.");
-            return;
+            return Ok(());
         }
-        let rows = names
-            .into_iter()
-            .map(|name| {
-                let (vertices, edges) = self
-                    .engine
-                    .graph_with(&name, |store| {
-                        (
-                            store.vertex_ids_in_graph(&name).len(),
-                            store.edges_in_graph(&name).len(),
-                        )
-                    })
-                    .unwrap_or((0, 0));
-                result_row(vec![
-                    ("graph_name", Value::Str(name)),
-                    ("vertices", Value::Int(vertices as i64)),
-                    ("edges", Value::Int(edges as i64)),
-                ])
-            })
-            .collect();
+        let mut rows = Vec::new();
+        for name in names {
+            let counts = match self.engine.graph_with(&name, |store| {
+                let vertices = store.vertex_ids_in_graph(&name)?.len();
+                let edges = store.edges_in_graph(&name)?.len();
+                Ok::<_, uqa_graph::GraphStoreError>((vertices, edges))
+            }) {
+                Ok(Some(Ok(counts))) => counts,
+                Ok(Some(Err(err))) => {
+                    return Err(format!("Failed to read graph '{name}': {err}"));
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "graph '{name}' disappeared while listing its metadata"
+                    ));
+                }
+                Err(err) => return Err(format!("Failed to read graph '{name}': {err}")),
+            };
+            rows.push(result_row(vec![
+                ("graph_name", Value::Str(name)),
+                ("vertices", usize_count_value(counts.0)),
+                ("edges", usize_count_value(counts.1)),
+            ]));
+        }
         print_result(
             &SQLResult::from_rows(
                 vec!["graph_name".into(), "vertices".into(), "edges".into()],
@@ -1491,67 +1741,60 @@ impl Session {
             ),
             out,
         );
+        Ok(())
     }
 
-    fn handle_migrate_python_db(&mut self, arg: &str, out: &mut impl Write) {
+    fn handle_migrate_python_db(&mut self, arg: &str, out: &mut impl Write) -> Result<(), String> {
         let parts = arg.split_whitespace().collect::<Vec<_>>();
         if parts.len() != 2 {
-            let _ = writeln!(out, "usage: \\migrate-python-db <source> <destination>");
-            return;
+            return Err("usage: \\migrate-python-db <source> <destination>".into());
         }
         let source = Path::new(parts[0]);
         let destination = Path::new(parts[1]);
-        match migrate_python_database(source, destination) {
-            Ok(report) => {
-                print_migration_report(&report, out);
-                match Engine::open(destination) {
-                    Ok(engine) => {
-                        self.engine = engine;
-                        self.db_path = Some(destination.to_path_buf());
-                        self.location = destination.display().to_string();
-                        let _ = writeln!(out, "opened {}", self.location);
-                    }
-                    Err(err) => {
-                        let _ = writeln!(out, "open migrated database failed: {err}");
-                    }
-                }
-            }
-            Err(err) => {
-                let _ = writeln!(out, "migration failed: {err}");
-            }
-        }
+        let report = migrate_python_database(source, destination)
+            .map_err(|err| format!("migration failed: {err}"))?;
+        print_migration_report(&report, out)
+            .map_err(|error| format!("write migration report failed: {error}"))?;
+        let engine = Engine::open(destination)
+            .map_err(|err| format!("open migrated database failed: {err}"))?;
+        self.engine = engine;
+        self.db_path = Some(destination.to_path_buf());
+        self.db_key = None;
+        self.location = destination.display().to_string();
+        let _ = writeln!(out, "opened {}", self.location);
+        Ok(())
     }
 }
 
-fn print_migration_report_stdout(report: &PythonMigrationReport) {
+fn print_migration_report_stdout(report: &PythonMigrationReport) -> io::Result<()> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    print_migration_report(report, &mut out);
+    print_migration_report(report, &mut out)
 }
 
-fn print_migration_report(report: &PythonMigrationReport, out: &mut impl Write) {
-    let _ = writeln!(out, "migrated {}", report.source_path.display());
-    let _ = writeln!(out, "destination {}", report.destination_path.display());
-    let _ = writeln!(
+fn print_migration_report(report: &PythonMigrationReport, out: &mut impl Write) -> io::Result<()> {
+    writeln!(out, "migrated {}", report.source_path.display())?;
+    writeln!(out, "destination {}", report.destination_path.display())?;
+    writeln!(
         out,
         "tables={} documents={} fts_fields={} vector_fields={} indexes={}",
         report.tables, report.documents, report.fts_fields, report.vector_fields, report.indexes
-    );
-    let _ = writeln!(
+    )?;
+    writeln!(
         out,
         "graphs={} vertices={} edges={} path_indexes={}",
         report.graphs, report.graph_vertices, report.graph_edges, report.path_indexes
-    );
-    let _ = writeln!(
+    )?;
+    writeln!(
         out,
         "analyzers={} table_field_analyzers={} scoring_params={} models={}",
         report.analyzers, report.table_field_analyzers, report.scoring_params, report.models
-    );
-    let _ = writeln!(
+    )?;
+    writeln!(
         out,
         "foreign_servers={} foreign_tables={} column_stats={}",
         report.foreign_servers, report.foreign_tables, report.column_stats
-    );
+    )
 }
 
 /// Open `path` with encryption support. When the file requires a key
@@ -1644,6 +1887,20 @@ fn result_row(entries: Vec<(&str, Value)>) -> BTreeMap<String, Value> {
         .collect()
 }
 
+fn usize_count_value(value: usize) -> Value {
+    match i64::try_from(value) {
+        Ok(value) => Value::Int(value),
+        Err(_) => Value::Str(value.to_string()),
+    }
+}
+
+fn u64_count_value(value: u64) -> Value {
+    match i64::try_from(value) {
+        Ok(value) => Value::Int(value),
+        Err(_) => Value::Str(value.to_string()),
+    }
+}
+
 fn sequence_row((name, state): (String, uqa_engine::SequenceState)) -> BTreeMap<String, Value> {
     result_row(vec![
         ("sequence_name", Value::Str(name)),
@@ -1683,6 +1940,7 @@ fn optional_value_to_display_value(value: Option<&Value>) -> Value {
 fn sql_type_name(ty: &ColumnType) -> String {
     match ty {
         ColumnType::Integer => "integer".into(),
+        ColumnType::Boolean => "boolean".into(),
         ColumnType::Text => "text".into(),
         ColumnType::Real => "real".into(),
         ColumnType::Numeric { precision, scale } => match (precision, scale) {
@@ -1693,6 +1951,7 @@ fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Json => "json".into(),
         ColumnType::JsonB => "jsonb".into(),
         ColumnType::Bytea => "bytea".into(),
+        ColumnType::Array(element) => format!("{}[]", sql_type_name(element)),
         ColumnType::Date => "date".into(),
         ColumnType::Time => "time".into(),
         ColumnType::TimeTz => "time with time zone".into(),
@@ -1703,13 +1962,14 @@ fn sql_type_name(ty: &ColumnType) -> String {
     }
 }
 
-fn fdw_type_name(ty: uqa_fdw::ColumnType) -> &'static str {
+fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
     match ty {
-        uqa_fdw::ColumnType::Integer => "integer",
-        uqa_fdw::ColumnType::Real => "real",
-        uqa_fdw::ColumnType::Text => "text",
-        uqa_fdw::ColumnType::Bool => "boolean",
-        uqa_fdw::ColumnType::Bytes => "bytea",
+        uqa_fdw::ColumnType::Integer => "integer".into(),
+        uqa_fdw::ColumnType::Real => "real".into(),
+        uqa_fdw::ColumnType::Text => "text".into(),
+        uqa_fdw::ColumnType::Bool => "boolean".into(),
+        uqa_fdw::ColumnType::Bytes => "bytea".into(),
+        uqa_fdw::ColumnType::Array(element) => format!("{}[]", fdw_type_name(element)),
     }
 }
 
@@ -2014,11 +2274,12 @@ fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Str(s)) => s.clone(),
         // PostgreSQL bytea hex output form.
         Some(Value::Bytes(b)) => {
-            use std::fmt::Write as _;
-            let mut out = String::with_capacity(2 + b.len() * 2);
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let mut out = String::new();
             out.push_str("\\x");
             for byte in b {
-                let _ = write!(out, "{byte:02x}");
+                out.push(char::from(HEX[usize::from(byte >> 4)]));
+                out.push(char::from(HEX[usize::from(byte & 0x0f)]));
             }
             out
         }
@@ -2029,16 +2290,16 @@ fn value_to_display(v: Option<&Value>) -> String {
         // arrays print canonical jsonb text. A jsonb array of plain
         // scalars is indistinguishable from a SQL array without type
         // metadata and renders in array syntax - documented divergence.
-        Some(Value::List(items)) => {
+        Some(value @ Value::List(items)) => {
             if items.iter().any(|item| matches!(item, Value::Map(_))) {
-                json_value_display(v.expect("list value"))
+                json_value_display(value)
             } else {
                 pg_array_display(items)
             }
         }
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
-        Some(Value::Map(_)) => json_value_display(v.expect("map value")),
+        Some(value @ Value::Map(_)) => json_value_display(value),
     }
 }
 
@@ -2080,9 +2341,9 @@ fn json_value_display(v: &Value) -> String {
         Value::Int(n) => n.to_string(),
         Value::Float(f) => format!("{f}"),
         Value::Decimal(d) => d.to_sql_string(),
-        Value::Str(s) => serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\"")),
+        Value::Str(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
-            serde_json::to_string(&value_to_display(Some(v))).unwrap_or_default()
+            serde_json::Value::String(value_to_display(Some(v))).to_string()
         }
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(json_value_display).collect();
@@ -2092,7 +2353,7 @@ fn json_value_display(v: &Value) -> String {
             let inner: Vec<String> = m
                 .iter()
                 .map(|(k, v)| {
-                    let key = serde_json::to_string(k).unwrap_or_else(|_| format!("\"{k}\""));
+                    let key = serde_json::Value::String(k.clone()).to_string();
                     format!("{key}: {}", json_value_display(v))
                 })
                 .collect();
@@ -2214,8 +2475,9 @@ mod tests {
     #[test]
     fn meta_ds_lists_sequences_using_search_path() {
         let engine = Engine::new();
+        engine.sql("CREATE SCHEMA app", &[]).unwrap();
         engine.set_search_path(vec!["app".into(), "public".into()]);
-        assert!(engine.create_sequence("acct_seq", 10, 2, false));
+        assert!(engine.create_sequence("acct_seq", 10, 2, false).unwrap());
         assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
         let mut session = Session {
             engine,
@@ -2230,10 +2492,13 @@ mod tests {
         };
 
         let mut out = Vec::new();
-        assert!(session.handle_meta("ds acct_seq", &mut out));
+        assert_eq!(
+            session.handle_meta("ds acct_seq", &mut out),
+            PromptLineOutcome::Continue
+        );
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("app.acct_seq"));
-        assert!(text.contains("10"));
+        assert!(text.contains("app.acct_seq"), "{text}");
+        assert!(text.contains("10"), "{text}");
     }
 
     #[test]

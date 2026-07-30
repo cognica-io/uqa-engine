@@ -104,7 +104,8 @@ fn sqlite_engine_matches_text_search_fixture() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("uqa.sqlite3");
     let eng = Engine::open(&db_path).unwrap();
-    eng.create_default_table("articles", vec!["title".into(), "body".into()]);
+    eng.create_default_table("articles", vec!["title".into(), "body".into()])
+        .unwrap();
 
     for c in &fx.corpus {
         let mut d = Document::new();
@@ -115,7 +116,9 @@ fn sqlite_engine_matches_text_search_fixture() {
 
     for case in &fx.queries {
         let mode = parse_mode(&case.scoring);
-        let hits = eng.search("articles", &case.field, &case.query, &mode, case.top_k);
+        let hits = eng
+            .search("articles", &case.field, &case.query, &mode, case.top_k)
+            .unwrap();
         assert_eq!(
             hits.len(),
             case.expected.len(),
@@ -143,8 +146,10 @@ fn sqlite_engine_matches_hybrid_search_fixture() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("uqa.sqlite3");
     let eng = Engine::open(&db_path).unwrap();
-    eng.create_default_table("articles", vec!["title".into()]);
-    eng.create_vector_field("articles", "embedding", fx.vector_dim);
+    eng.create_default_table("articles", vec!["title".into()])
+        .unwrap();
+    eng.create_vector_field("articles", "embedding", fx.vector_dim)
+        .unwrap();
 
     for c in &fx.corpus {
         let mut d = Document::new();
@@ -156,16 +161,18 @@ fn sqlite_engine_matches_hybrid_search_fixture() {
     }
 
     for case in &fx.queries {
-        let hits = eng.hybrid_search(&HybridSearchParams {
-            table: "articles",
-            text_field: &case.text_field,
-            text_query: &case.text_query,
-            vector_field: "embedding",
-            query_vector: case.query_vector.clone(),
-            knn_pool: case.knn_pool,
-            alpha: case.alpha,
-            top_k: case.top_k,
-        });
+        let hits = eng
+            .hybrid_search(&HybridSearchParams {
+                table: "articles",
+                text_field: &case.text_field,
+                text_query: &case.text_query,
+                vector_field: "embedding",
+                query_vector: case.query_vector.clone(),
+                knn_pool: case.knn_pool,
+                alpha: case.alpha,
+                top_k: case.top_k,
+            })
+            .unwrap();
         assert_eq!(
             hits.len(),
             case.expected.len(),
@@ -203,28 +210,29 @@ fn engine_state_survives_close_and_reopen() {
     let score_before_close;
     {
         let eng = Engine::open(&db_path).unwrap();
-        eng.create_default_table("articles", vec!["title".into()]);
-        eng.create_vector_field("articles", "embedding", 3);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
+        eng.create_vector_field("articles", "embedding", 3).unwrap();
         let mut d = Document::new();
         d.insert("title".into(), Value::Str("rust language".into()));
         let mut vectors = BTreeMap::new();
         vectors.insert("embedding".into(), vec![1.0f32, 0.0, 0.0]);
         eng.add_document_with_vectors("articles", 42, d, vectors)
             .unwrap();
-        let hits = eng.hybrid_search(&hybrid_params());
+        let hits = eng.hybrid_search(&hybrid_params()).unwrap();
         assert_eq!(hits.first().map(|h| h.doc_id), Some(42));
         score_before_close = hits[0].score;
         assert!(score_before_close > 0.0);
     } // engine drops; SQLite connection closes; WAL is checkpointed on next open.
 
     let eng = Engine::open(&db_path).unwrap();
-    let got = eng.get_document("articles", 42).unwrap();
+    let got = eng.get_document("articles", 42).unwrap().unwrap();
     assert_eq!(got.get("title"), Some(&Value::Str("rust language".into())));
 
     // Hybrid search still works after restore: the inverted index, doc
     // store, vector index, and persisted calibration parameters were
     // restored from the catalog, so the fused probability is identical.
-    let hits = eng.hybrid_search(&hybrid_params());
+    let hits = eng.hybrid_search(&hybrid_params()).unwrap();
     assert_eq!(hits.first().map(|h| h.doc_id), Some(42));
     assert!(
         (hits[0].score - score_before_close).abs() < 1e-12,

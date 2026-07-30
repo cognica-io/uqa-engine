@@ -60,6 +60,8 @@ fn set_table_analyzer_records_assignment() {
         &[],
     )
     .unwrap();
+    eng.sql("CREATE INDEX docs_title_fts ON docs USING gin (title)", &[])
+        .unwrap();
     eng.sql(
         "SELECT * FROM create_analyzer('strict', '{\"tokenizer\":\"keyword\"}')",
         &[],
@@ -72,7 +74,36 @@ fn set_table_analyzer_records_assignment() {
         )
         .unwrap();
     assert_eq!(r.rows.len(), 1);
-    let recorded = eng.table_field_analyzer("docs", "title").unwrap();
+    let recorded = eng
+        .table_field_analyzer("docs", "title")
+        .unwrap()
+        .expect("table analyzer assignment");
     assert_eq!(recorded.0, "strict");
     assert_eq!(recorded.1, "both");
+}
+
+#[test]
+fn set_table_analyzer_rejects_non_string_phase() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("CREATE INDEX docs_title_fts ON docs USING gin (title)", &[])
+        .unwrap();
+    eng.sql(
+        "SELECT * FROM create_analyzer('strict', '{\"tokenizer\":\"keyword\"}')",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "SELECT * FROM set_table_analyzer('docs', 'title', 'strict', 42)",
+            &[],
+        )
+        .expect_err("an invalid phase type must not silently select `both`");
+    assert!(error.to_string().contains("phase"), "{error}");
+    assert_eq!(eng.table_field_analyzer("docs", "title").unwrap(), None);
 }

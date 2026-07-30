@@ -192,7 +192,7 @@ def test_scoring_params_calibration_workflow() -> None:
 
     raw = engine.search("docs", "body", "rust engine", top_k=1, scoring="bm25")
     engine.update_scoring_params("docs", "body", raw[0]["score"], 1)
-    with pytest.raises(RuntimeError, match="label"):
+    with pytest.raises(ValueError, match="label"):
         engine.update_scoring_params("docs", "body", raw[0]["score"], 2)
 
     assert engine.drop_scoring_params("docs.body") is True

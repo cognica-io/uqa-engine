@@ -27,16 +27,20 @@ fn engine_with_simple_graph() -> Engine {
         )
         .unwrap();
     // 1 -> 2 -> 3, 1 -> 4
-    engine.create_graph("g");
-    engine.graph_with_mut("g", |store| {
-        store.create_graph("g");
-        for v in 1..=4 {
-            store.add_vertex(Vertex::new(v, "n"), "g");
-        }
-        store.add_edge(Edge::new(10, 1, 2, "knows"), "g");
-        store.add_edge(Edge::new(11, 2, 3, "knows"), "g");
-        store.add_edge(Edge::new(12, 1, 4, "likes"), "g");
-    });
+    engine.create_graph("g").unwrap();
+    engine
+        .graph_with_mut("g", |store| {
+            store.create_graph("g");
+            for v in 1..=4 {
+                store.add_vertex(Vertex::new(v, "n"), "g")?;
+            }
+            store.add_edge(Edge::new(10, 1, 2, "knows"), "g")?;
+            store.add_edge(Edge::new(11, 2, 3, "knows"), "g")?;
+            store.add_edge(Edge::new(12, 1, 4, "likes"), "g")?;
+            Ok(())
+        })
+        .unwrap()
+        .expect("graph exists");
     engine
 }
 
@@ -175,16 +179,20 @@ fn graph_pagerank_scores_central_vertex_higher_in_star() {
     engine
         .sql("INSERT INTO seeds (id) VALUES (1), (2), (3), (4)", &[])
         .unwrap();
-    engine.create_graph("star");
-    engine.graph_with_mut("star", |store| {
-        store.create_graph("star");
-        for v in 1..=4 {
-            store.add_vertex(Vertex::new(v, "n"), "star");
-        }
-        store.add_edge(Edge::new(10, 1, 2, "e"), "star");
-        store.add_edge(Edge::new(11, 3, 2, "e"), "star");
-        store.add_edge(Edge::new(12, 4, 2, "e"), "star");
-    });
+    engine.create_graph("star").unwrap();
+    engine
+        .graph_with_mut("star", |store| {
+            store.create_graph("star");
+            for v in 1..=4 {
+                store.add_vertex(Vertex::new(v, "n"), "star")?;
+            }
+            store.add_edge(Edge::new(10, 1, 2, "e"), "star")?;
+            store.add_edge(Edge::new(11, 3, 2, "e"), "star")?;
+            store.add_edge(Edge::new(12, 4, 2, "e"), "star")?;
+            Ok(())
+        })
+        .unwrap()
+        .expect("graph exists");
 
     let result = engine
         .sql(

@@ -11,6 +11,12 @@
 //! planning, or SQL execution. Integrators feed byte slices into the frontend
 //! decoders and translate decoded protocol messages into their own server and
 //! engine logic.
+//!
+//! Consequently this crate preserves cancellation requests, explicit error
+//! responses, and failed-transaction status bytes, but it cannot decide when
+//! an engine error or rollback must produce them. That mapping is a required
+//! responsibility of the embedding server; there is no query-execution bridge
+//! in this crate that could turn an execution failure into an empty success.
 
 pub mod backend;
 mod codec;

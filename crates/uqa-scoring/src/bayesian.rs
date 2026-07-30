@@ -8,6 +8,7 @@
 //! (Eq. 25-27, Paper 3) + two-step posterior (Remark 4.4.5).
 
 use crate::prob::{clamp_prob, sigmoid};
+use crate::{error::invalid_input, ScoringResult};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BayesianProbabilityTransform {
@@ -29,18 +30,24 @@ impl Default for BayesianProbabilityTransform {
 }
 
 impl BayesianProbabilityTransform {
-    pub fn new(alpha: f64, beta: f64, base_rate: Option<f64>) -> Self {
-        if let Some(br) = base_rate {
-            assert!(
-                br > 0.0 && br < 1.0,
-                "base_rate must be in (0, 1), got {br}"
-            );
+    pub fn new(alpha: f64, beta: f64, base_rate: Option<f64>) -> ScoringResult<Self> {
+        if !alpha.is_finite() || !beta.is_finite() {
+            return Err(invalid_input(format!(
+                "Bayesian alpha and beta must be finite, got alpha={alpha}, beta={beta}"
+            )));
         }
-        Self {
+        if let Some(br) = base_rate {
+            if !br.is_finite() || !(0.0..1.0).contains(&br) || br == 0.0 {
+                return Err(invalid_input(format!(
+                    "base_rate must be finite and in (0, 1), got {br}"
+                )));
+            }
+        }
+        Ok(Self {
             alpha,
             beta,
             base_rate,
-        }
+        })
     }
 
     /// Sigmoid likelihood: `sigma(alpha * (score - beta))` (Eq. 20).
@@ -168,8 +175,17 @@ mod tests {
 
     #[test]
     fn likelihood_at_beta_is_half() {
-        let t = BayesianProbabilityTransform::new(1.0, 5.0, None);
+        let t = BayesianProbabilityTransform::new(1.0, 5.0, None).unwrap();
         approx_eq(t.likelihood(5.0), 0.5, 1e-12);
+    }
+
+    #[test]
+    fn constructor_rejects_non_finite_parameters_and_invalid_base_rates() {
+        assert!(BayesianProbabilityTransform::new(f64::NAN, 0.0, None).is_err());
+        assert!(BayesianProbabilityTransform::new(1.0, f64::INFINITY, None).is_err());
+        assert!(BayesianProbabilityTransform::new(1.0, 0.0, Some(0.0)).is_err());
+        assert!(BayesianProbabilityTransform::new(1.0, 0.0, Some(1.0)).is_err());
+        assert!(BayesianProbabilityTransform::new(1.0, 0.0, Some(f64::NAN)).is_err());
     }
 
     #[test]
@@ -232,7 +248,7 @@ mod tests {
 
     #[test]
     fn score_to_probability_pipeline() {
-        let t = BayesianProbabilityTransform::new(1.0, 0.0, None);
+        let t = BayesianProbabilityTransform::new(1.0, 0.0, None).unwrap();
         // For score=0 the likelihood is 0.5, posterior collapses to the prior.
         let p_zero = t.score_to_probability(0.0, 0.0, 1.0);
         approx_eq(
@@ -244,7 +260,7 @@ mod tests {
 
     #[test]
     fn wand_upper_bound_dominates_actual_posterior() {
-        let t = BayesianProbabilityTransform::new(1.0, 0.0, None);
+        let t = BayesianProbabilityTransform::new(1.0, 0.0, None).unwrap();
         let upper = t.wand_upper_bound(5.0, 0.9);
         // Any actual posterior with score <= 5.0 must not exceed `upper`.
         for tf in [0.0, 1.0, 10.0] {

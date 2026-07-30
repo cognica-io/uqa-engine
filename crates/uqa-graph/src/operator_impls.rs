@@ -14,8 +14,9 @@
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, PostingList};
-use uqa_operators::base::{ExecutionContext, Operator};
+use uqa_operators::base::{ExecutionContext, Operator, OperatorResult};
 use uqa_operators::PathWeightPredicate;
+use uqa_storage::StorageBackendError;
 
 use crate::cypher::{CypherQuery, CypherWriter};
 use crate::memory_store::MemoryGraphStore;
@@ -109,7 +110,7 @@ impl WeightedPathQueryOperator {
 }
 
 impl Operator for WeightedPathQueryOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
         let mut query = WeightedPathQuery::new(
             self.path_expr.clone(),
             &self.graph_name,
@@ -122,7 +123,10 @@ impl Operator for WeightedPathQueryOperator {
         if let Some(v) = self.start_vertex {
             query = query.from_vertex(v);
         }
-        query.execute(self.graph_store.as_ref()).to_posting_list()
+        Ok(query
+            .execute(self.graph_store.as_ref())
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            .to_posting_list())
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -177,16 +181,16 @@ impl CypherQueryOperator {
 }
 
 impl Operator for CypherQueryOperator {
-    fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
         // The Cypher executor needs a unique borrow of the store. The
         // engine passes `Arc<RwLock<...>>` so concurrent readers can
         // share the store while writers serialize through the lock.
         let mut guard = self.graph_store.write();
         let mut writer = CypherWriter::new(&mut *guard, self.graph_name.clone())
             .with_params(self.params.clone());
-        let Ok((_cols, rows)) = writer.execute(&self.query) else {
-            return PostingList::new();
-        };
+        let (_cols, rows) = writer
+            .execute(&self.query)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         // Project bound vertex/edge ids out of the result rows. The
         // posting list carries one entry per distinct vertex id seen,
         // so downstream operators can intersect / union the result
@@ -205,7 +209,7 @@ impl Operator for CypherQueryOperator {
             .into_iter()
             .map(|id| uqa_core::PostingEntry::new(id, uqa_core::Payload::default()))
             .collect();
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

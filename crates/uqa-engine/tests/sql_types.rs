@@ -209,6 +209,95 @@ fn integer_array_column_create_insert_round_trip() {
 }
 
 #[test]
+fn array_types_coerce_elements_and_survive_engine_reopen() {
+    use uqa_sql::ast::ColumnType;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("arrays.sqlite");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE array_values (
+                 id INTEGER PRIMARY KEY,
+                 tags TEXT[],
+                 nums INTEGER[],
+                 matrix INTEGER[][]
+             )",
+        );
+        exec(
+            &engine,
+            "INSERT INTO array_values VALUES
+                 (1, ARRAY[1, 2], ARRAY['10', '20'],
+                  ARRAY[ARRAY['1', '2'], ARRAY['3', '4']]),
+                 (2, '{alpha,beta}', '{30,40}', '{{5,6},{7,8}}')",
+        );
+        let error = engine
+            .sql(
+                "INSERT INTO array_values VALUES (3, ARRAY['ok'], ARRAY['bad'], ARRAY[ARRAY[1]])",
+                &[],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("integer"));
+    }
+
+    let engine = Engine::open(&path).unwrap();
+    let columns = engine.describe_table("array_values").unwrap().unwrap();
+    assert_eq!(columns[1].ty, ColumnType::Array(Box::new(ColumnType::Text)));
+    assert_eq!(
+        columns[2].ty,
+        ColumnType::Array(Box::new(ColumnType::Integer))
+    );
+    assert_eq!(
+        columns[3].ty,
+        ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer))))
+    );
+
+    let result = exec(
+        &engine,
+        "SELECT tags, nums, matrix,
+                array_length(matrix, 2) AS matrix_width,
+                cardinality(matrix) AS matrix_cardinality
+         FROM array_values WHERE id = 1",
+    );
+    assert_eq!(
+        result.rows[0]["tags"],
+        Value::List(vec![Value::Str("1".into()), Value::Str("2".into())])
+    );
+    assert_eq!(
+        result.rows[0]["nums"],
+        Value::List(vec![Value::Int(10), Value::Int(20)])
+    );
+    assert_eq!(
+        result.rows[0]["matrix"],
+        Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+        ])
+    );
+    assert_eq!(result.rows[0]["matrix_width"], Value::Int(2));
+    assert_eq!(result.rows[0]["matrix_cardinality"], Value::Int(4));
+    let result = exec(
+        &engine,
+        "SELECT data_type, udt_name
+         FROM information_schema.columns
+         WHERE table_name = 'array_values' AND column_name = 'matrix'",
+    );
+    assert_eq!(result.rows[0]["data_type"], Value::Str("ARRAY".into()));
+    assert_eq!(result.rows[0]["udt_name"], Value::Str("_int4".into()));
+    let result = exec(
+        &engine,
+        "SELECT attndims, atttypid
+         FROM pg_catalog.pg_attribute
+         WHERE attname = 'matrix'",
+    );
+    assert_eq!(result.rows[0]["attndims"], Value::Int(2));
+    assert_eq!(result.rows[0]["atttypid"], Value::Int(1007));
+    let result = exec(&engine, "SELECT COUNT(*) AS count FROM array_values");
+    assert_eq!(result.rows[0]["count"], Value::Int(2));
+}
+
+#[test]
 fn array_length_returns_length() {
     let engine = engine_with_table();
     let result = exec(

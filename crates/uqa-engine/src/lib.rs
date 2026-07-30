@@ -102,10 +102,7 @@ use uqa_ml::{
     deep_learn as ml_deep_learn, DeepLearnOutput, DeepModel, LearnOptions, TrainingExample,
     TrainingSet,
 };
-use uqa_operators::{
-    CalibratedVectorOperator, ExecutionContext, LogOddsFusionOperator, Operator, ScoreOperator,
-    TermOperator, VectorSimilarityOperator,
-};
+use uqa_operators::ExecutionContext;
 use uqa_scoring::{
     BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
     CalibrationMetrics, CalibrationReport, ParameterLearner, Scorer,
@@ -113,22 +110,23 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
-    ColumnStatsInput, ColumnStatsRow, DocumentStore, IVFIndex, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
-    PersistentVectorIndexParams, SQLiteStorageBackend, StorageBackendError, StorageBackendResult,
-    TableSchema, VectorFieldSchema, VectorIndex,
+    ColumnStatsInput, ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow,
+    IVFIndex, InvertedIndex, ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex,
+    MemoryVectorIndex, PersistentStorageBackend, PersistentVectorIndexParams, RelationIdentity,
+    SQLiteStorageBackend, SequenceRow, StorageBackendError, StorageBackendResult, TableSchema,
+    VectorFieldSchema, VectorIndex, ViewRow,
 };
 
-pub use uqa_sql::{SQLParam, SQLResult};
+pub use uqa_sql::{ast::SequenceRestart, SQLParam, SQLResult};
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
+use functions::RegisteredSQLFunction;
 pub use functions::{
-    SQLAggregateFunction, SQLAggregateState, SQLScalarFunction, SQLTableFunction,
-    SQLTableFunctionResult,
+    SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
+    SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
 };
 
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
-const VIEWS_METADATA_KEY: &str = "sql_views_json";
 /// Metadata key prefix for per-graph AGE label registries
 /// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
 const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
@@ -189,17 +187,61 @@ impl Default for ScoringMode {
     }
 }
 
+type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
+
 /// Engine: per-table document store + inverted index + vector indexes,
 /// each behind a `RwLock<Box<dyn ...>>` so the `Memory*` and `SQLite*`
 /// backends drop in interchangeably.
 pub struct Engine {
-    tables: RwLock<BTreeMap<String, Arc<TableState>>>,
+    /// Re-entrant statement boundary for one logical SQL session. `Engine`
+    /// methods may call back into compiled SQL routines on the same thread,
+    /// while concurrent callers must never interleave physical work on the
+    /// session's pinned transaction connection or session-local registries.
+    statement_gate: parking_lot::ReentrantMutex<()>,
+    /// Session-bound table stores. Logical table definitions are durable and
+    /// synchronized through `table_catalog_epoch`, but every entry here is
+    /// built from this engine session's backend so explicit transactions never
+    /// leak onto another session's `SQLite` connection.
+    tables: RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>,
     catalog: Option<Arc<dyn CatalogFacade>>,
     backend: Option<Arc<dyn PersistentStorageBackend>>,
-    /// Named in-memory graphs reachable from SQL via the
-    /// `graph_*` function family. Persistence to the catalog is left
-    /// to a follow-up slice.
-    graphs: RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    /// `SQLite` handle used to derive independent logical sessions. Catalog and
+    /// backend objects for this `Engine` are always built from clones of this
+    /// exact handle, preserving cross-store transaction affinity.
+    sqlite_session: Option<ManagedConnection>,
+    /// Last `PRAGMA data_version` observed on this session's dedicated monitor
+    /// connection. Unlike in-process epochs, this detects commits made by an
+    /// independently opened `Engine` or another process.
+    seen_sqlite_data_version: std::sync::atomic::AtomicU64,
+    external_commit_refresh: parking_lot::Mutex<()>,
+    /// Shared logical-catalog generation for sessions derived from the same
+    /// engine. Physical table stores remain session-bound and are rebound when
+    /// this generation advances.
+    table_catalog_epoch: Arc<std::sync::atomic::AtomicU64>,
+    seen_table_catalog_epoch: std::sync::atomic::AtomicU64,
+    table_catalog_dirty: AtomicBool,
+    table_catalog_refresh: parking_lot::Mutex<()>,
+    /// Generation for committed table contents shared by sessions derived
+    /// from this engine. Table stores and their value/vector/text caches are
+    /// session-bound, so a sibling commit invalidates every derived cache
+    /// before the next statement starts.
+    table_data_epoch: Arc<std::sync::atomic::AtomicU64>,
+    seen_table_data_epoch: std::sync::atomic::AtomicU64,
+    table_data_dirty: AtomicBool,
+    table_data_refresh: parking_lot::Mutex<()>,
+    /// Generation for durable non-table catalog registries (graphs, views,
+    /// schemas, analyzers, FDW objects, indexes, and SQL routines). Each SQL
+    /// session owns a private cache and publishes this generation only after
+    /// its outer transaction commits, so uncommitted catalog state cannot
+    /// leak through shared in-memory maps.
+    catalog_registry_epoch: Arc<std::sync::atomic::AtomicU64>,
+    seen_catalog_registry_epoch: std::sync::atomic::AtomicU64,
+    catalog_registry_dirty: AtomicBool,
+    catalog_registry_refresh: parking_lot::Mutex<()>,
+    /// Session-local cache of named graphs reachable from SQL via the
+    /// `graph_*` function family. Durable definitions and graph contents are
+    /// restored from the catalog and synchronized by `catalog_registry_epoch`.
+    graphs: Arc<RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>>,
     /// Saved deep-fusion models. Mirrors the catalog `_models` table
     /// when the engine is SQLite-backed.
     models: RwLock<BTreeMap<String, DeepModel>>,
@@ -209,14 +251,12 @@ pub struct Engine {
     scoring_params: RwLock<BTreeMap<String, String>>,
     /// Persisted, fully lowered view definitions. Execution and catalog
     /// restoration both use the same `QueryPlan`; no AST carrier is kept.
-    views: RwLock<BTreeMap<String, uqa_planner::QueryPlan>>,
+    views: Arc<RwLock<BTreeMap<RelationIdentity, uqa_planner::QueryPlan>>>,
     /// Registered secondary indexes from `CREATE INDEX`.
-    catalog_indexes: RwLock<BTreeMap<String, CatalogIndexRow>>,
-    /// Registered schema names. Engine-level schemas are advisory
-    /// today: the catalog records them so `CREATE SCHEMA` does not
-    /// error out, but tables themselves still live in the flat
-    /// per-name namespace.
-    schemas: RwLock<std::collections::BTreeSet<String>>,
+    catalog_indexes: Arc<RwLock<BTreeMap<String, CatalogIndexRow>>>,
+    /// Durable schema catalog. `public` is an ordinary, always-present
+    /// catalog object; qualified relation creation validates against this set.
+    schemas: Arc<RwLock<std::collections::BTreeSet<String>>>,
     /// Resolution order for unqualified table names. Mirrors the canonical UQA implementation's
     /// `Engine._tables._search_path`. Defaults to `["public"]`.
     search_path: RwLock<Vec<String>>,
@@ -224,10 +264,13 @@ pub struct Engine {
     /// lands here so SHOW can echo it back; `DISCARD ALL` clears the
     /// map. Mirrors the canonical UQA implementation's `Engine._session_vars`.
     session_vars: RwLock<BTreeMap<String, String>>,
+    /// Logical-session PRNG state used by SQL `random()` / `setseed()`.
+    /// It is deliberately not shared by sibling `SQLite` sessions.
+    random_state: parking_lot::Mutex<u64>,
     /// Pre-built RPQ path indexes keyed by `<graph>::<name>`. Each
     /// entry materialises a fixed set of label sequences so RPQ can
     /// short-circuit NFA simulation when the expression matches.
-    path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
+    path_indexes: Arc<RwLock<BTreeMap<String, uqa_graph::PathIndex>>>,
     /// Open transaction stack. `BEGIN` pushes a new frame, `COMMIT`
     /// / `ROLLBACK` pop one, savepoint statements update the top
     /// frame's savepoint set.
@@ -239,48 +282,62 @@ pub struct Engine {
     cancel: uqa_core::CancellationToken,
     /// Named sequences. Mirrors `_engine._sequences` in the UQA implementation
     /// reference. Each entry tracks `(start, increment, current)`.
-    sequences: RwLock<BTreeMap<String, SequenceState>>,
+    sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
+    /// Last sequence value observed by this logical SQL session. Durable
+    /// sequence definitions and allocation state live in `sequences` and the
+    /// catalog; `currval` must never leak a sibling session's allocation.
+    sequence_currvals: RwLock<BTreeMap<RelationIdentity, i64>>,
     /// Prepared unified execution plans. Mirrors `_engine._prepared` while
     /// ensuring EXECUTE cannot re-enter an AST-only dispatch path.
     prepared: RwLock<BTreeMap<String, PreparedStatementPlan>>,
-    /// Fully lowered and planner-optimized plans keyed by SQL text.
+    /// Fully lowered logical plans keyed by SQL text. Physical optimization
+    /// runs after the statement acquires its transaction snapshot.
     sql_statement_cache: RwLock<SQLStatementCache>,
     /// Named analyzers from `CREATE ANALYZER`. Stores the config
     /// JSON string for `list_analyzers` introspection. Mirrors
     /// `_engine.create_analyzer` / `drop_analyzer`.
-    named_analyzers: RwLock<BTreeMap<String, String>>,
+    named_analyzers: Arc<RwLock<BTreeMap<String, String>>>,
     /// Per-(table, field) analyzer assignments from
     /// `set_table_analyzer`. Stores `(analyzer_name, phase)` so the
     /// FTS pipeline can pick up index-time vs query-time analyzers.
-    table_field_analyzers: RwLock<BTreeMap<(String, String), (String, String)>>,
+    table_field_analyzers: Arc<RwLock<TableFieldAnalyzerRegistry>>,
     /// `CREATE SERVER` registry. Keyed by server name; the value is
     /// the FDW handler descriptor.
-    foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
+    foreign_servers: Arc<RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>>,
     /// `CREATE FOREIGN TABLE` registry. Keyed by table name.
-    foreign_tables: RwLock<BTreeMap<String, uqa_fdw::ForeignTable>>,
+    foreign_tables: Arc<RwLock<BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>>>,
     /// Row payloads for `memory_fdw` foreign tables. This keeps the
     /// reference FDW executable without pretending that memory rows are
     /// part of the persistent catalog.
-    foreign_memory_tables: RwLock<BTreeMap<String, Vec<uqa_fdw::Row>>>,
-    /// Engine-local Rust scalar SQL functions.
-    sql_scalar_functions: RwLock<BTreeMap<String, Arc<dyn SQLScalarFunction>>>,
-    /// Engine-local Rust table SQL functions.
-    sql_table_functions: RwLock<BTreeMap<String, Arc<dyn SQLTableFunction>>>,
-    /// Engine-local Rust aggregate SQL functions.
-    sql_aggregate_functions: RwLock<BTreeMap<String, Arc<dyn SQLAggregateFunction>>>,
+    foreign_memory_tables: Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>>>,
+    /// Engine-local Rust scalar SQL functions. Rust API registrations are
+    /// runtime configuration, not SQL-catalog state, and deliberately do not
+    /// participate in SQL transaction/savepoint rollback.
+    sql_scalar_functions:
+        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>>,
+    /// Engine-local Rust table SQL functions (non-transactional runtime
+    /// configuration, shared by sibling sessions).
+    sql_table_functions: Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>>,
+    /// Engine-local Rust aggregate SQL functions (non-transactional runtime
+    /// configuration, shared by sibling sessions).
+    sql_aggregate_functions:
+        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>>,
     /// User-defined SQL / PL/pgSQL routines from `CREATE FUNCTION` /
-    /// `CREATE PROCEDURE`, keyed by lower-cased name. Each entry
-    /// holds the overload set for that name. Definitions persist to
-    /// catalog metadata; compiled bodies are rebuilt on restore.
-    sql_user_functions: RwLock<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>,
+    /// `CREATE PROCEDURE`, keyed by canonical qualified `schema.name`.
+    /// Each entry holds the parameter-type overload set for that name.
+    /// Definitions persist to catalog metadata; compiled bodies are rebuilt
+    /// on restore.
+    sql_user_functions:
+        Arc<RwLock<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>>,
     /// `RAISE NOTICE` / `WARNING` / ... sink: `(level, message)`
     /// pairs in emission order, drained by [`Engine::take_sql_notices`].
     sql_notices: parking_lot::Mutex<Vec<(String, String)>>,
-    /// Nesting cap for user-defined routine calls.
+    /// Nesting cap for user-defined routine calls. This Rust runtime setting is
+    /// intentionally outside SQL transaction rollback.
     sql_function_depth_limit: std::sync::atomic::AtomicUsize,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SQLStatementCache {
     entries: BTreeMap<String, Vec<uqa_planner::UnifiedPlan>>,
     insertion_order: VecDeque<String>,
@@ -288,6 +345,7 @@ struct SQLStatementCache {
 
 #[derive(Clone)]
 struct PreparedStatementPlan {
+    logical_plan: uqa_planner::UnifiedPlan,
     plan: uqa_planner::UnifiedPlan,
 }
 
@@ -326,31 +384,96 @@ pub struct SequenceState {
     pub start: i64,
     pub increment: i64,
     pub current: i64,
+    /// Whether `current` has already been returned by `nextval`.  Keeping this
+    /// bit avoids the lossy `start - increment` sentinel at BIGINT boundaries.
+    #[serde(default = "sequence_state_called_default")]
+    pub called: bool,
+}
+
+const fn sequence_state_called_default() -> bool {
+    // Legacy serialized states used `current = start - increment`; treating
+    // that value as called preserves their next allocation semantics.
+    true
+}
+
+#[derive(Clone, Copy, Default)]
+struct TransactionDirtyState {
+    table_data: bool,
+    table_catalog: bool,
+    catalog_registry: bool,
 }
 
 #[derive(Default)]
 struct TransactionFrame {
     storage_savepoint: Option<String>,
+    read_only: bool,
     savepoints: std::collections::BTreeSet<String>,
+    session_snapshot: SessionStateSnapshot,
+    session_savepoints: BTreeMap<String, SessionStateSnapshot>,
     data_snapshot: Option<EngineDataSnapshot>,
     data_savepoints: BTreeMap<String, EngineDataSnapshot>,
+    dirty_at_begin: TransactionDirtyState,
+    dirty_savepoints: BTreeMap<String, TransactionDirtyState>,
+}
+
+/// Lightweight SQL-session state that follows transaction/savepoint rollback
+/// for every backend. It is intentionally separate from the database-sized
+/// memory-engine snapshot so persistent sessions receive identical SET,
+/// search-path, PRNG, sequence-currval, PREPARE, and statement-cache semantics.
+#[derive(Clone, Default)]
+struct SessionStateSnapshot {
+    search_path: Vec<String>,
+    session_vars: BTreeMap<String, String>,
+    random_state: u64,
+    sequence_currvals: BTreeMap<RelationIdentity, i64>,
+    prepared: BTreeMap<String, PreparedStatementPlan>,
+    sql_statement_cache: SQLStatementCache,
 }
 
 #[derive(Clone)]
 struct EngineDataSnapshot {
-    tables: BTreeMap<String, TableDataSnapshot>,
-    sequences: BTreeMap<String, SequenceState>,
+    tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
+    graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
+    models: BTreeMap<String, DeepModel>,
+    scoring_params: BTreeMap<String, String>,
+    views: BTreeMap<RelationIdentity, uqa_planner::QueryPlan>,
+    sequences: BTreeMap<RelationIdentity, SequenceState>,
+    catalog_indexes: BTreeMap<String, CatalogIndexRow>,
+    schemas: std::collections::BTreeSet<String>,
+    path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
+    named_analyzers: BTreeMap<String, String>,
+    table_field_analyzers: TableFieldAnalyzerRegistry,
+    foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
+    foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
+    foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>,
+    sql_user_functions: BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>,
 }
 
 #[derive(Clone)]
 struct TableDataSnapshot {
     state: Arc<TableState>,
-    documents: Vec<(DocId, Document)>,
-    next_id: u64,
+    document_store: Arc<dyn DocumentStore>,
+    inverted_index: Arc<dyn InvertedIndex>,
+    vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
+    fts_fields: Vec<FieldName>,
+    columns: Vec<uqa_sql::ast::ColumnDef>,
+    /// One-past-the-last allocated document id. `u128` is intentional: it
+    /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
+    /// available final id and can never wrap or issue a duplicate.
+    next_id: u128,
+    analyzer: Analyzer,
+    column_stats: BTreeMap<String, uqa_planner::ColumnStats>,
+    column_stats_loaded: bool,
+    column_stats_dirty: bool,
+    table_checks: Vec<uqa_sql::ast::TableCheck>,
+    foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+    key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+    doc_count_cache: u64,
+    doc_count_dirty: bool,
 }
 
-struct TableState {
-    document_store: RwLock<Box<dyn DocumentStore>>,
+pub(crate) struct TableState {
+    pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
     fts_fields: RwLock<Vec<FieldName>>,
@@ -361,7 +484,7 @@ struct TableState {
     /// allocated value is `1`; the watermark grows past
     /// `max(existing_doc_id, allocated)` so reopened catalogs do not
     /// collide with existing rows.
-    next_id: parking_lot::Mutex<u64>,
+    next_id: parking_lot::Mutex<u128>,
     analyzer: RwLock<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
@@ -375,6 +498,9 @@ struct TableState {
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
     foreign_keys: RwLock<Vec<uqa_sql::ast::ForeignKey>>,
+    /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
+    /// their SQL NULL-equality policy.
+    key_constraints: RwLock<Vec<uqa_sql::ast::TableKeyConstraint>>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
@@ -405,30 +531,43 @@ impl Default for IVFIndexParams {
 }
 
 impl IVFIndexParams {
-    pub(crate) fn from_map_lossy(parameters: &BTreeMap<String, String>) -> Self {
+    pub(crate) fn from_catalog_map(
+        parameters: &BTreeMap<String, String>,
+    ) -> StorageBackendResult<Self> {
         fn read_positive(
             parameters: &BTreeMap<String, String>,
             keys: &[&str],
             default: usize,
-        ) -> usize {
-            parameters
-                .iter()
-                .find(|(key, _)| keys.iter().any(|k| key.eq_ignore_ascii_case(k)))
-                .and_then(|(_, value)| value.parse::<usize>().ok())
-                .filter(|value| *value > 0)
-                .unwrap_or(default)
+        ) -> StorageBackendResult<usize> {
+            let Some((key, raw)) = parameters.iter().find(|(key, _)| {
+                keys.iter()
+                    .any(|candidate| key.eq_ignore_ascii_case(candidate))
+            }) else {
+                return Ok(default);
+            };
+            let value = raw.parse::<usize>().map_err(|_| {
+                StorageBackendError::Other(format!(
+                    "invalid persisted IVF parameter `{key}` value `{raw}`"
+                ))
+            })?;
+            if value == 0 {
+                return Err(StorageBackendError::Other(format!(
+                    "persisted IVF parameter `{key}` must be greater than zero"
+                )));
+            }
+            Ok(value)
         }
 
         let default = Self::default();
-        Self {
-            nlist: read_positive(parameters, &["lists", "nlist"], default.nlist),
-            nprobe: read_positive(parameters, &["probes", "nprobe"], default.nprobe),
+        Ok(Self {
+            nlist: read_positive(parameters, &["lists", "nlist"], default.nlist)?,
+            nprobe: read_positive(parameters, &["probes", "nprobe"], default.nprobe)?,
             train_threshold: read_positive(
                 parameters,
                 &["train_threshold", "train-threshold", "min_train"],
                 default.train_threshold,
-            ),
-        }
+            )?,
+        })
     }
 }
 
@@ -464,8 +603,12 @@ fn parse_analyzer_config(name: &str, config_json: &str) -> std::result::Result<A
     let mut value: serde_json::Value = serde_json::from_str(config_json)
         .map_err(|e| format!("analyzer `{name}` config is not valid JSON: {e}"))?;
     normalize_analyzer_config_value(&mut value);
-    serde_json::from_value(value)
-        .map_err(|e| format!("analyzer `{name}` config is not a valid analyzer: {e}"))
+    let analyzer: Analyzer = serde_json::from_value(value)
+        .map_err(|e| format!("analyzer `{name}` config is not a valid analyzer: {e}"))?;
+    analyzer
+        .validate()
+        .map_err(|e| format!("analyzer `{name}` config is invalid: {e}"))?;
+    Ok(analyzer)
 }
 
 fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, AnalyzerPhase), String> {
@@ -488,32 +631,52 @@ impl Engine {
     /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
         Self {
+            statement_gate: parking_lot::ReentrantMutex::new(()),
             tables: RwLock::new(BTreeMap::new()),
             catalog: None,
             backend: None,
-            graphs: RwLock::new(BTreeMap::new()),
+            sqlite_session: None,
+            seen_sqlite_data_version: std::sync::atomic::AtomicU64::new(0),
+            external_commit_refresh: parking_lot::Mutex::new(()),
+            table_catalog_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            seen_table_catalog_epoch: std::sync::atomic::AtomicU64::new(1),
+            table_catalog_dirty: AtomicBool::new(false),
+            table_catalog_refresh: parking_lot::Mutex::new(()),
+            table_data_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            seen_table_data_epoch: std::sync::atomic::AtomicU64::new(1),
+            table_data_dirty: AtomicBool::new(false),
+            table_data_refresh: parking_lot::Mutex::new(()),
+            catalog_registry_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            seen_catalog_registry_epoch: std::sync::atomic::AtomicU64::new(1),
+            catalog_registry_dirty: AtomicBool::new(false),
+            catalog_registry_refresh: parking_lot::Mutex::new(()),
+            graphs: Arc::new(RwLock::new(BTreeMap::new())),
             models: RwLock::new(BTreeMap::new()),
             scoring_params: RwLock::new(BTreeMap::new()),
-            views: RwLock::new(BTreeMap::new()),
-            catalog_indexes: RwLock::new(BTreeMap::new()),
-            schemas: RwLock::new(std::collections::BTreeSet::new()),
+            views: Arc::new(RwLock::new(BTreeMap::new())),
+            catalog_indexes: Arc::new(RwLock::new(BTreeMap::new())),
+            schemas: Arc::new(RwLock::new(std::collections::BTreeSet::from([
+                "public".to_string()
+            ]))),
             search_path: RwLock::new(vec!["public".to_string()]),
             session_vars: RwLock::new(BTreeMap::new()),
-            path_indexes: RwLock::new(BTreeMap::new()),
+            random_state: parking_lot::Mutex::new(initial_random_state()),
+            path_indexes: Arc::new(RwLock::new(BTreeMap::new())),
             tx_stack: parking_lot::Mutex::new(Vec::new()),
             cancel: uqa_core::CancellationToken::new(),
             sequences: RwLock::new(BTreeMap::new()),
+            sequence_currvals: RwLock::new(BTreeMap::new()),
             prepared: RwLock::new(BTreeMap::new()),
             sql_statement_cache: RwLock::new(SQLStatementCache::default()),
-            named_analyzers: RwLock::new(BTreeMap::new()),
-            table_field_analyzers: RwLock::new(BTreeMap::new()),
-            foreign_servers: RwLock::new(BTreeMap::new()),
-            foreign_tables: RwLock::new(BTreeMap::new()),
-            foreign_memory_tables: RwLock::new(BTreeMap::new()),
-            sql_scalar_functions: RwLock::new(BTreeMap::new()),
-            sql_table_functions: RwLock::new(BTreeMap::new()),
-            sql_aggregate_functions: RwLock::new(BTreeMap::new()),
-            sql_user_functions: RwLock::new(BTreeMap::new()),
+            named_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
+            table_field_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
+            foreign_servers: Arc::new(RwLock::new(BTreeMap::new())),
+            foreign_tables: Arc::new(RwLock::new(BTreeMap::new())),
+            foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
+            sql_scalar_functions: Arc::new(RwLock::new(BTreeMap::new())),
+            sql_table_functions: Arc::new(RwLock::new(BTreeMap::new())),
+            sql_aggregate_functions: Arc::new(RwLock::new(BTreeMap::new())),
+            sql_user_functions: Arc::new(RwLock::new(BTreeMap::new())),
             sql_notices: parking_lot::Mutex::new(Vec::new()),
             sql_function_depth_limit: std::sync::atomic::AtomicUsize::new(SQL_FUNCTION_DEPTH_LIMIT),
         }
@@ -551,7 +714,29 @@ fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("timezone") {
         return Some("UTC");
     }
+    if name.eq_ignore_ascii_case("work_mem") {
+        return Some("64MB");
+    }
     None
+}
+
+fn is_known_runtime_parameter(name: &str) -> bool {
+    name.eq_ignore_ascii_case("search_path") || default_runtime_parameter(name).is_some()
+}
+
+fn is_mutable_runtime_parameter(name: &str) -> bool {
+    name.eq_ignore_ascii_case("search_path")
+        || name.eq_ignore_ascii_case("client_encoding")
+        || name.eq_ignore_ascii_case("datestyle")
+        || name.eq_ignore_ascii_case("timezone")
+        || name.eq_ignore_ascii_case("work_mem")
+}
+
+fn initial_random_state() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_STATE: AtomicU64 = AtomicU64::new(0x4d59_5df4_d0f3_3173);
+    NEXT_STATE.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed)
 }
 
 impl uqa_sql::expr::EngineHook for Engine {
@@ -573,6 +758,25 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
     fn has_scalar_functions(&self) -> bool {
         self.has_registered_scalar_functions()
+    }
+    fn current_schema(&self) -> std::result::Result<Option<String>, String> {
+        self.current_schema_name()
+            .map_err(|error| error.to_string())
+    }
+    fn current_schemas(
+        &self,
+        include_implicit: bool,
+    ) -> std::result::Result<Option<Vec<String>>, String> {
+        self.current_schema_names(include_implicit)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+    fn random_value(&self) -> std::result::Result<Option<f64>, String> {
+        Ok(Some(self.next_random_value()))
+    }
+    fn set_random_seed(&self, seed: f64) -> std::result::Result<bool, String> {
+        Engine::set_random_seed(self, seed)?;
+        Ok(true)
     }
     fn call_user_function(
         &self,
@@ -619,8 +823,23 @@ fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
 
 fn value_to_usize(value: &Value) -> Result<usize, String> {
     match value {
-        Value::Int(value) if *value >= 0 => Ok(*value as usize),
-        Value::Float(value) if value.fract() == 0.0 && *value >= 0.0 => Ok(*value as usize),
+        Value::Int(value) if *value >= 0 => usize::try_from(*value)
+            .map_err(|_| format!("integer label {value} exceeds the platform usize range")),
+        Value::Float(value) => {
+            let exponent = i32::try_from(usize::BITS)
+                .map_err(|_| "platform usize width exceeds f64 exponent range".to_string())?;
+            let upper_exclusive = 2.0_f64.powi(exponent);
+            if !value.is_finite()
+                || *value < 0.0
+                || value.fract() != 0.0
+                || *value >= upper_exclusive
+            {
+                return Err(format!(
+                    "expected finite non-negative integer label within usize range, got {value}"
+                ));
+            }
+            Ok(*value as usize)
+        }
         other => Err(format!(
             "expected non-negative integer label, got {other:?}"
         )),
@@ -634,13 +853,14 @@ fn value_to_usize(value: &Value) -> Result<usize, String> {
 const HISTOGRAM_BUCKETS: usize = 100;
 const MCV_COUNT: usize = 10;
 
-fn distinct_count(values: &[Value]) -> u64 {
+fn distinct_count(values: &[Value]) -> StorageBackendResult<u64> {
     use std::collections::BTreeSet;
     let mut set: BTreeSet<&Value> = BTreeSet::new();
     for v in values {
         set.insert(v);
     }
-    set.len() as u64
+    u64::try_from(set.len())
+        .map_err(|_| StorageBackendError::Other("ANALYZE distinct count exceeds u64".into()))
 }
 
 fn build_histogram(values: &[&Value]) -> Vec<Value> {
@@ -700,6 +920,318 @@ fn build_mcv(values: &[Value], total: u64) -> (Vec<Value>, Vec<f64>) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn value_to_usize_rejects_non_finite_fractional_and_out_of_range_floats() {
+        assert_eq!(value_to_usize(&Value::Float(42.0)).unwrap(), 42);
+        for value in [f64::NAN, f64::INFINITY, -1.0, 1.5] {
+            assert!(value_to_usize(&Value::Float(value)).is_err());
+        }
+        let exponent = i32::try_from(usize::BITS).unwrap();
+        assert!(value_to_usize(&Value::Float(2.0_f64.powi(exponent))).is_err());
+    }
+
+    #[test]
+    fn persisted_ivf_parameters_reject_invalid_values() {
+        let invalid = BTreeMap::from([("lists".to_string(), "not-a-number".to_string())]);
+        assert!(IVFIndexParams::from_catalog_map(&invalid).is_err());
+
+        let zero = BTreeMap::from([("probes".to_string(), "0".to_string())]);
+        assert!(IVFIndexParams::from_catalog_map(&zero).is_err());
+    }
+
+    #[test]
+    fn document_id_watermark_represents_and_reports_exhaustion_without_wrapping() {
+        let engine = Engine::new();
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        let table = engine.table("docs").unwrap().expect("table");
+        *table.next_id.lock() = u128::from(u64::MAX);
+
+        assert_eq!(engine.allocate_next_id("docs").unwrap(), u64::MAX);
+        let error = engine.allocate_next_id("docs").unwrap_err();
+        assert!(error.to_string().contains("document id space"), "{error}");
+        assert_eq!(*table.next_id.lock(), u128::from(u64::MAX) + 1);
+
+        let second = Engine::new();
+        second.create_default_table("docs", Vec::new()).unwrap();
+        second.advance_next_id("docs", u64::MAX).unwrap();
+        let error = second.allocate_next_id("docs").unwrap_err();
+        assert!(error.to_string().contains("document id space"), "{error}");
+    }
+
+    #[test]
+    fn vector_backfill_reports_invalid_values_instead_of_skipping_them() {
+        let engine = Engine::new();
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        engine
+            .add_document(
+                "docs",
+                1,
+                doc([("embedding", Value::Str("not-a-vector".into()))]),
+            )
+            .unwrap();
+
+        let error = engine
+            .create_vector_field("docs", "embedding", 2)
+            .unwrap_err();
+        assert!(error.to_string().contains("expected vector"), "{error}");
+        let unregistered = engine
+            .add_vector("docs", 1, "embedding", vec![1.0, 0.0])
+            .unwrap_err();
+        assert!(matches!(unregistered, SQLError::TypeMismatch(_)));
+    }
+
+    #[test]
+    fn vector_field_registration_distinguishes_absence_noop_and_dimension_mismatch() {
+        let engine = Engine::new();
+        let missing = engine
+            .create_vector_field("missing", "embedding", 2)
+            .unwrap_err();
+        assert!(missing.to_string().contains("does not exist"), "{missing}");
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        assert!(engine.create_vector_field("docs", "embedding", 2).unwrap());
+        assert!(!engine.create_vector_field("docs", "embedding", 2).unwrap());
+        let mismatch = engine
+            .create_vector_field("docs", "embedding", 3)
+            .unwrap_err();
+        assert!(mismatch.to_string().contains("dimension 2"), "{mismatch}");
+        assert!(mismatch.to_string().contains("requested 3"), "{mismatch}");
+    }
+
+    #[test]
+    fn direct_vector_writes_reject_unknown_tables_and_unregistered_fields() {
+        let engine = Engine::new();
+        let missing = engine
+            .add_vector("missing", 1, "embedding", vec![1.0, 0.0])
+            .unwrap_err();
+        assert!(matches!(missing, SQLError::UnknownTable(_)));
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        let unregistered = engine
+            .add_vector("docs", 1, "embedding", vec![1.0, 0.0])
+            .unwrap_err();
+        assert!(matches!(unregistered, SQLError::TypeMismatch(_)));
+        let unregistered_many = engine
+            .add_vector_values("docs", 1, "embedding", vec![vec![1.0, 0.0]])
+            .unwrap_err();
+        assert!(matches!(unregistered_many, SQLError::TypeMismatch(_)));
+
+        assert!(engine.create_vector_field("docs", "embedding", 2).unwrap());
+        assert!(engine
+            .add_vector("docs", 1, "embedding", vec![1.0, 0.0])
+            .unwrap());
+        assert!(engine
+            .add_vector_values("docs", 1, "embedding", vec![vec![0.0, 1.0]])
+            .unwrap());
+    }
+
+    #[test]
+    fn table_introspection_distinguishes_unknown_tables_from_missing_columns() {
+        let engine = Engine::new();
+        for error in [
+            engine.try_table_columns("missing").unwrap_err(),
+            engine.try_table_has_column("missing", "value").unwrap_err(),
+            engine.column_type("missing", "value").unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("does not exist"), "{error}");
+        }
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        assert!(engine.try_table_columns("docs").unwrap().is_empty());
+        assert!(!engine.try_table_has_column("docs", "value").unwrap());
+        assert_eq!(engine.column_type("docs", "value").unwrap(), None);
+
+        let sql_error = engine.sql("SELECT * FROM missing", &[]).unwrap_err();
+        assert!(sql_error.to_string().contains("missing"), "{sql_error}");
+        assert!(
+            sql_error.to_string().contains("does not exist"),
+            "{sql_error}"
+        );
+    }
+
+    #[test]
+    fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
+        let engine = Engine::new();
+        let column = uqa_sql::ast::ColumnDef {
+            name: "value".into(),
+            ty: uqa_sql::ast::ColumnType::Integer,
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            unique: false,
+            default: None,
+            check: None,
+            references: None,
+        };
+
+        for error in [
+            engine
+                .register_column("missing", column.clone())
+                .unwrap_err(),
+            engine
+                .set_column_default("missing", "value", None)
+                .unwrap_err(),
+            engine
+                .set_column_not_null("missing", "value", true)
+                .unwrap_err(),
+            engine
+                .set_column_type("missing", "value", &uqa_sql::ast::ColumnType::Boolean)
+                .unwrap_err(),
+            engine
+                .try_column_default_expr("missing", "value")
+                .unwrap_err(),
+            engine.advance_next_id("missing", 1).unwrap_err(),
+            engine
+                .refresh_value_indexes_for_table("missing")
+                .unwrap_err(),
+            engine.try_persist_table_schema("missing").unwrap_err(),
+            engine
+                .try_rebuild_vector_index_for_column("missing", "embedding", 2)
+                .unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("does not exist"), "{error}");
+        }
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        engine.register_column("docs", column.clone()).unwrap();
+        let duplicate = engine.register_column("docs", column).unwrap_err();
+        assert!(
+            duplicate.to_string().contains("already exists"),
+            "{duplicate}"
+        );
+        for error in [
+            engine
+                .set_column_default("docs", "absent", None)
+                .unwrap_err(),
+            engine
+                .set_column_not_null("docs", "absent", true)
+                .unwrap_err(),
+            engine
+                .set_column_type("docs", "absent", &uqa_sql::ast::ColumnType::Boolean)
+                .unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("column `absent`"), "{error}");
+        }
+
+        assert!(engine.set_column_default("docs", "value", None).unwrap());
+        assert!(engine.set_column_not_null("docs", "value", true).unwrap());
+        assert!(engine
+            .set_column_type("docs", "value", &uqa_sql::ast::ColumnType::Boolean)
+            .unwrap());
+        assert_eq!(
+            engine.column_type("docs", "value").unwrap(),
+            Some(uqa_sql::ast::ColumnType::Boolean)
+        );
+    }
+
+    #[test]
+    fn table_metadata_getters_reject_unknown_relations() {
+        let engine = Engine::new();
+        assert!(engine.describe_table("missing").unwrap().is_none());
+        for error in [
+            engine.auto_increment_column("missing").unwrap_err(),
+            engine.try_check_constraints("missing").unwrap_err(),
+            engine.try_foreign_keys("missing").unwrap_err(),
+            engine.try_unique_columns("missing").unwrap_err(),
+            engine.try_key_constraints("missing").unwrap_err(),
+            engine.try_referrers_to("missing").unwrap_err(),
+            engine.try_column_stats("missing").unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("does not exist"), "{error}");
+        }
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        assert_eq!(engine.auto_increment_column("docs").unwrap(), None);
+        assert!(engine.try_check_constraints("docs").unwrap().is_empty());
+        assert!(engine.try_foreign_keys("docs").unwrap().is_empty());
+        assert!(engine.try_unique_columns("docs").unwrap().is_empty());
+        assert!(engine.try_key_constraints("docs").unwrap().is_empty());
+        assert!(engine.try_referrers_to("docs").unwrap().is_empty());
+        assert!(engine.try_column_stats("docs").unwrap().is_empty());
+    }
+
+    #[test]
+    fn document_mutations_distinguish_unknown_tables_from_missing_documents() {
+        let engine = Engine::new();
+        let updates = BTreeMap::from([("value".to_string(), Value::Int(1))]);
+        let vectors = BTreeMap::new();
+        for error in [
+            engine
+                .update_document_fields("missing", 1, updates.clone(), vectors.clone())
+                .unwrap_err(),
+            engine
+                .patch_document_fields("missing", 1, &updates, &vectors)
+                .unwrap_err(),
+            engine
+                .rewrite_document("missing", 1, Document::new())
+                .unwrap_err(),
+            engine.delete_document("missing", 1).unwrap_err(),
+        ] {
+            assert!(matches!(error, SQLError::UnknownTable(_)), "{error}");
+        }
+
+        engine.create_default_table("docs", Vec::new()).unwrap();
+        assert!(!engine
+            .update_document_fields("docs", 1, updates.clone(), vectors.clone())
+            .unwrap());
+        assert!(!engine
+            .patch_document_fields("docs", 1, &updates, &vectors)
+            .unwrap());
+        engine.delete_document("docs", 1).unwrap();
+    }
+
+    #[test]
+    fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
+        let tensor_column = uqa_sql::ast::ColumnDef {
+            name: "embedding".into(),
+            ty: uqa_sql::ast::ColumnType::Tensor(2),
+            primary_key: false,
+            not_null: false,
+            auto_increment: false,
+            unique: false,
+            default: None,
+            check: None,
+            references: None,
+        };
+
+        let engine = Engine::new();
+        engine.create_default_table("bad", Vec::new()).unwrap();
+        engine
+            .register_column("bad", tensor_column.clone())
+            .unwrap();
+        engine
+            .add_document(
+                "bad",
+                1,
+                doc([(
+                    "embedding",
+                    Value::List(vec![Value::List(vec![Value::Float(1.0)])]),
+                )]),
+            )
+            .unwrap();
+        let error = engine
+            .create_vector_field("bad", "embedding", 2)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("vector dimension mismatch: expected 2, got 1"),
+            "{error}"
+        );
+
+        let nullable = Engine::new();
+        nullable
+            .create_default_table("nullable", Vec::new())
+            .unwrap();
+        nullable.register_column("nullable", tensor_column).unwrap();
+        nullable
+            .add_document("nullable", 1, doc([("embedding", Value::Null)]))
+            .unwrap();
+        assert!(nullable
+            .create_vector_field("nullable", "embedding", 2)
+            .unwrap());
+    }
+
     fn doc<const N: usize>(pairs: [(&str, Value); N]) -> Document {
         pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
     }
@@ -713,7 +1245,7 @@ mod tests {
     }
 
     fn vector_index_kind(engine: &Engine, table: &str, field: &str) -> String {
-        let table = engine.table(table).expect("table");
+        let table = engine.table(table).unwrap().expect("table");
         let indexes = table.vector_indexes.read();
         indexes
             .get(field)
@@ -726,15 +1258,19 @@ mod tests {
     struct StoreWithMissingDocId {
         docs: BTreeMap<DocId, Document>,
         missing_doc_id: DocId,
+        read_snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
+        writable_snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl StoreWithMissingDocId {
         fn from_table(engine: &Engine, table: &str, missing_doc_id: DocId) -> Self {
-            let table = engine.table(table).expect("table");
-            let docs = table.document_store.read().iter_all().collect();
+            let table = engine.table(table).unwrap().expect("table");
+            let docs = table.document_store.read().iter_all().unwrap().collect();
             Self {
                 docs,
                 missing_doc_id,
+                read_snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                writable_snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             }
         }
     }
@@ -745,8 +1281,8 @@ mod tests {
             Ok(())
         }
 
-        fn get(&self, doc_id: DocId) -> Option<Document> {
-            self.docs.get(&doc_id).cloned()
+        fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+            Ok(self.docs.get(&doc_id).cloned())
         }
 
         fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
@@ -759,23 +1295,51 @@ mod tests {
             Ok(())
         }
 
-        fn doc_ids(&self) -> Vec<DocId> {
+        fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
             let mut ids = vec![self.missing_doc_id];
             ids.extend(self.docs.keys().copied());
-            ids
+            Ok(ids)
         }
 
-        fn len(&self) -> usize {
-            self.docs.len() + 1
+        fn len(&self) -> StorageBackendResult<usize> {
+            Ok(self.docs.len() + 1)
         }
 
-        fn snapshot(&self) -> Arc<dyn DocumentStore> {
-            Arc::new(self.clone())
+        fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+            self.read_snapshot_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Arc::new(self.clone()))
+        }
+
+        fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+            self.writable_snapshot_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Box::new(self.clone()))
         }
     }
 
     #[test]
-    fn sql_update_skips_stale_document_ids() {
+    fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
+        let eng = Engine::new();
+        eng.sql("CREATE TABLE docs (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        let store = StoreWithMissingDocId::from_table(&eng, "docs", 99);
+        let read_calls = store.read_snapshot_calls.clone();
+        let writable_calls = store.writable_snapshot_calls.clone();
+        {
+            let table = eng.table("docs").unwrap().expect("table");
+            *table.document_store.write() = Box::new(store);
+        }
+
+        eng.begin().unwrap();
+        eng.commit().unwrap();
+
+        assert_eq!(read_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(writable_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn sql_update_reports_stale_document_ids() {
         let eng = Engine::new();
         eng.sql(
             "CREATE TABLE docs (
@@ -800,12 +1364,12 @@ mod tests {
         )
         .unwrap();
         {
-            let table = eng.table("docs").expect("table");
+            let table = eng.table("docs").unwrap().expect("table");
             *table.document_store.write() =
                 Box::new(StoreWithMissingDocId::from_table(&eng, "docs", 99));
         }
 
-        let result = eng
+        let error = eng
             .sql(
                 "UPDATE docs
                     SET content = 'updated content',
@@ -813,12 +1377,14 @@ mod tests {
                   WHERE id = 1 AND status = 'queued'",
                 &[],
             )
-            .unwrap();
+            .expect_err("a stale index candidate must not be treated as no matching row");
 
-        assert_eq!(result.affected_rows, 1);
-        let doc = eng.get_document("docs", 1).unwrap();
-        assert_eq!(doc.get("content"), Some(&s("updated content")));
-        assert_eq!(doc.get("status"), Some(&s("indexed")));
+        assert!(error
+            .to_string()
+            .contains("candidate 99 is missing from the document-field snapshot for table `docs`"));
+        let doc = eng.get_document("docs", 1).unwrap().unwrap();
+        assert_eq!(doc.get("content"), Some(&s("old content")));
+        assert_eq!(doc.get("status"), Some(&s("queued")));
     }
 
     /// Document store whose next `fail_budget` put calls fail. Used to
@@ -833,8 +1399,8 @@ mod tests {
 
     impl FailingPutStore {
         fn from_table(engine: &Engine, table: &str, fail_budget: usize) -> Self {
-            let table = engine.table(table).expect("table");
-            let docs = table.document_store.read().iter_all().collect();
+            let table = engine.table(table).unwrap().expect("table");
+            let docs = table.document_store.read().iter_all().unwrap().collect();
             Self {
                 docs,
                 fail_budget: Arc::new(std::sync::atomic::AtomicUsize::new(fail_budget)),
@@ -855,8 +1421,8 @@ mod tests {
             Ok(())
         }
 
-        fn get(&self, doc_id: DocId) -> Option<Document> {
-            self.docs.get(&doc_id).cloned()
+        fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+            Ok(self.docs.get(&doc_id).cloned())
         }
 
         fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
@@ -869,16 +1435,20 @@ mod tests {
             Ok(())
         }
 
-        fn doc_ids(&self) -> Vec<DocId> {
-            self.docs.keys().copied().collect()
+        fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+            Ok(self.docs.keys().copied().collect())
         }
 
-        fn len(&self) -> usize {
-            self.docs.len()
+        fn len(&self) -> StorageBackendResult<usize> {
+            Ok(self.docs.len())
         }
 
-        fn snapshot(&self) -> Arc<dyn DocumentStore> {
-            Arc::new(self.clone())
+        fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+            Ok(Arc::new(self.clone()))
+        }
+
+        fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+            Ok(Box::new(self.clone()))
         }
     }
 
@@ -896,7 +1466,7 @@ mod tests {
         )
         .unwrap();
         {
-            let table = eng.table("engine_meta").expect("table");
+            let table = eng.table("engine_meta").unwrap().expect("table");
             *table.document_store.write() =
                 Box::new(FailingPutStore::from_table(&eng, "engine_meta", 1));
         }
@@ -951,14 +1521,17 @@ mod tests {
 
         {
             let eng = Engine::from_persistent_backends(catalog.clone(), backend.clone()).unwrap();
-            eng.create_default_table("docs", vec!["title".into()]);
+            eng.create_default_table("docs", vec!["title".into()])
+                .unwrap();
             eng.add_document("docs", 1, doc([("title", s("hello facade"))]))
                 .unwrap();
         }
 
         let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
-        assert_eq!(reopened.document_count("docs"), 1);
-        let hits = reopened.search("docs", "title", "facade", &ScoringMode::default(), 10);
+        assert_eq!(reopened.document_count("docs").unwrap(), 1);
+        let hits = reopened
+            .search("docs", "title", "facade", &ScoringMode::default(), 10)
+            .unwrap();
         assert_eq!(hits.first().map(|hit| hit.doc_id), Some(1));
     }
 
@@ -987,7 +1560,7 @@ mod tests {
         conn.with(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT centroid_id, vector FROM _ivf_centroids
-                  WHERE table_name = 'articles' AND field = 'embedding'
+                  WHERE table_name = 'public.articles' AND field = 'embedding'
                   ORDER BY centroid_id",
             )?;
             let rows =
@@ -1024,14 +1597,14 @@ mod tests {
         conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _ivf_assignments
-                  WHERE table_name = 'articles' AND field = 'embedding'",
+                  WHERE table_name = 'public.articles' AND field = 'embedding'",
                 [],
             )?;
             conn.execute(
                 &format!(
                     "INSERT INTO _ivf_assignments
                         (table_name, field, doc_id, centroid_id)
-                     VALUES ('articles', 'embedding', 1, {other})"
+                     VALUES ('public.articles', 'embedding', 1, {other})"
                 ),
                 [],
             )?;
@@ -1039,7 +1612,7 @@ mod tests {
                 &format!(
                     "INSERT INTO _ivf_assignments
                         (table_name, field, doc_id, centroid_id)
-                     VALUES ('articles', 'embedding', 2, {nearest})"
+                     VALUES ('public.articles', 'embedding', 2, {nearest})"
                 ),
                 [],
             )?;
@@ -1052,7 +1625,7 @@ mod tests {
         conn.with(|conn| {
             let blob: Vec<u8> = conn.query_row(
                 "SELECT vector FROM _vectors
-                  WHERE table_name = 'articles'
+                  WHERE table_name = 'public.articles'
                     AND field = 'embedding'
                     AND doc_id = ?1
                   ORDER BY vector_ordinal
@@ -1068,10 +1641,11 @@ mod tests {
     #[test]
     fn run_analyze_populates_column_stats() {
         let eng = Engine::new();
-        eng.create_default_table("docs", vec!["title".into()]);
+        eng.create_default_table("docs", vec!["title".into()])
+            .unwrap();
         // Register the columns directly through the table state so we
         // don't depend on the SQL DDL path here.
-        if let Some(t) = eng.table("docs") {
+        if let Some(t) = eng.table("docs").unwrap() {
             *t.columns.write() = vec![uqa_sql::ast::ColumnDef {
                 name: "title".into(),
                 ty: uqa_sql::ast::ColumnType::Text,
@@ -1090,8 +1664,8 @@ mod tests {
             .unwrap();
         eng.add_document("docs", 3, doc([("title", s("beta"))]))
             .unwrap();
-        eng.run_analyze(Some("docs"));
-        let stats = eng.column_stats("docs");
+        eng.run_analyze(Some("docs")).unwrap();
+        let stats = eng.column_stats("docs").unwrap();
         let title_stats = stats.get("title").expect("title stats");
         assert_eq!(title_stats.row_count, 3);
         assert_eq!(title_stats.distinct_count, 2);
@@ -1103,19 +1677,21 @@ mod tests {
     #[test]
     fn add_get_delete_round_trip() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
         eng.add_document("articles", 1, doc([("title", s("rust language"))]))
             .unwrap();
-        let got = eng.get_document("articles", 1).unwrap();
+        let got = eng.get_document("articles", 1).unwrap().unwrap();
         assert_eq!(got.get("title"), Some(&s("rust language")));
         eng.delete_document("articles", 1).unwrap();
-        assert!(eng.get_document("articles", 1).is_none());
+        assert!(eng.get_document("articles", 1).unwrap().is_none());
     }
 
     #[test]
     fn search_returns_top_k_bm25_in_score_order() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
         eng.add_document(
             "articles",
             1,
@@ -1127,13 +1703,15 @@ mod tests {
         eng.add_document("articles", 3, doc([("title", s("rust rust rust"))]))
             .unwrap();
 
-        let hits = eng.search(
-            "articles",
-            "title",
-            "rust",
-            &ScoringMode::BM25(BM25Params::default()),
-            10,
-        );
+        let hits = eng
+            .search(
+                "articles",
+                "title",
+                "rust",
+                &ScoringMode::BM25(BM25Params::default()),
+                10,
+            )
+            .unwrap();
         // Doc 3 has tf=3 and is shorter -> highest BM25.
         assert_eq!(hits.first().map(|h| h.doc_id), Some(3));
         assert!(hits.iter().any(|h| h.doc_id == 1));
@@ -1143,7 +1721,8 @@ mod tests {
     #[test]
     fn search_top_k_matches_full_score_prefix() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
         for doc_id in 1..=20 {
             let body = std::iter::repeat_n("rust", doc_id as usize)
                 .collect::<Vec<_>>()
@@ -1152,20 +1731,24 @@ mod tests {
                 .unwrap();
         }
 
-        let full = eng.search(
-            "articles",
-            "title",
-            "rust",
-            &ScoringMode::BM25(BM25Params::default()),
-            usize::MAX,
-        );
-        let top = eng.search(
-            "articles",
-            "title",
-            "rust",
-            &ScoringMode::BM25(BM25Params::default()),
-            3,
-        );
+        let full = eng
+            .search(
+                "articles",
+                "title",
+                "rust",
+                &ScoringMode::BM25(BM25Params::default()),
+                usize::MAX,
+            )
+            .unwrap();
+        let top = eng
+            .search(
+                "articles",
+                "title",
+                "rust",
+                &ScoringMode::BM25(BM25Params::default()),
+                3,
+            )
+            .unwrap();
 
         assert_eq!(top.len(), 3);
         assert_eq!(
@@ -1180,7 +1763,8 @@ mod tests {
     #[test]
     fn search_returns_calibrated_probabilities_under_bayesian_bm25() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
         eng.add_document(
             "articles",
             1,
@@ -1190,13 +1774,15 @@ mod tests {
         eng.add_document("articles", 2, doc([("title", s("python is dynamic"))]))
             .unwrap();
 
-        let hits = eng.search(
-            "articles",
-            "title",
-            "rust",
-            &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
-            10,
-        );
+        let hits = eng
+            .search(
+                "articles",
+                "title",
+                "rust",
+                &ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+                10,
+            )
+            .unwrap();
 
         // Bayesian BM25 always returns probabilities in (0, 1).
         for h in &hits {
@@ -1212,8 +1798,9 @@ mod tests {
     #[test]
     fn knn_returns_top_k_in_descending_similarity() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
-        eng.create_vector_field("articles", "embedding", 3);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
+        eng.create_vector_field("articles", "embedding", 3).unwrap();
         eng.add_document_with_vectors(
             "articles",
             1,
@@ -1236,7 +1823,9 @@ mod tests {
         )
         .unwrap();
 
-        let hits = eng.knn_search("articles", "embedding", vec![1.0, 0.0, 0.0], 2);
+        let hits = eng
+            .knn_search("articles", "embedding", vec![1.0, 0.0, 0.0], 2)
+            .unwrap();
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
         // doc 3 (cos ~0.707) beats doc 2 (cos 0.0).
         assert_eq!(hits.get(1).map(|h| h.doc_id), Some(3));
@@ -1326,7 +1915,9 @@ mod tests {
             vector_index_kind(&reopened, "articles", "embedding"),
             "sqlite-ivf"
         );
-        let hits = reopened.knn_search("articles", "embedding", vec![1.0, 0.0], 1);
+        let hits = reopened
+            .knn_search("articles", "embedding", vec![1.0, 0.0], 1)
+            .unwrap();
         assert_eq!(hits.first().map(|h| h.doc_id), Some(2));
     }
 
@@ -1353,13 +1944,13 @@ mod tests {
             conn.execute(
                 "UPDATE _documents
                     SET body = json_set(body, '$.embedding', json('[0.0, 1.0]'))
-                  WHERE table_name = 'articles' AND doc_id = 1",
+                  WHERE table_name = 'public.articles' AND doc_id = 1",
                 [],
             )?;
             conn.execute(
                 "UPDATE _documents
                     SET body = json_set(body, '$.embedding', json('[1.0, 0.0]'))
-                  WHERE table_name = 'articles' AND doc_id = 2",
+                  WHERE table_name = 'public.articles' AND doc_id = 2",
                 [],
             )?;
             Ok(())
@@ -1380,7 +1971,7 @@ mod tests {
     #[test]
     fn create_vector_field_backfills_existing_documents() {
         let eng = Engine::new();
-        eng.create_default_table("docs", vec![]);
+        eng.create_default_table("docs", vec![]).unwrap();
         eng.add_document("docs", 1, doc([("embedding", vector(&[1.0, 0.0]))]))
             .unwrap();
         eng.add_document("docs", 2, doc([("embedding", vector(&[0.0, 1.0]))]))
@@ -1388,8 +1979,10 @@ mod tests {
         eng.add_document("docs", 3, doc([("embedding", vector(&[0.8, 0.2]))]))
             .unwrap();
 
-        assert!(eng.create_vector_field("docs", "embedding", 2));
-        let hits = eng.knn_search("docs", "embedding", vec![1.0, 0.0], 2);
+        assert!(eng.create_vector_field("docs", "embedding", 2).unwrap());
+        let hits = eng
+            .knn_search("docs", "embedding", vec![1.0, 0.0], 2)
+            .unwrap();
         assert_eq!(
             hits.iter().map(|h| h.doc_id).collect::<Vec<_>>(),
             vec![1, 3]
@@ -1399,8 +1992,9 @@ mod tests {
     #[test]
     fn hybrid_search_combines_text_and_vector_signals() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
-        eng.create_vector_field("articles", "embedding", 3);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
+        eng.create_vector_field("articles", "embedding", 3).unwrap();
 
         // Doc 1: title matches "rust", embedding pointing toward query.
         eng.add_document_with_vectors(
@@ -1427,16 +2021,18 @@ mod tests {
         )
         .unwrap();
 
-        let hits = eng.hybrid_search(&HybridSearchParams {
-            table: "articles",
-            text_field: "title",
-            text_query: "rust",
-            vector_field: "embedding",
-            query_vector: vec![1.0, 0.0, 0.0],
-            knn_pool: 10,
-            alpha: 0.5,
-            top_k: 10,
-        });
+        let hits = eng
+            .hybrid_search(&HybridSearchParams {
+                table: "articles",
+                text_field: "title",
+                text_query: "rust",
+                vector_field: "embedding",
+                query_vector: vec![1.0, 0.0, 0.0],
+                knn_pool: 10,
+                alpha: 0.5,
+                top_k: 10,
+            })
+            .unwrap();
 
         // Doc 1 should rank highest: text match AND high cosine.
         assert_eq!(hits.first().map(|h| h.doc_id), Some(1));
@@ -1449,11 +2045,12 @@ mod tests {
     #[test]
     fn document_count_tracks_indexed_documents() {
         let eng = Engine::new();
-        eng.create_default_table("articles", vec!["title".into()]);
+        eng.create_default_table("articles", vec!["title".into()])
+            .unwrap();
         for i in 0..5 {
             eng.add_document("articles", i, doc([("title", s(&format!("doc {i}")))]))
                 .unwrap();
         }
-        assert_eq!(eng.document_count("articles"), 5);
+        assert_eq!(eng.document_count("articles").unwrap(), 5);
     }
 }

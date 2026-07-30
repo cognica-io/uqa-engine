@@ -104,6 +104,28 @@ fn alter_table_add_column_with_default() {
 }
 
 #[test]
+fn boolean_type_is_enforced_and_survives_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("boolean.sqlite");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE flags (id INTEGER PRIMARY KEY, enabled BOOLEAN)",
+        );
+        exec(&engine, "INSERT INTO flags VALUES (1, true), (2, 'false')");
+        assert_err_contains(&engine, "INSERT INTO flags VALUES (3, 1)", "to boolean");
+    }
+
+    let reopened = Engine::open(&path).unwrap();
+    let columns = reopened.describe_table("flags").unwrap().unwrap();
+    assert!(matches!(columns[1].ty, uqa_sql::ast::ColumnType::Boolean));
+    let result = query(&reopened, "SELECT enabled FROM flags ORDER BY id");
+    assert_eq!(result.rows[0]["enabled"], Value::Bool(true));
+    assert_eq!(result.rows[1]["enabled"], Value::Bool(false));
+}
+
+#[test]
 fn create_index_using_ivf_accepts_vector_columns() {
     let engine = Engine::new();
     exec(
@@ -160,7 +182,10 @@ fn not_null_default_survives_engine_reopen() {
         );
     }
     let engine = Engine::open(&db).unwrap();
-    let columns = engine.describe_table("conversations").unwrap();
+    let columns = engine
+        .describe_table("conversations")
+        .unwrap()
+        .expect("conversation schema");
     let retrieval_col = columns
         .iter()
         .find(|col| col.name == "retrieval_top_k")
@@ -468,7 +493,7 @@ fn primary_key_enforces_uniqueness() {
     assert_err_contains(
         &engine,
         "INSERT INTO t (id, val) VALUES (1, 'b')",
-        "UNIQUE constraint",
+        "PRIMARY KEY constraint",
     );
 }
 

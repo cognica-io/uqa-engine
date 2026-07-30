@@ -35,7 +35,8 @@ fn single_field_score_is_probability() {
             weight: 1.0,
         }],
         &stats(),
-    );
+    )
+    .unwrap();
     let score = scorer.score_document(
         &map(&[("title", 3)]),
         &map(&[("title", 10)]),
@@ -60,7 +61,8 @@ fn two_fields_score_higher_than_one() {
             },
         ],
         &stats(),
-    );
+    )
+    .unwrap();
     let one_field = scorer.score_document(
         &map(&[("title", 3), ("body", 0)]),
         &map(&[("title", 10), ("body", 100)]),
@@ -83,7 +85,8 @@ fn zero_tf_gives_neutral_sparse_absence() {
             weight: 1.0,
         }],
         &stats(),
-    );
+    )
+    .unwrap();
     let score = scorer.score_document(
         &map(&[("title", 0)]),
         &map(&[("title", 10)]),

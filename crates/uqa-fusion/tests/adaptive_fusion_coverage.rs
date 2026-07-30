@@ -79,7 +79,7 @@ fn adaptive_fuse_single_signal() {
 #[test]
 fn adaptive_fuse_uniform_quality() {
     let adaptive = AdaptiveLogOddsFusion::new(0.5);
-    let standard = LogOddsFusion::new(0.5);
+    let standard = LogOddsFusion::new(0.5).unwrap();
     let probs = [0.7, 0.8, 0.6];
     let sq = SignalQuality {
         coverage_ratio: 1.0,

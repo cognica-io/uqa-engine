@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use uqa_core::{FieldName, Value};
 use uqa_engine::{Engine, HybridSearchParams};
+use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
 // Hybrid pipeline composes BM25 (`f64`) and cosine (`f32` lifted to
@@ -71,8 +72,10 @@ fn hybrid_search_matches_fixture() {
     let fx: Fixture = serde_json::from_slice(&bytes).expect("fixture parses");
 
     let eng = Engine::new();
-    eng.create_default_table("articles", vec!["title".into()]);
-    eng.create_vector_field("articles", "embedding", fx.vector_dim);
+    eng.create_default_table("articles", vec!["title".into()])
+        .unwrap();
+    eng.create_vector_field("articles", "embedding", fx.vector_dim)
+        .unwrap();
     for c in &fx.corpus {
         let mut d = Document::new();
         d.insert("title".into(), Value::Str(c.title.clone()));
@@ -83,16 +86,18 @@ fn hybrid_search_matches_fixture() {
     }
 
     for case in &fx.queries {
-        let hits = eng.hybrid_search(&HybridSearchParams {
-            table: "articles",
-            text_field: &case.text_field,
-            text_query: &case.text_query,
-            vector_field: "embedding",
-            query_vector: case.query_vector.clone(),
-            knn_pool: case.knn_pool,
-            alpha: case.alpha,
-            top_k: case.top_k,
-        });
+        let hits = eng
+            .hybrid_search(&HybridSearchParams {
+                table: "articles",
+                text_field: &case.text_field,
+                text_query: &case.text_query,
+                vector_field: "embedding",
+                query_vector: case.query_vector.clone(),
+                knn_pool: case.knn_pool,
+                alpha: case.alpha,
+                top_k: case.top_k,
+            })
+            .unwrap();
         let expected = &case.expected;
 
         assert_eq!(
@@ -123,4 +128,68 @@ fn hybrid_search_matches_fixture() {
             );
         }
     }
+}
+
+#[test]
+fn hybrid_search_rejects_missing_vector_field_even_without_text_tokens() {
+    let eng = Engine::new();
+    eng.create_default_table("articles", vec!["title".into()])
+        .unwrap();
+
+    for text_query in ["rust", ""] {
+        let error = eng
+            .hybrid_search(&HybridSearchParams {
+                table: "articles",
+                text_field: "title",
+                text_query,
+                vector_field: "missing_embedding",
+                query_vector: vec![1.0, 0.0, 0.0],
+                knn_pool: 10,
+                alpha: 0.5,
+                top_k: 10,
+            })
+            .expect_err("a requested missing vector field must not degrade to text-only");
+        assert!(
+            matches!(error, SQLError::UnknownColumn(ref field) if field == "missing_embedding"),
+            "unexpected error: {error}"
+        );
+    }
+}
+
+#[test]
+fn hybrid_search_validates_vector_shape_before_returning_an_empty_pool() {
+    let eng = Engine::new();
+    eng.create_default_table("articles", vec!["title".into()])
+        .unwrap();
+    eng.create_vector_field("articles", "embedding", 3).unwrap();
+
+    let error = eng
+        .hybrid_search(&HybridSearchParams {
+            table: "articles",
+            text_field: "title",
+            text_query: "",
+            vector_field: "embedding",
+            query_vector: vec![1.0, 0.0],
+            knn_pool: 0,
+            alpha: 0.5,
+            top_k: 0,
+        })
+        .expect_err("zero result limits must not bypass vector validation");
+    assert!(
+        matches!(error, SQLError::TypeMismatch(ref message) if message.contains("has 2 dimensions, expected 3")),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn explicit_scoring_sample_count_cannot_overflow_stride_arithmetic() {
+    let eng = Engine::new();
+    eng.create_default_table("articles", vec!["title".into()])
+        .unwrap();
+    let mut document = Document::new();
+    document.insert("title".into(), Value::Str("rust systems".into()));
+    eng.add_document("articles", 1, document).unwrap();
+
+    eng.estimate_scoring_params("articles", "title", usize::MAX, 1, 7)
+        .expect("a huge sample target must saturate stride arithmetic, not overflow");
 }

@@ -61,13 +61,21 @@ fn test_attention_construction() {
 #[test]
 fn test_attention_fuse_result_in_unit_interval() {
     let fusion = AttentionFusion::new(2, 6, 0.0);
-    assert_unit(fusion.fuse(&[0.8, 0.6], &[0.0; 6]));
+    assert_unit(
+        fusion
+            .fuse(&[0.8, 0.6], &[0.0; 6])
+            .expect("matching attention shape"),
+    );
 }
 
 #[test]
 fn test_attention_fuse_with_nonzero_features() {
     let fusion = AttentionFusion::new(2, 6, 0.0);
-    assert_unit(fusion.fuse(&[0.7, 0.3], &[1.0, 2.0, 0.5, 0.1, 3.0, 0.8]));
+    assert_unit(
+        fusion
+            .fuse(&[0.7, 0.3], &[1.0, 2.0, 0.5, 0.1, 3.0, 0.8])
+            .expect("matching attention shape"),
+    );
 }
 
 #[test]
@@ -79,14 +87,18 @@ fn test_attention_state_dict_roundtrip() {
     assert!((state.alpha - 0.3).abs() < 1e-12);
 
     let mut loaded = AttentionFusion::new(2, 6, 0.0);
-    loaded.load_state_dict(&state);
+    loaded.load_state_dict(&state).unwrap();
     assert_eq!(loaded.state_dict(), state);
 }
 
 #[test]
 fn test_attention_fuse_three_signals() {
     let fusion = AttentionFusion::new(3, 6, 0.0);
-    assert_unit(fusion.fuse(&[0.9, 0.5, 0.2], &[0.0; 6]));
+    assert_unit(
+        fusion
+            .fuse(&[0.9, 0.5, 0.2], &[0.0; 6])
+            .expect("matching attention shape"),
+    );
 }
 
 #[test]
@@ -98,7 +110,11 @@ fn test_learned_construction() {
 #[test]
 fn test_learned_fuse_result_in_unit_interval() {
     let fusion = LearnedFusion::new(2, 0.0);
-    assert_unit(fusion.fuse(&[0.8, 0.6]));
+    assert_unit(
+        fusion
+            .fuse(&[0.8, 0.6])
+            .expect("matching learned-fusion shape"),
+    );
 }
 
 #[test]
@@ -109,12 +125,16 @@ fn test_learned_state_dict_roundtrip() {
     assert!((state.alpha - 0.7).abs() < 1e-12);
 
     let mut loaded = LearnedFusion::new(3, 0.0);
-    loaded.load_state_dict(&state);
+    loaded.load_state_dict(&state).unwrap();
     assert_eq!(loaded.state_dict(), state);
 }
 
 #[test]
 fn test_learned_fuse_three_signals() {
     let fusion = LearnedFusion::new(3, 0.0);
-    assert_unit(fusion.fuse(&[0.9, 0.5, 0.2]));
+    assert_unit(
+        fusion
+            .fuse(&[0.9, 0.5, 0.2])
+            .expect("matching learned-fusion shape"),
+    );
 }

@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{require_finite_score, ExecutionContext, Operator, OperatorResult};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Cutoff {
@@ -31,16 +32,29 @@ pub struct MultiStageOperator {
 }
 
 impl MultiStageOperator {
-    pub fn new(stages: Vec<(Arc<dyn Operator>, Cutoff)>) -> Self {
-        assert!(
-            !stages.is_empty(),
-            "MultiStageOperator requires at least one stage"
-        );
-        Self { stages }
+    pub fn new(stages: Vec<(Arc<dyn Operator>, Cutoff)>) -> StorageBackendResult<Self> {
+        if stages.is_empty() {
+            return Err(StorageBackendError::Other(
+                "MultiStageOperator requires at least one stage".to_string(),
+            ));
+        }
+        for (_, cutoff) in &stages {
+            if let Cutoff::Threshold(threshold) = cutoff {
+                if !threshold.is_finite() {
+                    return Err(StorageBackendError::Other(
+                        "MultiStageOperator thresholds must be finite".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(Self { stages })
     }
 
-    fn apply_cutoff(pl: &PostingList, cutoff: Cutoff) -> PostingList {
-        match cutoff {
+    fn apply_cutoff(pl: &PostingList, cutoff: Cutoff) -> StorageBackendResult<PostingList> {
+        for entry in pl.entries() {
+            require_finite_score(entry.payload.score, "multi-stage retrieval")?;
+        }
+        Ok(match cutoff {
             Cutoff::TopK(k) => pl.top_k(k),
             Cutoff::Threshold(t) => {
                 let kept: Vec<PostingEntry> = pl
@@ -51,17 +65,22 @@ impl MultiStageOperator {
                     .collect();
                 PostingList::from_sorted_unchecked(kept)
             }
-        }
+        })
     }
 }
 
 impl Operator for MultiStageOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let (first_op, first_cutoff) = &self.stages[0];
-        let mut candidates = Self::apply_cutoff(&first_op.execute(ctx), *first_cutoff);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let (first_op, first_cutoff) = self.stages.first().ok_or_else(|| {
+            StorageBackendError::Other("MultiStageOperator requires at least one stage".to_string())
+        })?;
+        let mut candidates = Self::apply_cutoff(&first_op.execute(ctx)?, *first_cutoff)?;
 
         for (stage_op, cutoff) in self.stages.iter().skip(1) {
-            let stage_result = stage_op.execute(ctx);
+            let stage_result = stage_op.execute(ctx)?;
+            for entry in stage_result.entries() {
+                require_finite_score(entry.payload.score, "multi-stage retrieval")?;
+            }
             // Build a doc_id -> score map from the stage's output.
             let mut scores: std::collections::BTreeMap<u64, f64> =
                 std::collections::BTreeMap::new();
@@ -85,9 +104,10 @@ impl Operator for MultiStageOperator {
                     )
                 })
                 .collect();
-            candidates = Self::apply_cutoff(&PostingList::from_sorted_unchecked(rescored), *cutoff);
+            candidates =
+                Self::apply_cutoff(&PostingList::from_sorted_unchecked(rescored), *cutoff)?;
         }
-        candidates
+        Ok(candidates)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -115,8 +135,8 @@ mod tests {
     struct ConstOperator(Vec<PostingEntry>);
 
     impl Operator for ConstOperator {
-        fn execute(&self, _ctx: &ExecutionContext) -> PostingList {
-            PostingList::from_sorted_unchecked(self.0.clone())
+        fn execute(&self, _ctx: &ExecutionContext) -> OperatorResult {
+            Ok(PostingList::from_sorted_unchecked(self.0.clone()))
         }
     }
 
@@ -131,9 +151,9 @@ mod tests {
             entry(2, 0.9),
             entry(3, 0.5),
         ])) as Arc<dyn Operator>;
-        let pipeline = MultiStageOperator::new(vec![(stage_0, Cutoff::TopK(2))]);
+        let pipeline = MultiStageOperator::new(vec![(stage_0, Cutoff::TopK(2))]).unwrap();
         let ctx = ExecutionContext::new();
-        let out = pipeline.execute(&ctx);
+        let out = pipeline.execute(&ctx).unwrap();
         let ids: Vec<u64> = out.doc_ids().collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&2));
@@ -147,8 +167,8 @@ mod tests {
             entry(2, 0.5),
             entry(3, 0.8),
         ])) as Arc<dyn Operator>;
-        let pipeline = MultiStageOperator::new(vec![(op, Cutoff::Threshold(0.5))]);
-        let out = pipeline.execute(&ExecutionContext::new());
+        let pipeline = MultiStageOperator::new(vec![(op, Cutoff::Threshold(0.5))]).unwrap();
+        let out = pipeline.execute(&ExecutionContext::new()).unwrap();
         let ids: Vec<u64> = out.doc_ids().collect();
         assert_eq!(ids, vec![2, 3]);
     }
@@ -167,8 +187,9 @@ mod tests {
             entry(4, 0.99),
         ])) as Arc<dyn Operator>;
         let pipeline =
-            MultiStageOperator::new(vec![(stage_0, Cutoff::TopK(3)), (stage_1, Cutoff::TopK(2))]);
-        let out = pipeline.execute(&ExecutionContext::new());
+            MultiStageOperator::new(vec![(stage_0, Cutoff::TopK(3)), (stage_1, Cutoff::TopK(2))])
+                .unwrap();
+        let out = pipeline.execute(&ExecutionContext::new()).unwrap();
         let pairs: Vec<(u64, f64)> = out
             .entries()
             .iter()

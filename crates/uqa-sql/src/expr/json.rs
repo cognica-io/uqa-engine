@@ -22,9 +22,19 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
-        Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
+        Value::Float(f) => serde_json::Number::from_f64(*f).map_or_else(
+            || {
+                let label = if f.is_nan() {
+                    "NaN"
+                } else if f.is_sign_positive() {
+                    "Infinity"
+                } else {
+                    "-Infinity"
+                };
+                serde_json::Value::String(label.to_string())
+            },
+            serde_json::Value::Number,
+        ),
         Value::Decimal(d) => d
             .to_f64()
             .and_then(serde_json::Number::from_f64)
@@ -154,7 +164,7 @@ pub(super) fn json_extract_path(args: &[Value], as_text: bool) -> Result<Value> 
         Ok(Value::Str(match current {
             serde_json::Value::String(s) => s,
             serde_json::Value::Null => return Ok(Value::Null),
-            other => serde_json::to_string(&other).unwrap_or_default(),
+            other => other.to_string(),
         }))
     } else if matches!(current, serde_json::Value::Null) {
         Ok(Value::Null)

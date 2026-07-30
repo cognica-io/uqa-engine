@@ -20,9 +20,9 @@ use std::sync::Arc;
 use uqa_core::{
     IndexStats, PathExpr, PathSegment, Payload, PostingEntry, PostingList, Predicate, Value,
 };
-use uqa_storage::document_store::Document;
+use uqa_storage::{document_store::Document, StorageBackendError, StorageBackendResult};
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{missing_backend, ExecutionContext, Operator, OperatorResult};
 use crate::primitive::FilterOperator;
 
 /// Parse a dotted path: each numeric segment becomes an index, every
@@ -96,10 +96,10 @@ pub fn project_paths(
 ///
 /// * `<path>._unnested` -- the array element value.
 /// * `_unnest_index`    -- the element's 0-based index.
-pub fn unnest_array(doc: &Document, path: &[PathSegment]) -> Vec<Document> {
+pub fn unnest_array(doc: &Document, path: &[PathSegment]) -> StorageBackendResult<Vec<Document>> {
     let resolved = eval_path(doc, path);
     let Some(Value::List(items)) = resolved else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let path_key = path
         .iter()
@@ -116,8 +116,15 @@ pub fn unnest_array(doc: &Document, path: &[PathSegment]) -> Vec<Document> {
         .map(|(idx, item)| {
             let mut nested = doc.clone();
             nested.insert(unnest_key.clone(), item);
-            nested.insert("_unnest_index".to_string(), Value::Int(idx as i64));
-            nested
+            nested.insert(
+                "_unnest_index".to_string(),
+                Value::Int(i64::try_from(idx).map_err(|_| {
+                    StorageBackendError::Other(format!(
+                        "unnest index {idx} exceeds the Value::Int range"
+                    ))
+                })?),
+            );
+            Ok(nested)
         })
         .collect()
 }
@@ -145,19 +152,21 @@ impl PathFilterOperator {
 }
 
 impl Operator for PathFilterOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "path filter"));
         };
         let candidates: Vec<u64> = match &self.source {
-            Some(src) => src.execute(ctx).doc_ids().collect(),
-            None => doc_store.doc_ids(),
+            Some(src) => src.execute(ctx)?.doc_ids().collect(),
+            None => doc_store.doc_ids()?,
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
         for doc_id in candidates {
-            let Some(doc) = doc_store.get(doc_id) else {
-                continue;
-            };
+            let doc = doc_store.get(doc_id)?.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "path filter candidate {doc_id} is missing from the document store"
+                ))
+            })?;
             let Some(value) = eval_path(&doc, &self.path) else {
                 if self.predicate.is_null_aware() && self.predicate.evaluate(None) {
                     entries.push(PostingEntry::new(doc_id, Payload::default()));
@@ -173,7 +182,7 @@ impl Operator for PathFilterOperator {
             }
         }
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -204,16 +213,19 @@ impl PathProjectOperator {
 }
 
 impl Operator for PathProjectOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let source_pl = self.source.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let source_pl = self.source.execute(ctx)?;
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return source_pl;
+            return Err(missing_backend("document-store", "path projection"));
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
         for entry in source_pl.entries() {
-            let Some(doc) = doc_store.get(entry.doc_id) else {
-                continue;
-            };
+            let doc = doc_store.get(entry.doc_id)?.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "path projection candidate {} is missing from the document store",
+                    entry.doc_id
+                ))
+            })?;
             let mut fields = entry.payload.fields.clone();
             for path in &self.paths {
                 if let Some(value) = eval_path(&doc, path) {
@@ -229,7 +241,7 @@ impl Operator for PathProjectOperator {
                 },
             ));
         }
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -278,37 +290,39 @@ impl PathAggregateOperator {
 }
 
 impl Operator for PathAggregateOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "path aggregation"));
         };
         let candidates: Vec<u64> = match &self.source {
-            Some(src) => src.execute(ctx).doc_ids().collect(),
-            None => doc_store.doc_ids(),
+            Some(src) => src.execute(ctx)?.doc_ids().collect(),
+            None => doc_store.doc_ids()?,
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
         for doc_id in candidates {
-            let Some(doc) = doc_store.get(doc_id) else {
-                continue;
-            };
+            let doc = doc_store.get(doc_id)?.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "path aggregate candidate {doc_id} is missing from the document store"
+                ))
+            })?;
             let value = eval_path(&doc, &self.path);
             let mut numeric: Vec<f64> = Vec::new();
             match value {
                 Some(Value::List(items)) => {
                     for v in items {
-                        if let Some(n) = value_as_f64(&v) {
-                            numeric.push(n);
+                        if let Some(number) = value_as_f64(&v)? {
+                            numeric.push(number);
                         }
                     }
                 }
                 Some(other) => {
-                    if let Some(n) = value_as_f64(&other) {
-                        numeric.push(n);
+                    if let Some(number) = value_as_f64(&other)? {
+                        numeric.push(number);
                     }
                 }
                 None => {}
             }
-            let result = aggregate(self.agg, &numeric);
+            let result = aggregate(self.agg, &numeric)?;
             let mut fields = std::collections::BTreeMap::new();
             fields.insert(
                 "_path_aggregate_path".into(),
@@ -325,7 +339,7 @@ impl Operator for PathAggregateOperator {
             ));
         }
         entries.sort_by_key(|e| e.doc_id);
-        PostingList::from_sorted_unchecked(entries)
+        Ok(PostingList::from_sorted_unchecked(entries))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -336,26 +350,49 @@ impl Operator for PathAggregateOperator {
     }
 }
 
-fn value_as_f64(v: &Value) -> Option<f64> {
-    match v {
-        Value::Int(n) => Some(*n as f64),
-        Value::Float(f) => Some(*f),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        _ => None,
+fn value_as_f64(value: &Value) -> StorageBackendResult<Option<f64>> {
+    let numeric = match value {
+        Value::Null => return Ok(None),
+        Value::Int(number) => *number as f64,
+        Value::Float(number) => *number,
+        Value::Bool(boolean) => {
+            if *boolean {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        _ => {
+            return Err(StorageBackendError::Other(format!(
+                "path aggregation requires numeric values, got {value:?}"
+            )))
+        }
+    };
+    if !numeric.is_finite() {
+        return Err(StorageBackendError::Other(
+            "path aggregation requires finite numeric values".to_string(),
+        ));
     }
+    Ok(Some(numeric))
 }
 
-fn aggregate(kind: AggregationKind, values: &[f64]) -> f64 {
+fn aggregate(kind: AggregationKind, values: &[f64]) -> StorageBackendResult<f64> {
     if values.is_empty() {
-        return 0.0;
+        return Ok(0.0);
     }
-    match kind {
+    let result = match kind {
         AggregationKind::Sum => values.iter().sum(),
         AggregationKind::Avg => values.iter().sum::<f64>() / values.len() as f64,
         AggregationKind::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
         AggregationKind::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         AggregationKind::Count => values.len() as f64,
+    };
+    if !result.is_finite() {
+        return Err(StorageBackendError::Other(
+            "path aggregation overflowed the finite numeric range".to_string(),
+        ));
     }
+    Ok(result)
 }
 
 // -------------------------------------------------------------------------
@@ -386,7 +423,7 @@ impl UnifiedFilterOperator {
 }
 
 impl Operator for UnifiedFilterOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         if self.field_expr.contains('.') {
             let path = parse_path(&self.field_expr);
             let inner = PathFilterOperator::new(path, self.predicate.clone(), self.source.clone());

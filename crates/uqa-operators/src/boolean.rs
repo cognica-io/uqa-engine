@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
 
-use crate::base::{ExecutionContext, Operator};
+use crate::base::{missing_backend, ExecutionContext, Operator, OperatorResult};
 
 pub struct UnionOperator {
     pub operands: Vec<Arc<dyn Operator>>,
@@ -23,12 +23,12 @@ impl UnionOperator {
 }
 
 impl Operator for UnionOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        self.operands
-            .iter()
-            .map(|op| op.execute(ctx))
-            .reduce(|acc, next| acc.union(&next))
-            .unwrap_or_else(PostingList::new)
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let mut result = PostingList::new();
+        for operand in &self.operands {
+            result = result.union(&operand.execute(ctx)?);
+        }
+        Ok(result)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -47,19 +47,19 @@ impl IntersectOperator {
 }
 
 impl Operator for IntersectOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let mut iter = self.operands.iter();
         let Some(first) = iter.next() else {
-            return PostingList::new();
+            return Ok(PostingList::new());
         };
-        let mut acc = first.execute(ctx);
+        let mut acc = first.execute(ctx)?;
         for op in iter {
             if acc.is_empty() {
-                return acc;
+                return Ok(acc);
             }
-            acc = acc.intersect_owned(&op.execute(ctx));
+            acc = acc.intersect_owned(&op.execute(ctx)?);
         }
-        acc
+        Ok(acc)
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -84,18 +84,18 @@ impl ComplementOperator {
 }
 
 impl Operator for ComplementOperator {
-    fn execute(&self, ctx: &ExecutionContext) -> PostingList {
-        let result = self.operand.execute(ctx);
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        let result = self.operand.execute(ctx)?;
         let Some(doc_store) = ctx.document_store.as_ref() else {
-            return PostingList::new();
+            return Err(missing_backend("document-store", "boolean complement"));
         };
         let universal_entries: Vec<PostingEntry> = doc_store
-            .doc_ids()
+            .doc_ids()?
             .into_iter()
             .map(|id| PostingEntry::new(id, Payload::default()))
             .collect();
         let universal = PostingList::from_sorted_unchecked(universal_entries);
-        result.complement(&universal)
+        Ok(result.complement(&universal))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

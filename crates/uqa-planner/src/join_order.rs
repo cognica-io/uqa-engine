@@ -14,23 +14,17 @@
 //! [`JoinOrderTree`] -- a tree of join descriptors the engine
 //! interprets to drive the actual row-tuple join algorithms.
 //!
-//! `JoinOrderTree` mirrors the canonical UQA implementation's operator construction step; the
-//! algorithm choice (hash vs index) follows the same `min(left_card,
-//! right_card) <= INDEX_JOIN_THRESHOLD` cutoff.
+//! `JoinOrderTree` retains the executable physical strategy selected by the
+//! enumerator. Today relational equijoins are hash joins; the planner does not
+//! pretend that a pre-existing index join is available when the engine cannot
+//! execute one.
 
 use std::collections::BTreeMap;
 
 use crate::cardinality::ColumnStats;
-use crate::cost_model::CostEstimator;
+use crate::cost_model::{CostEstimator, OperatorKind};
 use crate::join_enumerator::{enumerate_dpccp, JoinPlan};
-use crate::join_graph::{JoinEdge, JoinGraph};
-
-/// Use index join when the smaller side has fewer rows than this
-/// threshold. Index join is `O(|L1| * log|L2|)` vs hash join
-/// `O(|L1| + |L2|)`; for small inputs the lower constant factor of
-/// binary search wins. Mirrors `INDEX_JOIN_THRESHOLD` in the UQA implementation
-/// reference.
-pub const INDEX_JOIN_THRESHOLD: f64 = 100.0;
+use crate::join_graph::{JoinEdge, JoinGraph, JoinGraphResult};
 
 /// Description of a base relation feeding a join. Mirrors the dict
 /// shape used by `uqa.planner.join_order.JoinOrderOptimizer.optimize`.
@@ -57,7 +51,6 @@ pub struct JoinPredicate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinAlgorithm {
     Hash,
-    Index,
 }
 
 /// Equijoin condition.
@@ -118,34 +111,28 @@ impl JoinOrderOptimizer {
         &self,
         relations: Vec<JoinRelation>,
         predicates: Vec<JoinPredicate>,
-    ) -> JoinOrderResult {
+    ) -> JoinGraphResult<JoinOrderResult> {
         if relations.is_empty() {
-            return JoinOrderResult {
-                tree: JoinOrderTree::Cross {
-                    left: Box::new(JoinOrderTree::Scan(JoinRelation {
-                        alias: String::new(),
-                        cardinality: 0.0,
-                        column_stats: BTreeMap::new(),
-                        source_id: 0,
-                    })),
-                    right: Box::new(JoinOrderTree::Scan(JoinRelation {
-                        alias: String::new(),
-                        cardinality: 0.0,
-                        column_stats: BTreeMap::new(),
-                        source_id: 0,
-                    })),
-                },
-                primary_alias: None,
-            };
+            return Err(crate::join_graph::JoinGraphError::EmptyGraph);
         }
 
         if relations.len() == 1 {
-            let rel = relations.into_iter().next().unwrap();
+            let relation = relations
+                .first()
+                .ok_or(crate::join_graph::JoinGraphError::EmptyGraph)?;
+            let mut validation = JoinGraph::new();
+            validation.add_relation(relation.alias.clone(), relation.cardinality)?;
+            let rel = relations.into_iter().next().ok_or(
+                crate::join_graph::JoinGraphError::UnknownRelation {
+                    index: 0,
+                    relation_count: 0,
+                },
+            )?;
             let alias = rel.alias.clone();
-            return JoinOrderResult {
+            return Ok(JoinOrderResult {
                 tree: JoinOrderTree::Scan(rel),
                 primary_alias: Some(alias),
-            };
+            });
         }
 
         let primary_alias = relations.first().map(|r| r.alias.clone());
@@ -154,19 +141,29 @@ impl JoinOrderOptimizer {
         let mut graph = JoinGraph::new();
         let mut alias_to_idx: BTreeMap<String, usize> = BTreeMap::new();
         for rel in &relations {
-            let idx = graph.add_relation(rel.alias.clone(), rel.cardinality);
-            alias_to_idx.insert(rel.alias.clone(), idx);
+            let idx = graph.add_relation(rel.alias.clone(), rel.cardinality)?;
+            if alias_to_idx.insert(rel.alias.clone(), idx).is_some() {
+                return Err(crate::join_graph::JoinGraphError::DuplicateAlias {
+                    alias: rel.alias.clone(),
+                });
+            }
         }
 
         // Materialize predicates as edges with column-stats-derived
         // selectivity.
         let mut predicate_lookup: BTreeMap<(usize, usize), JoinPredicate> = BTreeMap::new();
         for pred in predicates {
-            let l = alias_to_idx.get(&pred.left_alias).copied();
-            let r = alias_to_idx.get(&pred.right_alias).copied();
-            let (Some(l), Some(r)) = (l, r) else {
-                continue;
-            };
+            let l = alias_to_idx.get(&pred.left_alias).copied().ok_or_else(|| {
+                crate::join_graph::JoinGraphError::UnknownAlias {
+                    alias: pred.left_alias.clone(),
+                }
+            })?;
+            let r = alias_to_idx
+                .get(&pred.right_alias)
+                .copied()
+                .ok_or_else(|| crate::join_graph::JoinGraphError::UnknownAlias {
+                    alias: pred.right_alias.clone(),
+                })?;
             let selectivity = Self::estimate_predicate_selectivity(
                 &relations,
                 l,
@@ -174,7 +171,7 @@ impl JoinOrderOptimizer {
                 &pred.left_field,
                 &pred.right_field,
             );
-            graph.add_edge(l, r, selectivity);
+            graph.add_edge(l, r, selectivity)?;
             // Store both orientations so materialize_plan can resolve
             // either when DPccp swaps sides.
             predicate_lookup.insert((l.min(r), l.max(r)), pred);
@@ -182,14 +179,19 @@ impl JoinOrderOptimizer {
 
         let plan = enumerate_dpccp(&graph);
         let tree = match plan {
-            Some(p) => Self::materialize_plan(&p, &graph, &relations, &predicate_lookup),
+            Some(p) => Self::materialize_plan(&p, &graph, &relations, &predicate_lookup)?,
             None => {
                 // No connecting edges -- fall back to a left-deep
                 // cartesian product. DPccp returns None when the
                 // graph is disconnected, but a cross join is still a
                 // valid (if expensive) plan.
                 let mut iter = relations.into_iter();
-                let first = iter.next().unwrap();
+                let first =
+                    iter.next()
+                        .ok_or(crate::join_graph::JoinGraphError::UnknownRelation {
+                            index: 0,
+                            relation_count: 0,
+                        })?;
                 let mut tree = JoinOrderTree::Scan(first);
                 for rel in iter {
                     tree = JoinOrderTree::Cross {
@@ -201,10 +203,10 @@ impl JoinOrderOptimizer {
             }
         };
 
-        JoinOrderResult {
+        Ok(JoinOrderResult {
             tree,
             primary_alias,
-        }
+        })
     }
 
     fn estimate_predicate_selectivity(
@@ -232,28 +234,47 @@ impl JoinOrderOptimizer {
         graph: &JoinGraph,
         relations: &[JoinRelation],
         predicates: &BTreeMap<(usize, usize), JoinPredicate>,
-    ) -> JoinOrderTree {
+    ) -> JoinGraphResult<JoinOrderTree> {
         match (&plan.left, &plan.right) {
             (None, None) => {
                 // Leaf: `relations` is a singleton bitmask of the
                 // source relation index.
-                let idx = plan.relations.trailing_zeros() as usize;
-                JoinOrderTree::Scan(relations[idx].clone())
+                let idx = usize::try_from(plan.relations.trailing_zeros()).map_err(|_| {
+                    crate::join_graph::JoinGraphError::InvalidPlan {
+                        detail: "join leaf index exceeds usize".into(),
+                    }
+                })?;
+                relations
+                    .get(idx)
+                    .cloned()
+                    .map(JoinOrderTree::Scan)
+                    .ok_or_else(|| crate::join_graph::JoinGraphError::InvalidPlan {
+                        detail: format!("leaf references relation index {idx}"),
+                    })
             }
             (Some(left), Some(right)) => {
-                let l_tree = Self::materialize_plan(left, graph, relations, predicates);
-                let r_tree = Self::materialize_plan(right, graph, relations, predicates);
+                let l_tree = Self::materialize_plan(left, graph, relations, predicates)?;
+                let r_tree = Self::materialize_plan(right, graph, relations, predicates)?;
                 let l_set = left.relations;
                 let r_set = right.relations;
                 let Some(edge) = graph.edges.iter().find(|e| edge_connects(e, l_set, r_set)) else {
-                    return JoinOrderTree::Cross {
+                    return Ok(JoinOrderTree::Cross {
                         left: Box::new(l_tree),
                         right: Box::new(r_tree),
-                    };
+                    });
                 };
 
-                let edge_left_bit = edge.left.trailing_zeros() as usize;
-                let edge_right_bit = edge.right.trailing_zeros() as usize;
+                let edge_left_bit = usize::try_from(edge.left.trailing_zeros()).map_err(|_| {
+                    crate::join_graph::JoinGraphError::InvalidPlan {
+                        detail: "left join edge index exceeds usize".into(),
+                    }
+                })?;
+                let edge_right_bit =
+                    usize::try_from(edge.right.trailing_zeros()).map_err(|_| {
+                        crate::join_graph::JoinGraphError::InvalidPlan {
+                            detail: "right join edge index exceeds usize".into(),
+                        }
+                    })?;
                 let left_in_l = (l_set & (1u64 << edge_left_bit)) != 0;
                 let right_in_l = (l_set & (1u64 << edge_right_bit)) != 0;
                 let key = (
@@ -261,10 +282,11 @@ impl JoinOrderOptimizer {
                     edge_left_bit.max(edge_right_bit),
                 );
                 let Some(pred) = predicates.get(&key) else {
-                    return JoinOrderTree::Cross {
-                        left: Box::new(l_tree),
-                        right: Box::new(r_tree),
-                    };
+                    return Err(crate::join_graph::JoinGraphError::InvalidPlan {
+                        detail: format!(
+                            "join edge between relation indices {edge_left_bit} and {edge_right_bit} has no predicate"
+                        ),
+                    });
                 };
 
                 // Orient condition fields: if the plan put the edge's
@@ -282,24 +304,34 @@ impl JoinOrderOptimizer {
                     }
                 };
 
-                let min_card = left.rows().min(right.rows());
-                let algorithm = if min_card <= INDEX_JOIN_THRESHOLD {
-                    JoinAlgorithm::Index
-                } else {
-                    JoinAlgorithm::Hash
+                let algorithm = match plan.kind {
+                    Some(OperatorKind::HashJoinInner) => JoinAlgorithm::Hash,
+                    Some(kind) => {
+                        return Err(crate::join_graph::JoinGraphError::InvalidPlan {
+                            detail: format!(
+                                "DPccp selected non-executable equijoin strategy {kind:?}"
+                            ),
+                        });
+                    }
+                    None => {
+                        return Err(crate::join_graph::JoinGraphError::InvalidPlan {
+                            detail: "DPccp equijoin node has no physical strategy".into(),
+                        });
+                    }
                 };
 
-                JoinOrderTree::Inner {
+                Ok(JoinOrderTree::Inner {
                     algorithm,
                     condition,
                     left: Box::new(l_tree),
                     right: Box::new(r_tree),
-                }
+                })
             }
-            // A plan with exactly one child shouldn't appear; treat as
-            // its own materialised child.
-            (Some(left), None) => Self::materialize_plan(left, graph, relations, predicates),
-            (None, Some(right)) => Self::materialize_plan(right, graph, relations, predicates),
+            (Some(_), None) | (None, Some(_)) => {
+                Err(crate::join_graph::JoinGraphError::InvalidPlan {
+                    detail: "join node contains exactly one child".into(),
+                })
+            }
         }
     }
 }
@@ -344,47 +376,70 @@ mod tests {
         }
     }
 
+    fn assert_hash_join_tree(tree: &JoinOrderTree) {
+        match tree {
+            JoinOrderTree::Inner {
+                algorithm,
+                left,
+                right,
+                ..
+            } => {
+                assert_eq!(*algorithm, JoinAlgorithm::Hash);
+                assert_hash_join_tree(left);
+                assert_hash_join_tree(right);
+            }
+            JoinOrderTree::Cross { left, right } => {
+                assert_hash_join_tree(left);
+                assert_hash_join_tree(right);
+            }
+            JoinOrderTree::Scan(_) => {}
+        }
+    }
+
     #[test]
     fn single_relation_returns_scan() {
         let opt = JoinOrderOptimizer::new();
-        let result = opt.optimize(vec![rel("a", 100.0, 1)], vec![]);
+        let result = opt.optimize(vec![rel("a", 100.0, 1)], vec![]).unwrap();
         assert!(matches!(result.tree, JoinOrderTree::Scan(_)));
         assert_eq!(result.primary_alias.as_deref(), Some("a"));
     }
 
     #[test]
-    fn three_chain_picks_index_for_small_left() {
+    fn three_chain_uses_executable_hash_strategies() {
         let opt = JoinOrderOptimizer::new();
-        let result = opt.optimize(
-            vec![
-                rel_with_stats("small", 10.0, 1, "id", 10),
-                rel_with_stats("mid", 10_000.0, 2, "small_id", 10_000),
-                rel_with_stats("big", 1_000_000.0, 3, "mid_id", 1_000_000),
-            ],
-            vec![
-                JoinPredicate {
-                    left_alias: "small".into(),
-                    right_alias: "mid".into(),
-                    left_field: "id".into(),
-                    right_field: "small_id".into(),
-                },
-                JoinPredicate {
-                    left_alias: "mid".into(),
-                    right_alias: "big".into(),
-                    left_field: "id".into(),
-                    right_field: "mid_id".into(),
-                },
-            ],
-        );
-        // Top of plan should be a join.
-        assert!(matches!(result.tree, JoinOrderTree::Inner { .. }));
+        let result = opt
+            .optimize(
+                vec![
+                    rel_with_stats("small", 10.0, 1, "id", 10),
+                    rel_with_stats("mid", 10_000.0, 2, "small_id", 10_000),
+                    rel_with_stats("big", 1_000_000.0, 3, "mid_id", 1_000_000),
+                ],
+                vec![
+                    JoinPredicate {
+                        left_alias: "small".into(),
+                        right_alias: "mid".into(),
+                        left_field: "id".into(),
+                        right_field: "small_id".into(),
+                    },
+                    JoinPredicate {
+                        left_alias: "mid".into(),
+                        right_alias: "big".into(),
+                        left_field: "id".into(),
+                        right_field: "mid_id".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        assert_hash_join_tree(&result.tree);
         assert_eq!(result.primary_alias.as_deref(), Some("small"));
     }
 
     #[test]
     fn cross_join_when_no_predicate() {
         let opt = JoinOrderOptimizer::new();
-        let result = opt.optimize(vec![rel("a", 50.0, 1), rel("b", 50.0, 2)], vec![]);
+        let result = opt
+            .optimize(vec![rel("a", 50.0, 1), rel("b", 50.0, 2)], vec![])
+            .unwrap();
         match result.tree {
             JoinOrderTree::Inner { .. } => panic!("expected cross join, got inner"),
             JoinOrderTree::Scan(_) => panic!("expected cross join, got scan"),
@@ -401,5 +456,34 @@ mod tests {
         let s = JoinOrderOptimizer::estimate_predicate_selectivity(&relations, 0, 1, "x", "y");
         assert!((s - 0.01).abs() < 1e-9);
         let _ = Value::Int(0);
+    }
+
+    #[test]
+    fn invalid_join_inputs_are_reported_instead_of_silently_rewritten() {
+        let optimizer = JoinOrderOptimizer::new();
+        assert!(matches!(
+            optimizer.optimize(Vec::new(), Vec::new()),
+            Err(crate::join_graph::JoinGraphError::EmptyGraph)
+        ));
+        assert!(matches!(
+            optimizer.optimize(vec![rel("a", 1.0, 1), rel("a", 2.0, 2)], Vec::new()),
+            Err(crate::join_graph::JoinGraphError::DuplicateAlias { .. })
+        ));
+        assert!(matches!(
+            optimizer.optimize(
+                vec![rel("a", 1.0, 1), rel("b", 2.0, 2)],
+                vec![JoinPredicate {
+                    left_alias: "a".into(),
+                    right_alias: "missing".into(),
+                    left_field: "id".into(),
+                    right_field: "id".into(),
+                }],
+            ),
+            Err(crate::join_graph::JoinGraphError::UnknownAlias { .. })
+        ));
+        assert!(matches!(
+            optimizer.optimize(vec![rel("bad", f64::NAN, 1)], Vec::new()),
+            Err(crate::join_graph::JoinGraphError::InvalidCardinality { .. })
+        ));
     }
 }

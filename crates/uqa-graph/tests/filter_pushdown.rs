@@ -30,7 +30,7 @@ fn build_store(rows: &[(VertexId, &str, Option<i64>)]) -> MemoryGraphStore {
         if let Some(s) = salary {
             v.properties.insert("salary".to_string(), Value::Int(*s));
         }
-        g.add_vertex(v, GRAPH);
+        g.add_vertex(v, GRAPH).unwrap();
     }
     g
 }
@@ -62,7 +62,7 @@ proptest! {
         );
 
         // Baseline: match label, then post-filter in Rust on salary == target_salary.
-        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store);
+        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store).unwrap();
         let post_filtered: BTreeSet<VertexId> = matched_ids(&label_only)
             .into_iter()
             .filter(|vid| {
@@ -80,7 +80,7 @@ proptest! {
                 key: "salary".into(),
                 value: Value::Int(target_salary),
             })
-            .execute(&store);
+            .execute(&store).unwrap();
         let pushed_set = matched_ids(&pushed);
 
         prop_assert_eq!(post_filtered, pushed_set);
@@ -97,7 +97,7 @@ proptest! {
                 .collect::<Vec<_>>(),
         );
 
-        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store);
+        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store).unwrap();
         let post_filtered: BTreeSet<VertexId> = matched_ids(&label_only)
             .into_iter()
             .filter(|vid| {
@@ -110,7 +110,7 @@ proptest! {
         let pushed = VertexMatch::new(GRAPH)
             .label(LABEL)
             .predicate(VertexPredicate::PropertyExists("salary".into()))
-            .execute(&store);
+            .execute(&store).unwrap();
         let pushed_set = matched_ids(&pushed);
 
         prop_assert_eq!(post_filtered, pushed_set);
@@ -128,7 +128,7 @@ proptest! {
         );
 
         // Reference: label only, post-filtered by both checks in Rust.
-        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store);
+        let label_only = VertexMatch::new(GRAPH).label(LABEL).execute(&store).unwrap();
         let two_step: BTreeSet<VertexId> = matched_ids(&label_only)
             .into_iter()
             .filter(|vid| {
@@ -160,7 +160,7 @@ proptest! {
                     )
                 })),
             ]))
-            .execute(&store);
+            .execute(&store).unwrap();
         let pushed_set = matched_ids(&pushed);
 
         prop_assert_eq!(two_step, pushed_set);
@@ -170,6 +170,9 @@ proptest! {
 #[test]
 fn empty_graph_returns_empty() {
     let store = build_store(&[]);
-    let m = VertexMatch::new(GRAPH).label(LABEL).execute(&store);
+    let m = VertexMatch::new(GRAPH)
+        .label(LABEL)
+        .execute(&store)
+        .unwrap();
     assert!(m.inner().is_empty());
 }

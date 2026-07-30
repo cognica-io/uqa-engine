@@ -24,8 +24,9 @@ fn test_basic_top_k() {
         vec![0.9, 0.8],
         0.5,
         2,
-    );
-    assert_eq!(scorer.score_top_k().len(), 2);
+    )
+    .unwrap();
+    assert_eq!(scorer.score_top_k().unwrap().len(), 2);
 }
 
 #[test]
@@ -38,8 +39,9 @@ fn test_top_k_returns_highest() {
         vec![0.9, 0.8],
         0.5,
         1,
-    );
-    let result = scorer.score_top_k();
+    )
+    .unwrap();
+    let result = scorer.score_top_k().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0, 1);
 }
@@ -51,34 +53,36 @@ fn test_top_k_larger_than_docs() {
         vec![0.7, 0.6],
         0.5,
         10,
-    );
-    assert_eq!(scorer.score_top_k().len(), 1);
+    )
+    .unwrap();
+    assert_eq!(scorer.score_top_k().unwrap().len(), 1);
 }
 
 #[test]
 fn test_empty_signals() {
-    let scorer = FusionWANDScorer::new(Vec::new(), Vec::new(), 0.5, 5);
-    assert!(scorer.score_top_k().is_empty());
+    let scorer = FusionWANDScorer::new(Vec::new(), Vec::new(), 0.5, 5).unwrap();
+    assert!(scorer.score_top_k().unwrap().is_empty());
 }
 
 #[test]
 fn test_single_signal() {
-    let scorer = FusionWANDScorer::new(vec![map(&[(1, 0.9), (2, 0.3)])], vec![0.9], 0.5, 1);
-    let result = scorer.score_top_k();
+    let scorer =
+        FusionWANDScorer::new(vec![map(&[(1, 0.9), (2, 0.3)])], vec![0.9], 0.5, 1).unwrap();
+    let result = scorer.score_top_k().unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].0, 1);
 }
 
 #[test]
 fn test_fused_upper_bound_effectively_probability() {
-    let scorer = FusionWANDScorer::new(Vec::new(), vec![0.9, 0.8], 0.5, 5);
-    let result = FusionWANDScorer::new(
+    let scorer = FusionWANDScorer::new(
         vec![map(&[(1, 0.9)]), map(&[(1, 0.8)])],
-        scorer.upper_bounds.clone(),
-        scorer.alpha,
+        vec![0.9, 0.8],
+        0.5,
         1,
     )
-    .score_top_k();
+    .unwrap();
+    let result = scorer.score_top_k().unwrap();
     assert!(result[0].1 > 0.0 && result[0].1 < 1.0);
 }
 
@@ -89,8 +93,9 @@ fn test_scores_are_probabilities() {
         vec![0.8, 0.8],
         0.5,
         5,
-    );
-    for (_, score) in scorer.score_top_k() {
+    )
+    .unwrap();
+    for (_, score) in scorer.score_top_k().unwrap() {
         assert!(score > 0.0 && score < 1.0);
     }
 }
@@ -102,14 +107,16 @@ fn test_alpha_parameter() {
         vec![0.7, 0.6],
         0.1,
         5,
-    );
+    )
+    .unwrap();
     let s2 = FusionWANDScorer::new(
         vec![map(&[(1, 0.7)]), map(&[(1, 0.6)])],
         vec![0.7, 0.6],
         0.9,
         5,
-    );
-    assert!((s1.score_top_k()[0].1 - s2.score_top_k()[0].1).abs() > 1e-3);
+    )
+    .unwrap();
+    assert!((s1.score_top_k().unwrap()[0].1 - s2.score_top_k().unwrap()[0].1).abs() > 1e-3);
 }
 
 #[test]
@@ -119,8 +126,9 @@ fn test_wand_gating_relu() {
         vec![0.8, 0.8],
         0.5,
         5,
-    );
-    assert!(!scorer.score_top_k().is_empty());
+    )
+    .unwrap();
+    assert!(!scorer.score_top_k().unwrap().is_empty());
 }
 
 #[test]
@@ -130,8 +138,9 @@ fn test_wand_gating_swish() {
         vec![0.8, 0.8],
         0.5,
         5,
-    );
-    for (_, score) in scorer.score_top_k() {
+    )
+    .unwrap();
+    for (_, score) in scorer.score_top_k().unwrap() {
         assert!((0.0..=1.0).contains(&score));
     }
 }

@@ -48,8 +48,14 @@ fn unique_constraint_allows_distinct_values() {
         &[],
     )
     .unwrap();
-    let one = eng.get_document("accounts", 1).unwrap();
-    let two = eng.get_document("accounts", 2).unwrap();
+    let one = eng
+        .get_document("accounts", 1)
+        .unwrap()
+        .expect("account row 1");
+    let two = eng
+        .get_document("accounts", 2)
+        .unwrap()
+        .expect("account row 2");
     assert_ne!(one.get("email"), two.get("email"));
 }
 
@@ -225,4 +231,289 @@ fn composite_foreign_key_verifies_non_pivot_columns() {
         msg.contains("foreign key"),
         "expected FOREIGN KEY error, got {msg}"
     );
+}
+
+#[test]
+fn composite_unique_is_tuple_scoped_and_update_safe() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE memberships (
+            id INTEGER PRIMARY KEY,
+            tenant TEXT,
+            slug TEXT,
+            CONSTRAINT memberships_tenant_slug_key UNIQUE (tenant, slug)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO memberships (id, tenant, slug) VALUES
+            (1, 'a', 'one'), (2, 'a', 'two'), (3, 'b', 'one'),
+            (4, 'a', NULL), (5, 'a', NULL)",
+        &[],
+    )
+    .unwrap();
+
+    let duplicate = eng
+        .sql(
+            "INSERT INTO memberships (id, tenant, slug) VALUES (6, 'a', 'one')",
+            &[],
+        )
+        .unwrap_err();
+    let message = duplicate.to_string().to_ascii_lowercase();
+    assert!(message.contains("memberships_tenant_slug_key"), "{message}");
+
+    let update = eng
+        .sql("UPDATE memberships SET slug = 'one' WHERE id = 2", &[])
+        .unwrap_err();
+    assert!(update.to_string().to_ascii_lowercase().contains("unique"));
+    let row = eng
+        .sql("SELECT slug FROM memberships WHERE id = 2", &[])
+        .unwrap();
+    assert_eq!(row.rows[0]["slug"], uqa_core::Value::Str("two".into()));
+}
+
+#[test]
+fn composite_primary_key_is_unique_and_every_member_is_not_null() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE ledger (
+            tenant TEXT,
+            entry INTEGER,
+            value TEXT,
+            CONSTRAINT ledger_pkey PRIMARY KEY (tenant, entry)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO ledger (tenant, entry, value) VALUES
+            ('a', 1, 'first'), ('a', 2, 'second'), ('b', 1, 'third')",
+        &[],
+    )
+    .unwrap();
+
+    let duplicate = eng
+        .sql(
+            "INSERT INTO ledger (tenant, entry, value) VALUES ('a', 1, 'duplicate')",
+            &[],
+        )
+        .unwrap_err();
+    assert!(duplicate
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("primary key"));
+
+    for sql in [
+        "INSERT INTO ledger (tenant, entry, value) VALUES (NULL, 3, 'bad')",
+        "INSERT INTO ledger (tenant, entry, value) VALUES ('a', NULL, 'bad')",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert!(error.to_string().to_ascii_lowercase().contains("not null"));
+    }
+}
+
+#[test]
+fn unique_nulls_not_distinct_rejects_repeated_null_tuple() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE contacts (
+            id INTEGER PRIMARY KEY,
+            tenant TEXT,
+            email TEXT,
+            UNIQUE NULLS NOT DISTINCT (tenant, email)
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO contacts (id, tenant, email) VALUES (1, 'a', NULL)",
+        &[],
+    )
+    .unwrap();
+    let error = eng
+        .sql(
+            "INSERT INTO contacts (id, tenant, email) VALUES (2, 'a', NULL)",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().to_ascii_lowercase().contains("unique"));
+}
+
+#[test]
+fn composite_keys_survive_sqlite_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("composite-keys.db");
+    {
+        let eng = Engine::open(&path).unwrap();
+        eng.sql(
+            "CREATE TABLE durable (
+                id INTEGER PRIMARY KEY,
+                tenant TEXT,
+                slug TEXT,
+                CONSTRAINT durable_tenant_slug_key UNIQUE (tenant, slug)
+            )",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO durable (id, tenant, slug) VALUES (1, 'a', 'one')",
+            &[],
+        )
+        .unwrap();
+    }
+
+    let eng = Engine::open(&path).unwrap();
+    let error = eng
+        .sql(
+            "INSERT INTO durable (id, tenant, slug) VALUES (2, 'a', 'one')",
+            &[],
+        )
+        .unwrap_err();
+    let message = error.to_string().to_ascii_lowercase();
+    assert!(message.contains("durable_tenant_slug_key"), "{message}");
+}
+
+#[test]
+fn integer_primary_key_defaults_choose_the_physical_document_id_for_every_insert_source() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE values_target (
+            id INTEGER PRIMARY KEY DEFAULT 7,
+            payload TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO values_target (payload) VALUES ('from-values')",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        eng.get_document("values_target", 7)
+            .unwrap()
+            .expect("DEFAULT primary key must address the inserted document")["payload"],
+        uqa_core::Value::Str("from-values".into())
+    );
+
+    eng.sql(
+        "CREATE TABLE select_target (
+            id INTEGER PRIMARY KEY DEFAULT 9,
+            payload TEXT
+        )",
+        &[],
+    )
+    .unwrap();
+    eng.sql("CREATE TABLE source_rows (payload TEXT)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO source_rows (payload) VALUES ('from-select')",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO select_target (payload)
+         SELECT payload FROM source_rows",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        eng.get_document("select_target", 9)
+            .unwrap()
+            .expect("SELECT-source DEFAULT primary key must address the inserted document")
+            ["payload"],
+        uqa_core::Value::Str("from-select".into())
+    );
+}
+
+#[test]
+fn typed_dml_rejects_unknown_and_duplicate_target_columns() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE typed_rows (id INTEGER PRIMARY KEY, payload TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO typed_rows (id, payload) VALUES (1, 'before')",
+        &[],
+    )
+    .unwrap();
+
+    for sql in [
+        "INSERT INTO typed_rows (id, misspelled) VALUES (2, 'bad')",
+        "UPDATE typed_rows SET misspelled = 'bad' WHERE id = 1",
+        "INSERT INTO typed_rows (id, payload) VALUES (1, 'bad')
+         ON CONFLICT (id) DO UPDATE SET misspelled = EXCLUDED.payload",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("unknown column"),
+            "unexpected error for {sql}: {error}"
+        );
+    }
+
+    for sql in [
+        "INSERT INTO typed_rows (id, id) VALUES (2, 3)",
+        "UPDATE typed_rows SET payload = 'one', payload = 'two' WHERE id = 1",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("more than once"),
+            "unexpected error for {sql}: {error}"
+        );
+    }
+
+    let row = eng
+        .sql("SELECT payload FROM typed_rows WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(
+        row.rows[0]["payload"],
+        uqa_core::Value::Str("before".into())
+    );
+    assert!(eng.get_document("typed_rows", 2).unwrap().is_none());
+}
+
+#[test]
+fn insert_select_without_a_target_list_maps_values_by_target_position() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE positional_target (id INTEGER PRIMARY KEY, payload TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "CREATE TABLE positional_source (source_id INTEGER, source_payload TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO positional_source (source_id, source_payload)
+         VALUES (41, 'mapped')",
+        &[],
+    )
+    .unwrap();
+
+    eng.sql(
+        "INSERT INTO positional_target
+         SELECT source_id, source_payload FROM positional_source",
+        &[],
+    )
+    .unwrap();
+
+    let document = eng
+        .get_document("positional_target", 41)
+        .unwrap()
+        .expect("source values must map to target columns by position");
+    assert_eq!(document["id"], uqa_core::Value::Int(41));
+    assert_eq!(document["payload"], uqa_core::Value::Str("mapped".into()));
+    assert!(!document.contains_key("source_id"));
+    assert!(!document.contains_key("source_payload"));
 }

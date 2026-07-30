@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uqa_core::{DocId, Value};
 use uqa_operators::{base::Direction, ExecutionContext, Operator};
 
-use crate::backend::{MLBackend, MLError, MLResult};
+use crate::backend::{try_clone_slice, try_vec_with_capacity, MLBackend, MLError, MLResult};
 use crate::deep_fusion::{
     AggregationKind, DeepFusionOperator, Gating, GlobalPoolMethod, Layer, PoolMethod,
 };
@@ -155,13 +155,21 @@ pub enum GatingSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeepModel {
     pub layers: Vec<DeepLayerSpec>,
+    /// Legacy Python catalogs omitted fusion tuning when the model only
+    /// carried a layer graph. Zero preserves the historical neutral value.
+    #[serde(default)]
     pub alpha: f64,
+    #[serde(default)]
     pub gating: GatingSpec,
 }
 
 impl DeepModel {
-    pub fn to_layers(&self) -> Vec<Layer> {
-        self.layers.iter().map(layer_from_spec).collect()
+    pub fn to_layers(&self) -> MLResult<Vec<Layer>> {
+        let mut layers = try_vec_with_capacity(self.layers.len(), "deep model runtime layers")?;
+        for spec in &self.layers {
+            layers.push(layer_from_spec(spec)?);
+        }
+        Ok(layers)
     }
 
     pub fn gating_runtime(&self) -> Gating {
@@ -179,8 +187,13 @@ impl DeepModel {
         }
     }
 
+    /// Validate layer ordering, tensor shapes, dimensions, and numeric parameters.
+    pub fn validate(&self) -> MLResult<()> {
+        DeepFusionOperator::new(self.to_layers()?, self.alpha, self.gating_runtime()).map(|_| ())
+    }
+
     /// Run CPU inference against an operator execution context.
-    pub fn predict(&self, ctx: &ExecutionContext) -> PredictResult {
+    pub fn predict(&self, ctx: &ExecutionContext) -> MLResult<PredictResult> {
         predict_cpu(self, ctx)
     }
 
@@ -190,6 +203,7 @@ impl DeepModel {
         backend: &B,
         ctx: &ExecutionContext,
     ) -> MLResult<PredictResult> {
+        self.validate()?;
         backend.predict(self, ctx)
     }
 
@@ -202,34 +216,47 @@ impl DeepModel {
         backend: &B,
         examples: &[(DocId, Vec<f64>)],
     ) -> MLResult<PredictResult> {
+        self.validate()?;
         backend.predict_features(self, examples)
     }
 }
 
-pub(crate) fn predict_cpu(model: &DeepModel, ctx: &ExecutionContext) -> PredictResult {
-    let layers = model.to_layers();
+pub(crate) fn predict_cpu(model: &DeepModel, ctx: &ExecutionContext) -> MLResult<PredictResult> {
+    let layers = model.to_layers()?;
     if layers.is_empty() {
-        return (Vec::new(), BTreeMap::new());
+        return Err(MLError::InvalidModel(
+            "deep model requires at least one layer".into(),
+        ));
     }
-    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime());
-    posting_list_to_prediction(&op.execute(ctx))
+    if model.input_dimensions().is_some() {
+        return Err(MLError::InvalidModel(
+            "Input-based models require predict_features rather than context-only predict".into(),
+        ));
+    }
+    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime())?;
+    let posting_list = op
+        .execute(ctx)
+        .map_err(|error| MLError::Backend(error.to_string()))?;
+    posting_list_to_prediction(&posting_list)
 }
 
 pub(crate) fn predict_feature_batch_cpu(
     model: &DeepModel,
     examples: &[(DocId, Vec<f64>)],
 ) -> MLResult<PredictResult> {
-    let layers = model.to_layers();
+    let layers = model.to_layers()?;
     if layers.is_empty() {
-        return Ok((Vec::new(), BTreeMap::new()));
+        return Err(MLError::InvalidModel(
+            "deep model requires at least one layer".into(),
+        ));
     }
     let Some(expected_dims) = model.input_dimensions() else {
         return Err(MLError::InvalidModel(
             "feature prediction requires a model whose first layer is Input".into(),
         ));
     };
-    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime());
-    let mut scores = Vec::with_capacity(examples.len());
+    let op = DeepFusionOperator::new(layers, model.alpha, model.gating_runtime())?;
+    let mut scores = try_vec_with_capacity(examples.len(), "feature prediction scores")?;
     let mut probs = BTreeMap::new();
     for (doc_id, features) in examples {
         if features.len() != expected_dims {
@@ -238,9 +265,11 @@ pub(crate) fn predict_feature_batch_cpu(
                 features.len()
             )));
         }
-        let sample_prediction =
-            op.execute_features(*doc_id, features.clone(), &ExecutionContext::new());
-        let (mut sample_scores, sample_probs) = posting_list_to_prediction(&sample_prediction);
+        let feature_copy = try_clone_slice(features, "feature prediction input")?;
+        let sample_prediction = op
+            .execute_features(*doc_id, feature_copy, &ExecutionContext::new())
+            .map_err(|error| MLError::Backend(error.to_string()))?;
+        let (mut sample_scores, sample_probs) = posting_list_to_prediction(&sample_prediction)?;
         scores.append(&mut sample_scores);
         probs.extend(sample_probs);
     }
@@ -248,40 +277,52 @@ pub(crate) fn predict_feature_batch_cpu(
     Ok((scores, probs))
 }
 
-pub(crate) fn posting_list_to_prediction(pl: &uqa_core::PostingList) -> PredictResult {
-    let mut scores: Vec<(DocId, f64)> = Vec::with_capacity(pl.len());
+pub(crate) fn posting_list_to_prediction(pl: &uqa_core::PostingList) -> MLResult<PredictResult> {
+    let mut scores: Vec<(DocId, f64)> =
+        try_vec_with_capacity(pl.len(), "posting-list prediction scores")?;
     let mut probs: BTreeMap<DocId, Vec<f64>> = BTreeMap::new();
     for entry in pl.entries() {
+        if !entry.payload.score.is_finite() {
+            return Err(MLError::Backend(format!(
+                "prediction score for doc {} is not finite: {}",
+                entry.doc_id, entry.payload.score
+            )));
+        }
         scores.push((entry.doc_id, entry.payload.score));
         if let Some(Value::List(items)) = entry.payload.fields.get("class_probs") {
             let v: Vec<f64> = items
                 .iter()
-                .filter_map(|x| match x {
-                    Value::Float(f) => Some(*f),
-                    Value::Int(n) => Some(*n as f64),
-                    _ => None,
+                .enumerate()
+                .map(|(index, value)| match value {
+                    Value::Float(value) if value.is_finite() => Ok(*value),
+                    other => Err(MLError::Backend(format!(
+                        "class_probs[{index}] for doc {} is not a finite float: {other:?}",
+                        entry.doc_id
+                    ))),
                 })
-                .collect();
+                .collect::<MLResult<_>>()?;
             probs.insert(entry.doc_id, v);
         }
     }
-    (scores, probs)
+    Ok((scores, probs))
 }
 
-fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
-    match spec {
+fn layer_from_spec(spec: &DeepLayerSpec) -> MLResult<Layer> {
+    Ok(match spec {
         DeepLayerSpec::Input { dimensions } => Layer::Input {
             dimensions: *dimensions,
         },
-        DeepLayerSpec::Embed { embedding } => Layer::Embed(embedding.clone()),
+        DeepLayerSpec::Embed { embedding } => {
+            Layer::Embed(try_clone_slice(embedding, "embedding layer")?)
+        }
         DeepLayerSpec::Dense {
             weights,
             bias,
             output_channels,
             input_channels,
         } => Layer::Dense {
-            weights: weights.clone(),
-            bias: bias.clone(),
+            weights: try_clone_slice(weights, "dense weights")?,
+            bias: try_clone_slice(bias, "dense bias")?,
             output_channels: *output_channels,
             input_channels: *input_channels,
         },
@@ -294,8 +335,8 @@ fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
         DeepLayerSpec::Softmax => Layer::Softmax,
         DeepLayerSpec::BatchNorm { epsilon } => Layer::BatchNorm { epsilon: *epsilon },
         DeepLayerSpec::Dropout { p } => Layer::Dropout { p: *p },
-        DeepLayerSpec::CNN1D { .. } => cnn_1d_layer_from_spec(spec),
-        DeepLayerSpec::CNN2D { .. } => cnn_2d_layer_from_spec(spec),
+        DeepLayerSpec::CNN1D { .. } => cnn_1d_from_spec(spec)?,
+        DeepLayerSpec::CNN2D { .. } => cnn_2d_from_spec(spec)?,
         DeepLayerSpec::Propagate {
             edge_label,
             aggregation,
@@ -315,7 +356,7 @@ fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
             direction,
         } => Layer::Conv {
             edge_label: edge_label.clone(),
-            hop_weights: hop_weights.clone(),
+            hop_weights: try_clone_slice(hop_weights, "graph convolution hop weights")?,
             direction: direction_runtime(*direction),
         },
         DeepLayerSpec::Pool {
@@ -333,12 +374,12 @@ fn layer_from_spec(spec: &DeepLayerSpec) -> Layer {
             direction: direction_runtime(*direction),
         },
         DeepLayerSpec::Attention => Layer::Attention,
-        DeepLayerSpec::RNN { .. } => rnn_layer_from_spec(spec),
-        DeepLayerSpec::LSTM { .. } => lstm_layer_from_spec(spec),
-    }
+        DeepLayerSpec::RNN { .. } => recurrent_from_spec(spec, false)?,
+        DeepLayerSpec::LSTM { .. } => recurrent_from_spec(spec, true)?,
+    })
 }
 
-fn cnn_1d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+fn cnn_1d_from_spec(spec: &DeepLayerSpec) -> MLResult<Layer> {
     let DeepLayerSpec::CNN1D {
         weights,
         bias,
@@ -349,20 +390,22 @@ fn cnn_1d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
         padding,
     } = spec
     else {
-        unreachable!("cnn_1d_layer_from_spec requires DeepLayerSpec::CNN1D");
+        return Err(MLError::InvalidModel(
+            "internal CNN1D conversion mismatch".into(),
+        ));
     };
-    Layer::CNN1D {
-        weights: weights.clone(),
-        bias: bias.clone(),
+    Ok(Layer::CNN1D {
+        weights: try_clone_slice(weights, "CNN1D weights")?,
+        bias: try_clone_slice(bias, "CNN1D bias")?,
         output_channels: *output_channels,
         input_channels: *input_channels,
         kernel_size: *kernel_size,
         stride: *stride,
         padding: *padding,
-    }
+    })
 }
 
-fn cnn_2d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
+fn cnn_2d_from_spec(spec: &DeepLayerSpec) -> MLResult<Layer> {
     let DeepLayerSpec::CNN2D {
         weights,
         bias,
@@ -378,11 +421,13 @@ fn cnn_2d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
         padding_width,
     } = spec
     else {
-        unreachable!("cnn_2d_layer_from_spec requires DeepLayerSpec::CNN2D");
+        return Err(MLError::InvalidModel(
+            "internal CNN2D conversion mismatch".into(),
+        ));
     };
-    Layer::CNN2D {
-        weights: weights.clone(),
-        bias: bias.clone(),
+    Ok(Layer::CNN2D {
+        weights: try_clone_slice(weights, "CNN2D weights")?,
+        bias: try_clone_slice(bias, "CNN2D bias")?,
         output_channels: *output_channels,
         input_channels: *input_channels,
         input_height: *input_height,
@@ -393,51 +438,64 @@ fn cnn_2d_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
         stride_width: *stride_width,
         padding_height: *padding_height,
         padding_width: *padding_width,
-    }
+    })
 }
 
-fn rnn_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
-    let DeepLayerSpec::RNN {
-        weights_input,
-        weights_hidden,
-        bias,
-        hidden_channels,
-        input_channels,
-        return_sequences,
-    } = spec
-    else {
-        unreachable!("rnn_layer_from_spec requires DeepLayerSpec::RNN");
-    };
-    Layer::RNN {
-        weights_input: weights_input.clone(),
-        weights_hidden: weights_hidden.clone(),
-        bias: bias.clone(),
-        hidden_channels: *hidden_channels,
-        input_channels: *input_channels,
-        return_sequences: *return_sequences,
-    }
-}
-
-fn lstm_layer_from_spec(spec: &DeepLayerSpec) -> Layer {
-    let DeepLayerSpec::LSTM {
-        weights_input,
-        weights_hidden,
-        bias,
-        hidden_channels,
-        input_channels,
-        return_sequences,
-    } = spec
-    else {
-        unreachable!("lstm_layer_from_spec requires DeepLayerSpec::LSTM");
-    };
-    Layer::LSTM {
-        weights_input: weights_input.clone(),
-        weights_hidden: weights_hidden.clone(),
-        bias: bias.clone(),
-        hidden_channels: *hidden_channels,
-        input_channels: *input_channels,
-        return_sequences: *return_sequences,
-    }
+fn recurrent_from_spec(spec: &DeepLayerSpec, lstm: bool) -> MLResult<Layer> {
+    let (weights_input, weights_hidden, bias, hidden_channels, input_channels, return_sequences) =
+        match spec {
+            DeepLayerSpec::RNN {
+                weights_input,
+                weights_hidden,
+                bias,
+                hidden_channels,
+                input_channels,
+                return_sequences,
+            }
+            | DeepLayerSpec::LSTM {
+                weights_input,
+                weights_hidden,
+                bias,
+                hidden_channels,
+                input_channels,
+                return_sequences,
+            } => (
+                weights_input,
+                weights_hidden,
+                bias,
+                *hidden_channels,
+                *input_channels,
+                *return_sequences,
+            ),
+            _ => {
+                return Err(MLError::InvalidModel(
+                    "internal recurrent conversion mismatch".into(),
+                ));
+            }
+        };
+    let prefix = if lstm { "LSTM" } else { "RNN" };
+    let weights_input = try_clone_slice(weights_input, &format!("{prefix} input weights"))?;
+    let weights_hidden = try_clone_slice(weights_hidden, &format!("{prefix} hidden weights"))?;
+    let bias = try_clone_slice(bias, &format!("{prefix} bias"))?;
+    Ok(if lstm {
+        Layer::LSTM {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            return_sequences,
+        }
+    } else {
+        Layer::RNN {
+            weights_input,
+            weights_hidden,
+            bias,
+            hidden_channels,
+            input_channels,
+            return_sequences,
+        }
+    })
 }
 
 fn direction_runtime(dir: DirectionSpec) -> Direction {
@@ -451,6 +509,14 @@ fn direction_runtime(dir: DirectionSpec) -> Direction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_core::{Payload, PostingEntry, PostingList};
+
+    #[test]
+    fn legacy_layer_only_models_receive_neutral_fusion_defaults() {
+        let model: DeepModel = serde_json::from_str(r#"{"layers":[]}"#).unwrap();
+        assert_eq!(model.alpha, 0.0);
+        assert_eq!(model.gating, GatingSpec::None);
+    }
 
     #[test]
     fn recurrent_acronyms_serialize_as_plain_names() {
@@ -487,5 +553,14 @@ mod tests {
         };
         let cnn_json = serde_json::to_value(&cnn).unwrap();
         assert_eq!(cnn_json["kind"], "cnn_1d");
+    }
+
+    #[test]
+    fn prediction_conversion_rejects_non_finite_scores() {
+        let postings =
+            PostingList::from_unsorted(vec![PostingEntry::new(7, Payload::with_score(f64::NAN))]);
+        let error = posting_list_to_prediction(&postings)
+            .expect_err("non-finite predictions must cross the API as errors");
+        assert!(error.to_string().contains("not finite"));
     }
 }

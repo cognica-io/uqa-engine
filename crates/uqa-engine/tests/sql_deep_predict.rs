@@ -57,7 +57,7 @@ fn deep_learn_sql_trains_and_persists_model_from_table() {
         .sql("SELECT deep_learn('trained', 'train') AS report", &[])
         .unwrap();
     assert_eq!(result.rows.len(), 1);
-    assert!(engine.load_model("trained").is_some());
+    assert!(engine.load_model("trained").unwrap().is_some());
 
     let scores = engine
         .deep_predict_features("trained", &[(10, vec![4.0, 0.0]), (11, vec![0.0, 4.0])])
@@ -71,16 +71,16 @@ fn save_load_drop_round_trips_through_engine() {
     let engine = Engine::new();
     let model = linear_classifier_model();
     engine.save_model("clf", &model).unwrap();
-    let loaded = engine.load_model("clf").unwrap();
+    let loaded = engine.load_model("clf").unwrap().unwrap();
     assert_eq!(loaded.layers.len(), model.layers.len());
 
-    let scores = engine.deep_predict("clf").unwrap();
+    let scores = engine.deep_predict("clf").unwrap().unwrap();
     assert_eq!(scores.len(), 1);
     // The softmax row is doc_id=1 (the smallest after Flatten).
     assert!(scores[0].1 > 0.5);
 
-    engine.drop_model("clf");
-    assert!(engine.load_model("clf").is_none());
+    engine.drop_model("clf").unwrap();
+    assert!(engine.load_model("clf").unwrap().is_none());
 }
 
 #[test]
