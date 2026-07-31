@@ -23,7 +23,7 @@ The current implementation has working slices across the main UQA stack. Coverag
 
 ### Execution boundary
 
-Every compiled SQL statement follows `Statement -> UnifiedPlan -> plan-native optimizer -> UnifiedPlanExecutor`. `UnifiedPlanExecutor` exhaustively owns query and command dispatch; there is no second top-level row/direct-dispatch driver. The relational tree owns CTEs, set-operation branches, joins, VALUES/function/subquery sources, filters, arithmetic projections, aggregates, windows, ordering, distinctness, and limits. INSERT/UPDATE/DELETE/MERGE own physical scalar, source, CTE, conflict, and returning plans rather than parser statements. Prepared statements and stored views retain optimized plans. The SQL text cache retains lowered structural `UnifiedPlan`s and re-optimizes them for the current catalog snapshot on execution. Runtime SQL produced by PL/pgSQL is lowered and optimized before it enters the same executor.
+Every compiled SQL statement follows `Statement -> UnifiedPlan -> plan-native optimizer -> UnifiedPlanExecutor`. `UnifiedPlanExecutor` exhaustively owns query and command dispatch; there is no second top-level row/direct-dispatch driver. The relational tree owns CTEs, set-operation branches, joins, VALUES/function/subquery sources, filters, arithmetic projections, aggregates, windows, ordering, distinctness, and limits. INSERT/UPDATE/DELETE/MERGE own physical scalar, source, CTE, conflict, and returning plans rather than parser statements. Prepared statements and stored views retain optimized plans. The exact single-statement SQL text cache retains the parsed statement and lowered structural `UnifiedPlan`; in-memory read-only calls also reuse the optimized plan until data, catalog, search-path, or function state changes. Persistent calls still lower and optimize after pinning the current storage snapshot, and explicit transactions optimize against their current state. Runtime SQL produced by PL/pgSQL is lowered and optimized before it enters the same executor.
 
 `ScalarExpr` is the executable scalar IR used at every relational and DML expression site; scalar subqueries refer to owned `QueryPlan` slots and execute through the current physical query scope. Query blocks are executed directly from `QueryBlockPlan` and never reconstruct a `SelectStmt`. The optimizer recursively visits the complete `UnifiedPlan`, including CTEs, set-operation branches, scalar subqueries, mutations, prepared/explained bodies, and query-valued commands. Its cross-paradigm access decision selects row, `OperatorTree`, or hybrid posting-list-plus-residual execution after the whole query block has been lowered.
 
@@ -194,6 +194,7 @@ cargo bench -p uqa-engine    --bench graph_sql
 cargo bench -p uqa-engine    --bench retrieval_workloads
 cargo bench -p uqa-engine    --bench compiler
 cargo bench -p uqa-engine    --bench execution
+cargo bench -p uqa-engine    --bench query_matrix
 cargo bench -p uqa-engine    --bench knn
 cargo bench -p uqa-engine    --bench join
 cargo bench -p uqa-engine    --bench relevance
@@ -201,7 +202,7 @@ cargo bench -p uqa-graph     --bench rpq
 cargo bench -p uqa-graph     --bench graph_workloads
 ```
 
-The `relevance` and `beir_calibration` benches replay BEIR-style fixtures and assert ranking metrics stay above the declared floors. Reference numbers measured on Apple silicon live in [docs/design/performance.md](docs/design/performance.md).
+The `query_matrix` bench validates and measures every unified relational root, source form, retrieval path, and DML family with fixed-state mutations. The `relevance` and `beir_calibration` benches replay BEIR-style fixtures and assert ranking metrics stay above the declared floors. Reference numbers measured on Apple silicon live in [docs/design/performance.md](docs/design/performance.md).
 
 ## Layout
 

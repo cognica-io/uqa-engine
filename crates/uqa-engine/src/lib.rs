@@ -290,8 +290,9 @@ pub struct Engine {
     /// Prepared unified execution plans. Mirrors `_engine._prepared` while
     /// ensuring EXECUTE cannot re-enter an AST-only dispatch path.
     prepared: RwLock<BTreeMap<String, PreparedStatementPlan>>,
-    /// Fully lowered logical plans keyed by SQL text. Physical optimization
-    /// runs after the statement acquires its transaction snapshot.
+    /// Parsed single statements and their lowered logical plans, keyed by SQL
+    /// text. In-memory read-only statements also retain the optimized plan;
+    /// persistent statements replan after acquiring their storage snapshot.
     sql_statement_cache: RwLock<SQLStatementCache>,
     /// Named analyzers from `CREATE ANALYZER`. Stores the config
     /// JSON string for `list_analyzers` introspection. Mirrors
@@ -339,8 +340,15 @@ pub struct Engine {
 
 #[derive(Clone, Default)]
 struct SQLStatementCache {
-    entries: BTreeMap<String, Vec<uqa_planner::UnifiedPlan>>,
+    entries: BTreeMap<String, CachedSQLStatement>,
     insertion_order: VecDeque<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CachedSQLStatement {
+    pub(crate) statement: Arc<uqa_sql::ast::Statement>,
+    pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
+    pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
 }
 
 #[derive(Clone)]
@@ -350,13 +358,23 @@ struct PreparedStatementPlan {
 }
 
 impl SQLStatementCache {
-    fn get(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
+    fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
         self.entries.get(sql).cloned()
     }
 
-    fn insert(&mut self, sql: String, statements: Vec<uqa_planner::UnifiedPlan>) {
+    fn insert(
+        &mut self,
+        sql: String,
+        statement: Arc<uqa_sql::ast::Statement>,
+        logical_plan: Arc<uqa_planner::UnifiedPlan>,
+    ) {
+        let cached = CachedSQLStatement {
+            statement,
+            logical_plan,
+            optimized_plan: None,
+        };
         if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
-            entry.insert(statements);
+            entry.insert(cached);
             return;
         }
         while self.entries.len() >= SQL_STATEMENT_CACHE_LIMIT {
@@ -369,7 +387,13 @@ impl SQLStatementCache {
             }
         }
         self.insertion_order.push_back(sql.clone());
-        self.entries.insert(sql, statements);
+        self.entries.insert(sql, cached);
+    }
+
+    fn set_optimized(&mut self, sql: &str, optimized_plan: Arc<uqa_planner::UnifiedPlan>) {
+        if let Some(entry) = self.entries.get_mut(sql) {
+            entry.optimized_plan = Some(optimized_plan);
+        }
     }
 
     fn clear(&mut self) {
@@ -682,12 +706,35 @@ impl Engine {
         }
     }
 
-    pub(crate) fn cached_sql_plans(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
+    pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         self.sql_statement_cache.read().get(sql)
     }
 
-    pub(crate) fn cache_sql_plans(&self, sql: String, statements: Vec<uqa_planner::UnifiedPlan>) {
-        self.sql_statement_cache.write().insert(sql, statements);
+    pub(crate) fn cache_sql_statement(
+        &self,
+        sql: String,
+        statement: Arc<uqa_sql::ast::Statement>,
+        logical_plan: Arc<uqa_planner::UnifiedPlan>,
+    ) {
+        self.sql_statement_cache
+            .write()
+            .insert(sql, statement, logical_plan);
+    }
+
+    pub(crate) fn cache_optimized_sql_plan(
+        &self,
+        sql: &str,
+        optimized_plan: Arc<uqa_planner::UnifiedPlan>,
+    ) {
+        self.sql_statement_cache
+            .write()
+            .set_optimized(sql, optimized_plan);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_sql_plans(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
+        self.cached_sql_statement(sql)
+            .map(|cached| vec![cached.logical_plan.as_ref().clone()])
     }
 
     pub(crate) fn clear_sql_statement_cache(&self) {

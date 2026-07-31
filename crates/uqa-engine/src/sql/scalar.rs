@@ -19,10 +19,45 @@ use super::{CteScope, Engine, ScopedEngineHook};
 pub(super) trait PhysicalSubqueryRunner {
     fn execute_subquery(
         &self,
+        subquery: SubqueryId,
         plan: &QueryPlan,
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
+
+    fn scalar_subquery_value(
+        &self,
+        subquery: SubqueryId,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<Value, SQLError> {
+        self.execute_subquery(subquery, plan, outer_row, params)?
+            .into_scalar_value()
+    }
+
+    fn subquery_exists(
+        &self,
+        subquery: SubqueryId,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        self.execute_subquery(subquery, plan, outer_row, params)?
+            .into_exists()
+    }
+
+    fn subquery_contains(
+        &self,
+        subquery: SubqueryId,
+        plan: &QueryPlan,
+        needle: &Value,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        self.execute_subquery(subquery, plan, outer_row, params)?
+            .contains(needle)
+    }
 }
 
 pub(super) struct PhysicalEvalContext<'a> {
@@ -153,7 +188,56 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
             .ok_or_else(|| {
                 SQLError::Unsupported("physical subquery requires a plan runner".into())
             })?
-            .execute_subquery(plan, outer_row, params)
+            .execute_subquery(subquery, plan, outer_row, params)
+    }
+
+    fn scalar_subquery_value(
+        &self,
+        subquery: SubqueryId,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<Value, SQLError> {
+        let plan = self.plan(subquery)?;
+        self.runner()?
+            .scalar_subquery_value(subquery, plan, outer_row, params)
+    }
+
+    fn subquery_exists(
+        &self,
+        subquery: SubqueryId,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        let plan = self.plan(subquery)?;
+        self.runner()?
+            .subquery_exists(subquery, plan, outer_row, params)
+    }
+
+    fn subquery_contains(
+        &self,
+        subquery: SubqueryId,
+        needle: &Value,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        let plan = self.plan(subquery)?;
+        self.runner()?
+            .subquery_contains(subquery, plan, needle, outer_row, params)
+    }
+}
+
+impl PlanSubqueryArena<'_> {
+    fn plan(&self, subquery: SubqueryId) -> Result<&QueryPlan, SQLError> {
+        self.plans.get(subquery).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "physical scalar subquery slot {subquery} is out of bounds"
+            ))
+        })
+    }
+
+    fn runner(&self) -> Result<&dyn PhysicalSubqueryRunner, SQLError> {
+        self.runner
+            .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))
     }
 }
 

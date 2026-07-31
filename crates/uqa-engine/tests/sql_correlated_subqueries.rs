@@ -6,8 +6,13 @@
 
 //! Coverage for `test_correlated_subquery`.
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use uqa_core::Value;
-use uqa_engine::Engine;
+use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility};
 
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
@@ -279,4 +284,84 @@ fn exists_non_correlated_still_works() {
          ORDER BY name",
     );
     assert_eq!(result.rows.len(), 6);
+}
+
+#[test]
+fn non_correlated_scalar_subquery_runs_once_per_statement() {
+    let engine = setup();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    engine
+        .register_scalar_function_with_options(
+            "count_subquery_calls",
+            SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+            move |args: &[Value]| {
+                assert!(args.is_empty());
+                Ok(Value::Int(
+                    observed.fetch_add(1, Ordering::SeqCst) as i64 + 1,
+                ))
+            },
+        )
+        .unwrap();
+
+    let first = query(
+        &engine,
+        "SELECT name FROM employees
+         WHERE (SELECT count_subquery_calls()) = 1",
+    );
+    assert_eq!(first.rows.len(), 6);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let second = query(
+        &engine,
+        "SELECT name FROM employees
+         WHERE (SELECT count_subquery_calls()) = 2",
+    );
+    assert_eq!(second.rows.len(), 6);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn correlated_scalar_subquery_still_runs_for_each_outer_row() {
+    let engine = setup();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    engine
+        .register_scalar_function_with_options(
+            "count_correlated_calls",
+            SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+            move |args: &[Value]| {
+                assert!(args.is_empty());
+                Ok(Value::Int(
+                    observed.fetch_add(1, Ordering::SeqCst) as i64 + 1,
+                ))
+            },
+        )
+        .unwrap();
+
+    let result = query(
+        &engine,
+        "SELECT e.name FROM employees e
+         WHERE (SELECT count_correlated_calls()
+                FROM departments d WHERE d.id = e.dept_id) > 0",
+    );
+    assert_eq!(result.rows.len(), 6);
+    assert_eq!(calls.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn unqualified_outer_reference_remains_correlated() {
+    let engine = setup();
+    let result = query(
+        &engine,
+        "SELECT e.name FROM employees e
+         WHERE EXISTS (
+             SELECT 1 FROM departments d WHERE dept_id = d.id
+         )
+         ORDER BY e.name",
+    );
+    assert_eq!(
+        names(&result),
+        vec!["Alice", "Bob", "Carol", "Dave", "Eve", "Frank"]
+    );
 }

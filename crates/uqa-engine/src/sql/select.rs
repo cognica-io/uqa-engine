@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use uqa_core::DocId;
@@ -803,10 +804,26 @@ fn expand_projection_srf_output<'a>(
     )?))
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct CteScope {
     pub(super) rows: BTreeMap<String, uqa_execution::SharedSpill>,
     pub(super) scalar_subqueries: Vec<QueryPlan>,
+    scalar_subquery_arena: u64,
+    next_scalar_subquery_arena: Arc<AtomicU64>,
+    scalar_subquery_cache:
+        Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
+}
+
+impl Default for CteScope {
+    fn default() -> Self {
+        Self {
+            rows: BTreeMap::new(),
+            scalar_subqueries: Vec::new(),
+            scalar_subquery_arena: 0,
+            next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
+            scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+        }
+    }
 }
 
 impl CteScope {
@@ -830,9 +847,14 @@ impl CteScope {
         subqueries: &[QueryPlan],
     ) -> ScalarSubqueryScope<'_> {
         let previous = std::mem::replace(&mut self.scalar_subqueries, subqueries.to_vec());
+        let next_arena = self
+            .next_scalar_subquery_arena
+            .fetch_add(1, Ordering::Relaxed);
+        let previous_arena = std::mem::replace(&mut self.scalar_subquery_arena, next_arena);
         ScalarSubqueryScope {
             ctes: self,
             previous: Some(previous),
+            previous_arena,
         }
     }
 }
@@ -840,6 +862,7 @@ impl CteScope {
 pub(super) struct ScalarSubqueryScope<'a> {
     ctes: &'a mut CteScope,
     previous: Option<Vec<QueryPlan>>,
+    previous_arena: u64,
 }
 
 impl std::ops::Deref for ScalarSubqueryScope<'_> {
@@ -860,7 +883,40 @@ impl Drop for ScalarSubqueryScope<'_> {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
             self.ctes.scalar_subqueries = previous;
+            self.ctes.scalar_subquery_arena = self.previous_arena;
         }
+    }
+}
+
+#[derive(Clone)]
+enum ScalarSubqueryCacheEntry {
+    Correlated,
+    Materialized(CachedScalarSubquery),
+    Scalar(Value),
+    Exists(bool),
+}
+
+#[derive(Clone)]
+struct CachedScalarSubquery {
+    columns: Vec<String>,
+    rows: uqa_execution::SharedSpill,
+}
+
+impl CachedScalarSubquery {
+    fn result(&self) -> Result<uqa_execution::SubqueryResult, SQLError> {
+        let rows = self
+            .rows
+            .read_rows()
+            .map_err(physical_exec_error)?
+            .map(|row| {
+                let mut row = row.map_err(physical_exec_error)?;
+                row.retain(|column, _| !is_score_provenance_column(column));
+                Ok(row)
+            });
+        Ok(uqa_execution::SubqueryResult {
+            columns: self.columns.clone(),
+            rows: Box::new(rows),
+        })
     }
 }
 
@@ -996,6 +1052,171 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
 
 impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
     fn execute_subquery(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<uqa_execution::SubqueryResult, SQLError> {
+        let cache_key = (self.ctes.scalar_subquery_arena, subquery);
+        if let Some(entry) = self
+            .ctes
+            .scalar_subquery_cache
+            .lock()
+            .get(&cache_key)
+            .cloned()
+        {
+            match entry {
+                ScalarSubqueryCacheEntry::Correlated => {
+                    return self.execute_correlated_subquery(plan, outer_row, params);
+                }
+                ScalarSubqueryCacheEntry::Materialized(result) => return result.result(),
+                ScalarSubqueryCacheEntry::Scalar(_) | ScalarSubqueryCacheEntry::Exists(_) => {
+                    return Err(SQLError::Internal(
+                        "scalar subquery slot changed result consumer during execution".into(),
+                    ));
+                }
+            }
+        }
+
+        if super::correlation::query_depends_on_outer_row(self.engine, plan)? {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .insert(cache_key, ScalarSubqueryCacheEntry::Correlated);
+            return self.execute_correlated_subquery(plan, outer_row, params);
+        }
+
+        let result = self.execute_uncorrelated_subquery(plan, params)?;
+        self.ctes.scalar_subquery_cache.lock().insert(
+            cache_key,
+            ScalarSubqueryCacheEntry::Materialized(result.clone()),
+        );
+        result.result()
+    }
+
+    fn scalar_subquery_value(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<Value, SQLError> {
+        let cache_key = (self.ctes.scalar_subquery_arena, subquery);
+        if let Some(entry) = self
+            .ctes
+            .scalar_subquery_cache
+            .lock()
+            .get(&cache_key)
+            .cloned()
+        {
+            return match entry {
+                ScalarSubqueryCacheEntry::Correlated => self
+                    .execute_correlated_subquery(plan, outer_row, params)?
+                    .into_scalar_value(),
+                ScalarSubqueryCacheEntry::Scalar(value) => Ok(value),
+                ScalarSubqueryCacheEntry::Materialized(result) => {
+                    result.result()?.into_scalar_value()
+                }
+                ScalarSubqueryCacheEntry::Exists(_) => Err(SQLError::Internal(
+                    "scalar subquery slot changed result consumer during execution".into(),
+                )),
+            };
+        }
+        if super::correlation::query_depends_on_outer_row(self.engine, plan)? {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .insert(cache_key, ScalarSubqueryCacheEntry::Correlated);
+            return self
+                .execute_correlated_subquery(plan, outer_row, params)?
+                .into_scalar_value();
+        }
+        let value = self
+            .execute_uncorrelated_subquery(plan, params)?
+            .result()?
+            .into_scalar_value()?;
+        self.ctes
+            .scalar_subquery_cache
+            .lock()
+            .insert(cache_key, ScalarSubqueryCacheEntry::Scalar(value.clone()));
+        Ok(value)
+    }
+
+    fn subquery_exists(
+        &self,
+        subquery: usize,
+        plan: &QueryPlan,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        let cache_key = (self.ctes.scalar_subquery_arena, subquery);
+        if let Some(entry) = self
+            .ctes
+            .scalar_subquery_cache
+            .lock()
+            .get(&cache_key)
+            .cloned()
+        {
+            return match entry {
+                ScalarSubqueryCacheEntry::Correlated => self
+                    .execute_correlated_subquery(plan, outer_row, params)?
+                    .into_exists(),
+                ScalarSubqueryCacheEntry::Exists(exists) => Ok(exists),
+                ScalarSubqueryCacheEntry::Materialized(result) => Ok(result.rows.rows() != 0),
+                ScalarSubqueryCacheEntry::Scalar(_) => Err(SQLError::Internal(
+                    "scalar subquery slot changed result consumer during execution".into(),
+                )),
+            };
+        }
+        if super::correlation::query_depends_on_outer_row(self.engine, plan)? {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .insert(cache_key, ScalarSubqueryCacheEntry::Correlated);
+            return self
+                .execute_correlated_subquery(plan, outer_row, params)?
+                .into_exists();
+        }
+        let exists = self
+            .execute_uncorrelated_subquery(plan, params)?
+            .rows
+            .rows()
+            != 0;
+        self.ctes
+            .scalar_subquery_cache
+            .lock()
+            .insert(cache_key, ScalarSubqueryCacheEntry::Exists(exists));
+        Ok(exists)
+    }
+}
+
+impl ScopedEngineHook<'_> {
+    fn execute_uncorrelated_subquery(
+        &self,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+    ) -> Result<CachedScalarSubquery, SQLError> {
+        let mut scoped_ctes = self.ctes.clone();
+        let output = execute_query_plan_output(
+            self.engine,
+            plan,
+            params,
+            &mut scoped_ctes,
+            QueryOutputMode::SharedSpill,
+        )?;
+        let QueryRows::SharedSpill(rows) = output.rows else {
+            return Err(SQLError::Internal(
+                "scalar subquery spill collector returned in-memory rows".into(),
+            ));
+        };
+        Ok(CachedScalarSubquery {
+            columns: output.columns,
+            rows,
+        })
+    }
+
+    fn execute_correlated_subquery(
         &self,
         plan: &QueryPlan,
         outer_row: Option<&ResultRow>,

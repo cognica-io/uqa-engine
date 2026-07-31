@@ -344,20 +344,26 @@ impl SpillBuffer {
         self.max_spilled_record_bytes = 0;
     }
 
-    /// Seal this buffer as an immutable, cheaply cloneable disk
-    /// materialization. Every pending batch is flushed before publication;
-    /// readers reopen the file independently and therefore never copy all rows
-    /// merely because a CTE or view is referenced more than once.
+    /// Seal this buffer as an immutable, cheaply cloneable materialization.
+    /// Batches that fit within the configured byte budget remain in memory;
+    /// once spilling has started, every pending batch is flushed and readers
+    /// reopen the file independently. Both forms support repeatable scans
+    /// without collecting the complete input again.
     pub fn into_shared(mut self, schema: Vec<String>) -> ExecResult<SharedSpill> {
         let rows = self.rows;
-        self.spill_pending()?;
-        let file = match self.spill_file.take() {
-            Some(file) => file,
-            None => self.create_spill_file()?,
+        let storage = if self.spill_file.is_none() {
+            SharedSpillStorage::Memory(std::mem::take(&mut self.batches))
+        } else {
+            self.spill_pending()?;
+            SharedSpillStorage::Disk(
+                self.spill_file
+                    .take()
+                    .expect("spill file exists after flushing shared materialization"),
+            )
         };
         Ok(SharedSpill {
             inner: Arc::new(SharedSpillInner {
-                file,
+                storage,
                 schema,
                 rows,
                 max_record_bytes: self.max_spilled_record_bytes,
@@ -394,14 +400,20 @@ impl SpillBuffer {
     }
 }
 
+enum SharedSpillStorage {
+    Memory(Vec<Batch>),
+    Disk(NamedTempFile),
+}
+
 struct SharedSpillInner {
-    file: NamedTempFile,
+    storage: SharedSpillStorage,
     schema: Vec<String>,
     rows: usize,
     max_record_bytes: usize,
 }
 
-/// Immutable repeatable row materialization backed by one temporary file.
+/// Immutable repeatable row materialization bounded by the source buffer's
+/// memory budget and backed by a temporary file after that budget is exceeded.
 #[derive(Clone)]
 pub struct SharedSpill {
     inner: Arc<SharedSpillInner>,
@@ -416,10 +428,22 @@ impl SharedSpill {
         self.inner.rows
     }
 
+    /// Whether this materialization crossed its memory budget and uses disk.
+    pub fn has_spilled(&self) -> bool {
+        matches!(self.inner.storage, SharedSpillStorage::Disk(_))
+    }
+
     pub fn reader(&self) -> ExecResult<SharedSpillReader> {
+        let source = Arc::clone(&self.inner);
+        let reader = match &source.storage {
+            SharedSpillStorage::Memory(_) => SharedSpillReaderSource::Memory { next_batch: 0 },
+            SharedSpillStorage::Disk(file) => {
+                SharedSpillReaderSource::Disk(open_spill_reader(file)?)
+            }
+        };
         Ok(SharedSpillReader {
-            reader: open_spill_reader(&self.inner.file)?,
-            _source: Arc::clone(&self.inner),
+            reader,
+            source,
             failed: false,
             max_record_bytes: self.inner.max_record_bytes,
         })
@@ -432,11 +456,16 @@ impl SharedSpill {
     }
 }
 
-/// Independent reader for a [`SharedSpill`]. The `Arc` keeps the named file
-/// linked until the last scan has completed.
+enum SharedSpillReaderSource {
+    Memory { next_batch: usize },
+    Disk(BufReader<File>),
+}
+
+/// Independent reader for a [`SharedSpill`]. The `Arc` keeps either the
+/// in-memory batches or named file alive until the last scan has completed.
 pub struct SharedSpillReader {
-    reader: BufReader<File>,
-    _source: Arc<SharedSpillInner>,
+    reader: SharedSpillReaderSource,
+    source: Arc<SharedSpillInner>,
     failed: bool,
     max_record_bytes: usize,
 }
@@ -448,24 +477,33 @@ impl Iterator for SharedSpillReader {
         if self.failed {
             return None;
         }
-        match read_bounded_spill_record(
-            &mut self.reader,
-            self.max_record_bytes,
-            "shared spill batch",
-        ) {
-            Ok(None) => None,
-            Ok(Some(record)) => {
-                let decoded = decode_batch(&record);
-                if decoded.is_err() {
-                    self.failed = true;
-                }
-                Some(decoded)
+        match &mut self.reader {
+            SharedSpillReaderSource::Memory { next_batch } => {
+                let SharedSpillStorage::Memory(batches) = &self.source.storage else {
+                    unreachable!("shared materialization reader/storage mismatch")
+                };
+                let batch = batches.get(*next_batch)?.clone();
+                *next_batch += 1;
+                Some(Ok(batch))
             }
-            Err(error) => {
-                self.failed = true;
-                Some(Err(spill_error(format!(
-                    "failed to read shared spill batch: {error}"
-                ))))
+            SharedSpillReaderSource::Disk(reader) => {
+                match read_bounded_spill_record(reader, self.max_record_bytes, "shared spill batch")
+                {
+                    Ok(None) => None,
+                    Ok(Some(record)) => {
+                        let decoded = decode_batch(&record);
+                        if decoded.is_err() {
+                            self.failed = true;
+                        }
+                        Some(decoded)
+                    }
+                    Err(error) => {
+                        self.failed = true;
+                        Some(Err(spill_error(format!(
+                            "failed to read shared spill batch: {error}"
+                        ))))
+                    }
+                }
             }
         }
     }
@@ -1528,5 +1566,52 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(drained.len(), 3);
         assert_eq!(buffer.rows(), 0);
+    }
+
+    #[test]
+    fn shared_materialization_keeps_in_budget_batches_in_memory() {
+        let mut buffer = SpillBuffer::unbounded();
+        buffer.push(dummy_batch(0, 2)).unwrap();
+        buffer.push(dummy_batch(2, 2)).unwrap();
+        let shared = buffer.into_shared(vec!["x".into()]).unwrap();
+
+        assert!(!shared.has_spilled());
+        let read = || {
+            shared
+                .read_rows()
+                .unwrap()
+                .map(|row| match row.unwrap().get("x") {
+                    Some(Value::Int(value)) => *value,
+                    value => panic!("unexpected shared value: {value:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(read(), vec![0, 1, 2, 3]);
+        assert_eq!(read(), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn shared_materialization_flushes_in_memory_tail_after_spilling() {
+        let budget = SpillBuffer::encoded_size(&dummy_batch(0, 1)).unwrap();
+        let mut buffer = SpillBuffer::new(budget);
+        buffer.push(dummy_batch(0, 1)).unwrap();
+        assert!(buffer.push(dummy_batch(1, 1)).unwrap());
+        assert!(buffer.has_spilled());
+        assert_eq!(buffer.in_memory_rows(), 1);
+
+        let shared = buffer.into_shared(vec!["x".into()]).unwrap();
+        assert!(shared.has_spilled());
+        let read = || {
+            shared
+                .read_rows()
+                .unwrap()
+                .map(|row| match row.unwrap().get("x") {
+                    Some(Value::Int(value)) => *value,
+                    value => panic!("unexpected shared value: {value:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(read(), vec![0, 1]);
+        assert_eq!(read(), vec![0, 1]);
     }
 }

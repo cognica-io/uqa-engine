@@ -318,6 +318,37 @@ pub trait ScalarSubqueryRunner {
         outer_row: Option<&ResultRow>,
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
+
+    fn scalar_subquery_value(
+        &self,
+        subquery: SubqueryId,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<Value, SQLError> {
+        self.execute_subquery(subquery, outer_row, params)?
+            .into_scalar_value()
+    }
+
+    fn subquery_exists(
+        &self,
+        subquery: SubqueryId,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        self.execute_subquery(subquery, outer_row, params)?
+            .into_exists()
+    }
+
+    fn subquery_contains(
+        &self,
+        subquery: SubqueryId,
+        needle: &Value,
+        outer_row: Option<&ResultRow>,
+        params: &[SQLParam],
+    ) -> Result<bool, SQLError> {
+        self.execute_subquery(subquery, outer_row, params)?
+            .contains(needle)
+    }
 }
 
 /// Pull-based scalar-subquery result. Scalar, EXISTS, and IN consumers never
@@ -334,6 +365,39 @@ impl SubqueryResult {
             columns,
             rows: Box::new(rows.into_iter().map(Ok)),
         }
+    }
+
+    pub fn into_scalar_value(mut self) -> Result<Value, SQLError> {
+        let Some(first_row) = self.rows.next().transpose()? else {
+            return Ok(Value::Null);
+        };
+        if self.rows.next().transpose()?.is_some() {
+            return Err(SQLError::TypeMismatch(
+                "scalar subquery returned more than one row".into(),
+            ));
+        }
+        let first_column = self
+            .columns
+            .first()
+            .ok_or_else(|| SQLError::TypeMismatch("scalar subquery returned no columns".into()))?;
+        Ok(first_row.get(first_column).cloned().unwrap_or(Value::Null))
+    }
+
+    pub fn into_exists(mut self) -> Result<bool, SQLError> {
+        Ok(self.rows.next().transpose()?.is_some())
+    }
+
+    pub fn contains(self, needle: &Value) -> Result<bool, SQLError> {
+        let Some(first_column) = self.columns.first() else {
+            return Ok(false);
+        };
+        for row in self.rows {
+            let row = row?;
+            if row.get(first_column).is_some_and(|value| value == needle) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -456,24 +520,9 @@ pub fn eval_scalar(
             let value = eval_scalar(expr, context)?;
             cast_value(&value, ty)
         }
-        ScalarExpr::ScalarSubquery(subquery) => {
-            let mut result = execute_subquery(*subquery, context)?;
-            let Some(first_row) = result.rows.next().transpose()? else {
-                return Ok(Value::Null);
-            };
-            if result.rows.next().transpose()?.is_some() {
-                return Err(SQLError::TypeMismatch(
-                    "scalar subquery returned more than one row".into(),
-                ));
-            }
-            let first_column = result.columns.first().ok_or_else(|| {
-                SQLError::TypeMismatch("scalar subquery returned no columns".into())
-            })?;
-            Ok(first_row.get(first_column).cloned().unwrap_or(Value::Null))
-        }
+        ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
         ScalarExpr::Exists { subquery, negated } => {
-            let mut result = execute_subquery(*subquery, context)?;
-            let exists = result.rows.next().transpose()?.is_some();
+            let exists = execute_exists_subquery(*subquery, context)?;
             Ok(Value::Bool(if *negated { !exists } else { exists }))
         }
         ScalarExpr::InSubquery {
@@ -482,18 +531,7 @@ pub fn eval_scalar(
             negated,
         } => {
             let needle = eval_scalar(expr, context)?;
-            let result = execute_subquery(*subquery, context)?;
-            let Some(first_column) = result.columns.first() else {
-                return Ok(Value::Bool(*negated));
-            };
-            let mut found = false;
-            for row in result.rows {
-                let row = row?;
-                if row.get(first_column).is_some_and(|value| value == &needle) {
-                    found = true;
-                    break;
-                }
-            }
+            let found = execute_in_subquery(*subquery, &needle, context)?;
             Ok(Value::Bool(if *negated { !found } else { found }))
         }
     }
@@ -659,14 +697,35 @@ fn eval_case(
     })
 }
 
-fn execute_subquery(
+fn execute_scalar_subquery(
     subquery: SubqueryId,
     context: &ScalarEvalContext<'_>,
-) -> Result<SubqueryResult, SQLError> {
+) -> Result<Value, SQLError> {
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.execute_subquery(subquery, context.row, context.params)
+    runner.scalar_subquery_value(subquery, context.row, context.params)
+}
+
+fn execute_exists_subquery(
+    subquery: SubqueryId,
+    context: &ScalarEvalContext<'_>,
+) -> Result<bool, SQLError> {
+    let runner = context
+        .subquery_runner
+        .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
+    runner.subquery_exists(subquery, context.row, context.params)
+}
+
+fn execute_in_subquery(
+    subquery: SubqueryId,
+    needle: &Value,
+    context: &ScalarEvalContext<'_>,
+) -> Result<bool, SQLError> {
+    let runner = context
+        .subquery_runner
+        .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
+    runner.subquery_contains(subquery, needle, context.row, context.params)
 }
 
 #[cfg(test)]

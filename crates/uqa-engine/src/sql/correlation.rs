@@ -1,0 +1,449 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Physical-plan correlation analysis for scalar subquery initialization.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use uqa_execution::{ScalarExpr, ScalarFrameBound};
+use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
+use uqa_sql::SQLError;
+
+use super::{projection_columns, Engine};
+
+#[derive(Clone, Default)]
+struct RelationColumns {
+    names: BTreeSet<String>,
+    complete: bool,
+}
+
+#[derive(Default)]
+struct QueryScope {
+    qualifiers: BTreeSet<String>,
+    columns: RelationColumns,
+}
+
+pub(super) fn query_depends_on_outer_row(
+    engine: &Engine,
+    plan: &QueryPlan,
+) -> Result<bool, SQLError> {
+    query_has_external_reference(engine, plan, &mut Vec::new())
+}
+
+fn query_has_external_reference(
+    engine: &Engine,
+    plan: &QueryPlan,
+    scopes: &mut Vec<QueryScope>,
+) -> Result<bool, SQLError> {
+    let mut ctes = BTreeMap::new();
+    for cte in &plan.ctes {
+        let columns = if cte.columns.is_empty() {
+            query_output_columns(&cte.query)
+        } else {
+            RelationColumns {
+                names: cte.columns.iter().cloned().collect(),
+                complete: true,
+            }
+        };
+        if cte.recursive {
+            ctes.insert(cte.name.clone(), columns.clone());
+        }
+        if query_has_external_reference(engine, &cte.query, scopes)? {
+            return Ok(true);
+        }
+        ctes.insert(cte.name.clone(), columns);
+    }
+
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => {
+            let scope = match block.from.as_ref() {
+                Some(source) => source_scope(engine, source, &ctes)?,
+                None => QueryScope {
+                    qualifiers: BTreeSet::new(),
+                    columns: RelationColumns {
+                        names: BTreeSet::new(),
+                        complete: true,
+                    },
+                },
+            };
+            scopes.push(scope);
+            let result = (|| {
+                for expression in block.expressions() {
+                    if expression_has_external_reference(expression, scopes) {
+                        return Ok(true);
+                    }
+                }
+                if let Some(source) = block.from.as_ref() {
+                    if source_has_external_reference(engine, source, scopes)? {
+                        return Ok(true);
+                    }
+                }
+                for subquery in &block.subqueries {
+                    if query_has_external_reference(engine, subquery, scopes)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })();
+            scopes.pop();
+            result
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            subqueries,
+            ..
+        } => {
+            if query_has_external_reference(engine, left, scopes)?
+                || query_has_external_reference(engine, right, scopes)?
+            {
+                return Ok(true);
+            }
+            scopes.push(QueryScope {
+                qualifiers: BTreeSet::new(),
+                columns: query_output_columns(left),
+            });
+            let result = (|| {
+                for expression in order_by.iter().map(|order| &order.expr) {
+                    if expression_has_external_reference(expression, scopes) {
+                        return Ok(true);
+                    }
+                }
+                if limit
+                    .as_deref()
+                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
+                    || offset
+                        .as_deref()
+                        .is_some_and(|expr| expression_has_external_reference(expr, scopes))
+                {
+                    return Ok(true);
+                }
+                for subquery in subqueries {
+                    if query_has_external_reference(engine, subquery, scopes)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })();
+            scopes.pop();
+            result
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            scopes.push(QueryScope {
+                qualifiers: BTreeSet::new(),
+                columns: RelationColumns {
+                    names: BTreeSet::new(),
+                    complete: true,
+                },
+            });
+            let result = (|| {
+                for expression in rows.iter().flatten() {
+                    if expression_has_external_reference(expression, scopes) {
+                        return Ok(true);
+                    }
+                }
+                for subquery in subqueries {
+                    if query_has_external_reference(engine, subquery, scopes)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })();
+            scopes.pop();
+            result
+        }
+    }
+}
+
+fn source_scope(
+    engine: &Engine,
+    source: &SourcePlan,
+    ctes: &BTreeMap<String, RelationColumns>,
+) -> Result<QueryScope, SQLError> {
+    match source {
+        SourcePlan::Table { name, alias } => {
+            let mut qualifiers = BTreeSet::new();
+            if let Some(alias) = alias {
+                qualifiers.insert(alias.clone());
+            } else {
+                qualifiers.insert(name.clone());
+                if let Some(local) = name.rsplit('.').next() {
+                    qualifiers.insert(local.to_string());
+                }
+            }
+            Ok(QueryScope {
+                qualifiers,
+                columns: relation_columns(engine, name, ctes)?,
+            })
+        }
+        SourcePlan::Join { left, right, .. } => {
+            let left = source_scope(engine, left, ctes)?;
+            let right = source_scope(engine, right, ctes)?;
+            let mut qualifiers = left.qualifiers;
+            qualifiers.extend(right.qualifiers);
+            let mut names = left.columns.names;
+            names.extend(right.columns.names);
+            Ok(QueryScope {
+                qualifiers,
+                columns: RelationColumns {
+                    names,
+                    complete: left.columns.complete && right.columns.complete,
+                },
+            })
+        }
+        SourcePlan::Values {
+            rows,
+            alias,
+            column_aliases,
+        } => {
+            let qualifiers = alias.iter().cloned().collect();
+            let names = if column_aliases.is_empty() {
+                (0..rows.first().map_or(0, Vec::len))
+                    .map(|index| format!("column{}", index + 1))
+                    .collect()
+            } else {
+                column_aliases.iter().cloned().collect()
+            };
+            Ok(QueryScope {
+                qualifiers,
+                columns: RelationColumns {
+                    names,
+                    complete: true,
+                },
+            })
+        }
+        SourcePlan::Function {
+            name,
+            alias,
+            column_aliases,
+            ..
+        } => {
+            let qualifiers = alias.iter().cloned().collect();
+            let mut names: BTreeSet<String> = column_aliases.iter().cloned().collect();
+            let complete = !column_aliases.is_empty()
+                || matches!(
+                    name.to_ascii_lowercase().as_str(),
+                    "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
+                );
+            if names.is_empty() && complete {
+                names.insert(name.rsplit('.').next().unwrap_or(name).to_string());
+            }
+            Ok(QueryScope {
+                qualifiers,
+                columns: RelationColumns { names, complete },
+            })
+        }
+        SourcePlan::Subquery {
+            body,
+            alias,
+            column_aliases,
+        } => {
+            let qualifiers = alias.iter().cloned().collect();
+            let columns = if column_aliases.is_empty() {
+                query_output_columns(body)
+            } else {
+                RelationColumns {
+                    names: column_aliases.iter().cloned().collect(),
+                    complete: true,
+                }
+            };
+            Ok(QueryScope {
+                qualifiers,
+                columns,
+            })
+        }
+    }
+}
+
+fn relation_columns(
+    engine: &Engine,
+    name: &str,
+    ctes: &BTreeMap<String, RelationColumns>,
+) -> Result<RelationColumns, SQLError> {
+    if let Some(columns) = ctes
+        .iter()
+        .find(|(cte, _)| cte.eq_ignore_ascii_case(name))
+        .map(|(_, columns)| columns)
+    {
+        return Ok(columns.clone());
+    }
+    if let Ok(columns) = engine.try_table_columns(name) {
+        return Ok(RelationColumns {
+            names: columns.into_iter().collect(),
+            complete: true,
+        });
+    }
+    if let Some(view) = engine.view_plan(name)? {
+        return Ok(query_output_columns(&view));
+    }
+    if let Ok(columns) = engine.foreign_table_columns(name) {
+        return Ok(RelationColumns {
+            names: columns.into_iter().collect(),
+            complete: true,
+        });
+    }
+    Ok(RelationColumns::default())
+}
+
+fn source_has_external_reference(
+    engine: &Engine,
+    source: &SourcePlan,
+    scopes: &mut Vec<QueryScope>,
+) -> Result<bool, SQLError> {
+    match source {
+        SourcePlan::Join {
+            left, right, on, ..
+        } => Ok(source_has_external_reference(engine, left, scopes)?
+            || source_has_external_reference(engine, right, scopes)?
+            || on
+                .as_ref()
+                .is_some_and(|expr| expression_has_external_reference(expr, scopes))),
+        SourcePlan::Values { rows, .. } => Ok(rows
+            .iter()
+            .flatten()
+            .any(|expr| expression_has_external_reference(expr, scopes))),
+        SourcePlan::Function { args, .. } => Ok(args
+            .iter()
+            .any(|expr| expression_has_external_reference(expr, scopes))),
+        SourcePlan::Subquery { body, .. } => query_has_external_reference(engine, body, scopes),
+        SourcePlan::Table { .. } => Ok(false),
+    }
+}
+
+fn query_output_columns(plan: &QueryPlan) -> RelationColumns {
+    match &plan.root {
+        RelationalPlan::QueryBlock(block) => RelationColumns {
+            names: projection_columns(&block.projections).into_iter().collect(),
+            complete: !block
+                .projections
+                .iter()
+                .any(|projection| matches!(projection.expr, ScalarExpr::Star)),
+        },
+        RelationalPlan::SetOp { left, .. } => query_output_columns(left),
+        RelationalPlan::Values { rows, .. } => RelationColumns {
+            names: (0..rows.first().map_or(0, Vec::len))
+                .map(|index| format!("column{}", index + 1))
+                .collect(),
+            complete: true,
+        },
+    }
+}
+
+fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -> bool {
+    match expr {
+        ScalarExpr::Column(column) => !resolves_unqualified(column, scopes),
+        ScalarExpr::QualifiedColumn { qualifier, .. } => !scopes.iter().rev().any(|scope| {
+            scope
+                .qualifiers
+                .iter()
+                .any(|local| local.eq_ignore_ascii_case(qualifier))
+        }),
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter()
+                .any(|expr| expression_has_external_reference(expr, scopes))
+                || order_by
+                    .iter()
+                    .any(|order| expression_has_external_reference(&order.expr, scopes))
+                || filter
+                    .as_deref()
+                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
+        }
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => items
+            .iter()
+            .any(|expr| expression_has_external_reference(expr, scopes)),
+        ScalarExpr::Binary { lhs, rhs, .. } => {
+            expression_has_external_reference(lhs, scopes)
+                || expression_has_external_reference(rhs, scopes)
+        }
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => expression_has_external_reference(inner, scopes),
+        ScalarExpr::Between { expr, low, high } => {
+            expression_has_external_reference(expr, scopes)
+                || expression_has_external_reference(low, scopes)
+                || expression_has_external_reference(high, scopes)
+        }
+        ScalarExpr::InList { expr, list, .. } => {
+            expression_has_external_reference(expr, scopes)
+                || list
+                    .iter()
+                    .any(|item| expression_has_external_reference(item, scopes))
+        }
+        ScalarExpr::WindowCall { args, spec, .. } => {
+            args.iter()
+                .any(|expr| expression_has_external_reference(expr, scopes))
+                || spec
+                    .partition_by
+                    .iter()
+                    .any(|expr| expression_has_external_reference(expr, scopes))
+                || spec
+                    .order_by
+                    .iter()
+                    .any(|order| expression_has_external_reference(&order.expr, scopes))
+                || spec.frame.as_ref().is_some_and(|frame| {
+                    frame_bound_has_external_reference(&frame.start, scopes)
+                        || frame_bound_has_external_reference(&frame.end, scopes)
+                })
+        }
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref()
+                .is_some_and(|expr| expression_has_external_reference(expr, scopes))
+                || when.iter().any(|(condition, result)| {
+                    expression_has_external_reference(condition, scopes)
+                        || expression_has_external_reference(result, scopes)
+                })
+                || else_branch
+                    .as_deref()
+                    .is_some_and(|expr| expression_has_external_reference(expr, scopes))
+        }
+        ScalarExpr::InSubquery { expr, .. } => expression_has_external_reference(expr, scopes),
+        ScalarExpr::Star
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::Param(_)
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. } => false,
+    }
+}
+
+fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
+    for scope in scopes.iter().rev() {
+        if scope
+            .columns
+            .names
+            .iter()
+            .any(|local| local.eq_ignore_ascii_case(column))
+        {
+            return true;
+        }
+        if !scope.columns.complete {
+            return false;
+        }
+    }
+    false
+}
+
+fn frame_bound_has_external_reference(bound: &ScalarFrameBound, scopes: &[QueryScope]) -> bool {
+    match bound {
+        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
+            expression_has_external_reference(expr, scopes)
+        }
+        ScalarFrameBound::UnboundedPreceding
+        | ScalarFrameBound::UnboundedFollowing
+        | ScalarFrameBound::CurrentRow => false,
+    }
+}

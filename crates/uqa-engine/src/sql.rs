@@ -27,6 +27,7 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 use uqa_sql::ast::{
@@ -42,6 +43,7 @@ use crate::{Engine, IVFIndexParams, ScoredEntry};
 mod age_cypher;
 mod aggregates;
 mod catalog;
+mod correlation;
 mod ddl;
 mod dml;
 mod from_rows;
@@ -181,41 +183,48 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
     // cancellation flag preserved across statements should use
     // [`crate::Engine::reset_cancellation`] explicitly between calls.
     engine.cancellation_token().check()?;
-    // Parse the complete batch before executing its first statement. This
-    // preserves syntax atomicity, while lowering each parsed statement only
-    // when its turn arrives so earlier DDL, SET, ANALYZE, and function
-    // commands can affect the following statement's semantics.
-    let statements = compile(sql)?;
+    // Parse an uncached batch completely before executing its first statement.
+    // This preserves syntax atomicity. Exact single-statement cache hits reuse
+    // the parsed AST and logical plan; batches still lower each statement only
+    // when its turn arrives so earlier DDL, SET, ANALYZE, and function commands
+    // can affect the following statement's semantics.
+    let cached_statement = engine.cached_sql_statement(sql);
+    let (statements, mut cached_entry) = match cached_statement {
+        Some(cached) => (vec![cached.statement.as_ref().clone()], Some(cached)),
+        None => (compile(sql)?, None),
+    };
     if statements.is_empty() {
         return Ok(SQLResult::empty());
     }
-    let cache_single_statement = statements.len() == 1;
+    let is_single_statement = statements.len() == 1;
     let mut executor = UnifiedPlanExecutor::new(engine, params);
     let mut last = SQLResult::empty();
     for statement in statements {
         engine.cancellation_token().check()?;
-        let initial_plan = if cache_single_statement {
-            if let Some(mut plans) = engine.cached_sql_plans(sql) {
-                plans.pop().ok_or_else(|| {
-                    SQLError::Internal("cached SQL statement batch is unexpectedly empty".into())
-                })?
+        let (initial_plan, cached_optimized_plan) = if is_single_statement {
+            if let Some(cached) = cached_entry.take() {
+                (cached.logical_plan, cached.optimized_plan)
             } else {
-                let plan = lower_statement(engine, statement.clone());
-                engine.cache_sql_plans(sql.to_string(), vec![plan.clone()]);
-                plan
+                let plan = Arc::new(lower_statement(engine, statement.clone()));
+                engine.cache_sql_statement(
+                    sql.to_string(),
+                    Arc::new(statement.clone()),
+                    Arc::clone(&plan),
+                );
+                (plan, None)
             }
         } else {
-            lower_statement(engine, statement.clone())
+            (Arc::new(lower_statement(engine, statement.clone())), None)
         };
-        if is_transaction_control(&initial_plan) {
-            last = executor.execute(&initial_plan)?;
+        if is_transaction_control(initial_plan.as_ref()) {
+            last = executor.execute(initial_plan.as_ref())?;
             continue;
         }
 
         if engine.transaction_depth() != 0 {
             // The statement was lowered immediately above, after any earlier
             // BEGIN or catalog-changing statement in this batch completed.
-            let optimized = optimize_engine_plan(engine, initial_plan)?;
+            let optimized = optimize_engine_plan(engine, initial_plan.as_ref().clone())?;
             last = executor.execute(&optimized)?;
             continue;
         }
@@ -227,7 +236,7 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
         // back. Memory commands use the same boundary so a fallible multi-row
         // mutation restores its pre-statement snapshot; read-only memory
         // queries avoid copying the whole database.
-        let is_read_query = match &initial_plan {
+        let is_read_query = match initial_plan.as_ref() {
             uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
             uqa_planner::UnifiedPlan::Command(_) => false,
         };
@@ -240,8 +249,12 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
             // publishing that generation. Re-lower the parsed statement while
             // the database snapshot is pinned, then optimize that exact plan.
             let mut plan = lower_statement(engine, statement.clone());
-            if cache_single_statement {
-                engine.cache_sql_plans(sql.to_string(), vec![plan.clone()]);
+            if is_single_statement {
+                engine.cache_sql_statement(
+                    sql.to_string(),
+                    Arc::new(statement.clone()),
+                    Arc::new(plan.clone()),
+                );
             }
             let must_restart_as_writer = if is_read_query && engine.backend.is_some() {
                 match &plan {
@@ -260,8 +273,12 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
                 rollback_implicit_statement(engine, "restart read transaction as writer")?;
                 engine.begin_implicit_statement_transaction(false)?;
                 plan = lower_statement(engine, statement.clone());
-                if cache_single_statement {
-                    engine.cache_sql_plans(sql.to_string(), vec![plan.clone()]);
+                if is_single_statement {
+                    engine.cache_sql_statement(
+                        sql.to_string(),
+                        Arc::new(statement.clone()),
+                        Arc::new(plan.clone()),
+                    );
                 }
             }
             let optimized = match optimize_engine_plan(engine, plan) {
@@ -280,8 +297,20 @@ pub fn execute(engine: &Engine, sql: &str, params: &[SQLParam]) -> Result<SQLRes
                 }
             }
         } else {
-            let optimized = optimize_engine_plan(engine, initial_plan)?;
-            last = executor.execute(&optimized)?;
+            // In-memory read-only queries run without a transaction snapshot.
+            // Their cache generation is invalidated by every table, catalog,
+            // search-path, and function-registry change, so both parsing and
+            // physical optimization are reusable until that generation moves.
+            let optimized = if let Some(plan) = cached_optimized_plan {
+                plan
+            } else {
+                let plan = Arc::new(optimize_engine_plan(engine, initial_plan.as_ref().clone())?);
+                if is_single_statement {
+                    engine.cache_optimized_sql_plan(sql, Arc::clone(&plan));
+                }
+                plan
+            };
+            last = executor.execute(optimized.as_ref())?;
         }
     }
     Ok(last)
@@ -464,16 +493,21 @@ fn compile_logical_plans(
     engine: &Engine,
     sql: &str,
 ) -> Result<Vec<uqa_planner::UnifiedPlan>, SQLError> {
-    if let Some(plans) = engine.cached_sql_plans(sql) {
-        return Ok(plans);
+    if let Some(cached) = engine.cached_sql_statement(sql) {
+        return Ok(vec![cached.logical_plan.as_ref().clone()]);
     }
     let statements = compile(sql)?;
     let plans = statements
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|statement| lower_statement(engine, statement))
         .collect::<Vec<_>>();
     if plans.len() == 1 {
-        engine.cache_sql_plans(sql.to_string(), plans.clone());
+        engine.cache_sql_statement(
+            sql.to_string(),
+            Arc::new(statements[0].clone()),
+            Arc::new(plans[0].clone()),
+        );
     }
     Ok(plans)
 }
@@ -860,11 +894,84 @@ mod unified_plan_tests {
             UnifiedPlan::Command(command) if matches!(*command, CommandPlan::Update(_))
         ));
 
-        // The cache contains the same IR, not a parsed Statement that could
-        // re-enter a separate dispatcher.
+        // The cache retains the structural IR alongside the parsed statement;
+        // execution still enters exclusively through UnifiedPlanExecutor.
         assert!(engine
             .cached_sql_plans("SELECT amount * 2 + 1 AS adjusted FROM ledger")
             .is_some_and(|plans| matches!(plans.as_slice(), [UnifiedPlan::Query(_)])));
+    }
+
+    #[test]
+    fn memory_read_only_statements_reuse_optimized_plan_until_invalidation() {
+        let engine = Engine::new();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .expect("create table");
+        engine
+            .sql("INSERT INTO items (id) VALUES (1), (2)", &[])
+            .expect("seed rows");
+        let query = "SELECT id FROM items WHERE id > 0 ORDER BY id";
+
+        engine.sql(query, &[]).expect("warm statement cache");
+        let first = engine
+            .cached_sql_statement(query)
+            .and_then(|cached| cached.optimized_plan)
+            .expect("memory read caches its optimized plan");
+
+        engine.sql(query, &[]).expect("reuse statement cache");
+        let second = engine
+            .cached_sql_statement(query)
+            .and_then(|cached| cached.optimized_plan)
+            .expect("optimized plan remains cached");
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+
+        engine
+            .sql("INSERT INTO items (id) VALUES (3)", &[])
+            .expect("mutate table");
+        assert!(
+            engine.cached_sql_statement(query).is_none(),
+            "a committed data change must invalidate the optimized plan"
+        );
+    }
+
+    #[test]
+    fn snapshot_scoped_statements_do_not_cache_optimized_plans() {
+        let dir = tempfile::tempdir().expect("temporary database directory");
+        let persistent =
+            Engine::open(&dir.path().join("statement-optimized-cache.db")).expect("open engine");
+        persistent
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .expect("create table");
+        persistent
+            .sql("INSERT INTO items (id) VALUES (1), (2)", &[])
+            .expect("seed rows");
+        let persistent_query = "SELECT id FROM items WHERE id > 0 ORDER BY id";
+        persistent
+            .sql(persistent_query, &[])
+            .expect("run persistent read");
+        assert!(
+            persistent
+                .cached_sql_statement(persistent_query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
+            "persistent reads must optimize inside each storage snapshot"
+        );
+
+        let memory = Engine::new();
+        memory
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .expect("create memory table");
+        memory.begin().expect("begin explicit transaction");
+        let transactional_query = "SELECT id FROM items ORDER BY id";
+        memory
+            .sql(transactional_query, &[])
+            .expect("run explicit-transaction read");
+        assert!(
+            memory
+                .cached_sql_statement(transactional_query)
+                .is_some_and(|cached| cached.optimized_plan.is_none()),
+            "explicit transactions must optimize against their current state"
+        );
+        memory.rollback().expect("rollback explicit transaction");
     }
 
     #[test]

@@ -124,6 +124,67 @@ Targeted before/after probes isolated the largest retrieval changes: k-NN top-10
 
 The release-profile persistent probe independently recorded a 4k-document GIN build at 173.554 ms, IVF build at 25.082 ms, warm Bayesian SQL at 4.860 ms, direct Bayesian API search at 4.340 ms, vector SQL at 2.462 ms, and direct hybrid API search at 9.159 ms. Hybrid relevance remained above every existing floor: small-corpus NDCG@10/MAP@10 were 0.9143/0.3899 (floors 0.90/0.34), and large-corpus values were 0.7784/0.1062 (floors 0.74/0.05).
 
+## Unified query-plan matrix (2026-07-31)
+
+`query_matrix` is the end-to-end coverage benchmark for the unified executor. Its 31 cases cover every relational root (`QueryBlock`, set operation, and standalone `VALUES`), every `SourcePlan` variant (table, values, function, subquery, join, and `LATERAL`), regular and recursive CTEs, grouping sets, scalar and correlated subqueries, row/operator/hybrid retrieval, and the complete DML family (insert values/select/conflict, update/returning/from, delete/using, and merge). The relational and retrieval fixtures each contain 2k rows. Every case is validated before timing and uses 30 samples, a 500 ms warmup, and a 2 s target measurement window.
+
+Mutation cases use fixed-state custom iterations. Preparation and restoration run outside the timer, while the complete target autocommit statement remains inside it. An INSERT therefore does not grow the input seen by later samples, and update/delete/merge cases always begin from the same row values.
+
+Reproduce the published baseline with:
+
+```sh
+cargo bench -p uqa-engine --bench query_matrix --locked -- --save-baseline query_matrix_20260731
+```
+
+### Read plans
+
+| Case | Central estimate |
+| --- | ---: |
+| Constant query block | 1.132 us |
+| Row query block | 540.82 us |
+| Aggregate query block | 4.077 ms |
+| Window query block | 43.263 ms |
+| `UNION` | 4.102 ms |
+| `UNION ALL` | 1.499 ms |
+| `INTERSECT` | 4.865 ms |
+| `EXCEPT` | 4.845 ms |
+| Standalone `VALUES` | 1.709 us |
+| `VALUES` source | 3.911 us |
+| Table-function source | 199.41 us |
+| Subquery source | 513.43 us |
+| Join source | 13.624 ms |
+| `LATERAL` source | 914.60 us |
+| Non-recursive CTE | 763.07 us |
+| Recursive CTE (500 rows) | 2.772 ms |
+| Grouping sets | 15.363 ms |
+| Uncorrelated scalar subquery | 4.479 ms |
+| Correlated `EXISTS` | 47.595 ms |
+
+### Retrieval and mutation plans
+
+| Case | Central estimate |
+| --- | ---: |
+| Text operator tree | 494.18 us |
+| Bayesian operator tree | 2.002 ms |
+| Vector operator tree | 1.781 ms |
+| Hybrid residual filter | 1.164 ms |
+| Hybrid fusion | 6.063 ms |
+| Insert values | 717.77 us |
+| Insert select | 1.155 ms |
+| Insert on conflict | 737.37 us |
+| Update returning | 1.156 ms |
+| Update from | 7.595 ms |
+| Delete using | 3.412 ms |
+| Merge matched | 4.766 ms |
+
+### Root-cause fixes
+
+The matrix exposed three execution-boundary costs rather than isolated operator regressions:
+
+1. An uncorrelated scalar subquery was executed once per outer row. A conservative physical-plan correlation analysis now distinguishes true outer references, and statement-scoped scalar/`EXISTS` caches initialize independent subqueries once while preserving per-row execution for correlated plans. The pre-fix Criterion pilot estimated about 10.6 s per invocation for the 2k-row case; the configured post-fix estimate is 4.479 ms (about 2,375x faster). The pre-fix full sample run was aborted because Criterion projected more than five minutes.
+2. Exact single-statement calls reparsed, lowered, and optimized SQL on every execution. The cache now retains the parsed statement and logical plan, plus the optimized plan for in-memory read-only execution. Persistent sessions still lower and optimize after pinning each storage snapshot, and explicit transactions optimize against their current state. Against the saved pre-cache baseline, `SELECT 1` moved from 4.987 us to 1.132 us (-77.3%) and standalone `VALUES` moved from 14.850 us to 1.709 us (-88.5%). Scan-dominated cases remained statistically unchanged.
+3. Every repeatable CTE/intermediate result was forced to a temporary file, including a one-row recursive working set. Shared materializations now retain encoded batches while they fit `work_mem` and retain the existing disk format after that budget is crossed. The 500-step recursive CTE moved from 163.03 ms to 2.772 ms (-98.3%, 58.8x), while the non-recursive CTE improved by about 46%. Forced-spill tests at `work_mem = 1B` continue to cover accumulated rows, recursive working sets, and duplicate state.
+
 ## Reference numbers (post-optimization)
 
 | Workload | Bench | Median time |
@@ -145,6 +206,8 @@ The release-profile persistent probe independently recorded a 4k-document GIN bu
 | Graph label match (1k vertices) | same bench | ~86.8 us |
 | Relevance bench (3 queries, BM25) | `cargo bench -p uqa-engine --bench relevance` | ~24 us |
 | RPQ concat 3-hop (1k vertices) | `cargo bench -p uqa-graph --bench rpq` | ~2.2 us |
+| Recursive CTE (500 rows) | `cargo bench -p uqa-engine --bench query_matrix` | ~2.77 ms |
+| Uncorrelated scalar subquery (2k outer rows) | same bench | ~4.48 ms |
 
 The hash-join path on `sql_inner_join_10k_x_1k` remains the load-bearing rewrite from the original pass (nested-loop fallback was ~3.46 s); if you regress past 50 ms here the hash detector probably stopped firing.
 

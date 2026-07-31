@@ -101,5 +101,9 @@ harness = false
 name = "retrieval_workloads"
 harness = false
 
+[[bench]]
+name = "query_matrix"
+harness = false
+
 [lints]
 workspace = true
