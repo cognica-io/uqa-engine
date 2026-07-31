@@ -169,6 +169,22 @@ impl<'d, D: OperatorTreeDriver> PlanExecutor<'d, D> {
 pub fn operator_name(op: &OperatorTree) -> String {
     match op {
         OperatorTree::Empty => "EmptyOp",
+        OperatorTree::Term {
+            top_k:
+                Some(uqa_operators::TextTopKPlan {
+                    strategy: uqa_operators::TextTopKStrategy::Wand,
+                    ..
+                }),
+            ..
+        } => "WANDTopKOp",
+        OperatorTree::Term {
+            top_k:
+                Some(uqa_operators::TextTopKPlan {
+                    strategy: uqa_operators::TextTopKStrategy::BlockMaxWand,
+                    ..
+                }),
+            ..
+        } => "BlockMaxWANDTopKOp",
         OperatorTree::Term { .. } => "TermOp",
         OperatorTree::Filter { .. } => "FilterOp",
         OperatorTree::Facet { .. } => "FacetOp",
@@ -179,6 +195,7 @@ pub fn operator_name(op: &OperatorTree) -> String {
         OperatorTree::Union(_) => "UnionOp",
         OperatorTree::Complement(_) => "ComplementOp",
         OperatorTree::Composed(_) => "ComposedOp",
+        OperatorTree::EncodeGraphPosting { .. } => "EncodeGraphPostingOp",
         OperatorTree::VectorSimilarity { .. } => "VectorSimOp",
         OperatorTree::KNN { .. } => "KNNOp",
         OperatorTree::CalibratedVectorMatch { .. } => "CalibratedVectorMatchOp",
@@ -233,9 +250,10 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
             query,
             field,
             scoring,
+            top_k,
         } => {
             lines.push(format!(
-                "{prefix}TermOp(term={query:?}, field={field:?}, scoring={scoring:?})"
+                "{prefix}TermOp(term={query:?}, field={field:?}, scoring={scoring:?}, top_k={top_k:?})"
             ));
         }
         OperatorTree::VectorSimilarity {
@@ -364,6 +382,10 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
                 explain_recursive(child, lines, indent + 1);
             }
         }
+        OperatorTree::EncodeGraphPosting { source } => {
+            lines.push(format!("{prefix}EncodeGraphPosting"));
+            explain_recursive(source, lines, indent + 1);
+        }
         OperatorTree::SparseThreshold { source, threshold } => {
             lines.push(format!("{prefix}SparseThreshold(threshold={threshold})"));
             explain_recursive(source, lines, indent + 1);
@@ -489,6 +511,7 @@ mod tests {
                 query: "rust".into(),
                 field: Some("body".into()),
                 scoring: None,
+                top_k: None,
             },
             OperatorTree::Filter {
                 field: "year".into(),
@@ -510,6 +533,7 @@ mod tests {
             query: "x".into(),
             field: Some("body".into()),
             scoring: None,
+            top_k: None,
         };
         let driver = EmptyDriver;
         let mut executor = PlanExecutor::new(&driver);
@@ -540,11 +564,13 @@ mod tests {
                 query: "rust".into(),
                 field: Some("body".into()),
                 scoring: None,
+                top_k: None,
             },
             OperatorTree::Term {
                 query: "search".into(),
                 field: Some("body".into()),
                 scoring: None,
+                top_k: None,
             },
         ]);
         let driver = CountingDriver {

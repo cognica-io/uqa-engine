@@ -105,5 +105,9 @@ harness = false
 name = "query_matrix"
 harness = false
 
+[[bench]]
+name = "text_top_k"
+harness = false
+
 [lints]
 workspace = true

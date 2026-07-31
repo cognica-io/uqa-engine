@@ -446,6 +446,7 @@ impl CostModel {
                 ops.iter().map(|o| self.estimate(o, stats)).sum()
             }
             OperatorTree::Complement(inner) => self.estimate(inner, stats) + n,
+            OperatorTree::EncodeGraphPosting { source } => self.estimate(source, stats),
             OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
             OperatorTree::Facet { source, .. } => match source.as_deref() {
                 Some(s) => self.estimate(s, stats),

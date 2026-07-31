@@ -279,6 +279,10 @@ pub(super) fn execute_function_with_top_k(
         | FunctionKind::LearnedFusion => {
             let tree =
                 crate::operator_tree_bridge::lower_sql_function_bound(engine, name, args, params)?;
+            let tree = match top_k {
+                Some(k) => plan_bound_text_top_k(engine, table, tree, k)?,
+                None => tree,
+            };
             let posting = crate::operator_tree_bridge::expect_posting_output(
                 crate::operator_tree_bridge::execute_operator_tree_in_execution(
                     engine, table, params, &tree,
@@ -299,6 +303,36 @@ pub(super) fn execute_function_with_top_k(
                 .collect())
         }
     }
+}
+
+fn plan_bound_text_top_k(
+    engine: &Engine,
+    table: &str,
+    tree: uqa_operators::OperatorTree,
+    top_k: usize,
+) -> Result<uqa_operators::OperatorTree, SQLError> {
+    let (query, field, scoring) = match tree {
+        uqa_operators::OperatorTree::Term {
+            query,
+            field: Some(field),
+            scoring: Some(scoring),
+            top_k: None,
+        } => (query, field, scoring),
+        other => return Ok(other),
+    };
+    let mode = match scoring {
+        uqa_operators::TextScoringMode::BM25 => {
+            crate::ScoringMode::BM25(crate::BM25Params::default())
+        }
+        uqa_operators::TextScoringMode::BayesianBM25 => crate::ScoringMode::BayesianBM25(
+            engine.bayesian_params_for_in_execution(table, &field)?,
+        ),
+        uqa_operators::TextScoringMode::CustomBM25(params) => crate::ScoringMode::BM25(params),
+        uqa_operators::TextScoringMode::CustomBayesianBM25(params) => {
+            crate::ScoringMode::BayesianBM25(params)
+        }
+    };
+    engine.plan_text_top_k_tree(table, &field, &query, &mode, scoring, top_k)
 }
 
 #[derive(Clone, Copy)]
@@ -331,7 +365,7 @@ impl RetrievalExecution {
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         match self {
             Self::Public => engine.search(table, field, query, mode, top_k),
-            Self::InExecution => engine.search_leaf(table, field, query, mode, top_k),
+            Self::InExecution => engine.search_leaf(table, field, query, mode, top_k, None),
         }
     }
 }

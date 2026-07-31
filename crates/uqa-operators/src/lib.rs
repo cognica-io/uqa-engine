@@ -60,7 +60,7 @@ pub use tree::{
     EdgeConstraint, EdgePatternIR, ExternalPriorMode, GatingSpec, GraphPatternIR, LearnedFuserDyn,
     LearnedFusionRef, MultiStageCutoff, MultiStageEntry, OperatorTree, PathWeightPredicate,
     ProbBoolMode, ProgressiveFusionEntry, ScorerRef, TemporalFilterIR, TextScoringMode,
-    VertexConstraint, VertexPatternIR, VertexPredicate,
+    TextTopKPlan, TextTopKStrategy, VertexConstraint, VertexPatternIR, VertexPredicate,
 };
 pub use uqa_core::{PathExpr, PathSegment};
 pub use vector::{CosineProbabilityOperator, KNNOperator, VectorSimilarityOperator};

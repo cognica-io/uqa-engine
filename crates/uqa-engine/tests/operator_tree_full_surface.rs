@@ -87,6 +87,7 @@ fn term(query: &str, field: &str) -> OperatorTree {
         query: query.into(),
         field: Some(field.into()),
         scoring: Some(TextScoringMode::BM25),
+        top_k: None,
     }
 }
 

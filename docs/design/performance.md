@@ -219,6 +219,17 @@ The carrier split exposed a separate top-k optimization. A borrowed `RankedView:
 
 The small full-width difference is not claimed as a regression. The k = 10 through 1,000 deltas are far outside the measured drift band and come from the O(N log N) to O(N) algorithm change. An earlier sequential run of the unchanged full-sort algorithm appeared to show a roughly 50% regression, but rerunning the HEAD binary after the CPU entered the same sustained-load state reproduced the slower absolute time; that apparent delta was thermal/frequency drift. The k = 0 and k = N cases are now permanent benchmark inputs so boundary fast paths cannot silently regress into a full score sort.
 
+## Engine text top-k physical path (2026-07-31)
+
+`text_top_k` benchmarks the public profiled engine path on a persisted 5,000-document SQLite corpus. The query is `plan rust crate` with `k = 10`. A scorer fingerprint mismatch selects WAND; matching bounds built with `Engine::rebuild_text_block_max` select BMW. Benchmark IDs include candidate, fully-scored, and skip counts, while Criterion records end-to-end latency. Reproduce the full sample with `cargo bench -p uqa-engine --bench text_top_k`; `-- --quick` was used for the integration smoke measurement below on Darwin 25.5.0 arm64.
+
+| Physical path | Candidates | Fully scored | Skip rate | Quick interval |
+| --- | ---: | ---: | ---: | ---: |
+| Block-Max WAND | 4,674 | 208 | 95.55% | 4.740–4.767 ms |
+| WAND | 4,674 | 272 | 94.18% | 5.185–5.207 ms |
+
+This short run verifies instrumentation and shows the expected reduction in scoring work; it is not a statistical release gate. A benchmark gate must use the normal Criterion sample count on the target deployment class and compare its saved baseline. The exactness gate is separate: randomized engine differential tests compare both physical paths with exhaustive BM25/Bayesian BM25, including duplicate query terms and field-scoped statistics.
+
 ## Reference numbers (post-optimization)
 
 | Workload | Bench | Median time |

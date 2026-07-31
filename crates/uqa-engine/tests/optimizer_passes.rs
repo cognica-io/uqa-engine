@@ -104,6 +104,40 @@ fn lower_where_recognises_text_match_and_filter() {
 }
 
 #[test]
+fn mixed_graph_and_relational_boolean_inserts_an_explicit_phi_boundary() {
+    let expr = where_of(
+        "SELECT id FROM notes \
+         WHERE graph_traverse('g', 1, 'knows', 2) AND year = 2024",
+    );
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    let OperatorTree::Intersect(arms) = lowered else {
+        panic!("expected Intersect");
+    };
+    assert!(matches!(
+        &arms[0],
+        OperatorTree::EncodeGraphPosting { source }
+            if matches!(source.as_ref(), OperatorTree::Traverse { .. })
+    ));
+    assert!(matches!(&arms[1], OperatorTree::Filter { .. }));
+}
+
+#[test]
+fn homogeneous_graph_boolean_keeps_the_graph_carrier() {
+    let expr = where_of(
+        "SELECT id FROM notes WHERE \
+         graph_traverse('g', 1, 'knows', 2) OR graph_pagerank('g')",
+    );
+    let lowered = lower_where(&expr, &[]).expect("lowers");
+    let OperatorTree::Union(arms) = lowered else {
+        panic!("expected Union");
+    };
+    assert_eq!(arms.len(), 2);
+    assert!(arms
+        .iter()
+        .all(|arm| !matches!(arm, OperatorTree::EncodeGraphPosting { .. })));
+}
+
+#[test]
 fn simplify_algebra_pass_fires_via_recurse_children() {
     // The simplify pass walks the whole tree bottom-up. Even with a
     // shape that doesn't trigger absorption / dedup, the pass must

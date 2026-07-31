@@ -117,14 +117,14 @@ pub fn lower_where(expr: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTre
             for p in parts {
                 out.push(lower_where(p, params)?);
             }
-            Some(OperatorTree::Intersect(out))
+            Some(lower_document_boolean(out, false))
         }
         ScalarExpr::Or(parts) => {
             let mut out: Vec<OperatorTree> = Vec::with_capacity(parts.len());
             for p in parts {
                 out.push(lower_where(p, params)?);
             }
-            Some(OperatorTree::Union(out))
+            Some(lower_document_boolean(out, true))
         }
         // Complement is only sound when the inner predicate cannot be
         // NULL for any row (search functions, IS NULL tests). Column
@@ -205,6 +205,58 @@ pub fn lower_where(expr: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTre
             })
         }
         _ => None,
+    }
+}
+
+/// Build document-level SQL Boolean algebra without weakening the carrier
+/// contract of the generic set operators. Homogeneous graph children keep
+/// their `GraphPostingList` carrier and its explicit subgraph merge policy.
+/// Only a heterogeneous SQL predicate inserts the lossless Phi codec at each
+/// graph/document boundary.
+fn lower_document_boolean(mut children: Vec<OperatorTree>, union: bool) -> OperatorTree {
+    let graph_children = children
+        .iter()
+        .filter(|child| tree_returns_graph(child))
+        .count();
+    if graph_children > 0 && graph_children < children.len() {
+        children = children
+            .into_iter()
+            .map(|child| {
+                if tree_returns_graph(&child) {
+                    OperatorTree::EncodeGraphPosting {
+                        source: Box::new(child),
+                    }
+                } else {
+                    child
+                }
+            })
+            .collect();
+    }
+    if union {
+        OperatorTree::Union(children)
+    } else {
+        OperatorTree::Intersect(children)
+    }
+}
+
+fn tree_returns_graph(tree: &OperatorTree) -> bool {
+    match tree {
+        OperatorTree::Traverse { .. }
+        | OperatorTree::PatternMatch { .. }
+        | OperatorTree::RegularPathQuery { .. }
+        | OperatorTree::WeightedPathQuery { .. }
+        | OperatorTree::MessagePassing { .. }
+        | OperatorTree::GraphEmbedding { .. }
+        | OperatorTree::PageRank { .. }
+        | OperatorTree::HITS { .. }
+        | OperatorTree::BetweennessCentrality { .. }
+        | OperatorTree::TemporalTraverse { .. }
+        | OperatorTree::TemporalPatternMatch { .. } => true,
+        OperatorTree::Intersect(children) | OperatorTree::Union(children) => {
+            !children.is_empty() && children.iter().all(tree_returns_graph)
+        }
+        OperatorTree::Composed(children) => children.last().is_some_and(tree_returns_graph),
+        _ => false,
     }
 }
 
@@ -628,6 +680,7 @@ fn try_lower_text_match(
         query,
         field,
         scoring: Some(scoring),
+        top_k: None,
     })
 }
 
@@ -877,6 +930,7 @@ fn lower_staged_retrieval(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Op
                     query: const_string(&stage[1], params)?,
                     field: Some(column_name(&stage[0])?),
                     scoring: Some(TextScoringMode::BM25),
+                    top_k: None,
                 },
                 cutoff: MultiStageCutoff::TopK(const_usize(&stage[2], params)?),
             });
@@ -1416,10 +1470,16 @@ fn is_text_query_tree(tree: &OperatorTree) -> bool {
 
 fn bind_fts_bm25_tree(tree: OperatorTree) -> OperatorTree {
     match tree {
-        OperatorTree::Term { query, field, .. } => OperatorTree::Term {
+        OperatorTree::Term {
+            query,
+            field,
+            top_k,
+            ..
+        } => OperatorTree::Term {
             query,
             field,
             scoring: Some(TextScoringMode::BM25),
+            top_k,
         },
         OperatorTree::Intersect(children) => {
             OperatorTree::Intersect(children.into_iter().map(bind_fts_bm25_tree).collect())
@@ -1697,6 +1757,7 @@ impl<'a> EngineDriver<'a> {
         query: &str,
         field: Option<&str>,
         scoring: Option<TextScoringMode>,
+        top_k: Option<uqa_operators::TextTopKPlan>,
     ) -> DriverResult<PostingList> {
         let scoring = scoring.ok_or_else(|| {
             SQLError::Internal(
@@ -1717,8 +1778,20 @@ impl<'a> EngineDriver<'a> {
             };
             return self
                 .engine
-                .search_leaf(self.table, field, query, &mode, usize::MAX)
+                .search_leaf(
+                    self.table,
+                    field,
+                    query,
+                    &mode,
+                    top_k.map_or(usize::MAX, |plan| plan.k),
+                    top_k,
+                )
                 .map(|rows| scored_to_posting_list(&rows));
+        }
+        if top_k.is_some() {
+            return Err(SQLError::Internal(
+                "physical text top-k requires one concrete field".into(),
+            ));
         }
         if matches!(
             scoring,
@@ -1749,9 +1822,9 @@ impl<'a> EngineDriver<'a> {
                     ));
                 }
             };
-            for entry in self
-                .engine
-                .search_leaf(self.table, &field, query, &mode, usize::MAX)?
+            for entry in
+                self.engine
+                    .search_leaf(self.table, &field, query, &mode, usize::MAX, None)?
             {
                 by_document
                     .entry(entry.doc_id)
@@ -1838,7 +1911,8 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 query,
                 field,
                 scoring,
-            } => self.execute_term(query, field.as_deref(), *scoring),
+                top_k,
+            } => self.execute_term(query, field.as_deref(), *scoring, *top_k),
             OperatorTree::BayesianScore { source, field } => {
                 self.execute_bayesian_score(source, field.as_deref())
             }
@@ -1875,6 +1949,19 @@ impl OperatorTreeDriver for EngineDriver<'_> {
             OperatorTree::Union(parts) => return self.execute_union(parts),
             OperatorTree::Complement(inner) => self.execute_complement(inner),
             OperatorTree::Composed(parts) => return self.execute_composed(parts),
+            OperatorTree::EncodeGraphPosting { source } => {
+                return match self.execute_node(source)? {
+                    OperatorOutput::Graph(result) => Ok(OperatorOutput::Posting(
+                        uqa_graph::GraphPostingCodec::encode(result),
+                    )),
+                    OperatorOutput::Posting(_) => Err(SQLError::TypeMismatch(
+                        "EncodeGraphPosting requires a graph posting carrier".to_string(),
+                    )),
+                    OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(
+                        "EncodeGraphPosting cannot encode a tuple carrier".to_string(),
+                    )),
+                };
+            }
             OperatorTree::VectorSimilarity {
                 query_vector,
                 threshold,
@@ -3215,6 +3302,7 @@ impl EngineDriver<'_> {
                 query,
                 field,
                 scoring: Some(TextScoringMode::BayesianBM25),
+                top_k: None,
             } => {
                 let field_expr = match field {
                     Some(f) => ScalarExpr::Column(f.clone()),
@@ -4222,6 +4310,7 @@ fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
         | OperatorTree::Score { source, .. }
         | OperatorTree::BayesianScore { source, .. }
         | OperatorTree::Complement(source)
+        | OperatorTree::EncodeGraphPosting { source }
         | OperatorTree::CosineProbability(source)
         | OperatorTree::ProbNot { signal: source, .. }
         | OperatorTree::SparseThreshold { source, .. }
@@ -4625,7 +4714,7 @@ fn lower_where_bound(
                 };
                 children.push(child);
             }
-            Ok(Some(OperatorTree::Intersect(children)))
+            Ok(Some(lower_document_boolean(children, false)))
         }
         ScalarExpr::Or(parts) => {
             let mut children = Vec::with_capacity(parts.len());
@@ -4635,7 +4724,7 @@ fn lower_where_bound(
                 };
                 children.push(child);
             }
-            Ok(Some(OperatorTree::Union(children)))
+            Ok(Some(lower_document_boolean(children, true)))
         }
         ScalarExpr::Not(inner) if crate::sql::expr_is_null_free_public(inner) => {
             Ok(lower_where_bound(engine, inner, params)?
@@ -4726,10 +4815,28 @@ fn execute_operator_tree_inner(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
+    validate_text_top_k_placement(tree)?;
     let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
     let driver = EngineDriver::new_in_execution(engine, table, params);
     let mut executor = PlanExecutor::new(&driver);
     executor.execute(&optimized)
+}
+
+fn validate_text_top_k_placement(tree: &OperatorTree) -> DriverResult<()> {
+    let root_is_physical_text = matches!(tree, OperatorTree::Term { top_k: Some(_), .. });
+    let mut physical_text_nodes = 0_usize;
+    tree.visit(&mut |node| {
+        if matches!(node, OperatorTree::Term { top_k: Some(_), .. }) {
+            physical_text_nodes += 1;
+        }
+    });
+    if physical_text_nodes == usize::from(root_is_physical_text) {
+        Ok(())
+    } else {
+        Err(SQLError::Internal(
+            "physical text top-k is valid only as the root retrieval leaf".into(),
+        ))
+    }
 }
 
 fn tree_may_persist_calibration(tree: &OperatorTree) -> bool {
@@ -4919,6 +5026,27 @@ fn lookup_path(value: &Value, path: &[PathSegment]) -> Option<Value> {
 mod transaction_boundary_tests {
     use super::*;
 
+    fn physical_text_leaf() -> OperatorTree {
+        OperatorTree::Term {
+            query: "rust search".into(),
+            field: Some("body".into()),
+            scoring: Some(TextScoringMode::BM25),
+            top_k: Some(uqa_operators::TextTopKPlan {
+                k: 10,
+                strategy: uqa_operators::TextTopKStrategy::Wand,
+            }),
+        }
+    }
+
+    #[test]
+    fn physical_text_limit_is_rejected_below_a_parent() {
+        assert!(validate_text_top_k_placement(&physical_text_leaf()).is_ok());
+        assert!(
+            validate_text_top_k_placement(&OperatorTree::Union(vec![physical_text_leaf()]))
+                .is_err()
+        );
+    }
+
     fn populate_calibration_fixture(engine: &Engine) {
         engine
             .sql("CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT)", &[])
@@ -4943,6 +5071,7 @@ mod transaction_boundary_tests {
                 query: "rust".into(),
                 field: Some("body".into()),
                 scoring: Some(TextScoringMode::BayesianBM25),
+                top_k: None,
             },
             OperatorTree::KNN {
                 query_vector: vec![1.0],

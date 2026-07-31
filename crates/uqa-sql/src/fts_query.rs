@@ -428,6 +428,7 @@ pub fn compile(
                 query: term.clone(),
                 field: resolved,
                 scoring: None,
+                top_k: None,
             }
         }
         FTSNode::Phrase { field, phrase } => {
@@ -444,6 +445,7 @@ pub fn compile(
                     query,
                     field: resolved,
                     scoring: None,
+                    top_k: None,
                 };
             }
             OperatorTree::Intersect(
@@ -453,6 +455,7 @@ pub fn compile(
                         query: t,
                         field: resolved.clone(),
                         scoring: None,
+                        top_k: None,
                     })
                     .collect(),
             )

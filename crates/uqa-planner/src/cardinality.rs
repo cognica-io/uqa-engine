@@ -661,6 +661,7 @@ impl CardinalityEstimator {
 
             OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
             OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
+            OperatorTree::EncodeGraphPosting { source } => self.estimate(source, stats),
             OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
                 if stats.total_docs == 0 {
                     0.0
@@ -1429,6 +1430,7 @@ mod tests {
             query: "rust".into(),
             field: Some("body".into()),
             scoring: None,
+            top_k: None,
         };
         assert_eq!(est.estimate(&op, &stats), 42.0);
     }
@@ -1449,6 +1451,7 @@ mod tests {
             query: "x".into(),
             field: Some("body".into()),
             scoring: None,
+            top_k: None,
         }));
         assert!((est.estimate(&op, &stats) - 70.0).abs() < 1e-9);
     }

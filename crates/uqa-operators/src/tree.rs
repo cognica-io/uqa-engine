@@ -266,6 +266,26 @@ pub enum TextScoringMode {
     CustomBayesianBM25(uqa_scoring::BayesianBM25Params),
 }
 
+/// Exact physical top-k algorithm selected for a text-retrieval leaf.
+///
+/// The logical [`OperatorTree::Term`] remains usable without a limit.  Once a
+/// planner proves that a score-ordered limit can be pushed into that leaf it
+/// attaches one of these strategies through [`TextTopKPlan`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextTopKStrategy {
+    /// Document-at-a-time WAND with scorer-provided term upper bounds.
+    Wand,
+    /// Block-Max WAND with persisted, scorer-versioned block bounds.
+    BlockMaxWand,
+}
+
+/// Physical score-limit pushed into a text leaf.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextTopKPlan {
+    pub k: usize,
+    pub strategy: TextTopKStrategy,
+}
+
 /// External document prior used by [`OperatorTree::BayesianMatchWithPrior`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExternalPriorMode {
@@ -288,6 +308,10 @@ pub enum OperatorTree {
         /// chooses `text_match` or `bayesian_match`. Query-string
         /// parsers leave this unset so they stay syntax-only.
         scoring: Option<TextScoringMode>,
+        /// Physical score-limit selected after logical lowering. `None`
+        /// preserves the exhaustive posting-list carrier required by Boolean
+        /// and fusion parents.
+        top_k: Option<TextTopKPlan>,
     },
     /// `FilterOperator(field, predicate, source)`.
     Filter {
@@ -331,6 +355,11 @@ pub enum OperatorTree {
     Complement(Box<OperatorTree>),
     /// `ComposedOperator([...])`.
     Composed(Vec<OperatorTree>),
+    /// Explicitly encode a graph posting carrier into an ordinary posting
+    /// carrier with the versioned Phi codec. SQL document predicates insert
+    /// this boundary before combining graph results with relational results;
+    /// graph-to-graph set algebra remains on `GraphPostingList`.
+    EncodeGraphPosting { source: Box<OperatorTree> },
 
     /// `VectorSimilarityOperator(query_vector, threshold, field)`.
     VectorSimilarity {
@@ -692,6 +721,7 @@ impl OperatorTree {
             | OperatorTree::Score { source, .. }
             | OperatorTree::BayesianScore { source, .. }
             | OperatorTree::Complement(source)
+            | OperatorTree::EncodeGraphPosting { source }
             | OperatorTree::CosineProbability(source)
             | OperatorTree::ProbNot { signal: source, .. }
             | OperatorTree::SparseThreshold { source, .. }

@@ -119,6 +119,19 @@ impl SQLiteInvertedIndex {
         term: &str,
         scorer: &S,
     ) -> StorageBackendResult<()> {
+        self.build_block_max_scores_versioned(field, term, scorer, "")
+    }
+
+    /// Build one scorer-versioned block-max posting. The version is checked
+    /// on load so changed BM25 parameters or field statistics can never feed
+    /// an unsafe pruning bound.
+    pub fn build_block_max_scores_versioned<S: BlockMaxScorer + ?Sized>(
+        &self,
+        field: &str,
+        term: &str,
+        scorer: &S,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<()> {
         let posting_list = self.get_posting_list(field, term)?;
         if posting_list.is_empty() && !self.has_field(field)? {
             return Ok(());
@@ -141,17 +154,23 @@ impl SQLiteInvertedIndex {
             for (block_idx, chunk) in scored_entries.chunks(Self::BLOCK_SIZE).enumerate() {
                 let mut max_score = 0.0_f64;
                 for &(tf, doc_length) in chunk {
-                    max_score = max_score.max(scorer.score(tf, doc_length, df));
+                    let score = scorer.score(tf, doc_length, df);
+                    if !score.is_finite() || score < 0.0 {
+                        return Err(SQLiteError::StorageBackend(format!(
+                            "block-max score must be finite and non-negative, got {score}"
+                        )));
+                    }
+                    max_score = max_score.max(score);
                 }
                 let block_idx = encode_index_usize("block index", block_idx)?;
                 tx.execute(
                     &format!(
                         "INSERT OR REPLACE INTO {}
-                            (term, block_idx, max_score)
-                         VALUES (?1, ?2, ?3)",
+                            (term, block_idx, max_score, scorer_fingerprint)
+                         VALUES (?1, ?2, ?3, ?4)",
                         quote_ident(&table)
                     ),
-                    params![term, block_idx, max_score],
+                    params![term, block_idx, max_score, scorer_fingerprint],
                 )?;
             }
             tx.commit()?;
@@ -228,6 +247,57 @@ impl SQLiteInvertedIndex {
                 scores.push(score);
             }
             Ok(scores)
+        })?)
+    }
+
+    pub fn get_versioned_block_max_scores(
+        &self,
+        field: &str,
+        term: &str,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Option<Vec<f64>>> {
+        let table = self.blockmax_table_name(field);
+        Ok(self.conn.with(|conn| {
+            if !table_exists(conn, &table)? {
+                return Ok(None);
+            }
+            let pragma = format!("PRAGMA table_info({})", quote_ident(&table));
+            let mut columns = conn.prepare(&pragma)?;
+            let has_fingerprint = columns
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .any(|name| name == "scorer_fingerprint");
+            drop(columns);
+            if !has_fingerprint {
+                return Ok(None);
+            }
+            let sql = format!(
+                "SELECT block_idx, max_score FROM {}
+                 WHERE term = ?1 AND scorer_fingerprint = ?2
+                 ORDER BY block_idx",
+                quote_ident(&table)
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params![term, scorer_fingerprint], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if rows.is_empty() {
+                return Ok(None);
+            }
+            let mut scores = Vec::with_capacity(rows.len());
+            for (expected, (block_idx, score)) in rows.into_iter().enumerate() {
+                let block_idx = decode_index_usize("block index", block_idx)?;
+                if block_idx != expected || !score.is_finite() || score < 0.0 {
+                    return Err(SQLiteError::StorageBackend(format!(
+                        "corrupt block-max index for `{field}.{term}` at block {block_idx}"
+                    )));
+                }
+                scores.push(score);
+            }
+            Ok(Some(scores))
         })?)
     }
 
@@ -321,12 +391,28 @@ impl SQLiteInvertedIndex {
                     term TEXT NOT NULL,
                     block_idx INTEGER NOT NULL,
                     max_score REAL NOT NULL,
+                    scorer_fingerprint TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (term, block_idx)
                 )",
                 quote_ident(block_table)
             ),
             [],
         )?;
+        let pragma = format!("PRAGMA table_info({})", quote_ident(block_table));
+        let mut stmt = conn.prepare(&pragma)?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        if !columns.iter().any(|name| name == "scorer_fingerprint") {
+            conn.execute(
+                &format!(
+                    "ALTER TABLE {} ADD COLUMN scorer_fingerprint TEXT NOT NULL DEFAULT ''",
+                    quote_ident(block_table)
+                ),
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -465,6 +551,7 @@ impl SQLiteInvertedIndex {
                     &self.blockmax_table_name(field),
                 )?;
             }
+            invalidate_block_max_tables(&tx, &self.table)?;
             tx.execute(
                 "DELETE FROM _postings WHERE table_name = ?1 AND doc_id = ?2",
                 params![self.table, doc_id],
@@ -548,6 +635,7 @@ impl SQLiteInvertedIndex {
                     &self.blockmax_table_name(field),
                 )?;
             }
+            invalidate_block_max_tables(&tx, &self.table)?;
             tx.execute(
                 "DELETE FROM _postings WHERE table_name = ?1",
                 params![self.table],
@@ -627,6 +715,7 @@ impl SQLiteInvertedIndex {
                     decode_index_u64("field document count", other_docs)? > 0,
                 ));
             }
+            invalidate_block_max_tables(&tx, &self.table)?;
             tx.execute(
                 "DELETE FROM _doc_lengths WHERE table_name = ?1 AND doc_id = ?2",
                 params![self.table, doc_id],
@@ -653,6 +742,26 @@ impl SQLiteInvertedIndex {
             Ok(())
         })
     }
+}
+
+/// A score materialization is valid only for the exact posting/statistics
+/// snapshot it was built from. Clear every field-local block-max table in the
+/// same transaction as a posting mutation; stale bounds could otherwise make
+/// an exact top-k query return the wrong documents.
+fn invalidate_block_max_tables(
+    conn: &rusqlite::Connection,
+    logical_table: &str,
+) -> SQLiteResult<()> {
+    let prefix = format!("_blockmax_{logical_table}_");
+    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")?;
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for name in names.into_iter().filter(|name| name.starts_with(&prefix)) {
+        conn.execute(&format!("DELETE FROM {}", quote_ident(&name)), [])?;
+    }
+    Ok(())
 }
 
 fn positions_to_blob(positions: &[u32]) -> SQLiteResult<Vec<u8>> {
@@ -803,6 +912,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
     fn clear(&mut self) -> StorageBackendResult<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
+            invalidate_block_max_tables(&tx, &self.table)?;
             tx.execute(
                 "DELETE FROM _postings WHERE table_name = ?1",
                 params![self.table],
@@ -915,6 +1025,43 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 )
             })
             .collect())
+    }
+
+    fn rebuild_persisted_block_max(
+        &mut self,
+        field: &str,
+        scorer: &dyn BlockMaxScorer,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<bool> {
+        if scorer_fingerprint.is_empty() {
+            return Err(SQLiteError::StorageBackend(
+                "persisted block-max scorer fingerprint must not be empty".into(),
+            )
+            .into());
+        }
+        let terms = self.terms_for_field(field)?;
+        self.ensure_aux_tables(field)?;
+        let table = self.blockmax_table_name(field);
+        self.conn.with_mut(|conn| {
+            conn.execute(&format!("DELETE FROM {}", quote_ident(&table)), [])?;
+            Ok(())
+        })?;
+        for term in terms {
+            self.build_block_max_scores_versioned(field, &term, scorer, scorer_fingerprint)?;
+        }
+        Ok(true)
+    }
+
+    fn persisted_block_max_scores(
+        &self,
+        field: &str,
+        term: &str,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Option<Vec<f64>>> {
+        if scorer_fingerprint.is_empty() {
+            return Ok(None);
+        }
+        self.get_versioned_block_max_scores(field, term, scorer_fingerprint)
     }
 
     fn for_each_term_freq(

@@ -17,6 +17,7 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
+use crate::block_max_index::BlockMaxScorer;
 
 fn counter_error(context: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("inverted-index {context} overflow or corruption"))
@@ -132,6 +133,31 @@ pub trait InvertedIndex: Send + Sync {
             .iter()
             .map(|term| self.get_posting_list(field, term))
             .collect()
+    }
+
+    /// Persist scorer-specific block maxima for every term in `field`.
+    ///
+    /// Backends that do not provide durable auxiliary indexes return `false`.
+    /// The fingerprint must include every scorer and corpus statistic that can
+    /// affect a term contribution; reads only expose rows with an exact match.
+    fn rebuild_persisted_block_max(
+        &mut self,
+        _field: &str,
+        _scorer: &dyn BlockMaxScorer,
+        _scorer_fingerprint: &str,
+    ) -> StorageBackendResult<bool> {
+        Ok(false)
+    }
+
+    /// Load scorer-versioned block maxima for one posting list. `None` means
+    /// the backend has no complete, valid materialization for this scorer.
+    fn persisted_block_max_scores(
+        &self,
+        _field: &str,
+        _term: &str,
+        _scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Option<Vec<f64>>> {
+        Ok(None)
     }
 
     /// Visit every posting entry for `(field, term)` in ascending

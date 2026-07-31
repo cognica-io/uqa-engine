@@ -1054,6 +1054,25 @@ mod tests {
     }
 
     #[test]
+    fn compressed_write_refresh_uses_the_pinned_transaction_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = Engine::open_compressed(
+            &directory.path().join("compressed-write.db"),
+            uqa_storage::SQLiteCompressionOptions::default(),
+        )
+        .unwrap();
+
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO items (id) VALUES (1)", &[])
+            .unwrap();
+        let result = engine.sql("SELECT id FROM items", &[]).unwrap();
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
     fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
         let directory = tempfile::tempdir().unwrap();
         let root = Engine::open(&directory.path().join("pinned-reader.db")).unwrap();

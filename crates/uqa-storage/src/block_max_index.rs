@@ -139,6 +139,13 @@ impl BlockMaxIndex {
         self.block_maxes.get(&key).map_or(0, Vec::len)
     }
 
+    /// Borrow all block scores for one posting without repeated key
+    /// construction. BMW uses this to precompute suffix bounds once per query.
+    pub fn block_maxes(&self, table: &str, field: &str, term: &str) -> Option<&[f64]> {
+        let key = (table.to_string(), field.to_string(), term.to_string());
+        self.block_maxes.get(&key).map(Vec::as_slice)
+    }
+
     /// Block index for a given posting-list cursor position.
     pub fn block_index_for(&self, position: usize) -> StorageBackendResult<usize> {
         if self.block_size == 0 {

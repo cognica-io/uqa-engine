@@ -16,6 +16,9 @@ use std::sync::Arc;
 use uqa_core::IndexStats;
 use uqa_storage::BlockMaxScorer;
 
+use crate::error::invalid_input;
+use crate::ScoringResult;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BM25Params {
     pub k1: f64,
@@ -30,6 +33,30 @@ impl Default for BM25Params {
             b: 0.75,
             boost: 1.0,
         }
+    }
+}
+
+impl BM25Params {
+    pub fn validate(self) -> ScoringResult<()> {
+        if !self.k1.is_finite() || self.k1 <= 0.0 {
+            return Err(invalid_input(format!(
+                "BM25 k1 must be a positive finite value, got {}",
+                self.k1
+            )));
+        }
+        if !self.b.is_finite() || !(0.0..=1.0).contains(&self.b) {
+            return Err(invalid_input(format!(
+                "BM25 b must be finite and in [0, 1], got {}",
+                self.b
+            )));
+        }
+        if !self.boost.is_finite() || self.boost < 0.0 {
+            return Err(invalid_input(format!(
+                "BM25 boost must be finite and non-negative, got {}",
+                self.boost
+            )));
+        }
+        Ok(())
     }
 }
 

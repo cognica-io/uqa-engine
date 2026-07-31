@@ -59,6 +59,7 @@ pub mod join_order;
 pub mod optimizer;
 pub mod parallel;
 pub mod query_optimizer;
+pub mod text_top_k;
 pub mod unified_plan;
 
 pub use cardinality::{
@@ -84,6 +85,7 @@ pub use parallel::{
 pub use query_optimizer::{
     IndexScanCandidate, OptimizerConfig as TreeOptimizerConfig, QueryOptimizer,
 };
+pub use text_top_k::{plan_text_top_k, TextTopKCapabilities};
 pub use unified_plan::{
     AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
     ConflictActionPlan, ConflictPlan, CtePlan, DeletePlan, ExpressionPlan, InsertPlan,

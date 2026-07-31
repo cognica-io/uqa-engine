@@ -154,6 +154,7 @@ fn driver_propagates_leaf_failure_through_boolean_branches() {
             query: "tokio".into(),
             field: Some("missing".into()),
             scoring: Some(TextScoringMode::BM25),
+            top_k: None,
         },
         OperatorTree::Empty,
     ]);
@@ -186,6 +187,7 @@ fn driver_rejects_declared_but_unindexed_text_column() {
             query: "tokio".into(),
             field: Some("body".into()),
             scoring: Some(TextScoringMode::BM25),
+            top_k: None,
         })
         .expect_err("an unindexed text column must not look like no matches");
     assert!(
@@ -210,6 +212,7 @@ fn schema_less_dynamic_table_keeps_registered_fts_fields_executable() {
         query: "dynamic".into(),
         field: Some("body".into()),
         scoring: Some(TextScoringMode::BM25),
+        top_k: None,
     };
 
     let result = driver.execute_node(&tree).unwrap();
@@ -450,6 +453,7 @@ fn aggregation_errors_propagate_through_the_driver() {
             query: "tokio".into(),
             field: Some("body".into()),
             scoring: Some(TextScoringMode::BM25),
+            top_k: None,
         }),
         monoid: Arc::new(RejectingMonoid),
     };

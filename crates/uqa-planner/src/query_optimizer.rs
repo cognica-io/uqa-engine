@@ -992,6 +992,9 @@ fn map_operator_children(
         OperatorTree::Composed(children) => {
             OperatorTree::Composed(children.into_iter().map(&mut map).collect())
         }
+        OperatorTree::EncodeGraphPosting { source } => OperatorTree::EncodeGraphPosting {
+            source: Box::new(map(*source)),
+        },
         OperatorTree::CosineProbability(child) => {
             OperatorTree::CosineProbability(Box::new(map(*child)))
         }
@@ -1192,10 +1195,12 @@ fn map_operator_children(
             query,
             field,
             scoring,
+            top_k,
         } => OperatorTree::Term {
             query,
             field,
             scoring,
+            top_k,
         },
         OperatorTree::BayesianMatchWithPrior {
             field,
@@ -1367,6 +1372,7 @@ fn is_membership_only(op: &OperatorTree) -> bool {
         | OperatorTree::Facet { .. }
         | OperatorTree::Score { .. }
         | OperatorTree::BayesianScore { .. }
+        | OperatorTree::EncodeGraphPosting { .. }
         | OperatorTree::BayesianMatchWithPrior { .. }
         | OperatorTree::VectorSimilarity { .. }
         | OperatorTree::KNN { .. }
@@ -1544,6 +1550,7 @@ mod tests {
             query: "q".into(),
             field: Some(field.into()),
             scoring: Some(uqa_operators::TextScoringMode::BM25),
+            top_k: None,
         }
     }
 

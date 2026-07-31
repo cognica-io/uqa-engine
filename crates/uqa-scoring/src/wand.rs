@@ -60,6 +60,31 @@ impl Ord for HeapEntry {
     }
 }
 
+fn update_top_k(
+    top_k: &mut BinaryHeap<HeapEntry>,
+    k: usize,
+    score: f64,
+    doc_id: DocId,
+    threshold: &mut f64,
+) {
+    let candidate = HeapEntry { score, doc_id };
+    if top_k.len() < k {
+        top_k.push(candidate);
+        if top_k.len() == k {
+            *threshold = top_k.peek().map_or(0.0, |entry| entry.score);
+        }
+        return;
+    }
+    let Some(eviction) = top_k.peek() else {
+        return;
+    };
+    if score > eviction.score || (score == eviction.score && doc_id < eviction.doc_id) {
+        top_k.pop();
+        top_k.push(candidate);
+        *threshold = top_k.peek().map_or(*threshold, |entry| entry.score);
+    }
+}
+
 /// Common per-term cursor state: the entry slice and current position.
 /// Field, term, and scorer live on [`WANDQuery`] so a single cursor
 /// stays small and pivot reordering touches just one cache line.
@@ -141,7 +166,7 @@ impl WANDQuery {
 /// `scored` counts how many of those candidates we actually evaluated
 /// the full BM25 sum for; `cursor_advances` counts pivot-driven binary
 /// search steps and is informational only.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct WANDStats {
     pub scored: u64,
     pub total_candidates: u64,
@@ -217,6 +242,23 @@ impl<'a> BlockMaxWANDScorer<'a> {
         let q = self.query;
         let bmi = self.block_max_index;
         let table = &self.table;
+        let suffix_bounds = q
+            .fields
+            .iter()
+            .zip(&q.terms)
+            .map(|(field, term)| {
+                let Some(blocks) = bmi.block_maxes(table, field, term) else {
+                    return Vec::new();
+                };
+                let mut suffix = vec![0.0_f64; blocks.len()];
+                let mut maximum = 0.0_f64;
+                for (index, score) in blocks.iter().enumerate().rev() {
+                    maximum = maximum.max(*score);
+                    suffix[index] = maximum;
+                }
+                suffix
+            })
+            .collect::<Vec<_>>();
         run_pivot_loop(
             q,
             &mut cursors,
@@ -229,20 +271,13 @@ impl<'a> BlockMaxWANDScorer<'a> {
                         continue;
                     }
                     let cur_block = bmi.block_index_for(cursors[ti].position)?;
-                    let total_blocks = bmi.num_blocks(table, &q.fields[ti], &q.terms[ti]);
                     // Take the max block-max across the remaining blocks
                     // for this term so the bound stays valid for any
                     // pivot doc the cursor could still reach. Anchoring
                     // on just `cur_block` under-counts a later block
                     // whose max score exceeds the current block, which
                     // would prune candidates BMW must still consider.
-                    let mut bm = 0.0_f64;
-                    for b in cur_block..total_blocks {
-                        let v = bmi.block_max(table, &q.fields[ti], &q.terms[ti], b);
-                        if v > bm {
-                            bm = v;
-                        }
-                    }
+                    let bm = suffix_bounds[ti].get(cur_block).copied().unwrap_or(0.0);
                     // Fall back to the per-term `term_upper_bound(df)` if no
                     // block was recorded; an unindexed term must not get
                     // pruned more aggressively than plain WAND.
@@ -321,19 +356,22 @@ where
     F: FnMut(&[(u64, usize)], &[TermCursor<'_>]) -> StorageBackendResult<Option<Vec<f64>>>,
 {
     let num_terms = query.posting_lists.len();
+    let total_candidates = candidate_union(&query.posting_lists)?;
     if num_terms == 0 || query.k == 0 {
         return Ok(WANDResult {
             top_k: PostingList::new(),
             stats: WANDStats {
-                total_candidates: candidate_union(&query.posting_lists)?,
+                total_candidates,
                 ..WANDStats::default()
             },
         });
     }
-    let mut top_k: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(query.k);
+    let candidate_capacity = usize::try_from(total_candidates).unwrap_or(usize::MAX);
+    let mut top_k: BinaryHeap<HeapEntry> =
+        BinaryHeap::with_capacity(query.k.min(candidate_capacity));
     let mut threshold = 0.0_f64;
     let mut stats = WANDStats {
-        total_candidates: candidate_union(&query.posting_lists)?,
+        total_candidates,
         ..WANDStats::default()
     };
 
@@ -373,22 +411,13 @@ where
                 .checked_add(1)
                 .ok_or_else(|| invalid_wand_input("scored-document counter overflowed"))?;
 
-            if top_k.len() < query.k {
-                top_k.push(HeapEntry {
-                    score: actual_score,
-                    doc_id: pivot_doc as DocId,
-                });
-                if top_k.len() == query.k {
-                    threshold = top_k.peek().map_or(0.0, |e| e.score);
-                }
-            } else if actual_score > threshold {
-                top_k.pop();
-                top_k.push(HeapEntry {
-                    score: actual_score,
-                    doc_id: pivot_doc as DocId,
-                });
-                threshold = top_k.peek().map_or(threshold, |e| e.score);
-            }
+            update_top_k(
+                &mut top_k,
+                query.k,
+                actual_score,
+                pivot_doc as DocId,
+                &mut threshold,
+            );
 
             // Advance every cursor at pivot_doc.
             for st in &mut sorted_terms {

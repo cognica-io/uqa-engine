@@ -200,25 +200,7 @@ fn validate_params(params: BayesianBM25Params, stats: &IndexStats) -> ScoringRes
             "Bayesian BM25 calibration slopes must be finite".to_string(),
         ));
     }
-    let bm25 = params.bm25;
-    if !bm25.k1.is_finite() || bm25.k1 <= 0.0 {
-        return Err(invalid_input(format!(
-            "BM25 k1 must be a positive finite value, got {}",
-            bm25.k1
-        )));
-    }
-    if !bm25.b.is_finite() || !(0.0..=1.0).contains(&bm25.b) {
-        return Err(invalid_input(format!(
-            "BM25 b must be finite and in [0, 1], got {}",
-            bm25.b
-        )));
-    }
-    if !bm25.boost.is_finite() || bm25.boost < 0.0 {
-        return Err(invalid_input(format!(
-            "BM25 boost must be finite and non-negative, got {}",
-            bm25.boost
-        )));
-    }
+    params.bm25.validate()?;
     if !stats.avg_doc_length.is_finite() || stats.avg_doc_length < 0.0 {
         return Err(invalid_input(format!(
             "average document length must be finite and non-negative, got {}",

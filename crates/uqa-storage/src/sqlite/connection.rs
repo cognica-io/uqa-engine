@@ -419,6 +419,31 @@ impl ManagedConnection {
         ))
     }
 
+    /// Whether this session's independent [`Self::data_version`] monitor can
+    /// read without contending with the currently pinned transaction.
+    ///
+    /// The compressed VFS deliberately maps rollback-journal `RESERVED` and
+    /// stronger locks to one whole-file exclusive lock. Once an immediate
+    /// transaction has entered `SQLite`'s write state, a second connection from
+    /// the same pool therefore cannot even read `PRAGMA data_version`. Callers
+    /// must use the pinned connection and conservatively refresh their caches
+    /// instead of waiting on a lock held by themselves. WAL connections and
+    /// compressed read transactions permit the independent monitor.
+    pub fn data_version_monitor_is_nonblocking(&self) -> Result<bool> {
+        if !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. }) {
+            return Ok(true);
+        }
+        let _gate = self.session.gate.read();
+        let transaction = self.session.transaction.lock();
+        let Some(transaction) = transaction.as_ref() else {
+            return Ok(true);
+        };
+        Ok(!matches!(
+            transaction.connection()?.transaction_state(Some("main"))?,
+            rusqlite::TransactionState::Write
+        ))
+    }
+
     /// Database change counter observed on a connection permanently owned by
     /// this logical session. The value changes when another `SQLite` connection
     /// commits. In-memory databases have no independent connections and
@@ -737,6 +762,31 @@ mod tests {
             })
             .unwrap();
         assert_eq!(committed_count, 2);
+    }
+
+    #[test]
+    fn compressed_write_transaction_requires_pinned_connection_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("compressed-monitor.db");
+        let connection =
+            ManagedConnection::open_compressed(&path, SQLiteCompressionOptions::default()).unwrap();
+        connection
+            .with(|sqlite| {
+                sqlite.execute("CREATE TABLE items (id INTEGER PRIMARY KEY)", [])?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(connection.data_version_monitor_is_nonblocking().unwrap());
+        connection.begin_deferred_transaction().unwrap();
+        connection.pin_transaction_snapshot().unwrap();
+        assert!(connection.data_version_monitor_is_nonblocking().unwrap());
+        connection.rollback_transaction().unwrap();
+
+        connection.begin_transaction().unwrap();
+        assert!(!connection.data_version_monitor_is_nonblocking().unwrap());
+        connection.pin_transaction_snapshot().unwrap();
+        connection.rollback_transaction().unwrap();
     }
 
     #[test]

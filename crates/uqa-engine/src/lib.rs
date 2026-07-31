@@ -154,6 +154,26 @@ pub struct ScoredEntry {
     pub score: f64,
 }
 
+/// Algorithm that actually produced a text-search result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextSearchAlgorithm {
+    Exhaustive,
+    Wand,
+    BlockMaxWand,
+}
+
+/// Observable work counters for one text top-k execution.
+#[derive(Debug, Clone)]
+pub struct TextSearchProfile {
+    pub entries: Vec<ScoredEntry>,
+    pub algorithm: TextSearchAlgorithm,
+    pub scored_candidates: u64,
+    pub total_candidates: u64,
+    pub cursor_advances: u64,
+    pub skip_rate: f64,
+    pub elapsed_ms: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FtsIndexStat {
     pub table_name: String,
