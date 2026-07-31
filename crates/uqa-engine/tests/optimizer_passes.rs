@@ -128,6 +128,23 @@ fn simplify_algebra_pass_fires_via_recurse_children() {
 }
 
 #[test]
+fn simplify_algebra_deduplicates_separately_lowered_filters() {
+    let eng = engine_with_corpus();
+    let expr = where_of("SELECT id FROM notes WHERE year = 2024 AND year = 2024");
+    let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
+        .expect("optimise")
+        .expect("lowerable tree");
+    assert!(matches!(
+        optimised,
+        OperatorTree::IndexScan {
+            ref index_name,
+            ref field,
+            ..
+        } if index_name == "notes_year_idx" && field == "year"
+    ));
+}
+
+#[test]
 fn reorder_intersect_pass_sorts_arms_by_cardinality() {
     // Two arms with different cardinality estimates must come back in
     // ascending cost order. We can't observe the cost directly but we

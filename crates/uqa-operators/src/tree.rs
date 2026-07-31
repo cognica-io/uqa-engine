@@ -789,17 +789,6 @@ impl OperatorTree {
             _ => false,
         }
     }
-
-    /// Pointer-style identity for the absorption rule. The UQA
-    /// optimizer compares operands by `is`; the UQA-RS implementation uses
-    /// pointer-stable structural fingerprints.
-    pub fn fingerprint(&self) -> usize {
-        // Use the address of the heap-stored variant payload as the
-        // identity. Cheap clones that share the same Box / Arc
-        // payloads will collide; structurally-equal but separately
-        // allocated trees won't, matching the canonical UQA implementation's `is` semantics.
-        std::ptr::from_ref::<OperatorTree>(self) as usize
-    }
 }
 
 fn visit_operator_slice(children: &[OperatorTree], visitor: &mut impl FnMut(&OperatorTree)) {

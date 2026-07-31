@@ -145,6 +145,28 @@ fn text_match_uses_bm25_scores() {
 }
 
 #[test]
+fn duplicate_text_terms_preserve_their_additive_score_effect() {
+    let eng = engine();
+    let single = sql_score_map(&eng, "text_match(body, 'rust')");
+    let duplicate = sql_score_map(
+        &eng,
+        "text_match(body, 'rust') AND text_match(body, 'rust')",
+    );
+
+    assert_eq!(
+        single.keys().collect::<Vec<_>>(),
+        duplicate.keys().collect::<Vec<_>>()
+    );
+    for (id, score) in single {
+        let duplicate_score = duplicate.get(&id).expect("same matching documents");
+        assert!(
+            (duplicate_score - score * 2.0).abs() < 1e-12,
+            "doc {id}: duplicate term score {duplicate_score} did not preserve 2 * {score}"
+        );
+    }
+}
+
+#[test]
 fn bayesian_match_uses_bayesian_bm25_scores() {
     let eng = engine();
     let sql = sql_score_map(&eng, "bayesian_match(body, 'rust')");

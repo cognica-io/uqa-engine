@@ -9,8 +9,10 @@
 //! Walks an [`OperatorTree`] and applies the ten rewrite stages from
 //! Theorem 6.1.2 (Paper 1) and Theorem 6.1.1 (Paper 2):
 //!
-//! 1. `simplify_algebra` -- idempotent / absorption / empty
-//!    elimination on Intersect / Union.
+//! 1. `simplify_algebra` -- address-independent idempotence /
+//!    absorption / empty elimination on membership-only Intersect /
+//!    Union operands. Score-bearing operands remain distinct because
+//!    posting-list merges add their scores.
 //! 2. `push_filters_down` -- sink Filter into Intersect children when
 //!    the field applies.
 //! 3. `push_graph_pattern_filters` -- fold vertex / edge property
@@ -205,12 +207,13 @@ impl QueryOptimizer {
                         return OperatorTree::Intersect(Vec::new());
                     }
                 }
-                // Idempotent: dedup by identity (fingerprint).
+                // Idempotence is valid only for membership-only operands.
+                // Posting-list merges add scores, so structurally equal scored
+                // terms must remain distinct.
                 let mut seen: Vec<OperatorTree> = Vec::new();
                 'outer: for child in operands {
-                    let fp = child.fingerprint();
                     for s in &seen {
-                        if s.fingerprint() == fp {
+                        if same_membership_term(s, &child) {
                             continue 'outer;
                         }
                     }
@@ -220,14 +223,15 @@ impl QueryOptimizer {
                 // Absorption: drop Union(A, ...) when A also appears
                 // in the intersection.
                 let mut absorbed: Vec<OperatorTree> = Vec::new();
-                for child in &operands {
+                for (child_index, child) in operands.iter().enumerate() {
                     if let OperatorTree::Union(union_operands) = child {
-                        let drop = operands.iter().any(|other| {
-                            other.fingerprint() != child.fingerprint()
-                                && union_operands
-                                    .iter()
-                                    .any(|u| u.fingerprint() == other.fingerprint())
-                        });
+                        let drop = is_membership_only(child)
+                            && operands.iter().enumerate().any(|(other_index, other)| {
+                                other_index != child_index
+                                    && union_operands
+                                        .iter()
+                                        .any(|union_term| same_membership_term(union_term, other))
+                            });
                         if drop {
                             continue;
                         }
@@ -245,12 +249,11 @@ impl QueryOptimizer {
                 // Drop empty children.
                 let mut kept: Vec<OperatorTree> =
                     operands.into_iter().filter(|c| !c.is_empty()).collect();
-                // Idempotent: dedup by identity.
+                // Idempotence is valid only for membership-only operands.
                 let mut seen: Vec<OperatorTree> = Vec::new();
                 'outer: for child in kept.drain(..) {
-                    let fp = child.fingerprint();
                     for s in &seen {
-                        if s.fingerprint() == fp {
+                        if same_membership_term(s, &child) {
                             continue 'outer;
                         }
                     }
@@ -260,14 +263,15 @@ impl QueryOptimizer {
                 // Absorption: drop Intersect(A, ...) when A also appears
                 // in the union.
                 let mut absorbed: Vec<OperatorTree> = Vec::new();
-                for child in &operands {
+                for (child_index, child) in operands.iter().enumerate() {
                     if let OperatorTree::Intersect(int_operands) = child {
-                        let drop = operands.iter().any(|other| {
-                            other.fingerprint() != child.fingerprint()
-                                && int_operands
-                                    .iter()
-                                    .any(|u| u.fingerprint() == other.fingerprint())
-                        });
+                        let drop = is_membership_only(child)
+                            && operands.iter().enumerate().any(|(other_index, other)| {
+                                other_index != child_index
+                                    && int_operands.iter().any(|intersect_term| {
+                                        same_membership_term(intersect_term, other)
+                                    })
+                            });
                         if drop {
                             continue;
                         }
@@ -1323,6 +1327,181 @@ fn map_operator_children(
     }
 }
 
+/// Whether Boolean composition observes only membership for this subtree.
+///
+/// `PostingList::union` and `PostingList::intersect` add scores when the same
+/// document appears on both sides. They may also carry operator-specific
+/// fields. The algebraic identities are therefore safe only for the small,
+/// explicit subset below, whose execution produces default payloads. Keeping
+/// this match exhaustive makes a new `OperatorTree` variant opt out until its
+/// payload effect has been reviewed.
+fn is_membership_only(op: &OperatorTree) -> bool {
+    match op {
+        OperatorTree::Empty | OperatorTree::IndexScan { .. } => true,
+        OperatorTree::Filter { source, .. } => source.as_deref().is_none_or(is_membership_only),
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().all(is_membership_only),
+        OperatorTree::Complement(child) => is_membership_only(child),
+        OperatorTree::VectorExclusion { positive, negative } => {
+            is_membership_only(positive) && is_membership_only(negative)
+        }
+        OperatorTree::Term { .. }
+        | OperatorTree::Facet { .. }
+        | OperatorTree::Score { .. }
+        | OperatorTree::BayesianScore { .. }
+        | OperatorTree::BayesianMatchWithPrior { .. }
+        | OperatorTree::VectorSimilarity { .. }
+        | OperatorTree::KNN { .. }
+        | OperatorTree::CalibratedVectorMatch { .. }
+        | OperatorTree::CosineProbability(_)
+        | OperatorTree::LogOddsFusion { .. }
+        | OperatorTree::ProbBoolFusion { .. }
+        | OperatorTree::ProbNot { .. }
+        | OperatorTree::AttentionFusion { .. }
+        | OperatorTree::LearnedFusion { .. }
+        | OperatorTree::SparseThreshold { .. }
+        | OperatorTree::Traverse { .. }
+        | OperatorTree::GraphNeighbors { .. }
+        | OperatorTree::GraphEdges { .. }
+        | OperatorTree::PatternMatch { .. }
+        | OperatorTree::RegularPathQuery { .. }
+        | OperatorTree::GraphJoin { .. }
+        | OperatorTree::Aggregate { .. }
+        | OperatorTree::GroupBy { .. }
+        | OperatorTree::MultiStage { .. }
+        | OperatorTree::MultiFieldSearch { .. }
+        | OperatorTree::HybridTextVector { .. }
+        | OperatorTree::SemanticFilter { .. }
+        | OperatorTree::FacetVector { .. }
+        | OperatorTree::VertexAggregation { .. }
+        | OperatorTree::WeightedPathQuery { .. }
+        | OperatorTree::MessagePassing { .. }
+        | OperatorTree::GraphEmbedding { .. }
+        | OperatorTree::PageRank { .. }
+        | OperatorTree::HITS { .. }
+        | OperatorTree::BetweennessCentrality { .. }
+        | OperatorTree::TextSimilarityJoin { .. }
+        | OperatorTree::VectorSimilarityJoin { .. }
+        | OperatorTree::HybridJoin { .. }
+        | OperatorTree::CrossParadigmJoin { .. }
+        | OperatorTree::TemporalTraverse { .. }
+        | OperatorTree::TemporalPatternMatch { .. }
+        | OperatorTree::ProgressiveFusion { .. }
+        | OperatorTree::DeepFusion { .. }
+        | OperatorTree::DeepPredict { .. }
+        | OperatorTree::Opaque { .. } => false,
+    }
+}
+
+/// Address-independent structural equivalence for operands on which Boolean
+/// idempotence and absorption preserve the complete posting-list payload.
+fn same_membership_term(left: &OperatorTree, right: &OperatorTree) -> bool {
+    if !is_membership_only(left) || !is_membership_only(right) {
+        return false;
+    }
+
+    // All three zero-child composition forms execute as the same empty set.
+    if left.is_empty() || right.is_empty() {
+        return left.is_empty() && right.is_empty();
+    }
+
+    match (left, right) {
+        (
+            OperatorTree::Filter {
+                field: left_field,
+                predicate: left_predicate,
+                source: left_source,
+            },
+            OperatorTree::Filter {
+                field: right_field,
+                predicate: right_predicate,
+                source: right_source,
+            },
+        ) => {
+            left_field == right_field
+                && left_predicate == right_predicate
+                && same_optional_membership_source(left_source.as_deref(), right_source.as_deref())
+        }
+        (
+            OperatorTree::IndexScan {
+                index_name: left_index,
+                field: left_field,
+                predicate: left_predicate,
+            },
+            OperatorTree::IndexScan {
+                index_name: right_index,
+                field: right_field,
+                predicate: right_predicate,
+            },
+        ) => {
+            left_index == right_index
+                && left_field == right_field
+                && left_predicate == right_predicate
+        }
+        (OperatorTree::Intersect(left), OperatorTree::Intersect(right))
+        | (OperatorTree::Union(left), OperatorTree::Union(right)) => {
+            same_membership_multiset(left, right)
+        }
+        (OperatorTree::Complement(left), OperatorTree::Complement(right)) => {
+            same_membership_term(left, right)
+        }
+        (OperatorTree::Composed(left), OperatorTree::Composed(right)) => {
+            same_membership_sequence(left, right)
+        }
+        (
+            OperatorTree::VectorExclusion {
+                positive: left_positive,
+                negative: left_negative,
+            },
+            OperatorTree::VectorExclusion {
+                positive: right_positive,
+                negative: right_negative,
+            },
+        ) => {
+            same_membership_term(left_positive, right_positive)
+                && same_membership_term(left_negative, right_negative)
+        }
+        _ => false,
+    }
+}
+
+fn same_optional_membership_source(
+    left: Option<&OperatorTree>,
+    right: Option<&OperatorTree>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => same_membership_term(left, right),
+        (None, Some(_)) | (Some(_), None) => false,
+    }
+}
+
+fn same_membership_sequence(left: &[OperatorTree], right: &[OperatorTree]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| same_membership_term(left, right))
+}
+
+fn same_membership_multiset(left: &[OperatorTree], right: &[OperatorTree]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut matched = vec![false; right.len()];
+    for left_term in left {
+        let Some(index) = right.iter().enumerate().position(|(index, right_term)| {
+            !matched[index] && same_membership_term(left_term, right_term)
+        }) else {
+            return false;
+        };
+        matched[index] = true;
+    }
+    true
+}
+
 impl Default for QueryOptimizer {
     fn default() -> Self {
         Self::new()
@@ -1346,7 +1525,15 @@ mod tests {
         OperatorTree::Term {
             query: "q".into(),
             field: Some(field.into()),
-            scoring: None,
+            scoring: Some(uqa_operators::TextScoringMode::BM25),
+        }
+    }
+
+    fn membership_filter(field: &str, value: i64) -> OperatorTree {
+        OperatorTree::Filter {
+            field: field.into(),
+            predicate: Predicate::Equals(uqa_core::Value::Int(value)),
+            source: None,
         }
     }
 
@@ -1374,18 +1561,106 @@ mod tests {
     }
 
     #[test]
-    fn distinct_clones_in_intersect_keep_both() {
-        // Mirrors the canonical UQA implementation's `is` semantics: two cloned operators have
-        // different identities so the optimizer leaves them intact.
+    fn separately_allocated_membership_terms_are_idempotent() {
+        let op = OperatorTree::Intersect(vec![
+            membership_filter("year", 2026),
+            membership_filter("year", 2026),
+        ]);
+        let optimised = QueryOptimizer::new().optimize(op);
+        assert!(matches!(
+            optimised,
+            OperatorTree::Filter {
+                ref field,
+                predicate: Predicate::Equals(uqa_core::Value::Int(2026)),
+                source: None,
+            } if field == "year"
+        ));
+    }
+
+    #[test]
+    fn membership_absorption_uses_structural_equivalence() {
+        let a = || membership_filter("year", 2026);
+        let b = || membership_filter("year", 2025);
+
+        let intersection = QueryOptimizer::new().optimize(OperatorTree::Intersect(vec![
+            a(),
+            OperatorTree::Union(vec![b(), a()]),
+        ]));
+        assert!(matches!(
+            intersection,
+            OperatorTree::Filter {
+                predicate: Predicate::Equals(uqa_core::Value::Int(2026)),
+                ..
+            }
+        ));
+
+        let union = QueryOptimizer::new().optimize(OperatorTree::Union(vec![
+            a(),
+            OperatorTree::Intersect(vec![b(), a()]),
+        ]));
+        assert!(matches!(
+            union,
+            OperatorTree::Filter {
+                predicate: Predicate::Equals(uqa_core::Value::Int(2026)),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn commutative_membership_subtrees_compare_independent_of_order() {
+        let left = OperatorTree::Union(vec![
+            membership_filter("year", 2025),
+            membership_filter("year", 2026),
+        ]);
+        let right = OperatorTree::Union(vec![
+            membership_filter("year", 2026),
+            membership_filter("year", 2025),
+        ]);
+
+        let optimised = QueryOptimizer::new().optimize(OperatorTree::Intersect(vec![left, right]));
+        let OperatorTree::Union(terms) = optimised else {
+            panic!("expected one structurally deduplicated Union");
+        };
+        assert_eq!(terms.len(), 2);
+    }
+
+    #[test]
+    fn structurally_distinct_membership_terms_remain_distinct() {
+        let optimised = QueryOptimizer::new().optimize(OperatorTree::Intersect(vec![
+            membership_filter("year", 2025),
+            membership_filter("year", 2026),
+        ]));
+        let OperatorTree::Intersect(terms) = optimised else {
+            panic!("expected distinct Intersect");
+        };
+        assert_eq!(terms.len(), 2);
+    }
+
+    #[test]
+    fn scored_terms_keep_their_additive_effect() {
         let op = OperatorTree::Intersect(vec![term("a"), term("a")]);
         let optimised = QueryOptimizer::new().optimize(op);
-        // After cardinality reorder both copies survive; the result
-        // remains an Intersect with two children.
-        if let OperatorTree::Intersect(ops) = optimised {
-            assert_eq!(ops.len(), 2);
-        } else {
-            panic!("expected Intersect");
-        }
+        let OperatorTree::Intersect(terms) = optimised else {
+            panic!("expected scored Intersect");
+        };
+        assert_eq!(terms.len(), 2);
+    }
+
+    #[test]
+    fn absorption_does_not_discard_scored_branches() {
+        let op = OperatorTree::Intersect(vec![
+            term("a"),
+            OperatorTree::Union(vec![term("b"), term("a")]),
+        ]);
+        let optimised = QueryOptimizer::new().optimize(op);
+        let OperatorTree::Intersect(terms) = optimised else {
+            panic!("expected scored Intersect");
+        };
+        assert_eq!(terms.len(), 2);
+        assert!(terms
+            .iter()
+            .any(|term| matches!(term, OperatorTree::Union(_))));
     }
 
     #[test]
