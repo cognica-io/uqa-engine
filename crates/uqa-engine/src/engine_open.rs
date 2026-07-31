@@ -571,21 +571,64 @@ impl Engine {
         Ok(())
     }
 
-    /// Rebuild every session-local cache after the persistent backend has
-    /// acquired its outer transaction snapshot. This deliberately ignores
-    /// generation equality: another writer may have committed to `SQLite` and
-    /// released its lock immediately before publishing the in-process epoch.
+    /// Bring every session-local cache onto the outer transaction's pinned
+    /// database snapshot. A stable `data_version` closes the gap between a
+    /// physical `SQLite` commit and publication of the matching in-process
+    /// epochs, while allowing unchanged statements to retain their caches.
     pub(crate) fn refresh_pinned_transaction_snapshot(&self) -> StorageBackendResult<()> {
-        self.clear_persistent_table_bindings_for_catalog_reload();
+        let (sqlite_version_before, sqlite_version_after) =
+            if let Some(connection) = self.sqlite_session.as_ref() {
+                let before = connection.data_version()?;
+                connection.pin_transaction_snapshot()?;
+                let after = connection.data_version()?;
+                (before, after)
+            } else {
+                (None, None)
+            };
+        let sqlite_version_stable = sqlite_version_before == sqlite_version_after;
+        let sqlite_snapshot_unchanged = sqlite_version_stable
+            && sqlite_version_after.is_none_or(|version| {
+                self.seen_sqlite_data_version
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    == version
+            });
         let table_catalog_epoch = self
             .table_catalog_epoch
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_table_catalog(table_catalog_epoch)?;
-        self.refresh_table_data_cache(true)?;
+        let table_data_epoch = self
+            .table_data_epoch
+            .load(std::sync::atomic::Ordering::Acquire);
         let catalog_registry_epoch = self
             .catalog_registry_epoch
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_catalog_registries(catalog_registry_epoch)
+        if sqlite_snapshot_unchanged
+            && self
+                .seen_table_catalog_epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+                == table_catalog_epoch
+            && self
+                .seen_table_data_epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+                == table_data_epoch
+            && self
+                .seen_catalog_registry_epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+                == catalog_registry_epoch
+        {
+            return Ok(());
+        }
+
+        self.clear_persistent_table_bindings_for_catalog_reload();
+        self.reload_table_catalog(table_catalog_epoch)?;
+        self.refresh_table_data_cache(true)?;
+        self.reload_catalog_registries(catalog_registry_epoch)?;
+        if sqlite_version_stable {
+            if let Some(version) = sqlite_version_after {
+                self.seen_sqlite_data_version
+                    .store(version, std::sync::atomic::Ordering::Release);
+            }
+        }
+        Ok(())
     }
 
     /// Mark a durable non-table registry change. Explicit transactions keep

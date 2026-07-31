@@ -989,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_writer_unconditionally_refreshes_its_pinned_catalog_snapshot() {
+    fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
         let directory = tempfile::tempdir().unwrap();
         let root = Engine::open(&directory.path().join("catalog-race.db")).unwrap();
         let writer = root.new_session().unwrap();
@@ -1030,6 +1030,27 @@ mod tests {
             .unwrap()
             .has_table("fresh.items")
             .unwrap());
+    }
+
+    #[test]
+    fn unchanged_persistent_statements_keep_their_loaded_catalog_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = Engine::open(&directory.path().join("stable-snapshot.db")).unwrap();
+        engine
+            .sql("CREATE TABLE items (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+
+        // Consume the catalog/data generations published by CREATE TABLE.
+        engine.sql("SELECT id FROM items", &[]).unwrap();
+        let before = engine.require_table("items").unwrap();
+
+        engine.sql("SELECT id FROM items", &[]).unwrap();
+        let after = engine.require_table("items").unwrap();
+
+        assert!(
+            std::sync::Arc::ptr_eq(&before, &after),
+            "an unchanged statement rebuilt the complete persistent catalog"
+        );
     }
 
     #[test]

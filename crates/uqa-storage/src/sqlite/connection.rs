@@ -445,6 +445,23 @@ impl ManagedConnection {
         Ok(Some(version))
     }
 
+    /// Establish the database snapshot for the active transaction without
+    /// depending on the caller's first user query. `BEGIN DEFERRED` alone does
+    /// not start a read transaction, so a writer could otherwise commit after
+    /// the engine checks its cache generations but before the first catalog
+    /// read. Reading `sqlite_schema` is database-wide and keeps the operation
+    /// independent of any application table.
+    pub fn pin_transaction_snapshot(&self) -> Result<()> {
+        self.with(|connection| {
+            if connection.is_autocommit() {
+                return Err(SQLiteError::NoActiveTransaction);
+            }
+            let _: i64 =
+                connection.query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| row.get(0))?;
+            Ok(())
+        })
+    }
+
     /// Run a closure using this session. Outside a transaction the closure
     /// checks out a pooled connection; inside a transaction every clone is
     /// routed to the session's pinned connection.
@@ -679,6 +696,47 @@ mod tests {
         let after = observer.data_version().unwrap().unwrap();
         assert_ne!(after, before);
         assert_eq!(observer.data_version().unwrap(), Some(after));
+    }
+
+    #[test]
+    fn deferred_transaction_snapshot_can_be_pinned_before_a_user_query() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pinned-snapshot.db");
+        let base = ManagedConnection::open(&path).unwrap();
+        base.with(|connection| {
+            connection.execute_batch(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY); \
+                 INSERT INTO items (id) VALUES (1)",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let reader = base.new_session();
+        let writer = base.new_session();
+
+        reader.begin_deferred_transaction().unwrap();
+        reader.pin_transaction_snapshot().unwrap();
+        writer
+            .with(|connection| {
+                connection.execute("INSERT INTO items (id) VALUES (2)", [])?;
+                Ok(())
+            })
+            .unwrap();
+
+        let pinned_count: i64 = reader
+            .with(|connection| {
+                Ok(connection.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(pinned_count, 1);
+        reader.commit_transaction().unwrap();
+
+        let committed_count: i64 = reader
+            .with(|connection| {
+                Ok(connection.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(committed_count, 2);
     }
 
     #[test]
