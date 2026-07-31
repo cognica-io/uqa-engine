@@ -1544,7 +1544,8 @@ fn named_arg_expr(expr: &ScalarExpr) -> Option<(&str, &ScalarExpr)> {
 
 /// Physical `OperatorTreeDriver` backed by the engine's table, index, graph,
 /// join, and ML runtimes. Single-document branches compose through the core
-/// posting-list algebra; join branches retain the generalized tuple carrier.
+/// document support operations and documented payload merge policies; join
+/// branches retain the generalized tuple carrier.
 #[derive(Clone, Copy)]
 enum DriverExecution {
     Public,
@@ -1742,7 +1743,7 @@ impl<'a> EngineDriver<'a> {
             return match source {
                 Some(child) => self
                     .execute_posting_node(child)
-                    .map(|posting| posting.intersect_owned(&indexed)),
+                    .map(|posting| posting.merge_intersection_owned(&indexed)),
                 None => Ok(indexed),
             };
         }
@@ -2048,11 +2049,11 @@ impl EngineDriver<'_> {
             return Ok(PostingList::new().into());
         };
         iter.try_fold(first, |acc, next| match (acc, next) {
-            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
-                Ok(OperatorOutput::Posting(left.intersect_owned(&right)))
-            }
+            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => Ok(
+                OperatorOutput::Posting(left.merge_intersection_owned(&right)),
+            ),
             (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
-                Ok(OperatorOutput::Generalized(left.intersect(&right)))
+                Ok(OperatorOutput::Generalized(left.merge_intersection(&right)))
             }
             _ => Err(SQLError::TypeMismatch(
                 "Intersect operands must use the same posting-list carrier".to_string(),
@@ -2067,10 +2068,10 @@ impl EngineDriver<'_> {
         };
         iter.try_fold(first, |acc, next| match (acc, next) {
             (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
-                Ok(OperatorOutput::Posting(left.union(&right)))
+                Ok(OperatorOutput::Posting(left.merge_union(&right)))
             }
             (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
-                Ok(OperatorOutput::Generalized(left.union(&right)))
+                Ok(OperatorOutput::Generalized(left.merge_union(&right)))
             }
             _ => Err(SQLError::TypeMismatch(
                 "Union operands must use the same posting-list carrier".to_string(),
@@ -2214,7 +2215,7 @@ impl EngineDriver<'_> {
             .iter()
             .map(|entry| (entry.doc_id, entry.payload.score))
             .collect();
-        let intersection = text.intersect_owned(&vector);
+        let intersection = text.merge_intersection_owned(&vector);
         let entries = intersection
             .entries()
             .iter()
@@ -2249,7 +2250,7 @@ impl EngineDriver<'_> {
     ) -> DriverResult<PostingList> {
         let source = self.execute_posting_node(source)?;
         let vector = self.execute_posting_node(vector_op)?;
-        Ok(source.intersect_owned(&vector))
+        Ok(source.merge_intersection_owned(&vector))
     }
 
     fn execute_traverse(

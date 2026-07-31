@@ -4,12 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Property tests for the `Phi` homomorphism between `GraphPostingList`
-//! and the standard `PostingList` algebra (Theorem 1.1.6, Paper 2).
+//! Property tests for the lossless `Phi` encoding between
+//! `GraphPostingList` and `PostingList` payload storage.
 //!
-//! For any composition of `union`, `intersect`, `difference` on graph
-//! posting lists, encoding through `Phi` and decoding back must
-//! preserve the doc-id-set structure of the result.
+//! For any composition of payload merges and exclusions on graph posting
+//! lists, encoding through `Phi` and decoding back must
+//! preserve the full encoded result. Boolean identities are asserted only on
+//! document support.
 
 use std::collections::BTreeMap;
 
@@ -76,22 +77,22 @@ proptest! {
 
     #[test]
     fn phi_preserves_union(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.union(&b);
-        let rhs = a.to_posting_list().union(&b.to_posting_list());
+        let lhs = a.merge_union(&b);
+        let rhs = a.to_posting_list().merge_union(&b.to_posting_list());
         prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
     #[test]
     fn phi_preserves_intersect(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.intersect(&b);
-        let rhs = a.to_posting_list().intersect(&b.to_posting_list());
+        let lhs = a.merge_intersection(&b);
+        let rhs = a.to_posting_list().merge_intersection(&b.to_posting_list());
         prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
     #[test]
     fn phi_preserves_difference(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.difference(&b);
-        let rhs = a.to_posting_list().difference(&b.to_posting_list());
+        let lhs = a.exclude(&b);
+        let rhs = a.to_posting_list().exclude(&b.to_posting_list());
         prop_assert_eq!(lhs.to_posting_list(), rhs);
     }
 
@@ -102,8 +103,10 @@ proptest! {
     ) {
         // (a union b) intersect c == (a intersect c) union (b intersect c)
         // — applied via Phi, holds at the doc-id-set level.
-        let union_then_inter = a.union(&b).intersect(&a);
-        let inter_then_union = a.intersect(&a).union(&b.intersect(&a));
+        let union_then_inter = a.merge_union(&b).merge_intersection(&a);
+        let inter_then_union = a
+            .merge_intersection(&a)
+            .merge_union(&b.merge_intersection(&a));
         prop_assert_eq!(doc_ids(&union_then_inter), doc_ids(&inter_then_union));
     }
 }

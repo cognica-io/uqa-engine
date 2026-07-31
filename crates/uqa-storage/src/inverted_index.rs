@@ -277,12 +277,12 @@ pub trait InvertedIndex: Send + Sync {
 
     /// Posting list for `term` across every indexed field, unioned
     /// together. Default implementation sums per-field posting lists
-    /// via [`PostingList::union`].
+    /// via [`PostingList::merge_union`].
     fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {
         let mut result = PostingList::new();
         for field in self.field_names()? {
             let pl = self.get_posting_list(&field, term)?;
-            result = result.union(&pl);
+            result = result.merge_union(&pl);
         }
         Ok(result)
     }

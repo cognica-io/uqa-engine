@@ -49,7 +49,7 @@ Retrieval loop, 3 queries (`cargo bench -p uqa-engine --bench relevance`):
 | BM25 | 51.2 us | 24.1 us | -52.9% |
 | BayesianBM25 | 36.2 us | 24.1 us | -33.6% |
 
-Unchanged paths (interleaved A/B verified, same-minute alternating binaries): `sql_inner_join_10k_x_1k` ~1.52 vs ~1.55 ms (+2%, p > 0.05, code-layout level), `knn_top10_10k_dim32` ~763 vs ~769 us (no change), posting-list algebra unchanged.
+Unchanged paths (interleaved A/B verified, same-minute alternating binaries): `sql_inner_join_10k_x_1k` ~1.52 vs ~1.55 ms (+2%, p > 0.05, code-layout level), `knn_top10_10k_dim32` ~763 vs ~769 us (no change), posting merge paths unchanged.
 
 One deliberate semantic change rode along with the serde rewrite: serde's sequence form for internally-tagged enums no longer turns arrays like `[1, -1]` into `Temporal` / `Decimal` values - arrays that are not byte arrays now always decode as lists, which is the only round-trip-stable reading. `value_json_decoding_keeps_arrays_as_lists` documents it.
 
@@ -57,7 +57,7 @@ One deliberate semantic change rode along with the serde rewrite: serde's sequen
 
 The `tpch_style` benchmark builds 100k synthetic `lineitem` rows and runs two repeatable analytical shapes: a Q1-style low-cardinality grouped aggregate with shared arithmetic subexpressions, and a Q6-style range-filtered revenue aggregate. Setup validates the Q1 qualifying-row count and exact Q6 revenue before timing. It is intentionally TPC-H-style rather than an audited TPC-H implementation; its purpose is to pin the engine paths that sampling identified, not to publish a TPC-H score.
 
-The representation boundary remains unchanged: every scalar index scan produces a sorted, deduplicated `PostingList`, range predicates combine through the normal posting-list Boolean algebra, and only the final selected doc IDs cross into document projection. No row-set, bitmap, or format-specific filtering carrier was introduced. The dense bitmap in `BTreeIndex::scan` is a bounded internal sort/dedup strategy and is converted immediately into the same `PostingList`; sparse doc-ID spaces retain `sort_unstable`.
+The representation boundary remains unchanged: every scalar index scan produces a sorted, deduplicated `PostingList`, range predicates combine their document-id support, and only the final selected doc IDs cross into document projection. No row-set, bitmap, or format-specific filtering carrier was introduced. The dense bitmap in `BTreeIndex::scan` is a bounded internal sort/dedup strategy and is converted immediately into the same `PostingList`; sparse doc-ID spaces retain `sort_unstable`.
 
 Sampling exposed five compounding costs:
 
@@ -84,7 +84,7 @@ Time Profiler attributed 69.19% of Q1 samples to projected-expression evaluation
 
 1. Integer analytical expressions compile once to a postfix instruction stream evaluated on a fixed stack. Exact integer SUM/COUNT state is updated directly, while non-integer inputs, NULL, overflow, and division errors fall back to the canonical SQL evaluator.
 2. `MemoryDocumentStore` interns document key layouts and resolves projection ordinals once per layout, eliminating per-row field-name comparisons without assuming every document has the same shape.
-3. `PostingList::intersect_owned` adaptively retains the allocating path for small inputs and reuses the left buffer for large owned inputs. Engine filters, Boolean operators, staged retrieval, and text/vector intersections use this same API.
+3. `PostingList::merge_intersection_owned` adaptively retains the allocating path for small inputs and reuses the left buffer for large owned inputs. Engine filters, Boolean operators, staged retrieval, and text/vector intersections use this same API.
 4. Persistent text scoring can stream `(doc_id, term_frequency)` without decoding position blobs and fetch document lengths plus term frequencies in bulk. Hybrid search constructs statistics only for the analyzed query terms rather than copying vocabulary-wide field statistics.
 5. The persistent postings primary key already covers `(table_name, field, term)`, so schema version 12 removes the redundant `_postings_term_idx`. GIN backfill projects only indexed text fields instead of cloning whole documents.
 6. Vector top-k selection partitions candidates in linear expected time before sorting only the retained `k`. Graph label matching reads vertex IDs directly from the label index instead of cloning complete vertices.
@@ -184,6 +184,40 @@ The matrix exposed three execution-boundary costs rather than isolated operator 
 1. An uncorrelated scalar subquery was executed once per outer row. A conservative physical-plan correlation analysis now distinguishes true outer references, and statement-scoped scalar/`EXISTS` caches initialize independent subqueries once while preserving per-row execution for correlated plans. The pre-fix Criterion pilot estimated about 10.6 s per invocation for the 2k-row case; the configured post-fix estimate is 4.479 ms (about 2,375x faster). The pre-fix full sample run was aborted because Criterion projected more than five minutes.
 2. Exact single-statement calls reparsed, lowered, and optimized SQL on every execution. The cache now retains the parsed statement and logical plan, plus the optimized plan for in-memory read-only execution. Persistent sessions still lower and optimize after pinning each storage snapshot, and explicit transactions optimize against their current state. Against the saved pre-cache baseline, `SELECT 1` moved from 4.987 us to 1.132 us (-77.3%) and standalone `VALUES` moved from 14.850 us to 1.709 us (-88.5%). Scan-dominated cases remained statistically unchanged.
 3. Every repeatable CTE/intermediate result was forced to a temporary file, including a one-row recursive working set. Shared materializations now retain encoded batches while they fit `work_mem` and retain the existing disk format after that budget is crossed. The 500-step recursive CTE moved from 163.03 ms to 2.772 ms (-98.3%, 58.8x), while the non-recursive CTE improved by about 46%. Forced-spill tests at `work_mem = 1B` continue to cover accumulated rows, recursive working sets, and duplicate state.
+
+## Algebra carrier separation (2026-07-31)
+
+The document-support refactor split three contracts that the former payload-bearing `PostingList` API combined:
+
+- `DocSet` is the Boolean-algebra carrier.
+- `Relation<K>` is a finite-support `DocId -> K` function whose value combination is defined by `K`'s semiring.
+- `PostingList` remains document-id-ordered payload storage, while `RankedView` owns score order and top-k selection.
+
+`carrier_layers` measures the new semantic carriers directly, without payload cloning or posting-storage policy. The configured 100-sample run is reproducible with `cargo bench -p uqa-core --bench carrier_layers`.
+
+| Carrier operation (100k entries, 30% overlap) | Central estimate |
+| --- | ---: |
+| `DocSet::union` | 190.21 us |
+| `DocSet::intersect` | 121.55 us |
+| `DocSet::difference` | 154.77 us |
+| `Relation<bool>::plus` | 147.54 us |
+| `Relation<bool>::times` | 104.54 us |
+| `Relation<LogSemiring>::plus` | 484.01 us |
+| `Relation<LogSemiring>::times` | 124.76 us |
+
+The existing `posting_list` benchmark IDs were retained so the payload-storage paths could be compared against an archive of `main` HEAD on the same machine. The full-run deltas for 100k union, intersection, consuming intersection, and difference ranged from -3.9% to +3.4%; the directions were mixed and all remained inside the workstation's +/-10% drift band.
+
+The carrier split exposed a separate top-k optimization. A borrowed `RankedView::top_k` still builds the complete rank order because its output is rank ordered. `RankedView::select_top_k`, however, materializes a document-id-ordered `PostingList`; when the view has not already been ranked, it now partitions the candidates around k in linear time and sorts only the selected entries by document id. Empty and full-width selections bypass ranking entirely.
+
+| Materialized top-k from 100k scored postings | HEAD | Carrier split + selection | Change |
+| --- | ---: | ---: | ---: |
+| k = 0 | 5.723 ms | 4.983 ns | >99.99% lower |
+| k = 10 | 10.357 ms | 278.17 us | -97.3% |
+| k = 100 | 10.396 ms | 287.76 us | -97.2% |
+| k = 1,000 | 10.720 ms | 302.97 us | -97.2% |
+| k = 100,000 | 535.60 us | 548.27 us | +2.4% |
+
+The small full-width difference is not claimed as a regression. The k = 10 through 1,000 deltas are far outside the measured drift band and come from the O(N log N) to O(N) algorithm change. An earlier sequential run of the unchanged full-sort algorithm appeared to show a roughly 50% regression, but rerunning the HEAD binary after the CPU entered the same sustained-load state reproduced the slower absolute time; that apparent delta was thermal/frequency drift. The k = 0 and k = N cases are now permanent benchmark inputs so boundary fast paths cannot silently regress into a full score sort.
 
 ## Reference numbers (post-optimization)
 

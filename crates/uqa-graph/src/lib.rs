@@ -4,13 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Property graphs and the algebra over them.
+//! Property graphs and their posting representation.
 //!
 //! Defines `GraphStore` (trait + in-memory implementation), the
 //! `GraphPostingList` extension of [`uqa_core::PostingList`], and the
-//! `Phi` homomorphism (Theorem 1.1.6, Paper 2) that lets graph
-//! operations compose with the standard posting-list algebra without
-//! losing structure.
+//! lossless `Phi` encoding that lets graph operations compose with the
+//! posting payload merge policies without losing graph metadata.
 
 pub mod agtype;
 mod centrality;

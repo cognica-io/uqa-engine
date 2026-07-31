@@ -7,11 +7,10 @@
 //! Graph extension of [`uqa_core::PostingList`].
 //!
 //! `GraphPostingList` carries a `(doc_id -> GraphPayload)` side-table on
-//! top of a standard posting list. The `Phi` homomorphism (Theorem
-//! 1.1.6, Paper 2) shuttles that side-table through encoded field
-//! entries on the underlying [`uqa_core::Payload`], so all of the
-//! Boolean algebra from `PostingList` composes onto the graph algebra
-//! without loss.
+//! top of a standard posting list. The lossless `Phi` encoding shuttles
+//! that side-table through encoded field entries on the underlying
+//! [`uqa_core::Payload`], so documented posting merge policies compose
+//! with graph metadata without loss.
 
 use std::collections::BTreeMap;
 
@@ -66,8 +65,8 @@ impl GraphPostingList {
     /// occupied reserved fields. Vertex and edge fields are also emitted as
     /// legacy mirrors for existing posting-list consumers.
     ///
-    /// The result composes with the standard posting-list algebra; invert it
-    /// with [`Self::from_posting_list`] to recover the graph view.
+    /// The result composes with the standard posting payload policies; invert
+    /// it with [`Self::from_posting_list`] to recover the graph view.
     pub fn to_posting_list(&self) -> PostingList {
         let mut converted = Vec::with_capacity(self.inner.len());
         for entry in self.inner.entries() {
@@ -221,20 +220,22 @@ impl GraphPostingList {
         self.inner.is_empty()
     }
 
-    /// Boolean union via `Phi`: round-trip both operands through the
-    /// standard posting-list algebra and rebuild the graph view.
-    pub fn union(&self, other: &Self) -> Self {
-        let merged = self.to_posting_list().union(&other.to_posting_list());
+    /// Support union plus payload merge via `Phi`: round-trip both operands
+    /// through [`PostingList::merge_union`] and rebuild the graph view.
+    pub fn merge_union(&self, other: &Self) -> Self {
+        let merged = self.to_posting_list().merge_union(&other.to_posting_list());
         Self::from_posting_list(&merged)
     }
 
-    pub fn intersect(&self, other: &Self) -> Self {
-        let merged = self.to_posting_list().intersect(&other.to_posting_list());
+    pub fn merge_intersection(&self, other: &Self) -> Self {
+        let merged = self
+            .to_posting_list()
+            .merge_intersection(&other.to_posting_list());
         Self::from_posting_list(&merged)
     }
 
-    pub fn difference(&self, other: &Self) -> Self {
-        let merged = self.to_posting_list().difference(&other.to_posting_list());
+    pub fn exclude(&self, other: &Self) -> Self {
+        let merged = self.to_posting_list().exclude(&other.to_posting_list());
         Self::from_posting_list(&merged)
     }
 }
@@ -405,7 +406,7 @@ mod tests {
     fn union_via_phi_merges_doc_ids() {
         let a = fixture(1, vec![1], vec![]);
         let b = fixture(2, vec![2], vec![]);
-        let merged = a.union(&b);
+        let merged = a.merge_union(&b);
         let ids: Vec<DocId> = merged.inner().doc_ids().collect();
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(
@@ -422,13 +423,13 @@ mod tests {
     fn intersect_via_phi_keeps_only_shared() {
         let a = fixture(1, vec![1], vec![]);
         let b = fixture(1, vec![2], vec![]);
-        let merged = a.intersect(&b);
+        let merged = a.merge_intersection(&b);
         let ids: Vec<DocId> = merged.inner().doc_ids().collect();
         assert_eq!(ids, vec![1]);
     }
 
     #[test]
-    fn boolean_overlap_merges_logical_scores_and_keeps_phi_stable() {
+    fn payload_overlap_merges_logical_scores_and_keeps_phi_stable() {
         let mut a = GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(vec![PostingEntry::new(
                 1,
@@ -480,8 +481,8 @@ mod tests {
         );
 
         for encoded in [
-            a.to_posting_list().union(&b.to_posting_list()),
-            a.to_posting_list().intersect(&b.to_posting_list()),
+            a.to_posting_list().merge_union(&b.to_posting_list()),
+            a.to_posting_list().merge_intersection(&b.to_posting_list()),
         ] {
             let decoded = GraphPostingList::from_posting_list(&encoded);
             let entry = decoded.inner().get_entry(1).unwrap();
@@ -509,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn boolean_overlap_keeps_none_override_when_both_inputs_use_base_scores() {
+    fn payload_overlap_keeps_none_override_when_both_inputs_use_base_scores() {
         let a = fixture(1, vec![1], vec![10]);
         let mut b = GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 2.0)]),
@@ -523,7 +524,7 @@ mod tests {
                 ..GraphPayload::default()
             },
         );
-        let merged = a.union(&b);
+        let merged = a.merge_union(&b);
         assert_eq!(merged.inner().get_entry(1).unwrap().payload.score, 3.0);
         assert_eq!(merged.get_graph_payload(1).unwrap().score_override, None);
         assert_eq!(
@@ -533,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn boolean_overlap_with_plain_payload_keeps_graph_and_effective_score() {
+    fn payload_overlap_with_plain_payload_keeps_graph_and_effective_score() {
         let mut graph = GraphPostingList::from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 1.0)]),
             BTreeMap::new(),
@@ -552,7 +553,7 @@ mod tests {
             BTreeMap::new(),
         );
 
-        for merged in [graph.union(&plain), plain.union(&graph)] {
+        for merged in [graph.merge_union(&plain), plain.merge_union(&graph)] {
             assert_eq!(merged.inner().get_entry(1).unwrap().payload.score, 3.0);
             assert_eq!(
                 merged.get_graph_payload(1),
@@ -681,7 +682,7 @@ mod tests {
             BTreeMap::new(),
         );
         let b = fixture(2, vec![], vec![]);
-        let diff = a.difference(&b);
+        let diff = a.exclude(&b);
         let ids: Vec<DocId> = diff.inner().doc_ids().collect();
         assert_eq!(ids, vec![1]);
     }
@@ -712,6 +713,6 @@ mod tests {
             },
         );
         let right = fixture(2, vec![2], vec![2]);
-        assert_eq!(left.difference(&right), left);
+        assert_eq!(left.exclude(&right), left);
     }
 }

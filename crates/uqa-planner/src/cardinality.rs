@@ -17,14 +17,18 @@
 //!   &IndexStats)` mirrors the canonical UQA implementation's
 //!   `CardinalityEstimator.estimate(op, stats)`. Walks the
 //!   [`OperatorTree`] variants and applies the selectivity tables,
-//!   damping exponents, entropy lower bounds, graph statistics, and
-//!   random-walk sampling fallback from Definition 6.2.3 (Paper 1)
-//!   and Theorem 6.3.2 (Paper 2).
+//!   damping exponents, entropy heuristics, graph statistics, and a
+//!   random-walk sampling fallback.
 //!
 //! The estimator surfaces are independent: callers pick whichever
 //! matches their plan IR. Both share `column_stats` /
 //! `default_selectivity` / `like_selectivity` / `range_selectivity`
 //! configuration.
+//!
+//! These outputs guide planner costs; they are not query-correctness values or
+//! distribution-free accuracy guarantees. Sampling error depends on the graph,
+//! estimator assumptions, expected successes, and sample count and must be
+//! measured against representative workloads.
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 
@@ -56,9 +60,7 @@ pub const GRAPH_AVG_DEGREE_DEFAULT: f64 = 10.0;
 // Graph statistics
 // ---------------------------------------------------------------------
 
-/// Graph-level statistics for cardinality estimation
-/// (Theorem 6.3.2, Paper 2). Mirrors
-/// `uqa.planner.cardinality.GraphStats`.
+/// Graph-level statistics for heuristic cardinality estimation.
 #[derive(Debug, Clone, Default)]
 pub struct GraphStats {
     pub num_vertices: u64,
@@ -214,7 +216,7 @@ pub struct CardinalityEstimator {
     /// Per-column statistics keyed by column name. Used by the
     /// operator-tree filter selectivity helpers.
     pub column_stats: BTreeMap<String, ColumnStats>,
-    /// Optional graph statistics; enables Theorem 6.3.2 estimation.
+    /// Optional graph statistics used by traversal and pattern heuristics.
     pub graph_stats: Option<GraphStats>,
     /// Optional graph store sampler; enables random-walk sampling for
     /// pattern matches on large graphs.
@@ -735,8 +737,7 @@ impl CardinalityEstimator {
         card.max(1.0)
     }
 
-    /// Traverse cardinality using graph statistics (Theorem 6.3.2,
-    /// Paper 2). Mirrors `_estimate_traverse`.
+    /// Estimate traversal cardinality from graph statistics.
     fn estimate_traverse(
         &self,
         label: Option<&str>,
@@ -770,8 +771,7 @@ impl CardinalityEstimator {
         result
     }
 
-    /// Pattern match cardinality using graph statistics (Theorem 6.3.2,
-    /// Paper 2). Mirrors `_estimate_pattern_match`.
+    /// Estimate pattern-match cardinality from graph statistics or sampling.
     fn estimate_pattern_match(&self, pattern: &GraphPatternIR, n: f64) -> f64 {
         let k = pattern.vertex_patterns.len();
         let e = pattern.edge_patterns.len();
@@ -783,7 +783,7 @@ impl CardinalityEstimator {
                 n
             };
 
-            // Random-walk sampling for large graphs (Section 6.3, Paper 2).
+            // Fixed-size random-walk heuristic for large graphs.
             if nv > 10_000.0 && self.graph_store.is_some() {
                 if let Some(sampled) = self.sample_graph_cardinality(pattern, 100) {
                     return sampled.max(1.0);
@@ -853,9 +853,9 @@ impl CardinalityEstimator {
         estimate
     }
 
-    /// RPQ cardinality using graph statistics (Theorem 6.3.2, Paper
-    /// 2). The UQA-RS implementation estimates `|R|` (NFA size) directly from the
-    /// expression source string by counting label-bearing tokens.
+    /// Estimate RPQ cardinality from graph statistics. `|R|` (NFA size) is
+    /// approximated directly from the expression source by counting
+    /// label-bearing tokens.
     fn estimate_rpq(&self, rpq_source: &str, n: f64) -> f64 {
         if let Some(gs) = self.graph_stats.as_ref() {
             let nv = if gs.num_vertices > 0 {
@@ -890,8 +890,11 @@ impl CardinalityEstimator {
         self.estimate(side, stats)
     }
 
-    /// Random-walk sampling. `None` means no graph store is available or an
-    /// index cannot be represented on the current target.
+    /// Fixed-size random-walk estimate. `None` means no graph store is available
+    /// or an index cannot be represented on the current target.
+    ///
+    /// This deterministic sample is a cost heuristic. It does not report a
+    /// confidence interval and makes no distribution-free error guarantee.
     fn sample_graph_cardinality(
         &self,
         pattern: &GraphPatternIR,
@@ -994,7 +997,10 @@ impl CardinalityEstimator {
         1.0
     }
 
-    /// Join cardinality `|L1| * |L2| / |dom(f)|` (Definition 6.2.3).
+    /// Uniform, independent-key join heuristic `|L1| * |L2| / |dom(f)|`.
+    ///
+    /// The formula is a cost estimate under those assumptions, not a bound on
+    /// the realized join cardinality.
     pub fn estimate_join(&self, left_card: f64, right_card: f64, domain_size: f64) -> f64 {
         if domain_size <= 0.0 {
             return 0.0;

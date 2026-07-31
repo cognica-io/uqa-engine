@@ -4,29 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Property tests for the Boolean algebra over [`PostingList`].
+//! Property tests for the Boolean algebra over [`DocSet`].
 //!
-//! Identities (Theorem 2.1.2, Paper 1) hold over the doc-id set, not over
-//! payload scores: `union` and `intersect` add scores on collision, so
-//! `a | a` differs from `a` at the score level. Tests therefore compare
-//! via [`PostingList::doc_id_set`].
-//!
-//! The universal set `U` is the union of all generated id sets in each
-//! test, which guarantees every input is a subset of `U` — a precondition
-//! for the identity, annihilator, and complement laws.
+//! Payload-bearing [`PostingList`] values project onto this carrier, but are
+//! not themselves a Boolean algebra: their collision policy adds scores and
+//! uses right-hand field precedence.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
-use uqa_core::{DocId, Payload, PostingEntry, PostingList};
-
-fn pl_from_ids(ids: &BTreeSet<DocId>) -> PostingList {
-    PostingList::from_unsorted(
-        ids.iter()
-            .map(|&id| PostingEntry::new(id, Payload::default()))
-            .collect(),
-    )
-}
+use uqa_core::{DocId, DocSet, Payload, PostingEntry, PostingList, Value};
 
 fn id_set() -> impl Strategy<Value = BTreeSet<DocId>> {
     prop::collection::btree_set(0u64..32, 0..16)
@@ -40,158 +27,187 @@ fn id_set_triple() -> impl Strategy<Value = (BTreeSet<DocId>, BTreeSet<DocId>, B
     (id_set(), id_set(), id_set())
 }
 
-fn ids_of(pl: &PostingList) -> BTreeSet<DocId> {
-    pl.doc_id_set()
+fn docs(ids: &BTreeSet<DocId>) -> DocSet {
+    ids.iter().copied().collect()
 }
 
-fn entries_strictly_ascending(pl: &PostingList) -> bool {
-    pl.entries().windows(2).all(|w| w[0].doc_id < w[1].doc_id)
+fn universe(sets: &[&BTreeSet<DocId>]) -> DocSet {
+    sets.iter().flat_map(|set| set.iter().copied()).collect()
 }
 
 proptest! {
     #[test]
-    fn idempotence(s in id_set()) {
-        let a = pl_from_ids(&s);
-        prop_assert!((&a | &a).doc_ids_eq(&a));
-        prop_assert!((&a & &a).doc_ids_eq(&a));
+    fn idempotence(ids in id_set()) {
+        let a = docs(&ids);
+        prop_assert_eq!(&a | &a, a.clone());
+        prop_assert_eq!(&a & &a, a);
     }
 
     #[test]
-    fn commutativity((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        prop_assert!((&a | &b).doc_ids_eq(&(&b | &a)));
-        prop_assert!((&a & &b).doc_ids_eq(&(&b & &a)));
+    fn commutativity((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let b = docs(&right);
+        prop_assert_eq!(&a | &b, &b | &a);
+        prop_assert_eq!(&a & &b, &b & &a);
     }
 
     #[test]
-    fn associativity((sa, sb, sc) in id_set_triple()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let c = pl_from_ids(&sc);
-        prop_assert!(((&(&a | &b)) | &c).doc_ids_eq(&(&a | &(&b | &c))));
-        prop_assert!(((&(&a & &b)) & &c).doc_ids_eq(&(&a & &(&b & &c))));
+    fn associativity((first, second, third) in id_set_triple()) {
+        let a = docs(&first);
+        let b = docs(&second);
+        let c = docs(&third);
+        prop_assert_eq!(&(&a | &b) | &c, &a | &(&b | &c));
+        prop_assert_eq!(&(&a & &b) & &c, &a & &(&b & &c));
     }
 
     #[test]
-    fn distributivity_or_over_and((sa, sb, sc) in id_set_triple()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let c = pl_from_ids(&sc);
-        let lhs = &a | &(&b & &c);
-        let rhs = &(&a | &b) & &(&a | &c);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+    fn distributivity_or_over_and((first, second, third) in id_set_triple()) {
+        let a = docs(&first);
+        let b = docs(&second);
+        let c = docs(&third);
+        prop_assert_eq!(&a | &(&b & &c), &(&a | &b) & &(&a | &c));
     }
 
     #[test]
-    fn distributivity_and_over_or((sa, sb, sc) in id_set_triple()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let c = pl_from_ids(&sc);
-        let lhs = &a & &(&b | &c);
-        let rhs = &(&a & &b) | &(&a & &c);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+    fn distributivity_and_over_or((first, second, third) in id_set_triple()) {
+        let a = docs(&first);
+        let b = docs(&second);
+        let c = docs(&third);
+        prop_assert_eq!(&a & &(&b | &c), &(&a & &b) | &(&a & &c));
     }
 
     #[test]
-    fn identity_with_empty_for_union(s in id_set()) {
-        let a = pl_from_ids(&s);
-        let empty = PostingList::new();
-        prop_assert!((&a | &empty).doc_ids_eq(&a));
-        prop_assert!((&empty | &a).doc_ids_eq(&a));
+    fn identity_with_empty_for_union(ids in id_set()) {
+        let a = docs(&ids);
+        let empty = DocSet::new();
+        prop_assert_eq!(&a | &empty, a.clone());
+        prop_assert_eq!(&empty | &a, a);
     }
 
     #[test]
-    fn identity_with_universal_for_intersect((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let universal_ids: BTreeSet<DocId> = sa.union(&sb).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        prop_assert!((&a & &universal).doc_ids_eq(&a));
+    fn identity_with_universe_for_intersect((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let all = universe(&[&left, &right]);
+        prop_assert_eq!(&a & &all, a);
     }
 
     #[test]
-    fn annihilator_empty_for_intersect(s in id_set()) {
-        let a = pl_from_ids(&s);
-        let empty = PostingList::new();
-        prop_assert!((&a & &empty).doc_ids_eq(&empty));
+    fn annihilator_empty_for_intersect(ids in id_set()) {
+        let a = docs(&ids);
+        let empty = DocSet::new();
+        prop_assert_eq!(&a & &empty, empty);
     }
 
     #[test]
-    fn annihilator_universal_for_union((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let universal_ids: BTreeSet<DocId> = sa.union(&sb).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        prop_assert!((&a | &universal).doc_ids_eq(&universal));
+    fn annihilator_universe_for_union((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let all = universe(&[&left, &right]);
+        prop_assert_eq!(&a | &all, all);
     }
 
     #[test]
-    fn complement_law_union((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let universal_ids: BTreeSet<DocId> = sa.union(&sb).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        let complement_a = a.complement(&universal);
-        prop_assert!((&a | &complement_a).doc_ids_eq(&universal));
+    fn complement_law_union((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let all = universe(&[&left, &right]);
+        prop_assert_eq!(&a | &a.complement(&all), all);
     }
 
     #[test]
-    fn complement_law_intersect((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let universal_ids: BTreeSet<DocId> = sa.union(&sb).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        let complement_a = a.complement(&universal);
-        let empty = PostingList::new();
-        prop_assert!((&a & &complement_a).doc_ids_eq(&empty));
+    fn complement_law_intersect((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let all = universe(&[&left, &right]);
+        prop_assert_eq!(&a & &a.complement(&all), DocSet::new());
     }
 
     #[test]
-    fn de_morgan_union((sa, sb, sc) in id_set_triple()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let universal_ids: BTreeSet<DocId> =
-            sa.union(&sb).copied().collect::<BTreeSet<_>>()
-                .union(&sc).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        let lhs = (&a | &b).complement(&universal);
-        let rhs = &a.complement(&universal) & &b.complement(&universal);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+    fn de_morgan_union((first, second, third) in id_set_triple()) {
+        let a = docs(&first);
+        let b = docs(&second);
+        let all = universe(&[&first, &second, &third]);
+        let lhs = (&a | &b).complement(&all);
+        let rhs = &a.complement(&all) & &b.complement(&all);
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
-    fn de_morgan_intersect((sa, sb, sc) in id_set_triple()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let universal_ids: BTreeSet<DocId> =
-            sa.union(&sb).copied().collect::<BTreeSet<_>>()
-                .union(&sc).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        let lhs = (&a & &b).complement(&universal);
-        let rhs = &a.complement(&universal) | &b.complement(&universal);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+    fn de_morgan_intersect((first, second, third) in id_set_triple()) {
+        let a = docs(&first);
+        let b = docs(&second);
+        let all = universe(&[&first, &second, &third]);
+        let lhs = (&a & &b).complement(&all);
+        let rhs = &a.complement(&all) | &b.complement(&all);
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
-    fn difference_equals_intersect_complement((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        let universal_ids: BTreeSet<DocId> = sa.union(&sb).copied().collect();
-        let universal = pl_from_ids(&universal_ids);
-        let lhs = &a - &b;
-        let rhs = &a & &b.complement(&universal);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+    fn difference_equals_intersect_complement((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let b = docs(&right);
+        let all = universe(&[&left, &right]);
+        prop_assert_eq!(&a - &b, &a & &b.complement(&all));
     }
 
     #[test]
-    fn sort_invariant_holds_after_every_op((sa, sb) in id_set_pair()) {
-        let a = pl_from_ids(&sa);
-        let b = pl_from_ids(&sb);
-        prop_assert!(entries_strictly_ascending(&(&a | &b)));
-        prop_assert!(entries_strictly_ascending(&(&a & &b)));
-        prop_assert!(entries_strictly_ascending(&(&a - &b)));
+    fn sort_invariant_holds_after_every_operation((left, right) in id_set_pair()) {
+        let a = docs(&left);
+        let b = docs(&right);
+        for result in [&a | &b, &a & &b, &a - &b] {
+            prop_assert!(result.as_slice().windows(2).all(|window| window[0] < window[1]));
+        }
     }
 
     #[test]
-    fn doc_set_round_trip(s in id_set()) {
-        let a = pl_from_ids(&s);
-        prop_assert_eq!(ids_of(&a), s);
+    fn standard_set_round_trip(ids in id_set()) {
+        let actual: BTreeSet<_> = docs(&ids).into_iter().collect();
+        prop_assert_eq!(actual, ids);
     }
+
+    #[test]
+    fn doc_set_to_posting_support_round_trip(ids in id_set()) {
+        let support = docs(&ids);
+        prop_assert_eq!(PostingList::from_support(&support).support(), support);
+    }
+}
+
+#[test]
+fn posting_support_reconstruction_does_not_restore_payload() {
+    let decorated = PostingList::from_unsorted(vec![PostingEntry::new(
+        7,
+        Payload {
+            positions: vec![1, 4],
+            score: 2.5,
+            fields: BTreeMap::from([("field".to_string(), Value::Str("body".to_string()))]),
+        },
+    )]);
+
+    let reconstructed = PostingList::from_support(&decorated.support());
+    assert_eq!(reconstructed.support(), decorated.support());
+    assert_ne!(reconstructed, decorated);
+}
+
+#[test]
+fn posting_payload_merge_is_neither_idempotent_nor_commutative() {
+    let left = PostingList::from_unsorted(vec![PostingEntry::new(
+        1,
+        Payload {
+            score: 1.0,
+            fields: BTreeMap::from([("source".to_string(), Value::Str("left".to_string()))]),
+            ..Payload::default()
+        },
+    )]);
+    let right = PostingList::from_unsorted(vec![PostingEntry::new(
+        1,
+        Payload {
+            score: 2.0,
+            fields: BTreeMap::from([("source".to_string(), Value::Str("right".to_string()))]),
+            ..Payload::default()
+        },
+    )]);
+
+    assert_ne!(left.merge_union(&left), left);
+    assert_ne!(left.merge_union(&right), right.merge_union(&left));
+    assert_eq!(
+        left.merge_union(&right).support(),
+        right.merge_union(&left).support()
+    );
 }

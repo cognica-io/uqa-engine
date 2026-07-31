@@ -131,7 +131,7 @@ impl Operator for ProgressiveFusionOperator {
                 .collect();
             scored.sort_by_key(|e| e.doc_id);
             let scored_pl = PostingList::from_sorted_unchecked(scored);
-            let topk = scored_pl.top_k(*k);
+            let topk = scored_pl.ranked().select_top_k(*k);
             candidate_ids = Some(topk.doc_ids().collect());
             last_result = topk;
         }

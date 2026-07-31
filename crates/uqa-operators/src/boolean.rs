@@ -26,7 +26,7 @@ impl Operator for UnionOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         let mut result = PostingList::new();
         for operand in &self.operands {
-            result = result.union(&operand.execute(ctx)?);
+            result = result.merge_union(&operand.execute(ctx)?);
         }
         Ok(result)
     }
@@ -57,7 +57,7 @@ impl Operator for IntersectOperator {
             if acc.is_empty() {
                 return Ok(acc);
             }
-            acc = acc.intersect_owned(&op.execute(ctx)?);
+            acc = acc.merge_intersection_owned(&op.execute(ctx)?);
         }
         Ok(acc)
     }
@@ -95,7 +95,7 @@ impl Operator for ComplementOperator {
             .map(|id| PostingEntry::new(id, Payload::default()))
             .collect();
         let universal = PostingList::from_sorted_unchecked(universal_entries);
-        Ok(result.complement(&universal))
+        Ok(universal.exclude(&result))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

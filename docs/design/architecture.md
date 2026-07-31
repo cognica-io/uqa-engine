@@ -46,19 +46,34 @@ graph TD
 
 ## What lives where
 
-- `uqa-core` — `PostingList`, `GeneralizedPostingList`, `Value`, `Vertex`, `Edge`, `IndexStats`, `Predicate`. The Boolean algebra over posting lists is property-tested against the 11 axioms from Paper 1.
+- `uqa-core` — `DocSet`, `Relation<K>`, `PostingList`, `RankedView`, `GeneralizedPostingList`, `Value`, `Vertex`, `Edge`, `IndexStats`, `Predicate`. The Boolean algebra over `DocSet` is property-tested against the 11 axioms; payload merge and ranking have separate contracts.
 - `uqa-analysis` — porter stemmer, character filters, token filters, analyzer pipelines, language presets.
 - `uqa-storage` — `DocumentStore`, `InvertedIndex`, `VectorIndex`, `BTreeIndex`, `BlockMaxIndex`, an in-memory `SpatialIndex` using a Haversine scan, and `Catalog` with schema migrations. Document, inverted, vector, B-tree, and catalog interfaces have SQLite-backed implementations; block-max and spatial indexes are currently in-memory.
 - `uqa-scoring` — `BM25Scorer`, `BayesianBM25Scorer`, three-term posterior transform, `WANDScorer`, `BlockMaxWANDScorer`, calibration metrics, `MultiFieldBayesianScorer`, `ParameterLearner`.
 - `uqa-fusion` — `LogOddsFusion`, `AdaptiveLogOddsFusion`, `ProbabilisticBoolean`, `LearnedFusion`, `AttentionFusion`, `MultiHeadAttentionFusion`, query feature extractor.
 - `uqa-operators` — `Operator` trait + `ExecutionContext`, primitive (TermOperator, FilterOperator, ScoreOperator, FacetOperator), boolean (Union/Intersect/Complement), hybrid (HybridTextVector, LogOddsFusion), vector (Cosine/KNN/VectorSimilarity), multi-stage, sparse, progressive-fusion, hierarchical (PathFilter/Project/Aggregate / UnifiedFilter), deep-fusion (Embed/Signal/Dense/Flatten/GlobalPool/ Softmax/BatchNorm/Dropout/CNN1D/CNN2D/RNN/LSTM/Propagate/Conv/Pool/ Attention). The deep-fusion graph layers depend only on a `GraphNeighborLookup` trait so they remain decoupled from `uqa-graph`.
-- `uqa-graph` — `MemoryGraphStore` with named graphs, `GraphPostingList` with the Phi homomorphism (Theorem 1.1.6, Paper 2), pattern matching (`GMatch` with arc consistency + MRV + negated-edge post-filter), RPQ parser/NFA/DFA + `RegularPathQuery` operator, an openCypher-oriented lexer/AST/recursive-descent parser for the supported clause set, read-only and mutating executors, centrality (PageRank, HITS, betweenness), message passing, embedding, indexes, incremental matcher, deltas + versioned store with rollback, temporal filtering, cross-paradigm operators.
+- `uqa-graph` — `MemoryGraphStore` with named graphs, `GraphPostingList` with a lossless Phi payload encoding, pattern matching (`GMatch` with arc consistency + MRV + negated-edge post-filter), RPQ parser/NFA/DFA + `RegularPathQuery` operator, an openCypher-oriented lexer/AST/recursive-descent parser for the supported clause set, read-only and mutating executors, centrality (PageRank, HITS, betweenness), message passing, embedding, indexes, incremental matcher, deltas + versioned store with rollback, temporal filtering, cross-paradigm operators.
 - `uqa-joins` — text-similarity (Jaccard), vector-similarity (cosine), hybrid (structured + cosine), graph-driven, cross-paradigm vertex/document bridging.
 - `uqa-sql` — `libpg_query` Postgres parser → internal AST → compiled statement; SQL function registry covers `text_match`, `knn_match`, `fuse_log_odds`, `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`.
 - `uqa-fdw` — `ForeignServer`, `ForeignTable`, `FDWPredicate`, `FDWHandler` trait, `MemoryHandler` reference implementation with predicate pushdown, projection, limit, and `LIKE` matching.
 - `uqa-engine` — top-level `Engine` with table state, catalog restore, `search` / `knn_search` / `hybrid_search` / `sql` entry points, named graph storage, deep-model save/load/predict, parameter persistence.
 - `uqa-api` — fluent `QueryBuilder` for common read and retrieval flows. Validated literal, vector, staged-retrieval, fusion, highlight, and facet helpers are fallible; retrieval and fusion helpers render `WHERE` predicates that enter the shared retrieval IR. Raw projection/predicate fragments cover appropriate expression-level extensions, while complete SQL remains available through `Engine::sql`.
 - `uqa-cli` — `usql` REPL (multi-line SQL, meta commands, in-memory or persistent engines). The TTY path uses `rustyline` for editing, persistent prompt history, history hints, completion, and ANSI highlighting; completion combines static SQL keywords, live engine schema names, and `uqa-sql` registry names for UQA functions.
+
+## Carrier boundaries
+
+The query stack separates membership, value combination, physical storage, and ranking:
+
+| Layer | Representation | Contract |
+| --- | --- | --- |
+| Document membership | `DocSet` | Finite Boolean algebra relative to an explicit universe; equality is document-id equality. |
+| Semiring values | `Relation<K>` | Finite-support `DocId -> K`; pointwise `plus` and `times` use the laws supplied by `K`. `bool` gives support union/intersection, while `LogSemiring` gives log-space weighted relations. |
+| Decorated storage | `PostingList` | Sorted unique `(doc_id, Payload)` entries. Collision merge unions positions, adds scores, and gives right-hand fields precedence. Full values are therefore not generally idempotent or commutative. |
+| Ranking | `RankedView` | Descending score order and top-K selection, separate from the document-id ordering required by posting storage. |
+
+`PostingList::support` is a lossy projection: multiple payload-bearing posting lists map to the same `DocSet`. The supported round trip is `support(PostingList::from(D)) == D`. The reverse reconstruction assigns default payloads and is not equal to a decorated input in general.
+
+Planner cardinality values are estimates used for cost decisions. Analytical or sampling accuracy is documented with estimator assumptions and reproducible benchmarks; it is not treated as an implementation theorem or a query-correctness invariant.
 
 ## Data flow at a glance
 
@@ -86,9 +101,9 @@ flowchart LR
     Generalized --> Result
 ```
 
-`EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent generalized set algebra. Graph payloads retain their subgraph metadata through the `GraphPostingList` Phi encoding. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
+`EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent tuple-support operations. Graph payloads retain their subgraph metadata through the `GraphPostingList` Phi encoding. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
 
-The first `QueryOptimizer` pass applies idempotence and absorption through address-independent structural equivalence. It restricts those identities to membership-only subtrees whose execution emits default payloads. Score-bearing and decorated operators are deliberately excluded: `PostingList` union and intersection add colliding scores and merge payload fields, so removing a duplicate there would change an observable `_score` or carrier value.
+The first `QueryOptimizer` pass applies idempotence and absorption through address-independent structural equivalence. It restricts those identities to membership-only subtrees whose execution emits default payloads. Score-bearing and decorated operators are deliberately excluded: `PostingList` payload merges add colliding scores and merge payload fields, so removing a duplicate there would change an observable `_score` or carrier value.
 
 `OperatorTree` is a child access algebra, not the container for every SQL semantic. Arithmetic, subqueries, windows, and row mutations are represented by `ScalarExpr`, `QueryPlan`, and physical command nodes in the enclosing `UnifiedPlan`; retrieval, graph, join, centrality, and fusion nodes use `OperatorTree` where its posting-list or tuple carrier is the correct representation. The plan-native optimizer sees the complete relational/scalar plan and chooses row, operator-capable, or hybrid access after lowering. Every successfully compiled SQL form enters the same exhaustive `UnifiedPlanExecutor`, so this representation choice is not an execution bypass.
 
@@ -124,8 +139,8 @@ The plan-native optimizer flattens reorderable INNER JOIN regions, obtains live 
 
 ## Where to read next
 
-- Operator algebra invariants — `crates/uqa-core/tests/algebra.rs`
-- Phi homomorphism — `crates/uqa-graph/tests/algebra.rs`
+- Document-set algebra and posting projection — `crates/uqa-core/tests/algebra.rs`
+- Lossless graph Phi encoding — `crates/uqa-graph/tests/algebra.rs`
 - Cypher parsing — `crates/uqa-graph/src/cypher/parser.rs`
 - SQL compilation — `crates/uqa-sql/src/compiler.rs`
 - Hash join — [`crates/uqa-execution/src/join.rs`](../../crates/uqa-execution/src/join.rs) and its SQL physical lowering in [`crates/uqa-engine/src/sql/from_rows.rs`](../../crates/uqa-engine/src/sql/from_rows.rs)

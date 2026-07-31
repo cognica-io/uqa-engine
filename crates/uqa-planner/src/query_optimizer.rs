@@ -1329,7 +1329,7 @@ fn map_operator_children(
 
 /// Whether Boolean composition observes only membership for this subtree.
 ///
-/// `PostingList::union` and `PostingList::intersect` add scores when the same
+/// `PostingList::merge_union` and `PostingList::merge_intersection` add scores when the same
 /// document appears on both sides. They may also carry operator-specific
 /// fields. The algebraic identities are therefore safe only for the small,
 /// explicit subset below, whose execution produces default payloads. Keeping

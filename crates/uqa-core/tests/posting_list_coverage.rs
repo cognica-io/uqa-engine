@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use uqa_core::{
-    DocId, GeneralizedPayload, GeneralizedPostingEntry, GeneralizedPostingList, Payload,
+    DocId, DocSet, GeneralizedPayload, GeneralizedPostingEntry, GeneralizedPostingList, Payload,
     PostingEntry, PostingList, Value,
 };
 
@@ -31,10 +31,6 @@ fn pl(ids: &[DocId]) -> PostingList {
 
 fn pl_with(entries: &[(DocId, f64)]) -> PostingList {
     PostingList::from_unsorted(entries.iter().map(|(d, s)| entry(*d, *s)).collect())
-}
-
-fn ids(list: &PostingList) -> BTreeSet<DocId> {
-    list.doc_id_set()
 }
 
 fn sorted_posting_entries(list: &PostingList) -> bool {
@@ -66,118 +62,122 @@ fn posting_from_set(set: &BTreeSet<DocId>) -> PostingList {
     PostingList::from_unsorted(set.iter().map(|id| entry(*id, 0.0)).collect())
 }
 
+fn doc_set(set: &BTreeSet<DocId>) -> DocSet {
+    set.iter().copied().collect()
+}
+
 proptest! {
     #[test]
     fn test_union_commutativity(a in id_set(), b in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        prop_assert!(a.union(&b).doc_ids_eq(&b.union(&a)));
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        prop_assert_eq!(a.union(&b), b.union(&a));
     }
 
     #[test]
     fn test_intersect_commutativity(a in id_set(), b in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        prop_assert!(a.intersect(&b).doc_ids_eq(&b.intersect(&a)));
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        prop_assert_eq!(a.intersect(&b), b.intersect(&a));
     }
 
     #[test]
     fn test_union_associativity(a in id_set(), b in id_set(), c in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let c = posting_from_set(&c);
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let c = doc_set(&c);
         let lhs = a.union(&b.union(&c));
         let rhs = a.union(&b).union(&c);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_intersect_associativity(a in id_set(), b in id_set(), c in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let c = posting_from_set(&c);
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let c = doc_set(&c);
         let lhs = a.intersect(&b.intersect(&c));
         let rhs = a.intersect(&b).intersect(&c);
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_intersect_distributes_over_union(a in id_set(), b in id_set(), c in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let c = posting_from_set(&c);
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let c = doc_set(&c);
         let lhs = a.intersect(&b.union(&c));
         let rhs = a.intersect(&b).union(&a.intersect(&c));
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_union_distributes_over_intersect(a in id_set(), b in id_set(), c in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let c = posting_from_set(&c);
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let c = doc_set(&c);
         let lhs = a.union(&b.intersect(&c));
         let rhs = a.union(&b).intersect(&a.union(&c));
-        prop_assert!(lhs.doc_ids_eq(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_union_identity(a in id_set()) {
-        let a = posting_from_set(&a);
-        let empty = PostingList::new();
-        prop_assert!(a.union(&empty).doc_ids_eq(&a));
-        prop_assert!(empty.union(&a).doc_ids_eq(&a));
+        let a = doc_set(&a);
+        let empty = DocSet::new();
+        prop_assert_eq!(a.union(&empty), a.clone());
+        prop_assert_eq!(empty.union(&a), a);
     }
 
     #[test]
     fn test_intersect_identity(a in id_set()) {
-        let a = posting_from_set(&a);
-        let universal = pl(&(0u64..=50).collect::<Vec<_>>());
-        prop_assert!(a.intersect(&universal).doc_ids_eq(&a));
+        let a = doc_set(&a);
+        let universal = DocSet::from((0u64..=50).collect::<Vec<_>>());
+        prop_assert_eq!(a.intersect(&universal), a);
     }
 
     #[test]
     fn test_complement_union_is_universal(a in id_set()) {
-        let a = posting_from_set(&a);
-        let universal = pl(&(0u64..=50).collect::<Vec<_>>());
+        let a = doc_set(&a);
+        let universal = DocSet::from((0u64..=50).collect::<Vec<_>>());
         let result = a.union(&a.complement(&universal));
-        prop_assert_eq!(result.doc_id_set(), universal.doc_id_set());
+        prop_assert_eq!(result, universal);
     }
 
     #[test]
     fn test_complement_intersect_is_empty(a in id_set()) {
-        let a = posting_from_set(&a);
-        let universal = pl(&(0u64..=50).collect::<Vec<_>>());
-        prop_assert_eq!(a.intersect(&a.complement(&universal)).len(), 0);
+        let a = doc_set(&a);
+        let universal = DocSet::from((0u64..=50).collect::<Vec<_>>());
+        prop_assert!(a.intersect(&a.complement(&universal)).is_empty());
     }
 
     #[test]
     fn test_sorted_invariant_after_union(a in id_set(), b in id_set()) {
-        prop_assert!(sorted_posting_entries(&posting_from_set(&a).union(&posting_from_set(&b))));
+        prop_assert!(sorted_posting_entries(&posting_from_set(&a).merge_union(&posting_from_set(&b))));
     }
 
     #[test]
     fn test_sorted_invariant_after_intersect(a in id_set(), b in id_set()) {
-        prop_assert!(sorted_posting_entries(&posting_from_set(&a).intersect(&posting_from_set(&b))));
+        prop_assert!(sorted_posting_entries(&posting_from_set(&a).merge_intersection(&posting_from_set(&b))));
     }
 
     #[test]
     fn test_sorted_invariant_after_complement(a in id_set()) {
         let universal = pl(&(0u64..=50).collect::<Vec<_>>());
-        prop_assert!(sorted_posting_entries(&posting_from_set(&a).complement(&universal)));
+        prop_assert!(sorted_posting_entries(&universal.exclude(&posting_from_set(&a))));
     }
 
     #[test]
     fn test_sorted_invariant_after_difference(a in id_set(), b in id_set()) {
-        prop_assert!(sorted_posting_entries(&posting_from_set(&a).difference(&posting_from_set(&b))));
+        prop_assert!(sorted_posting_entries(&posting_from_set(&a).exclude(&posting_from_set(&b))));
     }
 
     #[test]
     fn test_difference_correctness(a in id_set(), b in id_set()) {
         let a_pl = posting_from_set(&a);
         let b_pl = posting_from_set(&b);
-        let expected: BTreeSet<DocId> = a.difference(&b).copied().collect();
-        prop_assert_eq!(a_pl.difference(&b_pl).doc_id_set(), expected);
+        let expected: DocSet = a.difference(&b).copied().collect();
+        prop_assert_eq!(a_pl.exclude(&b_pl).support(), expected);
     }
 }
 
@@ -200,14 +200,14 @@ fn test_merge_payloads_positions() {
         },
     )]);
     assert_eq!(
-        a.union(&b).get_entry(1).unwrap().payload.positions,
+        a.merge_union(&b).get_entry(1).unwrap().payload.positions,
         vec![0, 1, 2, 3]
     );
 }
 
 #[test]
 fn test_merge_payloads_scores() {
-    let result = pl_with(&[(1, 1.0)]).union(&pl_with(&[(1, 0.5)]));
+    let result = pl_with(&[(1, 1.0)]).merge_union(&pl_with(&[(1, 0.5)]));
     assert!((result.get_entry(1).unwrap().payload.score - 1.5).abs() < 1e-12);
 }
 
@@ -231,7 +231,7 @@ fn test_merge_payloads_fields() {
             ..Payload::default()
         },
     )]);
-    let union = a.union(&b);
+    let union = a.merge_union(&b);
     let fields = &union.get_entry(1).unwrap().payload.fields;
     assert_eq!(fields.get("a"), Some(&Value::Int(1)));
     assert_eq!(fields.get("b"), Some(&Value::Int(2)));
@@ -239,7 +239,7 @@ fn test_merge_payloads_fields() {
 
 #[test]
 fn test_generalized_posting_list_union() {
-    let result = gpl(&[&[1, 2], &[3, 4]]).union(&gpl(&[&[1, 2], &[5, 6]]));
+    let result = gpl(&[&[1, 2], &[3, 4]]).merge_union(&gpl(&[&[1, 2], &[5, 6]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![1, 2], vec![3, 4], vec![5, 6]])
@@ -254,7 +254,8 @@ fn test_generalized_posting_list_sorted() {
 
 #[test]
 fn test_intersect_shared_tuples_only() {
-    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6]]).intersect(&gpl(&[&[3, 4], &[5, 6], &[7, 8]]));
+    let result =
+        gpl(&[&[1, 2], &[3, 4], &[5, 6]]).merge_intersection(&gpl(&[&[3, 4], &[5, 6], &[7, 8]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![3, 4], vec![5, 6]])
@@ -267,7 +268,7 @@ fn test_intersect_preserves_left_payload() {
     left.payload
         .fields
         .insert("side".into(), Value::Str("left".into()));
-    let result = GeneralizedPostingList::from_unsorted(vec![left]).intersect(
+    let result = GeneralizedPostingList::from_unsorted(vec![left]).merge_intersection(
         &GeneralizedPostingList::from_unsorted(vec![gentry(&[1, 2])]),
     );
     assert_eq!(
@@ -278,13 +279,14 @@ fn test_intersect_preserves_left_payload() {
 
 #[test]
 fn test_intersect_sorted_invariant() {
-    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6], &[7, 8]]).intersect(&gpl(&[&[5, 6], &[1, 2]]));
+    let result =
+        gpl(&[&[1, 2], &[3, 4], &[5, 6], &[7, 8]]).merge_intersection(&gpl(&[&[5, 6], &[1, 2]]));
     assert!(sorted_generalized_entries(&result));
 }
 
 #[test]
 fn test_difference_self_minus_other() {
-    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6]]).difference(&gpl(&[&[3, 4]]));
+    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6]]).exclude(&gpl(&[&[3, 4]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![1, 2], vec![5, 6]])
@@ -298,7 +300,7 @@ fn test_difference_preserves_payload() {
     let mut dropped = gentry(&[3, 4]);
     dropped.payload.fields.insert("score".into(), Value::Int(7));
     let result =
-        GeneralizedPostingList::from_unsorted(vec![kept, dropped]).difference(&gpl(&[&[3, 4]]));
+        GeneralizedPostingList::from_unsorted(vec![kept, dropped]).exclude(&gpl(&[&[3, 4]]));
     assert_eq!(
         result.entries()[0].payload.fields.get("score"),
         Some(&Value::Int(5))
@@ -308,14 +310,14 @@ fn test_difference_preserves_payload() {
 #[test]
 fn test_difference_sorted_invariant() {
     assert!(sorted_generalized_entries(
-        &gpl(&[&[1, 2], &[3, 4], &[5, 6], &[7, 8]]).difference(&gpl(&[&[3, 4]]))
+        &gpl(&[&[1, 2], &[3, 4], &[5, 6], &[7, 8]]).exclude(&gpl(&[&[3, 4]]))
     ));
 }
 
 #[test]
 fn test_complement_universal_minus_self() {
     let universal = gpl(&[&[1, 2], &[3, 4], &[5, 6], &[7, 8]]);
-    let result = gpl(&[&[3, 4], &[7, 8]]).complement(&universal);
+    let result = universal.exclude(&gpl(&[&[3, 4], &[7, 8]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![1, 2], vec![5, 6]])
@@ -325,16 +327,13 @@ fn test_complement_universal_minus_self() {
 #[test]
 fn test_complement_of_empty_is_universal() {
     let universal = gpl(&[&[1, 2], &[3, 4]]);
-    assert_eq!(
-        GeneralizedPostingList::new().complement(&universal),
-        universal
-    );
+    assert_eq!(universal.exclude(&GeneralizedPostingList::new()), universal);
 }
 
 #[test]
 fn test_complement_of_universal_is_empty() {
     let universal = gpl(&[&[1, 2], &[3, 4]]);
-    assert_eq!(universal.complement(&universal).len(), 0);
+    assert_eq!(universal.exclude(&universal).len(), 0);
 }
 
 #[test]
@@ -351,14 +350,14 @@ fn test_doc_ids_set_empty() {
 }
 
 #[test]
-fn test_and_operator() {
-    let result = &gpl(&[&[1, 2], &[3, 4], &[5, 6]]) & &gpl(&[&[3, 4], &[7, 8]]);
+fn test_explicit_tuple_intersection_merge() {
+    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6]]).merge_intersection(&gpl(&[&[3, 4], &[7, 8]]));
     assert_eq!(result.doc_ids_set(), BTreeSet::from([vec![3, 4]]));
 }
 
 #[test]
-fn test_or_operator() {
-    let result = &gpl(&[&[1, 2], &[3, 4]]) | &gpl(&[&[3, 4], &[5, 6]]);
+fn test_explicit_tuple_union_merge() {
+    let result = gpl(&[&[1, 2], &[3, 4]]).merge_union(&gpl(&[&[3, 4], &[5, 6]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![1, 2], vec![3, 4], vec![5, 6]])
@@ -366,8 +365,8 @@ fn test_or_operator() {
 }
 
 #[test]
-fn test_sub_operator() {
-    let result = &gpl(&[&[1, 2], &[3, 4], &[5, 6]]) - &gpl(&[&[3, 4]]);
+fn test_explicit_tuple_exclusion() {
+    let result = gpl(&[&[1, 2], &[3, 4], &[5, 6]]).exclude(&gpl(&[&[3, 4]]));
     assert_eq!(
         result.doc_ids_set(),
         BTreeSet::from([vec![1, 2], vec![5, 6]])
@@ -390,12 +389,12 @@ fn test_eq_different_lengths() {
 }
 
 #[test]
-fn test_eq_ignores_payload_differences() {
+fn test_eq_includes_payload_differences() {
     let mut a = gentry(&[1, 2]);
     a.payload.fields.insert("x".into(), Value::Int(1));
     let mut b = gentry(&[1, 2]);
     b.payload.fields.insert("x".into(), Value::Int(99));
-    assert_eq!(
+    assert_ne!(
         GeneralizedPostingList::from_unsorted(vec![a]),
         GeneralizedPostingList::from_unsorted(vec![b])
     );
@@ -404,69 +403,69 @@ fn test_eq_ignores_payload_differences() {
 #[test]
 fn test_intersect_with_empty() {
     assert!(gpl(&[&[1, 2], &[3, 4]])
-        .intersect(&GeneralizedPostingList::new())
+        .merge_intersection(&GeneralizedPostingList::new())
         .is_empty());
     assert!(GeneralizedPostingList::new()
-        .intersect(&gpl(&[&[1, 2], &[3, 4]]))
+        .merge_intersection(&gpl(&[&[1, 2], &[3, 4]]))
         .is_empty());
 }
 
 #[test]
 fn test_difference_with_empty() {
     let a = gpl(&[&[1, 2], &[3, 4]]);
-    assert_eq!(a.difference(&GeneralizedPostingList::new()), a);
-    assert!(GeneralizedPostingList::new().difference(&a).is_empty());
+    assert_eq!(a.exclude(&GeneralizedPostingList::new()), a);
+    assert!(GeneralizedPostingList::new().exclude(&a).is_empty());
 }
 
 #[test]
 fn test_union_with_empty() {
     let a = gpl(&[&[1, 2], &[3, 4]]);
-    assert_eq!(a.union(&GeneralizedPostingList::new()), a);
-    assert_eq!(GeneralizedPostingList::new().union(&a), a);
+    assert_eq!(a.merge_union(&GeneralizedPostingList::new()), a);
+    assert_eq!(GeneralizedPostingList::new().merge_union(&a), a);
 }
 
 #[test]
 fn test_intersect_no_overlap() {
     assert!(gpl(&[&[1, 2], &[3, 4]])
-        .intersect(&gpl(&[&[5, 6], &[7, 8]]))
+        .merge_intersection(&gpl(&[&[5, 6], &[7, 8]]))
         .is_empty());
 }
 
 #[test]
 fn test_difference_no_overlap() {
     let a = gpl(&[&[1, 2], &[3, 4]]);
-    assert_eq!(a.difference(&gpl(&[&[5, 6], &[7, 8]])), a);
+    assert_eq!(a.exclude(&gpl(&[&[5, 6], &[7, 8]])), a);
 }
 
 proptest! {
     #[test]
     fn test_de_morgan_intersect(a in id_set(), b in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let universal = a.union(&b).union(&pl(&(0u64..=50).collect::<Vec<_>>()));
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let universal = DocSet::from((0u64..=50).collect::<Vec<_>>());
         let lhs = a.intersect(&b).complement(&universal);
         let rhs = a.complement(&universal).union(&b.complement(&universal));
-        prop_assert_eq!(ids(&lhs), ids(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_de_morgan_union(a in id_set(), b in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let universal = a.union(&b).union(&pl(&(0u64..=50).collect::<Vec<_>>()));
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let universal = DocSet::from((0u64..=50).collect::<Vec<_>>());
         let lhs = a.union(&b).complement(&universal);
         let rhs = a.complement(&universal).intersect(&b.complement(&universal));
-        prop_assert_eq!(ids(&lhs), ids(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 
     #[test]
     fn test_distributivity(a in id_set(), b in id_set(), c in id_set()) {
-        let a = posting_from_set(&a);
-        let b = posting_from_set(&b);
-        let c = posting_from_set(&c);
+        let a = doc_set(&a);
+        let b = doc_set(&b);
+        let c = doc_set(&c);
         let lhs = a.intersect(&b.union(&c));
         let rhs = a.intersect(&b).union(&a.intersect(&c));
-        prop_assert_eq!(ids(&lhs), ids(&rhs));
+        prop_assert_eq!(lhs, rhs);
     }
 }
 
@@ -490,23 +489,26 @@ proptest! {
     fn test_gpl_union_commutative(a in tuple_set_strategy(), b in tuple_set_strategy()) {
         let a = generalized_from_set(&a);
         let b = generalized_from_set(&b);
-        prop_assert_eq!(a.union(&b).doc_ids_set(), b.union(&a).doc_ids_set());
+        prop_assert_eq!(a.merge_union(&b).doc_ids_set(), b.merge_union(&a).doc_ids_set());
     }
 
     #[test]
     fn test_gpl_intersect_commutative(a in tuple_set_strategy(), b in tuple_set_strategy()) {
         let a = generalized_from_set(&a);
         let b = generalized_from_set(&b);
-        prop_assert_eq!(a.intersect(&b).doc_ids_set(), b.intersect(&a).doc_ids_set());
+        prop_assert_eq!(a.merge_intersection(&b).doc_ids_set(), b.merge_intersection(&a).doc_ids_set());
     }
 
     #[test]
     fn test_gpl_de_morgan_intersect(a in tuple_set_strategy(), b in tuple_set_strategy()) {
         let a = generalized_from_set(&a);
         let b = generalized_from_set(&b);
-        let universal = a.union(&b);
-        let lhs = a.intersect(&b).complement(&universal).doc_ids_set();
-        let rhs = a.complement(&universal).union(&b.complement(&universal)).doc_ids_set();
+        let universal = a.merge_union(&b);
+        let lhs = universal.exclude(&a.merge_intersection(&b)).doc_ids_set();
+        let rhs = universal
+            .exclude(&a)
+            .merge_union(&universal.exclude(&b))
+            .doc_ids_set();
         prop_assert_eq!(lhs, rhs);
     }
 }

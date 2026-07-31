@@ -6,8 +6,8 @@
 
 //! Graph operators: BFS traversal, label match, subgraph isomorphism,
 //! and vertex aggregation. Each operator returns a
-//! [`GraphPostingList`] so the result composes with the standard
-//! posting-list algebra via [`crate::GraphPostingList::to_posting_list`].
+//! [`GraphPostingList`] so the result composes with document-support and
+//! payload merge operations via [`crate::GraphPostingList::to_posting_list`].
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 

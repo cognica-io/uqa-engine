@@ -891,7 +891,7 @@ pub enum Value {
 
 /// Field used by the graph posting-list Phi encoding.
 ///
-/// This is public only so `uqa-graph` and the core posting-list algebra can
+/// This is public only so `uqa-graph` and the core posting merge logic can
 /// share one versioned codec. Applications should treat it as an opaque
 /// implementation detail.
 #[doc(hidden)]
@@ -941,7 +941,7 @@ impl GraphPhiPayload {
     }
 }
 
-/// Lossless metadata carried through the ordinary posting-list algebra.
+/// Lossless metadata carried through ordinary posting payload merges.
 ///
 /// Scores use their IEEE-754 bit representation in [`Value`] so `-0.0` and
 /// NaN payloads survive a non-colliding round trip exactly. The original value
@@ -1471,7 +1471,7 @@ impl<'de> Deserialize<'de> for Value {
 ///
 /// `positions` is sorted ascending with no duplicates. `fields` uses
 /// `BTreeMap` (not `HashMap`) so equality and iteration are deterministic
-/// - this matters for the Boolean-algebra property tests.
+/// across storage, merge, and regression tests.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Payload {
     pub positions: Vec<u32>,

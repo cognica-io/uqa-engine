@@ -54,7 +54,7 @@ impl Operator for TermOperator {
         }
         let mut acc = idx.get_posting_list(&self.field, &tokens[0])?;
         for t in &tokens[1..] {
-            acc = acc.union(&idx.get_posting_list(&self.field, t)?);
+            acc = acc.merge_union(&idx.get_posting_list(&self.field, t)?);
         }
         Ok(acc)
     }

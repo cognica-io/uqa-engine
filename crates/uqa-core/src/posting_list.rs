@@ -4,33 +4,34 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Posting list and its Boolean algebra.
+//! Payload-bearing posting storage and merge operations.
 //!
 //! `PostingList` is an ordered sequence of `(doc_id, payload)` pairs sorted
-//! ascending by `doc_id` with no duplicate `doc_id`. The structure
-//! `(L, union, intersect, complement, empty, universal)` is a complete
-//! Boolean algebra (Theorem 2.1.2, Paper 1).
+//! ascending by `doc_id` with no duplicate `doc_id`. Its document support is
+//! projected explicitly as [`DocSet`], which is the carrier of the Boolean
+//! algebra.
 //!
 //! # Equality semantics
 //!
 //! Derived `PartialEq` on `PostingList` compares full entries (doc id +
-//! payload). The Boolean algebra identities (idempotence, distributivity,
-//! De Morgan, ...) hold over the *doc id set*, not over scores: [`union`]
-//! and [`intersect`] additively merge payloads (positions union, scores
-//! added, fields right-wins on key collision). Tests that assert algebraic
-//! equalities must compare via [`PostingList::doc_id_set`] or
-//! [`PostingList::doc_ids_eq`].
+//! payload). [`PostingList::merge_union`] and
+//! [`PostingList::merge_intersection`] select union/intersection support while
+//! applying a payload merge policy: positions are unioned, scores are added,
+//! and fields use the right-hand value on collision. Consequently those
+//! operations are generally neither idempotent nor commutative under full
+//! `PostingList` equality.
 //!
-//! [`union`]: PostingList::union
-//! [`intersect`]: PostingList::intersect
+//! Projecting a posting list to [`DocSet`] loses payloads. Reconstructing a
+//! posting list from that support therefore creates default payloads and is
+//! not equal to the original decorated posting list in general.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::{BitAnd, BitOr, Sub};
 
 use crate::types::{
     DocId, GeneralizedPostingEntry, GraphPhiEnvelope, GraphPhiPayload, Payload, PostingEntry,
     Value, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD, GRAPH_PHI_VERTICES_FIELD,
 };
+use crate::{DocSet, RankedView};
 
 /// Ordered sequence of `(doc_id, payload)` pairs.
 ///
@@ -74,9 +75,13 @@ impl PostingList {
         Self { entries }
     }
 
-    /// `A union B`: keep all `doc_id`s from either side, merging payloads on
-    /// collision.
-    pub fn union(&self, other: &Self) -> Self {
+    /// Keep the union of both supports and merge payloads on a shared
+    /// `doc_id`.
+    ///
+    /// This is not Boolean join on full posting values: scores add and fields
+    /// from `other` take precedence on collision. Use [`Self::support`] when a
+    /// Boolean-algebra value is required.
+    pub fn merge_union(&self, other: &Self) -> Self {
         let (a, b) = (&self.entries, &other.entries);
         let mut out = Vec::with_capacity(a.len() + b.len());
         let (mut i, mut j) = (0, 0);
@@ -105,9 +110,12 @@ impl PostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    /// `A intersect B`: keep only `doc_id`s present in both sides, merging
-    /// payloads.
-    pub fn intersect(&self, other: &Self) -> Self {
+    /// Keep the intersection of both supports and merge payloads on each
+    /// shared `doc_id`.
+    ///
+    /// This is not Boolean meet on full posting values. Its payload policy is
+    /// the same as [`Self::merge_union`].
+    pub fn merge_intersection(&self, other: &Self) -> Self {
         let (a, b) = (&self.entries, &other.entries);
         let mut out = Vec::with_capacity(a.len().min(b.len()));
         let (mut i, mut j) = (0, 0);
@@ -128,17 +136,21 @@ impl PostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    /// Consuming intersection that avoids a result allocation for large inputs by reusing the left posting buffer. Small inputs retain the lower-overhead allocating path. Payload semantics are identical to [`PostingList::intersect`], including right-hand field precedence.
+    /// Consuming intersection merge that avoids a result allocation for large
+    /// inputs by reusing the left posting buffer. Small inputs retain the
+    /// lower-overhead allocating path. Payload semantics are identical to
+    /// [`PostingList::merge_intersection`], including right-hand field
+    /// precedence.
     #[inline]
-    pub fn intersect_owned(self, other: &Self) -> Self {
+    pub fn merge_intersection_owned(self, other: &Self) -> Self {
         if self.entries.len().min(other.entries.len()) < INTERSECT_REUSE_MIN_ENTRIES {
-            return self.intersect(other);
+            return self.merge_intersection(other);
         }
-        self.intersect_reusing_left(other)
+        self.merge_intersection_reusing_left(other)
     }
 
     #[inline(never)]
-    fn intersect_reusing_left(mut self, other: &Self) -> Self {
+    fn merge_intersection_reusing_left(mut self, other: &Self) -> Self {
         let mut other_index = 0;
         self.entries.retain_mut(|entry| {
             while other_index < other.entries.len()
@@ -160,10 +172,9 @@ impl PostingList {
 
     /// `A - B`: entries of `A` whose `doc_id` does not appear in `B`.
     ///
-    /// Set-membership filter rather than a two-pointer loop: for sparse `B`
-    /// the hash lookup amortizes better than skip-and-compare, and the
-    /// output preserves the sorted invariant trivially.
-    pub fn difference(&self, other: &Self) -> Self {
+    /// A membership filter preserves left payloads and the sorted invariant;
+    /// the temporary `BTreeSet` provides deterministic `O(log |B|)` probes.
+    pub fn exclude(&self, other: &Self) -> Self {
         let other_ids: BTreeSet<DocId> = other.entries.iter().map(|e| e.doc_id).collect();
         let out: Vec<PostingEntry> = self
             .entries
@@ -174,29 +185,9 @@ impl PostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    /// Complement of `self` with respect to a universal set `universal`:
-    /// `universal - self`.
-    pub fn complement(&self, universal: &Self) -> Self {
-        universal.difference(self)
-    }
-
-    /// Top-`k` entries by `payload.score` (descending). Ties broken by
-    /// ascending `doc_id`. Output is re-sorted by `doc_id` so the
-    /// invariant is preserved.
-    pub fn top_k(&self, k: usize) -> Self {
-        if k >= self.entries.len() {
-            return self.clone();
-        }
-        let mut scored: Vec<&PostingEntry> = self.entries.iter().collect();
-        scored.sort_by(|a, b| {
-            b.payload
-                .score
-                .total_cmp(&a.payload.score)
-                .then_with(|| a.doc_id.cmp(&b.doc_id))
-        });
-        let mut top: Vec<PostingEntry> = scored.into_iter().take(k).cloned().collect();
-        top.sort_by_key(|e| e.doc_id);
-        Self::from_sorted_unchecked(top)
+    /// Build a score-ordered view without changing posting storage order.
+    pub fn ranked(&self) -> RankedView<'_> {
+        RankedView::new(self)
     }
 
     /// Apply a scoring function to every entry, returning a new posting list.
@@ -235,21 +226,19 @@ impl PostingList {
         self.entries.iter().map(|e| e.doc_id)
     }
 
-    /// `BTreeSet` of doc ids — convenient for set-level equality checks in
-    /// property tests.
-    pub fn doc_id_set(&self) -> BTreeSet<DocId> {
-        self.entries.iter().map(|e| e.doc_id).collect()
+    /// Project this payload-bearing relation onto its document-id support.
+    pub fn support(&self) -> DocSet {
+        DocSet::from_sorted_unchecked(self.doc_ids().collect())
     }
 
-    /// Compare by doc-id sequence only, ignoring payloads. This is the
-    /// equality the Boolean algebra identities are stated over.
-    pub fn doc_ids_eq(&self, other: &Self) -> bool {
-        self.entries.len() == other.entries.len()
-            && self
-                .entries
-                .iter()
-                .zip(other.entries.iter())
-                .all(|(a, b)| a.doc_id == b.doc_id)
+    /// Create document-id-ordered posting storage with a default payload for
+    /// every id in `support`.
+    pub fn from_support(support: &DocSet) -> Self {
+        let entries = support
+            .iter()
+            .map(|doc_id| PostingEntry::new(doc_id, Payload::default()))
+            .collect();
+        Self::from_sorted_unchecked(entries)
     }
 
     pub fn len(&self) -> usize {
@@ -283,38 +272,34 @@ impl<'a> IntoIterator for &'a PostingList {
     }
 }
 
-impl BitOr for &PostingList {
-    type Output = PostingList;
-    fn bitor(self, rhs: Self) -> PostingList {
-        self.union(rhs)
-    }
-}
-
-impl BitAnd for &PostingList {
-    type Output = PostingList;
-    fn bitand(self, rhs: Self) -> PostingList {
-        self.intersect(rhs)
-    }
-}
-
-impl Sub for &PostingList {
-    type Output = PostingList;
-    fn sub(self, rhs: Self) -> PostingList {
-        self.difference(rhs)
-    }
-}
-
 impl FromIterator<PostingEntry> for PostingList {
     fn from_iter<I: IntoIterator<Item = PostingEntry>>(iter: I) -> Self {
         Self::from_unsorted(iter.into_iter().collect())
     }
 }
 
+impl From<&DocSet> for PostingList {
+    fn from(support: &DocSet) -> Self {
+        Self::from_support(support)
+    }
+}
+
+impl From<DocSet> for PostingList {
+    fn from(support: DocSet) -> Self {
+        Self::from_support(&support)
+    }
+}
+
+impl From<&PostingList> for DocSet {
+    fn from(posting_list: &PostingList) -> Self {
+        posting_list.support()
+    }
+}
+
 /// Merge two payloads when their parent entries collide on `doc_id`.
 ///
 /// - positions: union, sorted ascending, deduped
-/// - score: added (so `union(a, a)` doubles the score; algebraic identities
-///   are stated over doc-id sets, not scores)
+/// - score: added (so `merge_union(a, a)` generally differs from `a`)
 /// - fields: right-hand side wins on key collision
 fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
     let a_phi = GraphPhiEnvelope::decode(a.fields.get(GRAPH_PHI_FIELD));
@@ -460,11 +445,10 @@ fn restore_field(fields: &mut BTreeMap<String, Value>, key: &str, value: Option<
     }
 }
 
-/// Posting list with multi-document tuples, the carrier for join results
-/// (Definition 4.1.2, Paper 1).
+/// Payload-bearing, multi-document tuple storage for join results.
 ///
 /// Invariant: `entries` sorted by the `doc_ids` tuple, no duplicates.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GeneralizedPostingList {
     entries: Vec<GeneralizedPostingEntry>,
 }
@@ -488,7 +472,9 @@ impl GeneralizedPostingList {
         Self { entries }
     }
 
-    pub fn union(&self, other: &Self) -> Self {
+    /// Select the union of tuple support, preserving the left payload when a
+    /// tuple occurs on both sides.
+    pub fn merge_union(&self, other: &Self) -> Self {
         let (a, b) = (&self.entries, &other.entries);
         let mut out = Vec::with_capacity(a.len() + b.len());
         let (mut i, mut j) = (0, 0);
@@ -514,7 +500,8 @@ impl GeneralizedPostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    pub fn intersect(&self, other: &Self) -> Self {
+    /// Select the intersection of tuple support, preserving left payloads.
+    pub fn merge_intersection(&self, other: &Self) -> Self {
         let (a, b) = (&self.entries, &other.entries);
         let mut out = Vec::with_capacity(a.len().min(b.len()));
         let (mut i, mut j) = (0, 0);
@@ -532,7 +519,8 @@ impl GeneralizedPostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    pub fn difference(&self, other: &Self) -> Self {
+    /// Preserve left entries whose tuple support is absent from `other`.
+    pub fn exclude(&self, other: &Self) -> Self {
         let other_ids: BTreeSet<&Vec<DocId>> = other.entries.iter().map(|e| &e.doc_ids).collect();
         let out: Vec<GeneralizedPostingEntry> = self
             .entries
@@ -543,14 +531,11 @@ impl GeneralizedPostingList {
         Self::from_sorted_unchecked(out)
     }
 
-    pub fn complement(&self, universal: &Self) -> Self {
-        universal.difference(self)
-    }
-
     pub fn entries(&self) -> &[GeneralizedPostingEntry] {
         &self.entries
     }
 
+    /// Materialize tuple support without payloads.
     pub fn doc_ids_set(&self) -> BTreeSet<Vec<DocId>> {
         self.entries.iter().map(|e| e.doc_ids.clone()).collect()
     }
@@ -564,43 +549,9 @@ impl GeneralizedPostingList {
     }
 }
 
-impl PartialEq for GeneralizedPostingList {
-    fn eq(&self, other: &Self) -> bool {
-        self.entries.len() == other.entries.len()
-            && self
-                .entries
-                .iter()
-                .zip(other.entries.iter())
-                .all(|(a, b)| a.doc_ids == b.doc_ids)
-    }
-}
-
-impl Eq for GeneralizedPostingList {}
-
 impl FromIterator<GeneralizedPostingEntry> for GeneralizedPostingList {
     fn from_iter<I: IntoIterator<Item = GeneralizedPostingEntry>>(iter: I) -> Self {
         Self::from_unsorted(iter.into_iter().collect())
-    }
-}
-
-impl BitOr for &GeneralizedPostingList {
-    type Output = GeneralizedPostingList;
-    fn bitor(self, rhs: Self) -> GeneralizedPostingList {
-        self.union(rhs)
-    }
-}
-
-impl BitAnd for &GeneralizedPostingList {
-    type Output = GeneralizedPostingList;
-    fn bitand(self, rhs: Self) -> GeneralizedPostingList {
-        self.intersect(rhs)
-    }
-}
-
-impl Sub for &GeneralizedPostingList {
-    type Output = GeneralizedPostingList;
-    fn sub(self, rhs: Self) -> GeneralizedPostingList {
-        self.difference(rhs)
     }
 }
 
@@ -638,37 +589,37 @@ mod tests {
     fn union_merges_two_pointer() {
         let a = pl_of(&[1, 3, 5]);
         let b = pl_of(&[2, 3, 4]);
-        assert_eq!(ids(&a.union(&b)), vec![1, 2, 3, 4, 5]);
+        assert_eq!(ids(&a.merge_union(&b)), vec![1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn intersect_keeps_common() {
         let a = pl_of(&[1, 3, 5]);
         let b = pl_of(&[2, 3, 4, 5]);
-        assert_eq!(ids(&a.intersect(&b)), vec![3, 5]);
+        assert_eq!(ids(&a.merge_intersection(&b)), vec![3, 5]);
     }
 
     #[test]
     fn difference_excludes_other_ids() {
         let a = pl_of(&[1, 2, 3, 4]);
         let b = pl_of(&[2, 4]);
-        assert_eq!(ids(&a.difference(&b)), vec![1, 3]);
+        assert_eq!(ids(&a.exclude(&b)), vec![1, 3]);
     }
 
     #[test]
     fn complement_uses_universal() {
         let a = pl_of(&[2, 4]);
         let universal = pl_of(&[1, 2, 3, 4, 5]);
-        assert_eq!(ids(&a.complement(&universal)), vec![1, 3, 5]);
+        assert_eq!(ids(&universal.exclude(&a)), vec![1, 3, 5]);
     }
 
     #[test]
-    fn operator_overloads() {
+    fn payload_operations_are_explicit_methods() {
         let a = pl_of(&[1, 2, 3]);
         let b = pl_of(&[2, 3, 4]);
-        assert_eq!(ids(&(&a | &b)), vec![1, 2, 3, 4]);
-        assert_eq!(ids(&(&a & &b)), vec![2, 3]);
-        assert_eq!(ids(&(&a - &b)), vec![1]);
+        assert_eq!(ids(&a.merge_union(&b)), vec![1, 2, 3, 4]);
+        assert_eq!(ids(&a.merge_intersection(&b)), vec![2, 3]);
+        assert_eq!(ids(&a.exclude(&b)), vec![1]);
     }
 
     #[test]
@@ -680,7 +631,7 @@ mod tests {
             PostingEntry::new(4, Payload::with_score(0.7)),
         ];
         let pl = PostingList::from_unsorted(entries);
-        let top2 = pl.top_k(2);
+        let top2 = pl.ranked().select_top_k(2);
         assert_eq!(ids(&top2), vec![2, 4]); // re-sorted by doc_id ascending
     }
 
@@ -741,14 +692,10 @@ mod tests {
             PostingEntry::new(5, Payload::with_score(8.0)),
         ]);
 
-        assert_eq!(left.clone().intersect_owned(&right), left.intersect(&right));
-    }
-
-    #[test]
-    fn doc_ids_eq_ignores_payloads() {
-        let a = PostingList::from_unsorted(vec![PostingEntry::new(1, Payload::with_score(1.0))]);
-        let b = PostingList::from_unsorted(vec![PostingEntry::new(1, Payload::with_score(99.0))]);
-        assert!(a.doc_ids_eq(&b));
+        assert_eq!(
+            left.clone().merge_intersection_owned(&right),
+            left.merge_intersection(&right)
+        );
     }
 
     #[test]
@@ -778,7 +725,7 @@ mod tests {
             mk(vec![2, 3]),
         ]);
         let b = GeneralizedPostingList::from_unsorted(vec![mk(vec![1, 2]), mk(vec![2, 3])]);
-        let inter = a.intersect(&b);
+        let inter = a.merge_intersection(&b);
         let want: Vec<Vec<DocId>> = inter.entries().iter().map(|e| e.doc_ids.clone()).collect();
         assert_eq!(want, vec![vec![1, 2], vec![2, 3]]);
     }

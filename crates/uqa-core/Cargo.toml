@@ -1,6 +1,6 @@
 [package]
 name = "uqa-core"
-description = "Posting list, predicates, and value types for the Unified Query Algebra"
+description = "Document sets, finite-support relations, posting storage, and value types for UQA"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,6 +22,10 @@ serde_json = { workspace = true }
 
 [[bench]]
 name = "posting_list"
+harness = false
+
+[[bench]]
+name = "carrier_layers"
 harness = false
 
 [lints]

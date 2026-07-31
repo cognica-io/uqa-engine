@@ -105,7 +105,7 @@ pub struct QueryBlockPlan {
 pub enum AccessPathPlan {
     /// Ordinary row-source execution.
     Row,
-    /// Use the shared posting-list/operator algebra for the block predicate.
+    /// Use the shared document-support/operator algebra for the block predicate.
     OperatorTree {
         /// The relational ORDER BY/OFFSET/LIMIT can be pushed into the
         /// retrieval function before row materialization.

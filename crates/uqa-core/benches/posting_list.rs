@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Microbenchmarks for the `PostingList` two-pointer Boolean algebra.
+//! Microbenchmarks for `PostingList` support merges and payload policies.
 //!
 //! Run with `cargo bench -p uqa-core --bench posting_list`.
 //! This mirrors the canonical UQA `bench_posting_list.py` surface:
-//! pairwise Boolean operations by input size and overlap, top-k,
+//! pairwise support operations by input size and overlap, top-k,
 //! n-way merge, scored-payload union, and binary-search lookup.
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
@@ -59,7 +59,7 @@ fn bench_union(c: &mut Criterion) {
         let (a, b) = build_pair(size, 0.3);
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&a).union(black_box(&b));
+                let result = black_box(&a).merge_union(black_box(&b));
                 black_box(result.len())
             });
         });
@@ -74,7 +74,7 @@ fn bench_union(c: &mut Criterion) {
             &overlap,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&a).union(black_box(&b));
+                    let result = black_box(&a).merge_union(black_box(&b));
                     black_box(result.len())
                 });
             },
@@ -89,7 +89,7 @@ fn bench_intersect(c: &mut Criterion) {
         let (a, b) = build_pair(size, 0.3);
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&a).intersect(black_box(&b));
+                let result = black_box(&a).merge_intersection(black_box(&b));
                 black_box(result.len())
             });
         });
@@ -105,7 +105,7 @@ fn bench_intersect(c: &mut Criterion) {
                 |(left, right)| {
                     let left = black_box(left);
                     let right = black_box(right);
-                    let result = left.intersect(&right);
+                    let result = left.merge_intersection(&right);
                     black_box(result).len()
                 },
                 BatchSize::LargeInput,
@@ -120,7 +120,7 @@ fn bench_intersect(c: &mut Criterion) {
                     |(left, right)| {
                         let left = black_box(left);
                         let right = black_box(right);
-                        let result = left.intersect_owned(&right);
+                        let result = left.merge_intersection_owned(&right);
                         black_box(result).len()
                     },
                     BatchSize::LargeInput,
@@ -138,7 +138,7 @@ fn bench_intersect(c: &mut Criterion) {
             &overlap,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&a).intersect(black_box(&b));
+                    let result = black_box(&a).merge_intersection(black_box(&b));
                     black_box(result.len())
                 });
             },
@@ -153,7 +153,7 @@ fn bench_difference(c: &mut Criterion) {
         let (a, b) = build_pair(size, 0.3);
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, _| {
             bencher.iter(|| {
-                let result = black_box(&a).difference(black_box(&b));
+                let result = black_box(&a).exclude(black_box(&b));
                 black_box(result.len())
             });
         });
@@ -168,7 +168,7 @@ fn bench_difference(c: &mut Criterion) {
             &overlap,
             |bencher, _| {
                 bencher.iter(|| {
-                    let result = black_box(&a).difference(black_box(&b));
+                    let result = black_box(&a).exclude(black_box(&b));
                     black_box(result.len())
                 });
             },
@@ -180,10 +180,10 @@ fn bench_difference(c: &mut Criterion) {
 fn bench_top_k(c: &mut Criterion) {
     let pl = posting_list(N, 0, 1, true);
     let mut group = c.benchmark_group("posting_list_top_k");
-    for k in [10, 100, 1_000] {
+    for k in [0, 10, 100, 1_000, N as usize] {
         group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, k| {
             bencher.iter(|| {
-                let result = black_box(&pl).top_k(*k);
+                let result = black_box(&pl).ranked().select_top_k(*k);
                 black_box(result.len())
             });
         });
@@ -205,7 +205,7 @@ fn bench_multi_merge(c: &mut Criterion) {
                     let result = lists
                         .iter()
                         .skip(1)
-                        .fold(lists[0].clone(), |acc, pl| acc.union(pl));
+                        .fold(lists[0].clone(), |acc, pl| acc.merge_union(pl));
                     black_box(result.len())
                 });
             },
@@ -226,7 +226,7 @@ fn bench_multi_merge(c: &mut Criterion) {
                     let result = lists
                         .iter()
                         .skip(1)
-                        .fold(lists[0].clone(), |acc, pl| acc.intersect(pl));
+                        .fold(lists[0].clone(), |acc, pl| acc.merge_intersection(pl));
                     black_box(result.len())
                 });
             },
@@ -239,7 +239,7 @@ fn bench_payload_merge(c: &mut Criterion) {
     let (a, b) = build_pair(10_000, 0.5);
     c.bench_function("posting_list_union_with_scores_10k", |bencher| {
         bencher.iter(|| {
-            let result = black_box(&a).union(black_box(&b));
+            let result = black_box(&a).merge_union(black_box(&b));
             black_box(result.len())
         });
     });

@@ -284,7 +284,7 @@ pub(super) fn execute_function_with_top_k(
                 name,
             )?;
             let posting = match top_k {
-                Some(k) => posting.top_k(k),
+                Some(k) => posting.ranked().select_top_k(k),
                 None => posting,
             };
             Ok(posting

@@ -158,13 +158,13 @@ fn composition_law_graph_relational() {
     let b = graph_posting_list(&[(2, 0.6), (3, 0.5), (4, 0.4)]);
     let c = graph_posting_list(&[(3, 0.3), (4, 0.2), (5, 0.1)]);
 
-    let composed_src = a.intersect(&b).union(&c);
+    let composed_src = a.merge_intersection(&b).merge_union(&c);
     let lhs = GraphToRelationalFunctor::map_object(composed_src);
 
     let fa = GraphToRelationalFunctor::map_object(a);
     let fb = GraphToRelationalFunctor::map_object(b);
     let fc = GraphToRelationalFunctor::map_object(c);
-    let rhs = fa.intersect(&fb).union(&fc);
+    let rhs = fa.merge_intersection(&fb).merge_union(&fc);
 
     assert_eq!(doc_ids(&lhs), doc_ids(&rhs));
 }

@@ -8,7 +8,7 @@ Status: Living implementation plan Target repo: `uqa-rs`
 
 Build UQA-RS as a native Rust implementation of the Unified Query Algebra:
 
-1. **Algebraically faithful.** Core posting-list, graph, scoring, fusion, and aggregation laws are enforced by property and golden tests.
+1. **Contract-faithful.** Document support, payload merge, graph encoding, scoring, fusion, and aggregation each have their own property or golden tests.
 2. **SQL and API compatible.** The public contract is the UQA SQL surface, `Engine`, `QueryBuilder`, `usql`, graph APIs, and crate-level Rust APIs.
 3. **Embeddable.** The engine runs in-process with local storage backends and no required service dependency.
 4. **Persistent by default where configured.** Catalog metadata, table data, secondary indexes, statistics, graphs, models, and analyzer configuration must survive reopen.
@@ -23,15 +23,19 @@ Build UQA-RS as a native Rust implementation of the Unified Query Algebra:
 
 ## 2. Theoretical anchors
 
-The implementation must preserve the UQA paper contracts:
+The implementation uses the papers as design input, with the executable contracts stated at the type boundary:
 
-- **Posting-list Boolean algebra.** Union, intersection, complement, empty, universal, De Morgan, and distributivity laws hold for `PostingList` and generalized posting lists.
-- **Document/posting-list isomorphism.** `PL(doc(L)) == L` and `doc(PL(D)) == D` for supported document sets.
+- **Document-set Boolean algebra.** `DocSet` is the carrier for union, intersection, complement relative to an explicit universe, empty, De Morgan, and distributivity. The 11 Boolean laws are property-tested with ordinary `DocSet` equality.
+- **Support projection, not a posting-list isomorphism.** `PostingList::support` forgets payloads. Constructing a posting list from `D: DocSet` assigns default payloads, so `support(PostingList::from(D)) == D`; reconstructing from `support(L)` equals a decorated `L` only when every payload is already default.
+- **Value relations.** `Relation<K>` is a finite-support function `DocId -> K`. Pointwise combination is available when `K` supplies a semiring; `bool` recovers document-set support behavior and `LogSemiring` supplies log-space weight combination. `Payload` is deliberately not a semiring: posting collision merge adds scores, unions positions, and uses right-hand field precedence, so full-value idempotence and commutativity are not claimed.
+- **Ranked views.** `PostingList` remains physically sorted by document id. `RankedView` owns the separate score ordering used for ranked iteration and top-K selection.
 - **Operator rewrites.** Filter pushdown, vector threshold merging, facet additivity, join distribution, and aggregation decomposition are equivalence-preserving.
-- **Graph homomorphism.** `Phi` preserves graph posting-list Boolean structure; graph pattern and RPQ operators remain compatible with algebraic rewrites.
+- **Graph payload encoding.** `Phi` losslessly encodes graph payloads into ordinary posting payload fields and commutes with the implementation's documented posting merge policies. Boolean rewrite claims are made only for the resulting `DocSet` support.
 - **Bayesian BM25.** Probability transforms, priors, WAND/BMW bounds, calibration metrics, and parameter learning use deterministic numeric contracts.
 - **Log-odds fusion.** Confidence-scaled log-odds, identity laws, sign preservation, disagreement collapse, and clamped probability boundaries are tested.
 - **Vector calibration.** Likelihood-ratio calibration and hybrid additive fusion keep scoring signals inside the probabilistic model.
+
+Cardinality estimates are planner heuristics, not data-correctness contracts. Sampling accuracy requires an explicit estimator model and assumptions. For independent Bernoulli trials with mean `mu = E[X]`, the usual two-sided multiplicative Chernoff form for `0 < epsilon <= 1` gives a sufficient condition `epsilon >= sqrt(3 ln(2/delta) / mu)` for failure probability at most `delta`; a bare `1 / sqrt(E[X])` expression is not a universal guarantee. Cost and accuracy claims belong in reproducible benchmark reports with the corpus, sample count, estimator assumptions, error metric, and confidence procedure recorded.
 
 ## 3. Workspace layout
 
@@ -39,7 +43,7 @@ UQA-RS is a Cargo workspace with narrow crate boundaries:
 
 | Crate | Responsibility |
 | --- | --- |
-| `uqa-core` | Shared value types, posting lists, predicates, cancellation |
+| `uqa-core` | Document sets, semiring relations, posting storage, ranked views, predicates, cancellation |
 | `uqa-analysis` | Tokenizers, analyzers, highlighting, token filters |
 | `uqa-storage` | Catalog, document store, inverted index, SQLite persistence, index metadata |
 | `uqa-scoring` | BM25, Bayesian BM25, calibration, external priors, WAND/BMW |

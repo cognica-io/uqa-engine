@@ -55,7 +55,7 @@ impl MultiStageOperator {
             require_finite_score(entry.payload.score, "multi-stage retrieval")?;
         }
         Ok(match cutoff {
-            Cutoff::TopK(k) => pl.top_k(k),
+            Cutoff::TopK(k) => pl.ranked().select_top_k(k),
             Cutoff::Threshold(t) => {
                 let kept: Vec<PostingEntry> = pl
                     .entries()

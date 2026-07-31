@@ -10,8 +10,8 @@
 //! document. A [`ColumnValueIndex`] wraps the storage-layer
 //! [`BTreeIndex`] so equality / range / IN / IS NULL predicates on
 //! indexed columns resolve to a [`PostingList`] in `O(log n + k)` and
-//! then compose with the posting-list Boolean algebra like any other
-//! signal. Indexes are built on first use from one bulk field scan and
+//! then compose through their document-id support like any other signal.
+//! Indexes are built on first use from one bulk field scan and
 //! maintained incrementally by the insert / update / delete paths.
 //!
 //! Only columns the catalog marks as indexable get an index: PRIMARY

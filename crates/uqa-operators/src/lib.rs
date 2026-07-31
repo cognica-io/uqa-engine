@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Algebraic operators over posting lists.
+//! Document-support, payload, scoring, and fusion operators over posting lists.
 //!
 //! Operators form a monoid under composition (Theorem 3.2.3, Paper 1):
 //! every concrete operator's `execute` returns a `PostingList`, and

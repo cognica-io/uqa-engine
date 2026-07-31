@@ -126,7 +126,7 @@ impl Operator for HybridTextVectorOperator {
         Ok(self
             .term_op
             .execute(ctx)?
-            .intersect_owned(&self.vector_op.execute(ctx)?))
+            .merge_intersection_owned(&self.vector_op.execute(ctx)?))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -153,7 +153,7 @@ impl Operator for SemanticFilterOperator {
         Ok(self
             .source
             .execute(ctx)?
-            .intersect_owned(&self.vector_op.execute(ctx)?))
+            .merge_intersection_owned(&self.vector_op.execute(ctx)?))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -330,7 +330,7 @@ impl Operator for LogOddsFusionOperator {
         }
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
-            Some(k) => result.top_k(k),
+            Some(k) => result.ranked().select_top_k(k),
             None => result,
         })
     }
