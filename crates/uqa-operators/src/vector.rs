@@ -90,9 +90,9 @@ impl Operator for KNNOperator {
 }
 
 /// Wraps a vector operator (KNN, threshold, ...) and rewrites each score
-/// from cosine similarity in `[-1, 1]` to a probability in `(0, 1)` via
+/// from cosine similarity in `[-1, 1]` to an evidence value in `[0, 1]` via
 /// `(1 + score) / 2` (Definition 7.1.2, Paper 3). This is the
-/// uncalibrated bridge between vector signals and the log-odds fusion
+/// uncalibrated bridge between vector signals and evidence-combination
 /// pipeline; calibrated alternatives (Paper 5) live in
 /// `CalibratedVectorOperator`.
 pub struct CosineProbabilityOperator {

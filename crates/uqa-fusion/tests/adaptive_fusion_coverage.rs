@@ -6,7 +6,7 @@
 
 //! Coverage for fusion-level cases in `test_adaptive_fusion`.
 
-use uqa_fusion::{AdaptiveLogOddsFusion, LogOddsFusion, SignalQuality};
+use uqa_fusion::{AdaptivePositiveEvidencePool, RobustPositiveEvidencePool, SignalQuality};
 
 fn approx_eq(a: f64, b: f64) {
     assert!((a - b).abs() < 1e-9, "expected {a} ~= {b}");
@@ -26,7 +26,7 @@ fn signal_quality_creation() {
 
 #[test]
 fn compute_signal_alpha_high_quality() {
-    let fusion = AdaptiveLogOddsFusion::new(0.5);
+    let fusion = AdaptivePositiveEvidencePool::new(0.5);
     let sq = SignalQuality {
         coverage_ratio: 1.0,
         score_variance: 0.0,
@@ -37,7 +37,7 @@ fn compute_signal_alpha_high_quality() {
 
 #[test]
 fn compute_signal_alpha_low_quality() {
-    let fusion = AdaptiveLogOddsFusion::new(0.5);
+    let fusion = AdaptivePositiveEvidencePool::new(0.5);
     let sq = SignalQuality {
         coverage_ratio: 0.1,
         score_variance: 5.0,
@@ -48,7 +48,7 @@ fn compute_signal_alpha_low_quality() {
 
 #[test]
 fn compute_signal_alpha_clamping() {
-    let fusion = AdaptiveLogOddsFusion::new(0.5);
+    let fusion = AdaptivePositiveEvidencePool::new(0.5);
     let low = SignalQuality {
         coverage_ratio: 0.0,
         score_variance: 0.0,
@@ -56,7 +56,7 @@ fn compute_signal_alpha_clamping() {
     };
     approx_eq(fusion.compute_signal_alpha(low), 0.01);
 
-    let fusion_high = AdaptiveLogOddsFusion::new(5.0);
+    let fusion_high = AdaptivePositiveEvidencePool::new(5.0);
     let high = SignalQuality {
         coverage_ratio: 1.0,
         score_variance: 0.0,
@@ -67,7 +67,7 @@ fn compute_signal_alpha_clamping() {
 
 #[test]
 fn adaptive_fuse_single_signal() {
-    let fusion = AdaptiveLogOddsFusion::new(0.5);
+    let fusion = AdaptivePositiveEvidencePool::new(0.5);
     let sq = SignalQuality {
         coverage_ratio: 1.0,
         score_variance: 0.0,
@@ -78,8 +78,8 @@ fn adaptive_fuse_single_signal() {
 
 #[test]
 fn adaptive_fuse_uniform_quality() {
-    let adaptive = AdaptiveLogOddsFusion::new(0.5);
-    let standard = LogOddsFusion::new(0.5).unwrap();
+    let adaptive = AdaptivePositiveEvidencePool::new(0.5);
+    let standard = RobustPositiveEvidencePool::new(0.5).unwrap();
     let probs = [0.7, 0.8, 0.6];
     let sq = SignalQuality {
         coverage_ratio: 1.0,
@@ -94,7 +94,7 @@ fn adaptive_fuse_uniform_quality() {
 
 #[test]
 fn adaptive_fuse_mixed_quality() {
-    let fusion = AdaptiveLogOddsFusion::new(0.5);
+    let fusion = AdaptivePositiveEvidencePool::new(0.5);
     let high_q = SignalQuality {
         coverage_ratio: 1.0,
         score_variance: 0.0,

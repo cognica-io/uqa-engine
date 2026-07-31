@@ -485,7 +485,8 @@ impl CardinalityEstimator {
 
             OperatorTree::AttentionFusion { signals, .. }
             | OperatorTree::LearnedFusion { signals, .. }
-            | OperatorTree::LogOddsFusion { signals, .. } => {
+            | OperatorTree::BayesianEvidenceFusion { signals, .. }
+            | OperatorTree::RobustPositiveEvidencePool { signals, .. } => {
                 let sum: f64 = signals.iter().map(|s| self.estimate(s, stats)).sum();
                 n.min(sum)
             }

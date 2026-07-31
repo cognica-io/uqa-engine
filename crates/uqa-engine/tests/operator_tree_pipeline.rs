@@ -261,7 +261,7 @@ fn malformed_empty_fusion_and_stage_nodes_return_typed_errors() {
             signals: Vec::new(),
             mode: ProbBoolMode::And,
         },
-        OperatorTree::LogOddsFusion {
+        OperatorTree::RobustPositiveEvidencePool {
             signals: Vec::new(),
             alpha: 0.5,
             gating: GatingSpec::Pass,
@@ -304,9 +304,9 @@ fn malformed_empty_fusion_and_stage_nodes_return_typed_errors() {
 fn malformed_fusion_configuration_propagates_from_driver() {
     let engine = engine_with_corpus();
     let driver = EngineDriver::new(&engine, "notes", &[]);
-    let log_odds_cases = [
+    let positive_evidence_cases = [
         (
-            OperatorTree::LogOddsFusion {
+            OperatorTree::RobustPositiveEvidencePool {
                 signals: vec![OperatorTree::Empty],
                 alpha: f64::NAN,
                 gating: GatingSpec::Pass,
@@ -318,7 +318,7 @@ fn malformed_fusion_configuration_propagates_from_driver() {
             "alpha",
         ),
         (
-            OperatorTree::LogOddsFusion {
+            OperatorTree::RobustPositiveEvidencePool {
                 signals: vec![OperatorTree::Empty],
                 alpha: 0.5,
                 gating: GatingSpec::Pass,
@@ -330,7 +330,7 @@ fn malformed_fusion_configuration_propagates_from_driver() {
             "weights",
         ),
         (
-            OperatorTree::LogOddsFusion {
+            OperatorTree::RobustPositiveEvidencePool {
                 signals: vec![OperatorTree::Empty],
                 alpha: 0.5,
                 gating: GatingSpec::Pass,
@@ -342,12 +342,12 @@ fn malformed_fusion_configuration_propagates_from_driver() {
             "bounds",
         ),
     ];
-    for (tree, expected) in log_odds_cases {
+    for (tree, expected) in positive_evidence_cases {
         match driver.execute_node(&tree) {
             Err(SQLError::Internal(message)) => {
                 assert!(message.contains(expected), "unexpected error: {message}");
             }
-            other => panic!("expected typed log-odds error, got {other:?}"),
+            other => panic!("expected typed positive-evidence error, got {other:?}"),
         }
     }
 

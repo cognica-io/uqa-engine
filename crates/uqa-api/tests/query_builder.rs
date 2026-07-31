@@ -274,6 +274,29 @@ fn fuse_log_odds_executes_generated_shared_ir_query() {
 }
 
 #[test]
+fn explicit_evidence_fusion_builders_execute_distinct_contracts() {
+    let engine = engine_with_corpus();
+    let signals = [
+        "bayesian_match(title, 'rust')",
+        "bayesian_match(title, 'embedded')",
+    ];
+    let robust = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .pool_positive_evidence(&signals, 0.5)
+        .unwrap();
+    assert!(robust.to_sql().contains("pool_positive_evidence("));
+    assert_probability_scores(&robust.execute().unwrap());
+
+    let exact = QueryBuilder::new(&engine, "notes")
+        .select_columns(&["id", "_score"])
+        .fuse_bayesian_evidence(&signals, Some(0.1))
+        .unwrap();
+    assert!(exact.to_sql().contains("fuse_bayesian_evidence("));
+    assert!(exact.to_sql().contains("base_rate => 0.1"));
+    assert_probability_scores(&exact.execute().unwrap());
+}
+
+#[test]
 fn multi_stage_executes_registered_staged_retrieval_query() {
     let engine = engine_with_corpus();
     let query = QueryBuilder::new(&engine, "notes")
@@ -339,6 +362,12 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
             .expect("invalid log-odds alpha must fail");
         assert!(log_odds_error.to_string().contains("finite and in [0, 1]"));
 
+        let robust_error = QueryBuilder::new(&engine, "notes")
+            .pool_positive_evidence(&signals, alpha)
+            .err()
+            .expect("invalid robust-pool alpha must fail");
+        assert!(robust_error.to_string().contains("finite and in [0, 1]"));
+
         let learned_error = QueryBuilder::new(&engine, "notes")
             .fuse_learned(&signals, Some(alpha))
             .err()
@@ -353,6 +382,14 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
             .err()
             .expect("log odds requires two signals"),
         QueryBuilder::new(&engine, "notes")
+            .pool_positive_evidence(&one_signal, 0.5)
+            .err()
+            .expect("robust pool requires two signals"),
+        QueryBuilder::new(&engine, "notes")
+            .fuse_bayesian_evidence(&one_signal, None)
+            .err()
+            .expect("Bayesian evidence fusion requires two signals"),
+        QueryBuilder::new(&engine, "notes")
             .fuse_attention(&one_signal)
             .err()
             .expect("attention requires two signals"),
@@ -363,6 +400,12 @@ fn fusion_builders_reject_invalid_alpha_and_signal_arity() {
     ] {
         assert!(error.to_string().contains(">=2 signals"));
     }
+
+    let invalid_prior = QueryBuilder::new(&engine, "notes")
+        .fuse_bayesian_evidence(&signals, Some(1.0))
+        .err()
+        .expect("invalid Bayesian evidence prior must fail");
+    assert!(invalid_prior.to_string().contains("base_rate"));
 
     let no_signal_stages: [(&str, usize); 0] = [];
     let multi_stage_error = QueryBuilder::new(&engine, "notes")

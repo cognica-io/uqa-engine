@@ -4,7 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Hybrid text + vector operators and multi-signal log-odds fusion.
+//! Hybrid text + vector operators, exact evidence fusion, and robust retrieval
+//! pooling.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -13,9 +14,10 @@ use uqa_core::{
     DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Predicate, Value,
 };
 use uqa_fusion::{
-    AdaptiveLogOddsFusion as AdaptiveLogOddsFuser, LogOddsFusion, LogitGating,
-    ProbabilisticBoolean, SignalQuality,
+    AdaptivePositiveEvidencePool as AdaptivePositiveEvidenceFuser, BayesianEvidenceFusion,
+    LogitGating, ProbabilisticBoolean, RobustPositiveEvidencePool, SignalQuality,
 };
+use uqa_scoring::EvidenceLogit;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::base::{
@@ -62,7 +64,7 @@ const ADAPTIVE_SPREAD_SHARE: f64 = 0.5;
 /// uniform floor. Returns `None` when no signal has measurable spread,
 /// falling back to the unweighted mean.
 fn adaptive_signal_weights(
-    fuser: &LogOddsFusion,
+    fuser: &RobustPositiveEvidencePool,
     score_maps: &[BTreeMap<DocId, f64>],
 ) -> Option<Vec<f64>> {
     let spreads: Vec<f64> = score_maps
@@ -163,17 +165,113 @@ impl Operator for SemanticFilterOperator {
     }
 }
 
-/// Multi-signal fusion via log-odds conjunction (Section 4, Paper 4).
+/// Exact Bayesian fusion of signed prior-free evidence.
 ///
-/// Each signal must produce prior-free evidence probabilities in
-/// `(0, 1)`; a configured `base_rate` enters the fusion exactly once.
+/// Each present score is interpreted as a prior-free probability-like evidence
+/// value and converted to a signed [`EvidenceLogit`]. Missing signals contribute
+/// the additive identity zero. The configured corpus prior enters exactly once,
+/// after which the operator computes
+/// `sigmoid(logit(base_rate) + sum(evidence_i))` without gating, confidence
+/// scaling, normalized weights, or adaptive query-pool statistics.
+pub struct BayesianEvidenceFusionOperator {
+    pub signals: Vec<Arc<dyn Operator>>,
+    pub base_rate: f64,
+    pub top_k: Option<usize>,
+}
+
+impl BayesianEvidenceFusionOperator {
+    pub fn new(signals: Vec<Arc<dyn Operator>>, base_rate: f64) -> Self {
+        Self {
+            signals,
+            base_rate,
+            top_k: None,
+        }
+    }
+
+    pub fn with_top_k(mut self, top_k: usize) -> Self {
+        self.top_k = Some(top_k);
+        self
+    }
+}
+
+impl Operator for BayesianEvidenceFusionOperator {
+    fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
+        if self.signals.is_empty() {
+            return Err(StorageBackendError::Other(
+                "Bayesian evidence fusion requires at least one signal".to_string(),
+            ));
+        }
+        let fusion = BayesianEvidenceFusion::new(self.base_rate)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let posting_lists: Vec<PostingList> = self
+            .signals
+            .iter()
+            .map(|signal| signal.execute(ctx))
+            .collect::<StorageBackendResult<_>>()?;
+        for posting_list in &posting_lists {
+            validate_probability_postings(posting_list, "Bayesian evidence fusion")?;
+        }
+
+        let mut all_doc_ids = std::collections::BTreeSet::new();
+        let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
+            .iter()
+            .map(|posting_list| {
+                let mut scores = BTreeMap::new();
+                for entry in posting_list {
+                    scores.insert(entry.doc_id, entry.payload.score);
+                    all_doc_ids.insert(entry.doc_id);
+                }
+                scores
+            })
+            .collect();
+        if all_doc_ids.is_empty() {
+            return Ok(PostingList::new());
+        }
+
+        let mut entries = Vec::with_capacity(all_doc_ids.len());
+        for doc_id in all_doc_ids {
+            let evidence: Vec<EvidenceLogit> = score_maps
+                .iter()
+                .filter_map(|scores| scores.get(&doc_id).copied())
+                .map(EvidenceLogit::from_prior_free_probability)
+                .collect::<Result<_, _>>()
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            let posterior = fusion
+                .fuse(&evidence)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            entries.push(PostingEntry::new(
+                doc_id,
+                Payload::with_score(posterior.value()),
+            ));
+        }
+        let result = PostingList::from_sorted_unchecked(entries);
+        Ok(match self.top_k {
+            Some(k) => result.ranked().select_top_k(k),
+            None => result,
+        })
+    }
+
+    fn cost_estimate(&self, stats: &IndexStats) -> f64 {
+        self.signals
+            .iter()
+            .map(|signal| signal.cost_estimate(stats))
+            .sum()
+    }
+}
+
+/// Robust positive-evidence pooling for retrieval ranking.
+///
+/// Each signal must produce prior-free evidence probabilities in `[0, 1]`; a
+/// configured `base_rate` enters the pool exactly once. This is a ranking
+/// heuristic, not the conditional-independence Bayesian sum implemented by
+/// [`BayesianEvidenceFusionOperator`].
 /// Missing documents contribute zero gated logit, and a signal with no
 /// matches at all stays in the declared signal set as neutral evidence
 /// (Lucene PR 16410 semantics: the clause count that governs `n^alpha`
 /// and the uniform denominator never shrinks at execution time). The
 /// default softplus gating floors match evidence at the prior;
 /// `LogitGating::Pass` matches Lucene's signed default.
-pub struct LogOddsFusionOperator {
+pub struct RobustPositiveEvidencePoolOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub alpha: f64,
     pub gating: LogitGating,
@@ -189,7 +287,7 @@ pub struct LogOddsFusionOperator {
     pub top_k: Option<usize>,
 }
 
-impl LogOddsFusionOperator {
+impl RobustPositiveEvidencePoolOperator {
     pub fn new(signals: Vec<Arc<dyn Operator>>, alpha: f64) -> Self {
         Self {
             signals,
@@ -237,27 +335,27 @@ impl LogOddsFusionOperator {
     }
 }
 
-impl Operator for LogOddsFusionOperator {
+impl Operator for RobustPositiveEvidencePoolOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         if self.signals.is_empty() {
             return Err(StorageBackendError::Other(
-                "log-odds fusion requires at least one signal".to_string(),
+                "positive-evidence pool requires at least one signal".to_string(),
             ));
         }
         if !self.alpha.is_finite() || !(0.0..=1.0).contains(&self.alpha) {
             return Err(StorageBackendError::Other(format!(
-                "log-odds fusion alpha must be finite and in [0, 1], got {}",
+                "positive-evidence pool alpha must be finite and in [0, 1], got {}",
                 self.alpha
             )));
         }
         if let Some(base_rate) = self.base_rate {
             if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
                 return Err(StorageBackendError::Other(format!(
-                    "log-odds fusion base_rate must be finite and in (0, 1), got {base_rate}"
+                    "positive-evidence pool base_rate must be finite and in (0, 1), got {base_rate}"
                 )));
             }
         }
-        let mut fuser = LogOddsFusion::new(self.alpha)
+        let mut fuser = RobustPositiveEvidencePool::new(self.alpha)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?
             .with_logit_gating(self.gating);
         if let Some(base_rate) = self.base_rate {
@@ -279,7 +377,7 @@ impl Operator for LogOddsFusionOperator {
             .map(|sig| sig.execute(ctx))
             .collect::<StorageBackendResult<_>>()?;
         for posting_list in &posting_lists {
-            validate_probability_postings(posting_list, "log-odds fusion")?;
+            validate_probability_postings(posting_list, "positive-evidence pool")?;
         }
 
         // Build per-signal score maps and the universal doc id set.
@@ -629,17 +727,17 @@ fn value_to_facet_string(v: &Value) -> String {
     }
 }
 
-/// Adaptive log-odds fusion. Matches UQA behavior for
-/// `AdaptiveLogOddsFusionOperator` — runs each signal, computes a
+/// Adaptive positive-evidence pooling. Matches UQA behavior for
+/// `AdaptivePositiveEvidencePoolOperator` — runs each signal, computes a
 /// per-signal `SignalQuality` (coverage / variance / calibration
-/// error), and combines through [`AdaptiveLogOddsFuser::fuse`].
-pub struct AdaptiveLogOddsFusionOperator {
+/// error), and combines through [`AdaptivePositiveEvidenceFuser::fuse`].
+pub struct AdaptivePositiveEvidencePoolOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub base_alpha: f64,
     pub gating: Option<String>,
 }
 
-impl AdaptiveLogOddsFusionOperator {
+impl AdaptivePositiveEvidencePoolOperator {
     pub fn new(signals: Vec<Arc<dyn Operator>>, base_alpha: f64, gating: Option<String>) -> Self {
         Self {
             signals,
@@ -649,16 +747,16 @@ impl AdaptiveLogOddsFusionOperator {
     }
 }
 
-impl Operator for AdaptiveLogOddsFusionOperator {
+impl Operator for AdaptivePositiveEvidencePoolOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         if self.signals.is_empty() {
             return Err(StorageBackendError::Other(
-                "adaptive log-odds fusion requires at least one signal".to_string(),
+                "adaptive positive-evidence pool requires at least one signal".to_string(),
             ));
         }
         if !self.base_alpha.is_finite() || !(0.0..=1.0).contains(&self.base_alpha) {
             return Err(StorageBackendError::Other(format!(
-                "adaptive log-odds fusion alpha must be finite and in [0, 1], got {}",
+                "adaptive positive-evidence pool alpha must be finite and in [0, 1], got {}",
                 self.base_alpha
             )));
         }
@@ -668,7 +766,7 @@ impl Operator for AdaptiveLogOddsFusionOperator {
             .map(|sig| sig.execute(ctx))
             .collect::<StorageBackendResult<_>>()?;
         for posting_list in &posting_lists {
-            validate_probability_postings(posting_list, "adaptive log-odds fusion")?;
+            validate_probability_postings(posting_list, "adaptive positive-evidence pool")?;
         }
         let mut all_doc_ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::new();
         let score_maps: Vec<BTreeMap<DocId, f64>> = posting_lists
@@ -717,10 +815,10 @@ impl Operator for AdaptiveLogOddsFusionOperator {
             .iter()
             .map(|m| coverage_based_default(m.len(), num_docs, 0.01))
             .collect();
-        let mut fusion = AdaptiveLogOddsFuser::new(self.base_alpha);
+        let mut fusion = AdaptivePositiveEvidenceFuser::new(self.base_alpha);
         if let Some(name) = &self.gating {
             let gating = LogitGating::parse(name).ok_or_else(|| {
-                StorageBackendError::Other(format!("unknown logit gating function: {name}"))
+                StorageBackendError::Other(format!("unknown positive-evidence gate: {name}"))
             })?;
             fusion = fusion.with_gating(gating);
         }
@@ -800,8 +898,46 @@ mod tests {
     }
 
     #[test]
+    fn exact_bayesian_operator_keeps_neutral_evidence_at_the_prior() {
+        let signals: Vec<Arc<dyn Operator>> = vec![
+            Arc::new(LiteralOperator(vec![(1, 0.5), (2, 0.8)])),
+            Arc::new(LiteralOperator(vec![(1, 0.5), (2, 0.25)])),
+        ];
+        let result = BayesianEvidenceFusionOperator::new(signals, 0.1)
+            .execute(&ExecutionContext::new())
+            .unwrap();
+        let neutral = result.get_entry(1).unwrap().payload.score;
+        assert!((neutral - 0.1).abs() < 1e-12, "got {neutral}");
+
+        let expected = uqa_scoring::sigmoid(
+            uqa_scoring::logit(0.1) + uqa_scoring::logit(0.8) + uqa_scoring::logit(0.25),
+        );
+        let signed = result.get_entry(2).unwrap().payload.score;
+        assert!((signed - expected).abs() < 1e-12, "{signed} != {expected}");
+    }
+
+    #[test]
+    fn exact_bayesian_operator_rejects_invalid_priors_and_signal_scores() {
+        let invalid_prior = BayesianEvidenceFusionOperator::new(
+            vec![Arc::new(LiteralOperator(vec![(1, 0.5)]))],
+            0.0,
+        )
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+        assert!(invalid_prior.to_string().contains("base_rate"));
+
+        let invalid_score = BayesianEvidenceFusionOperator::new(
+            vec![Arc::new(LiteralOperator(vec![(1, 1.1)]))],
+            0.5,
+        )
+        .execute(&ExecutionContext::new())
+        .unwrap_err();
+        assert!(invalid_score.to_string().contains("probability"));
+    }
+
+    #[test]
     fn adaptive_weights_favor_the_discriminating_signal() {
-        let fuser = LogOddsFusion::new(0.5).expect("test alpha is valid");
+        let fuser = RobustPositiveEvidencePool::new(0.5).expect("test alpha is valid");
         let flat: BTreeMap<DocId, f64> = [(1, 0.7), (2, 0.7), (3, 0.7)].into_iter().collect();
         let spread: BTreeMap<DocId, f64> = [(1, 0.9), (2, 0.5), (3, 0.1)].into_iter().collect();
         let weights = adaptive_signal_weights(&fuser, &[flat.clone(), spread])
@@ -823,10 +959,10 @@ mod tests {
             Arc::new(LiteralOperator(vec![(1, 0.2)])),
             Arc::new(LiteralOperator(vec![(1, 0.3)])),
         ];
-        let softplus = AdaptiveLogOddsFusionOperator::new(signals.clone(), 0.5, None)
+        let softplus = AdaptivePositiveEvidencePoolOperator::new(signals.clone(), 0.5, None)
             .execute(&ExecutionContext::new())
             .unwrap();
-        let pass = AdaptiveLogOddsFusionOperator::new(signals, 0.5, Some("pass".into()))
+        let pass = AdaptivePositiveEvidencePoolOperator::new(signals, 0.5, Some("pass".into()))
             .execute(&ExecutionContext::new())
             .unwrap();
         let softplus_score = softplus.entries()[0].payload.score;
@@ -849,21 +985,22 @@ mod tests {
     }
 
     #[test]
-    fn malformed_log_odds_configuration_returns_operator_error() {
+    fn malformed_positive_evidence_configuration_returns_operator_error() {
         let context = ExecutionContext::new();
         let cases = [
-            LogOddsFusionOperator::new(two_literal_signals(), f64::NAN),
-            LogOddsFusionOperator::new(two_literal_signals(), 0.5).with_weights(vec![0.8, 0.8]),
-            LogOddsFusionOperator::new(two_literal_signals(), 0.5)
+            RobustPositiveEvidencePoolOperator::new(two_literal_signals(), f64::NAN),
+            RobustPositiveEvidencePoolOperator::new(two_literal_signals(), 0.5)
+                .with_weights(vec![0.8, 0.8]),
+            RobustPositiveEvidencePoolOperator::new(two_literal_signals(), 0.5)
                 .with_logit_normalization(vec![0.0, 1.0], vec![0.0, 2.0]),
         ];
 
         for operator in cases {
             let error = operator
                 .execute(&context)
-                .expect_err("malformed log-odds configuration must fail");
+                .expect_err("malformed positive-evidence configuration must fail");
             assert!(
-                error.to_string().contains("log-odds")
+                error.to_string().contains("positive-evidence")
                     || error.to_string().contains("weights")
                     || error.to_string().contains("bounds"),
                 "unexpected error: {error}"

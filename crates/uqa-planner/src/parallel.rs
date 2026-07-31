@@ -17,7 +17,8 @@
 //!   concurrently and returns their results in input order. Mirrors
 //!   `ParallelExecutor.execute_branches` so the operator-tree driver
 //!   can fork independent branches (`Intersect` / `Union` /
-//!   `LogOddsFusion` / `ProbBoolFusion` children, deep-fusion
+//!   `BayesianEvidenceFusion` / `RobustPositiveEvidencePool` /
+//!   `ProbBoolFusion` children, deep-fusion
 //!   `SignalLayer` signals) without serialising them.
 
 // The browser (emscripten) target runs single-threaded, so the rayon

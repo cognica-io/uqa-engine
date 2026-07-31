@@ -1,6 +1,6 @@
 [package]
 name = "uqa-fusion"
-description = "Log-odds, attention, and learned multi-signal fusion"
+description = "Exact Bayesian evidence fusion and robust multi-signal retrieval pooling"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

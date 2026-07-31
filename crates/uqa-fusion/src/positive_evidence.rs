@@ -4,12 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Sparse log-odds fusion under the probability contract.
+//! Robust positive-evidence pooling for retrieval ranking.
 //!
-//! Signals are prior-free evidence probabilities in `(0, 1)`; the fusion
+//! Signals are prior-free evidence probabilities in `[0, 1]`; the pool
 //! prior (`base_rate`) enters exactly once, after confidence scaling:
 //!
 //! `P = sigmoid(aggregate(gate(logit(p_i))) * n^alpha + logit(base_rate))`
+//!
+//! Gating, `n^alpha` confidence scaling, normalized weights, and adaptive
+//! query-pool statistics make this a ranking heuristic rather than a Bayesian
+//! posterior theorem. Exact signed likelihood-ratio addition lives in
+//! [`crate::BayesianEvidenceFusion`].
 //!
 //! The default `Softplus` gating is the smooth evidence floor of
 //! Remark 6.5.4 (Paper 4): a matching signal never counts against a
@@ -17,8 +22,8 @@
 //! preserved. Because the gate is applied to prior-free evidence and
 //! the prior enters once, the floor sits at the corpus prior -- not at
 //! an unconditional p = 0.5. `Pass` gating keeps the raw sign of
-//! evidence (Theorem 4.2.2) for callers that want strictly signed
-//! fusion; it matches Lucene's `LogOddsFusionQuery` default since
+//! evidence (Theorem 4.2.2) for callers that want signed heuristic
+//! pooling; it matches Lucene's `LogOddsFusionQuery` default since
 //! Lucene PR 16410 flipped that query to signed log-odds with softplus
 //! as the explicit opt-in (`Gating.SOFTPLUS`). The softplus default
 //! here is deliberate and BEIR-validated: with prior-free evidence the
@@ -33,13 +38,13 @@ const CLAMP_MAX: f64 = 1.0 - CLAMP_MIN;
 const WEIGHT_SUM_TOLERANCE: f64 = 1e-3;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LogOddsFusionError {
+pub enum PositiveEvidencePoolError {
     InvalidAlpha(f64),
     InvalidBaseRate(f64),
     UnknownGating(String),
 }
 
-impl fmt::Display for LogOddsFusionError {
+impl fmt::Display for PositiveEvidencePoolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidAlpha(alpha) => {
@@ -50,13 +55,13 @@ impl fmt::Display for LogOddsFusionError {
                 "base_rate must be finite and in (0, 1), got {base_rate}"
             ),
             Self::UnknownGating(name) => {
-                write!(formatter, "unknown logit gating function: {name}")
+                write!(formatter, "unknown positive-evidence gate: {name}")
             }
         }
     }
 }
 
-impl std::error::Error for LogOddsFusionError {}
+impl std::error::Error for PositiveEvidencePoolError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogitGating {
@@ -98,22 +103,23 @@ impl LogitGating {
     }
 }
 
-/// Confidence-scaled sparse log-odds fusion.
+/// Confidence-scaled sparse positive-evidence pool.
 ///
 /// Matching signals contribute `softplus(logit(p))` by default -- the
 /// smooth evidence floor; a signal that did not match contributes
 /// exactly zero, while the denominator and confidence scale still use
 /// the total signal count. A configured `base_rate` adds
 /// `logit(base_rate)` exactly once after confidence scaling, so
-/// signals must be prior-free evidence.
+/// signals must be prior-free evidence. The result is a bounded ranking score,
+/// not an empirically calibrated posterior guarantee.
 #[derive(Debug, Clone, Copy)]
-pub struct LogOddsFusion {
+pub struct RobustPositiveEvidencePool {
     alpha: f64,
     gating: LogitGating,
     base_rate: Option<f64>,
 }
 
-impl Default for LogOddsFusion {
+impl Default for RobustPositiveEvidencePool {
     fn default() -> Self {
         Self {
             alpha: 0.5,
@@ -123,10 +129,10 @@ impl Default for LogOddsFusion {
     }
 }
 
-impl LogOddsFusion {
-    pub fn new(alpha: f64) -> Result<Self, LogOddsFusionError> {
+impl RobustPositiveEvidencePool {
+    pub fn new(alpha: f64) -> Result<Self, PositiveEvidencePoolError> {
         if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
-            return Err(LogOddsFusionError::InvalidAlpha(alpha));
+            return Err(PositiveEvidencePoolError::InvalidAlpha(alpha));
         }
         Ok(Self {
             alpha,
@@ -135,11 +141,14 @@ impl LogOddsFusion {
         })
     }
 
-    pub fn with_gating(alpha: f64, gating: Option<&str>) -> Result<Self, LogOddsFusionError> {
+    pub fn with_gating(
+        alpha: f64,
+        gating: Option<&str>,
+    ) -> Result<Self, PositiveEvidencePoolError> {
         let mut fusion = Self::new(alpha)?;
         if let Some(name) = gating {
             fusion.gating = LogitGating::parse(name)
-                .ok_or_else(|| LogOddsFusionError::UnknownGating(name.to_string()))?;
+                .ok_or_else(|| PositiveEvidencePoolError::UnknownGating(name.to_string()))?;
         }
         Ok(fusion)
     }
@@ -149,11 +158,11 @@ impl LogOddsFusion {
         self
     }
 
-    /// Fusion-level relevance prior, applied exactly once. Signals fed
-    /// into a prior-configured fusion must be prior-free evidence.
-    pub fn with_base_rate(mut self, base_rate: f64) -> Result<Self, LogOddsFusionError> {
+    /// Pool-level relevance prior, applied exactly once. Signals fed into a
+    /// prior-configured pool must be prior-free evidence.
+    pub fn with_base_rate(mut self, base_rate: f64) -> Result<Self, PositiveEvidencePoolError> {
         if !base_rate.is_finite() || base_rate <= 0.0 || base_rate >= 1.0 {
-            return Err(LogOddsFusionError::InvalidBaseRate(base_rate));
+            return Err(PositiveEvidencePoolError::InvalidBaseRate(base_rate));
         }
         self.base_rate = Some(base_rate);
         Ok(self)
@@ -164,9 +173,8 @@ impl LogOddsFusion {
     }
 
     /// The gated evidence logit a probability would contribute to this
-    /// fusion. Exposed so callers can derive per-signal statistics
-    /// (e.g. discrimination-based weights) from the same transform the
-    /// fusion applies.
+    /// pool. Exposed so callers can derive per-signal statistics (for example,
+    /// discrimination-based weights) from the same transform the pool applies.
     pub fn gated_logit(&self, probability: f64) -> f64 {
         self.gating.apply(lucene_logit(probability))
     }
@@ -220,7 +228,7 @@ impl LogOddsFusion {
         }
 
         // The single-signal identity (Proposition 4.3.2) only holds for
-        // prior-free fusion without normalization bounds; a configured
+        // prior-free pooling without normalization bounds; a configured
         // prior must still enter once, and explicit logit bounds are a
         // learned per-signal transform that must not be bypassed.
         if probabilities.len() == 1 && self.base_rate.is_none() && logit_min.is_none() {
@@ -345,18 +353,18 @@ pub struct SignalQuality {
 /// Per-signal adaptive confidence: better coverage, lower variance, and
 /// lower calibration error produce a higher normalized weight.
 #[derive(Debug, Clone, Copy)]
-pub struct AdaptiveLogOddsFusion {
+pub struct AdaptivePositiveEvidencePool {
     pub base_alpha: f64,
     pub gating: LogitGating,
 }
 
-impl Default for AdaptiveLogOddsFusion {
+impl Default for AdaptivePositiveEvidencePool {
     fn default() -> Self {
         Self::new(0.5)
     }
 }
 
-impl AdaptiveLogOddsFusion {
+impl AdaptivePositiveEvidencePool {
     pub fn new(base_alpha: f64) -> Self {
         Self {
             base_alpha,
@@ -402,7 +410,7 @@ impl AdaptiveLogOddsFusion {
                     return Err("computed weights sum to zero");
                 }
                 let normalized: Vec<f64> = raw.iter().map(|weight| weight / total).collect();
-                let inner = LogOddsFusion::new(self.base_alpha)
+                let inner = RobustPositiveEvidencePool::new(self.base_alpha)
                     .map_err(|_| "base alpha must be finite and in [0, 1]")?
                     .with_logit_gating(self.gating);
                 inner.fuse_weighted(probabilities, &normalized)
@@ -429,28 +437,30 @@ mod tests {
 
     #[test]
     fn single_signal_rewrites_to_identity() {
-        approx_eq(LogOddsFusion::default().fuse(&[0.7]), 0.7);
+        approx_eq(RobustPositiveEvidencePool::default().fuse(&[0.7]), 0.7);
     }
 
     #[test]
     fn malformed_constructor_configuration_returns_typed_errors() {
         assert!(matches!(
-            LogOddsFusion::new(f64::NAN),
-            Err(LogOddsFusionError::InvalidAlpha(alpha)) if alpha.is_nan()
+            RobustPositiveEvidencePool::new(f64::NAN),
+            Err(PositiveEvidencePoolError::InvalidAlpha(alpha)) if alpha.is_nan()
         ));
         assert!(matches!(
-            LogOddsFusion::with_gating(0.5, Some("typo")),
-            Err(LogOddsFusionError::UnknownGating(name)) if name == "typo"
+            RobustPositiveEvidencePool::with_gating(0.5, Some("typo")),
+            Err(PositiveEvidencePoolError::UnknownGating(name)) if name == "typo"
         ));
         assert!(matches!(
-            LogOddsFusion::new(0.5).unwrap().with_base_rate(1.0),
-            Err(LogOddsFusionError::InvalidBaseRate(1.0))
+            RobustPositiveEvidencePool::new(0.5)
+                .unwrap()
+                .with_base_rate(1.0),
+            Err(PositiveEvidencePoolError::InvalidBaseRate(1.0))
         ));
     }
 
     #[test]
     fn default_matches_lucene_formula_without_a_prior() {
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let probabilities = [0.8, 0.6];
         let gated_sum = probabilities
             .iter()
@@ -462,7 +472,7 @@ mod tests {
 
     #[test]
     fn pass_gating_preserves_evidence_sign() {
-        let fusion = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
+        let fusion = RobustPositiveEvidencePool::with_gating(0.5, Some("pass")).unwrap();
         let probabilities = [0.8, 0.6];
         let logit_sum = probabilities
             .iter()
@@ -475,7 +485,7 @@ mod tests {
 
     #[test]
     fn absent_signal_contributes_zero_but_remains_in_denominator() {
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let expected = sigmoid((softplus(lucene_logit(0.8)) / 2.0) * 2.0_f64.sqrt());
         approx_eq(fusion.fuse_sparse(&[Some(0.8), None]), expected);
     }
@@ -485,13 +495,13 @@ mod tests {
         // Softplus floors match evidence at zero, so with a configured
         // prior even the weakest match cannot fall below the prior;
         // pass gating lets weak evidence sink beneath it.
-        let fusion = LogOddsFusion::new(0.5)
+        let fusion = RobustPositiveEvidencePool::new(0.5)
             .unwrap()
             .with_base_rate(0.05)
             .unwrap();
         approx_eq(fusion.fuse_sparse(&[None, None]), 0.05);
         assert!(fusion.fuse_sparse(&[Some(0.1), None]) >= 0.05);
-        let signed = LogOddsFusion::with_gating(0.5, Some("pass"))
+        let signed = RobustPositiveEvidencePool::with_gating(0.5, Some("pass"))
             .unwrap()
             .with_base_rate(0.05)
             .unwrap();
@@ -500,7 +510,7 @@ mod tests {
 
     #[test]
     fn weighted_fusion_uses_weighted_sum_without_mean_division() {
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let weights = [0.75, 0.25];
         let expected = sigmoid(
@@ -517,7 +527,7 @@ mod tests {
 
     #[test]
     fn base_rate_enters_once_after_confidence_scaling() {
-        let fusion = LogOddsFusion::new(0.5)
+        let fusion = RobustPositiveEvidencePool::new(0.5)
             .unwrap()
             .with_base_rate(0.05)
             .unwrap();
@@ -530,7 +540,7 @@ mod tests {
 
     #[test]
     fn base_rate_applies_even_to_a_single_signal() {
-        let fusion = LogOddsFusion::new(0.5)
+        let fusion = RobustPositiveEvidencePool::new(0.5)
             .unwrap()
             .with_base_rate(0.05)
             .unwrap();
@@ -545,7 +555,7 @@ mod tests {
 
     #[test]
     fn neutral_evidence_returns_the_prior_under_pass_gating() {
-        let fusion = LogOddsFusion::with_gating(0.5, Some("pass"))
+        let fusion = RobustPositiveEvidencePool::with_gating(0.5, Some("pass"))
             .unwrap()
             .with_base_rate(0.1)
             .unwrap();
@@ -554,7 +564,7 @@ mod tests {
 
     #[test]
     fn logit_normalization_replaces_gating() {
-        let fusion = LogOddsFusion::new(0.0).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.0).unwrap();
         let probabilities = [Some(0.5), Some(0.8)];
         let minimums = [-1.0, 0.0];
         let maximums = [1.0, lucene_logit(0.8)];
@@ -569,7 +579,7 @@ mod tests {
 
     #[test]
     fn partial_logit_bounds_are_rejected() {
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let minimums = [-1.0, 0.0];
         assert_eq!(
@@ -584,7 +594,7 @@ mod tests {
 
     #[test]
     fn degenerate_logit_bounds_are_rejected() {
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let probabilities = [Some(0.8), Some(0.6)];
         let inverted = ([0.0, 1.0], [1.0, 1.0]);
         assert_eq!(
@@ -607,7 +617,7 @@ mod tests {
     fn single_signal_with_bounds_applies_normalization() {
         // Explicit logit bounds are a learned per-signal transform, so
         // the single-signal identity must not bypass them.
-        let fusion = LogOddsFusion::new(0.5).unwrap();
+        let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
         let minimums = [0.0];
         let maximums = [2.0 * lucene_logit(0.8)];
         let expected = sigmoid(0.5);
@@ -627,10 +637,10 @@ mod tests {
             calibration_error: 0.0,
         };
         let probabilities = [0.2, 0.3];
-        let softplus_fused = AdaptiveLogOddsFusion::new(0.5)
+        let softplus_fused = AdaptivePositiveEvidencePool::new(0.5)
             .fuse(&probabilities, &[quality, quality])
             .unwrap();
-        let pass_fused = AdaptiveLogOddsFusion::new(0.5)
+        let pass_fused = AdaptivePositiveEvidencePool::new(0.5)
             .with_gating(LogitGating::Pass)
             .fuse(&probabilities, &[quality, quality])
             .unwrap();
@@ -646,7 +656,7 @@ mod tests {
 
     #[test]
     fn adaptive_signal_alpha_is_clamped() {
-        let fusion = AdaptiveLogOddsFusion::default();
+        let fusion = AdaptivePositiveEvidencePool::default();
         let quality = SignalQuality {
             coverage_ratio: 0.0,
             score_variance: 100.0,

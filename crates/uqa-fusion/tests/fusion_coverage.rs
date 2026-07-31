@@ -6,7 +6,7 @@
 
 //! Coverage for `test_fusion`.
 
-use uqa_fusion::{LogOddsFusion, ProbabilisticBoolean};
+use uqa_fusion::{ProbabilisticBoolean, RobustPositiveEvidencePool};
 
 fn approx_eq(a: f64, b: f64, tol: f64) {
     assert!((a - b).abs() <= tol, "expected {a} ~= {b}");
@@ -14,7 +14,7 @@ fn approx_eq(a: f64, b: f64, tol: f64) {
 
 #[test]
 fn softplus_gating_treats_every_match_as_positive_evidence() {
-    let fusion = LogOddsFusion::with_gating(0.0, Some("softplus")).unwrap();
+    let fusion = RobustPositiveEvidencePool::with_gating(0.0, Some("softplus")).unwrap();
     for p in [0.1, 0.3, 0.5, 0.7, 0.9] {
         for n in [2, 3, 5, 10] {
             assert!(fusion.fuse(&vec![p; n]) > 0.5);
@@ -24,7 +24,7 @@ fn softplus_gating_treats_every_match_as_positive_evidence() {
 
 #[test]
 fn softplus_gating_preserves_weak_match_ordering() {
-    let fusion = LogOddsFusion::with_gating(0.5, Some("softplus")).unwrap();
+    let fusion = RobustPositiveEvidencePool::with_gating(0.5, Some("softplus")).unwrap();
     assert!(fusion.fuse(&[0.8, 0.7, 0.6, 0.9]) > 0.5);
     assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) > 0.5);
     assert!(fusion.fuse(&[0.4, 0.3]) > fusion.fuse(&[0.2, 0.1]));
@@ -32,7 +32,7 @@ fn softplus_gating_preserves_weak_match_ordering() {
 
 #[test]
 fn pass_gating_lets_weak_evidence_sink() {
-    let fusion = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
+    let fusion = RobustPositiveEvidencePool::with_gating(0.5, Some("pass")).unwrap();
     assert!(fusion.fuse(&[0.8, 0.7, 0.6, 0.9]) > 0.5);
     assert!(fusion.fuse(&[0.2, 0.3, 0.4, 0.1]) < 0.5);
     assert!(fusion.fuse(&[0.4, 0.3]) > fusion.fuse(&[0.2, 0.1]));
@@ -40,7 +40,7 @@ fn pass_gating_lets_weak_evidence_sink() {
 
 #[test]
 fn sparse_absence_never_outranks_a_match_by_default() {
-    let fusion = LogOddsFusion::new(0.5).unwrap();
+    let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     let absent = fusion.fuse_sparse(&[None, None]);
     let weak_match = fusion.fuse_sparse(&[Some(0.1), None]);
     let strong_match = fusion.fuse_sparse(&[Some(0.9), None]);
@@ -48,19 +48,19 @@ fn sparse_absence_never_outranks_a_match_by_default() {
     assert!(weak_match > absent);
     assert!(strong_match > weak_match);
     // Signed pass gating lets weak evidence sink below absence.
-    let signed = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
+    let signed = RobustPositiveEvidencePool::with_gating(0.5, Some("pass")).unwrap();
     assert!(signed.fuse_sparse(&[Some(0.1), None]) < absent);
 }
 
 #[test]
 fn relevance_preservation() {
-    let fusion = LogOddsFusion::new(0.5).unwrap();
+    let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     assert!(fusion.fuse(&[0.51, 0.6, 0.7, 0.8, 0.9]) > 0.5);
 }
 
 #[test]
 fn single_signal_identity() {
-    let fusion = LogOddsFusion::new(0.5).unwrap();
+    let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     for p in [0.1, 0.3, 0.5, 0.7, 0.9] {
         approx_eq(fusion.fuse(&[p]), p, 1e-12);
     }
@@ -68,12 +68,12 @@ fn single_signal_identity() {
 
 #[test]
 fn empty_returns_neutral() {
-    assert_eq!(LogOddsFusion::new(0.5).unwrap().fuse(&[]), 0.5);
+    assert_eq!(RobustPositiveEvidencePool::new(0.5).unwrap().fuse(&[]), 0.5);
 }
 
 #[test]
 fn result_in_unit_interval() {
-    let result = LogOddsFusion::new(0.5)
+    let result = RobustPositiveEvidencePool::new(0.5)
         .unwrap()
         .fuse(&[0.01, 0.99, 0.5, 0.3, 0.8]);
     assert!((0.0..=1.0).contains(&result));
@@ -81,7 +81,7 @@ fn result_in_unit_interval() {
 
 #[test]
 fn weighted_fusion_basic() {
-    let result = LogOddsFusion::new(0.5)
+    let result = RobustPositiveEvidencePool::new(0.5)
         .unwrap()
         .fuse_weighted(&[0.8, 0.2], &[0.5, 0.5])
         .unwrap();
@@ -91,29 +91,35 @@ fn weighted_fusion_basic() {
 #[test]
 fn weighted_fusion_empty_rejects_zero_sum_weights() {
     assert_eq!(
-        LogOddsFusion::new(0.5).unwrap().fuse_weighted(&[], &[]),
+        RobustPositiveEvidencePool::new(0.5)
+            .unwrap()
+            .fuse_weighted(&[], &[]),
         Err("weights must sum to 1")
     );
 }
 
 #[test]
 fn alpha_zero_is_mean() {
-    let result = LogOddsFusion::new(0.0).unwrap().fuse(&[0.8, 0.6]);
+    let result = RobustPositiveEvidencePool::new(0.0)
+        .unwrap()
+        .fuse(&[0.8, 0.6]);
     assert!(result > 0.0);
     assert!(result < 1.0);
 }
 
 #[test]
 fn alpha_one_is_sum() {
-    let result = LogOddsFusion::new(1.0).unwrap().fuse(&[0.8, 0.6]);
+    let result = RobustPositiveEvidencePool::new(1.0)
+        .unwrap()
+        .fuse(&[0.8, 0.6]);
     assert!(result > 0.0);
     assert!(result < 1.0);
 }
 
 #[test]
 fn gating_none_matches_default() {
-    let default = LogOddsFusion::new(0.5).unwrap();
-    let none = LogOddsFusion::with_gating(0.5, None).unwrap();
+    let default = RobustPositiveEvidencePool::new(0.5).unwrap();
+    let none = RobustPositiveEvidencePool::with_gating(0.5, None).unwrap();
     approx_eq(
         default.fuse(&[0.8, 0.6, 0.7]),
         none.fuse(&[0.8, 0.6, 0.7]),
@@ -123,7 +129,7 @@ fn gating_none_matches_default() {
 
 #[test]
 fn gating_relu() {
-    let result = LogOddsFusion::with_gating(0.5, Some("relu"))
+    let result = RobustPositiveEvidencePool::with_gating(0.5, Some("relu"))
         .unwrap()
         .fuse(&[0.8, 0.6, 0.7]);
     assert!((0.0..=1.0).contains(&result));
@@ -131,7 +137,7 @@ fn gating_relu() {
 
 #[test]
 fn gating_swish() {
-    let result = LogOddsFusion::with_gating(0.5, Some("swish"))
+    let result = RobustPositiveEvidencePool::with_gating(0.5, Some("swish"))
         .unwrap()
         .fuse(&[0.8, 0.6, 0.7]);
     assert!((0.0..=1.0).contains(&result));

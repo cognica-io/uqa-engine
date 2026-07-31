@@ -164,7 +164,8 @@ pub fn operator_name(op: &OperatorTree) -> String {
         OperatorTree::KNN { .. } => "KNNOp",
         OperatorTree::CalibratedVectorMatch { .. } => "CalibratedVectorMatchOp",
         OperatorTree::CosineProbability(_) => "CosineProbabilityOp",
-        OperatorTree::LogOddsFusion { .. } => "LogOddsFusion",
+        OperatorTree::BayesianEvidenceFusion { .. } => "BayesianEvidenceFusion",
+        OperatorTree::RobustPositiveEvidencePool { .. } => "RobustPositiveEvidencePool",
         OperatorTree::ProbBoolFusion { .. } => "ProbBoolFusion",
         OperatorTree::ProbNot { .. } => "ProbNot",
         OperatorTree::AttentionFusion { .. } => "AttentionFusion",
@@ -256,9 +257,18 @@ fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) 
                 explain_recursive(src, lines, indent + 1);
             }
         }
-        OperatorTree::LogOddsFusion { signals, alpha, .. } => {
+        OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
             lines.push(format!(
-                "{prefix}LogOddsFusion(alpha={alpha}, signals={})",
+                "{prefix}BayesianEvidenceFusion(base_rate={base_rate:?}, signals={})",
+                signals.len()
+            ));
+            for signal in signals {
+                explain_recursive(signal, lines, indent + 1);
+            }
+        }
+        OperatorTree::RobustPositiveEvidencePool { signals, alpha, .. } => {
+            lines.push(format!(
+                "{prefix}RobustPositiveEvidencePool(alpha={alpha}, signals={})",
                 signals.len()
             ));
             for sig in signals {

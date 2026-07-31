@@ -757,7 +757,18 @@ impl QueryOptimizer {
 
     fn reorder_fusion_signals(&self, op: OperatorTree) -> OperatorTree {
         match op {
-            OperatorTree::LogOddsFusion {
+            OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
+                let mut signals: Vec<_> = signals
+                    .into_iter()
+                    .map(|signal| self.reorder_fusion_signals(signal))
+                    .collect();
+                signals.sort_by(|left, right| {
+                    self.graph_aware_signal_cost(left)
+                        .total_cmp(&self.graph_aware_signal_cost(right))
+                });
+                OperatorTree::BayesianEvidenceFusion { signals, base_rate }
+            }
+            OperatorTree::RobustPositiveEvidencePool {
                 signals,
                 alpha,
                 gating,
@@ -786,7 +797,7 @@ impl QueryOptimizer {
                     logit_min.map(|values| order.iter().map(|index| values[*index]).collect());
                 let reordered_logit_max =
                     logit_max.map(|values| order.iter().map(|index| values[*index]).collect());
-                OperatorTree::LogOddsFusion {
+                OperatorTree::RobustPositiveEvidencePool {
                     signals: indexed_signals
                         .into_iter()
                         .map(|(_, signal)| signal)
@@ -984,7 +995,13 @@ fn map_operator_children(
         OperatorTree::CosineProbability(child) => {
             OperatorTree::CosineProbability(Box::new(map(*child)))
         }
-        OperatorTree::LogOddsFusion {
+        OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
+            OperatorTree::BayesianEvidenceFusion {
+                signals: signals.into_iter().map(&mut map).collect(),
+                base_rate,
+            }
+        }
+        OperatorTree::RobustPositiveEvidencePool {
             signals,
             alpha,
             gating,
@@ -992,7 +1009,7 @@ fn map_operator_children(
             logit_min,
             logit_max,
             adaptive_weights,
-        } => OperatorTree::LogOddsFusion {
+        } => OperatorTree::RobustPositiveEvidencePool {
             signals: signals.into_iter().map(&mut map).collect(),
             alpha,
             gating,
@@ -1355,7 +1372,8 @@ fn is_membership_only(op: &OperatorTree) -> bool {
         | OperatorTree::KNN { .. }
         | OperatorTree::CalibratedVectorMatch { .. }
         | OperatorTree::CosineProbability(_)
-        | OperatorTree::LogOddsFusion { .. }
+        | OperatorTree::BayesianEvidenceFusion { .. }
+        | OperatorTree::RobustPositiveEvidencePool { .. }
         | OperatorTree::ProbBoolFusion { .. }
         | OperatorTree::ProbNot { .. }
         | OperatorTree::AttentionFusion { .. }

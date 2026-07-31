@@ -917,18 +917,20 @@ impl Engine {
         Ok(out)
     }
 
-    /// Hybrid search under the probability contract: query-level
-    /// Bayesian BM25 over `text_field` and likelihood-ratio calibrated
-    /// KNN over `vector_field`, combined with sparse log-odds fusion.
+    /// Robust hybrid retrieval: query-level Bayesian BM25 over `text_field`
+    /// and query-pool-transformed KNN over `vector_field`, combined by
+    /// positive-evidence pooling.
     /// Both signals enter as prior-free evidence -- BM25 by one sigmoid
     /// over the complete raw query score with the prior stripped, and
     /// cosine distance by the pool-fitted two-Gaussian calibration --
     /// while the text field's estimated relevance prior enters the
-    /// fusion exactly once. Signals are weighted per query by their
+    /// pool exactly once. Signals are weighted per query by their
     /// gated-evidence spread over the candidate pool, so a signal that
     /// cannot separate the candidates loses influence instead of
     /// diluting the fused ranking. Returns the top-`top_k` entries by
-    /// descending fused probability.
+    /// descending pooled score. This API intentionally exposes a robust ranking
+    /// heuristic, not the exact conditional-independence contract provided by
+    /// `fuse_bayesian_evidence` / `BayesianEvidenceFusion`.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Result<Vec<ScoredEntry>, SQLError> {
         let Some(table) = self
             .try_table(params.table)
@@ -963,7 +965,7 @@ impl Engine {
             field: params.vector_field.to_string(),
             threshold: None,
         });
-        let tree = uqa_operators::OperatorTree::LogOddsFusion {
+        let tree = uqa_operators::OperatorTree::RobustPositiveEvidencePool {
             signals,
             alpha: params.alpha,
             gating: uqa_operators::GatingSpec::Softplus,

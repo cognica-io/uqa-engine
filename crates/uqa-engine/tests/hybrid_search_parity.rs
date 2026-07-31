@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Golden-fixture test: hybrid (text + KNN, log-odds fused) output.
+//! Golden-fixture test: hybrid (text + KNN, positive-evidence pooled) output.
 //! Refresh the fixtures with
 //! `cargo run -p uqa-engine --example build_parity_fixtures`.
 

@@ -29,9 +29,14 @@ pub enum FunctionKind {
     BayesianMatchWithPrior,
     /// `knn_match(field, query_vector, k)` - top-k cosine KNN.
     KNNMatch,
-    /// `fuse_log_odds(signal_1, signal_2, ...)` - log-odds fusion of
-    /// other UQA function calls.
+    /// Compatibility name for robust positive-evidence pooling.
     FuseLogOdds,
+    /// `pool_positive_evidence(signal_1, signal_2, ...)` - gated,
+    /// confidence-scaled retrieval pooling without a calibration theorem.
+    PositiveEvidencePool,
+    /// `fuse_bayesian_evidence(signal_1, signal_2, ...)` - exact signed
+    /// log-likelihood-ratio addition with one relevance prior.
+    BayesianEvidenceFusion,
     /// `graph_pagerank([graph_name])` - `PageRank` over a named graph.
     GraphPagerank,
     /// `graph_hits([graph_name])` - `HITS` over a named graph.
@@ -122,6 +127,11 @@ fn registry() -> &'static BTreeMap<&'static str, FunctionKind> {
         );
         m.insert("knn_match", FunctionKind::KNNMatch);
         m.insert("fuse_log_odds", FunctionKind::FuseLogOdds);
+        m.insert("pool_positive_evidence", FunctionKind::PositiveEvidencePool);
+        m.insert(
+            "fuse_bayesian_evidence",
+            FunctionKind::BayesianEvidenceFusion,
+        );
         m.insert("graph_pagerank", FunctionKind::GraphPagerank);
         m.insert("pagerank", FunctionKind::GraphPagerank);
         m.insert("graph_hits", FunctionKind::GraphHits);
@@ -195,6 +205,14 @@ mod tests {
         assert_eq!(lookup("text_match"), Some(FunctionKind::TextMatch));
         assert_eq!(lookup("KNN_MATCH"), Some(FunctionKind::KNNMatch));
         assert_eq!(lookup("fuse_log_odds"), Some(FunctionKind::FuseLogOdds));
+        assert_eq!(
+            lookup("pool_positive_evidence"),
+            Some(FunctionKind::PositiveEvidencePool)
+        );
+        assert_eq!(
+            lookup("fuse_bayesian_evidence"),
+            Some(FunctionKind::BayesianEvidenceFusion)
+        );
         assert!(registered_names().contains(&"deep_predict"));
     }
 

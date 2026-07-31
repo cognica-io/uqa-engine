@@ -8,7 +8,11 @@
 //! `bench_scoring_advanced.py`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use uqa_fusion::{AttentionFusion, LearnedFusion, LogOddsFusion, QueryFeatureExtractor};
+use uqa_fusion::{
+    AttentionFusion, BayesianEvidenceFusion, LearnedFusion, QueryFeatureExtractor,
+    RobustPositiveEvidencePool,
+};
+use uqa_scoring::EvidenceLogit;
 
 fn probabilities(n: usize) -> Vec<f64> {
     (0..n)
@@ -20,12 +24,12 @@ fn query_features(n: usize) -> Vec<f64> {
     (0..n).map(|i| (i as f64 + 1.0) / n as f64).collect()
 }
 
-fn bench_log_odds(c: &mut Criterion) {
-    let mut group = c.benchmark_group("fusion_log_odds");
+fn bench_positive_evidence_pool(c: &mut Criterion) {
+    let mut group = c.benchmark_group("robust_positive_evidence_pool");
     for n_signals in [2_usize, 3, 5, 10] {
         let probs = probabilities(n_signals);
         let weights = vec![1.0 / n_signals as f64; n_signals];
-        let fusion = LogOddsFusion::new(0.5).expect("benchmark alpha is valid");
+        let fusion = RobustPositiveEvidencePool::new(0.5).expect("benchmark alpha is valid");
         group.bench_with_input(
             BenchmarkId::from_parameter(n_signals),
             &n_signals,
@@ -42,14 +46,38 @@ fn bench_log_odds(c: &mut Criterion) {
     }
     group.finish();
 
-    let fusion = LogOddsFusion::new(0.5).expect("benchmark alpha is valid");
+    let fusion = RobustPositiveEvidencePool::new(0.5).expect("benchmark alpha is valid");
     let samples: Vec<Vec<f64>> = (0..10_000).map(|i| probabilities(2 + i % 4)).collect();
-    c.bench_function("fusion_log_odds_batch_10k", |bencher| {
+    c.bench_function("robust_positive_evidence_pool_batch_10k", |bencher| {
         bencher.iter(|| {
             let total: f64 = samples.iter().map(|p| fusion.fuse(p)).sum();
             black_box(total)
         });
     });
+}
+
+fn bench_bayesian_evidence(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bayesian_evidence_fusion");
+    let fusion = BayesianEvidenceFusion::new(0.05).expect("benchmark prior is valid");
+    for n_signals in [2_usize, 3, 5, 10] {
+        let evidence: Vec<_> = (0..n_signals)
+            .map(|index| EvidenceLogit::new(index as f64 * 0.2 - 0.4).unwrap())
+            .collect();
+        group.bench_with_input(
+            BenchmarkId::from_parameter(n_signals),
+            &n_signals,
+            |bencher, _| {
+                bencher.iter(|| {
+                    black_box(
+                        fusion
+                            .fuse(black_box(&evidence))
+                            .expect("finite evidence sum"),
+                    )
+                });
+            },
+        );
+    }
+    group.finish();
 }
 
 fn bench_attention_fusion(c: &mut Criterion) {
@@ -141,7 +169,8 @@ fn bench_learned_fusion(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_log_odds,
+    bench_positive_evidence_pool,
+    bench_bayesian_evidence,
     bench_attention_fusion,
     bench_learned_fusion
 );

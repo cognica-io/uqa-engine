@@ -4,13 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the `LogOddsFusionOperator` coverage for `test_fusion_wand`.
+//! Coverage for the `RobustPositiveEvidencePoolOperator` coverage for `test_fusion_wand`.
 
 use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
-use uqa_fusion::LogOddsFusion;
-use uqa_operators::{ExecutionContext, LogOddsFusionOperator, Operator};
+use uqa_fusion::RobustPositiveEvidencePool;
+use uqa_operators::{ExecutionContext, Operator, RobustPositiveEvidencePoolOperator};
 
 struct FixedOperator(Vec<(u64, f64)>);
 
@@ -39,7 +39,7 @@ fn signal(entries: &[(u64, f64)]) -> Arc<dyn Operator> {
 
 #[test]
 fn test_top_k_parameter() {
-    let op = LogOddsFusionOperator::new(
+    let op = RobustPositiveEvidencePoolOperator::new(
         vec![
             signal(&[(1, 0.9), (2, 0.7), (3, 0.5), (4, 0.3)]),
             signal(&[(1, 0.8), (2, 0.6), (3, 0.4), (4, 0.2)]),
@@ -52,7 +52,7 @@ fn test_top_k_parameter() {
 
 #[test]
 fn test_without_top_k_returns_all() {
-    let op = LogOddsFusionOperator::new(
+    let op = RobustPositiveEvidencePoolOperator::new(
         vec![signal(&[(1, 0.9), (2, 0.7)]), signal(&[(1, 0.8), (2, 0.6)])],
         0.5,
     );
@@ -61,7 +61,7 @@ fn test_without_top_k_returns_all() {
 
 #[test]
 fn test_top_k_preserves_ranking() {
-    let op = LogOddsFusionOperator::new(
+    let op = RobustPositiveEvidencePoolOperator::new(
         vec![
             signal(&[(1, 0.9), (2, 0.3), (3, 0.1)]),
             signal(&[(1, 0.8), (2, 0.2), (3, 0.1)]),
@@ -80,7 +80,7 @@ fn test_top_k_preserves_ranking() {
 
 #[test]
 fn test_top_k_results_match_full_results() {
-    let full = LogOddsFusionOperator::new(
+    let full = RobustPositiveEvidencePoolOperator::new(
         vec![
             signal(&[(1, 0.9), (2, 0.7), (3, 0.5)]),
             signal(&[(1, 0.8), (2, 0.6), (3, 0.4)]),
@@ -89,7 +89,7 @@ fn test_top_k_results_match_full_results() {
     )
     .execute(&ExecutionContext::new())
     .unwrap();
-    let top = LogOddsFusionOperator::new(
+    let top = RobustPositiveEvidencePoolOperator::new(
         vec![
             signal(&[(1, 0.9), (2, 0.7), (3, 0.5)]),
             signal(&[(1, 0.8), (2, 0.6), (3, 0.4)]),
@@ -107,13 +107,13 @@ fn test_top_k_results_match_full_results() {
 
 #[test]
 fn sparse_operator_matches_lucene_formula() {
-    let result = LogOddsFusionOperator::new(
+    let result = RobustPositiveEvidencePoolOperator::new(
         vec![signal(&[(1, 0.8), (2, 0.6)]), signal(&[(1, 0.7)])],
         0.5,
     )
     .execute(&ExecutionContext::new())
     .unwrap();
-    let fusion = LogOddsFusion::new(0.5).unwrap();
+    let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     let doc_one = result.get_entry(1).unwrap().payload.score;
     let doc_two = result.get_entry(2).unwrap().payload.score;
     assert!((doc_one - fusion.fuse_sparse(&[Some(0.8), Some(0.7)])).abs() < 1e-12);
@@ -126,10 +126,13 @@ fn one_active_signal_keeps_declared_signal_count() {
     // dropping out: documents still fuse at the declared n = 2, so a
     // score cannot depend on whether the other signal matched anywhere
     // (Lucene PR 16410 semantics).
-    let result = LogOddsFusionOperator::new(vec![signal(&[(1, 0.8), (2, 0.2)]), signal(&[])], 0.5)
-        .execute(&ExecutionContext::new())
-        .unwrap();
-    let fusion = LogOddsFusion::new(0.5).unwrap();
+    let result = RobustPositiveEvidencePoolOperator::new(
+        vec![signal(&[(1, 0.8), (2, 0.2)]), signal(&[])],
+        0.5,
+    )
+    .execute(&ExecutionContext::new())
+    .unwrap();
+    let fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     let doc_one = result.get_entry(1).unwrap().payload.score;
     let doc_two = result.get_entry(2).unwrap().payload.score;
     assert!((doc_one - fusion.fuse_sparse(&[Some(0.8), None])).abs() < 1e-12);
@@ -137,7 +140,7 @@ fn one_active_signal_keeps_declared_signal_count() {
 
     // Layout independence: the same document scores identically whether
     // the second signal matched nothing or only unrelated documents.
-    let unrelated = LogOddsFusionOperator::new(
+    let unrelated = RobustPositiveEvidencePoolOperator::new(
         vec![signal(&[(1, 0.8), (2, 0.2)]), signal(&[(99, 0.6)])],
         0.5,
     )
@@ -149,7 +152,7 @@ fn one_active_signal_keeps_declared_signal_count() {
 
 #[test]
 fn invalid_weights_are_rejected_before_execution() {
-    let error = LogOddsFusionOperator::new(vec![signal(&[]), signal(&[])], 0.5)
+    let error = RobustPositiveEvidencePoolOperator::new(vec![signal(&[]), signal(&[])], 0.5)
         .with_weights(vec![0.8, 0.8])
         .execute(&ExecutionContext::new())
         .unwrap_err();

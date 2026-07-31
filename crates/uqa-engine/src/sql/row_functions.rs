@@ -261,6 +261,8 @@ pub(super) fn execute_function_with_top_k(
         | FunctionKind::KNNMatch
         | FunctionKind::CalibratedVectorMatch
         | FunctionKind::FuseLogOdds
+        | FunctionKind::PositiveEvidencePool
+        | FunctionKind::BayesianEvidenceFusion
         | FunctionKind::GraphPagerank
         | FunctionKind::GraphHits
         | FunctionKind::GraphBetweenness
@@ -377,7 +379,7 @@ fn run_multi_field_match(
         }
     }
     let active_field_count = active_fields.iter().filter(|active| **active).count();
-    let mut fusion = uqa_fusion::LogOddsFusion::new(0.5)
+    let mut fusion = uqa_fusion::RobustPositiveEvidencePool::new(0.5)
         .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
     if let Some(base_rate) = crate::operator_tree_bridge::combine_signal_priors(&field_priors) {
         fusion = fusion

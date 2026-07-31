@@ -328,7 +328,8 @@ impl CostModel {
             OperatorTree::Union(ops) => ops.iter().map(|o| self.estimate(o, stats)).sum(),
             OperatorTree::Aggregate { .. } => n,
             OperatorTree::GroupBy { .. } => n * GROUP_BY_OVERHEAD_FACTOR,
-            OperatorTree::LogOddsFusion { signals, .. }
+            OperatorTree::BayesianEvidenceFusion { signals, .. }
+            | OperatorTree::RobustPositiveEvidencePool { signals, .. }
             | OperatorTree::ProbBoolFusion { signals, .. }
             | OperatorTree::AttentionFusion { signals, .. }
             | OperatorTree::LearnedFusion { signals, .. } => {

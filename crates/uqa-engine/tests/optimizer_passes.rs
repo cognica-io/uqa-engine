@@ -239,8 +239,9 @@ fn unsupported_shape_returns_none() {
 }
 
 #[test]
-fn fuse_log_odds_lowers_to_logoddsfusion_and_reorder_keeps_signals() {
-    // `fuse_log_odds` is the gateway into the fusion-signal reorder
+fn fuse_log_odds_lowers_to_robust_pool_and_reorder_keeps_signals() {
+    // `fuse_log_odds` remains a compatibility gateway into robust pooling and
+    // the fusion-signal reorder pass.
     // pass. We confirm the lowering produces the expected variant and
     // that the reorder pass preserves the signal count.
     let eng = engine_with_corpus();
@@ -251,14 +252,44 @@ fn fuse_log_odds_lowers_to_logoddsfusion_and_reorder_keeps_signals() {
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
         .expect("optimise")
         .expect("lowerable tree");
-    let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
-        panic!("expected LogOddsFusion");
+    let OperatorTree::RobustPositiveEvidencePool { signals, alpha, .. } = optimised else {
+        panic!("expected RobustPositiveEvidencePool");
     };
     assert_eq!(signals.len(), 2);
     assert!((alpha - 0.5).abs() < f64::EPSILON);
     assert!(signals
         .iter()
         .all(|s| matches!(s, OperatorTree::Term { .. })));
+}
+
+#[test]
+fn explicit_fusion_names_lower_to_distinct_ir_contracts() {
+    let eng = engine_with_corpus();
+    let robust_expr = where_of(
+        "SELECT id FROM notes WHERE pool_positive_evidence(\
+            bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'), 0.5)",
+    );
+    let robust = optimised_tree_for(&eng, "notes", &robust_expr, &[])
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        robust,
+        OperatorTree::RobustPositiveEvidencePool { .. }
+    ));
+
+    let exact_expr = where_of(
+        "SELECT id FROM notes WHERE fuse_bayesian_evidence(\
+            bayesian_match(title, 'rust'), bayesian_match(body, 'tokio'), \
+            base_rate => 0.1)",
+    );
+    let exact = optimised_tree_for(&eng, "notes", &exact_expr, &[])
+        .unwrap()
+        .unwrap();
+    let OperatorTree::BayesianEvidenceFusion { signals, base_rate } = exact else {
+        panic!("expected BayesianEvidenceFusion");
+    };
+    assert_eq!(signals.len(), 2);
+    assert_eq!(base_rate, Some(0.1));
 }
 
 #[test]
@@ -271,8 +302,8 @@ fn fuse_log_odds_lowers_with_default_alpha() {
     let optimised = optimised_tree_for(&eng, "notes", &expr, &[])
         .expect("optimise")
         .expect("lowerable tree");
-    let OperatorTree::LogOddsFusion { signals, alpha, .. } = optimised else {
-        panic!("expected LogOddsFusion");
+    let OperatorTree::RobustPositiveEvidencePool { signals, alpha, .. } = optimised else {
+        panic!("expected RobustPositiveEvidencePool");
     };
     assert_eq!(signals.len(), 2);
     assert!((alpha - 0.5).abs() < f64::EPSILON);
@@ -295,7 +326,7 @@ fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
     assert_eq!(parts.len(), 2);
     assert!(parts
         .iter()
-        .any(|p| matches!(p, OperatorTree::LogOddsFusion { .. })));
+        .any(|p| matches!(p, OperatorTree::RobustPositiveEvidencePool { .. })));
     assert!(parts
         .iter()
         .any(|p| matches!(p, OperatorTree::Filter { .. })));
@@ -393,8 +424,8 @@ fn fuse_log_odds_calibrates_knn_signal() {
          )",
     );
     let lowered = lower_where(&expr, &[]).expect("lowers");
-    let OperatorTree::LogOddsFusion { signals, alpha, .. } = lowered else {
-        panic!("expected LogOddsFusion");
+    let OperatorTree::RobustPositiveEvidencePool { signals, alpha, .. } = lowered else {
+        panic!("expected RobustPositiveEvidencePool");
     };
     assert_eq!(signals.len(), 2);
     assert!((alpha - 0.5).abs() < f64::EPSILON);

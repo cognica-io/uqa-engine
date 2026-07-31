@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Log-odds fusion algebraic property tests (Paper 4, Section 4).
+//! Robust positive-evidence pool property tests (Paper 4, Section 4).
 //!
 //! Pins the raw mean-logit helper's algebraic properties, the default
-//! sign-preserving probability contract, and the Lucene-parity softplus
-//! opt-in behavior.
+//! sign behavior and the Lucene-parity softplus heuristic. Exact Bayesian laws
+//! are tested separately by `BayesianEvidenceFusion`.
 
 use proptest::prelude::*;
-use uqa_fusion::LogOddsFusion;
+use uqa_fusion::RobustPositiveEvidencePool;
 
 /// Numerically safe probabilities — keeps logits finite.
 fn safe_prob() -> impl Strategy<Value = f64> {
@@ -28,8 +28,8 @@ proptest! {
     /// The identity holds for both forms.
     #[test]
     fn n1_identity(p in safe_prob()) {
-        let scaled = LogOddsFusion::default();
-        let mean = LogOddsFusion::new(0.0).unwrap();
+        let scaled = RobustPositiveEvidencePool::default();
+        let mean = RobustPositiveEvidencePool::new(0.0).unwrap();
         prop_assert!(
             (scaled.fuse(&[p]) - p).abs() < 1e-12,
             "scaled.fuse([p]) != p"
@@ -44,7 +44,7 @@ proptest! {
     /// positive evidence keeps the fused probability at or above 0.5.
     #[test]
     fn sign_preserved_when_all_above_half(probs in proptest::collection::vec(0.5001f64..0.999, 1..6)) {
-        let f = LogOddsFusion::default();
+        let f = RobustPositiveEvidencePool::default();
         let fused = f.fuse(&probs);
         prop_assert!(fused >= 0.5, "fuse {probs:?} -> {fused} should be >= 0.5");
     }
@@ -54,7 +54,7 @@ proptest! {
     /// 0.5.
     #[test]
     fn pass_gating_sign_preserved_when_all_below_half(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
-        let f = LogOddsFusion::with_gating(0.5, Some("pass")).unwrap();
+        let f = RobustPositiveEvidencePool::with_gating(0.5, Some("pass")).unwrap();
         let fused = f.fuse(&probs);
         prop_assert!(fused < 0.5, "fuse {probs:?} -> {fused} should be < 0.5");
     }
@@ -63,7 +63,7 @@ proptest! {
     /// evidence, so even weak matches score above absence.
     #[test]
     fn softplus_weak_matches_score_above_absence(probs in proptest::collection::vec(0.001f64..0.4999, 2..6)) {
-        let f = LogOddsFusion::default();
+        let f = RobustPositiveEvidencePool::default();
         let fused = f.fuse(&probs);
         prop_assert!(fused > 0.5, "fuse {probs:?} -> {fused} should be > 0.5");
     }
@@ -74,7 +74,7 @@ proptest! {
     /// (it scales toward 0.5 but never crosses it).
     #[test]
     fn irrelevance_preserves_sign(p in safe_prob(), pad in 1usize..8) {
-        let mean = LogOddsFusion::new(0.0).unwrap();
+        let mean = RobustPositiveEvidencePool::new(0.0).unwrap();
         let mut padded = vec![p];
         padded.extend(std::iter::repeat_n(0.5, pad));
         let fused = mean.fuse_mean(&padded);
@@ -93,7 +93,7 @@ proptest! {
     /// neutral fused score than a single occurrence.
     #[test]
     fn relevance_preservation(p in safe_prob(), n in 1usize..6) {
-        let mean = LogOddsFusion::new(0.0).unwrap();
+        let mean = RobustPositiveEvidencePool::new(0.0).unwrap();
         let single = mean.fuse_mean(&[p]);
         let many: Vec<f64> = std::iter::repeat_n(p, n).collect();
         let fused = mean.fuse_mean(&many);
@@ -111,7 +111,7 @@ proptest! {
     /// zero — i.e. the fused mean is exactly 0.5.
     #[test]
     fn symmetric_disagreement_collapses(p in safe_prob()) {
-        let mean = LogOddsFusion::new(0.0).unwrap();
+        let mean = RobustPositiveEvidencePool::new(0.0).unwrap();
         let pair = mean.fuse_mean(&[p, 1.0 - p]);
         prop_assert!(
             (pair - 0.5).abs() < 1e-9,
@@ -130,14 +130,17 @@ proptest! {
 /// confidence-scaled form deviates from mean form for n>=2.
 #[test]
 fn empty_input_returns_neutral() {
-    assert_eq!(LogOddsFusion::default().fuse(&[]), 0.5);
-    assert_eq!(LogOddsFusion::new(0.0).unwrap().fuse_mean(&[]), 0.5);
+    assert_eq!(RobustPositiveEvidencePool::default().fuse(&[]), 0.5);
+    assert_eq!(
+        RobustPositiveEvidencePool::new(0.0).unwrap().fuse_mean(&[]),
+        0.5
+    );
 }
 
 #[test]
 fn confidence_scaling_amplifies_agreement() {
-    let scaled = LogOddsFusion::new(0.5).unwrap();
-    let mean = LogOddsFusion::new(0.0).unwrap();
+    let scaled = RobustPositiveEvidencePool::new(0.5).unwrap();
+    let mean = RobustPositiveEvidencePool::new(0.0).unwrap();
     let agreeing = [0.8, 0.8, 0.8];
     let s = scaled.fuse(&agreeing);
     let m = mean.fuse_mean(&agreeing);

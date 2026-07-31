@@ -356,8 +356,15 @@ pub enum OperatorTree {
     /// calibrated probability projection.
     CosineProbability(Box<OperatorTree>),
 
-    /// `LogOddsFusionOperator` with optional Lucene weights and logit bounds.
-    LogOddsFusion {
+    /// Exact signed-evidence Bayesian fusion. `base_rate = None` derives one
+    /// prior from signal metadata and otherwise falls back to the neutral 0.5.
+    BayesianEvidenceFusion {
+        signals: Vec<OperatorTree>,
+        base_rate: Option<f64>,
+    },
+    /// Robust positive-evidence retrieval pool with optional weights and logit
+    /// normalization. This variant makes no calibration theorem claim.
+    RobustPositiveEvidencePool {
         signals: Vec<OperatorTree>,
         alpha: f64,
         gating: GatingSpec,
@@ -698,7 +705,10 @@ impl OperatorTree {
             | OperatorTree::Union(children)
             | OperatorTree::Composed(children)
             | OperatorTree::Opaque { children, .. }
-            | OperatorTree::LogOddsFusion {
+            | OperatorTree::BayesianEvidenceFusion {
+                signals: children, ..
+            }
+            | OperatorTree::RobustPositiveEvidencePool {
                 signals: children, ..
             }
             | OperatorTree::ProbBoolFusion {

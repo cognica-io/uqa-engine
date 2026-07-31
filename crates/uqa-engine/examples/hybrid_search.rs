@@ -70,7 +70,7 @@ fn main() {
         })
         .unwrap();
 
-    println!("Hybrid (text + vector, log-odds fused, alpha=0.5) top 3:");
+    println!("Hybrid (text + vector, positive-evidence pooled, alpha=0.5) top 3:");
     for h in &hits {
         println!("  doc_id={} score={:.4}", h.doc_id, h.score);
     }

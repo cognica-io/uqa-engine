@@ -238,10 +238,13 @@ fn test_three_implicit_and_left_associative() {
 }
 
 #[test]
-fn test_compile_mixed_text_vector_and_uses_log_odds() {
+fn test_compile_mixed_text_vector_and_uses_robust_positive_evidence_pool() {
     let ast = parse("body:search AND embedding:[0.1, 0.9, 0.0]");
     let op = compile_fts_node(&ast, Some("_all"), &whitespace_tokenizer);
-    assert!(matches!(op, OperatorTree::LogOddsFusion { .. }));
+    assert!(matches!(
+        op,
+        OperatorTree::RobustPositiveEvidencePool { .. }
+    ));
 }
 
 #[test]

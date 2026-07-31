@@ -29,8 +29,8 @@
 //! `compile` lowers the AST into an [`OperatorTree`]. Term and phrase
 //! nodes become `Term` / `Intersect(Term*)` (phrases are tokenized
 //! into individual terms by the caller-supplied phrase tokenizer);
-//! vectors become `KNN { k = 10_000 }`; AND mixes log-odds fusion
-//! when one side has a vector signal and the other does not.
+//! vectors become `KNN { k = 10_000 }`; AND uses robust positive-evidence
+//! pooling when one side has a vector signal and the other does not.
 
 use crate::error::{Result, SQLError};
 use uqa_operators::{GatingSpec, OperatorTree};
@@ -469,11 +469,11 @@ pub fn compile(
         FTSNode::And(left, right) => {
             let l = compile(left, default_field, phrase_tokenizer);
             let r = compile(right, default_field, phrase_tokenizer);
-            // Mixed text + vector AND -> log-odds fusion (same shape
-            // as the canonical UQA implementation's `_compile_and`).
+            // Mixed text + vector AND -> robust positive-evidence pooling
+            // (same shape as the canonical UQA implementation's `_compile_and`).
             let mixed = has_vector_signal(left) ^ has_vector_signal(right);
             if mixed {
-                OperatorTree::LogOddsFusion {
+                OperatorTree::RobustPositiveEvidencePool {
                     signals: vec![l, r],
                     alpha: 0.5,
                     gating: GatingSpec::Softplus,
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_mixed_and_uses_logodds_fusion() {
+    fn compile_mixed_and_uses_robust_positive_evidence_pool() {
         let ast = FTSNode::And(
             Box::new(FTSNode::Term {
                 field: None,
@@ -614,7 +614,7 @@ mod tests {
         let op = compile(&ast, Some("body"), &whitespace_tokenizer);
         assert!(matches!(
             op,
-            OperatorTree::LogOddsFusion {
+            OperatorTree::RobustPositiveEvidencePool {
                 alpha: 0.5,
                 gating: GatingSpec::Softplus,
                 ..

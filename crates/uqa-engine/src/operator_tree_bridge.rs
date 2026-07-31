@@ -44,8 +44,9 @@ use uqa_core::{
 };
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::{
-    DeepGraphDirection, ExternalPriorMode, GatingSpec, LogOddsFusionOperator, MultiStageCutoff,
-    MultiStageEntry, OperatorTree, TextScoringMode,
+    BayesianEvidenceFusionOperator, DeepGraphDirection, ExternalPriorMode, GatingSpec,
+    MultiStageCutoff, MultiStageEntry, OperatorTree, RobustPositiveEvidencePoolOperator,
+    TextScoringMode,
 };
 use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
 use uqa_planner::parallel::ParallelExecutor;
@@ -74,7 +75,7 @@ struct WeightedPathExecution<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct LogOddsExecution<'a> {
+struct PositiveEvidencePoolExecution<'a> {
     signals: &'a [OperatorTree],
     alpha: f64,
     gating: &'a GatingSpec,
@@ -226,7 +227,8 @@ fn lower_function(name: &str, args: &[ScalarExpr], params: &[SQLParam]) -> Optio
         // Standalone knn_match preserves raw cosine similarities;
         // calibration to (0, 1) only fires inside fusion contexts.
         "knn_match" => try_lower_knn_match(args, params).ok(),
-        "fuse_log_odds" => lower_fuse_log_odds(args, params),
+        "fuse_bayesian_evidence" => lower_bayesian_evidence_fusion(args, params),
+        "pool_positive_evidence" | "fuse_log_odds" => lower_positive_evidence_pool(args, params),
         "multi_field_match" => lower_multi_field_match(args, params),
         "staged_retrieval" => lower_staged_retrieval(args, params),
         "attention" | "fuse_attention" | "fuse_multihead" => {
@@ -537,8 +539,15 @@ fn validate_operator_function_arity(name: &str, actual: usize) -> DriverResult<(
         "deep_predict" => (actual != 1).then_some("1"),
         "graph_pagerank" | "pagerank" | "graph_hits" | "hits" | "graph_betweenness"
         | "betweenness" => (actual > 1).then_some("0..=1"),
-        "fuse_log_odds" | "attention" | "fuse_attention" | "fuse_multihead" | "learned_fusion"
-        | "fuse_learned" | "staged_retrieval" => (actual < 2).then_some(">=2"),
+        "fuse_bayesian_evidence"
+        | "pool_positive_evidence"
+        | "fuse_log_odds"
+        | "attention"
+        | "fuse_attention"
+        | "fuse_multihead"
+        | "learned_fusion"
+        | "fuse_learned"
+        | "staged_retrieval" => (actual < 2).then_some(">=2"),
         "multi_field_match" => (actual < 3).then_some(">=3"),
         _ => None,
     };
@@ -555,7 +564,9 @@ fn validate_operator_function_arity(name: &str, actual: usize) -> DriverResult<(
 fn validate_probability_signal_contract(name: &str, args: &[ScalarExpr]) -> DriverResult<()> {
     if !matches!(
         name.to_ascii_lowercase().as_str(),
-        "fuse_log_odds"
+        "fuse_bayesian_evidence"
+            | "pool_positive_evidence"
+            | "fuse_log_odds"
             | "attention"
             | "fuse_attention"
             | "fuse_multihead"
@@ -874,11 +885,10 @@ fn lower_staged_retrieval(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Op
     (!stages.is_empty()).then_some(OperatorTree::MultiStage { stages })
 }
 
-/// Compile a signal-function call into a node that produces calibrated
-/// probabilities in (0, 1). Mirrors the canonical UQA implementation's
-/// `_compile_calibrated_signal`: in fusion contexts every signal must
-/// land on the (0, 1) probability scale before log-odds / attention /
-/// learned fusion can combine them.
+/// Compile a signal-function call into a node on the `[0, 1]` evidence scale.
+/// Mirrors the canonical UQA implementation's `_compile_calibrated_signal`:
+/// exact fusion, robust pooling, attention, and learned combinations all need
+/// a common numeric boundary even though they make different semantic claims.
 ///
 /// - `bayesian_match` --> [`OperatorTree::Term`] with Bayesian BM25 scoring.
 /// - `fts_match` text trees --> [`OperatorTree::BayesianScore`] around the
@@ -909,9 +919,9 @@ fn lower_calibrated_signal(
     }
 }
 
-/// Lower a function-call argument into a calibrated signal node. Used
-/// by every fusion lowering arm (`fuse_log_odds`, `attention`,
-/// `learned_fusion`) so the rewrite stays consistent across fusers.
+/// Lower a function-call argument into a probability-domain signal node. Used
+/// by exact evidence fusion, robust pooling, attention, and learned fusion so
+/// the rewrite stays consistent across combination policies.
 fn lower_signal_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorTree> {
     match arg {
         ScalarExpr::Func { name, args, .. } => {
@@ -932,7 +942,7 @@ fn lower_operator_arg(arg: &ScalarExpr, params: &[SQLParam]) -> Option<OperatorT
     lower_function(name, args, params)
 }
 
-fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
+fn lower_positive_evidence_pool(args: &[ScalarExpr], params: &[SQLParam]) -> Option<OperatorTree> {
     // `fuse_log_odds(signal_1, signal_2, ...[, alpha[, gating]])`.
     // The UQA SQL contract defaults alpha to 0.5 when no numeric option is supplied;
     // don't treat the last signal as an alpha argument.
@@ -1008,7 +1018,7 @@ fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Opera
     for a in &args[..signal_end] {
         signals.push(lower_signal_arg(a, params)?);
     }
-    Some(OperatorTree::LogOddsFusion {
+    Some(OperatorTree::RobustPositiveEvidencePool {
         signals,
         alpha,
         gating,
@@ -1017,6 +1027,36 @@ fn lower_fuse_log_odds(args: &[ScalarExpr], params: &[SQLParam]) -> Option<Opera
         logit_max,
         adaptive_weights: false,
     })
+}
+
+fn lower_bayesian_evidence_fusion(
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+) -> Option<OperatorTree> {
+    if args.len() < 2 {
+        return None;
+    }
+    let mut signal_end = args.len();
+    let mut base_rate = None;
+    if let Some((name, value_expr)) = named_arg_expr(args.last()?) {
+        if !name.eq_ignore_ascii_case("base_rate") {
+            return None;
+        }
+        let value = const_f64(value_expr, params)?;
+        if !value.is_finite() || value <= 0.0 || value >= 1.0 {
+            return None;
+        }
+        base_rate = Some(value);
+        signal_end -= 1;
+    }
+    if signal_end < 2 {
+        return None;
+    }
+    let signals = args[..signal_end]
+        .iter()
+        .map(|argument| lower_signal_arg(argument, params))
+        .collect::<Option<Vec<_>>>()?;
+    Some(OperatorTree::BayesianEvidenceFusion { signals, base_rate })
 }
 
 struct AttentionLoweringOptions<'a> {
@@ -1329,7 +1369,16 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
         OperatorTree::Complement(child) => {
             OperatorTree::Complement(Box::new(prepare_fts_probability_tree(*child)))
         }
-        OperatorTree::LogOddsFusion {
+        OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
+            OperatorTree::BayesianEvidenceFusion {
+                signals: signals
+                    .into_iter()
+                    .map(prepare_fts_probability_tree)
+                    .collect(),
+                base_rate,
+            }
+        }
+        OperatorTree::RobustPositiveEvidencePool {
             signals,
             alpha,
             gating,
@@ -1337,7 +1386,7 @@ fn prepare_fts_probability_tree(tree: OperatorTree) -> OperatorTree {
             logit_min,
             logit_max,
             adaptive_weights,
-        } => OperatorTree::LogOddsFusion {
+        } => OperatorTree::RobustPositiveEvidencePool {
             signals: signals
                 .into_iter()
                 .map(prepare_fts_probability_tree)
@@ -1830,7 +1879,10 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 threshold,
                 field,
             } => self.execute_vector_similarity(query_vector, *threshold, field),
-            OperatorTree::LogOddsFusion {
+            OperatorTree::BayesianEvidenceFusion { signals, base_rate } => {
+                self.execute_bayesian_evidence_fusion(signals, *base_rate)
+            }
+            OperatorTree::RobustPositiveEvidencePool {
                 signals,
                 alpha,
                 gating,
@@ -1838,7 +1890,7 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 logit_min,
                 logit_max,
                 adaptive_weights,
-            } => self.execute_log_odds_fusion(LogOddsExecution {
+            } => self.execute_positive_evidence_pool(PositiveEvidencePoolExecution {
                 signals,
                 alpha: *alpha,
                 gating,
@@ -3001,13 +3053,13 @@ impl EngineDriver<'_> {
         Ok(PostingList::from_sorted_unchecked(entries))
     }
 
-    fn execute_log_odds_fusion(
+    fn execute_positive_evidence_pool(
         &self,
-        execution: LogOddsExecution<'_>,
+        execution: PositiveEvidencePoolExecution<'_>,
     ) -> DriverResult<PostingList> {
         use uqa_operators::base::Operator;
 
-        let LogOddsExecution {
+        let PositiveEvidencePoolExecution {
             signals,
             alpha,
             gating,
@@ -3019,7 +3071,7 @@ impl EngineDriver<'_> {
 
         if signals.is_empty() {
             return Err(SQLError::TypeMismatch(
-                "LogOddsFusion requires at least one signal".to_string(),
+                "RobustPositiveEvidencePool requires at least one signal".to_string(),
             ));
         }
         let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
@@ -3039,7 +3091,8 @@ impl EngineDriver<'_> {
             GatingSpec::Swish => uqa_fusion::LogitGating::Swish,
             GatingSpec::Gelu => uqa_fusion::LogitGating::Gelu,
         };
-        let mut operator = LogOddsFusionOperator::new(signal_ops, alpha).with_gating(logit_gating);
+        let mut operator =
+            RobustPositiveEvidencePoolOperator::new(signal_ops, alpha).with_gating(logit_gating);
         if adaptive_weights {
             operator = operator.with_adaptive_weights();
         }
@@ -3054,10 +3107,39 @@ impl EngineDriver<'_> {
         }
         operator
             .execute(&self.bridge_context()?)
-            .map_err(|error| operator_execution_error("LogOddsFusion", error))
+            .map_err(|error| operator_execution_error("RobustPositiveEvidencePool", error))
     }
 
-    /// Execute a fusion child under the probability contract: the
+    fn execute_bayesian_evidence_fusion(
+        &self,
+        signals: &[OperatorTree],
+        explicit_base_rate: Option<f64>,
+    ) -> DriverResult<PostingList> {
+        use uqa_operators::base::Operator;
+
+        if signals.is_empty() {
+            return Err(SQLError::TypeMismatch(
+                "BayesianEvidenceFusion requires at least one signal".to_string(),
+            ));
+        }
+        let mut signal_ops: Vec<std::sync::Arc<dyn Operator>> = Vec::with_capacity(signals.len());
+        let mut signal_priors = Vec::new();
+        for signal in signals {
+            let (posting, prior) = self.execute_fusion_signal(signal)?;
+            signal_ops.push(std::sync::Arc::new(StaticPostingList { pl: posting }));
+            if let Some(prior) = prior {
+                signal_priors.push(prior);
+            }
+        }
+        let base_rate = explicit_base_rate
+            .or_else(|| combine_signal_priors(&signal_priors))
+            .unwrap_or(0.5);
+        BayesianEvidenceFusionOperator::new(signal_ops, base_rate)
+            .execute(&self.bridge_context()?)
+            .map_err(|error| operator_execution_error("BayesianEvidenceFusion", error))
+    }
+
+    /// Execute a combination child at the typed probability/evidence boundary: the
     /// signal contributes prior-free evidence and reports the corpus
     /// relevance prior it would otherwise have folded in, so the
     /// fusion can apply that prior exactly once.
@@ -4122,7 +4204,8 @@ fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
         | OperatorTree::Union(children)
         | OperatorTree::Composed(children)
         | OperatorTree::Opaque { children, .. } => children.first(),
-        OperatorTree::LogOddsFusion { signals, .. }
+        OperatorTree::BayesianEvidenceFusion { signals, .. }
+        | OperatorTree::RobustPositiveEvidencePool { signals, .. }
         | OperatorTree::ProbBoolFusion { signals, .. }
         | OperatorTree::AttentionFusion { signals, .. }
         | OperatorTree::LearnedFusion { signals, .. } => signals.first(),

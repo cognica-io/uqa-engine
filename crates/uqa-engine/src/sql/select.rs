@@ -1340,7 +1340,7 @@ fn run_query_block_with_prepared_exists_output(
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;
     // otherwise registry-backed predicates such as
-    // `fuse_log_odds(bayesian_match(...), knn_match(...))` fall
+    // `pool_positive_evidence(bayesian_match(...), knn_match(...))` fall
     // through to scalar expression evaluation.
     if let SourcePlan::Table { name, alias } = from {
         let foreign_table = engine

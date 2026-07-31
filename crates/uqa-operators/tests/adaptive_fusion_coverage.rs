@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
-use uqa_operators::{AdaptiveLogOddsFusionOperator, ExecutionContext, Operator};
+use uqa_operators::{AdaptivePositiveEvidencePoolOperator, ExecutionContext, Operator};
 
 struct ConstantOperator {
     pl: PostingList,
@@ -43,7 +43,7 @@ fn adaptive_operator_basic() {
     let pl1 = op(vec![(1, 0.8), (2, 0.7), (3, 0.6)]);
     let pl2 = op(vec![(1, 0.9), (2, 0.3)]);
 
-    let op = AdaptiveLogOddsFusionOperator::new(vec![pl1, pl2], 0.5, None);
+    let op = AdaptivePositiveEvidencePoolOperator::new(vec![pl1, pl2], 0.5, None);
     let result = op.execute(&ExecutionContext::new()).unwrap();
 
     assert_eq!(result.len(), 3);
@@ -56,7 +56,7 @@ fn adaptive_operator_basic() {
 
 #[test]
 fn adaptive_operator_rejects_missing_signals() {
-    let op = AdaptiveLogOddsFusionOperator::new(Vec::new(), 0.5, None);
+    let op = AdaptivePositiveEvidencePoolOperator::new(Vec::new(), 0.5, None);
     let error = op.execute(&ExecutionContext::new()).unwrap_err();
     assert!(error.to_string().contains("at least one signal"));
 }
@@ -66,6 +66,6 @@ fn adaptive_operator_cost_estimate() {
     let pl1 = op(vec![(1, 0.5)]);
     let pl2 = op(vec![(2, 0.5)]);
 
-    let op = AdaptiveLogOddsFusionOperator::new(vec![pl1, pl2], 0.5, None);
+    let op = AdaptivePositiveEvidencePoolOperator::new(vec![pl1, pl2], 0.5, None);
     assert_eq!(op.cost_estimate(&IndexStats::new(100)), 200.0);
 }

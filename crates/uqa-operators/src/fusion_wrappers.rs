@@ -241,9 +241,9 @@ impl Operator for LearnedFusionOperator {
 /// Multi-field Bayesian BM25 search (Section 12.2 #1, Paper 3).
 /// Searches every `field` with its corresponding query, scores each field
 /// through a prior-free [`uqa_scoring::BayesianBM25Scorer`], and fuses
-/// the per-field evidence through weighted sparse log-odds fusion
-/// (`uqa_fusion::log_odds`); the configured `base_rate` enters the
-/// fusion exactly once.
+/// the per-field evidence through weighted robust positive-evidence pooling
+/// (`uqa_fusion::positive_evidence`); the configured `base_rate` enters the
+/// pool exactly once.
 pub struct MultiFieldSearchOperator {
     pub fields: Vec<String>,
     pub queries: Vec<String>,
@@ -360,7 +360,7 @@ impl Operator for MultiFieldSearchOperator {
         };
 
         let active_field_count = per_field.iter().filter(|scores| !scores.is_empty()).count();
-        let mut fusion = uqa_fusion::LogOddsFusion::new(self.fusion_alpha)
+        let mut fusion = uqa_fusion::RobustPositiveEvidencePool::new(self.fusion_alpha)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         if self.bayesian_params.base_rate > 0.0 {
             fusion = fusion

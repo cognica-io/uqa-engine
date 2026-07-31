@@ -42,10 +42,10 @@ pub use hierarchical::{
     PathAggregateOperator, PathFilterOperator, PathProjectOperator, UnifiedFilterOperator,
 };
 pub use hybrid::{
-    AdaptiveLogOddsFusionOperator, FacetVectorOperator, HybridTextVectorOperator,
-    IndexScanOperator, LogOddsFusionOperator, ProbBoolFusionOperator,
-    ProbBoolMode as HybridProbBoolMode, ProbNotOperator, SemanticFilterOperator,
-    VectorExclusionOperator,
+    AdaptivePositiveEvidencePoolOperator, BayesianEvidenceFusionOperator, FacetVectorOperator,
+    HybridTextVectorOperator, IndexScanOperator, ProbBoolFusionOperator,
+    ProbBoolMode as HybridProbBoolMode, ProbNotOperator, RobustPositiveEvidencePoolOperator,
+    SemanticFilterOperator, VectorExclusionOperator,
 };
 pub use multi_stage::{Cutoff, MultiStageOperator};
 pub use primitive::{

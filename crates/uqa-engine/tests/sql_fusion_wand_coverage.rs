@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, ScoringMode};
-use uqa_fusion::LogOddsFusion;
-use uqa_scoring::BayesianBM25Params;
+use uqa_fusion::{BayesianEvidenceFusion, RobustPositiveEvidencePool};
+use uqa_scoring::{BayesianBM25Params, EvidenceLogit};
 use uqa_sql::SQLParam;
 
 fn engine() -> Engine {
@@ -476,7 +476,7 @@ fn test_log_odds_fuses_prior_free_evidence_with_the_prior_once() {
         .unwrap();
     let (params, [learning, algorithms]) =
         evidence_calibration(&engine, "content", ["learning", "algorithms"]);
-    let mut fusion = LogOddsFusion::new(0.5).unwrap();
+    let mut fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     if params.base_rate > 0.0 {
         fusion = fusion.with_base_rate(params.base_rate).unwrap();
     }
@@ -499,6 +499,112 @@ fn test_log_odds_fuses_prior_free_evidence_with_the_prior_once() {
 }
 
 #[test]
+fn exact_bayesian_fusion_adds_signed_evidence_and_one_explicit_prior() {
+    let engine = engine();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM docs WHERE \
+             fuse_bayesian_evidence(\
+                 bayesian_match(content, 'learning'), \
+                 bayesian_match(content, 'algorithms'), \
+                 base_rate => 0.1)",
+            &[],
+        )
+        .unwrap();
+    let (_, [learning, algorithms]) =
+        evidence_calibration(&engine, "content", ["learning", "algorithms"]);
+    let fusion = BayesianEvidenceFusion::new(0.1).unwrap();
+
+    for row in result.rows {
+        let doc_id = match row.get("id") {
+            Some(Value::Int(value)) => *value as u64,
+            other => panic!("expected integer id, got {other:?}"),
+        };
+        let score = match row.get("_score") {
+            Some(Value::Float(value)) => *value,
+            other => panic!("expected float score, got {other:?}"),
+        };
+        let evidence: Vec<_> = [learning.get(&doc_id), algorithms.get(&doc_id)]
+            .into_iter()
+            .flatten()
+            .map(|probability| EvidenceLogit::from_prior_free_probability(*probability).unwrap())
+            .collect();
+        let expected = fusion.fuse(&evidence).unwrap().value();
+        assert!((score - expected).abs() < 1e-12, "doc {doc_id}");
+    }
+}
+
+#[test]
+fn uninformative_vector_evidence_adds_no_membership_bonus() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE neutral_vectors (\
+                id SERIAL PRIMARY KEY, content TEXT, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX neutral_vectors_gin ON neutral_vectors USING gin (content)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO neutral_vectors (content, embedding) VALUES \
+             ('machine learning', ARRAY[1.0, 0.0]), \
+             ('database indexing', ARRAY[1.0, 0.0]), \
+             ('deep learning', ARRAY[1.0, 0.0])",
+            &[],
+        )
+        .unwrap();
+
+    let params = engine
+        .bayesian_params_for("neutral_vectors", "content")
+        .unwrap();
+    let text_evidence: BTreeMap<_, _> = engine
+        .search(
+            "neutral_vectors",
+            "content",
+            "learning",
+            &ScoringMode::BayesianBM25(params.evidence_params()),
+            usize::MAX,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM neutral_vectors WHERE \
+             fuse_bayesian_evidence(\
+                 bayesian_match(content, 'learning'), \
+                 calibrated_vector_match(embedding, ARRAY[1.0, 0.0], 3), \
+                 base_rate => 0.1) \
+             ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows.len(), 3);
+
+    for row in result.rows {
+        let doc_id = match row.get("id") {
+            Some(Value::Int(value)) => *value as u64,
+            other => panic!("expected integer id, got {other:?}"),
+        };
+        let actual = match row.get("_score") {
+            Some(Value::Float(value)) => *value,
+            other => panic!("expected float score, got {other:?}"),
+        };
+        let expected = text_evidence.get(&doc_id).map_or(0.1, |evidence| {
+            uqa_scoring::sigmoid(uqa_scoring::logit(0.1) + uqa_scoring::logit(*evidence))
+        });
+        assert!((actual - expected).abs() < 1e-12, "doc {doc_id}");
+    }
+}
+
+#[test]
 fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
     let engine = engine();
     let result = engine
@@ -514,7 +620,7 @@ fn test_log_odds_weights_and_bounds_follow_signal_reordering() {
         .unwrap();
     let (params, [learning, algorithms]) =
         evidence_calibration(&engine, "content", ["learning", "algorithms"]);
-    let mut fusion = LogOddsFusion::new(0.5).unwrap();
+    let mut fusion = RobustPositiveEvidencePool::new(0.5).unwrap();
     if params.base_rate > 0.0 {
         fusion = fusion.with_base_rate(params.base_rate).unwrap();
     }

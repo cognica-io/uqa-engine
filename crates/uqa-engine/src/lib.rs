@@ -41,14 +41,15 @@
 //! Querying:
 //! - `Engine::sql` (defined in [`sql`]) - full SQL surface (select /
 //!   insert / update / delete / create-table, plus the registered
-//!   functions: `text_match`, `knn_match`, `fuse_log_odds`,
+//!   functions: `text_match`, `knn_match`, `fuse_bayesian_evidence`,
+//!   `pool_positive_evidence` (plus compatibility alias `fuse_log_odds`),
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
 //! - [`Engine::search`] - direct text-only retrieval returning a posting
 //!   list.
 //! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN
 //!   over a vector field.
-//! - [`Engine::hybrid_search`] - log-odds fusion of text and vector
-//!   posting lists (no SQL parsing in the hot path).
+//! - [`Engine::hybrid_search`] - robust positive-evidence pooling of text
+//!   and vector posting lists (no SQL parsing in the hot path).
 //!
 //! Deep-model persistence:
 //! - [`Engine::save_model`], [`Engine::load_model`], [`Engine::drop_model`]
@@ -846,7 +847,7 @@ pub struct HybridSearchParams<'a> {
     /// How many KNN candidates to pull from the vector index before
     /// fusion. Tune above `top_k` to widen the recall pool.
     pub knn_pool: usize,
-    /// Confidence-scaling exponent for log-odds fusion (Paper 4 Section 4).
+    /// Confidence-scaling exponent for robust positive-evidence pooling.
     pub alpha: f64,
     pub top_k: usize,
 }
