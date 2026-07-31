@@ -9,10 +9,10 @@
 //! `GraphPostingList` carries a `(doc_id -> GraphPayload)` side-table on
 //! top of a standard posting list. The lossless `Phi` encoding shuttles
 //! that side-table through encoded field entries on the underlying
-//! [`uqa_core::Payload`], so documented posting merge policies compose
-//! with graph metadata without loss.
+//! [`uqa_core::Payload`]. Graph-result merges use explicit subgraph policies;
+//! generic posting-list payload merges remain a separate contract.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::types::{
     GraphPhiEnvelope, GraphPhiPayload, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD,
@@ -38,6 +38,34 @@ impl GraphPayload {
     }
 }
 
+/// How graph metadata is combined when two graph results contain the same
+/// document. Ordinary posting payloads still follow
+/// [`PostingList::merge_union`] / [`PostingList::merge_intersection`]; this
+/// policy applies only to the graph name and subgraph vertex/edge sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubgraphMergePolicy {
+    Union,
+    Intersection,
+    PreferLeft,
+    PreferRight,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GraphPostingListError {
+    #[error("graph payload for document {doc_id} is outside the posting-list support")]
+    PayloadOutsideSupport { doc_id: DocId },
+    #[error(
+        "cannot combine graph payloads for document {doc_id}: graph names {left:?} and {right:?} conflict"
+    )]
+    ConflictingGraphNames {
+        doc_id: DocId,
+        left: String,
+        right: String,
+    },
+}
+
+pub type GraphPostingListResult<T> = Result<T, GraphPostingListError>;
+
 /// Posting list paired with a `(doc_id -> GraphPayload)` map. The
 /// invariants of the underlying `PostingList` (sorted, unique doc ids)
 /// hold here as well.
@@ -52,11 +80,22 @@ impl GraphPostingList {
         Self::default()
     }
 
-    pub fn from_parts(inner: PostingList, graph_payloads: BTreeMap<DocId, GraphPayload>) -> Self {
-        Self {
+    /// Construct a graph posting list while enforcing that every side-table
+    /// key belongs to the underlying posting support.
+    pub fn try_from_parts(
+        inner: PostingList,
+        graph_payloads: BTreeMap<DocId, GraphPayload>,
+    ) -> GraphPostingListResult<Self> {
+        if let Some(doc_id) = graph_payloads
+            .keys()
+            .find(|doc_id| inner.get_entry(**doc_id).is_none())
+        {
+            return Err(GraphPostingListError::PayloadOutsideSupport { doc_id: *doc_id });
+        }
+        Ok(Self {
             inner,
             graph_payloads,
-        }
+        })
     }
 
     /// `Phi`: encode the graph payload map onto the underlying posting
@@ -200,8 +239,17 @@ impl GraphPostingList {
         }
     }
 
-    pub fn set_graph_payload(&mut self, doc_id: DocId, payload: GraphPayload) {
+    /// Attach graph metadata to a document already present in the support.
+    pub fn try_set_graph_payload(
+        &mut self,
+        doc_id: DocId,
+        payload: GraphPayload,
+    ) -> GraphPostingListResult<()> {
+        if self.inner.get_entry(doc_id).is_none() {
+            return Err(GraphPostingListError::PayloadOutsideSupport { doc_id });
+        }
         self.graph_payloads.insert(doc_id, payload);
+        Ok(())
     }
 
     pub fn get_graph_payload(&self, doc_id: DocId) -> Option<&GraphPayload> {
@@ -220,24 +268,168 @@ impl GraphPostingList {
         self.inner.is_empty()
     }
 
-    /// Support union plus payload merge via `Phi`: round-trip both operands
-    /// through [`PostingList::merge_union`] and rebuild the graph view.
-    pub fn merge_union(&self, other: &Self) -> Self {
-        let merged = self.to_posting_list().merge_union(&other.to_posting_list());
-        Self::from_posting_list(&merged)
+    /// Union document support and ordinary payloads, while taking the set
+    /// union of overlapping subgraph vertices and edges.
+    pub fn merge_union(&self, other: &Self) -> GraphPostingListResult<Self> {
+        self.merge_union_with(other, SubgraphMergePolicy::Union)
     }
 
-    pub fn merge_intersection(&self, other: &Self) -> Self {
-        let merged = self
-            .to_posting_list()
-            .merge_intersection(&other.to_posting_list());
-        Self::from_posting_list(&merged)
+    /// Intersect document support and ordinary payloads, while taking the set
+    /// intersection of overlapping subgraph vertices and edges.
+    pub fn merge_intersection(&self, other: &Self) -> GraphPostingListResult<Self> {
+        self.merge_intersection_with(other, SubgraphMergePolicy::Intersection)
+    }
+
+    /// Union with an explicit graph-metadata collision policy.
+    pub fn merge_union_with(
+        &self,
+        other: &Self,
+        policy: SubgraphMergePolicy,
+    ) -> GraphPostingListResult<Self> {
+        let inner = self.inner.merge_union(&other.inner);
+        let graph_payloads = self.merge_graph_payloads(other, &inner, policy)?;
+        Self::try_from_parts(inner, graph_payloads)
+    }
+
+    /// Intersection with an explicit graph-metadata collision policy.
+    pub fn merge_intersection_with(
+        &self,
+        other: &Self,
+        policy: SubgraphMergePolicy,
+    ) -> GraphPostingListResult<Self> {
+        let inner = self.inner.merge_intersection(&other.inner);
+        let graph_payloads = self.merge_graph_payloads(other, &inner, policy)?;
+        Self::try_from_parts(inner, graph_payloads)
     }
 
     pub fn exclude(&self, other: &Self) -> Self {
-        let merged = self.to_posting_list().exclude(&other.to_posting_list());
-        Self::from_posting_list(&merged)
+        let inner = self.inner.exclude(&other.inner);
+        let graph_payloads = self
+            .graph_payloads
+            .iter()
+            .filter(|(doc_id, _)| inner.get_entry(**doc_id).is_some())
+            .map(|(doc_id, payload)| (*doc_id, payload.clone()))
+            .collect();
+        Self {
+            inner,
+            graph_payloads,
+        }
     }
+
+    fn merge_graph_payloads(
+        &self,
+        other: &Self,
+        merged_inner: &PostingList,
+        policy: SubgraphMergePolicy,
+    ) -> GraphPostingListResult<BTreeMap<DocId, GraphPayload>> {
+        let mut merged = BTreeMap::new();
+        for entry in merged_inner {
+            let doc_id = entry.doc_id;
+            let left = self.graph_payloads.get(&doc_id);
+            let right = other.graph_payloads.get(&doc_id);
+            let payload = match (left, right) {
+                (None, None) => continue,
+                (Some(payload), None) | (None, Some(payload)) => payload.clone(),
+                (Some(left), Some(right)) => merge_graph_payload(doc_id, left, right, policy)?,
+            };
+
+            let overlaps =
+                self.inner.get_entry(doc_id).is_some() && other.inner.get_entry(doc_id).is_some();
+            let mut payload = payload;
+            if overlaps
+                && (left.and_then(|value| value.score_override).is_some()
+                    || right.and_then(|value| value.score_override).is_some())
+            {
+                let left_score = effective_score(self, doc_id);
+                let right_score = effective_score(other, doc_id);
+                payload.score_override = Some(left_score + right_score);
+            }
+            merged.insert(doc_id, payload);
+        }
+        Ok(merged)
+    }
+}
+
+fn effective_score(list: &GraphPostingList, doc_id: DocId) -> f64 {
+    list.graph_payloads
+        .get(&doc_id)
+        .and_then(|payload| payload.score_override)
+        .unwrap_or_else(|| {
+            list.inner
+                .get_entry(doc_id)
+                .map_or(0.0, |entry| entry.payload.score)
+        })
+}
+
+fn merge_graph_payload(
+    doc_id: DocId,
+    left: &GraphPayload,
+    right: &GraphPayload,
+    policy: SubgraphMergePolicy,
+) -> GraphPostingListResult<GraphPayload> {
+    let graph_name = match policy {
+        SubgraphMergePolicy::PreferLeft => left.graph_name.clone(),
+        SubgraphMergePolicy::PreferRight => right.graph_name.clone(),
+        SubgraphMergePolicy::Union | SubgraphMergePolicy::Intersection => {
+            compatible_graph_name(doc_id, &left.graph_name, &right.graph_name)?
+        }
+    };
+    let (subgraph_vertices, subgraph_edges) = match policy {
+        SubgraphMergePolicy::Union => (
+            set_union(&left.subgraph_vertices, &right.subgraph_vertices),
+            set_union(&left.subgraph_edges, &right.subgraph_edges),
+        ),
+        SubgraphMergePolicy::Intersection => (
+            set_intersection(&left.subgraph_vertices, &right.subgraph_vertices),
+            set_intersection(&left.subgraph_edges, &right.subgraph_edges),
+        ),
+        SubgraphMergePolicy::PreferLeft => {
+            (left.subgraph_vertices.clone(), left.subgraph_edges.clone())
+        }
+        SubgraphMergePolicy::PreferRight => (
+            right.subgraph_vertices.clone(),
+            right.subgraph_edges.clone(),
+        ),
+    };
+    Ok(GraphPayload {
+        subgraph_vertices,
+        subgraph_edges,
+        graph_name,
+        score_override: None,
+    })
+}
+
+fn compatible_graph_name(doc_id: DocId, left: &str, right: &str) -> GraphPostingListResult<String> {
+    if left == right || right.is_empty() {
+        Ok(left.to_string())
+    } else if left.is_empty() {
+        Ok(right.to_string())
+    } else {
+        Err(GraphPostingListError::ConflictingGraphNames {
+            doc_id,
+            left: left.to_string(),
+            right: right.to_string(),
+        })
+    }
+}
+
+fn set_union<T: Copy + Ord>(left: &[T], right: &[T]) -> Vec<T> {
+    left.iter()
+        .chain(right)
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn set_intersection<T: Copy + Ord>(left: &[T], right: &[T]) -> Vec<T> {
+    let right: BTreeSet<_> = right.iter().copied().collect();
+    left.iter()
+        .copied()
+        .filter(|value| right.contains(value))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn restore_payload_field(fields: &mut BTreeMap<String, Value>, key: &str, value: Option<Value>) {
@@ -275,19 +467,45 @@ mod tests {
     }
 
     fn fixture(doc_id: DocId, vertices: Vec<VertexId>, edges: Vec<EdgeId>) -> GraphPostingList {
-        let mut gpl = GraphPostingList::from_parts(
+        let mut gpl = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(doc_id, 1.0)]),
             BTreeMap::new(),
-        );
-        gpl.set_graph_payload(
+        )
+        .unwrap();
+        gpl.try_set_graph_payload(
             doc_id,
             GraphPayload {
                 subgraph_vertices: vertices,
                 subgraph_edges: edges,
                 ..GraphPayload::default()
             },
-        );
+        )
+        .unwrap();
         gpl
+    }
+
+    #[test]
+    fn graph_payload_support_is_enforced_by_construction_and_mutation() {
+        let inner = PostingList::from_sorted_unchecked(vec![entry(1, 1.0)]);
+        let error = GraphPostingList::try_from_parts(
+            inner.clone(),
+            BTreeMap::from([(2, GraphPayload::default())]),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            GraphPostingListError::PayloadOutsideSupport { doc_id: 2 }
+        );
+
+        let mut graph = GraphPostingList::try_from_parts(inner, BTreeMap::new()).unwrap();
+        let error = graph
+            .try_set_graph_payload(2, GraphPayload::default())
+            .unwrap_err();
+        assert_eq!(
+            error,
+            GraphPostingListError::PayloadOutsideSupport { doc_id: 2 }
+        );
+        assert!(graph.get_graph_payload(2).is_none());
     }
 
     #[test]
@@ -357,10 +575,11 @@ mod tests {
                 score_override: None,
             },
         );
-        let gpl = GraphPostingList::from_parts(
+        let gpl = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        );
+        )
+        .unwrap();
 
         let encoded = gpl.to_posting_list();
         assert_eq!(encoded.get_entry(7).unwrap().payload.score, -7.5);
@@ -403,10 +622,10 @@ mod tests {
     }
 
     #[test]
-    fn union_via_phi_merges_doc_ids() {
+    fn union_combines_disjoint_support() {
         let a = fixture(1, vec![1], vec![]);
         let b = fixture(2, vec![2], vec![]);
-        let merged = a.merge_union(&b);
+        let merged = a.merge_union(&b).unwrap();
         let ids: Vec<DocId> = merged.inner().doc_ids().collect();
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(
@@ -420,17 +639,74 @@ mod tests {
     }
 
     #[test]
-    fn intersect_via_phi_keeps_only_shared() {
-        let a = fixture(1, vec![1], vec![]);
-        let b = fixture(1, vec![2], vec![]);
-        let merged = a.merge_intersection(&b);
+    fn default_overlap_policies_apply_set_union_and_intersection() {
+        let a = fixture(1, vec![3, 1, 3], vec![10, 20]);
+        let b = fixture(1, vec![2, 3], vec![20, 30]);
+
+        let merged = a.merge_union(&b).unwrap();
         let ids: Vec<DocId> = merged.inner().doc_ids().collect();
         assert_eq!(ids, vec![1]);
+        let payload = merged.get_graph_payload(1).unwrap();
+        assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
+        assert_eq!(payload.subgraph_edges, vec![10, 20, 30]);
+
+        let merged = a.merge_intersection(&b).unwrap();
+        let payload = merged.get_graph_payload(1).unwrap();
+        assert_eq!(payload.subgraph_vertices, vec![3]);
+        assert_eq!(payload.subgraph_edges, vec![20]);
     }
 
     #[test]
-    fn payload_overlap_merges_logical_scores_and_keeps_phi_stable() {
-        let mut a = GraphPostingList::from_parts(
+    fn graph_name_conflicts_require_an_explicit_precedence_policy() {
+        let mut left = fixture(1, vec![1], vec![10]);
+        left.try_set_graph_payload(
+            1,
+            GraphPayload {
+                subgraph_vertices: vec![1],
+                subgraph_edges: vec![10],
+                graph_name: "left".into(),
+                score_override: None,
+            },
+        )
+        .unwrap();
+        let mut right = fixture(1, vec![2], vec![20]);
+        right
+            .try_set_graph_payload(
+                1,
+                GraphPayload {
+                    subgraph_vertices: vec![2],
+                    subgraph_edges: vec![20],
+                    graph_name: "right".into(),
+                    score_override: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            left.merge_union(&right).unwrap_err(),
+            GraphPostingListError::ConflictingGraphNames {
+                doc_id: 1,
+                left: "left".into(),
+                right: "right".into(),
+            }
+        );
+        let merged = left
+            .merge_union_with(&right, SubgraphMergePolicy::PreferRight)
+            .unwrap();
+        assert_eq!(
+            merged.get_graph_payload(1),
+            Some(&GraphPayload {
+                subgraph_vertices: vec![2],
+                subgraph_edges: vec![20],
+                graph_name: "right".into(),
+                score_override: None,
+            })
+        );
+    }
+
+    #[test]
+    fn generic_posting_merge_retains_its_right_precedence_codec_contract() {
+        let mut a = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![PostingEntry::new(
                 1,
                 Payload {
@@ -443,8 +719,9 @@ mod tests {
                 },
             )]),
             BTreeMap::new(),
-        );
-        a.set_graph_payload(
+        )
+        .unwrap();
+        a.try_set_graph_payload(
             1,
             GraphPayload {
                 subgraph_vertices: vec![1],
@@ -452,8 +729,9 @@ mod tests {
                 graph_name: "left".into(),
                 score_override: None,
             },
-        );
-        let mut b = GraphPostingList::from_parts(
+        )
+        .unwrap();
+        let mut b = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![PostingEntry::new(
                 1,
                 Payload {
@@ -469,8 +747,9 @@ mod tests {
                 },
             )]),
             BTreeMap::new(),
-        );
-        b.set_graph_payload(
+        )
+        .unwrap();
+        b.try_set_graph_payload(
             1,
             GraphPayload {
                 subgraph_vertices: vec![2],
@@ -478,7 +757,8 @@ mod tests {
                 graph_name: "right".into(),
                 score_override: Some(5.0),
             },
-        );
+        )
+        .unwrap();
 
         for encoded in [
             a.to_posting_list().merge_union(&b.to_posting_list()),
@@ -512,21 +792,31 @@ mod tests {
     #[test]
     fn payload_overlap_keeps_none_override_when_both_inputs_use_base_scores() {
         let a = fixture(1, vec![1], vec![10]);
-        let mut b = GraphPostingList::from_parts(
+        let mut b = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 2.0)]),
             BTreeMap::new(),
-        );
-        b.set_graph_payload(
+        )
+        .unwrap();
+        b.try_set_graph_payload(
             1,
             GraphPayload {
                 subgraph_vertices: vec![2],
                 subgraph_edges: vec![20],
                 ..GraphPayload::default()
             },
-        );
-        let merged = a.merge_union(&b);
+        )
+        .unwrap();
+        let merged = a.merge_union(&b).unwrap();
         assert_eq!(merged.inner().get_entry(1).unwrap().payload.score, 3.0);
         assert_eq!(merged.get_graph_payload(1).unwrap().score_override, None);
+        assert_eq!(
+            merged.get_graph_payload(1).unwrap().subgraph_vertices,
+            vec![1, 2]
+        );
+        assert_eq!(
+            merged.get_graph_payload(1).unwrap().subgraph_edges,
+            vec![10, 20]
+        );
         assert_eq!(
             merged.to_posting_list().get_entry(1).unwrap().payload.score,
             3.0
@@ -535,25 +825,30 @@ mod tests {
 
     #[test]
     fn payload_overlap_with_plain_payload_keeps_graph_and_effective_score() {
-        let mut graph = GraphPostingList::from_parts(
+        let mut graph = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 1.0)]),
             BTreeMap::new(),
-        );
-        graph.set_graph_payload(
-            1,
-            GraphPayload {
-                subgraph_vertices: vec![1],
-                subgraph_edges: vec![7],
-                graph_name: "left".into(),
-                score_override: Some(4.0),
-            },
-        );
-        let plain = GraphPostingList::from_parts(
+        )
+        .unwrap();
+        graph
+            .try_set_graph_payload(
+                1,
+                GraphPayload {
+                    subgraph_vertices: vec![1],
+                    subgraph_edges: vec![7],
+                    graph_name: "left".into(),
+                    score_override: Some(4.0),
+                },
+            )
+            .unwrap();
+        let plain = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 2.0)]),
             BTreeMap::new(),
-        );
+        )
+        .unwrap();
 
         for merged in [graph.merge_union(&plain), plain.merge_union(&graph)] {
+            let merged = merged.unwrap();
             assert_eq!(merged.inner().get_entry(1).unwrap().payload.score, 3.0);
             assert_eq!(
                 merged.get_graph_payload(1),
@@ -575,18 +870,21 @@ mod tests {
     fn round_trip_preserves_nan_score_bits() {
         let base_score = f64::from_bits(0x7ff8_0000_0000_0123);
         let override_score = f64::from_bits(0x7ff8_0000_0000_0456);
-        let mut graph = GraphPostingList::from_parts(
+        let mut graph = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, base_score)]),
             BTreeMap::new(),
-        );
-        graph.set_graph_payload(
-            1,
-            GraphPayload {
-                graph_name: "nan".into(),
-                score_override: Some(override_score),
-                ..GraphPayload::default()
-            },
-        );
+        )
+        .unwrap();
+        graph
+            .try_set_graph_payload(
+                1,
+                GraphPayload {
+                    graph_name: "nan".into(),
+                    score_override: Some(override_score),
+                    ..GraphPayload::default()
+                },
+            )
+            .unwrap();
         let restored = GraphPostingList::from_posting_list(&graph.to_posting_list());
         assert_eq!(
             restored
@@ -676,11 +974,12 @@ mod tests {
     }
 
     #[test]
-    fn difference_via_phi_removes_other() {
-        let a = GraphPostingList::from_parts(
+    fn difference_removes_other_support() {
+        let a = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry(1, 1.0), entry(2, 1.0)]),
             BTreeMap::new(),
-        );
+        )
+        .unwrap();
         let b = fixture(2, vec![], vec![]);
         let diff = a.exclude(&b);
         let ids: Vec<DocId> = diff.inner().doc_ids().collect();
@@ -689,7 +988,7 @@ mod tests {
 
     #[test]
     fn difference_preserves_the_surviving_left_payload_exactly() {
-        let mut left = GraphPostingList::from_parts(
+        let mut left = GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![PostingEntry::new(
                 1,
                 Payload {
@@ -702,8 +1001,9 @@ mod tests {
                 },
             )]),
             BTreeMap::new(),
-        );
-        left.set_graph_payload(
+        )
+        .unwrap();
+        left.try_set_graph_payload(
             1,
             GraphPayload {
                 subgraph_vertices: vec![1, 1],
@@ -711,7 +1011,8 @@ mod tests {
                 graph_name: "left".into(),
                 score_override: Some(12.0),
             },
-        );
+        )
+        .unwrap();
         let right = fixture(2, vec![2], vec![2]);
         assert_eq!(left.exclude(&right), left);
     }

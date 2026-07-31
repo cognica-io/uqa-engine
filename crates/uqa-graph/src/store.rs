@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{Edge, EdgeId, Vertex, VertexId};
 
+use crate::posting_list::GraphPostingListError;
 use crate::types::Direction;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,6 +27,8 @@ pub enum GraphStoreError {
     InvalidQuery(String),
     #[error("corrupt graph state: {0}")]
     CorruptGraph(String),
+    #[error(transparent)]
+    InvalidPostingList(#[from] GraphPostingListError),
 }
 
 pub type GraphStoreResult<T> = Result<T, GraphStoreError>;

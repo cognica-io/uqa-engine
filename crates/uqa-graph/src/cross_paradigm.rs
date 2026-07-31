@@ -20,7 +20,7 @@ use uqa_core::{Edge, Payload, PostingEntry, PostingList, Value, Vertex, VertexId
 use crate::memory_store::MemoryGraphStore;
 use crate::operators::{GMatch, Traverse};
 use crate::pattern::GraphPattern;
-use crate::posting_list::{GraphPayload, GraphPostingList};
+use crate::posting_list::{GraphPayload, GraphPostingList, GraphPostingListError};
 use crate::store::{GraphStore, GraphStoreError};
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +29,8 @@ pub enum CrossParadigmError {
     Analysis(#[from] AnalysisError),
     #[error(transparent)]
     GraphStore(#[from] GraphStoreError),
+    #[error(transparent)]
+    InvalidPostingList(#[from] GraphPostingListError),
     #[error("invalid cross-paradigm input: {0}")]
     InvalidInput(String),
     #[error("cross-paradigm arithmetic overflow: {0}")]
@@ -400,10 +402,11 @@ impl<'a> SemanticGraphSearch<'a> {
                 graph_payloads.insert(entry.doc_id, copy);
             }
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -491,10 +494,11 @@ impl<'a> VectorEnhancedMatch<'a> {
                 graph_payloads.insert(entry.doc_id, copy);
             }
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 

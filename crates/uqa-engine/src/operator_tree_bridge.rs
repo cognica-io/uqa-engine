@@ -23,9 +23,9 @@
 //!    outside that retrieval subset stay in the enclosing relational
 //!    `UnifiedPlan` filter node.
 //! 2. [`EngineDriver`] implements [`OperatorTreeDriver`] with exhaustive
-//!    physical dispatch for every concrete IR variant. Ordinary and graph
-//!    nodes use `PostingList` (with graph Phi payloads); joins retain their
-//!    tuple identity in `GeneralizedPostingList`.
+//!    physical dispatch for every concrete IR variant. Ordinary nodes use
+//!    `PostingList`, graph nodes retain `GraphPostingList`, and joins retain
+//!    their tuple identity in `GeneralizedPostingList`.
 //!
 //! The integration target is a "lower -> optimise -> execute" pipeline:
 //! [`run_optimised`] does the three-step sequence and returns a
@@ -1656,6 +1656,7 @@ impl<'a> EngineDriver<'a> {
     fn execute_posting_node(&self, op: &OperatorTree) -> DriverResult<PostingList> {
         match self.execute_node(op)? {
             OperatorOutput::Posting(result) => Ok(result),
+            OperatorOutput::Graph(result) => Ok(result.to_posting_list()),
             OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
                 "{} produces tuple rows and cannot feed a single-document operator",
                 uqa_planner::executor::operator_name(op)
@@ -1962,13 +1963,17 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 label,
                 max_hops,
                 vertex_predicate,
-            } => self.execute_traverse(
-                *start_vertex,
-                graph,
-                label.as_deref(),
-                *max_hops,
-                vertex_predicate.as_ref(),
-            ),
+            } => {
+                return self
+                    .execute_traverse(
+                        *start_vertex,
+                        graph,
+                        label.as_deref(),
+                        *max_hops,
+                        vertex_predicate.as_ref(),
+                    )
+                    .map(OperatorOutput::Graph);
+            }
             OperatorTree::GraphNeighbors {
                 vertex,
                 graph,
@@ -1979,13 +1984,19 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 self.execute_graph_edges(graph, label.as_deref())
             }
             OperatorTree::PatternMatch { pattern, graph } => {
-                self.execute_pattern_match(pattern, graph)
+                return self
+                    .execute_pattern_match(pattern, graph)
+                    .map(OperatorOutput::Graph);
             }
             OperatorTree::RegularPathQuery {
                 rpq_source,
                 start_vertex,
                 graph,
-            } => self.execute_regular_path_query(rpq_source, *start_vertex, graph),
+            } => {
+                return self
+                    .execute_regular_path_query(rpq_source, *start_vertex, graph)
+                    .map(OperatorOutput::Graph);
+            }
             OperatorTree::GraphJoin {
                 left,
                 right,
@@ -2009,23 +2020,41 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 predicate,
                 predicate_selectivity,
                 score,
-            } => self.execute_weighted_path_query(WeightedPathExecution {
-                rpq_source,
-                start_vertex: *start_vertex,
-                graph,
-                weight_property,
-                default_edge_weight: *default_edge_weight,
-                max_hops: *max_hops,
-                predicate,
-                predicate_selectivity: *predicate_selectivity,
-                score: *score,
-            }),
-            OperatorTree::MessagePassing { source } => self.execute_message_passing(source),
-            OperatorTree::GraphEmbedding { source } => self.execute_graph_embedding(source),
-            OperatorTree::PageRank { graph } => self.execute_page_rank(graph),
-            OperatorTree::HITS { graph } => self.execute_hits(graph),
+            } => {
+                return self
+                    .execute_weighted_path_query(WeightedPathExecution {
+                        rpq_source,
+                        start_vertex: *start_vertex,
+                        graph,
+                        weight_property,
+                        default_edge_weight: *default_edge_weight,
+                        max_hops: *max_hops,
+                        predicate,
+                        predicate_selectivity: *predicate_selectivity,
+                        score: *score,
+                    })
+                    .map(OperatorOutput::Graph);
+            }
+            OperatorTree::MessagePassing { source } => {
+                return self
+                    .execute_message_passing(source)
+                    .map(OperatorOutput::Graph);
+            }
+            OperatorTree::GraphEmbedding { source } => {
+                return self
+                    .execute_graph_embedding(source)
+                    .map(OperatorOutput::Graph);
+            }
+            OperatorTree::PageRank { graph } => {
+                return self.execute_page_rank(graph).map(OperatorOutput::Graph);
+            }
+            OperatorTree::HITS { graph } => {
+                return self.execute_hits(graph).map(OperatorOutput::Graph);
+            }
             OperatorTree::BetweennessCentrality { graph } => {
-                self.execute_betweenness_centrality(graph)
+                return self
+                    .execute_betweenness_centrality(graph)
+                    .map(OperatorOutput::Graph);
             }
             OperatorTree::TextSimilarityJoin {
                 left,
@@ -2061,18 +2090,26 @@ impl OperatorTreeDriver for EngineDriver<'_> {
                 label,
                 max_hops,
                 temporal_filter,
-            } => self.execute_temporal_traverse(
-                *start_vertex,
-                graph,
-                label.as_deref(),
-                *max_hops,
-                temporal_filter.as_ref(),
-            ),
+            } => {
+                return self
+                    .execute_temporal_traverse(
+                        *start_vertex,
+                        graph,
+                        label.as_deref(),
+                        *max_hops,
+                        temporal_filter.as_ref(),
+                    )
+                    .map(OperatorOutput::Graph);
+            }
             OperatorTree::TemporalPatternMatch {
                 pattern,
                 graph,
                 temporal_filter,
-            } => self.execute_temporal_pattern_match(pattern, graph, temporal_filter.as_ref()),
+            } => {
+                return self
+                    .execute_temporal_pattern_match(pattern, graph, temporal_filter.as_ref())
+                    .map(OperatorOutput::Graph);
+            }
             OperatorTree::ProgressiveFusion {
                 stages,
                 alpha,
@@ -2104,6 +2141,10 @@ impl EngineDriver<'_> {
             (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => Ok(
                 OperatorOutput::Posting(left.merge_intersection_owned(&right)),
             ),
+            (OperatorOutput::Graph(left), OperatorOutput::Graph(right)) => left
+                .merge_intersection(&right)
+                .map(OperatorOutput::Graph)
+                .map_err(|error| graph_execution_error("GraphIntersect", error)),
             (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
                 Ok(OperatorOutput::Generalized(left.merge_intersection(&right)))
             }
@@ -2122,6 +2163,10 @@ impl EngineDriver<'_> {
             (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
                 Ok(OperatorOutput::Posting(left.merge_union(&right)))
             }
+            (OperatorOutput::Graph(left), OperatorOutput::Graph(right)) => left
+                .merge_union(&right)
+                .map(OperatorOutput::Graph)
+                .map_err(|error| graph_execution_error("GraphUnion", error)),
             (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
                 Ok(OperatorOutput::Generalized(left.merge_union(&right)))
             }
@@ -2312,7 +2357,7 @@ impl EngineDriver<'_> {
         label: Option<&str>,
         max_hops: usize,
         vertex_predicate: Option<&uqa_operators::VertexPredicate>,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let max_hops = u32::try_from(max_hops).map_err(|_| {
             SQLError::TypeMismatch(format!("Traverse.max_hops is too large: {max_hops}"))
         })?;
@@ -2325,7 +2370,6 @@ impl EngineDriver<'_> {
                 op = op.predicate(uqa_graph::VertexPredicate::Custom(predicate.clone()));
             }
             op.execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("Traverse", error))
         })
     }
@@ -2398,12 +2442,11 @@ impl EngineDriver<'_> {
         &self,
         pattern: &uqa_operators::GraphPatternIR,
         graph: &str,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let pattern = graph_pattern_from_ir(pattern);
         self.with_graph(graph, |store| {
             uqa_graph::GMatch::new(pattern, graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("PatternMatch", error))
         })
     }
@@ -2413,13 +2456,12 @@ impl EngineDriver<'_> {
         rpq_source: &str,
         start_vertex: u64,
         graph: &str,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let path = parse_rpq(rpq_source)?;
         self.with_graph(graph, |store| {
             uqa_graph::RegularPathQuery::new(path, graph)
                 .from_vertex(start_vertex)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("RegularPathQuery", error))
         })
     }
@@ -2483,7 +2525,7 @@ impl EngineDriver<'_> {
     fn execute_weighted_path_query(
         &self,
         query: WeightedPathExecution<'_>,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let WeightedPathExecution {
             rpq_source,
             start_vertex,
@@ -2528,58 +2570,65 @@ impl EngineDriver<'_> {
             op.max_hops = max_hops;
             op.score = score;
             op.execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("WeightedPathQuery", error))
         })
     }
 
-    fn execute_message_passing(&self, source: &OperatorTree) -> DriverResult<PostingList> {
+    fn execute_message_passing(
+        &self,
+        source: &OperatorTree,
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let graph = require_graph_name(source, "MessagePassing.source")?;
         let source_result = self.execute_posting_node(source)?;
         let result = self.with_graph(&graph, |store| {
             uqa_graph::MessagePassing::new(&graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("MessagePassing", error))
         })?;
-        Ok(restrict_result_to_source(&result, &source_result))
+        Ok(uqa_graph::GraphPostingList::from_posting_list(
+            &restrict_result_to_source(&result.to_posting_list(), &source_result),
+        ))
     }
 
-    fn execute_graph_embedding(&self, source: &OperatorTree) -> DriverResult<PostingList> {
+    fn execute_graph_embedding(
+        &self,
+        source: &OperatorTree,
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let graph = require_graph_name(source, "GraphEmbedding.source")?;
         let source_result = self.execute_posting_node(source)?;
         let result = self.with_graph(&graph, |store| {
             uqa_graph::GraphEmbedding::new(&graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("GraphEmbedding", error))
         })?;
-        Ok(restrict_result_to_source(&result, &source_result))
+        Ok(uqa_graph::GraphPostingList::from_posting_list(
+            &restrict_result_to_source(&result.to_posting_list(), &source_result),
+        ))
     }
 
-    fn execute_page_rank(&self, graph: &str) -> DriverResult<PostingList> {
+    fn execute_page_rank(&self, graph: &str) -> DriverResult<uqa_graph::GraphPostingList> {
         self.with_graph(graph, |store| {
             uqa_graph::PageRank::new(graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("PageRank", error))
         })
     }
 
-    fn execute_hits(&self, graph: &str) -> DriverResult<PostingList> {
+    fn execute_hits(&self, graph: &str) -> DriverResult<uqa_graph::GraphPostingList> {
         self.with_graph(graph, |store| {
             uqa_graph::HITS::new(graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("HITS", error))
         })
     }
 
-    fn execute_betweenness_centrality(&self, graph: &str) -> DriverResult<PostingList> {
+    fn execute_betweenness_centrality(
+        &self,
+        graph: &str,
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         self.with_graph(graph, |store| {
             uqa_graph::BetweennessCentrality::new(graph)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("BetweennessCentrality", error))
         })
     }
@@ -2766,7 +2815,7 @@ impl EngineDriver<'_> {
         label: Option<&str>,
         max_hops: usize,
         temporal_filter: Option<&uqa_operators::TemporalFilterIR>,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let max_hops = u32::try_from(max_hops).map_err(|_| {
             SQLError::TypeMismatch(format!(
                 "TemporalTraverse.max_hops is too large: {max_hops}"
@@ -2781,7 +2830,6 @@ impl EngineDriver<'_> {
                 op = op.label(label);
             }
             op.execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("TemporalTraverse", error))
         })
     }
@@ -2791,14 +2839,13 @@ impl EngineDriver<'_> {
         pattern: &uqa_operators::GraphPatternIR,
         graph: &str,
         temporal_filter: Option<&uqa_operators::TemporalFilterIR>,
-    ) -> DriverResult<PostingList> {
+    ) -> DriverResult<uqa_graph::GraphPostingList> {
         let pattern = graph_pattern_from_ir(pattern);
         let filter = temporal_filter_from_ir(temporal_filter)?;
         self.with_graph(graph, |store| {
             uqa_graph::TemporalPatternMatch::new(pattern, graph)
                 .filter(filter)
                 .execute(store)
-                .map(|result| result.to_posting_list())
                 .map_err(|error| graph_execution_error("TemporalPatternMatch", error))
         })
     }
@@ -4811,6 +4858,7 @@ pub(crate) fn expect_posting_output(
 ) -> DriverResult<PostingList> {
     match output {
         OperatorOutput::Posting(result) => Ok(result),
+        OperatorOutput::Graph(result) => Ok(result.to_posting_list()),
         OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
             "{context} requires single-document rows, but the physical plan produced join tuples"
         ))),

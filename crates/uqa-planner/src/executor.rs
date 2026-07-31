@@ -13,6 +13,7 @@
 use std::time::Instant;
 
 use uqa_core::{GeneralizedPostingList, PostingList};
+use uqa_graph::GraphPostingList;
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 
 /// Statistics from plan execution. Mirrors
@@ -28,13 +29,15 @@ pub struct ExecutionStats {
 /// Materialised value produced by a physical [`OperatorTree`] node.
 ///
 /// Most operators preserve one document id per row and therefore emit a
-/// [`PostingList`]. Join operators preserve an ordered tuple of document ids
-/// and emit a [`GeneralizedPostingList`]. Keeping the two carriers distinct is
-/// important: assigning synthetic scalar ids to join tuples would make later
-/// set operations compare enumeration positions instead of tuple identity.
+/// [`PostingList`]. Graph operators retain their subgraph side table in a
+/// [`GraphPostingList`], while join operators preserve an ordered tuple of
+/// document ids in a [`GeneralizedPostingList`]. Keeping the carriers distinct
+/// prevents set operations from silently applying ordinary payload precedence
+/// to graph metadata or comparing synthetic join enumeration positions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OperatorOutput {
     Posting(PostingList),
+    Graph(GraphPostingList),
     Generalized(GeneralizedPostingList),
 }
 
@@ -43,6 +46,7 @@ impl OperatorOutput {
     pub fn len(&self) -> usize {
         match self {
             Self::Posting(result) => result.len(),
+            Self::Graph(result) => result.len(),
             Self::Generalized(result) => result.len(),
         }
     }
@@ -51,6 +55,7 @@ impl OperatorOutput {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Posting(result) => result.is_empty(),
+            Self::Graph(result) => result.is_empty(),
             Self::Generalized(result) => result.is_empty(),
         }
     }
@@ -59,14 +64,22 @@ impl OperatorOutput {
     pub fn as_posting(&self) -> Option<&PostingList> {
         match self {
             Self::Posting(result) => Some(result),
-            Self::Generalized(_) => None,
+            Self::Graph(_) | Self::Generalized(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_graph(&self) -> Option<&GraphPostingList> {
+        match self {
+            Self::Graph(result) => Some(result),
+            Self::Posting(_) | Self::Generalized(_) => None,
         }
     }
 
     #[must_use]
     pub fn as_generalized(&self) -> Option<&GeneralizedPostingList> {
         match self {
-            Self::Posting(_) => None,
+            Self::Posting(_) | Self::Graph(_) => None,
             Self::Generalized(result) => Some(result),
         }
     }
@@ -75,6 +88,12 @@ impl OperatorOutput {
 impl From<PostingList> for OperatorOutput {
     fn from(value: PostingList) -> Self {
         Self::Posting(value)
+    }
+}
+
+impl From<GraphPostingList> for OperatorOutput {
+    fn from(value: GraphPostingList) -> Self {
+        Self::Graph(value)
     }
 }
 

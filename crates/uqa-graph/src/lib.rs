@@ -8,16 +8,17 @@
 //!
 //! Defines `GraphStore` (trait + in-memory implementation), the
 //! `GraphPostingList` extension of [`uqa_core::PostingList`], and the
-//! lossless `Phi` encoding that lets graph operations compose with the
-//! posting payload merge policies without losing graph metadata.
+//! lossless `Phi` codec for carrying graph metadata through ordinary posting
+//! storage. Graph-result merges expose their subgraph collision policy
+//! separately from ordinary posting payload merges.
 
+pub mod adapters;
 pub mod agtype;
 mod centrality;
 mod cross_paradigm;
 pub mod cypher;
 mod delta;
 mod embedding;
-pub mod functor;
 mod incremental_match;
 mod index;
 mod memory_store;
@@ -34,6 +35,7 @@ mod temporal;
 mod types;
 mod versioned_store;
 
+pub use adapters::{GraphPostingCodec, PostingToGraphAdapter, TextTfScoreNormalizer};
 pub use centrality::{BetweennessCentrality, PageRank, HITS};
 pub use cross_paradigm::{
     CrossParadigmError, CrossParadigmResult, Document, SemanticGraphSearch, TextToGraph, ToGraph,
@@ -41,7 +43,6 @@ pub use cross_paradigm::{
 };
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
-pub use functor::{GraphToRelationalFunctor, RelationalToGraphFunctor, TextToVectorFunctor};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex};
 pub use memory_store::{
@@ -55,7 +56,10 @@ pub use operators::{
     DEFAULT_GRAPH_SCORE,
 };
 pub use pattern::{EdgePattern, EdgePredicate, GraphPattern, VertexPattern, VertexPredicate};
-pub use posting_list::{GraphPayload, GraphPostingList};
+pub use posting_list::{
+    GraphPayload, GraphPostingList, GraphPostingListError, GraphPostingListResult,
+    SubgraphMergePolicy,
+};
 pub use rpq::{
     build_nfa, epsilon_closure, parse_rpq, simplify, subset_construction, Dfa, DfaState, Nfa,
     NfaTransition, RPQBuildError, RPQParseError, RegularPathExpr, StateId, MAX_DFA_STATES,

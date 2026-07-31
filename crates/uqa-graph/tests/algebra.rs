@@ -4,15 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Property tests for the lossless `Phi` encoding between
-//! `GraphPostingList` and `PostingList` payload storage.
-//!
-//! For any composition of payload merges and exclusions on graph posting
-//! lists, encoding through `Phi` and decoding back must
-//! preserve the full encoded result. Boolean identities are asserted only on
-//! document support.
+//! Property tests for the lossless graph codec and the explicit graph-result
+//! merge contract. Boolean identities are asserted only on document support;
+//! subgraph metadata is checked against an independently computed set merge.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use uqa_core::types::{GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD, GRAPH_PHI_VERTICES_FIELD};
@@ -57,12 +53,62 @@ fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
                 );
             }
         }
-        GraphPostingList::from_parts(PostingList::from_sorted_unchecked(entries), payloads)
+        GraphPostingList::try_from_parts(PostingList::from_sorted_unchecked(entries), payloads)
+            .expect("generated graph payloads are within posting support")
     })
 }
 
 fn doc_ids(g: &GraphPostingList) -> Vec<DocId> {
     g.inner().doc_ids().collect()
+}
+
+fn set_union(left: &[u64], right: &[u64]) -> Vec<u64> {
+    left.iter()
+        .chain(right)
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn set_intersection(left: &[u64], right: &[u64]) -> Vec<u64> {
+    let right: BTreeSet<_> = right.iter().copied().collect();
+    left.iter()
+        .copied()
+        .filter(|value| right.contains(value))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn assert_merged_graph_payload(
+    merged: &GraphPostingList,
+    left: &GraphPostingList,
+    right: &GraphPostingList,
+    doc_id: DocId,
+    merge: fn(&[u64], &[u64]) -> Vec<u64>,
+) {
+    match (
+        left.get_graph_payload(doc_id),
+        right.get_graph_payload(doc_id),
+    ) {
+        (None, None) => assert!(merged.get_graph_payload(doc_id).is_none()),
+        (Some(expected), None) | (None, Some(expected)) => {
+            assert_eq!(merged.get_graph_payload(doc_id), Some(expected));
+        }
+        (Some(left), Some(right)) => {
+            let actual = merged.get_graph_payload(doc_id).unwrap();
+            assert_eq!(
+                actual.subgraph_vertices,
+                merge(&left.subgraph_vertices, &right.subgraph_vertices)
+            );
+            assert_eq!(
+                actual.subgraph_edges,
+                merge(&left.subgraph_edges, &right.subgraph_edges)
+            );
+            assert_eq!(actual.graph_name, left.graph_name);
+        }
+    }
 }
 
 proptest! {
@@ -76,37 +122,74 @@ proptest! {
     }
 
     #[test]
-    fn phi_preserves_union(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.merge_union(&b);
-        let rhs = a.to_posting_list().merge_union(&b.to_posting_list());
-        prop_assert_eq!(lhs.to_posting_list(), rhs);
-    }
-
-    #[test]
-    fn phi_preserves_intersect(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.merge_intersection(&b);
-        let rhs = a.to_posting_list().merge_intersection(&b.to_posting_list());
-        prop_assert_eq!(lhs.to_posting_list(), rhs);
-    }
-
-    #[test]
-    fn phi_preserves_difference(a in arb_graph_posting_list(), b in arb_graph_posting_list()) {
-        let lhs = a.exclude(&b);
-        let rhs = a.to_posting_list().exclude(&b.to_posting_list());
-        prop_assert_eq!(lhs.to_posting_list(), rhs);
-    }
-
-    #[test]
-    fn phi_preserves_de_morgan_relative(
+    fn graph_union_has_support_union_and_subgraph_set_union(
         a in arb_graph_posting_list(),
         b in arb_graph_posting_list(),
     ) {
-        // (a union b) intersect c == (a intersect c) union (b intersect c)
-        // — applied via Phi, holds at the doc-id-set level.
-        let union_then_inter = a.merge_union(&b).merge_intersection(&a);
+        let merged = a.merge_union(&b).unwrap();
+        let expected_support = a
+            .inner()
+            .doc_ids()
+            .chain(b.inner().doc_ids())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        prop_assert_eq!(doc_ids(&merged), expected_support);
+        for doc_id in merged.inner().doc_ids() {
+            assert_merged_graph_payload(&merged, &a, &b, doc_id, set_union);
+        }
+    }
+
+    #[test]
+    fn graph_intersection_has_support_intersection_and_subgraph_set_intersection(
+        a in arb_graph_posting_list(),
+        b in arb_graph_posting_list(),
+    ) {
+        let merged = a.merge_intersection(&b).unwrap();
+        let right_support = b.inner().doc_ids().collect::<BTreeSet<_>>();
+        let expected_support = a
+            .inner()
+            .doc_ids()
+            .filter(|doc_id| right_support.contains(doc_id))
+            .collect::<Vec<_>>();
+        prop_assert_eq!(doc_ids(&merged), expected_support);
+        for doc_id in merged.inner().doc_ids() {
+            assert_merged_graph_payload(&merged, &a, &b, doc_id, set_intersection);
+        }
+    }
+
+    #[test]
+    fn difference_preserves_surviving_left_values(
+        a in arb_graph_posting_list(),
+        b in arb_graph_posting_list(),
+    ) {
+        let difference = a.exclude(&b);
+        let right_support = b.inner().doc_ids().collect::<BTreeSet<_>>();
+        let expected_support = a
+            .inner()
+            .doc_ids()
+            .filter(|doc_id| !right_support.contains(doc_id))
+            .collect::<Vec<_>>();
+        prop_assert_eq!(doc_ids(&difference), expected_support);
+        for doc_id in difference.inner().doc_ids() {
+            prop_assert_eq!(difference.inner().get_entry(doc_id), a.inner().get_entry(doc_id));
+            prop_assert_eq!(difference.get_graph_payload(doc_id), a.get_graph_payload(doc_id));
+        }
+    }
+
+    #[test]
+    fn support_satisfies_relative_distributivity(
+        a in arb_graph_posting_list(),
+        b in arb_graph_posting_list(),
+    ) {
+        // (a union b) intersect a == (a intersect a) union (b intersect a)
+        // holds at the document-support level only.
+        let union_then_inter = a.merge_union(&b).unwrap().merge_intersection(&a).unwrap();
         let inter_then_union = a
             .merge_intersection(&a)
-            .merge_union(&b.merge_intersection(&a));
+            .unwrap()
+            .merge_union(&b.merge_intersection(&a).unwrap())
+            .unwrap();
         prop_assert_eq!(doc_ids(&union_then_inter), doc_ids(&inter_then_union));
     }
 }

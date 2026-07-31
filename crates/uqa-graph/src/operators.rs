@@ -147,10 +147,11 @@ impl<'a> Traverse<'a> {
                 },
             );
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -215,10 +216,11 @@ impl<'a> VertexMatch<'a> {
             );
         }
         entries.sort_by_key(|e| e.doc_id);
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -331,10 +333,11 @@ impl<'a> GMatch<'a> {
                 },
             );
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 
     fn try_execute_single_edge<G: GraphStore>(
@@ -417,10 +420,10 @@ impl<'a> GMatch<'a> {
             );
         }
 
-        Ok(Some(GraphPostingList::from_parts(
+        Ok(Some(GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        )))
+        )?))
     }
 
     fn try_execute_two_edge_path<G: GraphStore>(
@@ -525,10 +528,10 @@ impl<'a> GMatch<'a> {
             }
         }
 
-        Ok(Some(GraphPostingList::from_parts(
+        Ok(Some(GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        )))
+        )?))
     }
 
     fn push_two_edge_path_match(
@@ -948,10 +951,11 @@ impl<'a> VertexAggregation<'a> {
                 score_override: Some(result),
             },
         );
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(vec![entry]),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -1034,10 +1038,11 @@ impl<'a> RegularPathQuery<'a> {
             }
         }
         entries.sort_by_key(|e| e.doc_id);
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 
     fn simulate_from<G: GraphStore>(
@@ -1183,10 +1188,11 @@ impl<'a> WeightedPathQuery<'a> {
                 },
             );
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 
     fn simulate_from<G: GraphStore>(

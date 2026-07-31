@@ -199,10 +199,11 @@ impl<'a> TemporalTraverse<'a> {
                 },
             );
         }
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -310,10 +311,11 @@ impl<'a> TemporalPatternMatch<'a> {
             );
         }
 
-        Ok(GraphPostingList::from_parts(
+        GraphPostingList::try_from_parts(
             PostingList::from_sorted_unchecked(entries),
             graph_payloads,
-        ))
+        )
+        .map_err(Into::into)
     }
 
     fn compute_candidates<G: GraphStore>(

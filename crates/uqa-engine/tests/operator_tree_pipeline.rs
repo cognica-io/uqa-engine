@@ -244,8 +244,9 @@ fn graph_ir_node_executes_through_the_shared_driver() {
         .expect("PageRank must execute through EngineDriver");
     assert_eq!(
         result
-            .as_posting()
+            .as_graph()
             .expect("PageRank produces one posting per vertex")
+            .inner()
             .doc_ids()
             .collect::<Vec<_>>(),
         vec![1, 2]

@@ -90,12 +90,7 @@ impl<'a> PageRank<'a> {
             return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            return Ok(single_vertex_result(
-                vertices[0],
-                1.0,
-                &vertices,
-                self.graph,
-            ));
+            return single_vertex_result(vertices[0], 1.0, &vertices, self.graph);
         }
 
         let n_f64 = usize_as_f64(n, "PageRank vertex count")?;
@@ -287,12 +282,7 @@ impl<'a> BetweennessCentrality<'a> {
             return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            return Ok(single_vertex_result(
-                vertices[0],
-                0.0,
-                &vertices,
-                self.graph,
-            ));
+            return single_vertex_result(vertices[0], 0.0, &vertices, self.graph);
         }
 
         let vertex_index: BTreeMap<VertexId, usize> = vertices
@@ -408,7 +398,7 @@ fn single_vertex_result(
     score: f64,
     vertices: &[VertexId],
     graph: &str,
-) -> GraphPostingList {
+) -> GraphStoreResult<GraphPostingList> {
     let entry = PostingEntry::new(vid, Payload::with_score(score));
     let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
     graph_payloads.insert(
@@ -420,10 +410,11 @@ fn single_vertex_result(
             score_override: Some(score),
         },
     );
-    GraphPostingList::from_parts(
+    GraphPostingList::try_from_parts(
         PostingList::from_sorted_unchecked(vec![entry]),
         graph_payloads,
     )
+    .map_err(Into::into)
 }
 
 fn build_score_result(
@@ -455,8 +446,6 @@ fn build_score_result(
             },
         );
     }
-    Ok(GraphPostingList::from_parts(
-        PostingList::from_sorted_unchecked(entries),
-        graph_payloads,
-    ))
+    GraphPostingList::try_from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
+        .map_err(Into::into)
 }

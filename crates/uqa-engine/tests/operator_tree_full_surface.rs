@@ -159,10 +159,14 @@ impl Scorer for FrequencyScorer {
     }
 }
 
-fn posting(output: &OperatorOutput) -> &PostingList {
-    output
-        .as_posting()
-        .expect("operator must produce a single-document posting list")
+fn posting(output: &OperatorOutput) -> PostingList {
+    match output {
+        OperatorOutput::Posting(posting) => posting.clone(),
+        OperatorOutput::Graph(graph) => graph.to_posting_list(),
+        OperatorOutput::Generalized(_) => {
+            panic!("operator must produce a single-document posting carrier")
+        }
+    }
 }
 
 #[test]
@@ -347,6 +351,54 @@ fn graph_temporal_and_centrality_nodes_execute_physically() {
         })
         .unwrap();
     assert_eq!(temporal_pattern.len(), 1);
+}
+
+#[test]
+fn graph_set_nodes_preserve_the_graph_carrier_and_merge_subgraphs() {
+    let engine = fixture();
+    let driver = EngineDriver::new(&engine, "docs", &[]);
+    let one_hop = OperatorTree::Traverse {
+        start_vertex: 1,
+        graph: "social".into(),
+        label: Some("follows".into()),
+        max_hops: 1,
+        vertex_predicate: None,
+    };
+    let two_hops = OperatorTree::Traverse {
+        start_vertex: 1,
+        graph: "social".into(),
+        label: Some("follows".into()),
+        max_hops: 2,
+        vertex_predicate: None,
+    };
+
+    let union = driver
+        .execute_node(&OperatorTree::Union(vec![
+            one_hop.clone(),
+            two_hops.clone(),
+        ]))
+        .unwrap();
+    let union = union
+        .as_graph()
+        .expect("a union of graph results must retain the graph carrier");
+    assert_eq!(union.inner().doc_ids().collect::<Vec<_>>(), vec![1, 2, 3]);
+    let payload = union.get_graph_payload(1).unwrap();
+    assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
+    assert_eq!(payload.subgraph_edges, vec![1, 2]);
+
+    let intersection = driver
+        .execute_node(&OperatorTree::Intersect(vec![one_hop, two_hops]))
+        .unwrap();
+    let intersection = intersection
+        .as_graph()
+        .expect("an intersection of graph results must retain the graph carrier");
+    assert_eq!(
+        intersection.inner().doc_ids().collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    let payload = intersection.get_graph_payload(1).unwrap();
+    assert_eq!(payload.subgraph_vertices, vec![1, 2]);
+    assert_eq!(payload.subgraph_edges, vec![1]);
 }
 
 #[test]
