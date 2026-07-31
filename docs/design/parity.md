@@ -1,11 +1,19 @@
 # Parity Fixtures
 
-The UQA-RS implementation keeps two kinds of golden fixtures under `tests/parity/`:
+The UQA-RS implementation keeps three kinds of golden fixtures under `tests/parity/`:
 
 - **SQL golden file** (`sql_golden_fixture.json`) — replayed by [`crates/uqa-engine/tests/sql_golden.rs`](../../crates/uqa-engine/tests/sql_golden.rs). Each case is a `(name, sql, expected: [{column: value, ...}])` triple. The harness applies `schema_sql` and `data_sql` once, then runs every case against a fresh in-memory `Engine` and compares the result rows column by column.
 - **BEIR-style relevance fixture** (`beir_fixture.json`) — replayed by [`crates/uqa-engine/tests/beir_fixture.rs`](../../crates/uqa-engine/tests/beir_fixture.rs). Encodes the corpus, a query set, graded judgments per query, and the floors for `NDCG@K` and `MAP@K` the harness must clear.
+- **Vector calibration fixture** (`vector_calibration_fixture.json`) — replayed by [`crates/uqa-scoring/tests/vector_calibration_contract.rs`](../../crates/uqa-scoring/tests/vector_calibration_contract.rs). Records complete model provenance, the evaluated target population, candidate-K drift probes/ceilings, disjoint validation and held-out labels, a deterministic bootstrap seed, confidence level, and regression gates.
 
-Both formats are versioned; bump `version` whenever a breaking schema change lands and update the loader to refuse older files.
+All three formats are versioned; bump `version` whenever a breaking schema change lands and update the loader to refuse older files.
+
+The vector fixture is deliberately a manifest rather than an undocumented
+array embedded in a test. Its threshold is selected only on `validation` and
+transferred unchanged to `held_out`; ECE, Brier, and log-loss gates compare
+their bootstrap upper confidence bounds, not just point estimates. Changing
+the corpus, index build, embedding model, dimensions, or candidate K requires
+new provenance and a reviewed fixture version.
 
 ## Format reference
 

@@ -416,7 +416,7 @@ pub enum RelevantSampleSplit {
     DistanceGap,
 }
 
-/// Calibrated KNN search operator (Paper 5, Theorem 3.1.1).
+/// Query-pool vector score transform.
 ///
 /// Fits the likelihood-ratio calibration from the retrieved pool at
 /// query time: the head of the sorted distance distribution (per
@@ -425,8 +425,11 @@ pub enum RelevantSampleSplit {
 /// posterior is `sigmoid(log(f_R(d) / f_G(d)) + logit(base_rate))` via
 /// [`VectorProbabilityTransform`]. An uninformative pool (too small,
 /// zero spread, or no head/tail separation) yields the prior for every
-/// candidate instead of fabricating discrimination.
-pub struct CalibratedVectorOperator {
+/// candidate instead of fabricating discrimination. Because the same selected
+/// pool supplies both pseudo-classes, this is an unsupervised ranking transform,
+/// not a reusable calibrated-probability model. Use
+/// [`uqa_scoring::VectorCalibrationModel`] for the latter contract.
+pub struct QueryPoolVectorScoreOperator {
     pub query_vector: Vec<f32>,
     pub k: usize,
     pub field: String,
@@ -437,7 +440,15 @@ pub struct CalibratedVectorOperator {
     pub split: RelevantSampleSplit,
 }
 
-impl CalibratedVectorOperator {
+/// Compatibility name for the former query-pool operator. Its output has
+/// never carried a held-out calibration guarantee.
+#[deprecated(
+    since = "0.1.0",
+    note = "use QueryPoolVectorScoreOperator; use VectorCalibrationModel for reusable calibrated probabilities"
+)]
+pub type CalibratedVectorOperator = QueryPoolVectorScoreOperator;
+
+impl QueryPoolVectorScoreOperator {
     pub fn new(query_vector: Vec<f32>, k: usize, field: impl Into<String>) -> Self {
         Self {
             query_vector,
@@ -459,7 +470,7 @@ impl CalibratedVectorOperator {
     }
 }
 
-impl Operator for CalibratedVectorOperator {
+impl Operator for QueryPoolVectorScoreOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         if !self.base_rate.is_finite() || self.base_rate <= 0.0 || self.base_rate >= 1.0 {
             return Err(StorageBackendError::Other(format!(
@@ -646,8 +657,8 @@ mod tests {
     }
 
     #[test]
-    fn calibrated_vector_missing_index_is_an_execution_error() {
-        let op = CalibratedVectorOperator::new(vec![0.0; 3], 0, "missing").with_base_rate(0.5);
+    fn query_pool_vector_missing_index_is_an_execution_error() {
+        let op = QueryPoolVectorScoreOperator::new(vec![0.0; 3], 0, "missing").with_base_rate(0.5);
         let error = op.execute(&ExecutionContext::new()).unwrap_err();
         assert!(error.to_string().contains("vector-index"));
     }

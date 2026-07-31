@@ -13,13 +13,14 @@ rust-version.workspace = true
 uqa-core = { workspace = true }
 uqa-storage = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 uqa-analysis = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-serde_json = { workspace = true }
 
 [[bench]]
 name = "bm25"

@@ -16,9 +16,9 @@ use uqa_analysis::standard_analyzer;
 use uqa_core::{Payload, PostingEntry, PostingList};
 use uqa_fusion::{AttentionFusion, LearnedFusion};
 use uqa_operators::{
-    AttentionFuser, AttentionFusionOperator, CalibratedVectorOperator, Cutoff, ExecutionContext,
-    LearnedFusionOperator, MultiFieldSearchOperator, MultiStageOperator, Operator,
-    ProgressiveFusionOperator, RelevantSampleSplit, SparseThresholdOperator,
+    AttentionFuser, AttentionFusionOperator, Cutoff, ExecutionContext, LearnedFusionOperator,
+    MultiFieldSearchOperator, MultiStageOperator, Operator, ProgressiveFusionOperator,
+    QueryPoolVectorScoreOperator, RelevantSampleSplit, SparseThresholdOperator,
 };
 use uqa_storage::{InvertedIndex, MemoryInvertedIndex, MemoryVectorIndex, VectorIndex};
 
@@ -237,8 +237,8 @@ fn vector_context(n_docs: u64) -> ExecutionContext {
 fn bench_calibrated_vector(c: &mut Criterion) {
     let ctx = vector_context(2_000);
     let query: Vec<f32> = (0..16).map(|d| d as f32 / 16.0).collect();
-    let uniform = CalibratedVectorOperator::new(query.clone(), 100, "embedding");
-    let gap = CalibratedVectorOperator::new(query, 100, "embedding")
+    let uniform = QueryPoolVectorScoreOperator::new(query.clone(), 100, "embedding");
+    let gap = QueryPoolVectorScoreOperator::new(query, 100, "embedding")
         .with_split(RelevantSampleSplit::DistanceGap);
     c.bench_function("calibrated_vector_uniform", |bencher| {
         bencher.iter(|| {

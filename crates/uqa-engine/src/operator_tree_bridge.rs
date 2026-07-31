@@ -3260,9 +3260,10 @@ impl EngineDriver<'_> {
         ))
     }
 
-    /// Likelihood-ratio calibrated vector evidence: fit the pool
-    /// calibration on the source's cosine similarities and emit
-    /// prior-free posteriors (base rate 0.5 contributes zero log-odds).
+    /// Query-pool vector evidence: fit the two-Gaussian score transform on
+    /// the source's selected cosine similarities and emit unit-interval,
+    /// prior-free evidence. This is a ranking heuristic, not a reusable
+    /// held-out calibration model.
     fn execute_cosine_evidence(&self, source: &OperatorTree) -> DriverResult<PostingList> {
         let pl = self.execute_posting_node(source)?;
         let distances: Vec<f64> = pl.iter().map(|e| 1.0 - e.payload.score).collect();

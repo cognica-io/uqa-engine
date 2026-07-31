@@ -7,7 +7,7 @@
 //! Vector index abstraction and an in-memory brute-force fallback.
 //!
 //! Operators (`KNNOperator`, `VectorSimilarityOperator`,
-//! `CalibratedVectorOperator`) depend only on this trait. IVF backends
+//! `QueryPoolVectorScoreOperator`) depend only on this trait. IVF backends
 //! slot in by implementing the same surface.
 
 use std::collections::BTreeMap;

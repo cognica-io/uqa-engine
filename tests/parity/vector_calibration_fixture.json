@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "fixture_id": "synthetic-vector-calibration-v1",
+  "target_population": "all judged query-document pairs in the held-out split",
+  "seed": 20260731,
+  "n_bins": 5,
+  "bootstrap_resamples": 512,
+  "confidence_level": 0.95,
+  "reference": {
+    "transform": {
+      "mu_match": 0.1,
+      "mu_random": 0.8,
+      "sigma": 0.25,
+      "base_rate": 0.2
+    },
+    "provenance": {
+      "model_version": "fixture-fit-v1",
+      "target": {
+        "corpus_id": "synthetic-calibration-corpus",
+        "corpus_version": "sha256:fixture-corpus-v1",
+        "index_id": "docs.embedding.ivf",
+        "index_version": "sha256:fixture-index-v1",
+        "index_kind": "ivf-cosine",
+        "embedding_model_id": "fixture-minilm",
+        "embedding_model_version": "1.0.0",
+        "candidate_k": 4,
+        "dimensions": 384
+      },
+      "fit_sample_count": 400
+    }
+  },
+  "candidate_k_model": {
+    "transform": {
+      "mu_match": 0.14,
+      "mu_random": 0.7,
+      "sigma": 0.28,
+      "base_rate": 0.2
+    },
+    "provenance": {
+      "model_version": "fixture-fit-v1-k8",
+      "target": {
+        "corpus_id": "synthetic-calibration-corpus",
+        "corpus_version": "sha256:fixture-corpus-v1",
+        "index_id": "docs.embedding.ivf",
+        "index_version": "sha256:fixture-index-v1",
+        "index_kind": "ivf-cosine",
+        "embedding_model_id": "fixture-minilm",
+        "embedding_model_version": "1.0.0",
+        "candidate_k": 8,
+        "dimensions": 384
+      },
+      "fit_sample_count": 800
+    }
+  },
+  "shared_distance_probes": [0.05, 0.1, 0.2, 0.3, 0.45, 0.6],
+  "max_mean_absolute_k_drift": 0.16,
+  "max_absolute_k_drift": 0.27,
+  "validation": {
+    "probabilities": [
+      0.05, 0.08, 0.1, 0.12, 0.15, 0.18, 0.2, 0.25, 0.3, 0.35,
+      0.65, 0.7, 0.75, 0.8, 0.82, 0.85, 0.88, 0.9, 0.92, 0.95
+    ],
+    "labels": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  },
+  "held_out": {
+    "probabilities": [
+      0.04, 0.96, 0.08, 0.92, 0.1, 0.9, 0.12, 0.88,
+      0.15, 0.85, 0.18, 0.82, 0.2, 0.8, 0.22, 0.78,
+      0.25, 0.75, 0.3, 0.7, 0.35, 0.65, 0.4, 0.6
+    ],
+    "labels": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+  },
+  "gate": {
+    "max_ece_upper": 0.3,
+    "max_brier_upper": 0.1,
+    "max_log_loss_upper": 0.4,
+    "min_transferred_f1": 0.95
+  }
+}

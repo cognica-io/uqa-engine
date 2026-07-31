@@ -344,8 +344,9 @@ pub enum OperatorTree {
         k: usize,
         field: String,
     },
-    /// Pool-calibrated KNN retrieval exposed by
-    /// `calibrated_vector_match`.
+    /// Query-pool vector score transform exposed by the compatibility SQL
+    /// name `calibrated_vector_match`. This variant does not claim held-out
+    /// probability calibration.
     CalibratedVectorMatch {
         query_vector: Vec<f32>,
         k: usize,
@@ -353,7 +354,8 @@ pub enum OperatorTree {
         threshold: Option<f64>,
     },
     /// `CosineProbabilityOperator(source)` -- wraps a KNN child with a
-    /// calibrated probability projection.
+    /// unit-interval score projection. This is monotone, not empirically
+    /// calibrated.
     CosineProbability(Box<OperatorTree>),
 
     /// Exact signed-evidence Bayesian fusion. `base_rate = None` derives one

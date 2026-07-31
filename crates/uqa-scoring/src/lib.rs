@@ -12,6 +12,7 @@ pub mod bayesian_bm25;
 pub mod bayesian_estimator;
 pub mod bm25;
 pub mod calibration;
+pub mod calibration_validation;
 pub mod error;
 pub mod external_prior;
 pub mod fusion_wand;
@@ -21,6 +22,7 @@ pub mod parameter_learner;
 pub mod prob;
 pub mod score_domain;
 pub mod scorer;
+pub mod vector_calibration;
 pub mod vector_score;
 pub mod wand;
 
@@ -30,6 +32,10 @@ pub use bayesian_estimator::UnsupervisedBm25ScoreEstimator;
 pub use bm25::{BM25Params, BM25Scorer};
 pub use calibration::{
     CalibrationMetrics, CalibrationReport, ReliabilityBin, VectorProbabilityTransform,
+};
+pub use calibration_validation::{
+    BinaryDecisionMetrics, BootstrapConfig, ConfidenceInterval, HeldOutCalibrationGate,
+    HeldOutCalibrationReport, ThresholdTransferReport,
 };
 pub use error::{ScoringError, ScoringResult};
 pub use external_prior::{authority_prior, recency_prior, ExternalPriorScorer, PriorFn};
@@ -43,6 +49,10 @@ pub use prob::{
 };
 pub use score_domain::{EvidenceLogit, PosteriorProbability, PriorLogit, RawBm25Score};
 pub use scorer::Scorer;
+pub use vector_calibration::{
+    VectorCalibrationModel, VectorCalibrationProvenance, VectorCalibrationStabilityReport,
+    VectorCalibrationTarget, VECTOR_CALIBRATION_MODEL_SCHEMA_VERSION,
+};
 pub use vector_score::VectorScorer;
 pub use wand::{
     AdaptiveWANDScorer, BlockMaxWANDScorer, BoundTightnessAnalyzer, WANDQuery, WANDResult,

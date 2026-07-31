@@ -581,8 +581,9 @@ impl<'a> QueryBuilder<'a> {
         Ok(self.r#where(format!("fuse_learned({})", parts.join(", "))))
     }
 
-    /// Add calibrated KNN retrieval to `WHERE`. Scores are probabilities, so
-    /// an optional threshold must be finite and in `[0, 1]`.
+    /// Add the query-pool KNN score transform to `WHERE` through its
+    /// compatibility SQL name. Scores lie in `[0, 1]`, but are not described
+    /// as calibrated probabilities without a held-out evaluation.
     ///
     /// # Errors
     ///
@@ -706,9 +707,9 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `bayesian_match(field, '<query>')` filter - Bayesian BM25
-    /// scoring with calibrated probabilities. Mirrors the canonical UQA implementation's
-    /// `QueryBuilder.score_bayesian_bm25` style search.
+    /// `bayesian_match(field, '<query>')` filter with the configured
+    /// query-level BM25 score transform. Probability-calibration claims
+    /// require parameters fitted and verified on held-out labels.
     pub fn bayesian_match(self, field: &str, query: &str) -> Self {
         self.r#where(format!("bayesian_match({field}, {})", quote_str(query)))
     }

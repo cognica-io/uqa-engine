@@ -1204,7 +1204,7 @@ fn run_calibrated_vector_match(
         return Err(SQLError::UnknownTable(table.to_string()));
     };
     use uqa_operators::base::Operator;
-    let op = uqa_operators::CalibratedVectorOperator::new(query_vector, k, field);
+    let op = uqa_operators::QueryPoolVectorScoreOperator::new(query_vector, k, field);
     let pl = op
         .execute(&ctx)
         .map_err(|error| SQLError::Internal(format!("calibrated vector search: {error}")))?;

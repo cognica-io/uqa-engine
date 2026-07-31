@@ -12,7 +12,10 @@
 //! Run with `cargo bench -p uqa-scoring --bench calibration`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use uqa_scoring::{CalibrationMetrics, ParameterLearner};
+use uqa_scoring::{
+    BootstrapConfig, CalibrationMetrics, HeldOutCalibrationGate, HeldOutCalibrationReport,
+    ParameterLearner, ThresholdTransferReport,
+};
 
 const N: usize = 100_000;
 
@@ -99,6 +102,49 @@ fn bench_report(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_held_out_calibration_gate(c: &mut Criterion) {
+    let probabilities: Vec<f64> = (0..200)
+        .map(|index| 0.05 + f64::from(index % 10) * 0.1)
+        .collect();
+    let labels: Vec<u8> = probabilities
+        .iter()
+        .map(|probability| u8::from(*probability >= 0.5))
+        .collect();
+    let (validation_probabilities, held_out_probabilities) = probabilities.split_at(100);
+    let (validation_labels, held_out_labels) = labels.split_at(100);
+    c.bench_function("held_out_calibration_bootstrap_gate", |bencher| {
+        bencher.iter(|| {
+            let report = HeldOutCalibrationReport::evaluate(
+                black_box(held_out_probabilities),
+                black_box(held_out_labels),
+                10,
+                BootstrapConfig {
+                    resamples: 200,
+                    confidence_level: 0.95,
+                    seed: 20_260_731,
+                },
+            )
+            .unwrap();
+            let transfer = ThresholdTransferReport::evaluate(
+                black_box(validation_probabilities),
+                black_box(validation_labels),
+                black_box(held_out_probabilities),
+                black_box(held_out_labels),
+            )
+            .unwrap();
+            HeldOutCalibrationGate {
+                max_ece_upper: 0.3,
+                max_brier_upper: 0.1,
+                max_log_loss_upper: 0.4,
+                min_transferred_f1: 0.95,
+            }
+            .check(&report, &transfer)
+            .unwrap();
+            black_box(report.ece_interval.upper + transfer.held_out.f1)
+        });
+    });
+}
+
 fn learner_dataset(n: usize) -> (Vec<f64>, Vec<f64>) {
     let scores: Vec<f64> = (0..n)
         .map(|i| if i % 2 == 0 { 4.0 } else { -4.0 })
@@ -157,6 +203,7 @@ criterion_group!(
     bench_ece,
     bench_reliability_diagram,
     bench_report,
+    bench_held_out_calibration_gate,
     bench_parameter_learner
 );
 criterion_main!(benches);

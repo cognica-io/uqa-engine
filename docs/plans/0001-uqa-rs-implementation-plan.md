@@ -19,7 +19,7 @@ Build UQA-RS as a native Rust implementation of the Unified Query Algebra:
 - Distributed execution in the core engine.
 - Runtime dependency on another language implementation.
 - A separate SQL dialect that drifts from the UQA SQL contract.
-- HNSW as the first vector-index backend. IVF and calibrated vector scoring remain the implemented baseline.
+- HNSW as the first vector-index backend. IVF and explicit query-pool or persisted-model vector score paths remain the implemented baseline.
 
 ## 2. Theoretical anchors
 
@@ -30,10 +30,10 @@ The implementation uses the papers as design input, with the executable contract
 - **Value relations.** `Relation<K>` is a finite-support function `DocId -> K`. Pointwise combination is available when `K` supplies a semiring; `bool` recovers document-set support behavior and `LogSemiring` supplies log-space weight combination. `Payload` is deliberately not a semiring: posting collision merge adds scores, unions positions, and uses right-hand field precedence, so full-value idempotence and commutativity are not claimed.
 - **Ranked views.** `PostingList` remains physically sorted by document id. `RankedView` owns the separate score ordering used for ranked iteration and top-K selection.
 - **Operator rewrites.** Filter pushdown, vector threshold merging, facet additivity, join distribution, and aggregation decomposition are equivalence-preserving.
-- **Graph payload encoding.** `Phi` losslessly encodes graph payloads into ordinary posting payload fields and commutes with the implementation's documented posting merge policies. Boolean rewrite claims are made only for the resulting `DocSet` support.
-- **Bayesian BM25.** Probability transforms, priors, WAND/BMW bounds, calibration metrics, and parameter learning use deterministic numeric contracts.
-- **Log-odds fusion.** Confidence-scaled log-odds, identity laws, sign preservation, disagreement collapse, and clamped probability boundaries are tested.
-- **Vector calibration.** Likelihood-ratio calibration and hybrid additive fusion keep scoring signals inside the probabilistic model.
+- **Graph payload encoding.** `Phi` is a lossless storage codec. `GraphPostingList` separately defines subgraph union/intersection/precedence policies and the engine preserves that graph carrier through set nodes; generic posting payload merge is not claimed as a graph-algebra homomorphism.
+- **Bayesian BM25.** Query-level sigmoid transforms, priors, WAND/BMW bounds, calibration metrics, and parameter learning use deterministic numeric contracts. Unlabeled parameter estimation is named as a score transform; probability claims require held-out labels.
+- **Fusion modes.** Exact signed `BayesianEvidenceFusion` preserves neutral evidence and applies the prior once. Confidence-scaled positive-evidence pooling is an explicitly separate robust ranking heuristic.
+- **Vector calibration.** Query-pool Gaussian fitting is an unsupervised score transform. Reusable `VectorCalibrationModel` values store corpus/index/embedding-model/K/version provenance, reject mismatched runtime targets, and are gated with held-out reliability, ECE, Brier, log-loss, bootstrap confidence intervals, and threshold transfer.
 
 Cardinality estimates are planner heuristics, not data-correctness contracts. Sampling accuracy requires an explicit estimator model and assumptions. For independent Bernoulli trials with mean `mu = E[X]`, the usual two-sided multiplicative Chernoff form for `0 < epsilon <= 1` gives a sufficient condition `epsilon >= sqrt(3 ln(2/delta) / mu)` for failure probability at most `delta`; a bare `1 / sqrt(E[X])` expression is not a universal guarantee. Cost and accuracy claims belong in reproducible benchmark reports with the corpus, sample count, estimator assumptions, error metric, and confidence procedure recorded.
 

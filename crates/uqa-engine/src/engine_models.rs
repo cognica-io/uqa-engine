@@ -9,6 +9,17 @@ use super::{
     SQLError, TrainingSet,
 };
 
+const VECTOR_CALIBRATION_MODEL_PREFIX: &str = "vector_calibration_model::";
+
+fn vector_calibration_model_key(name: &str) -> Result<String, SQLError> {
+    if name.trim().is_empty() {
+        return Err(SQLError::TypeMismatch(
+            "vector calibration model name must not be empty".into(),
+        ));
+    }
+    Ok(format!("{VECTOR_CALIBRATION_MODEL_PREFIX}{name}"))
+}
+
 impl Engine {
     pub fn save_model(&self, name: &str, model: &DeepModel) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| engine.save_model_inner(name, model))
@@ -196,6 +207,41 @@ impl Engine {
     /// `true` when something was removed.
     pub fn drop_scoring_params(&self, name: &str) -> Result<bool, SQLError> {
         self.with_implicit_transaction(|engine| engine.drop_scoring_params_inner(name))
+    }
+
+    /// Persist a typed vector-calibration model, including the corpus, index,
+    /// embedding-model, candidate-K, and version provenance that constrains
+    /// its safe reuse.
+    pub fn save_vector_calibration_model(
+        &self,
+        name: &str,
+        model: &uqa_scoring::VectorCalibrationModel,
+    ) -> Result<(), SQLError> {
+        let key = vector_calibration_model_key(name)?;
+        let json = model
+            .to_json()
+            .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
+        self.save_scoring_params(&key, &json)
+    }
+
+    /// Load and validate a persisted vector-calibration model. Unsupported
+    /// schema versions and invalid numeric parameters are errors rather than
+    /// silently falling back to query-pool calibration.
+    pub fn load_vector_calibration_model(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_scoring::VectorCalibrationModel>, SQLError> {
+        let key = vector_calibration_model_key(name)?;
+        self.load_scoring_params(&key)?
+            .as_deref()
+            .map(uqa_scoring::VectorCalibrationModel::from_json)
+            .transpose()
+            .map_err(|error| SQLError::TypeMismatch(error.to_string()))
+    }
+
+    pub fn drop_vector_calibration_model(&self, name: &str) -> Result<bool, SQLError> {
+        let key = vector_calibration_model_key(name)?;
+        self.drop_scoring_params(&key)
     }
 
     fn drop_scoring_params_inner(&self, name: &str) -> Result<bool, SQLError> {

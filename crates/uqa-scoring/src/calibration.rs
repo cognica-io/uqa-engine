@@ -29,7 +29,7 @@ const MAX_EXACT_F64_INTEGER: u64 = 1u64 << f64::MANTISSA_DIGITS;
 /// callers fit the means / std dev offline (e.g. via the parameter
 /// learner) and pass the transform through. Optional per-distance
 /// weights bias the computed log-odds before the sigmoid.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VectorProbabilityTransform {
     /// Mean distance for relevant documents (numerator distribution).
     pub mu_match: f64,

@@ -94,7 +94,8 @@ impl Operator for KNNOperator {
 /// `(1 + score) / 2` (Definition 7.1.2, Paper 3). This is the
 /// uncalibrated bridge between vector signals and evidence-combination
 /// pipeline; calibrated alternatives (Paper 5) live in
-/// `CalibratedVectorOperator`.
+/// `QueryPoolVectorScoreOperator`; reusable calibrated models live in
+/// `uqa_scoring::VectorCalibrationModel`.
 pub struct CosineProbabilityOperator {
     pub source: Arc<dyn Operator>,
 }
