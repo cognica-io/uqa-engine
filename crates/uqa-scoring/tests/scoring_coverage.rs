@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use uqa_core::IndexStats;
 use uqa_scoring::{
-    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianProbabilityTransform,
+    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, LegacyCompositePriorTransform,
     VectorScorer,
 };
 
@@ -121,7 +121,7 @@ fn test_monotonicity_higher_bm25_higher_posterior() {
 fn test_composite_prior_bounds() {
     for tf in [0.0, 1.0, 5.0, 10.0, 50.0, 100.0] {
         for ratio in [0.005, 0.05, 0.5, 1.0, 2.5, 10.0] {
-            let prior = BayesianProbabilityTransform::composite_prior(tf, ratio);
+            let prior = LegacyCompositePriorTransform::composite_prior(tf, ratio);
             assert!(
                 (0.1..=0.9).contains(&prior),
                 "prior={prior} tf={tf} ratio={ratio}"
@@ -200,11 +200,11 @@ fn test_upper_bound_at_least_score() {
 }
 
 #[test]
-fn test_likelihood_numerically_stable() {
-    let transform = BayesianProbabilityTransform::new(1.0, 0.0, None).unwrap();
-    assert_close(transform.likelihood(500.0), 1.0, 1e-12);
-    assert_close(transform.likelihood(-500.0), 0.0, 1e-12);
-    assert_close(transform.likelihood(0.0), 0.5, 1e-12);
+fn test_legacy_score_signal_numerically_stable() {
+    let transform = LegacyCompositePriorTransform::new(1.0, 0.0, None).unwrap();
+    assert_close(transform.score_signal(500.0), 1.0, 1e-12);
+    assert_close(transform.score_signal(-500.0), 0.0, 1e-12);
+    assert_close(transform.score_signal(0.0), 0.5, 1e-12);
 }
 
 #[test]

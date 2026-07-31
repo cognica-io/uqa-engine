@@ -15,7 +15,7 @@ use std::sync::Arc;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_scoring::{
     prob::log_odds_conjunction_weighted, BM25Params, BM25Scorer, BayesianBM25Params,
-    BayesianBM25Scorer, VectorScorer,
+    BayesianBM25Scorer, RawBm25Score, VectorScorer,
 };
 
 fn stats() -> Arc<uqa_core::IndexStats> {
@@ -92,7 +92,9 @@ fn bench_bayesian_bm25(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("bayesian_bm25_combine_scores");
     for num_terms in [1_usize, 3, 5, 10] {
-        let term_scores: Vec<f64> = (0..num_terms).map(|i| 0.2 + i as f64 * 0.05).collect();
+        let term_scores: Vec<RawBm25Score> = (0..num_terms)
+            .map(|i| RawBm25Score::new(0.2 + i as f64 * 0.05).unwrap())
+            .collect();
         group.bench_with_input(
             BenchmarkId::from_parameter(num_terms),
             &term_scores,

@@ -104,8 +104,8 @@ use uqa_ml::{
 };
 use uqa_operators::ExecutionContext;
 use uqa_scoring::{
-    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
-    CalibrationMetrics, CalibrationReport, ParameterLearner, Scorer,
+    BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
+    CalibrationReport, ParameterLearner, RawBm25Score, Scorer, UnsupervisedBm25ScoreEstimator,
 };
 use uqa_sql::SQLError;
 use uqa_storage::{

@@ -19,13 +19,14 @@ pub mod metrics;
 pub mod multi_field;
 pub mod parameter_learner;
 pub mod prob;
+pub mod score_domain;
 pub mod scorer;
 pub mod vector_score;
 pub mod wand;
 
-pub use bayesian::BayesianProbabilityTransform;
+pub use bayesian::LegacyCompositePriorTransform;
 pub use bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
-pub use bayesian_estimator::BayesianScoreEstimator;
+pub use bayesian_estimator::UnsupervisedBm25ScoreEstimator;
 pub use bm25::{BM25Params, BM25Scorer};
 pub use calibration::{
     CalibrationMetrics, CalibrationReport, ReliabilityBin, VectorProbabilityTransform,
@@ -40,6 +41,7 @@ pub use prob::{
     cosine_to_probability, log_odds_conjunction, logit, prob_and, prob_not, prob_or, sigmoid,
     PROB_EPSILON,
 };
+pub use score_domain::{EvidenceLogit, PosteriorProbability, PriorLogit, RawBm25Score};
 pub use scorer::Scorer;
 pub use vector_score::VectorScorer;
 pub use wand::{

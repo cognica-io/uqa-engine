@@ -6,7 +6,10 @@
 
 //! Coverage for Engine calibration report cases in `test_calibration`.
 
-use uqa_engine::Engine;
+use std::collections::BTreeMap;
+
+use uqa_engine::{Engine, ScoringMode};
+use uqa_scoring::{sigmoid, BayesianBM25Params, CalibrationMetrics};
 
 fn engine_with_docs() -> Engine {
     let engine = Engine::new();
@@ -40,6 +43,58 @@ fn calibration_report_returns_struct() {
         .unwrap();
     assert!(report.ece >= 0.0);
     assert!(report.brier >= 0.0);
+}
+
+#[test]
+fn calibration_report_scores_non_matches_at_raw_bm25_zero() {
+    let engine = engine_with_docs();
+    let params = BayesianBM25Params {
+        alpha: 1.0,
+        beta: 2.0,
+        ..BayesianBM25Params::default()
+    };
+    engine
+        .save_scoring_params(
+            "docs.content",
+            &serde_json::json!({
+                "alpha": params.alpha,
+                "beta": params.beta,
+                "base_rate": params.base_rate,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+    let labels = [1, 1, 0, 0];
+    let actual = engine
+        .calibration_report("docs", "content", "learning", &labels)
+        .unwrap();
+
+    let matching_scores: BTreeMap<_, _> = engine
+        .search(
+            "docs",
+            "content",
+            "learning",
+            &ScoringMode::BayesianBM25(params),
+            usize::MAX,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.doc_id, entry.score))
+        .collect();
+    let non_match_probability = sigmoid(params.alpha * (0.0 - params.beta));
+    assert!(non_match_probability > 0.0);
+    let probabilities: Vec<_> = (1..=4)
+        .map(|doc_id| {
+            matching_scores
+                .get(&doc_id)
+                .copied()
+                .unwrap_or(non_match_probability)
+        })
+        .collect();
+    let expected = CalibrationMetrics::report(&probabilities, &labels, 10).unwrap();
+
+    assert_eq!(actual, expected);
 }
 
 #[test]

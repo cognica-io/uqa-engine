@@ -62,7 +62,7 @@ impl Scorer for BayesianBM25Scorer {
     }
 
     fn finalize_score(&self, term_scores: &[f64]) -> f64 {
-        self.calibrate_raw_score(BM25Scorer::combine_scores(term_scores))
+        self.calibrate_raw_value(BM25Scorer::combine_scores(term_scores))
     }
 
     fn term_upper_bound(&self, doc_freq: u64) -> f64 {

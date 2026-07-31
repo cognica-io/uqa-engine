@@ -4,21 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Corpus-driven parameter estimation for query-level Bayesian BM25.
+//! Corpus-driven estimation of an unsupervised BM25 score transform.
 //!
-//! The sampling loop mirrors Lucene's `BayesianScoreEstimator`: it
-//! reservoir samples a field's indexed vocabulary, builds OR
-//! pseudo-queries, and gathers their raw BM25 score distributions.
-//! The sigmoid midpoint deliberately deviates from Lucene's median:
-//! `beta` anchors at the same 95th-percentile relevance boundary that
-//! defines the base rate, so `P(relevant | raw = beta) = base_rate`
-//! and a real query's top-ranked scores fall in the sigmoid's linear
-//! region instead of its saturated tail.
+//! The estimator reservoir samples a field's indexed vocabulary, builds OR
+//! pseudo-queries, and gathers raw BM25 score distributions. It anchors the
+//! sigmoid midpoint `beta` at the sampled 95th-percentile score boundary, so
+//! `sigmoid(alpha * (raw - beta))` is exactly `0.5` at that boundary. The
+//! fraction of corpus documents above the boundary is recorded separately as
+//! `base_rate` metadata for fusion; it is not the transform value at `beta`.
+//!
+//! Because the estimator has no relevance labels, its output is a monotone,
+//! corpus-adaptive score transform rather than a calibrated probability model.
+//! Probability claims require held-out labels and calibration diagnostics.
 //!
 //! Pseudo-queries are built at several lengths around
 //! `tokens_per_query`, and the per-length boundary and spread are
 //! fitted with an affine model in the token count. The fitted slopes
-//! travel with the parameters so scoring can translate the calibration
+//! travel with the parameters so scoring can translate the transform
 //! to the actual query length (`scaled_for_query_terms`), keeping long
 //! real queries out of the sigmoid's saturated tail.
 
@@ -39,26 +41,29 @@ const DEFAULT_SEED: i64 = 42;
 const BASE_RATE_MIN: f64 = 1e-6;
 const BASE_RATE_MAX: f64 = 0.5;
 const FALLBACK_BASE_RATE: f64 = 0.01;
-/// Scores at or above this percentile of the sampled distribution count
-/// as relevant; it defines both the base rate and the sigmoid midpoint.
+/// Scores at or above this percentile form the designated high-score tail;
+/// its boundary defines the sigmoid midpoint and its corpus fraction is stored
+/// as base-rate metadata.
 const RELEVANCE_BOUNDARY_PERCENTILE: f64 = 0.95;
-/// Below this many sampled scores the percentile boundary and the
-/// standard deviation are noise; the estimator falls back instead of
-/// fabricating a calibration.
+/// Below this many sampled scores the percentile boundary and standard
+/// deviation are noise; the estimator falls back instead of fabricating a fit.
 const MIN_CALIBRATION_SAMPLES: usize = 10;
 /// Floor on the coefficient of variation when deriving `alpha` from
 /// the score spread. Near-identical samples would otherwise explode
 /// `alpha = 1 / std` into a step function that erases ranking.
 const MIN_RELATIVE_STD: f64 = 0.25;
 
+/// Fits a deterministic sigmoid score transform from unlabeled corpus score
+/// distributions. The result preserves ranking but carries no calibration
+/// guarantee until it is checked against held-out relevance labels.
 #[derive(Debug, Clone, Copy)]
-pub struct BayesianScoreEstimator {
+pub struct UnsupervisedBm25ScoreEstimator {
     n_samples: usize,
     tokens_per_query: usize,
     seed: i64,
 }
 
-impl BayesianScoreEstimator {
+impl UnsupervisedBm25ScoreEstimator {
     pub fn new(n_samples: usize, tokens_per_query: usize, seed: i64) -> ScoringResult<Self> {
         if n_samples == 0 {
             return Err(invalid_input("n_samples must be positive"));
@@ -86,7 +91,7 @@ impl BayesianScoreEstimator {
         self.tokens_per_query
     }
 
-    /// The pseudo-query lengths this estimator calibrates across.
+    /// The pseudo-query lengths this estimator fits across.
     pub fn calibration_lengths(&self) -> Vec<usize> {
         calibration_lengths(self.tokens_per_query)
     }
@@ -156,7 +161,7 @@ impl BayesianScoreEstimator {
             if query_terms.is_empty() {
                 continue;
             }
-            // Every matching document participates in the calibration;
+            // Every matching document participates in the fit;
             // capping at a top-scored sample would bias the percentile
             // boundary and the base rate on corpora with more matches
             // than the cap (Lucene PR 16410).
@@ -183,7 +188,7 @@ impl BayesianScoreEstimator {
         // upper tail was measured on SciFact and rejected: it costs
         // 1.6 to 4.9 NDCG@10 points by weakening the text signal's
         // fusion dominance, while a document matching many rare
-        // coherent terms genuinely deserves a posterior near one.
+        // coherent terms genuinely deserves a transformed score near one.
         let mut boundary_points: Vec<(f64, f64)> = Vec::new();
         let mut spread_points: Vec<(f64, f64)> = Vec::new();
         let mut total_scores = 0;
@@ -271,7 +276,7 @@ fn affine_fit(points: &[(f64, f64)]) -> (f64, f64) {
     (mean_y - slope * mean_x, slope)
 }
 
-impl Default for BayesianScoreEstimator {
+impl Default for UnsupervisedBm25ScoreEstimator {
     fn default() -> Self {
         Self {
             n_samples: DEFAULT_N_SAMPLES,
@@ -447,7 +452,7 @@ mod tests {
     #[test]
     fn estimate_fits_query_length_slopes() {
         let index = co_occurring_index();
-        let params = BayesianScoreEstimator::new(12, 4, 42)
+        let params = UnsupervisedBm25ScoreEstimator::new(12, 4, 42)
             .unwrap()
             .estimate(&index, "body", BM25Params::default())
             .unwrap();
@@ -469,9 +474,9 @@ mod tests {
 
     #[test]
     fn constructor_rejects_zero_and_overflowing_sizes() {
-        assert!(BayesianScoreEstimator::new(0, 1, 42).is_err());
-        assert!(BayesianScoreEstimator::new(1, 0, 42).is_err());
-        assert!(BayesianScoreEstimator::new(1, usize::MAX, 42).is_err());
+        assert!(UnsupervisedBm25ScoreEstimator::new(0, 1, 42).is_err());
+        assert!(UnsupervisedBm25ScoreEstimator::new(1, 0, 42).is_err());
+        assert!(UnsupervisedBm25ScoreEstimator::new(1, usize::MAX, 42).is_err());
     }
 
     #[test]
@@ -487,7 +492,7 @@ mod tests {
     #[test]
     fn empty_index_returns_lucene_fallback() {
         let index = MemoryInvertedIndex::new(standard_analyzer("english"));
-        let params = BayesianScoreEstimator::default()
+        let params = UnsupervisedBm25ScoreEstimator::default()
             .estimate(&index, "body", BM25Params::default())
             .unwrap();
         assert_eq!(params.alpha, 1.0);
@@ -498,7 +503,7 @@ mod tests {
     #[test]
     fn estimate_is_seed_reproducible_and_bounded() {
         let index = populated_index();
-        let estimator = BayesianScoreEstimator::new(3, 2, 42).unwrap();
+        let estimator = UnsupervisedBm25ScoreEstimator::new(3, 2, 42).unwrap();
         let first = estimator
             .estimate(&index, "body", BM25Params::default())
             .unwrap();
@@ -530,7 +535,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let params = BayesianScoreEstimator::default()
+        let params = UnsupervisedBm25ScoreEstimator::default()
             .estimate_with_queries(
                 &index,
                 "body",

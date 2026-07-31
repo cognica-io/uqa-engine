@@ -8,10 +8,10 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BayesianScoreEstimator,
-    CalibrationMetrics, CalibrationReport, DocId, Engine, ExecutionContext, HybridSearchParams,
-    InvertedIndex, ParameterLearner, PostingList, SQLError, ScoredEntry, Scorer, ScoringMode,
-    StorageBackendError, StorageBackendResult,
+    Arc, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, CalibrationMetrics,
+    CalibrationReport, DocId, Engine, ExecutionContext, HybridSearchParams, InvertedIndex,
+    ParameterLearner, PostingList, RawBm25Score, SQLError, ScoredEntry, Scorer, ScoringMode,
+    StorageBackendError, StorageBackendResult, UnsupervisedBm25ScoreEstimator,
 };
 use uqa_core::IndexStats;
 
@@ -220,7 +220,7 @@ impl Engine {
         &self,
         table: &str,
         field: &str,
-        estimator: &BayesianScoreEstimator,
+        estimator: &UnsupervisedBm25ScoreEstimator,
     ) -> Result<Vec<Vec<String>>, SQLError> {
         let Some(table_state) = self
             .try_table(table)
@@ -277,7 +277,7 @@ impl Engine {
         Ok(queries)
     }
 
-    /// Estimate calibration parameters from the field's indexed
+    /// Estimate unsupervised score-transform parameters from the field's indexed
     /// vocabulary and persist them with a document-count stamp.
     /// Returns `None` (without persisting) when the field has nothing
     /// to sample, so an empty table estimates on first real use.
@@ -287,7 +287,7 @@ impl Engine {
         field: &str,
     ) -> Result<Option<BayesianBM25Params>, SQLError> {
         let table_state = self.require_table(table)?;
-        let estimator = BayesianScoreEstimator::default();
+        let estimator = UnsupervisedBm25ScoreEstimator::default();
         let queries = self.sample_calibration_queries(table, field, &estimator)?;
         let (params, doc_count) = {
             let index = table_state.inverted_index.read();
@@ -312,7 +312,9 @@ impl Engine {
                     &queries,
                 )
             }
-            .map_err(|error| storage_sql_error("estimate Bayesian BM25 parameters", error))?;
+            .map_err(|error| {
+                storage_sql_error("estimate BM25 score-transform parameters", error)
+            })?;
             let doc_count = index
                 .doc_count()
                 .map_err(|error| storage_sql_error("read indexed document count", error))?;
@@ -588,13 +590,12 @@ impl Engine {
         query: &str,
         labels: &[u8],
     ) -> Result<CalibrationReport, SQLError> {
-        if self
+        let Some(table_state) = self
             .try_table(table)
             .map_err(|error| storage_sql_error("resolve calibration table", error))?
-            .is_none()
-        {
+        else {
             return Err(SQLError::UnknownTable(table.to_string()));
-        }
+        };
         let doc_ids = self.table_doc_ids(table)?;
         if labels.len() != doc_ids.len() {
             return Err(SQLError::TypeMismatch(format!(
@@ -609,7 +610,32 @@ impl Engine {
             ));
         }
 
-        let mode = ScoringMode::BayesianBM25(self.bayesian_params_for(table, field)?);
+        let params = self.bayesian_params_for(table, field)?;
+        let (query_term_count, stats) = {
+            let index = table_state.inverted_index.read();
+            let query_term_count = index
+                .get_search_analyzer(field)
+                .analyze(query)
+                .map_err(|error| storage_sql_error("analyze calibration query", error))?
+                .len();
+            let stats = Arc::new(
+                index
+                    .field_stats(field)
+                    .map_err(|error| storage_sql_error("read calibration field stats", error))?,
+            );
+            (query_term_count, stats)
+        };
+        let scaled_params = params.scaled_for_query_terms(query_term_count);
+        let non_match_probability = BayesianBM25Scorer::new(scaled_params, stats)
+            .map_err(|error| {
+                SQLError::Internal(format!("build calibration-report scorer: {error}"))
+            })?
+            .calibrate_raw_score(
+                RawBm25Score::new(0.0).expect("the raw BM25 score for a non-match is finite"),
+            )
+            .value();
+
+        let mode = ScoringMode::BayesianBM25(params);
         let score_map: std::collections::BTreeMap<DocId, f64> = self
             .search(table, field, query, &mode, usize::MAX)?
             .into_iter()
@@ -617,7 +643,12 @@ impl Engine {
             .collect();
         let probabilities: Vec<f64> = doc_ids
             .iter()
-            .map(|doc_id| score_map.get(doc_id).copied().unwrap_or(0.0))
+            .map(|doc_id| {
+                score_map
+                    .get(doc_id)
+                    .copied()
+                    .unwrap_or(non_match_probability)
+            })
             .collect();
         CalibrationMetrics::report(&probabilities, labels, 10)
             .map_err(|error| SQLError::Internal(format!("compute calibration report: {error}")))
@@ -684,9 +715,8 @@ impl Engine {
         Ok(params)
     }
 
-    /// Estimate and persist Lucene-style Bayesian BM25 calibration
-    /// parameters from a field's indexed vocabulary and raw score
-    /// distribution.
+    /// Estimate and persist an unsupervised BM25 score transform from a
+    /// field's indexed vocabulary and raw score distribution.
     pub fn estimate_scoring_params(
         &self,
         table: &str,
@@ -725,7 +755,7 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let estimator = BayesianScoreEstimator::new(n_samples, tokens_per_query, seed)
+        let estimator = UnsupervisedBm25ScoreEstimator::new(n_samples, tokens_per_query, seed)
             .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
         let queries = self.sample_calibration_queries(table, field, &estimator)?;
         let (params, doc_count) = {

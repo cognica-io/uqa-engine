@@ -13,7 +13,7 @@ use uqa_core::IndexStats;
 use crate::bm25::{BM25Params, BM25Scorer};
 use crate::error::invalid_input;
 use crate::prob::{logit, sigmoid};
-use crate::ScoringResult;
+use crate::{PosteriorProbability, RawBm25Score, ScoringResult};
 
 /// Floor on the scaled score spread, as a fraction of the reference
 /// spread, so extrapolating to very short queries cannot drive `sigma`
@@ -133,31 +133,40 @@ impl BayesianBM25Scorer {
 
     pub fn score_with_idf(&self, term_freq: u64, doc_length: u64, idf_val: f64) -> f64 {
         let raw = self.bm25.score_with_idf(term_freq, doc_length, idf_val);
-        self.calibrate_raw_score(raw)
+        self.calibrate_raw_value(raw)
     }
 
     /// Calibrate the complete raw BM25 query score.
     ///
     /// `P = sigmoid(alpha * (score - beta))` -- exactly Lucene's
-    /// `BayesianScoreQuery` transform. With the estimator's boundary
-    /// anchoring, `beta` sits at the relevance boundary, so the
-    /// posterior crosses 0.5 where matches start counting as relevant.
-    /// The corpus prior (`params.base_rate`) belongs to fusion, not to
-    /// this transform.
-    pub fn calibrate_raw_score(&self, raw_score: f64) -> f64 {
-        sigmoid(self.params.alpha * (raw_score - self.params.beta))
+    /// `BayesianScoreQuery` transform. `raw_score = beta` always maps to
+    /// `0.5`; the corpus prior (`params.base_rate`) belongs to fusion and does
+    /// not enter this transform. When parameters came from
+    /// [`crate::UnsupervisedBm25ScoreEstimator`], held-out labels are still
+    /// required before treating the bounded output as empirically calibrated.
+    pub fn calibrate_raw_score(&self, raw_score: RawBm25Score) -> PosteriorProbability {
+        PosteriorProbability::new(self.calibrate_raw_value(raw_score.value()))
+            .expect("sigmoid always produces a valid posterior probability")
     }
 
     /// Combine raw BM25 term contributions, then calibrate exactly once.
-    pub fn combine_scores(&self, raw_term_scores: &[f64]) -> f64 {
-        self.calibrate_raw_score(BM25Scorer::combine_scores(raw_term_scores))
+    pub fn combine_scores(
+        &self,
+        raw_term_scores: &[RawBm25Score],
+    ) -> ScoringResult<PosteriorProbability> {
+        let combined = raw_term_scores.iter().map(|score| score.value()).sum();
+        Ok(self.calibrate_raw_score(RawBm25Score::new(combined)?))
     }
 
-    /// Bayesian WAND upper bound (Theorem 6.1.2): tightest safe pruning
-    /// bound derived from the BM25 supremum and the maximum prior.
+    /// Safe pruning bound obtained by applying the monotone sigmoid transform
+    /// to the raw BM25 supremum.
     pub fn upper_bound(&self, doc_freq: u64) -> f64 {
         let bm25_ub = self.bm25.upper_bound(doc_freq);
-        self.calibrate_raw_score(bm25_ub)
+        self.calibrate_raw_value(bm25_ub)
+    }
+
+    pub(crate) fn calibrate_raw_value(&self, raw_score: f64) -> f64 {
+        sigmoid(self.params.alpha * (raw_score - self.params.beta))
     }
 }
 
@@ -289,7 +298,13 @@ mod tests {
     fn query_level_calibration_uses_the_bm25_sum() {
         let scorer =
             BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
-        let combined = scorer.combine_scores(&[0.7, 0.4]);
+        let combined = scorer
+            .combine_scores(&[
+                RawBm25Score::new(0.7).unwrap(),
+                RawBm25Score::new(0.4).unwrap(),
+            ])
+            .unwrap()
+            .value();
         assert!((combined - sigmoid(1.1)).abs() < 1e-12);
     }
 
@@ -297,8 +312,20 @@ mod tests {
     fn query_level_calibration_preserves_raw_ranking() {
         let scorer =
             BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
-        let lower = scorer.combine_scores(&[0.7, 0.4]);
-        let higher = scorer.combine_scores(&[0.8, 0.5]);
+        let lower = scorer
+            .combine_scores(&[
+                RawBm25Score::new(0.7).unwrap(),
+                RawBm25Score::new(0.4).unwrap(),
+            ])
+            .unwrap()
+            .value();
+        let higher = scorer
+            .combine_scores(&[
+                RawBm25Score::new(0.8).unwrap(),
+                RawBm25Score::new(0.5).unwrap(),
+            ])
+            .unwrap()
+            .value();
         assert!(higher > lower, "{higher} must exceed {lower}");
     }
 
@@ -314,9 +341,32 @@ mod tests {
         .unwrap();
         let without_prior =
             BayesianBM25Scorer::new(BayesianBM25Params::default(), stats(1000, 10.0)).unwrap();
-        let combined = with_prior.combine_scores(&[0.7, 0.4]);
-        assert!((combined - without_prior.combine_scores(&[0.7, 0.4])).abs() < 1e-12);
+        let raw_scores = [
+            RawBm25Score::new(0.7).unwrap(),
+            RawBm25Score::new(0.4).unwrap(),
+        ];
+        let combined = with_prior.combine_scores(&raw_scores).unwrap().value();
+        assert!(
+            (combined - without_prior.combine_scores(&raw_scores).unwrap().value()).abs() < 1e-12
+        );
         assert!((combined - sigmoid(1.1)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn raw_beta_maps_to_half_independently_of_base_rate() {
+        for base_rate in [0.0, 0.01, 0.2, 0.8] {
+            let params = BayesianBM25Params {
+                alpha: 2.5,
+                beta: 3.75,
+                base_rate,
+                ..BayesianBM25Params::default()
+            };
+            let scorer = BayesianBM25Scorer::new(params, stats(1000, 10.0)).unwrap();
+            let midpoint = scorer
+                .calibrate_raw_score(RawBm25Score::new(params.beta).unwrap())
+                .value();
+            assert_eq!(midpoint, 0.5, "base_rate={base_rate}");
+        }
     }
 
     #[test]
@@ -384,12 +434,14 @@ mod tests {
         let evidence_scorer =
             BayesianBM25Scorer::new(params.evidence_params(), stats(1000, 10.0)).unwrap();
         for raw in [0.0, 1.5, 3.0, 6.0] {
-            let posterior = posterior_scorer.calibrate_raw_score(raw);
-            let evidence = evidence_scorer.calibrate_raw_score(raw);
+            let raw = RawBm25Score::new(raw).unwrap();
+            let posterior = posterior_scorer.calibrate_raw_score(raw).value();
+            let evidence = evidence_scorer.calibrate_raw_score(raw).value();
             let expected = sigmoid(logit(posterior) - logit(0.05));
             assert!(
                 (evidence - expected).abs() < 1e-12,
-                "raw {raw}: {evidence} vs {expected}"
+                "raw {}: {evidence} vs {expected}",
+                raw.value()
             );
         }
         let plain = BayesianBM25Params::default();
