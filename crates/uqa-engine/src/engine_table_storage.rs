@@ -1401,6 +1401,56 @@ impl Engine {
         Ok(())
     }
 
+    /// Append one validated PRIMARY KEY or UNIQUE tuple without replacing the
+    /// table's existing CHECK, FOREIGN KEY, or key constraints. SQL DDL owns
+    /// validation of existing rows before calling this storage mutation.
+    pub(crate) fn add_key_constraint(
+        &self,
+        table: &str,
+        constraint: &uqa_sql::ast::TableKeyConstraint,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.add_key_constraint_inner(table, constraint)
+        })
+    }
+
+    fn add_key_constraint_inner(
+        &self,
+        table: &str,
+        constraint: &uqa_sql::ast::TableKeyConstraint,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        let mut key_constraints = t.key_constraints.read().clone();
+        key_constraints.push(constraint.clone());
+        let mut columns = t.columns.read().clone();
+        if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey {
+            for key_column in &constraint.columns {
+                let column = columns
+                    .iter_mut()
+                    .find(|column| column.name == *key_column)
+                    .ok_or_else(|| column_not_found(&table_name, key_column))?;
+                column.not_null = true;
+            }
+        }
+        let constraints = uqa_sql::ast::TableConstraintSet {
+            checks: t.table_checks.read().clone(),
+            foreign_keys: t.foreign_keys.read().clone(),
+            key_constraints,
+        };
+        if self.is_persistent() {
+            self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
+        }
+        *t.columns.write() = columns;
+        *t.key_constraints.write() = constraints.key_constraints;
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
+    }
+
     /// Snapshot of every CHECK constraint that applies to `table`,
     /// merging the column-level CHECKs into the table-level list.
     /// Returns `(name, expr)` pairs where `name` is the constraint

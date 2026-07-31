@@ -12,7 +12,7 @@
 
 use crate::ast::{
     AlterTableAction, AlterTableStmt, ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement,
-    TransactionStmt, UpdateStmt,
+    TableKeyConstraint, TableKeyConstraintKind, TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};
 use pg_query::protobuf::{Node, RangeVar};
@@ -1624,6 +1624,56 @@ fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Alte
                 if_not_exists: cmd.missing_ok,
             }
         }
+        AlterTableType::AtAddConstraint => {
+            let def_inner = cmd
+                .def
+                .as_ref()
+                .and_then(|definition| definition.node.as_ref())
+                .ok_or_else(|| SQLError::Internal("ADD CONSTRAINT without Constraint".into()))?;
+            let constraint = match def_inner {
+                NodeEnum::Constraint(constraint) => constraint,
+                other => {
+                    return Err(SQLError::Internal(format!(
+                        "ADD CONSTRAINT expected Constraint, got {other:?}"
+                    )));
+                }
+            };
+            let kind = match constraint.contype() {
+                pg_query::protobuf::ConstrType::ConstrPrimary => TableKeyConstraintKind::PrimaryKey,
+                pg_query::protobuf::ConstrType::ConstrUnique => TableKeyConstraintKind::Unique,
+                other => {
+                    return Err(SQLError::Unsupported(format!(
+                        "ALTER TABLE ADD CONSTRAINT {other:?} is not supported"
+                    )));
+                }
+            };
+            let columns = constraint
+                .keys
+                .iter()
+                .map(extract_string)
+                .collect::<Result<Vec<_>>>()?;
+            if columns.is_empty() {
+                return Err(SQLError::TypeMismatch(
+                    "PRIMARY KEY / UNIQUE constraint must name at least one column".into(),
+                ));
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for column in &columns {
+                if !seen.insert(column.as_str()) {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "PRIMARY KEY / UNIQUE constraint names column `{column}` more than once"
+                    )));
+                }
+            }
+            AlterTableAction::AddKeyConstraint {
+                constraint: TableKeyConstraint {
+                    name: (!constraint.conname.is_empty()).then(|| constraint.conname.clone()),
+                    kind,
+                    columns,
+                    nulls_not_distinct: constraint.nulls_not_distinct,
+                },
+            }
+        }
         AlterTableType::AtDropColumn => AlterTableAction::DropColumn {
             name: cmd.name.clone(),
             if_exists: cmd.missing_ok,
@@ -2171,6 +2221,22 @@ mod tests {
             panic!("expected DROP TABLE");
         };
         assert_eq!(drop.names, vec!["\"a.b\".\"d.e\"".to_string()]);
+    }
+
+    #[test]
+    fn alter_table_add_key_constraint_preserves_tuple_shape() {
+        let Statement::AlterTable(alter) =
+            first("ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)")
+        else {
+            panic!("expected ALTER TABLE");
+        };
+        assert!(matches!(
+            alter.action,
+            AlterTableAction::AddKeyConstraint { constraint }
+                if constraint.name.as_deref() == Some("labels_tenant_slug_key")
+                    && constraint.kind == TableKeyConstraintKind::Unique
+                    && constraint.columns == ["tenant", "slug"]
+        ));
     }
 
     #[test]

@@ -410,6 +410,9 @@ pub enum AlterTableAction {
         column: ColumnDef,
         if_not_exists: bool,
     },
+    AddKeyConstraint {
+        constraint: TableKeyConstraint,
+    },
     DropColumn {
         name: String,
         if_exists: bool,

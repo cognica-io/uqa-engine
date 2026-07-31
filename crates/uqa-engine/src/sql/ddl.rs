@@ -419,6 +419,12 @@ fn run_alter_table_inner(engine: &Engine, mut stmt: AlterTableStmt) -> Result<SQ
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
         }
+        AlterTableAction::AddKeyConstraint { constraint } => {
+            validate_added_key_constraint(engine, &stmt.table, &constraint)?;
+            engine
+                .add_key_constraint(&stmt.table, &constraint)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+        }
         AlterTableAction::DropColumn {
             name,
             if_exists,
@@ -605,6 +611,93 @@ fn ensure_existing_values_not_null(
         return Err(SQLError::TypeMismatch(format!(
             "ALTER TABLE ALTER COLUMN: column `{column}` contains NULL values"
         )));
+    }
+    Ok(())
+}
+
+fn validate_added_key_constraint(
+    engine: &Engine,
+    table: &str,
+    constraint: &uqa_sql::ast::TableKeyConstraint,
+) -> Result<(), SQLError> {
+    let columns = engine
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let column_names: std::collections::BTreeSet<&str> =
+        columns.iter().map(|column| column.name.as_str()).collect();
+    for column in &constraint.columns {
+        if !column_names.contains(column.as_str()) {
+            return Err(SQLError::TypeMismatch(format!(
+                "ALTER TABLE ADD CONSTRAINT references unknown column `{column}`"
+            )));
+        }
+    }
+
+    let existing_keys = engine
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    if let Some(name) = constraint.name.as_deref() {
+        let check_name_exists = engine
+            .try_check_constraints(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+            .iter()
+            .any(|(existing, _)| existing.as_deref() == Some(name));
+        let foreign_name_exists = engine
+            .try_foreign_keys(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+            .iter()
+            .any(|existing| existing.name.as_deref() == Some(name));
+        let key_name_exists = existing_keys
+            .iter()
+            .any(|existing| existing.name.as_deref() == Some(name));
+        if check_name_exists || foreign_name_exists || key_name_exists {
+            return Err(SQLError::TypeMismatch(format!(
+                "constraint `{name}` already exists on table `{table}`"
+            )));
+        }
+    }
+    if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey
+        && existing_keys
+            .iter()
+            .any(|existing| existing.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey)
+    {
+        return Err(SQLError::TypeMismatch(format!(
+            "multiple PRIMARY KEY constraints are not allowed on table `{table}`"
+        )));
+    }
+
+    let mut seen = std::collections::BTreeSet::<Vec<Value>>::new();
+    for doc_id in engine.table_doc_ids(table)? {
+        let Some(document) = engine.get_document(table, doc_id)? else {
+            continue;
+        };
+        let values: Vec<Value> = constraint
+            .columns
+            .iter()
+            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+            .collect();
+        let contains_null = values.iter().any(|value| matches!(value, Value::Null));
+        if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey && contains_null {
+            return Err(SQLError::TypeMismatch(format!(
+                "PRIMARY KEY constraint contains NULL values on table `{table}`"
+            )));
+        }
+        if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
+            && contains_null
+            && !constraint.nulls_not_distinct
+        {
+            continue;
+        }
+        if !seen.insert(values) {
+            return Err(SQLError::TypeMismatch(format!(
+                "{} constraint would be violated by duplicate values on table `{table}`",
+                match constraint.kind {
+                    uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
+                    uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
+                }
+            )));
+        }
     }
     Ok(())
 }

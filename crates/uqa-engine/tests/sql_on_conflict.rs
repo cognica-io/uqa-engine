@@ -395,6 +395,132 @@ fn insert_select_uses_the_same_composite_conflict_path_as_values() {
 }
 
 #[test]
+fn alter_table_add_unique_constraint_enables_conflict_target_and_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("legacy-composite-key.db");
+    {
+        let eng = Engine::open(&db).unwrap();
+        eng.sql(
+            "CREATE TABLE labels (
+                id INTEGER PRIMARY KEY,
+                tenant TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                value TEXT
+            )",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO labels (id, tenant, slug, value) VALUES (1, 'a', 'one', 'old')",
+            &[],
+        )
+        .unwrap();
+        let missing = eng
+            .sql(
+                "INSERT INTO labels (id, tenant, slug, value) VALUES (2, 'a', 'one', 'new')
+                 ON CONFLICT (tenant, slug) DO UPDATE SET value = EXCLUDED.value",
+                &[],
+            )
+            .unwrap_err();
+        assert!(missing.to_string().contains("does not match"));
+
+        eng.sql(
+            "ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)",
+            &[],
+        )
+        .unwrap();
+        eng.sql(
+            "INSERT INTO labels (id, tenant, slug, value) VALUES (2, 'a', 'one', 'new')
+             ON CONFLICT (tenant, slug) DO UPDATE SET value = EXCLUDED.value",
+            &[],
+        )
+        .unwrap();
+    }
+
+    let eng = Engine::open(&db).unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug, value) VALUES (3, 'a', 'one', 'newer')
+         ON CONFLICT (tenant, slug) DO UPDATE SET value = EXCLUDED.value",
+        &[],
+    )
+    .unwrap();
+    let rows = eng
+        .sql("SELECT id, value FROM labels ORDER BY id", &[])
+        .unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["id"], Value::Int(1));
+    assert_eq!(rows.rows[0]["value"], Value::Str("newer".into()));
+}
+
+#[test]
+fn alter_table_add_unique_constraint_rejects_legacy_duplicates_atomically() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE labels (id INTEGER PRIMARY KEY, tenant TEXT, slug TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (id, tenant, slug) VALUES (1, 'a', 'one'), (2, 'a', 'one')",
+        &[],
+    )
+    .unwrap();
+
+    let error = eng
+        .sql(
+            "ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)",
+            &[],
+        )
+        .unwrap_err();
+    assert!(error.to_string().to_ascii_lowercase().contains("duplicate"));
+    assert!(!eng
+        .key_constraints("labels")
+        .unwrap()
+        .iter()
+        .any(|constraint| constraint.columns == ["tenant", "slug"]));
+}
+
+#[test]
+fn alter_table_add_composite_primary_key_enforces_nullability_and_uniqueness() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE labels (tenant TEXT, slug TEXT, value TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO labels (tenant, slug, value) VALUES ('a', 'one', 'old')",
+        &[],
+    )
+    .unwrap();
+
+    eng.sql(
+        "ALTER TABLE labels ADD CONSTRAINT labels_pkey PRIMARY KEY (tenant, slug)",
+        &[],
+    )
+    .unwrap();
+
+    let duplicate = eng
+        .sql(
+            "INSERT INTO labels (tenant, slug, value) VALUES ('a', 'one', 'duplicate')",
+            &[],
+        )
+        .unwrap_err();
+    assert!(duplicate
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("primary key"));
+
+    let null = eng
+        .sql(
+            "INSERT INTO labels (tenant, slug, value) VALUES ('a', NULL, 'null')",
+            &[],
+        )
+        .unwrap_err();
+    assert!(null.to_string().to_ascii_lowercase().contains("not null"));
+}
+
+#[test]
 fn conflict_update_returning_reports_a_rewritten_integer_primary_key_doc_id() {
     let eng = Engine::new();
     eng.sql(
