@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Engine creation, file detection, compression, and session creation.
 
 use super::{

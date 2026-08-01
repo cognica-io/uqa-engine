@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
 use super::{

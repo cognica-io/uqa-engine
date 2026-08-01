@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Complete `DocumentStore` query, mutation, iteration, and snapshot contract.
 
 use super::{

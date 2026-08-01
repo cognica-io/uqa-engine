@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Recursive query/source plan traversal and compute classification.
 
 use super::{

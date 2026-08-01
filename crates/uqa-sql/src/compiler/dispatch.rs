@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Parser entry point and exhaustive statement-family dispatch.
 
 use super::administrative::{

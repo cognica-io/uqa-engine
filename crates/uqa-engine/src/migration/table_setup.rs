@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Destination table, analyzer, FTS, and vector-index installation.
 
 use super::{

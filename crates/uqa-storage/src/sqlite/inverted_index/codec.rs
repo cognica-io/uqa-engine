@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! `SQLite` integer bounds, posting-position codecs, and aggregate loaders.
 
 use super::{params, BTreeMap, FieldName, OptionalExtension, SQLiteError, SQLiteResult};

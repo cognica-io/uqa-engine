@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Bayesian text, prior-aware, and calibrated-vector retrieval paths.
 
 use super::{

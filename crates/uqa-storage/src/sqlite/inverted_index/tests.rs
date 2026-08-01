@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::*;
 use crate::sqlite::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};

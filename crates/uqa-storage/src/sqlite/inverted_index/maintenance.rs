@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Auxiliary schema, field analysis, and skip-pointer rebuilds.
 
 use super::{

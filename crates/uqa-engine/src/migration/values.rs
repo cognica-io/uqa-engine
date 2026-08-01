@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! SQLite/JSON/temporal value conversion and catalog JSON helpers.
 
 use super::{

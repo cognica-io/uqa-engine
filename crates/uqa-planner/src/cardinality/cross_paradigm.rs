@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Fusion, retrieval, graph, and cross-paradigm operator heuristics.
 
 use super::{

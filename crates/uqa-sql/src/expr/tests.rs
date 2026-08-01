@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::casting::cast_integer;
 use super::*;
 use crate::ast::Expr;

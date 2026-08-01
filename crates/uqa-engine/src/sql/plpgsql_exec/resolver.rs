@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Variable resolution for bound PL/pgSQL expressions and statements.
 
 use super::{DatumResolver, PLpgSQLDatum, SQLError, Value, VariableResolver};

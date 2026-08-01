@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Chunk compression, bounded decompression, and authenticated encryption.
 
 use super::{

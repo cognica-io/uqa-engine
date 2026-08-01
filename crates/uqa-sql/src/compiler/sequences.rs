@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! CREATE/ALTER SEQUENCE lowering and option validation.
 
 use super::{range_var_name, validate_durable_create_relation, NodeEnum, Result, SQLError};

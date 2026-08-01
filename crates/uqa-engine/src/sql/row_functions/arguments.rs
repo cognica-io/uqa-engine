@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Shared evaluated argument and column-name extraction.
 
 use super::{eval_scalar, SQLError, ScalarEvalContext, ScalarExpr, Value};

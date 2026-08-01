@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Checked conversion of graph property values to finite numeric weights.
 
 use super::{GraphStoreError, GraphStoreResult, Value};

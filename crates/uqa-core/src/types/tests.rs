@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND};
 use super::*;
 

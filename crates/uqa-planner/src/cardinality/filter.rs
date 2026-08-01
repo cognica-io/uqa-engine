@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Indexed predicate selectivity from MCV and histogram statistics.
 
 use super::{

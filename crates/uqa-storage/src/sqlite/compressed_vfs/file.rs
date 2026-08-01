@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Uniform byte-file abstraction for compressed main files and plain auxiliaries.
 
 use super::{

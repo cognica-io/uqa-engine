@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Graph entity, membership, and AGE label-registry restoration.
 
 use super::{BTreeMap, CatalogFacade, Engine, StorageBackendError, StorageBackendResult};

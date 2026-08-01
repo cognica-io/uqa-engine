@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::lowering_expression::strip_assignment_target;
 use super::lowering_statement::{lower_stmt, lower_stmt_list};
 use super::parsing::{lower_datum, parse_plpgsql_text, validate_datums};

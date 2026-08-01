@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Per-graph membership and adjacency indexes.
 
 use super::{BTreeMap, BTreeSet, Edge, EdgeId, Vertex, VertexId};

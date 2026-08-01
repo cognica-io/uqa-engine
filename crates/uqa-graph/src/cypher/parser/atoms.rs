@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Literals, comprehensions, maps, calls, parameters, and CASE expressions.
 
 use super::{

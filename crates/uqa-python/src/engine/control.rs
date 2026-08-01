@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Notices, limits, cancellation, close, and representation.
 
 use super::{pymethods, runtime_error, PyEngine, PyResult, PyRuntimeError};

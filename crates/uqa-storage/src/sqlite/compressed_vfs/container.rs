@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Append-only compressed-container lifecycle, chunk cache, and compaction.
 
 use super::{

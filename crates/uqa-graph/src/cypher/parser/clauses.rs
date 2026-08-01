@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Top-level query clauses, projection, ordering, skip, and limit.
 
 use super::{

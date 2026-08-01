@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{Engine, QueryPlan, RelationIdentity, RelationalPlan, SourcePlan};
 
 fn lower_query(sql: &str) -> QueryPlan {

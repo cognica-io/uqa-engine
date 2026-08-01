@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Graph analytics, graph lifecycle, and AGE-compatible scalar helpers.
 
 use super::{

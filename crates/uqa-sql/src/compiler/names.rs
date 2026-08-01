@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Qualified-name rendering and durable relation-envelope validation.
 
 use super::{extract_string, Node, RangeVar, Result, SQLError};

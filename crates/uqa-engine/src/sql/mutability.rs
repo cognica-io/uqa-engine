@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{builtin_function_dispatch_name, BTreeSet, Engine, SQLError};
 
 /// SELECT is not synonymous with read-only: UQA exposes a small set of

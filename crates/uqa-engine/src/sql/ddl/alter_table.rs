@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! ALTER TABLE schema mutation and existing-row backfill.
 
 use super::{

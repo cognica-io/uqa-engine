@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Skip-pointer and scorer-versioned block-max materialization.
 
 use super::{

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! DROP, ALTER TABLE, and RENAME lowering.
 
 use super::routines::compile_drop_function;

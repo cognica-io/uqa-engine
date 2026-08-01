@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Path, node, relationship, variable-length, and property-map patterns.
 
 use super::{

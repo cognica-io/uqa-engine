@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Logical-session search path, PRNG, runtime variables, and DISCARD.
 
 use super::{parse_search_path_list, Engine, SQLError, StorageBackendResult};

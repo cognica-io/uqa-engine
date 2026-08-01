@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! `SQLite` VFS callbacks, temporary paths, and lock-file lifecycle.
 
 use super::{

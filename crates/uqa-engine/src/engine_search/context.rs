@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Snapshot assembly for operator execution.
 
 use super::{storage_sql_error, Engine, ExecutionContext, SQLError};

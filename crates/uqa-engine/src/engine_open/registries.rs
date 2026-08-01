@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Analyzer, FDW, view, index, path-index, and FTS registry restoration.
 
 use super::{

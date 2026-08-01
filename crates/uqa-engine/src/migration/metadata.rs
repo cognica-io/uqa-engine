@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Secondary catalog metadata, statistics, models, FDWs, and path indexes.
 
 use super::{

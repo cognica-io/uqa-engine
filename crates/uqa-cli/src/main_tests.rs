@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::completion::highlight_sql_line;
 use super::*;
 use rustyline::completion::Candidate as _;

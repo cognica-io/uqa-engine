@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Function-registry dispatch, operator lowering, and top-K planning.
 
 use super::{

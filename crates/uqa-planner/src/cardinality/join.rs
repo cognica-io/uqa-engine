@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Generic independent-domain join estimate.
 
 use super::CardinalityEstimator;

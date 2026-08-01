@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Compression codec selection and validated chunk geometry.
 
 use super::{DEFAULT_CHUNK_PAGES, DEFAULT_LEVEL, DEFAULT_PAGE_SIZE};

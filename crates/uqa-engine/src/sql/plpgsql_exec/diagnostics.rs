@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! SQLSTATE matching, row diagnostics, and `RAISE` formatting.
 
 use super::{cast_value, condition_sqlstates, ResultRow, SQLError, SQLResult, Value};

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{coerce_json_value, float_to_integer};
 use uqa_core::Value;
 

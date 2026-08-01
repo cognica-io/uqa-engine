@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Session control, ANALYZE, EXPLAIN, TRUNCATE, and transactions.
 
 use super::dispatch::compile_stmt;

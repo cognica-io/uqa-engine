@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Checked document-id, ordinal, and vector-blob encoding.
 
 use super::{DocId, SQLiteError, SQLiteResult};

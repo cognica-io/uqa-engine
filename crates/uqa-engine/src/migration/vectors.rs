@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Vector extraction, fallback loading, and finite f32 validation.
 
 use super::{

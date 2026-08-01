@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! CTAS, prepared statements, foreign relations, views, and schemas.
 
 use super::dispatch::compile_stmt;

@@ -1,6 +1,9 @@
+//
 // Unified Query Algebra
+//
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
+
 // libfuzzer target: posting list construction is robust against
 // arbitrary `(doc_id, score)` payloads. We feed `arbitrary` data into
 // `PostingList::from_unsorted` and assert the resulting list is sorted

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Token-stream lookahead, consumption, and expectation primitives.
 
 use super::{is_keyword, ParseError, Parser, Token, TokenKind};

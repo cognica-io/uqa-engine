@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! SQL-AST and scalar-value helpers for relational selectivity.
 
 use super::{BinaryOp, ColumnStats, Expr, Value};

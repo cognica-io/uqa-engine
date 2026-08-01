@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Relational, graph, and sampling statistics contracts.
 
 use super::{BTreeMap, Value, VertexConstraint};

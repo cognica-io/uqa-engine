@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Schema/catalog enumeration and schema lifecycle.
 
 use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};

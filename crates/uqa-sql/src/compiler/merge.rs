@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! MERGE source, predicate, and WHEN-clause lowering.
 
 use super::{

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Checked document-id conversion and probe-vs-scan batch construction.
 
 use super::{DocId, SQLiteError, SQLiteResult};

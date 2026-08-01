@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! WAND/BMW planning, block-max lifecycle, and profiled text leaves.
 
 use super::{

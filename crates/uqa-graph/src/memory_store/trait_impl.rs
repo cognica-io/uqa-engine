@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! `GraphStore` mutation, traversal, statistics, and id-allocation contract.
 
 use super::{

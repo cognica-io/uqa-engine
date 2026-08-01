@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! `InvertedIndex` trait implementation and read/statistics surface.
 
 use super::{

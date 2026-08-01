@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Vector normalization, centroid probing, and result scoring.
 
 use super::{cosine_similarity, select_top_k_scored, DocId, Payload, PostingEntry, PostingList};

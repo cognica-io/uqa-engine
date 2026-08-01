@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Estimator construction and statistics attachment.
 
 use super::{Arc, BTreeMap, CardinalityEstimator, ColumnStats, GraphStats, GraphStoreSampler};

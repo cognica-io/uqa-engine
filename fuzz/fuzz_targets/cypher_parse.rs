@@ -1,6 +1,9 @@
+//
 // Unified Query Algebra
+//
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
+
 // libfuzzer target: `uqa_graph::cypher::parse_cypher` must not panic.
 // Run with: cargo +nightly fuzz run cypher_parse
 

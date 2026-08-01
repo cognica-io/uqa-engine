@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{SQLError, Value};
 
 pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Python and SQL error boundary conversion.
 
 use super::{PyErr, PyRuntimeError, PyStringMethods, PyTypeMethods, Python, SQLError};

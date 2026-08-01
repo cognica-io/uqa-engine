@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::*;
 use uqa_execution::{Batch, ExecError, ExecResult, PhysicalOperator};
 use uqa_planner::UnifiedPlan;

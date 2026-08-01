@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! AGE graphid composition and per-graph label allocation state.
 
 use super::{BTreeMap, Deserialize, GraphStoreError, GraphStoreResult, Serialize};

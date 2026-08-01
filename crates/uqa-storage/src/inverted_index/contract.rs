@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{
     counter_error, usize_to_u64, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName,
     IndexStats, PostingEntry, PostingList, StorageBackendError, StorageBackendResult,

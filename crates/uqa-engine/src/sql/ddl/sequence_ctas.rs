@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Sequence DDL and CREATE TABLE AS execution.
 
 use super::{ddl_storage_error, Document, Engine, SQLError, SQLParam, SQLResult};

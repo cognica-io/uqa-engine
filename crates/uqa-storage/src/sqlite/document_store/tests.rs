@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::blob::decode_f64_tensor_blob;
 use super::*;
 use crate::sqlite::catalog::Catalog;

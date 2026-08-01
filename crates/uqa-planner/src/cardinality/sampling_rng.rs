@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Deterministic PRNG used by graph cardinality sampling.
 
 use super::Cell;

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Shared graph-result identifiers and payload conversion.
 
 use super::{DocId, GraphStoreError, GraphStoreResult, Value};

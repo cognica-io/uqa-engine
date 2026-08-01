@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Graph traversal, pattern, RPQ, temporal, and sampling estimates.
 
 use super::{

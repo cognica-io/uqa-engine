@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{JSON, JS_MAX_SAFE_INTEGER};
 
 pub(super) fn req_str(args: &JSON, key: &str) -> Result<String, String> {

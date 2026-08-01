@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::records::LEGACY_VIEWS_METADATA_KEY;
 use super::*;
 use crate::document_store::Document;

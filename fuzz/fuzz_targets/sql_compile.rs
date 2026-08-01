@@ -1,6 +1,9 @@
+//
 // Unified Query Algebra
+//
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
+
 // libfuzzer target: `uqa_sql::compile` must not panic on any input.
 // Run with: cargo +nightly fuzz run sql_compile
 

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Blob markers, hydration, validation, and blob-table persistence.
 
 use super::{

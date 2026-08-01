@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 use super::{
     BTreeMap, Batch, BufRead, BufReader, BufWriter, DecimalValue, Deserialize, ExecError,
     ExecResult, File, NamedTempFile, Read, ResultRow, RowSchema, Seek, SeekFrom, Serialize,

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! SQL/PLpgSQL routine creation, invocation, bodies, and drops.
 
 use super::dispatch::compile_stmt;

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Hybrid text/vector query construction and execution.
 
 use super::{storage_sql_error, Engine, HybridSearchParams, SQLError, ScoredEntry};

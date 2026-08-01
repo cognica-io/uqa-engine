@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! KNN, calibrated vector, and similarity search.
 
 use super::{storage_sql_error, Engine, SQLError, ScoredEntry};

@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Core `OperatorTree` cardinality dispatch and intersection damping.
 
 use super::{

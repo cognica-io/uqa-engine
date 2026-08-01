@@ -1,3 +1,9 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
 //! Named graph entities, memberships, snapshots, and cleanup.
 
 use super::{
