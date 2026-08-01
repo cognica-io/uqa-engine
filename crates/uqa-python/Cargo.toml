@@ -14,7 +14,7 @@ name = "_uqa"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { workspace = true, features = ["abi3-py38"] }
+pyo3 = { workspace = true, features = ["abi3-py38", "multiple-pymethods"] }
 serde_json = { workspace = true }
 uqa-core = { workspace = true }
 uqa-engine = { workspace = true }

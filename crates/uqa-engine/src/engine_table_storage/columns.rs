@@ -1,0 +1,418 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Column registration, index rebuild, and table or column rename.
+
+use super::{table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+
+impl Engine {
+    /// Append a column to the schema. No data migration is needed because
+    /// the document store is sparse; rows missing the column read back as
+    /// `Value::Null`.
+    pub fn register_column(
+        &self,
+        table: &str,
+        column: uqa_sql::ast::ColumnDef,
+    ) -> StorageBackendResult<()> {
+        self.try_register_column(table, column)
+    }
+
+    pub(crate) fn try_register_column(
+        &self,
+        table: &str,
+        column: uqa_sql::ast::ColumnDef,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_register_column_inner(table, column)
+        })
+    }
+
+    pub(super) fn try_register_column_inner(
+        &self,
+        table: &str,
+        mut column: uqa_sql::ast::ColumnDef,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        if let Some(default) = &mut column.default {
+            self.bind_sequence_references_in_expr(default)?;
+        }
+        if let Some(reference) = &mut column.references {
+            reference.table = self.canonical_foreign_key_target(&reference.table)?;
+        }
+        let mut columns = t.columns.write();
+        if columns.iter().any(|c| c.name == column.name) {
+            return Err(StorageBackendError::Other(format!(
+                "column `{}` already exists on table `{table_name}`",
+                column.name
+            )));
+        }
+        let mut next = columns.clone();
+        next.push(column);
+        self.mark_column_stats_dirty(&table_name, &t)?;
+        if self.is_persistent() {
+            self.try_save_table_schema_with_columns(&table_name, &t, &next)?;
+        }
+        *columns = next;
+        drop(columns);
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
+    }
+
+    pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        self.try_drop_column(table, column)
+    }
+
+    pub(crate) fn try_drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| engine.try_drop_column_inner(table, column))
+    }
+
+    pub(super) fn try_drop_column_inner(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
+        else {
+            return Ok(false);
+        };
+        let Some(t) = self.try_table(table)? else {
+            return Ok(false);
+        };
+        if !t
+            .columns
+            .read()
+            .iter()
+            .any(|candidate| candidate.name == column)
+        {
+            return Ok(false);
+        }
+        self.preflight_drop_column_dependencies(&table_name, column)?;
+        Self::value_indexes_clear(&t);
+        {
+            let mut cols = t.columns.write();
+            cols.retain(|c| c.name != column);
+        }
+        t.key_constraints
+            .write()
+            .retain(|constraint| !constraint.columns.iter().any(|name| name == column));
+        t.foreign_keys.write().retain(|foreign_key| {
+            !foreign_key.local_columns.iter().any(|name| name == column)
+                && !foreign_key
+                    .on_delete_set_columns
+                    .iter()
+                    .any(|name| name == column)
+        });
+        // Remove from FTS field list if present.
+        {
+            let mut fts = t.fts_fields.write();
+            fts.retain(|f| f != column);
+        }
+        // Drop the vector index for this field if it exists.
+        {
+            let mut vs = t.vector_indexes.write();
+            if let Some(mut idx) = vs.remove(column) {
+                idx.clear()?;
+            }
+        }
+        self.remove_catalog_indexes_for_column(&table_name, column)?;
+        self.table_field_analyzers
+            .write()
+            .retain(|(table, field), _| !(table == &table_name && field == column));
+        let ids = t.document_store.read().doc_ids()?;
+        for doc_id in ids {
+            let Some(mut doc) = t.document_store.read().get(doc_id)? else {
+                continue;
+            };
+            if doc.remove(column).is_some() {
+                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+            }
+        }
+        if self.is_persistent() {
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.drop_column_data(&table_name, column)?;
+            }
+            self.try_save_table_schema(&table_name, &t)?;
+        }
+        self.mark_column_stats_dirty(&table_name, &t)?;
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(true)
+    }
+
+    pub(crate) fn try_drop_vector_indexes_for_column(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_drop_vector_indexes_for_column_inner(table, column)
+        })
+    }
+
+    pub(super) fn try_drop_vector_indexes_for_column_inner(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_ddl_target(table, "ALTER TABLE ALTER COLUMN")?
+        else {
+            return Ok(false);
+        };
+        let Some(t) = self.try_table(table)? else {
+            return Ok(false);
+        };
+        if let Some(mut idx) = t.vector_indexes.write().remove(column) {
+            idx.clear()?;
+        }
+        for index_name in self.vector_catalog_index_names_for_column(&table_name, column)? {
+            self.try_drop_catalog_index(&index_name)?;
+        }
+        self.try_save_table_schema(&table_name, &t)?;
+        Ok(true)
+    }
+
+    pub(crate) fn try_rebuild_vector_index_for_column(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_rebuild_vector_index_for_column_inner(table, column, dimensions)
+        })
+    }
+
+    pub(super) fn try_rebuild_vector_index_for_column_inner(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<bool> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let params = self.ivf_catalog_params_for_column(&table_name, column)?;
+        let rebuilt = if let Some(params) = params {
+            self.rebuild_ivf_vector_field(&table_name, column, dimensions, params)
+        } else {
+            self.rebuild_vector_field(&table_name, column, dimensions)
+        }?;
+        if !rebuilt {
+            return Err(StorageBackendError::Other(format!(
+                "failed to rebuild vector index for `{table_name}`.`{column}`"
+            )));
+        }
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        self.try_save_table_schema(&table_name, &t)?;
+        Ok(true)
+    }
+
+    pub fn rename_column(&self, table: &str, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.try_rename_column(table, from, to)
+    }
+
+    pub(crate) fn try_rename_column(
+        &self,
+        table: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_rename_column_inner(table, from, to)
+        })
+    }
+
+    pub(super) fn try_rename_column_inner(
+        &self,
+        table: &str,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<bool> {
+        let Some(table_name) = self.resolve_table_ddl_target(table, "ALTER TABLE RENAME COLUMN")?
+        else {
+            return Ok(false);
+        };
+        let Some(t) = self.try_table(table)? else {
+            return Ok(false);
+        };
+        {
+            let columns = t.columns.read();
+            if !columns.iter().any(|candidate| candidate.name == from) {
+                return Ok(false);
+            }
+            if from != to && columns.iter().any(|candidate| candidate.name == to) {
+                return Ok(false);
+            }
+        }
+        self.rewrite_column_rename_dependencies(&table_name, from, to)?;
+        Self::value_indexes_clear(&t);
+        {
+            let mut cols = t.columns.write();
+            for c in cols.iter_mut() {
+                if c.name == from {
+                    c.name = to.to_string();
+                }
+            }
+        }
+        for constraint in t.key_constraints.write().iter_mut() {
+            for column in &mut constraint.columns {
+                if column == from {
+                    *column = to.to_string();
+                }
+            }
+        }
+        {
+            let mut fts = t.fts_fields.write();
+            for f in fts.iter_mut() {
+                if f == from {
+                    *f = to.to_string();
+                }
+            }
+        }
+        let vector_dimensions = {
+            let mut vs = t.vector_indexes.write();
+            if let Some(mut idx) = vs.remove(from) {
+                let dimensions = idx.dimensions();
+                idx.clear()?;
+                Some(dimensions)
+            } else {
+                None
+            }
+        };
+        let ids = t.document_store.read().doc_ids()?;
+        for doc_id in ids {
+            let Some(mut doc) = t.document_store.read().get(doc_id)? else {
+                continue;
+            };
+            if let Some(value) = doc.remove(from) {
+                doc.insert(to.to_string(), value);
+                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+            }
+        }
+        if let Some(dimensions) = vector_dimensions {
+            self.create_vector_field(&table_name, to, dimensions)?;
+        }
+        self.rename_catalog_index_column_refs(&table_name, from, to)?;
+        {
+            let mut analyzers = self.table_field_analyzers.write();
+            let mut moved = Vec::new();
+            analyzers.retain(|(table, field), value| {
+                if table == &table_name && field == from {
+                    moved.push(((table_name.clone(), to.to_string()), value.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+            analyzers.extend(moved);
+        }
+        if self.is_persistent() {
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.rename_column_data(&table_name, from, to)?;
+            }
+            if let Some(dimensions) = vector_dimensions {
+                if let Some(params) = self.ivf_catalog_params_for_column(&table_name, to)? {
+                    if !self.rebuild_ivf_vector_field(&table_name, to, dimensions, params)? {
+                        return Err(StorageBackendError::Other(format!(
+                            "failed to rebuild IVF index for `{table_name}`.`{to}`"
+                        )));
+                    }
+                }
+            }
+            self.try_save_table_schema(&table_name, &t)?;
+        }
+        self.mark_column_stats_dirty(&table_name, &t)?;
+        self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(true)
+    }
+
+    pub fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.try_rename_table(from, to)
+    }
+
+    pub(crate) fn try_rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| engine.try_rename_table_inner(from, to))
+    }
+
+    pub(super) fn try_rename_table_inner(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<bool> {
+        let Some(from) = self.resolve_table_ddl_target(from, "ALTER TABLE RENAME")? else {
+            return Ok(false);
+        };
+        let from_relation = Self::resolved_relation_identity(&from)?;
+        let (target_schema, target_name) =
+            RelationIdentity::parse_reference(to).map_err(StorageBackendError::Other)?;
+        let to_relation = RelationIdentity::new(
+            target_schema.unwrap_or_else(|| from_relation.schema.clone()),
+            target_name,
+        );
+        if !self.schemas.read().contains(&to_relation.schema) {
+            return Err(StorageBackendError::Other(format!(
+                "schema `{}` does not exist",
+                to_relation.schema
+            )));
+        }
+        let to = to_relation.qualified_name();
+        if let Some(kind) = self.relation_kind_at(&to)? {
+            return Err(StorageBackendError::Other(format!(
+                "relation `{to}` already exists as {kind}"
+            )));
+        }
+        {
+            let tables = self.tables.read();
+            if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
+                return Ok(false);
+            }
+        }
+        self.rewrite_table_rename_dependencies(&from, &to)?;
+        if self.is_persistent() {
+            if let Some(catalog) = self.catalog.as_ref() {
+                catalog.rename_table_data(&from, &to)?;
+            }
+        }
+        let mut tables = self.tables.write();
+        if tables.contains_key(&to_relation) {
+            return Ok(false);
+        }
+        let Some(state) = tables.remove(&from_relation) else {
+            return Ok(false);
+        };
+        tables.insert(to_relation, state.clone());
+        drop(tables);
+        self.rename_catalog_index_table_refs(&from, &to);
+        {
+            let mut analyzers = self.table_field_analyzers.write();
+            let mut moved = Vec::new();
+            analyzers.retain(|(table, field), value| {
+                if table == &from {
+                    moved.push(((to.clone(), field.clone()), value.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+            analyzers.extend(moved);
+        }
+        if self.is_persistent() {
+            self.rebind_persistent_table_stores(&to, &state)?;
+            self.try_save_table_schema(&to, &state)?;
+        }
+        self.mark_column_stats_dirty(&to, &state)?;
+        self.refresh_value_indexes_for_table(&to)?;
+        Ok(true)
+    }
+}

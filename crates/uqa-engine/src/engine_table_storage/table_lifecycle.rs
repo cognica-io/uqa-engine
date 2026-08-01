@@ -1,0 +1,313 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Table drop, lookup, description, and default inspection.
+
+use super::{
+    stored_relation_reference_matches, table_not_found, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult,
+};
+
+impl Engine {
+    /// Drop a table from the catalog and release its in-memory state.
+    /// Returns `true` if the table existed.
+    pub fn drop_table(&self, name: &str) -> StorageBackendResult<bool> {
+        self.try_drop_table(name)
+    }
+
+    pub(crate) fn try_drop_table(&self, name: &str) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            let Some(name) = engine.resolve_table_ddl_target(name, "DROP TABLE")? else {
+                return Ok(false);
+            };
+            engine.try_drop_tables_inner(&[name], false)?;
+            Ok(true)
+        })
+    }
+
+    pub(crate) fn try_drop_tables(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_drop_tables_inner(names, cascade)
+        })
+    }
+
+    pub(super) fn canonical_drop_table_names(
+        &self,
+        names: &[String],
+    ) -> StorageBackendResult<Vec<String>> {
+        let mut canonical_names = Vec::with_capacity(names.len());
+        for name in names {
+            canonical_names.push(
+                self.resolve_table_ddl_target(name, "DROP TABLE")?
+                    .ok_or_else(|| table_not_found(name))?,
+            );
+        }
+        canonical_names.sort_unstable();
+        canonical_names.dedup();
+        Ok(canonical_names)
+    }
+
+    pub(super) fn try_drop_tables_inner(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> StorageBackendResult<()> {
+        let canonical_names = self.canonical_drop_table_names(names)?;
+        let targets = canonical_names
+            .iter()
+            .map(|name| Self::resolved_relation_identity(name))
+            .collect::<StorageBackendResult<Vec<_>>>()?;
+        let target_names = canonical_names
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        // Finish every dependency check before mutating a referrer or target.
+        for name in &canonical_names {
+            self.ensure_no_dependent_views("DROP TABLE", name)?;
+        }
+        let entries = self.table_entries();
+        for (candidate_name, table) in &entries {
+            if target_names.contains(candidate_name) {
+                continue;
+            }
+            if let Some(target) = targets
+                .iter()
+                .find(|target| Self::table_schema_references_relation(table, target))
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "DROP TABLE `{}` rejected: schema expression on `{candidate_name}` may depend on it and cannot be rewritten safely",
+                    target.qualified_name()
+                )));
+            }
+        }
+
+        let mut inbound = Vec::new();
+        let mut updates = Vec::new();
+        for (candidate_name, table) in entries {
+            if target_names.contains(&candidate_name) {
+                continue;
+            }
+            let mut columns = table.columns.read().clone();
+            let checks = table.table_checks.read().clone();
+            let mut foreign_keys = table.foreign_keys.read().clone();
+            let key_constraints = table.key_constraints.read().clone();
+            let previous_fk_len = foreign_keys.len();
+            foreign_keys.retain(|foreign_key| {
+                !targets
+                    .iter()
+                    .any(|target| Self::foreign_key_targets(foreign_key, target))
+            });
+            let mut changed = previous_fk_len != foreign_keys.len();
+            for column in &mut columns {
+                if column.references.as_ref().is_some_and(|reference| {
+                    targets
+                        .iter()
+                        .any(|target| stored_relation_reference_matches(&reference.table, target))
+                }) {
+                    column.references = None;
+                    changed = true;
+                }
+            }
+            if changed {
+                inbound.push(candidate_name.clone());
+                updates.push((
+                    candidate_name,
+                    table,
+                    columns,
+                    checks,
+                    foreign_keys,
+                    key_constraints,
+                ));
+            }
+        }
+        if !cascade && !inbound.is_empty() {
+            inbound.sort_unstable();
+            inbound.dedup();
+            return Err(StorageBackendError::Other(format!(
+                "DROP TABLE rejected: still referenced by foreign key(s) on `{}`; use CASCADE",
+                inbound.join("`, `")
+            )));
+        }
+        if cascade {
+            for (name, table, columns, checks, foreign_keys, key_constraints) in &updates {
+                self.persist_constraint_candidate(
+                    name,
+                    table,
+                    columns,
+                    checks,
+                    foreign_keys,
+                    key_constraints,
+                )?;
+            }
+            for (_, table, columns, checks, foreign_keys, _) in updates {
+                *table.columns.write() = columns;
+                *table.table_checks.write() = checks;
+                *table.foreign_keys.write() = foreign_keys;
+            }
+        }
+        for name in canonical_names {
+            self.drop_table_state_inner(&name)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {
+        let relation = Self::resolved_relation_identity(name)?;
+        if !self.tables.read().contains_key(&relation) {
+            return Err(table_not_found(name));
+        }
+        if let Some(catalog) = self.catalog.as_ref() {
+            catalog.drop_table_and_data(name)?;
+            self.note_table_catalog_changed();
+        }
+        self.tables.write().remove(&relation);
+        // Sweep every related per-table registry so catalog state
+        // does not outlive the table.
+        self.table_field_analyzers
+            .write()
+            .retain(|(t, _), _| t != name);
+        self.catalog_indexes
+            .write()
+            .retain(|_, row| row.table_name != name);
+        Ok(())
+    }
+
+    pub fn has_table(&self, name: &str) -> StorageBackendResult<bool> {
+        self.try_has_table(name)
+    }
+
+    pub fn try_has_table(&self, name: &str) -> StorageBackendResult<bool> {
+        Ok(self.try_resolve_table_name(name)?.is_some())
+    }
+
+    /// All schema-declared columns for `table`, in declaration order.
+    pub fn table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        self.try_table_columns(table)
+    }
+
+    pub fn try_table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        let table_state = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let columns = table_state
+            .columns
+            .read()
+            .iter()
+            .map(|column| column.name.clone())
+            .collect();
+        Ok(columns)
+    }
+
+    pub fn table_has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        self.try_table_has_column(table, column)
+    }
+
+    pub fn try_table_has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let cols = t.columns.read();
+        Ok(cols.iter().any(|c| c.name == column))
+    }
+
+    pub(crate) fn column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::ColumnType>> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let cols = t.columns.read();
+        Ok(cols.iter().find(|c| c.name == column).map(|c| c.ty.clone()))
+    }
+
+    /// Return the SERIAL/BIGSERIAL column name for `table`, if any.
+    pub(crate) fn auto_increment_column(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<String>> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let cols = t.columns.read();
+        Ok(cols
+            .iter()
+            .find(|c| c.auto_increment)
+            .map(|c| c.name.clone()))
+    }
+
+    /// Sorted list of every registered table name.
+    pub fn table_names(&self) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_table_catalog()?;
+        Ok(self
+            .tables
+            .read()
+            .keys()
+            .map(RelationIdentity::qualified_name)
+            .collect())
+    }
+
+    /// Snapshot the column schema of `table`. Returns `None` when no
+    /// table by that name is registered.
+    pub fn describe_table(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
+        self.try_describe_table(table)
+    }
+
+    pub fn try_describe_table(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
+        let Some(table) = self.try_table(table)? else {
+            return Ok(None);
+        };
+        let mut columns = table.columns.read().clone();
+        for column in &mut columns {
+            if let Some(default) = &mut column.default {
+                self.resolve_stored_sequence_references_in_expr(default)?;
+            }
+        }
+        Ok(Some(columns))
+    }
+
+    /// DEFAULT expression for `column` on `table`, when one was
+    /// declared via `... <col> <type> DEFAULT <expr>`.
+    pub fn column_default_expr(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
+        self.try_column_default_expr(table, column)
+    }
+
+    pub fn try_column_default_expr(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
+        let t = self
+            .try_table(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let cols = t.columns.read();
+        let mut default = cols
+            .iter()
+            .find(|c| c.name == column)
+            .and_then(|c| c.default.clone());
+        drop(cols);
+        if let Some(default) = &mut default {
+            self.resolve_stored_sequence_references_in_expr(default)?;
+        }
+        Ok(default)
+    }
+}

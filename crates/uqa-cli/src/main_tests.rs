@@ -1,0 +1,162 @@
+use super::completion::highlight_sql_line;
+use super::*;
+use rustyline::completion::Candidate as _;
+use rustyline::history::MemHistory;
+
+#[test]
+fn completion_reads_uqa_function_registry() {
+    let helper = UsqlHelper::new(Vec::new(), Vec::new(), Vec::new());
+    let history = MemHistory::new();
+    let ctx = Context::new(&history);
+    let (_start, candidates) = helper.complete("SELECT dee", 10, &ctx).unwrap();
+    let replacements = candidates
+        .iter()
+        .map(rustyline::completion::Candidate::replacement)
+        .collect::<Vec<_>>();
+    assert!(replacements.contains(&"deep_predict"));
+    assert!(replacements.contains(&"deep_learn"));
+}
+
+#[test]
+fn completion_uses_live_schema_names() {
+    let helper = UsqlHelper::new(
+        vec!["users".into()],
+        vec!["events_ext".into()],
+        vec!["user_id".into()],
+    );
+    let history = MemHistory::new();
+    let ctx = Context::new(&history);
+    let (_start, from_candidates) = helper.complete("SELECT * FROM us", 16, &ctx).unwrap();
+    assert!(from_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "users"));
+
+    let (_start, empty_from_candidates) = helper
+        .complete("SELECT * FROM ", "SELECT * FROM ".len(), &ctx)
+        .unwrap();
+    assert!(empty_from_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "users"));
+
+    let (_start, column_candidates) = helper.complete("SELECT user", 11, &ctx).unwrap();
+    assert!(column_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "user_id"));
+}
+
+#[test]
+fn completion_uses_live_schema_names_for_backslash_table_args() {
+    let helper = UsqlHelper::new(
+        vec!["users".into()],
+        vec!["events_ext".into()],
+        vec!["user_id".into()],
+    );
+    let history = MemHistory::new();
+    let ctx = Context::new(&history);
+
+    let (_start, stats_candidates) = helper.complete("\\stats ", "\\stats ".len(), &ctx).unwrap();
+    assert!(stats_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "users"));
+    assert!(!stats_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "events_ext"));
+
+    let (_start, describe_candidates) = helper.complete("\\d ev", "\\d ev".len(), &ctx).unwrap();
+    assert!(describe_candidates
+        .iter()
+        .any(|candidate| candidate.replacement() == "events_ext"));
+}
+
+#[test]
+fn split_statements_respects_dollar_quoting() {
+    let text = "CREATE FUNCTION f() RETURNS int AS $$\nBEGIN\n  RETURN 1;\nEND;\n$$ LANGUAGE plpgsql;\nSELECT f();";
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(parts[0].contains("RETURN 1;"));
+    assert_eq!(parts[1], "SELECT f()");
+}
+
+#[test]
+fn split_statements_respects_tagged_dollar_quoting_and_params() {
+    let text = "DO $body$ BEGIN PERFORM 1; END; $body$; SELECT $1; SELECT 2;";
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 3, "{parts:?}");
+    assert!(parts[0].starts_with("DO $body$"));
+    assert_eq!(parts[1], "SELECT $1");
+}
+
+#[test]
+fn split_statements_respects_comments_and_identifiers() {
+    let text = "SELECT 1 -- trailing; comment\n; SELECT /* block ; comment */ \"odd;name\", 'a;b'; SELECT 3";
+    let parts = split_statements(text);
+    assert_eq!(parts.len(), 3, "{parts:?}");
+    assert!(parts[1].contains("odd;name"));
+    assert!(parts[1].contains("'a;b'"));
+}
+
+#[test]
+fn terminator_detection_waits_for_dollar_quote_close() {
+    assert!(!contains_statement_terminator(
+        "CREATE FUNCTION f() AS $$ BEGIN RETURN 1;"
+    ));
+    assert!(contains_statement_terminator(
+        "CREATE FUNCTION f() AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql;"
+    ));
+}
+
+#[test]
+fn meta_ds_lists_sequences_using_search_path() {
+    let engine = Engine::new();
+    engine.sql("CREATE SCHEMA app", &[]).unwrap();
+    engine.set_search_path(vec!["app".into(), "public".into()]);
+    assert!(engine.create_sequence("acct_seq", 10, 2, false).unwrap());
+    assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
+    let mut session = Session {
+        engine,
+        db_path: None,
+        db_key: None,
+        location: ":memory:".into(),
+        history: Vec::new(),
+        history_path: None,
+        show_timing: false,
+        expanded: false,
+        output_path: None,
+    };
+
+    let mut out = Vec::new();
+    assert_eq!(
+        session.handle_meta("ds acct_seq", &mut out),
+        PromptLineOutcome::Continue
+    );
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("app.acct_seq"), "{text}");
+    assert!(text.contains("10"), "{text}");
+}
+
+#[test]
+fn highlighter_marks_keywords_registry_functions_and_literals() {
+    let highlighted = highlight_sql_line("select text_match(body, 'rust') -- comment");
+    assert!(highlighted.contains("\x1b[1;34mselect\x1b[0m"));
+    assert!(highlighted.contains("\x1b[1;34mtext_match\x1b[0m"));
+    assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
+    assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
+}
+
+#[test]
+fn highlighter_forces_refresh_while_typing_sql_tokens() {
+    let helper = UsqlHelper::new(Vec::new(), Vec::new(), Vec::new());
+    assert!(helper.highlight_char("sele", 4, CmdKind::Other));
+    assert!(helper
+        .highlight("select", 6)
+        .contains("\x1b[1;34mselect\x1b[0m"));
+}
+
+#[test]
+fn highlighter_keeps_uppercase_keywords_case_insensitive() {
+    let highlighted = highlight_sql_line("SELECT text_match(body, 'rust') -- comment");
+    assert!(highlighted.contains("\x1b[1;34mSELECT\x1b[0m"));
+    assert!(highlighted.contains("\x1b[1;34mtext_match\x1b[0m"));
+    assert!(highlighted.contains("\x1b[32m'rust'\x1b[0m"));
+    assert!(highlighted.contains("\x1b[90m-- comment\x1b[0m"));
+}

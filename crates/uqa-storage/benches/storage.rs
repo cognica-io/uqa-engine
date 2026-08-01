@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_analysis::standard_analyzer;
 use uqa_core::Value;
-use uqa_storage::sqlite::{ManagedConnection, SQLiteVectorIndex};
+use uqa_storage::sqlite::{Catalog, ManagedConnection, SQLiteVectorIndex};
 use uqa_storage::{
     DocumentStore, IVFIndex, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex,
     MemoryVectorIndex, VectorIndex,
@@ -246,12 +246,14 @@ fn bench_vector_persistence(c: &mut Criterion) {
             let path = dir.path().join("vectors.db");
             {
                 let conn = ManagedConnection::open(&path).expect("open sqlite");
+                let _catalog = Catalog::open(conn.clone()).expect("initialize sqlite catalog");
                 let mut idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
                 for id in 0..128 {
                     idx.add(id, vector(id + 1, 8)).unwrap();
                 }
             }
             let conn = ManagedConnection::open(&path).expect("reopen sqlite");
+            let _catalog = Catalog::open(conn.clone()).expect("reopen sqlite catalog");
             let idx = SQLiteVectorIndex::new(conn, "docs", "embedding", 8);
             black_box(idx.count().unwrap())
         });
