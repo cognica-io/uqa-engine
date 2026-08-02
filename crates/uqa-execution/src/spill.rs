@@ -293,8 +293,8 @@ impl SpillBuffer {
     /// Drain buffered batches in their original input order.
     ///
     /// The returned iterator owns the temporary file. Each disk read or decode
-    /// failure is returned as an [`ExecError`], and dropping the iterator early
-    /// still removes the temporary file.
+    /// failure is returned as a [`crate::physical::ExecError`], and dropping the
+    /// iterator early still removes the temporary file.
     pub fn drain(&mut self) -> ExecResult<SpillDrain> {
         let reader = self
             .spill_file
