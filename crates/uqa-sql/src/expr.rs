@@ -129,6 +129,14 @@ pub trait RowLookup {
 
     fn qualified_column(&self, qualifier: &str, column: &str, key: &str) -> Option<&Value>;
 
+    /// Return a value by the physical schema position used to construct this
+    /// row view. Materialized named rows do not expose positional access;
+    /// projected execution sources override it so compiled hot paths can avoid
+    /// repeating string lookup for every expression and row.
+    fn positional_column(&self, _index: usize) -> Option<&Value> {
+        None
+    }
+
     /// Physical correlated subqueries require the concrete outer row passed
     /// to `ScalarSubqueryRunner`. Projected row views return `None`; planners
     /// only use them for expressions that cannot contain subqueries.

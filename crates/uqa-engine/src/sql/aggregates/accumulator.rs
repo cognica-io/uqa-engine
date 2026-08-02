@@ -193,6 +193,51 @@ impl AggregateAccumulator {
         Ok(())
     }
 
+    pub(super) fn observe_projected(&mut self, value: &Value) -> Result<(), SQLError> {
+        match value {
+            Value::Int(value) => self.observe_projected_integer(*value),
+            _ => self.observe(value),
+        }
+    }
+
+    pub(super) fn observe_projected_integer(&mut self, value: i64) -> Result<(), SQLError> {
+        match self.state_plan {
+            AggregateStatePlan::Count => {
+                self.count = self
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+                Ok(())
+            }
+            AggregateStatePlan::Sum => {
+                self.count = self
+                    .count
+                    .checked_add(1)
+                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+                self.integer_sum = self
+                    .integer_sum
+                    .checked_add(i128::from(value))
+                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
+                if self.numeric_inputs.has_decimal() {
+                    let next = DecimalValue::from_i64(value);
+                    self.decimal_sum = Some(
+                        self.decimal_sum
+                            .as_ref()
+                            .and_then(|sum| sum.checked_add(&next))
+                            .ok_or_else(|| {
+                                SQLError::TypeMismatch("decimal aggregate overflow".into())
+                            })?,
+                    );
+                }
+                if !self.numeric_inputs.all_integers() {
+                    self.sum += value as f64;
+                }
+                Ok(())
+            }
+            _ => self.observe(&Value::Int(value)),
+        }
+    }
+
     pub(super) fn observe_state(&mut self, value: &Value) -> Result<(), SQLError> {
         match self.state_plan {
             AggregateStatePlan::Generic => {

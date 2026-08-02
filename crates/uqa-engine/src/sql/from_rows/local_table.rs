@@ -291,6 +291,8 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                     table,
                     ScoredInput::entries(entries, true),
                     columns,
+                    None,
+                    None,
                 );
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::TableScan::new(Box::new(source)));

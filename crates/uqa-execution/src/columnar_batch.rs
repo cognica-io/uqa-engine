@@ -50,6 +50,16 @@ impl ColumnarBatch {
                 values: Vec::with_capacity(row_count),
             })
             .collect::<Vec<_>>();
+        if occurrences.values().all(|count| *count == 1) {
+            for mut row in rows {
+                for column in &mut columns {
+                    column
+                        .values
+                        .push(row.remove(&column.name).unwrap_or(Value::Null));
+                }
+            }
+            return Self { columns, row_count };
+        }
         for mut row in rows {
             let mut remaining = occurrences.clone();
             for column in &mut columns {

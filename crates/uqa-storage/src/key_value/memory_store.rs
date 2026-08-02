@@ -61,6 +61,31 @@ impl KeyValueStore for MemoryKeyValueStore {
             .collect())
     }
 
+    fn scan_prefix_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<Vec<u8>>> {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let inner = self.inner.lock();
+        let lower = match after {
+            Some(after) if after >= prefix => Excluded(after.to_vec()),
+            Some(_) | None => Included(prefix.to_vec()),
+        };
+        Ok(inner
+            .map
+            .range((lower, Unbounded))
+            .take_while(|(key, _)| key.starts_with(prefix))
+            .take(limit)
+            .map(|(key, _)| key.clone())
+            .collect())
+    }
+
     fn first_prefix_after(
         &self,
         prefix: &[u8],
@@ -69,10 +94,10 @@ impl KeyValueStore for MemoryKeyValueStore {
         use std::ops::Bound::{Excluded, Included, Unbounded};
 
         let inner = self.inner.lock();
-        let lower = after.map_or_else(
-            || Included(prefix.to_vec()),
-            |after| Excluded(after.to_vec()),
-        );
+        let lower = match after {
+            Some(after) if after >= prefix => Excluded(after.to_vec()),
+            Some(_) | None => Included(prefix.to_vec()),
+        };
         Ok(inner
             .map
             .range((lower, Unbounded))

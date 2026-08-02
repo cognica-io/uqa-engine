@@ -72,6 +72,10 @@ impl PhysicalOperator for Filter<'_> {
         &self.schema.columns
     }
 
+    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+        self.child.output_ordering()
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.child.open()
     }

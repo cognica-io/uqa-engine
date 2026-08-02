@@ -236,6 +236,16 @@ pub(in crate::sql) fn order_projection(
             continue;
         }
 
+        // A bare source column does not need a computed shadow slot. Reusing
+        // it preserves scan ordering through the append-project stage and
+        // avoids evaluating and cloning the same value a second time.
+        if let ScalarExpr::Column(source) = &projection.expr {
+            if input_columns.contains(source) {
+                output.push((labels[index].clone(), source.clone()));
+                continue;
+            }
+        }
+
         let mut internal = format!("__uqa_projection_{index}");
         let mut suffix = 0usize;
         while occupied.contains(&internal) {
@@ -348,13 +358,30 @@ pub(in crate::sql) fn attach_order_limit<'a>(
         } else {
             None
         };
-        operator = Box::new(ExternalSort::new(
-            operator,
-            keys,
-            evaluator,
-            keep,
-            work_mem_bytes,
-        ));
+        let required_ordering = keys
+            .iter()
+            .map(|key| match &key.expr {
+                ScalarExpr::Column(column) => Some(uqa_execution::PhysicalOrder {
+                    column: column.clone(),
+                    descending: key.descending,
+                    nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
+                    nullable: true,
+                }),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        let already_ordered = required_ordering.as_ref().is_some_and(|required| {
+            uqa_execution::ordering_satisfies(operator.output_ordering(), required)
+        });
+        if !already_ordered {
+            operator = Box::new(ExternalSort::new(
+                operator,
+                keys,
+                evaluator,
+                keep,
+                work_mem_bytes,
+            ));
+        }
     }
     if offset.is_some() || limit.is_some() {
         operator = Box::new(Limit::new(operator, offset.unwrap_or(0), limit));

@@ -84,6 +84,27 @@ pub trait KeyValueStore: Send + Sync {
     fn put(&self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&self, key: &[u8]) -> StorageBackendResult<()>;
     fn scan_prefix(&self, prefix: &[u8]) -> StorageBackendResult<Vec<(Vec<u8>, Vec<u8>)>>;
+    /// Return at most `limit` keys in key order, strictly after `after` when
+    /// it is present. Backends should override this method with a key-only,
+    /// bounded range scan so cursor consumers neither materialize the entire
+    /// prefix nor read values they do not need on every page.
+    fn scan_prefix_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<Vec<u8>>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .scan_prefix(prefix)?
+            .into_iter()
+            .filter(|(key, _)| after.is_none_or(|after| key.as_slice() > after))
+            .take(limit)
+            .map(|(key, _)| key)
+            .collect())
+    }
     fn first_prefix_after(
         &self,
         prefix: &[u8],

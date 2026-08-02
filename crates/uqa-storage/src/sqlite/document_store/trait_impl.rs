@@ -347,6 +347,46 @@ impl DocumentStore for SQLiteDocumentStore {
         })?)
     }
 
+    fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let after = after.map(sqlite_doc_id).transpose()?;
+        let limit = i64::try_from(limit).map_err(|_| {
+            SQLiteError::StorageBackend(format!(
+                "document cursor limit {limit} is outside SQLite's integer range"
+            ))
+        })?;
+        Ok(self.conn.with(|connection| {
+            let mut out = Vec::new();
+            if let Some(after) = after {
+                let mut stmt = connection.prepare_cached(
+                    "SELECT doc_id FROM _documents
+                     WHERE table_name = ?1 AND doc_id > ?2
+                     ORDER BY doc_id LIMIT ?3",
+                )?;
+                let rows = stmt.query_map(params![self.table, after, limit], |row| {
+                    row.get::<_, i64>(0)
+                })?;
+                for row in rows {
+                    out.push(document_id_from_sqlite(row?)?);
+                }
+            } else {
+                let mut stmt = connection.prepare_cached(
+                    "SELECT doc_id FROM _documents
+                     WHERE table_name = ?1
+                     ORDER BY doc_id LIMIT ?2",
+                )?;
+                let rows =
+                    stmt.query_map(params![self.table, limit], |row| row.get::<_, i64>(0))?;
+                for row in rows {
+                    out.push(document_id_from_sqlite(row?)?);
+                }
+            }
+            Ok(out)
+        })?)
+    }
+
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         SQLiteDocumentStore::max_doc_id(self)
     }

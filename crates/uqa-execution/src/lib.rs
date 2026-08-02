@@ -68,6 +68,7 @@ pub mod lateral_join;
 pub mod map_rows;
 pub mod physical;
 pub mod project_set;
+pub mod projected_predicate;
 pub mod relational;
 pub mod scalar;
 pub mod scan;
@@ -83,8 +84,11 @@ pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
-pub use physical::{ExecError, ExecResult, OperatorBatchCursor, PhysicalOperator};
+pub use physical::{
+    ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor, PhysicalOperator, PhysicalOrder,
+};
 pub use project_set::{ProjectRows, ProjectSet, SetProjector};
+pub use projected_predicate::ProjectedPredicate;
 pub use relational::{
     AggregateExecutor, AggregateKind, AggregateSpec, ExpressionEvaluator, Filter, HashAggregate,
     Limit, Project, RowPredicate, SetOperation, SharedExpressionEvaluator, SharedRowPredicate,

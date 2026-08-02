@@ -7,12 +7,12 @@
 //! Single-table access-path execution.
 
 use super::{
-    build_facet_output, execute_function, execute_function_with_top_k, execute_mixed_where,
-    execute_query_block_operator_output, expand_star_columns, expr_contains_jsonpath_fts_match,
-    expr_is_jsonpath_fts_match, facet_projection_fields, projection_columns,
-    score_limited_text_filter, score_order_top_k, AccessPathPlan, ComputePlan, CteScope, Engine,
-    FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
-    ScoredDocumentSource, ScoredInput,
+    build_facet_output, column_prune_for_stmt, execute_function, execute_function_with_top_k,
+    execute_mixed_where, execute_query_block_operator_output, expand_star_columns,
+    expr_contains_jsonpath_fts_match, expr_is_jsonpath_fts_match, facet_projection_fields,
+    projection_columns, score_limited_text_filter, score_order_top_k, AccessPathPlan, ComputePlan,
+    CteScope, Engine, FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
+    SQLParam, ScalarExpr, ScoredDocumentSource, ScoredInput,
 };
 
 pub(in crate::sql) fn run_single_table_select_output(
@@ -65,7 +65,7 @@ pub(in crate::sql) fn run_single_table_select_output(
             Some(top_k),
         )?)
     } else {
-        crate::operator_tree_bridge::run_optimised(engine, table, stmt.r#where.as_ref(), params)?
+        crate::operator_tree_bridge::run_accelerated(engine, table, stmt.r#where.as_ref(), params)?
     };
     let score_bearing_filter = stmt
         .r#where
@@ -124,10 +124,49 @@ pub(in crate::sql) fn run_single_table_select_output(
     }
 
     let table_state = engine.require_table(table)?;
-    let source_schema = engine.try_table_columns(table).map_err(|error| {
-        SQLError::Internal(format!("read table columns for `{table}`: {error}"))
-    })?;
-    let source = ScoredDocumentSource::new(table, table_state, scored, source_schema);
+    let source_schema = stmt
+        .from
+        .as_ref()
+        .and_then(|source| column_prune_for_stmt(engine, stmt, source))
+        .and_then(|prune| prune.get(table).cloned())
+        .map(|columns| columns.into_iter().collect())
+        .map_or_else(
+            || {
+                engine.try_table_columns(table).map_err(|error| {
+                    SQLError::Internal(format!("read table columns for `{table}`: {error}"))
+                })
+            },
+            Ok,
+        )?;
+    let ordered_primary_key = engine
+        .try_describe_table(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
+        .and_then(|columns| {
+            columns
+                .into_iter()
+                .find(|column| {
+                    column.primary_key && matches!(column.ty, uqa_sql::ast::ColumnType::Integer)
+                })
+                .map(|column| column.name)
+        });
+    let pushed_predicate = physical_filter
+        .as_ref()
+        .map(|predicate| {
+            uqa_execution::ProjectedPredicate::compile(predicate, &source_schema, params)
+        })
+        .transpose()?
+        .flatten();
+    if pushed_predicate.is_some() {
+        physical_filter = None;
+    }
+    let source = ScoredDocumentSource::new(
+        table,
+        table_state,
+        scored,
+        source_schema,
+        ordered_primary_key,
+        pushed_predicate,
+    );
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     let columns = if matches!(block.compute, ComputePlan::Project) {

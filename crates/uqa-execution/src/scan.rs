@@ -14,7 +14,7 @@
 //! in-memory `Vec<ResultRow>`.
 
 use crate::batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
-use crate::physical::{ExecResult, PhysicalOperator};
+use crate::physical::{ExecResult, PhysicalOperator, PhysicalOrder};
 use uqa_sql::ResultRow;
 
 /// Source of rows feeding a [`TableScan`]. Implementors typically own
@@ -25,8 +25,37 @@ pub trait RowSource: Send {
     /// Stable column order for the rows produced by [`Self::next_row`].
     fn schema(&self) -> &[String];
 
+    /// Leading row order guaranteed by the source.
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &[]
+    }
+
     /// Pull the next row. Returns `None` when the source is exhausted.
     fn next_row(&mut self) -> ExecResult<Option<ResultRow>>;
+
+    /// Pull up to `max_rows` without forcing batch-capable sources through a
+    /// row-at-a-time lock or backend call. The default preserves compatibility
+    /// for iterator-like sources.
+    fn next_batch(&mut self, max_rows: usize) -> ExecResult<Vec<ResultRow>> {
+        let mut rows = Vec::with_capacity(max_rows);
+        while rows.len() < max_rows {
+            match self.next_row()? {
+                Some(row) => rows.push(row),
+                None => break,
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Feed backend-native projected rows directly to an aggregate. Sources
+    /// that cannot preserve their normal filter and virtual-column semantics
+    /// return `false` without advancing their cursor.
+    fn consume_into_aggregate(
+        &mut self,
+        _executor: &mut dyn crate::relational::AggregateExecutor,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
 }
 
 /// In-memory source from a precomputed `Vec<ResultRow>`. Useful for
@@ -122,15 +151,18 @@ impl RowSource for VecSource {
 pub struct TableScan {
     source: Option<Box<dyn RowSource>>,
     schema: RowSchema,
+    ordering: Vec<PhysicalOrder>,
     exhausted: bool,
 }
 
 impl TableScan {
     pub fn new(source: Box<dyn RowSource>) -> Self {
         let schema = RowSchema::new(source.schema().to_vec());
+        let ordering = source.output_ordering().to_vec();
         Self {
             source: Some(source),
             schema,
+            ordering,
             exhausted: false,
         }
     }
@@ -145,6 +177,20 @@ impl PhysicalOperator for TableScan {
         &self.schema.columns
     }
 
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &self.ordering
+    }
+
+    fn consume_into_aggregate(
+        &mut self,
+        executor: &mut dyn crate::relational::AggregateExecutor,
+    ) -> ExecResult<bool> {
+        let Some(source) = self.source.as_mut() else {
+            return Ok(false);
+        };
+        source.consume_into_aggregate(executor)
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.exhausted = false;
         Ok(())
@@ -157,17 +203,9 @@ impl PhysicalOperator for TableScan {
         let Some(src) = self.source.as_mut() else {
             return Ok(None);
         };
-        let mut buf = Vec::with_capacity(DEFAULT_BATCH_SIZE);
-        for _ in 0..DEFAULT_BATCH_SIZE {
-            match src.next_row()? {
-                Some(row) => buf.push(row),
-                None => {
-                    self.exhausted = true;
-                    break;
-                }
-            }
-        }
+        let buf = src.next_batch(DEFAULT_BATCH_SIZE)?;
         if buf.is_empty() {
+            self.exhausted = true;
             return Ok(None);
         }
         Ok(Some(Batch::new(self.schema.clone(), buf)))

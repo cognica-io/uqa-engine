@@ -14,29 +14,25 @@
 //! preserving input order. The temporary file is removed when the buffer (or
 //! its active drain iterator) is dropped.
 
-use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::ser::{SerializeMap, SerializeSeq};
-use serde::{Deserialize, Serialize, Serializer};
 use tempfile::NamedTempFile;
-use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
 
 use crate::batch::{Batch, RowSchema};
-use crate::physical::{ExecError, ExecResult};
+use crate::physical::ExecResult;
 
 mod format;
 
 use format::{
-    append_batches, decode_batch, decode_row, open_spill_reader, read_bounded_spill_record,
-    spill_error, ByteCounter, ExactBatch, ExactRow,
+    append_batches, decode_batch, decode_row, encoded_batch_size, encoded_single_row_batch_size,
+    open_spill_reader, read_bounded_spill_record, spill_error, ExactRow,
 };
 
-const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x01\n";
+const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
 
 /// Append-only batch buffer with an encoded-byte memory budget.
 ///
@@ -151,15 +147,16 @@ impl SpillBuffer {
     }
 
     /// Exact byte count used for budget accounting, including the record
-    /// delimiter written to disk.
+    /// length prefix written to disk.
     pub fn encoded_size(batch: &Batch) -> ExecResult<usize> {
-        let mut counter = ByteCounter::default();
-        serde_json::to_writer(&mut counter, &ExactBatch(batch))
-            .map_err(|error| spill_error(format!("failed to size spill batch: {error}")))?;
-        counter
-            .bytes
-            .checked_add(1)
-            .ok_or_else(|| spill_error("spill batch encoded size overflow"))
+        encoded_batch_size(batch)
+    }
+
+    pub(crate) fn encoded_single_row_size(
+        schema: &RowSchema,
+        row: &ResultRow,
+    ) -> ExecResult<usize> {
+        encoded_single_row_batch_size(schema, row)
     }
 
     /// Total buffered rows, including rows already written to disk.
@@ -442,17 +439,44 @@ impl SharedSpill {
 
     pub fn reader(&self) -> ExecResult<SharedSpillReader> {
         let source = Arc::clone(&self.inner);
+        Self::reader_from_source(source)
+    }
+
+    /// Consume this materialization into a one-shot reader.
+    ///
+    /// When the in-memory materialization has no other owners, batches move
+    /// directly into the reader instead of being deep-cloned. Shared and disk
+    /// materializations retain the independent-reader behavior of [`Self::reader`].
+    pub fn into_reader(self) -> ExecResult<SharedSpillReader> {
+        match Arc::try_unwrap(self.inner) {
+            Ok(SharedSpillInner {
+                storage: SharedSpillStorage::Memory(batches),
+                max_record_bytes,
+                ..
+            }) => Ok(SharedSpillReader {
+                reader: SharedSpillReaderSource::OwnedMemory(batches.into_iter()),
+                source: None,
+                failed: false,
+                max_record_bytes,
+            }),
+            Ok(inner) => Self::reader_from_source(Arc::new(inner)),
+            Err(source) => Self::reader_from_source(source),
+        }
+    }
+
+    fn reader_from_source(source: Arc<SharedSpillInner>) -> ExecResult<SharedSpillReader> {
         let reader = match &source.storage {
             SharedSpillStorage::Memory(_) => SharedSpillReaderSource::Memory { next_batch: 0 },
             SharedSpillStorage::Disk(file) => {
                 SharedSpillReaderSource::Disk(open_spill_reader(file)?)
             }
         };
+        let max_record_bytes = source.max_record_bytes;
         Ok(SharedSpillReader {
             reader,
-            source,
+            source: Some(source),
             failed: false,
-            max_record_bytes: self.inner.max_record_bytes,
+            max_record_bytes,
         })
     }
 
@@ -465,14 +489,15 @@ impl SharedSpill {
 
 enum SharedSpillReaderSource {
     Memory { next_batch: usize },
+    OwnedMemory(std::vec::IntoIter<Batch>),
     Disk(BufReader<File>),
 }
 
-/// Independent reader for a [`SharedSpill`]. The `Arc` keeps either the
-/// in-memory batches or named file alive until the last scan has completed.
+/// Reader for a [`SharedSpill`]. Independent readers retain the shared source;
+/// a consuming reader may instead own unique in-memory batches directly.
 pub struct SharedSpillReader {
     reader: SharedSpillReaderSource,
-    source: Arc<SharedSpillInner>,
+    source: Option<Arc<SharedSpillInner>>,
     failed: bool,
     max_record_bytes: usize,
 }
@@ -486,13 +511,18 @@ impl Iterator for SharedSpillReader {
         }
         match &mut self.reader {
             SharedSpillReaderSource::Memory { next_batch } => {
-                let SharedSpillStorage::Memory(batches) = &self.source.storage else {
+                let source = self
+                    .source
+                    .as_ref()
+                    .expect("shared memory reader retains its source");
+                let SharedSpillStorage::Memory(batches) = &source.storage else {
                     unreachable!("shared materialization reader/storage mismatch")
                 };
                 let batch = batches.get(*next_batch)?.clone();
                 *next_batch += 1;
                 Some(Ok(batch))
             }
+            SharedSpillReaderSource::OwnedMemory(batches) => batches.next().map(Ok),
             SharedSpillReaderSource::Disk(reader) => {
                 match read_bounded_spill_record(reader, self.max_record_bytes, "shared spill batch")
                 {

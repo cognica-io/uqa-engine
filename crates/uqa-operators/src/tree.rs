@@ -831,6 +831,77 @@ impl OperatorTree {
             _ => false,
         }
     }
+
+    /// Whether this subtree observes and produces document membership only.
+    ///
+    /// The classification is intentionally exhaustive: a newly added
+    /// operator remains payload-bearing until its score and field effects are
+    /// reviewed. Optimizer laws and physical support-only set operations share
+    /// this contract so they cannot silently disagree.
+    pub fn is_membership_only(&self) -> bool {
+        match self {
+            OperatorTree::Empty | OperatorTree::IndexScan { .. } => true,
+            OperatorTree::Filter { source, .. } => source
+                .as_deref()
+                .is_none_or(OperatorTree::is_membership_only),
+            OperatorTree::Intersect(children)
+            | OperatorTree::Union(children)
+            | OperatorTree::Composed(children) => {
+                children.iter().all(OperatorTree::is_membership_only)
+            }
+            OperatorTree::Complement(child) => child.is_membership_only(),
+            OperatorTree::VectorExclusion { positive, negative } => {
+                positive.is_membership_only() && negative.is_membership_only()
+            }
+            OperatorTree::Term { .. }
+            | OperatorTree::Facet { .. }
+            | OperatorTree::Score { .. }
+            | OperatorTree::BayesianScore { .. }
+            | OperatorTree::EncodeGraphPosting { .. }
+            | OperatorTree::BayesianMatchWithPrior { .. }
+            | OperatorTree::VectorSimilarity { .. }
+            | OperatorTree::KNN { .. }
+            | OperatorTree::CalibratedVectorMatch { .. }
+            | OperatorTree::CosineProbability(_)
+            | OperatorTree::BayesianEvidenceFusion { .. }
+            | OperatorTree::RobustPositiveEvidencePool { .. }
+            | OperatorTree::ProbBoolFusion { .. }
+            | OperatorTree::ProbNot { .. }
+            | OperatorTree::AttentionFusion { .. }
+            | OperatorTree::LearnedFusion { .. }
+            | OperatorTree::SparseThreshold { .. }
+            | OperatorTree::Traverse { .. }
+            | OperatorTree::GraphNeighbors { .. }
+            | OperatorTree::GraphEdges { .. }
+            | OperatorTree::PatternMatch { .. }
+            | OperatorTree::RegularPathQuery { .. }
+            | OperatorTree::GraphJoin { .. }
+            | OperatorTree::Aggregate { .. }
+            | OperatorTree::GroupBy { .. }
+            | OperatorTree::MultiStage { .. }
+            | OperatorTree::MultiFieldSearch { .. }
+            | OperatorTree::HybridTextVector { .. }
+            | OperatorTree::SemanticFilter { .. }
+            | OperatorTree::FacetVector { .. }
+            | OperatorTree::VertexAggregation { .. }
+            | OperatorTree::WeightedPathQuery { .. }
+            | OperatorTree::MessagePassing { .. }
+            | OperatorTree::GraphEmbedding { .. }
+            | OperatorTree::PageRank { .. }
+            | OperatorTree::HITS { .. }
+            | OperatorTree::BetweennessCentrality { .. }
+            | OperatorTree::TextSimilarityJoin { .. }
+            | OperatorTree::VectorSimilarityJoin { .. }
+            | OperatorTree::HybridJoin { .. }
+            | OperatorTree::CrossParadigmJoin { .. }
+            | OperatorTree::TemporalTraverse { .. }
+            | OperatorTree::TemporalPatternMatch { .. }
+            | OperatorTree::ProgressiveFusion { .. }
+            | OperatorTree::DeepFusion { .. }
+            | OperatorTree::DeepPredict { .. }
+            | OperatorTree::Opaque { .. } => false,
+        }
+    }
 }
 
 fn visit_operator_slice(children: &[OperatorTree], visitor: &mut impl FnMut(&OperatorTree)) {

@@ -66,7 +66,14 @@ impl Backends {
         let scan = self.uqa_scan(fixture);
         assert_eq!(scan, self.sqlite_scan(fixture));
         assert_eq!(scan, self.duckdb_scan(fixture));
-        assert_eq!(scan, self.uqa_cursor_scan(fixture));
+        assert_eq!(scan.len(), fixture.expected_scan_rows());
+        let (cursor_scan, cursor_summary) = self.uqa_cursor_scan_with_summary(fixture);
+        assert_eq!(scan, cursor_scan);
+        assert_eq!(cursor_summary.row_count, scan.len());
+        assert!(
+            !cursor_summary.spilled_to_disk,
+            "the published cursor comparison must isolate in-memory cursor overhead"
+        );
     }
 
     pub fn uqa_q1(&self, fixture: &Fixture) -> Vec<Q1Row> {
@@ -104,13 +111,17 @@ impl Backends {
 
     pub fn sqlite_q6(&self, fixture: &Fixture) -> i64 {
         self.sqlite
-            .query_row(&fixture.manifest.queries.q6, [], |row| row.get(0))
+            .prepare_cached(&fixture.manifest.queries.q6)
+            .expect("prepare SQLite Q6")
+            .query_row([], |row| row.get(0))
             .expect("SQLite Q6")
     }
 
     pub fn duckdb_q6(&self, fixture: &Fixture) -> i64 {
         self.duckdb
-            .query_row(&fixture.manifest.queries.q6, [], |row| row.get(0))
+            .prepare_cached(&fixture.manifest.queries.q6)
+            .expect("prepare DuckDB Q6")
+            .query_row([], |row| row.get(0))
             .expect("DuckDB Q6")
     }
 
@@ -129,10 +140,20 @@ impl Backends {
             .uqa
             .sql_cursor(&fixture.manifest.queries.scan, &[])
             .expect("UQA cursor scan");
-        cursor
-            .flat_map(|batch| batch.expect("UQA cursor batch").into_rows())
-            .map(|row| (integer(&row, "id"), integer(&row, "extended_price")))
-            .collect()
+        collect_cursor_rows(cursor)
+    }
+
+    fn uqa_cursor_scan_with_summary(
+        &self,
+        fixture: &Fixture,
+    ) -> (Vec<ScanRow>, uqa_engine::SQLCursorSummary) {
+        let cursor = self
+            .uqa
+            .sql_cursor(&fixture.manifest.queries.scan, &[])
+            .expect("UQA cursor scan");
+        let summary = cursor.summary();
+        let rows = collect_cursor_rows(cursor);
+        (rows, summary)
     }
 
     pub fn sqlite_scan(&self, fixture: &Fixture) -> Vec<ScanRow> {
@@ -142,6 +163,38 @@ impl Backends {
     pub fn duckdb_scan(&self, fixture: &Fixture) -> Vec<ScanRow> {
         duckdb_scan(&self.duckdb, &fixture.manifest.queries.scan)
     }
+}
+
+fn collect_cursor_rows(cursor: uqa_engine::SQLCursor) -> Vec<ScanRow> {
+    cursor
+        .flat_map(|batch| {
+            let batch = batch.expect("UQA cursor batch");
+            scan_rows_from_batch(&batch)
+        })
+        .collect()
+}
+
+fn scan_rows_from_batch(batch: &uqa_execution::ColumnarBatch) -> Vec<ScanRow> {
+    let id = batch
+        .columns()
+        .iter()
+        .find(|column| column.name == "id")
+        .expect("UQA cursor id column");
+    let extended_price = batch
+        .columns()
+        .iter()
+        .find(|column| column.name == "extended_price")
+        .expect("UQA cursor extended_price column");
+    id.values
+        .iter()
+        .zip(&extended_price.values)
+        .map(|(id, extended_price)| {
+            (
+                integer_value(id, "id"),
+                integer_value(extended_price, "extended_price"),
+            )
+        })
+        .collect()
 }
 
 fn string(row: &uqa_sql::ResultRow, column: &str) -> String {
@@ -158,9 +211,16 @@ fn integer(row: &uqa_sql::ResultRow, column: &str) -> i64 {
     }
 }
 
+fn integer_value(value: &Value, column: &str) -> i64 {
+    match value {
+        Value::Int(value) => *value,
+        other => panic!("{column} must be an integer, got {other:?}"),
+    }
+}
+
 fn relational_q1(connection: &rusqlite::Connection, query: &str) -> Vec<Q1Row> {
     connection
-        .prepare(query)
+        .prepare_cached(query)
         .expect("prepare SQLite Q1")
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -172,7 +232,7 @@ fn relational_q1(connection: &rusqlite::Connection, query: &str) -> Vec<Q1Row> {
 
 fn duckdb_q1(connection: &duckdb::Connection, query: &str) -> Vec<Q1Row> {
     connection
-        .prepare(query)
+        .prepare_cached(query)
         .expect("prepare DuckDB Q1")
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -184,7 +244,7 @@ fn duckdb_q1(connection: &duckdb::Connection, query: &str) -> Vec<Q1Row> {
 
 fn relational_scan(connection: &rusqlite::Connection, query: &str) -> Vec<ScanRow> {
     connection
-        .prepare(query)
+        .prepare_cached(query)
         .expect("prepare SQLite scan")
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .expect("execute SQLite scan")
@@ -194,7 +254,7 @@ fn relational_scan(connection: &rusqlite::Connection, query: &str) -> Vec<ScanRo
 
 fn duckdb_scan(connection: &duckdb::Connection, query: &str) -> Vec<ScanRow> {
     connection
-        .prepare(query)
+        .prepare_cached(query)
         .expect("prepare DuckDB scan")
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .expect("execute DuckDB scan")

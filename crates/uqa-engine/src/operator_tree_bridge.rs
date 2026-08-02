@@ -742,6 +742,54 @@ pub fn run_optimised(
     Ok(Some(posting_list_to_scored(&pl)))
 }
 
+/// SELECT access-path counterpart of [`run_optimised`]. A scalar predicate
+/// only leaves the relational scan when optimization selected a real index;
+/// retrieval operators always retain their posting-list execution path.
+pub(crate) fn run_accelerated(
+    engine: &Engine,
+    table: &str,
+    where_expr: Option<&ScalarExpr>,
+    params: &[SQLParam],
+) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+    let Some(expression) = where_expr else {
+        return Ok(None);
+    };
+    let Some(tree) = lower_where_bound(engine, expression, params)? else {
+        return Ok(None);
+    };
+    let optimized = engine_query_optimizer(engine, table, &tree)?.optimize(tree);
+    let mut has_index_scan = false;
+    optimized.visit(&mut |node| has_index_scan |= matches!(node, OperatorTree::IndexScan { .. }));
+    if !has_index_scan && !uqa_planner::optimizer::contains_retrieval(expression) {
+        let mut filters = Vec::new();
+        optimized.visit(&mut |node| {
+            if let OperatorTree::Filter {
+                field, predicate, ..
+            } = node
+            {
+                filters.push((field.clone(), predicate.clone()));
+            }
+        });
+        let mut all_value_indexed = !filters.is_empty();
+        for (field, predicate) in filters {
+            if !engine
+                .value_index_supports(table, &field, &predicate)
+                .map_err(|error| operator_execution_error("prepare value index", error))?
+            {
+                all_value_indexed = false;
+                break;
+            }
+        }
+        if !all_value_indexed {
+            return Ok(None);
+        }
+    }
+    let output =
+        execute_preoptimized_operator_tree_in_execution(engine, table, params, &optimized)?;
+    let posting = expect_posting_output(output, "SQL WHERE")?;
+    Ok(Some(posting_list_to_scored(&posting)))
+}
+
 /// Optimise and execute an already-lowered tree through the same
 /// planner/runtime boundary used by SQL `WHERE` lowering. Graph table
 /// functions use this entry point too, so they do not maintain a
@@ -801,9 +849,33 @@ fn execute_operator_tree_inner(
 ) -> DriverResult<OperatorOutput> {
     validate_text_top_k_placement(tree)?;
     let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
+    execute_preoptimized_operator_tree_inner(engine, table, params, &optimized)
+}
+
+fn execute_preoptimized_operator_tree_in_execution(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        return Err(SQLError::Internal(
+            "calibrating operator execution requires an active statement transaction".into(),
+        ));
+    }
+    execute_preoptimized_operator_tree_inner(engine, table, params, tree)
+}
+
+fn execute_preoptimized_operator_tree_inner(
+    engine: &Engine,
+    table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    validate_text_top_k_placement(tree)?;
     let driver = EngineDriver::new_in_execution(engine, table, params);
     let mut executor = PlanExecutor::new(&driver);
-    executor.execute(&optimized)
+    executor.execute(tree)
 }
 
 fn validate_text_top_k_placement(tree: &OperatorTree) -> DriverResult<()> {

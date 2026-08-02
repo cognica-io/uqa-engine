@@ -4,6 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::collections::BTreeMap;
+
+use uqa_core::{DecimalValue, TemporalValue, Value};
+
 use super::*;
 
 fn dummy_batch(start: usize, n: usize) -> Batch {
@@ -241,7 +245,14 @@ fn corrupted_spill_record_surfaces_decode_error_and_cleans_up() {
         .as_mut()
         .unwrap()
         .as_file_mut()
-        .write_all(b"not-json\n")
+        .write_all(&1_u64.to_le_bytes())
+        .unwrap();
+    buffer
+        .spill_file
+        .as_mut()
+        .unwrap()
+        .as_file_mut()
+        .write_all(&[0xff])
         .unwrap();
     buffer
         .spill_file
@@ -254,9 +265,7 @@ fn corrupted_spill_record_surfaces_decode_error_and_cleans_up() {
     let mut drain = buffer.drain().unwrap();
     assert_eq!(drain.next().unwrap().unwrap().rows, dummy_batch(0, 1).rows);
     let error = drain.next().unwrap().unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("failed to deserialize spill batch"));
+    assert!(error.to_string().contains("truncated schema column count"));
     assert!(drain.next().is_none());
     drop(drain);
     assert!(!path.exists());
@@ -285,13 +294,15 @@ fn truncated_spill_record_is_not_accepted_at_eof() {
     let mut buffer = SpillBuffer::new(0);
     buffer.push(dummy_batch(0, 1)).unwrap();
     let file = buffer.spill_file.as_mut().unwrap().as_file_mut();
-    file.write_all(b"truncated").unwrap();
+    file.write_all(&[1, 2, 3, 4]).unwrap();
     file.flush().unwrap();
 
     let mut reader = buffer.reader().unwrap();
     assert!(reader.next().unwrap().is_ok());
     let error = reader.next().unwrap().unwrap_err();
-    assert!(error.to_string().contains("missing record delimiter"));
+    assert!(error
+        .to_string()
+        .contains("truncated spill batch length prefix"));
     assert!(reader.next().is_none());
 }
 
@@ -393,6 +404,45 @@ fn shared_materialization_keeps_in_budget_batches_in_memory() {
     };
     assert_eq!(read(), vec![0, 1, 2, 3]);
     assert_eq!(read(), vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn consuming_unique_shared_materialization_moves_memory_batches() {
+    let mut buffer = SpillBuffer::unbounded();
+    buffer.push(dummy_batch(0, 2)).unwrap();
+    buffer.push(dummy_batch(2, 2)).unwrap();
+    let shared = buffer.into_shared(vec!["x".into()]).unwrap();
+
+    let mut reader = shared.into_reader().unwrap();
+    assert!(matches!(
+        &reader.reader,
+        SharedSpillReaderSource::OwnedMemory(_)
+    ));
+    let values = reader
+        .by_ref()
+        .flat_map(|batch| batch.unwrap().rows)
+        .map(|row| match row.get("x") {
+            Some(Value::Int(value)) => *value,
+            value => panic!("unexpected consumed value: {value:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(values, vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn consuming_shared_materialization_preserves_other_readers() {
+    let mut buffer = SpillBuffer::unbounded();
+    buffer.push(dummy_batch(0, 2)).unwrap();
+    let shared = buffer.into_shared(vec!["x".into()]).unwrap();
+    let retained = shared.clone();
+
+    let reader = shared.into_reader().unwrap();
+    assert!(matches!(
+        &reader.reader,
+        SharedSpillReaderSource::Memory { .. }
+    ));
+    assert_eq!(reader.count(), 1);
+    assert_eq!(retained.reader().unwrap().count(), 1);
 }
 
 #[test]

@@ -159,6 +159,10 @@ impl PhysicalOperator for Sort<'_> {
         self.inner.schema()
     }
 
+    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+        self.inner.output_ordering()
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.inner.open()
     }

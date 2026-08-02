@@ -179,69 +179,12 @@ impl QueryOptimizer {
 ///
 /// `PostingList::merge_union` and `PostingList::merge_intersection` add scores when the same
 /// document appears on both sides. They may also carry operator-specific
-/// fields. The algebraic identities are therefore safe only for the small,
-/// explicit subset below, whose execution produces default payloads. Keeping
-/// this match exhaustive makes a new `OperatorTree` variant opt out until its
-/// payload effect has been reviewed.
+/// fields. The algebraic identities are therefore safe only for the explicit
+/// subset classified exhaustively by `OperatorTree`, whose execution produces
+/// default payloads. A new variant opts out until its payload effect has been
+/// reviewed.
 fn is_membership_only(op: &OperatorTree) -> bool {
-    match op {
-        OperatorTree::Empty | OperatorTree::IndexScan { .. } => true,
-        OperatorTree::Filter { source, .. } => source.as_deref().is_none_or(is_membership_only),
-        OperatorTree::Intersect(children)
-        | OperatorTree::Union(children)
-        | OperatorTree::Composed(children) => children.iter().all(is_membership_only),
-        OperatorTree::Complement(child) => is_membership_only(child),
-        OperatorTree::VectorExclusion { positive, negative } => {
-            is_membership_only(positive) && is_membership_only(negative)
-        }
-        OperatorTree::Term { .. }
-        | OperatorTree::Facet { .. }
-        | OperatorTree::Score { .. }
-        | OperatorTree::BayesianScore { .. }
-        | OperatorTree::EncodeGraphPosting { .. }
-        | OperatorTree::BayesianMatchWithPrior { .. }
-        | OperatorTree::VectorSimilarity { .. }
-        | OperatorTree::KNN { .. }
-        | OperatorTree::CalibratedVectorMatch { .. }
-        | OperatorTree::CosineProbability(_)
-        | OperatorTree::BayesianEvidenceFusion { .. }
-        | OperatorTree::RobustPositiveEvidencePool { .. }
-        | OperatorTree::ProbBoolFusion { .. }
-        | OperatorTree::ProbNot { .. }
-        | OperatorTree::AttentionFusion { .. }
-        | OperatorTree::LearnedFusion { .. }
-        | OperatorTree::SparseThreshold { .. }
-        | OperatorTree::Traverse { .. }
-        | OperatorTree::GraphNeighbors { .. }
-        | OperatorTree::GraphEdges { .. }
-        | OperatorTree::PatternMatch { .. }
-        | OperatorTree::RegularPathQuery { .. }
-        | OperatorTree::GraphJoin { .. }
-        | OperatorTree::Aggregate { .. }
-        | OperatorTree::GroupBy { .. }
-        | OperatorTree::MultiStage { .. }
-        | OperatorTree::MultiFieldSearch { .. }
-        | OperatorTree::HybridTextVector { .. }
-        | OperatorTree::SemanticFilter { .. }
-        | OperatorTree::FacetVector { .. }
-        | OperatorTree::VertexAggregation { .. }
-        | OperatorTree::WeightedPathQuery { .. }
-        | OperatorTree::MessagePassing { .. }
-        | OperatorTree::GraphEmbedding { .. }
-        | OperatorTree::PageRank { .. }
-        | OperatorTree::HITS { .. }
-        | OperatorTree::BetweennessCentrality { .. }
-        | OperatorTree::TextSimilarityJoin { .. }
-        | OperatorTree::VectorSimilarityJoin { .. }
-        | OperatorTree::HybridJoin { .. }
-        | OperatorTree::CrossParadigmJoin { .. }
-        | OperatorTree::TemporalTraverse { .. }
-        | OperatorTree::TemporalPatternMatch { .. }
-        | OperatorTree::ProgressiveFusion { .. }
-        | OperatorTree::DeepFusion { .. }
-        | OperatorTree::DeepPredict { .. }
-        | OperatorTree::Opaque { .. } => false,
-    }
+    op.is_membership_only()
 }
 
 /// Address-independent structural equivalence for operands on which Boolean

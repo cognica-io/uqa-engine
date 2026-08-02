@@ -149,6 +149,30 @@ impl PostingList {
         self.merge_intersection_reusing_left(other)
     }
 
+    /// Intersect document support and reconstruct every retained entry with a
+    /// default payload. This is the physical meet for membership-only operator
+    /// subtrees; unlike [`Self::merge_intersection_owned`], it deliberately
+    /// does not observe or combine scores, positions, or fields.
+    pub fn merge_support_intersection_owned(mut self, other: &Self) -> Self {
+        let mut other_index = 0;
+        self.entries.retain_mut(|entry| {
+            while other_index < other.entries.len()
+                && other.entries[other_index].doc_id < entry.doc_id
+            {
+                other_index += 1;
+            }
+            if other_index >= other.entries.len()
+                || other.entries[other_index].doc_id != entry.doc_id
+            {
+                return false;
+            }
+            entry.payload = Payload::default();
+            other_index += 1;
+            true
+        });
+        self
+    }
+
     #[inline(never)]
     fn merge_intersection_reusing_left(mut self, other: &Self) -> Self {
         let mut other_index = 0;
@@ -302,12 +326,6 @@ impl From<&PostingList> for DocSet {
 /// - score: added (so `merge_union(a, a)` generally differs from `a`)
 /// - fields: right-hand side wins on key collision
 fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
-    let a_phi = GraphPhiEnvelope::decode(a.fields.get(GRAPH_PHI_FIELD));
-    let b_phi = GraphPhiEnvelope::decode(b.fields.get(GRAPH_PHI_FIELD));
-    if a_phi.is_some() || b_phi.is_some() {
-        return merge_phi_payloads(a, b, a_phi, b_phi);
-    }
-
     let a_score_only = a.positions.is_empty() && a.fields.is_empty();
     let b_score_only = b.positions.is_empty() && b.fields.is_empty();
     if a_score_only && b_score_only {
@@ -322,6 +340,12 @@ fn merge_payloads(a: &Payload, b: &Payload) -> Payload {
         let mut merged = a.clone();
         merged.score = a.score + b.score;
         return merged;
+    }
+
+    let a_phi = GraphPhiEnvelope::decode(a.fields.get(GRAPH_PHI_FIELD));
+    let b_phi = GraphPhiEnvelope::decode(b.fields.get(GRAPH_PHI_FIELD));
+    if a_phi.is_some() || b_phi.is_some() {
+        return merge_phi_payloads(a, b, a_phi, b_phi);
     }
 
     let mut positions: Vec<u32> = Vec::with_capacity(a.positions.len() + b.positions.len());
@@ -696,6 +720,20 @@ mod tests {
             left.clone().merge_intersection_owned(&right),
             left.merge_intersection(&right)
         );
+    }
+
+    #[test]
+    fn support_intersection_discards_payloads() {
+        let left = PostingList::from_sorted_unchecked(vec![
+            PostingEntry::new(1, Payload::with_score(3.0)),
+            PostingEntry::new(2, Payload::with_score(4.0)),
+        ]);
+        let right = PostingList::from_sorted_unchecked(vec![
+            PostingEntry::new(2, Payload::with_score(5.0)),
+            PostingEntry::new(3, Payload::with_score(6.0)),
+        ]);
+
+        assert_eq!(left.merge_support_intersection_owned(&right), pl_of(&[2]));
     }
 
     #[test]

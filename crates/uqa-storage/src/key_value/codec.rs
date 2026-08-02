@@ -14,10 +14,10 @@ use super::{
 
 pub fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut upper = prefix.to_vec();
-    for byte in upper.iter_mut().rev() {
-        if *byte != u8::MAX {
-            *byte += 1;
-            upper.truncate(upper.len());
+    for index in (0..upper.len()).rev() {
+        if upper[index] != u8::MAX {
+            upper[index] += 1;
+            upper.truncate(index + 1);
             return Some(upper);
         }
     }
@@ -416,4 +416,17 @@ pub(super) fn vector_key(
     let mut key = vector_doc_prefix(table, field, doc_id)?;
     push_u64(&mut key, u64::from(vector_ordinal));
     Ok(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefix_upper_bound;
+
+    #[test]
+    fn prefix_upper_bound_carries_and_truncates_trailing_max_bytes() {
+        assert_eq!(prefix_upper_bound(b"abc"), Some(b"abd".to_vec()));
+        assert_eq!(prefix_upper_bound(&[b'a', 0xff]), Some(vec![b'b']));
+        assert_eq!(prefix_upper_bound(&[0xff, 0xff]), None);
+        assert_eq!(prefix_upper_bound(&[]), None);
+    }
 }

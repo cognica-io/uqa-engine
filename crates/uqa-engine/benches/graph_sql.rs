@@ -44,9 +44,15 @@ fn build_engine() -> Engine {
                 let mut edge = Edge::new(edge_id, id, id + 1, "knows");
                 edge.properties
                     .insert("weight".to_string(), Value::Float((id % 10) as f64 / 10.0));
+                edge.properties
+                    .insert("valid_from".to_string(), Value::Int(0));
+                edge.properties
+                    .insert("valid_to".to_string(), Value::Int(1_000));
                 store.add_edge(edge, GRAPH)?;
                 edge_id += 1;
             }
+            store.add_edge(Edge::new(edge_id, 2, 3, "works_at"), GRAPH)?;
+            edge_id += 1;
             for id in 1..=450 {
                 if id % 25 == 0 {
                     store.add_edge(Edge::new(edge_id, id, id + 50, "knows"), GRAPH)?;
@@ -107,5 +113,46 @@ fn bench_rpq_sql(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_centrality_sql, bench_rpq_sql);
+fn bench_named_graph_sql(c: &mut Criterion) {
+    let engine = build_engine();
+    let cases = [
+        (
+            "graph_sql_named_traverse",
+            "SELECT id FROM seeds WHERE graph_traverse('bench', 1, 'knows', 2) ORDER BY id",
+        ),
+        (
+            "graph_sql_named_temporal_traverse",
+            "SELECT id FROM seeds WHERE temporal_traverse('bench', 1, 'knows', 2, 100, 200) ORDER BY id",
+        ),
+        (
+            "graph_sql_named_rpq",
+            "SELECT * FROM rpq('knows/works_at', 1, 'bench')",
+        ),
+    ];
+    for (_, sql) in cases {
+        let result = engine.sql(sql, &[]).expect("named graph SQL setup");
+        assert!(
+            !result.rows.is_empty(),
+            "benchmark query returned no rows: {sql}"
+        );
+    }
+
+    let mut group = c.benchmark_group("graph_named_sql");
+    for (name, sql) in cases {
+        group.bench_function(name, |bencher| {
+            bencher.iter(|| {
+                let result = engine.sql(black_box(sql), &[]).expect("named graph SQL");
+                black_box(result.rows.len())
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_centrality_sql,
+    bench_rpq_sql,
+    bench_named_graph_sql
+);
 criterion_main!(benches);

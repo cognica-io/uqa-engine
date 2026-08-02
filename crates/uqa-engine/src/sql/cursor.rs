@@ -41,7 +41,9 @@ impl SQLCursor {
             row_count: spill.rows(),
             spilled_to_disk: spill.has_spilled(),
         };
-        let reader = spill.reader().map_err(super::select::physical_exec_error)?;
+        let reader = spill
+            .into_reader()
+            .map_err(super::select::physical_exec_error)?;
         Ok(Self { summary, reader })
     }
 

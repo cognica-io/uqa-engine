@@ -23,6 +23,7 @@ pub struct Project<'a> {
     /// output (after any alias rewrite). Useful when projections only
     /// derive new columns.
     pass_through: bool,
+    ordering: Vec<crate::PhysicalOrder>,
 }
 
 impl Project<'static> {
@@ -78,6 +79,7 @@ impl<'a> Project<'a> {
             evaluator,
             schema,
             pass_through: false,
+            ordering: Vec::new(),
         }
     }
 
@@ -86,6 +88,18 @@ impl<'a> Project<'a> {
         projections: Vec<(String, ScalarExpr)>,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
+        let ordering = child
+            .output_ordering()
+            .iter()
+            .take_while(|order| {
+                projections.iter().all(|(name, expression)| {
+                    name != &order.column
+                        || matches!(expression, ScalarExpr::Star)
+                        || matches!(expression, ScalarExpr::Column(source) if source == name)
+                })
+            })
+            .cloned()
+            .collect();
         let mut cols = child.schema().to_vec();
         for (name, _) in &projections {
             if !cols.contains(name) {
@@ -99,6 +113,7 @@ impl<'a> Project<'a> {
             evaluator,
             schema,
             pass_through: true,
+            ordering,
         }
     }
 }
@@ -106,6 +121,10 @@ impl<'a> Project<'a> {
 impl PhysicalOperator for Project<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
+    }
+
+    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+        &self.ordering
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -118,11 +137,21 @@ impl PhysicalOperator for Project<'_> {
         };
         let mut out = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
-            let mut new_row: ResultRow = if self.pass_through {
-                row.clone()
-            } else {
-                ResultRow::new()
-            };
+            if self.pass_through {
+                let mut computed = Vec::with_capacity(self.projections.len());
+                for (name, expr) in &self.projections {
+                    if matches!(expr, ScalarExpr::Star) {
+                        computed.extend(self.evaluator.project_star(&row)?);
+                    } else {
+                        computed.push((name.clone(), self.evaluator.evaluate(expr, &row)?));
+                    }
+                }
+                let mut new_row = row;
+                new_row.extend(computed);
+                out.push(new_row);
+                continue;
+            }
+            let mut new_row = ResultRow::new();
             for (name, expr) in &self.projections {
                 if matches!(expr, ScalarExpr::Star) {
                     for (column, value) in self.evaluator.project_star(&row)? {

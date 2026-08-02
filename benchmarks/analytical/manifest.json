@@ -30,25 +30,25 @@
       "name": "q1_uqa_vs_sqlite",
       "numerator": "analytical_external_q1/uqa",
       "denominator": "analytical_external_q1/sqlite",
-      "max": 50.0
+      "max": 1.1
     },
     {
       "name": "q1_uqa_vs_duckdb",
       "numerator": "analytical_external_q1/uqa",
       "denominator": "analytical_external_q1/duckdb",
-      "max": 550.0
+      "max": 12.0
     },
     {
       "name": "q6_uqa_vs_sqlite",
       "numerator": "analytical_external_q6/uqa",
       "denominator": "analytical_external_q6/sqlite",
-      "max": 150.0
+      "max": 3.0
     },
     {
       "name": "q6_uqa_vs_duckdb",
       "numerator": "analytical_external_q6/uqa",
       "denominator": "analytical_external_q6/duckdb",
-      "max": 650.0
+      "max": 18.0
     },
     {
       "name": "cursor_vs_materialized_scan",
@@ -60,13 +60,13 @@
       "name": "cursor_scan_vs_sqlite",
       "numerator": "analytical_result_scan/uqa_cursor",
       "denominator": "analytical_result_scan/sqlite",
-      "max": 220.0
+      "max": 8.0
     },
     {
       "name": "cursor_scan_vs_duckdb",
       "numerator": "analytical_result_scan/uqa_cursor",
       "denominator": "analytical_result_scan/duckdb",
-      "max": 350.0
+      "max": 15.0
     }
   ]
 }

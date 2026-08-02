@@ -57,7 +57,7 @@ pub(in crate::sql) fn build_facet_output(
     let source_schema = engine.try_table_columns(table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{table}`: {error}"))
     })?;
-    let source = ScoredDocumentSource::new(table, table_state, scored, source_schema);
+    let source = ScoredDocumentSource::new(table, table_state, scored, source_schema, None, None);
     let mut source: Box<dyn PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     if let Some(predicate) = predicate {

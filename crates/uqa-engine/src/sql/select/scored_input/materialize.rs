@@ -1,0 +1,151 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Projected document filtering, materialization, and aggregate delivery.
+
+use uqa_core::Value;
+use uqa_execution::ExecResult;
+use uqa_sql::ResultRow;
+
+use super::projected_row::ProjectedDocumentRow;
+use super::{ScoredDocumentSource, ScoredEntry};
+use crate::sql::{DocId, SQLError};
+
+type KeptEntryVisitor<'visitor> =
+    dyn FnMut(DocId, &ScoredEntry, &[&str], &[&Value]) -> ExecResult<()> + 'visitor;
+
+impl ScoredDocumentSource {
+    pub(super) fn materialize_entries(
+        &self,
+        entries: &[ScoredEntry],
+    ) -> ExecResult<Vec<ResultRow>> {
+        let mut rows = Vec::with_capacity(entries.len());
+        self.for_each_kept_entry(entries, &mut |doc_id, entry, fields, values| {
+            let mut row = fields
+                .iter()
+                .zip(values)
+                .map(|(field, value)| ((*field).to_string(), (*value).clone()))
+                .collect::<ResultRow>();
+            self.row_metadata(doc_id, entry.score)
+                .insert_into(&mut row)?;
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+
+    fn for_each_kept_entry(
+        &self,
+        entries: &[ScoredEntry],
+        visitor: &mut KeptEntryVisitor<'_>,
+    ) -> ExecResult<()> {
+        let fields = self
+            .projected_fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        if fields.is_empty() && self.input_guarantees_presence {
+            for entry in entries {
+                if let Some(predicate) = self.predicate.as_ref() {
+                    if !predicate.keep(&[])? {
+                        continue;
+                    }
+                }
+                visitor(entry.doc_id, entry, &fields, &[])?;
+            }
+            return Ok(());
+        }
+        let doc_ids = entries.iter().map(|entry| entry.doc_id).collect::<Vec<_>>();
+        let store = self.table.document_store.read();
+        let mut index = 0usize;
+        let mut materialization_error = None;
+        store
+            .for_each_fields_multi_ref_with_presence(
+                &doc_ids,
+                &fields,
+                &mut |doc_id, exists, values| {
+                    if !exists {
+                        materialization_error = Some(
+                            SQLError::Internal(format!(
+                                "access path returned document {doc_id}, but table `{}` omitted it",
+                                self.table_name
+                            ))
+                            .into(),
+                        );
+                        return false;
+                    }
+                    let Some(entry) = entries.get(index) else {
+                        materialization_error = Some(
+                            SQLError::Internal("document projection produced too many rows".into())
+                                .into(),
+                        );
+                        return false;
+                    };
+                    index += 1;
+                    if entry.doc_id != doc_id || values.len() != fields.len() {
+                        materialization_error = Some(
+                            SQLError::Internal(format!(
+                                "document projection for `{}` lost row alignment",
+                                self.table_name
+                            ))
+                            .into(),
+                        );
+                        return false;
+                    }
+                    if let Some(predicate) = self.predicate.as_ref() {
+                        match predicate.keep(values) {
+                            Ok(true) => {}
+                            Ok(false) => return true,
+                            Err(error) => {
+                                materialization_error = Some(error.into());
+                                return false;
+                            }
+                        }
+                    }
+                    if let Err(error) = visitor(doc_id, entry, &fields, values) {
+                        materialization_error = Some(error);
+                        return false;
+                    }
+                    true
+                },
+            )
+            .map_err(|error| -> uqa_execution::ExecError {
+                SQLError::Internal(format!(
+                    "read `{}` projected documents: {error}",
+                    self.table_name
+                ))
+                .into()
+            })?;
+        if let Some(error) = materialization_error {
+            return Err(error);
+        }
+        if index != entries.len() {
+            return Err(SQLError::Internal(format!(
+                "document projection for `{}` visited {index} rows, expected {}",
+                self.table_name,
+                entries.len()
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn aggregate_entries(
+        &self,
+        entries: &[ScoredEntry],
+        executor: &mut dyn uqa_execution::AggregateExecutor,
+    ) -> ExecResult<()> {
+        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
+            let row = ProjectedDocumentRow::new(
+                &self.projected_fields,
+                &self.projected_slots,
+                values,
+                self.row_metadata(doc_id, entry.score),
+            )?;
+            executor.consume_projected_row(&row)
+        })
+    }
+}

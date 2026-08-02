@@ -9,7 +9,7 @@
 use uqa_core::Value;
 use uqa_sql::ResultRow;
 
-use crate::{Batch, ExecResult, PhysicalOperator, RowSchema};
+use crate::{Batch, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
 
 /// Select already-computed columns without evaluating expressions again.
 ///
@@ -26,6 +26,7 @@ pub struct ColumnSelection<'a> {
     /// under collision-free internal names while this final, non-evaluating
     /// operator restores the public SQL column names.
     columns: Vec<(String, String)>,
+    ordering: Vec<PhysicalOrder>,
 }
 
 impl<'a> ColumnSelection<'a> {
@@ -41,10 +42,26 @@ impl<'a> ColumnSelection<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         columns: Vec<(String, String)>,
     ) -> Self {
+        let ordering = child
+            .output_ordering()
+            .iter()
+            .map_while(|order| {
+                let output = columns
+                    .iter()
+                    .find(|(_, input)| input == &order.column)?
+                    .0
+                    .clone();
+                Some(PhysicalOrder {
+                    column: output,
+                    ..order.clone()
+                })
+            })
+            .collect();
         Self {
             child,
             schema: RowSchema::new(columns.iter().map(|(output, _)| output.clone()).collect()),
             columns,
+            ordering,
         }
     }
 }
@@ -52,6 +69,10 @@ impl<'a> ColumnSelection<'a> {
 impl PhysicalOperator for ColumnSelection<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
+    }
+
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &self.ordering
     }
 
     fn open(&mut self) -> ExecResult<()> {

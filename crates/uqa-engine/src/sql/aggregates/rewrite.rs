@@ -206,7 +206,7 @@ pub(in crate::sql) fn aggregate_input_values(
 
 pub(in crate::sql) fn new_aggregate_accumulators_with_budget(
     engine: &Engine,
-    aggregate_targets: &[&ScalarExpr],
+    aggregate_targets: &[ScalarExpr],
     budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
     aggregate_targets

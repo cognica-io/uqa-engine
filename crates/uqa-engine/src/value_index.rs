@@ -172,7 +172,7 @@ impl ColumnValueIndex {
     /// Resolve `predicate` to a posting list, or `None` when this
     /// index cannot reproduce evaluated-scan semantics for it.
     pub(crate) fn scan(&self, predicate: &Predicate) -> Option<PostingList> {
-        if !predicate_targets_are_index_safe(predicate) {
+        if !self.supports(predicate) {
             return None;
         }
         match predicate {
@@ -180,14 +180,27 @@ impl ColumnValueIndex {
             Predicate::IsNotNull => Some(self.index.scan(&Predicate::IsNotNull)),
             // `NotEquals` needs "all non-null minus matches"; the
             // complement is rarely selective, so leave it to the scan.
-            Predicate::NotEquals(_) => None,
-            predicate => {
-                if self.has_temporal {
-                    return None;
-                }
-                Some(self.index.scan(predicate))
-            }
+            Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
+            predicate => Some(self.index.scan(predicate)),
         }
+    }
+
+    pub(crate) fn estimate_cardinality(&self, predicate: &Predicate) -> Option<usize> {
+        if !self.supports(predicate) {
+            return None;
+        }
+        Some(match predicate {
+            Predicate::IsNull => self.nulls.len(),
+            Predicate::IsNotNull => self.index.estimate_cardinality(predicate),
+            Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
+            predicate => self.index.estimate_cardinality(predicate),
+        })
+    }
+
+    fn supports(&self, predicate: &Predicate) -> bool {
+        predicate_targets_are_index_safe(predicate)
+            && !matches!(predicate, Predicate::NotEquals(_))
+            && (matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) || !self.has_temporal)
     }
 }
 
@@ -266,6 +279,63 @@ impl crate::Engine {
             .get(field)
             .and_then(|index| index.scan(predicate));
         Ok(result)
+    }
+
+    /// Estimate one exact value-index predicate without materializing or
+    /// sorting its posting list. Engine column indexes keep every document in
+    /// one value bucket, so the storage upper bound is exact here.
+    pub(crate) fn value_index_cardinality(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> Result<Option<usize>, SQLError> {
+        let table_state = self.require_table(table)?;
+        {
+            let indexes = table_state.value_indexes.read();
+            if let Some(index) = indexes.get(field) {
+                return Ok(index.estimate_cardinality(predicate));
+            }
+        }
+        if !self
+            .ensure_value_index(table, field)
+            .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
+        {
+            return Ok(None);
+        }
+        let cardinality = table_state
+            .value_indexes
+            .read()
+            .get(field)
+            .and_then(|index| index.estimate_cardinality(predicate));
+        Ok(cardinality)
+    }
+
+    /// Return whether catalog policy provides an exact in-memory value-index
+    /// implementation for this predicate. Missing hot state is hydrated in
+    /// memory, preserving the read-only lazy-recovery contract without forcing
+    /// the relational planner to execute every scalar filter as a posting scan.
+    pub(crate) fn value_index_supports(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> StorageBackendResult<bool> {
+        if !self.ensure_value_index(table, field)? {
+            return Ok(false);
+        }
+        let Some(table_name) = self.try_resolve_table_name(table)? else {
+            return Ok(false);
+        };
+        let Some(table) = self.try_table(&table_name)? else {
+            return Ok(false);
+        };
+        let supported = table
+            .value_indexes
+            .read()
+            .get(field)
+            .is_some_and(|index| index.supports(predicate));
+        Ok(supported)
     }
 
     /// Hydrate one value index from durable postings when available. A missing

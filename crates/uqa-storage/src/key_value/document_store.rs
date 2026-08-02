@@ -70,19 +70,28 @@ impl DocumentStore for KeyValueDocumentStore {
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
+        Ok(self.next_doc_ids(after, 1)?.into_iter().next())
+    }
+
+    fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let prefix = document_key_prefix(&self.table)?;
         let after_key = after
             .map(|doc_id| document_key(&self.table, doc_id))
             .transpose()?;
-        let Some((key, _)) = self
+        let mut out = Vec::with_capacity(limit);
+        for key in self
             .store
-            .first_prefix_after(&prefix, after_key.as_deref())?
-        else {
-            return Ok(None);
-        };
-        let mut offset = 1;
-        let _table = read_str(&key, &mut offset)?;
-        read_u64(&key, &mut offset).map(Some)
+            .scan_prefix_keys_after(&prefix, after_key.as_deref(), limit)?
+        {
+            let mut offset = 1;
+            let _table = read_str(&key, &mut offset)?;
+            let doc_id = read_u64(&key, &mut offset)?;
+            out.push(doc_id);
+        }
+        Ok(out)
     }
 
     fn len(&self) -> StorageBackendResult<usize> {

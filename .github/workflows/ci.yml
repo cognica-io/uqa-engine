@@ -32,6 +32,8 @@ jobs:
           components: rustfmt
       - name: Check workspace dependency policy
         run: python3 scripts/check-workspace-dependencies.py
+      - name: Check benchmark parity evidence
+        run: python3 scripts/check-benchmark-parity.py
       - run: cargo fmt --all --check
 
   clippy:

@@ -126,12 +126,13 @@ impl BTreeIndex {
         self.entries.clear();
     }
 
-    /// Run `predicate` against the index, returning the matching `doc_ids`
-    /// as a sorted, deduplicated [`PostingList`].
-    pub fn scan(&self, predicate: &Predicate) -> PostingList {
-        let range_iter: Box<dyn Iterator<Item = (&Value, &Vec<DocId>)> + '_> = match predicate {
-            Predicate::Equals(t) => match self.entries.get(t) {
-                Some(bucket) => Box::new(std::iter::once((t, bucket))),
+    fn matching_entries<'a>(
+        &'a self,
+        predicate: &'a Predicate,
+    ) -> Box<dyn Iterator<Item = (&'a Value, &'a Vec<DocId>)> + 'a> {
+        match predicate {
+            Predicate::Equals(t) => match self.entries.get_key_value(t) {
+                Some(entry) => Box::new(std::iter::once(entry)),
                 None => Box::new(std::iter::empty()),
             },
             Predicate::GreaterThan(t) => Box::new(
@@ -166,18 +167,37 @@ impl BTreeIndex {
                 // appropriate.
                 Box::new(self.entries.iter())
             }
-        };
+        }
+    }
+
+    fn entry_matches(predicate: &Predicate, value: &Value) -> bool {
+        match predicate {
+            Predicate::NotEquals(_) | Predicate::IsNotNull => predicate.evaluate(Some(value)),
+            Predicate::IsNull => false,
+            _ => true,
+        }
+    }
+
+    /// Return an allocation-free upper bound for the matching document
+    /// cardinality. It is exact when each document occurs in one value bucket,
+    /// as maintained by engine column indexes; direct callers that insert one
+    /// document under several values may receive an overestimate.
+    pub fn estimate_cardinality(&self, predicate: &Predicate) -> usize {
+        self.matching_entries(predicate)
+            .filter(|(value, _)| Self::entry_matches(predicate, value))
+            .fold(0usize, |total, (_, bucket)| {
+                total.saturating_add(bucket.len())
+            })
+    }
+
+    /// Run `predicate` against the index, returning the matching `doc_ids`
+    /// as a sorted, deduplicated [`PostingList`].
+    pub fn scan(&self, predicate: &Predicate) -> PostingList {
+        let range_iter = self.matching_entries(predicate);
 
         let mut all_ids: Vec<DocId> = Vec::new();
         for (value, bucket) in range_iter {
-            // For predicates that need element-wise checks, evaluate
-            // here so the result honours the trait contract.
-            let keep = match predicate {
-                Predicate::NotEquals(_) | Predicate::IsNotNull => predicate.evaluate(Some(value)),
-                Predicate::IsNull => false, // a value is present, so IsNull never matches
-                _ => true,
-            };
-            if keep {
+            if Self::entry_matches(predicate, value) {
                 all_ids.extend_from_slice(bucket);
             }
         }
@@ -272,5 +292,32 @@ mod tests {
         sort_and_dedup_doc_ids(&mut doc_ids);
 
         assert_eq!(doc_ids, vec![0, 42, DocId::MAX]);
+    }
+
+    #[test]
+    fn cardinality_estimate_is_exact_for_single_valued_documents() {
+        let index = idx_with_ints();
+        let predicate = Predicate::Between {
+            low: Value::Int(2022),
+            high: Value::Int(2025),
+        };
+
+        assert_eq!(
+            index.estimate_cardinality(&predicate),
+            index.scan(&predicate).len()
+        );
+    }
+
+    #[test]
+    fn cardinality_estimate_is_a_safe_upper_bound_for_duplicate_documents() {
+        let mut index = idx_with_ints();
+        index.insert(3, Value::Int(2030));
+        let predicate = Predicate::Between {
+            low: Value::Int(2020),
+            high: Value::Int(2030),
+        };
+
+        assert_eq!(index.estimate_cardinality(&predicate), 6);
+        assert_eq!(index.scan(&predicate).len(), 5);
     }
 }

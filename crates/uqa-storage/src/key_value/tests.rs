@@ -65,6 +65,30 @@ fn memory_key_value_scan_and_batch_are_ordered_and_atomic() {
             (b"p/a/2".to_vec(), b"two".to_vec())
         ]
     );
+    assert_eq!(
+        store
+            .scan_prefix_keys_after(b"p/a/", Some(b"p/a/1"), 1)
+            .unwrap(),
+        vec![b"p/a/2".to_vec()]
+    );
+    assert_eq!(
+        store
+            .scan_prefix_keys_after(b"p/a/", Some(b"a"), 2)
+            .unwrap(),
+        vec![b"p/a/1".to_vec(), b"p/a/2".to_vec()]
+    );
+    assert!(store
+        .scan_prefix_keys_after(b"p/a/", Some(b"z"), 2)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store.first_prefix_after(b"p/a/", Some(b"a")).unwrap(),
+        Some((b"p/a/1".to_vec(), b"one".to_vec()))
+    );
+    assert!(store
+        .scan_prefix_keys_after(b"p/a/", None, 0)
+        .unwrap()
+        .is_empty());
 
     let mut batch = store.batch();
     batch.delete(b"p/a/1").unwrap();
@@ -78,6 +102,23 @@ fn memory_key_value_scan_and_batch_are_ordered_and_atomic() {
             (b"p/a/3".to_vec(), b"three".to_vec())
         ]
     );
+}
+
+#[test]
+fn key_value_document_cursor_returns_bounded_ordered_pages() {
+    let mut docs = KeyValueDocumentStore::new(store(), "articles");
+    for doc_id in [8, 2, 13, 5] {
+        docs.put(
+            doc_id,
+            BTreeMap::from([("id".to_string(), Value::Int(doc_id as i64))]),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(docs.next_doc_ids(None, 2).unwrap(), vec![2, 5]);
+    assert_eq!(docs.next_doc_ids(Some(5), 2).unwrap(), vec![8, 13]);
+    assert!(docs.next_doc_ids(Some(13), 2).unwrap().is_empty());
+    assert!(docs.next_doc_ids(None, 0).unwrap().is_empty());
 }
 
 #[test]

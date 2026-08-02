@@ -22,7 +22,7 @@ use uqa_core::Value;
 use uqa_sql::ResultRow;
 
 use crate::batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
-use crate::physical::{ExecError, ExecResult, PhysicalOperator};
+use crate::physical::{ExecError, ExecResult, PhysicalOperator, PhysicalOrder};
 use crate::relational::{compare_sort_key_values, SharedExpressionEvaluator, SortKey};
 use crate::spill::SpillBuffer;
 
@@ -50,6 +50,7 @@ pub struct ExternalSort<'a> {
     work_mem_bytes: usize,
     spill_directory: Option<PathBuf>,
     schema: RowSchema,
+    ordering: Vec<PhysicalOrder>,
     output: Option<Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send>>,
     initial_run_count: usize,
     merge_pass_count: usize,
@@ -64,6 +65,19 @@ impl<'a> ExternalSort<'a> {
         work_mem_bytes: usize,
     ) -> Self {
         let schema = RowSchema::new(child.schema().to_vec());
+        let ordering = keys
+            .iter()
+            .map(|key| match &key.expr {
+                crate::ScalarExpr::Column(column) => Some(PhysicalOrder {
+                    column: column.clone(),
+                    descending: key.descending,
+                    nulls_first: Some(key.nulls_first.unwrap_or(key.descending)),
+                    nullable: true,
+                }),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
         Self {
             child,
             keys,
@@ -72,6 +86,7 @@ impl<'a> ExternalSort<'a> {
             work_mem_bytes,
             spill_directory: None,
             schema,
+            ordering,
             output: None,
             initial_run_count: 0,
             merge_pass_count: 0,
@@ -177,9 +192,11 @@ impl<'a> ExternalSort<'a> {
 
         let mut buffer = self.create_run_buffer();
         let schema = run_schema();
+        let mut writer = RunBatchWriter::new(schema);
         for record in records {
-            buffer.push(Batch::new(schema.clone(), vec![encode_record(record)]))?;
+            writer.push(&mut buffer, encode_record(record))?;
         }
+        writer.finish(&mut buffer)?;
         if force_spill {
             buffer.spill_pending()?;
         }
@@ -214,6 +231,10 @@ impl<'a> ExternalSort<'a> {
 impl PhysicalOperator for ExternalSort<'_> {
     fn schema(&self) -> &[String] {
         &self.schema.columns
+    }
+
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &self.ordering
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -320,13 +341,60 @@ fn decode_record(mut record: ResultRow, expected_key_count: usize) -> ExecResult
 }
 
 fn encoded_record_size(schema: &RowSchema, record: ResultRow) -> ExecResult<(ResultRow, usize)> {
-    let mut batch = Batch::new(schema.clone(), vec![record]);
-    let bytes = SpillBuffer::encoded_size(&batch)?;
-    let record = batch
-        .rows
-        .pop()
-        .ok_or_else(|| ExecError::Other("encoded external sort record disappeared".into()))?;
+    let bytes = SpillBuffer::encoded_single_row_size(schema, &record)?;
     Ok((record, bytes))
+}
+
+struct RunBatchWriter {
+    schema: RowSchema,
+    pending: Vec<ResultRow>,
+    conservative_bytes: usize,
+}
+
+impl RunBatchWriter {
+    fn new(schema: RowSchema) -> Self {
+        Self {
+            schema,
+            pending: Vec::new(),
+            conservative_bytes: 0,
+        }
+    }
+
+    fn push(&mut self, output: &mut SpillBuffer, record: ResultRow) -> ExecResult<()> {
+        let (record, record_bytes) = encoded_record_size(&self.schema, record)?;
+        let exceeds_budget = self
+            .conservative_bytes
+            .checked_add(record_bytes)
+            .is_none_or(|bytes| bytes > output.budget_bytes());
+        if exceeds_budget && !self.pending.is_empty() {
+            self.flush(output)?;
+        }
+        self.pending.push(record);
+        self.conservative_bytes = self
+            .conservative_bytes
+            .checked_add(record_bytes)
+            .ok_or_else(|| ExecError::Other("external sort run batch size overflow".into()))?;
+        if self.conservative_bytes > output.budget_bytes() {
+            self.flush(output)?;
+        }
+        Ok(())
+    }
+
+    fn finish(mut self, output: &mut SpillBuffer) -> ExecResult<()> {
+        self.flush(output)
+    }
+
+    fn flush(&mut self, output: &mut SpillBuffer) -> ExecResult<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        output.push(Batch::new(
+            self.schema.clone(),
+            std::mem::take(&mut self.pending),
+        ))?;
+        self.conservative_bytes = 0;
+        Ok(())
+    }
 }
 
 type RowStream = Box<dyn Iterator<Item = ExecResult<ResultRow>> + Send>;
@@ -369,12 +437,13 @@ fn merge_group(
     }
 
     let schema = run_schema();
+    let mut writer = RunBatchWriter::new(schema);
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
         let item = heap_pop(&mut heap, keys)
             .ok_or_else(|| ExecError::Other("external sort merge heap became empty".into()))?;
         let cursor = item.cursor;
-        output.push(Batch::new(schema.clone(), vec![encode_record(item.record)]))?;
+        writer.push(&mut output, encode_record(item.record))?;
         emitted = emitted
             .checked_add(1)
             .ok_or_else(|| ExecError::Other("external sort emitted-row count overflow".into()))?;
@@ -389,6 +458,7 @@ fn merge_group(
             );
         }
     }
+    writer.finish(&mut output)?;
     output.spill_pending()?;
     Ok(SortedRun { buffer: output })
 }
@@ -569,7 +639,8 @@ mod tests {
         buffer.push(Batch::new(run_schema(), vec![record])).unwrap();
         let path = buffer.spill_path().unwrap().to_path_buf();
         let mut corrupt = std::fs::OpenOptions::new().append(true).open(path).unwrap();
-        corrupt.write_all(b"not-json\n").unwrap();
+        corrupt.write_all(&1_u64.to_le_bytes()).unwrap();
+        corrupt.write_all(&[0xff]).unwrap();
         corrupt.flush().unwrap();
 
         let result = merge_group(vec![SortedRun { buffer }], &keys, None, SpillBuffer::new(0));
@@ -577,9 +648,7 @@ mod tests {
             Ok(_) => panic!("corrupt run unexpectedly merged"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("failed to deserialize spill batch"));
+        assert!(error.to_string().contains("truncated schema column count"));
     }
 
     #[test]

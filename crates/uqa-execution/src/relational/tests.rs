@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::physical::run_to_rows;
-use crate::scan::TableScan;
+use crate::scan::{RowSource, TableScan};
 use uqa_core::Value;
 use uqa_sql::ast::BinaryOp;
 
@@ -30,6 +30,56 @@ fn bin(op: BinaryOp, lhs: ScalarExpr, rhs: ScalarExpr) -> ScalarExpr {
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
     }
+}
+
+struct OrderedSource {
+    rows: std::vec::IntoIter<ResultRow>,
+    schema: Vec<String>,
+    ordering: Vec<crate::PhysicalOrder>,
+}
+
+impl RowSource for OrderedSource {
+    fn schema(&self) -> &[String] {
+        &self.schema
+    }
+
+    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+        &self.ordering
+    }
+
+    fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
+        Ok(self.rows.next())
+    }
+}
+
+fn ascending_id_scan() -> Box<dyn PhysicalOperator> {
+    Box::new(TableScan::new(Box::new(OrderedSource {
+        rows: vec![row([("id", Value::Int(1))]), row([("id", Value::Int(2))])].into_iter(),
+        schema: vec!["id".into()],
+        ordering: vec![crate::PhysicalOrder {
+            column: "id".into(),
+            descending: false,
+            nulls_first: None,
+            nullable: false,
+        }],
+    })))
+}
+
+#[test]
+fn appending_projection_only_propagates_unmodified_ordering_prefix() {
+    let preserved = Project::appending(
+        ascending_id_scan(),
+        vec![("derived".into(), ScalarExpr::Literal(Value::Int(1)))],
+        vec![],
+    );
+    assert_eq!(preserved.output_ordering()[0].column, "id");
+
+    let overwritten = Project::appending(
+        ascending_id_scan(),
+        vec![("id".into(), ScalarExpr::Literal(Value::Int(0)))],
+        vec![],
+    );
+    assert!(overwritten.output_ordering().is_empty());
 }
 
 #[test]
@@ -184,7 +234,7 @@ fn hash_aggregate_count_sum_per_group() {
 
 #[test]
 fn aggregate_count_finalizer_rejects_bigint_overflow() {
-    let mut fold = AggFold::new(1);
+    let mut fold = AggFold::new(1, false);
     fold.count = i64::MAX as u64 + 1;
     let spec = AggregateSpec {
         kind: AggregateKind::CountStar,

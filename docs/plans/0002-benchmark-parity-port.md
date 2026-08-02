@@ -1,37 +1,58 @@
 # Benchmark Parity Port Plan
 
+Status: Complete (2026-08-02)
+
 ## Objective
 
-Port the remaining Python benchmark coverage from `/Users/jaepil/work/research/uqa/benchmarks` into the Rust `uqa-rs` Criterion benchmark suite without omitting named benchmark surfaces.
+Preserve the benchmark surface of the Python `cognica-io/uqa` repository in
+the Rust Criterion suites, with enough provenance to detect a missing source
+file, a changed source snapshot, or a removed Rust benchmark surface.
 
-## Current Gap Summary
+## Pinned source contract
 
-- `bench_hybrid_fusion.py` and `bench_beir_calibration.py` include real BEIR-style report paths, NDCG@10, MAP@10, Recall@10, ECE, Brier, LogLoss, Dense, BM25, RRF, Convex, and balanced log-odds fusion. The Rust benchmark currently exercises only a compact synthetic subset.
-- `bench_planner.py` includes histogram construction and equality/range selectivity in addition to DPccp and greedy fallback. The Rust planner benchmark currently covers only join enumeration.
-- `bench_graph_centrality.py` includes PageRank and HITS variants, weighted max path, subgraph-index cached pattern match, incremental remove, progressive fusion, and SQL graph function paths. The Rust graph benchmark currently covers broad graph operators but omits several variants and SQL paths.
+[`benchmarks/parity/manifest.json`](../../benchmarks/parity/manifest.json)
+pins commit `59339400b209796b349f3a1d82a942379a662686` and the exact SHA-256 of
+all 15 `bench_*.py` files in that snapshot. Those files contain 207 named test
+cases. The manifest maps them to 148 Rust evidence tokens and records four
+additional Rust-only tokens for BEIR calibration and engine WAND/BMW coverage.
 
-## Implementation Tasks
+The previous inventory incorrectly listed `bench_hybrid_fusion.py` and
+`bench_beir_calibration.py` as Python source files. Neither exists in the
+pinned snapshot. The Rust `beir_calibration` suite remains useful additional
+coverage, but it is not presented as a direct source-file port.
 
-1. Expand `crates/uqa-scoring/benches/beir_calibration.rs` to cover the full BEIR/hybrid benchmark surface:
-   - Keep a deterministic built-in fixture for CI.
-   - Add optional real BEIR fixture loading from `UQA_BENCH_BEIR_DIR` or the sibling Python data directory when available.
-   - Report Dense, BM25, RRF, Convex, and Balanced methods.
-   - Compute NDCG@10, MAP@10, Recall@10, ECE, Brier, and LogLoss.
-   - Cover calibration sources analogous to distance gap, Bayesian BM25, and density prior.
-2. Expand the planner benchmark coverage to include the missing histogram/analyze and equality/range selectivity SQL surfaces. The join-enumerator portions stay in `crates/uqa-planner/benches/planner.rs`; the SQL statistics surfaces live in `crates/uqa-engine/benches/sql_workloads.rs` because `uqa-engine` owns `ANALYZE` and predicate execution.
-3. Expand graph benchmark coverage to include the missing graph centrality and named-graph variants:
-   - PageRank high damping and low iteration variants.
-   - HITS low iteration variant.
-   - Weighted max path.
-   - Subgraph-index cached pattern match.
-   - Incremental remove vertex.
-   - Centrality-style SQL function dispatch through the engine, in an engine benchmark to avoid a crate dependency cycle.
-4. Update crate benchmark dependencies and manifests only where required by the new benchmark code.
-5. Verify with:
-   - `cargo fmt --all --check`
-   - `cargo check --workspace --all-targets --locked`
-   - `cargo bench --workspace --no-run --locked`
+## Completed coverage
 
-## Completion Audit
+- Calibration, scoring, multi-field scoring, external priors, fusion, posting
+  lists, storage, compiler, execution, SQL, and planner benchmark surfaces are
+  mapped to their owning Rust crates.
+- Planner coverage includes join enumeration, histogram construction, and
+  equality/range selectivity through the planner and engine suites.
+- Graph coverage includes traversal, RPQ, named/temporal graphs, property
+  indexing, centrality, message passing, incremental updates, cached pattern
+  matching, and engine SQL dispatch.
+- The graph index comparison now measures an actual immutable property index
+  against a true vertex scan and asserts that both paths return the same IDs.
+- `scripts/check-benchmark-parity.py` validates the fixed file set, manifest
+  schema, unique paths/tokens, Rust source evidence, and optionally the source
+  commit, file hashes, and named-case counts. CI runs the repository-local
+  half of this check on every change.
 
-The work is complete only when every Python `bench_*.py` file maps to Rust Criterion benchmark functions or groups with evidence from manifests and source files, and all verification commands above pass.
+This contract establishes benchmark-surface coverage, not equal algorithms,
+fixtures, or latency between Python and Rust. Numerical regression claims use
+versioned Rust fixtures and same-machine benchmark artifacts separately.
+
+## Verification
+
+```sh
+python3 scripts/check-benchmark-parity.py
+python3 scripts/check-benchmark-parity.py --source-root <pinned-uqa-checkout>
+cargo fmt --all --check
+cargo check --workspace --all-targets --locked
+cargo bench --workspace --no-run --locked
+```
+
+The source-backed check currently reports 15 Python files, 207 named cases,
+and 152 Rust evidence tokens. Any future source update must deliberately
+change the pinned commit, every affected digest/case count, and its Rust
+mapping in the same review.

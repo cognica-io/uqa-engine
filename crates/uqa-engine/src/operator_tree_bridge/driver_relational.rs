@@ -14,14 +14,20 @@ use super::{
 
 impl EngineDriver<'_> {
     pub(super) fn execute_intersect(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
+        let membership_only = parts.iter().all(OperatorTree::is_membership_only);
         let mut iter = self.execute_output_branches(parts)?.into_iter();
         let Some(first) = iter.next() else {
             return Ok(PostingList::new().into());
         };
         iter.try_fold(first, |acc, next| match (acc, next) {
-            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => Ok(
-                OperatorOutput::Posting(left.merge_intersection_owned(&right)),
-            ),
+            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
+                let intersection = if membership_only {
+                    left.merge_support_intersection_owned(&right)
+                } else {
+                    left.merge_intersection_owned(&right)
+                };
+                Ok(OperatorOutput::Posting(intersection))
+            }
             (OperatorOutput::Graph(left), OperatorOutput::Graph(right)) => left
                 .merge_intersection(&right)
                 .map(OperatorOutput::Graph)

@@ -168,6 +168,79 @@ impl KeyValueStore for SQLiteKeyValueStore {
             .map_err(StorageBackendError::from)
     }
 
+    fn scan_prefix_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<Vec<u8>>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.ensure_table()?;
+        let upper = prefix_upper_bound(prefix);
+        let after = after.filter(|after| *after >= prefix);
+        let limit = i64::try_from(limit).map_err(|_| {
+            StorageBackendError::Other(format!(
+                "key/value cursor limit {limit} is outside SQLite's integer range"
+            ))
+        })?;
+        self.conn
+            .with(|connection| {
+                let mut keys = Vec::new();
+                match (after, upper) {
+                    (Some(after), Some(upper)) => {
+                        let mut stmt = connection.prepare_cached(&format!(
+                            "SELECT key FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1 AND key < ?2
+                             ORDER BY key LIMIT ?3"
+                        ))?;
+                        let rows =
+                            stmt.query_map(params![after, upper, limit], |row| row.get(0))?;
+                        for key in rows {
+                            keys.push(key?);
+                        }
+                    }
+                    (Some(after), None) => {
+                        let mut stmt = connection.prepare_cached(&format!(
+                            "SELECT key FROM {KEY_VALUE_TABLE}
+                             WHERE key > ?1
+                             ORDER BY key LIMIT ?2"
+                        ))?;
+                        let rows = stmt.query_map(params![after, limit], |row| row.get(0))?;
+                        for key in rows {
+                            keys.push(key?);
+                        }
+                    }
+                    (None, Some(upper)) => {
+                        let mut stmt = connection.prepare_cached(&format!(
+                            "SELECT key FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1 AND key < ?2
+                             ORDER BY key LIMIT ?3"
+                        ))?;
+                        let rows =
+                            stmt.query_map(params![prefix, upper, limit], |row| row.get(0))?;
+                        for key in rows {
+                            keys.push(key?);
+                        }
+                    }
+                    (None, None) => {
+                        let mut stmt = connection.prepare_cached(&format!(
+                            "SELECT key FROM {KEY_VALUE_TABLE}
+                             WHERE key >= ?1
+                             ORDER BY key LIMIT ?2"
+                        ))?;
+                        let rows = stmt.query_map(params![prefix, limit], |row| row.get(0))?;
+                        for key in rows {
+                            keys.push(key?);
+                        }
+                    }
+                }
+                Ok(keys)
+            })
+            .map_err(StorageBackendError::from)
+    }
+
     fn first_prefix_after(
         &self,
         prefix: &[u8],
@@ -175,6 +248,7 @@ impl KeyValueStore for SQLiteKeyValueStore {
     ) -> StorageBackendResult<Option<(Vec<u8>, Vec<u8>)>> {
         self.ensure_table()?;
         let upper = prefix_upper_bound(prefix);
+        let after = after.filter(|after| *after >= prefix);
         self.conn
             .with(|connection| {
                 let row = match (after, upper) {
@@ -420,8 +494,40 @@ mod tests {
             store.put(b"apple/1", b"red").unwrap();
             store.put(b"apple/2", b"green").unwrap();
             store.put(b"banana/1", b"yellow").unwrap();
+            store.put(&[0x10, 0xff, 0x01], b"binary-prefix").unwrap();
+            store.put(&[0x11, 0x00], b"binary-neighbour").unwrap();
             assert_eq!(store.get(b"apple/1").unwrap().as_deref(), Some(&b"red"[..]));
             assert_eq!(store.scan_prefix(b"apple/").unwrap().len(), 2);
+            assert_eq!(
+                store
+                    .scan_prefix_keys_after(b"apple/", Some(b"apple/1"), 1)
+                    .unwrap(),
+                vec![b"apple/2".to_vec()]
+            );
+            assert_eq!(
+                store
+                    .scan_prefix_keys_after(b"apple/", Some(b"a"), 2)
+                    .unwrap(),
+                vec![b"apple/1".to_vec(), b"apple/2".to_vec()]
+            );
+            assert!(store
+                .scan_prefix_keys_after(b"apple/", Some(b"z"), 2)
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                store.first_prefix_after(b"apple/", Some(b"a")).unwrap(),
+                Some((b"apple/1".to_vec(), b"red".to_vec()))
+            );
+            assert!(store
+                .scan_prefix_keys_after(b"apple/", None, 0)
+                .unwrap()
+                .is_empty());
+            assert_eq!(store.scan_prefix(&[0x10, 0xff]).unwrap().len(), 1);
+            store.delete_prefix(&[0x10, 0xff]).unwrap();
+            assert_eq!(
+                store.get(&[0x11, 0x00]).unwrap().as_deref(),
+                Some(&b"binary-neighbour"[..])
+            );
         }
         {
             let store = SQLiteKeyValueStore::open(&path).unwrap();

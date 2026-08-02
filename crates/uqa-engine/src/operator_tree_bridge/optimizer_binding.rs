@@ -83,10 +83,10 @@ pub(super) fn engine_index_candidates(
         let Some(index_name) = indexes_by_field.get(&field) else {
             continue;
         };
-        let Some(matches) = engine.value_index_scan(table, &field, &predicate)? else {
+        let Some(cardinality) = engine.value_index_cardinality(table, &field, &predicate)? else {
             continue;
         };
-        let cardinality = matches.len() as f64;
+        let cardinality = cardinality as f64;
         let scan_cost = match predicate {
             Predicate::Equals(_) => 1.0 + cardinality * 0.1,
             _ => cardinality.max(1.0),

@@ -1,60 +1,60 @@
 {
-  "benchmark_source_sha256": "e2ea9924aa50352ceee5031884936b8247eb6a648eb4eb575b6c87c110eabe64",
+  "benchmark_source_sha256": "797bd0b552a83bf47970ff399c6103b12b73e1975d91b917aba0de373b5785b4",
   "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
   "criterion_median_nanoseconds": {
-    "analytical_external_q1/duckdb": 629708.4401041667,
-    "analytical_external_q1/sqlite": 7389491.902777778,
-    "analytical_external_q1/uqa": 234014958.5,
-    "analytical_external_q6/duckdb": 224920.15552325582,
-    "analytical_external_q6/sqlite": 1014262.975,
-    "analytical_external_q6/uqa": 96089323.0,
-    "analytical_result_scan/duckdb": 860572.6022727273,
-    "analytical_result_scan/sqlite": 1456770.809962406,
-    "analytical_result_scan/uqa_cursor": 191200708.5,
-    "analytical_result_scan/uqa_materialized": 185070333.0
+    "analytical_external_q1/duckdb": 549205.1382352941,
+    "analytical_external_q1/sqlite": 7533910.651785715,
+    "analytical_external_q1/uqa": 2974979.5147058824,
+    "analytical_external_q6/duckdb": 127237.28093567252,
+    "analytical_external_q6/sqlite": 1025559.5090225564,
+    "analytical_external_q6/uqa": 1820141.2404761906,
+    "analytical_result_scan/duckdb": 772542.0895655272,
+    "analytical_result_scan/sqlite": 1444319.5324675324,
+    "analytical_result_scan/uqa_cursor": 6029596.28125,
+    "analytical_result_scan/uqa_materialized": 6069541.414285714
   },
-  "generated_at_utc": "2026-08-02T04:24:19.036617+00:00",
-  "git_commit": "bfdcbd4a08d30a5f43f2eb97885bebdc206bed1f",
+  "generated_at_utc": "2026-08-02T12:33:47.625826+00:00",
+  "git_commit": "a933ac3aa9f21a899572582eb10224ba38c8f7eb",
   "git_dirty": true,
   "independent_reproduction": false,
   "machine": "arm64",
   "manifest": "benchmarks/analytical/manifest.json",
-  "manifest_sha256": "b7d56b05c19acb492ea54ec29cf8de1c9d5c4c00fb00c3601fa366a546044c01",
+  "manifest_sha256": "162a919253fba2b17f3851c78b3e37bc3b024fc6bb7e9546aec45d793a291ae6",
   "passed": true,
   "platform": "macOS-26.5.1-arm64-arm-64bit",
   "processor": "arm",
   "ratio_gates": [
     {
       "denominator": "analytical_external_q1/sqlite",
-      "maximum": 50.0,
+      "maximum": 1.1,
       "name": "q1_uqa_vs_sqlite",
       "numerator": "analytical_external_q1/uqa",
       "passed": true,
-      "ratio": 31.66861288690656
+      "ratio": 0.3948785235461668
     },
     {
       "denominator": "analytical_external_q1/duckdb",
-      "maximum": 550.0,
+      "maximum": 12.0,
       "name": "q1_uqa_vs_duckdb",
       "numerator": "analytical_external_q1/uqa",
       "passed": true,
-      "ratio": 371.62430038461787
+      "ratio": 5.416882158577551
     },
     {
       "denominator": "analytical_external_q6/sqlite",
-      "maximum": 150.0,
+      "maximum": 3.0,
       "name": "q6_uqa_vs_sqlite",
       "numerator": "analytical_external_q6/uqa",
       "passed": true,
-      "ratio": 94.73807618778552
+      "ratio": 1.7747787665787789
     },
     {
       "denominator": "analytical_external_q6/duckdb",
-      "maximum": 650.0,
+      "maximum": 18.0,
       "name": "q6_uqa_vs_duckdb",
       "numerator": "analytical_external_q6/uqa",
       "passed": true,
-      "ratio": 427.21526123995926
+      "ratio": 14.3050938144175
     },
     {
       "denominator": "analytical_result_scan/uqa_materialized",
@@ -62,23 +62,23 @@
       "name": "cursor_vs_materialized_scan",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 1.0331245716189423
+      "ratio": 0.9934187559966728
     },
     {
       "denominator": "analytical_result_scan/sqlite",
-      "maximum": 220.0,
+      "maximum": 8.0,
       "name": "cursor_scan_vs_sqlite",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 131.24968402197337
+      "ratio": 4.174696904464623
     },
     {
       "denominator": "analytical_result_scan/duckdb",
-      "maximum": 350.0,
+      "maximum": 15.0,
       "name": "cursor_scan_vs_duckdb",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 222.17847511650837
+      "ratio": 7.804877381685452
     }
   ],
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",

@@ -59,6 +59,12 @@ impl Fixture {
         Duration::from_millis(self.manifest.criterion.measurement_ms)
     }
 
+    pub fn expected_scan_rows(&self) -> usize {
+        (0..self.manifest.rows)
+            .filter(|id| 1 + ((*id ^ self.manifest.seed) % 50) < 40)
+            .count()
+    }
+
     pub fn insert_sql(&self) -> String {
         let mut sql = String::with_capacity(self.manifest.rows as usize * 55);
         sql.push_str(

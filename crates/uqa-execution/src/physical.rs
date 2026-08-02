@@ -11,6 +11,19 @@ use thiserror::Error;
 
 use crate::batch::Batch;
 
+/// A leading physical row-order property carried between operators.
+///
+/// Column names refer to the operator's output schema. `nulls_first` is
+/// irrelevant when `nullable` is false, which lets a primary-key scan satisfy
+/// either explicit NULLS placement without adding a redundant sort.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicalOrder {
+    pub column: String,
+    pub descending: bool,
+    pub nulls_first: Option<bool>,
+    pub nullable: bool,
+}
+
 /// Operator-pipeline error type. Wraps SQL evaluation errors so call
 /// sites do not need to juggle two error enums.
 #[derive(Debug, Error)]
@@ -59,9 +72,36 @@ pub trait PhysicalOperator: Send {
     /// Schema (column names, in order) the operator will emit.
     fn schema(&self) -> &[String];
 
+    /// Leading output ordering known to be preserved by this operator.
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &[]
+    }
+
+    /// Let a leaf consume its native projected rows directly into an
+    /// aggregate executor. Returning `false` promises that no input was
+    /// consumed, so the caller can fall back to ordinary `Batch` pulls.
+    fn consume_into_aggregate(
+        &mut self,
+        _executor: &mut dyn crate::relational::AggregateExecutor,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
+
     fn open(&mut self) -> ExecResult<()>;
     fn next(&mut self) -> ExecResult<Option<Batch>>;
     fn close(&mut self) -> ExecResult<()>;
+}
+
+/// Return whether `actual` has `required` as an ordering prefix.
+pub fn ordering_satisfies(actual: &[PhysicalOrder], required: &[PhysicalOrder]) -> bool {
+    actual.len() >= required.len()
+        && actual.iter().zip(required).all(|(actual, required)| {
+            actual.column == required.column
+                && actual.descending == required.descending
+                && (!actual.nullable
+                    || actual.nulls_first == required.nulls_first
+                    || required.nulls_first.is_none())
+        })
 }
 
 /// Borrowing iterator over a physical operator. Construction opens the

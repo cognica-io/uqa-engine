@@ -44,7 +44,7 @@ pub use cross_paradigm::{
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
-pub use index::{LabelIndex, PathIndex};
+pub use index::{LabelIndex, PathIndex, VertexPropertyIndex};
 pub use memory_store::{
     graphid_label_id, graphid_sequence, make_graphid, GraphLabelRegistry, MemoryGraphStore,
     EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT, VERTEX_DEFAULT_LABEL_ID,
