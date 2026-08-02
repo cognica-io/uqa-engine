@@ -21,7 +21,7 @@ impl Engine {
     fn create_graph_inner(&self, name: &str) -> StorageBackendResult<bool> {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         if graphs.contains_key(name) {
             return Ok(false);
         }
@@ -41,15 +41,16 @@ impl Engine {
 
     fn drop_graph_inner(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         if !graphs.contains_key(name) {
             return Ok(false);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_named_graph_data(name)?;
         }
         graphs.remove(name);
-        self.path_indexes
+        self.durable
+            .path_indexes
             .write()
             .retain(|key, _| !key.starts_with(&format!("{name}::")));
         self.note_catalog_registry_changed();
@@ -60,14 +61,14 @@ impl Engine {
     /// Mirrors the canonical UQA implementation's `Engine.list_graphs`.
     pub fn list_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        Ok(self.graphs.read().keys().cloned().collect())
+        Ok(self.durable.graphs.read().keys().cloned().collect())
     }
 
     /// Return `true` when a graph with `name` is registered.
     /// Mirrors the canonical UQA implementation's `Engine.has_graph`.
     pub fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.graphs.read().contains_key(name))
+        Ok(self.durable.graphs.read().contains_key(name))
     }
 
     /// Insert a vertex into a named graph. Auto-creates the graph if
@@ -89,7 +90,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
@@ -116,7 +117,7 @@ impl Engine {
     fn add_graph_edge_inner(&self, edge: uqa_core::Edge, graph: &str) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
@@ -151,7 +152,7 @@ impl Engine {
         use uqa_graph::DeltaOp;
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
@@ -197,17 +198,17 @@ impl Engine {
         self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
         let idx = {
-            let graphs = self.graphs.read();
+            let graphs = self.durable.graphs.read();
             let Some(store) = graphs.get(graph) else {
                 return Ok(false);
             };
             uqa_graph::PathIndex::build(store, graph, label_sequences).map_err(graph_store_error)?
         };
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             let seq_json = serde_json::to_string(label_sequences)?;
             catalog.save_path_index(&key, &seq_json)?;
         }
-        self.path_indexes.write().insert(key, idx);
+        self.durable.path_indexes.write().insert(key, idx);
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -221,13 +222,13 @@ impl Engine {
     fn drop_path_index_inner(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
-        if !self.path_indexes.read().contains_key(&key) {
+        if !self.durable.path_indexes.read().contains_key(&key) {
             return Ok(false);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_path_index(&key)?;
         }
-        let removed = self.path_indexes.write().remove(&key).is_some();
+        let removed = self.durable.path_indexes.write().remove(&key).is_some();
         if removed {
             self.note_catalog_registry_changed();
         }
@@ -244,14 +245,14 @@ impl Engine {
     ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
         self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
-        Ok(self.path_indexes.read().get(&key).cloned())
+        Ok(self.durable.path_indexes.read().get(&key).cloned())
     }
 
     /// Sorted list of registered path index keys. Each key has the
     /// shape `<graph>::<name>` so the caller can split as needed.
     pub fn list_path_indexes(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        Ok(self.path_indexes.read().keys().cloned().collect())
+        Ok(self.durable.path_indexes.read().keys().cloned().collect())
     }
 
     /// Read-only borrow of a named graph for ad-hoc query construction
@@ -263,7 +264,7 @@ impl Engine {
         f: impl FnOnce(&uqa_graph::MemoryGraphStore) -> R,
     ) -> StorageBackendResult<Option<R>> {
         self.synchronize_catalog_registries()?;
-        let graphs = self.graphs.read();
+        let graphs = self.durable.graphs.read();
         Ok(graphs.get(name).map(f))
     }
 
@@ -282,7 +283,7 @@ impl Engine {
         f: impl FnOnce(&mut uqa_graph::MemoryGraphStore) -> uqa_graph::GraphStoreResult<R>,
     ) -> StorageBackendResult<Option<R>> {
         self.synchronize_catalog_registries()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         let Some(store) = graphs.get(name) else {
             return Ok(None);
         };
@@ -329,7 +330,7 @@ impl Engine {
         self.synchronize_catalog_registries()
             .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
         let q = parse_cypher(query)?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         let existed = graphs.contains_key(graph);
         let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
         if !candidate.has_graph(graph) {
@@ -380,7 +381,7 @@ impl Engine {
                 )));
             }
         }
-        let Some(catalog) = self.catalog.as_ref() else {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
         let vertices = store
@@ -418,7 +419,8 @@ impl Engine {
     }
 
     fn invalidate_graph_path_indexes(&self, graph: &str) {
-        self.path_indexes
+        self.durable
+            .path_indexes
             .write()
             .retain(|key, _| !key.starts_with(&format!("{graph}::")));
     }

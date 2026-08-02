@@ -47,9 +47,10 @@ pub use key_value::{
 };
 pub use spatial_index::{haversine_distance, MemorySpatialIndex, SpatialIndex};
 pub use sqlite::{
-    detect_database_file_format, Catalog, DatabaseFileFormat, ManagedConnection,
-    SQLiteBTreeIndexStore, SQLiteCompressionCodec, SQLiteCompressionOptions, SQLiteDocumentStore,
-    SQLiteError, SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
+    detect_database_file_format, read_authenticated_anchor, Catalog, DatabaseFileFormat,
+    ManagedConnection, SQLiteBTreeIndexStore, SQLiteCompressedContainerAnchor,
+    SQLiteCompressionCodec, SQLiteCompressionOptions, SQLiteDocumentStore, SQLiteError,
+    SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
 };
 pub use transaction::{
     InMemoryTransaction, SQLiteTransaction, Snapshotable, TransactionError, TxResult,

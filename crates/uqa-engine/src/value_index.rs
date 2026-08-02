@@ -221,7 +221,7 @@ impl crate::Engine {
                 }
             }
         }
-        for row in self.catalog_indexes.read().values() {
+        for row in self.durable.catalog_indexes.read().values() {
             if !row.index_type.eq_ignore_ascii_case("btree") {
                 continue;
             }
@@ -307,6 +307,7 @@ impl crate::Engine {
 
         let store = t.document_store.read();
         let persistent_backend = self
+            .storage
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes());
@@ -382,6 +383,7 @@ impl crate::Engine {
             .cloned()
             .collect();
         if let Some(backend) = self
+            .storage
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
@@ -419,6 +421,7 @@ impl crate::Engine {
             // catalog/data snapshot and mutate only what is still divergent.
             let plan = engine.persistent_value_index_repair_plan()?;
             let Some(backend) = engine
+                .storage
                 .backend
                 .as_ref()
                 .filter(|backend| backend.persists_btree_indexes())
@@ -441,6 +444,7 @@ impl crate::Engine {
         &self,
     ) -> StorageBackendResult<PersistentValueIndexRepairPlan> {
         let Some(backend) = self
+            .storage
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
@@ -473,6 +477,7 @@ impl crate::Engine {
     /// lazy-load contract for every other indexed column.
     pub(crate) fn reload_persistent_value_indexes(&self) -> StorageBackendResult<()> {
         if !self
+            .storage
             .backend
             .as_ref()
             .is_some_and(|backend| backend.persists_btree_indexes())
@@ -501,6 +506,7 @@ impl crate::Engine {
         document: &BTreeMap<String, Value>,
     ) -> Result<Option<BTreeMap<String, Value>>, SQLError> {
         if !self
+            .storage
             .backend
             .as_ref()
             .is_some_and(|backend| backend.persists_btree_indexes())
@@ -532,6 +538,7 @@ impl crate::Engine {
         new: Option<&BTreeMap<String, Value>>,
     ) -> Result<(), SQLError> {
         let Some(backend) = self
+            .storage
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
@@ -558,6 +565,7 @@ impl crate::Engine {
             .map_err(|err| SQLError::Internal(format!("resolve value-index table: {err}")))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
         if let Some(backend) = self
+            .storage
             .backend
             .as_ref()
             .filter(|backend| backend.persists_btree_indexes())
@@ -812,7 +820,7 @@ mod tests {
         engine
             .sql("INSERT INTO items (id) VALUES (1)", &[])
             .unwrap();
-        let backend = engine.backend.as_ref().unwrap();
+        let backend = engine.storage.backend.as_ref().unwrap();
         backend.drop_btree_index("public.items", "id").unwrap();
         let table = engine.try_table("items").unwrap().unwrap();
         crate::Engine::value_indexes_clear(&table);
@@ -872,7 +880,7 @@ mod tests {
         engine
             .sql("INSERT INTO items (id) VALUES (1)", &[])
             .unwrap();
-        let backend = engine.backend.as_ref().unwrap().clone();
+        let backend = engine.storage.backend.as_ref().unwrap().clone();
         backend.drop_btree_index("public.items", "id").unwrap();
         backend
             .replace_btree_index("public.items", "obsolete", &[(1, Value::Int(888))])
@@ -887,7 +895,7 @@ mod tests {
         drop(engine);
 
         let reopened = crate::Engine::open(&database).unwrap();
-        let backend = reopened.backend.as_ref().unwrap();
+        let backend = reopened.storage.backend.as_ref().unwrap();
 
         assert!(backend.load_btree_index("items", "id").unwrap().is_none());
         assert!(backend
@@ -923,7 +931,12 @@ mod tests {
         // independent session owns SQLite's single writer reservation. If the
         // repair unconditionally issued BEGIN IMMEDIATE this would block and
         // eventually return SQLITE_BUSY.
-        let blocker = engine.sqlite_session.as_ref().unwrap().new_session();
+        let blocker = engine
+            .storage
+            .sqlite_session
+            .as_ref()
+            .unwrap()
+            .new_session();
         blocker.begin_transaction().unwrap();
         let repair_result = engine.repair_persistent_value_indexes_on_open();
         let new_session_result = engine.new_session();

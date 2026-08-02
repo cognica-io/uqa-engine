@@ -12,16 +12,16 @@ impl Engine {
     /// Current `search_path`. Mirrors the canonical UQA implementation's
     /// `Engine._tables.search_path`.
     pub fn search_path(&self) -> Vec<String> {
-        self.search_path.read().clone()
+        self.session.state.read().search_path.clone()
     }
 
     /// First existing schema on this logical session's explicit search path.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
         self.synchronize_catalog_registries()?;
-        let schemas = self.schemas.read();
-        Ok(self
+        let session = self.session.state.read();
+        let schemas = self.durable.schemas.read();
+        Ok(session
             .search_path
-            .read()
             .iter()
             .find(|name| schemas.contains(name.as_str()))
             .cloned())
@@ -35,13 +35,14 @@ impl Engine {
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        let schemas = self.schemas.read();
-        let path = self.search_path.read();
+        let session = self.session.state.read();
+        let schemas = self.durable.schemas.read();
+        let path = &session.search_path;
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
             out.push("pg_catalog".to_string());
         }
-        for name in path.iter() {
+        for name in path {
             if (schemas.contains(name.as_str())
                 || matches!(name.as_str(), "pg_catalog" | "information_schema"))
                 && !out.contains(name)
@@ -54,13 +55,13 @@ impl Engine {
 
     /// Draw one value in `[0, 1)` from this logical session's PRNG.
     pub fn next_random_value(&self) -> f64 {
-        let mut state = self.random_state.lock();
-        let mut value = *state;
+        let mut session = self.session.state.write();
+        let mut value = session.random_state;
         // xorshift64*; every stored state is non-zero.
         value ^= value >> 12;
         value ^= value << 25;
         value ^= value >> 27;
-        *state = value;
+        session.random_state = value;
         let sample = value.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 11;
         sample as f64 * (1.0 / ((1_u64 << 53) as f64))
     }
@@ -83,7 +84,7 @@ impl Engine {
         if state == 0 {
             state = 0x2545_f491_4f6c_dd1d;
         }
-        *self.random_state.lock() = state;
+        self.session.state.write().random_state = state;
         Ok(())
     }
 
@@ -93,8 +94,9 @@ impl Engine {
         if value.is_empty() {
             value.push("public".to_string());
         }
-        *self.search_path.write() = value;
-        self.clear_sql_statement_cache();
+        let mut session = self.session.state.write();
+        session.search_path = value;
+        session.sql_statement_cache.clear();
     }
 
     /// Apply `SET <name> [TO|=] <value>`. Honours `search_path`
@@ -119,14 +121,22 @@ impl Engine {
         }
         if name.eq_ignore_ascii_case("search_path") {
             let parts = parse_search_path_list(value)?;
-            self.set_search_path(parts);
-            self.session_vars
-                .write()
+            let mut session = self.session.state.write();
+            session.search_path = if parts.is_empty() {
+                vec!["public".to_string()]
+            } else {
+                parts
+            };
+            session
+                .session_vars
                 .insert(name.to_string(), value.to_string());
+            session.sql_statement_cache.clear();
             return Ok(());
         }
-        self.session_vars
+        self.session
+            .state
             .write()
+            .session_vars
             .insert(name.to_string(), value.to_string());
         Ok(())
     }
@@ -140,11 +150,12 @@ impl Engine {
         if name.eq_ignore_ascii_case("search_path") {
             return Ok(self.search_path().join(","));
         }
-        let session_vars = self.session_vars.read();
-        if let Some(value) = session_vars.get(name) {
+        let session = self.session.state.read();
+        if let Some(value) = session.session_vars.get(name) {
             return Ok(value.clone());
         }
-        if let Some((_, value)) = session_vars
+        if let Some((_, value)) = session
+            .session_vars
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
         {
@@ -209,26 +220,28 @@ impl Engine {
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
+        if target == DiscardTarget::Temp {
+            return Err(SQLError::Unsupported(
+                "DISCARD TEMP requires temporary-table support".to_string(),
+            ));
+        }
+        let mut session = self.session.state.write();
         match target {
             DiscardTarget::All => {
-                self.session_vars.write().clear();
-                self.prepared.write().clear();
-                self.sequence_currvals.write().clear();
-                self.clear_sql_statement_cache();
-                self.set_search_path(vec!["public".to_string()]);
+                session.session_vars.clear();
+                session.prepared.clear();
+                session.sequence_currvals.clear();
+                session.sql_statement_cache.clear();
+                session.search_path = vec!["public".to_string()];
             }
             DiscardTarget::Plans => {
-                self.prepared.write().clear();
-                self.clear_sql_statement_cache();
+                session.prepared.clear();
+                session.sql_statement_cache.clear();
             }
             DiscardTarget::Sequences => {
-                self.sequence_currvals.write().clear();
+                session.sequence_currvals.clear();
             }
-            DiscardTarget::Temp => {
-                return Err(SQLError::Unsupported(
-                    "DISCARD TEMP requires temporary-table support".to_string(),
-                ));
-            }
+            DiscardTarget::Temp => unreachable!("DISCARD TEMP returned before locking state"),
         }
         Ok(())
     }

@@ -4,12 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{execute, Engine, SQLError, SQLParam, SQLResult};
+use uqa_execution::ColumnarBatch;
+
+use super::{cursor, execute, Engine, SQLCursor, SQLCursorSummary, SQLError, SQLParam, SQLResult};
 
 impl Engine {
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
         self.synchronize_table_data()
@@ -18,6 +20,37 @@ impl Engine {
             SQLError::Internal(format!("refresh durable catalog registries: {err}"))
         })?;
         execute(self, query, params)
+    }
+
+    /// Execute one read query into a bounded spill and return a columnar batch
+    /// cursor. Unlike [`Engine::sql`], this path never retains the complete
+    /// result as `Vec<ResultRow>` in memory. The statement finishes and its
+    /// snapshot is committed before the cursor is returned.
+    pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.synchronize_table_catalog()
+            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
+        self.synchronize_table_data()
+            .map_err(|err| SQLError::Internal(format!("refresh committed table data: {err}")))?;
+        self.synchronize_catalog_registries().map_err(|err| {
+            SQLError::Internal(format!("refresh durable catalog registries: {err}"))
+        })?;
+        cursor::execute(self, query, params)
+    }
+
+    /// Consume the bounded cursor synchronously without retaining batches.
+    pub fn sql_columnar(
+        &self,
+        query: &str,
+        params: &[SQLParam],
+        mut consume: impl FnMut(ColumnarBatch) -> Result<(), SQLError>,
+    ) -> Result<SQLCursorSummary, SQLError> {
+        let mut cursor = self.sql_cursor(query, params)?;
+        let summary = cursor.summary();
+        for batch in &mut cursor {
+            consume(batch?)?;
+        }
+        Ok(summary)
     }
 
     /// All doc ids on a table, used by the SELECT path when there is no

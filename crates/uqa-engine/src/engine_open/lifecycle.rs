@@ -7,9 +7,9 @@
 //! File-format opening, connection binding, and independent session creation.
 
 use super::{
-    Arc, AtomicBool, BTreeMap, Catalog, CatalogFacade, DeepModel, Engine, ManagedConnection, Path,
-    PersistentStorageBackend, RwLock, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
-    StorageBackendError, StorageBackendResult,
+    Arc, Catalog, CatalogFacade, DeepModel, Engine, ManagedConnection, Path,
+    PersistentStorageBackend, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions,
+    SQLiteError, SQLiteStorageBackend, StorageBackendError, StorageBackendResult,
 };
 
 impl Engine {
@@ -98,7 +98,12 @@ impl Engine {
     }
 
     /// Compressed and encrypted SQLite-backed engine. Chunk payloads
-    /// are compressed first, then encrypted by the compressed VFS.
+    /// are compressed first, then encrypted by the compressed VFS. The v2
+    /// format authenticates container metadata, chunk placement, and commit
+    /// records, but cannot distinguish replacement by an internally valid
+    /// snapshot or fork without an external trusted state anchor.
+    /// Security-sensitive deployments that do not require compression should
+    /// prefer [`Engine::open_encrypted`] and `SQLCipher`.
     pub fn open_compressed_encrypted(
         path: &Path,
         key: &str,
@@ -106,6 +111,33 @@ impl Engine {
     ) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open_compressed_encrypted(path, key, compression)?;
         Self::open_with_connection(&conn)
+    }
+
+    /// Open an encrypted compressed database and reject a different file or
+    /// any state other than `trusted_anchor` before `SQLite` reads the main
+    /// database. Refresh the trusted anchor after every committed write.
+    pub fn open_compressed_encrypted_with_anchor(
+        path: &Path,
+        key: &str,
+        compression: SQLiteCompressionOptions,
+        trusted_anchor: SQLiteCompressedContainerAnchor,
+    ) -> Result<Self, SQLiteError> {
+        let conn = ManagedConnection::open_compressed_encrypted_with_anchor(
+            path,
+            key,
+            compression,
+            trusted_anchor,
+        )?;
+        Self::open_with_connection(&conn)
+    }
+
+    /// Authenticate and return the anchor to persist in a trusted store after
+    /// committed writes to an encrypted compressed database.
+    pub fn compressed_container_anchor(
+        path: &Path,
+        key: &str,
+    ) -> Result<SQLiteCompressedContainerAnchor, SQLiteError> {
+        Ok(uqa_storage::read_authenticated_anchor(path, key)?)
     }
 
     fn open_with_connection(conn: &ManagedConnection) -> Result<Self, SQLiteError> {
@@ -118,8 +150,9 @@ impl Engine {
         // commit through another pooled connection. Establish the monitor
         // baseline only after all one-time writes have completed.
         let data_version = conn.data_version()?.unwrap_or(0);
-        engine.sqlite_session = Some(conn.clone());
+        engine.storage.sqlite_session = Some(conn.clone());
         engine
+            .epochs
             .seen_sqlite_data_version
             .store(data_version, std::sync::atomic::Ordering::Release);
         Ok(engine)
@@ -129,12 +162,13 @@ impl Engine {
     ///
     /// The new session gets its own catalog/backend pair, transaction stack,
     /// runtime variables, prepared statements, statement cache, and
-    /// cancellation token. Durable logical registries are shared, while table
-    /// storage handles are rebound to the new [`ManagedConnection`] session so
-    /// all catalog/document/index/vector operations in an explicit
-    /// transaction use one pinned physical connection.
+    /// cancellation token. Durable registry caches remain session-private and
+    /// synchronize through shared epochs; runtime-only Rust extensions are
+    /// shared. Table storage handles are rebound to the new
+    /// [`ManagedConnection`] so all catalog/document/index/vector operations
+    /// in an explicit transaction use one pinned physical connection.
     pub fn new_session(&self) -> Result<Self, SQLiteError> {
-        let base = self.sqlite_session.as_ref().ok_or_else(|| {
+        let base = self.storage.sqlite_session.as_ref().ok_or_else(|| {
             SQLiteError::StorageBackend(
                 "independent sessions require an Engine opened through the SQLite API".into(),
             )
@@ -147,34 +181,21 @@ impl Engine {
             Self::from_persistent_backends(catalog, backend).map_err(Self::sqlite_open_error)?;
         let data_version = connection.data_version()?.unwrap_or(0);
 
-        session.sqlite_session = Some(connection);
+        session.storage.sqlite_session = Some(connection);
         session
+            .epochs
             .seen_sqlite_data_version
             .store(data_version, std::sync::atomic::Ordering::Release);
-        session.table_catalog_epoch = self.table_catalog_epoch.clone();
-        session.table_data_epoch = self.table_data_epoch.clone();
-        session.catalog_registry_epoch = self.catalog_registry_epoch.clone();
+        session.epochs.share_published_from(&self.epochs);
         // Force one catalog rebind after attaching the shared generation.
         // Otherwise a DDL commit racing the initial restore could leave this
         // session with the old table snapshot but the new generation marked
         // as already observed.
-        session
-            .seen_table_catalog_epoch
-            .store(0, std::sync::atomic::Ordering::Release);
-        session
-            .seen_table_data_epoch
-            .store(0, std::sync::atomic::Ordering::Release);
-        session
-            .seen_catalog_registry_epoch
-            .store(0, std::sync::atomic::Ordering::Release);
-        // Durable registries remain session-local. Sharing these Arc maps
+        // Durable registries remain session-local. Sharing these maps
         // would expose a writer's uncommitted graph/schema/view/FDW changes
         // to sibling sessions before SQLite COMMIT. Runtime-only registries
         // may remain shared.
-        session.foreign_memory_tables = self.foreign_memory_tables.clone();
-        session.sql_scalar_functions = self.sql_scalar_functions.clone();
-        session.sql_table_functions = self.sql_table_functions.clone();
-        session.sql_aggregate_functions = self.sql_aggregate_functions.clone();
+        session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
         session
             .synchronize_table_catalog()
             .map_err(Self::sqlite_open_error)?;
@@ -199,56 +220,12 @@ impl Engine {
         let restore_catalog = Arc::clone(&catalog);
         let restore_backend = Arc::clone(&backend);
         let mut engine = Self {
-            statement_gate: parking_lot::ReentrantMutex::new(()),
-            tables: RwLock::new(BTreeMap::new()),
-            catalog: Some(catalog),
-            backend: Some(backend),
-            sqlite_session: None,
-            seen_sqlite_data_version: std::sync::atomic::AtomicU64::new(0),
-            external_commit_refresh: parking_lot::Mutex::new(()),
-            table_catalog_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_table_catalog_epoch: std::sync::atomic::AtomicU64::new(1),
-            table_catalog_dirty: AtomicBool::new(false),
-            table_catalog_refresh: parking_lot::Mutex::new(()),
-            table_data_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_table_data_epoch: std::sync::atomic::AtomicU64::new(1),
-            table_data_dirty: AtomicBool::new(false),
-            table_data_refresh: parking_lot::Mutex::new(()),
-            catalog_registry_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_catalog_registry_epoch: std::sync::atomic::AtomicU64::new(1),
-            catalog_registry_dirty: AtomicBool::new(false),
-            catalog_registry_refresh: parking_lot::Mutex::new(()),
-            graphs: Arc::new(RwLock::new(BTreeMap::new())),
-            models: RwLock::new(BTreeMap::new()),
-            scoring_params: RwLock::new(BTreeMap::new()),
-            views: Arc::new(RwLock::new(BTreeMap::new())),
-            catalog_indexes: Arc::new(RwLock::new(BTreeMap::new())),
-            schemas: Arc::new(RwLock::new(std::collections::BTreeSet::from([
-                "public".to_string()
-            ]))),
-            search_path: RwLock::new(vec!["public".to_string()]),
-            session_vars: RwLock::new(BTreeMap::new()),
-            random_state: parking_lot::Mutex::new(super::initial_random_state()),
-            path_indexes: Arc::new(RwLock::new(BTreeMap::new())),
-            tx_stack: parking_lot::Mutex::new(Vec::new()),
-            cancel: uqa_core::CancellationToken::new(),
-            sequences: RwLock::new(BTreeMap::new()),
-            sequence_currvals: RwLock::new(BTreeMap::new()),
-            prepared: RwLock::new(BTreeMap::new()),
-            sql_statement_cache: RwLock::new(super::SQLStatementCache::default()),
-            named_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
-            table_field_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_servers: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_scalar_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_table_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_aggregate_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_user_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_notices: parking_lot::Mutex::new(Vec::new()),
-            sql_function_depth_limit: std::sync::atomic::AtomicUsize::new(
-                super::SQL_FUNCTION_DEPTH_LIMIT,
-            ),
+            storage: super::StorageContext::persistent(catalog, backend),
+            durable: super::DurableCatalogState::new(),
+            session: super::SessionContext::new(super::initial_random_state()),
+            extensions: super::RuntimeExtensions::new(),
+            epochs: super::EpochCoordinator::new(),
+            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
         };
         Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
         engine.restore_from_catalog(restore_catalog.as_ref(), restore_backend.as_ref())?;
@@ -258,10 +235,10 @@ impl Engine {
         // cache misses mean absence rather than a swallowed catalog error.
         for (name, json) in restore_catalog.load_models()? {
             let model = serde_json::from_str::<DeepModel>(&json)?;
-            engine.models.write().insert(name, model);
+            engine.durable.models.write().insert(name, model);
         }
         for (name, json) in restore_catalog.load_all_scoring_params()? {
-            engine.scoring_params.write().insert(name, json);
+            engine.durable.scoring_params.write().insert(name, json);
         }
         Ok(engine)
     }

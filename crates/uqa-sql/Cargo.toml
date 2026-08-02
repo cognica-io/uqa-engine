@@ -11,11 +11,6 @@ rust-version.workspace = true
 
 [dependencies]
 uqa-core = { workspace = true }
-uqa-analysis = { workspace = true }
-uqa-storage = { workspace = true }
-uqa-scoring = { workspace = true }
-uqa-fusion = { workspace = true }
-uqa-operators = { workspace = true }
 pg_query = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

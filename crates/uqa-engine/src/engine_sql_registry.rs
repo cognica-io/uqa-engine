@@ -44,13 +44,13 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.sql_scalar_functions.write().insert(
+        let previous = self.extensions.scalar_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
         if let Err(error) = self.rebind_prepared_plans() {
-            let mut scalars = self.sql_scalar_functions.write();
+            let mut scalars = self.extensions.scalar_functions.write();
             scalars.remove(&name);
             if let Some(previous) = previous {
                 scalars.insert(name, previous);
@@ -91,13 +91,13 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.sql_table_functions.write().insert(
+        let previous = self.extensions.table_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
         if let Err(error) = self.rebind_prepared_plans() {
-            let mut tables = self.sql_table_functions.write();
+            let mut tables = self.extensions.table_functions.write();
             tables.remove(&name);
             if let Some(previous) = previous {
                 tables.insert(name, previous);
@@ -138,7 +138,7 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.sql_aggregate_functions.write().insert(
+        let previous = self.extensions.aggregate_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
@@ -146,7 +146,7 @@ impl Engine {
         // Cached plans compiled before this registration must be rebound.
         self.clear_sql_statement_cache();
         if let Err(error) = self.rebind_prepared_plans() {
-            let mut aggregates = self.sql_aggregate_functions.write();
+            let mut aggregates = self.extensions.aggregate_functions.write();
             aggregates.remove(&name);
             if let Some(previous) = previous {
                 aggregates.insert(name, previous);
@@ -178,7 +178,8 @@ impl Engine {
         args: &[Value],
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self
-            .sql_scalar_functions
+            .extensions
+            .scalar_functions
             .read()
             .get(&name.to_ascii_lowercase())
             .cloned()?;
@@ -186,7 +187,7 @@ impl Engine {
     }
 
     pub(crate) fn has_registered_scalar_functions(&self) -> bool {
-        !self.sql_scalar_functions.read().is_empty()
+        !self.extensions.scalar_functions.read().is_empty()
     }
 
     pub(crate) fn call_registered_table_function(
@@ -195,7 +196,8 @@ impl Engine {
         args: &[Value],
     ) -> Option<std::result::Result<SQLTableFunctionResult, SQLError>> {
         let registration = self
-            .sql_table_functions
+            .extensions
+            .table_functions
             .read()
             .get(&name.to_ascii_lowercase())
             .cloned()?;
@@ -203,7 +205,8 @@ impl Engine {
     }
 
     pub(crate) fn has_registered_table_function(&self, name: &str) -> bool {
-        self.sql_table_functions
+        self.extensions
+            .table_functions
             .read()
             .contains_key(&name.to_ascii_lowercase())
     }
@@ -214,7 +217,8 @@ impl Engine {
         args: &[Value],
     ) -> Option<std::result::Result<crate::SQLTableFunctionStream, SQLError>> {
         let registration = self
-            .sql_table_functions
+            .extensions
+            .table_functions
             .read()
             .get(&name.to_ascii_lowercase())
             .cloned()?;
@@ -222,7 +226,8 @@ impl Engine {
     }
 
     pub(crate) fn has_registered_aggregate_function(&self, name: &str) -> bool {
-        self.sql_aggregate_functions
+        self.extensions
+            .aggregate_functions
             .read()
             .contains_key(&name.to_ascii_lowercase())
     }
@@ -231,7 +236,8 @@ impl Engine {
         &self,
         name: &str,
     ) -> Option<Arc<dyn SQLAggregateFunction>> {
-        self.sql_aggregate_functions
+        self.extensions
+            .aggregate_functions
             .read()
             .get(&name.to_ascii_lowercase())
             .map(|registration| registration.function.clone())
@@ -269,15 +275,18 @@ impl Engine {
     fn registered_runtime_function_options(&self, name: &str) -> [Option<SQLFunctionOptions>; 3] {
         let name = name.to_ascii_lowercase();
         [
-            self.sql_scalar_functions
+            self.extensions
+                .scalar_functions
                 .read()
                 .get(&name)
                 .map(|registration| registration.options),
-            self.sql_table_functions
+            self.extensions
+                .table_functions
                 .read()
                 .get(&name)
                 .map(|registration| registration.options),
-            self.sql_aggregate_functions
+            self.extensions
+                .aggregate_functions
                 .read()
                 .get(&name)
                 .map(|registration| registration.options),

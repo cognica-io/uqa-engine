@@ -13,6 +13,7 @@ use super::Engine;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine
+        .storage
         .sqlite_session
         .as_ref()
         .expect("persistent test engine")
@@ -25,7 +26,9 @@ fn sqlite_data_version(engine: &Engine) -> u64 {
 fn contended_transaction_stack_does_not_hide_autocommit_data_generation() {
     let engine = Arc::new(Engine::new());
     let initial_epoch = engine
-        .table_data_epoch
+        .epochs
+        .table_data
+        .published
         .load(std::sync::atomic::Ordering::Acquire);
     let locked = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
@@ -34,7 +37,7 @@ fn contended_transaction_stack_does_not_hide_autocommit_data_generation() {
     let holder_locked = Arc::clone(&locked);
     let holder_release = Arc::clone(&release);
     let holder = std::thread::spawn(move || {
-        let _guard = holder_engine.tx_stack.lock();
+        let _guard = holder_engine.session.transactions.lock();
         holder_locked.wait();
         holder_release.wait();
     });
@@ -54,12 +57,16 @@ fn contended_transaction_stack_does_not_hide_autocommit_data_generation() {
 
     assert_eq!(
         engine
-            .table_data_epoch
+            .epochs
+            .table_data
+            .published
             .load(std::sync::atomic::Ordering::Acquire),
         initial_epoch + 1
     );
     assert!(!engine
-        .table_data_dirty
+        .epochs
+        .table_data
+        .dirty
         .load(std::sync::atomic::Ordering::Acquire));
 }
 
@@ -67,7 +74,7 @@ fn contended_transaction_stack_does_not_hide_autocommit_data_generation() {
 fn pinned_and_rollback_reload_do_not_consume_late_legacy_sequences() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("late-legacy-sequence.db")).unwrap();
-    let catalog = engine.catalog.as_ref().expect("persistent catalog");
+    let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
     let legacy = r#"{"late":{"start":7,"increment":2,"current":5}}"#;
     catalog
         .set_metadata(crate::SEQUENCES_METADATA_KEY, legacy)
@@ -93,7 +100,7 @@ fn pinned_and_rollback_reload_do_not_consume_late_legacy_sequences() {
 fn pinned_reload_reports_a_missing_public_schema_without_repairing_it() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("missing-public.db")).unwrap();
-    let catalog = engine.catalog.as_ref().expect("persistent catalog");
+    let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
     catalog.drop_schema("public").unwrap();
     let before = sqlite_data_version(&engine);
 
@@ -148,6 +155,7 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
     let after_initial_repair = sqlite_data_version(&engine);
     assert_eq!(
         engine
+            .epochs
             .seen_sqlite_data_version
             .load(std::sync::atomic::Ordering::Acquire),
         after_initial_repair,

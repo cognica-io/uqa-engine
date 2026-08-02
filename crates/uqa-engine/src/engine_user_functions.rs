@@ -206,7 +206,7 @@ impl Engine {
         let name = def.name.clone();
         let signature = routine_signature_types(&def);
         let kind = routine_kind(&def);
-        let mut registry = self.sql_user_functions.write();
+        let mut registry = self.durable.sql_user_functions.write();
         let mut next = registry.clone();
         {
             let overloads = next.entry(name.clone()).or_default();
@@ -266,7 +266,7 @@ impl Engine {
         } else {
             "function"
         };
-        let mut registry = self.sql_user_functions.write();
+        let mut registry = self.durable.sql_user_functions.write();
         let mut next = registry.clone();
         let mut dropped = false;
         let mut notices = Vec::new();
@@ -395,8 +395,10 @@ impl Engine {
             ]);
         }
         Ok(self
-            .search_path
+            .session
+            .state
             .read()
+            .search_path
             .iter()
             .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
             .collect())
@@ -407,7 +409,7 @@ impl Engine {
     /// candidates, matching `PostgreSQL`'s routine lookup rules.
     pub(crate) fn lookup_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
         let keys = self.routine_lookup_keys(name).ok()?;
-        let registry = self.sql_user_functions.read();
+        let registry = self.durable.sql_user_functions.read();
         let mut visible = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         for key in keys {
@@ -430,7 +432,7 @@ impl Engine {
     /// Every registered routine, sorted by qualified name then signature. Feeds
     /// `pg_catalog.pg_proc` / `information_schema.routines`.
     pub(crate) fn list_sql_functions(&self) -> Vec<Arc<SQLUserFunction>> {
-        let registry = self.sql_user_functions.read();
+        let registry = self.durable.sql_user_functions.read();
         let mut out: Vec<Arc<SQLUserFunction>> = Vec::new();
         for overloads in registry.values() {
             let mut sorted = overloads.clone();
@@ -446,7 +448,8 @@ impl Engine {
 
     /// Current nesting cap for user-defined routine calls.
     pub fn sql_function_depth_limit(&self) -> usize {
-        self.sql_function_depth_limit
+        self.runtime
+            .function_depth_limit
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -454,13 +457,15 @@ impl Engine {
     /// (minimum 1). Mirrors `PostgreSQL`'s `max_stack_depth` role for
     /// recursive functions.
     pub fn set_sql_function_depth_limit(&self, limit: usize) {
-        self.sql_function_depth_limit
+        self.runtime
+            .function_depth_limit
             .store(limit.max(1), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Queue a notice (`RAISE NOTICE` / `WARNING` / ...).
     pub(crate) fn push_sql_notice(&self, level: &str, message: &str) {
-        self.sql_notices
+        self.runtime
+            .notices
             .lock()
             .push((level.to_string(), message.to_string()));
     }
@@ -468,14 +473,14 @@ impl Engine {
     /// Drain queued notices as `(level, message)` pairs in emission
     /// order.
     pub fn take_sql_notices(&self) -> Vec<(String, String)> {
-        std::mem::take(&mut *self.sql_notices.lock())
+        std::mem::take(&mut *self.runtime.notices.lock())
     }
 
     fn persist_sql_functions_snapshot(
         &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     ) -> Result<(), SQLError> {
-        let Some(catalog) = self.catalog.as_ref() else {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
         let defs: BTreeMap<String, Vec<CreateFunction>> = registry
@@ -513,7 +518,12 @@ impl Engine {
                         "invalid persisted routine registry key `{stored_name}`: {error}"
                     ))
                 })?;
-            if !self.schemas.read().contains(&stored_relation.schema) {
+            if !self
+                .durable
+                .schemas
+                .read()
+                .contains(&stored_relation.schema)
+            {
                 return Err(StorageBackendError::Other(format!(
                     "persisted routine `{stored_name}` references missing schema `{}`",
                     stored_relation.schema
@@ -558,7 +568,7 @@ impl Engine {
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
         }
-        *self.sql_user_functions.write() = restored;
+        *self.durable.sql_user_functions.write() = restored;
         Ok(())
     }
 }

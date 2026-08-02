@@ -1,0 +1,86 @@
+{
+  "benchmark_source_sha256": "e2ea9924aa50352ceee5031884936b8247eb6a648eb4eb575b6c87c110eabe64",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "criterion_median_nanoseconds": {
+    "analytical_external_q1/duckdb": 629708.4401041667,
+    "analytical_external_q1/sqlite": 7389491.902777778,
+    "analytical_external_q1/uqa": 234014958.5,
+    "analytical_external_q6/duckdb": 224920.15552325582,
+    "analytical_external_q6/sqlite": 1014262.975,
+    "analytical_external_q6/uqa": 96089323.0,
+    "analytical_result_scan/duckdb": 860572.6022727273,
+    "analytical_result_scan/sqlite": 1456770.809962406,
+    "analytical_result_scan/uqa_cursor": 191200708.5,
+    "analytical_result_scan/uqa_materialized": 185070333.0
+  },
+  "generated_at_utc": "2026-08-02T04:24:19.036617+00:00",
+  "git_commit": "bfdcbd4a08d30a5f43f2eb97885bebdc206bed1f",
+  "git_dirty": true,
+  "independent_reproduction": false,
+  "machine": "arm64",
+  "manifest": "benchmarks/analytical/manifest.json",
+  "manifest_sha256": "b7d56b05c19acb492ea54ec29cf8de1c9d5c4c00fb00c3601fa366a546044c01",
+  "passed": true,
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "processor": "arm",
+  "ratio_gates": [
+    {
+      "denominator": "analytical_external_q1/sqlite",
+      "maximum": 50.0,
+      "name": "q1_uqa_vs_sqlite",
+      "numerator": "analytical_external_q1/uqa",
+      "passed": true,
+      "ratio": 31.66861288690656
+    },
+    {
+      "denominator": "analytical_external_q1/duckdb",
+      "maximum": 550.0,
+      "name": "q1_uqa_vs_duckdb",
+      "numerator": "analytical_external_q1/uqa",
+      "passed": true,
+      "ratio": 371.62430038461787
+    },
+    {
+      "denominator": "analytical_external_q6/sqlite",
+      "maximum": 150.0,
+      "name": "q6_uqa_vs_sqlite",
+      "numerator": "analytical_external_q6/uqa",
+      "passed": true,
+      "ratio": 94.73807618778552
+    },
+    {
+      "denominator": "analytical_external_q6/duckdb",
+      "maximum": 650.0,
+      "name": "q6_uqa_vs_duckdb",
+      "numerator": "analytical_external_q6/uqa",
+      "passed": true,
+      "ratio": 427.21526123995926
+    },
+    {
+      "denominator": "analytical_result_scan/uqa_materialized",
+      "maximum": 1.35,
+      "name": "cursor_vs_materialized_scan",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "passed": true,
+      "ratio": 1.0331245716189423
+    },
+    {
+      "denominator": "analytical_result_scan/sqlite",
+      "maximum": 220.0,
+      "name": "cursor_scan_vs_sqlite",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "passed": true,
+      "ratio": 131.24968402197337
+    },
+    {
+      "denominator": "analytical_result_scan/duckdb",
+      "maximum": 350.0,
+      "name": "cursor_scan_vs_duckdb",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "passed": true,
+      "ratio": 222.17847511650837
+    }
+  ],
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "schema_version": 1
+}

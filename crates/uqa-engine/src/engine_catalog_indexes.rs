@@ -56,6 +56,7 @@ impl Engine {
             parameters_json: parameters_json.clone(),
         };
         let previous = self
+            .durable
             .catalog_indexes
             .write()
             .insert(name.to_string(), row.clone());
@@ -68,7 +69,7 @@ impl Engine {
             }
             return Err(err);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             if let Err(err) = catalog.save_catalog_index(
                 name,
                 index_type,
@@ -110,7 +111,7 @@ impl Engine {
     }
 
     fn restore_catalog_index_entry(&self, name: &str, previous: Option<&CatalogIndexRow>) {
-        let mut indexes = self.catalog_indexes.write();
+        let mut indexes = self.durable.catalog_indexes.write();
         indexes.remove(name);
         if let Some(previous) = previous {
             indexes.insert(name.to_string(), previous.clone());
@@ -150,14 +151,15 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         self.synchronize_catalog_registries()?;
-        let existing = self.catalog_indexes.read().get(name).cloned();
+        let existing = self.durable.catalog_indexes.read().get(name).cloned();
         let Some(existing_row) = existing else {
             return Ok(None);
         };
-        let removed = self.catalog_indexes.write().remove(name);
+        let removed = self.durable.catalog_indexes.write().remove(name);
         if existing_row.index_type.eq_ignore_ascii_case("btree") {
             if let Err(err) = self.refresh_value_indexes_for_table(&existing_row.table_name) {
-                self.catalog_indexes
+                self.durable
+                    .catalog_indexes
                     .write()
                     .insert(name.to_string(), existing_row.clone());
                 if let Err(cleanup) = self.refresh_value_indexes_for_table(&existing_row.table_name)
@@ -169,9 +171,10 @@ impl Engine {
                 return Err(err);
             }
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             if let Err(err) = catalog.drop_catalog_index(name) {
-                self.catalog_indexes
+                self.durable
+                    .catalog_indexes
                     .write()
                     .insert(name.to_string(), existing_row.clone());
                 if existing_row.index_type.eq_ignore_ascii_case("btree") {
@@ -193,11 +196,11 @@ impl Engine {
 
     pub fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
         self.synchronize_catalog_registries()?;
-        Ok(self.catalog_indexes.read().get(name).cloned())
+        Ok(self.durable.catalog_indexes.read().get(name).cloned())
     }
 
     pub fn has_catalog_index(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.catalog_indexes.read().contains_key(name))
+        Ok(self.durable.catalog_indexes.read().contains_key(name))
     }
 }

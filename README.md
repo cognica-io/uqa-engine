@@ -33,7 +33,9 @@ For a score-ordered limit on one text field, the planner attaches an exact WAND 
 
 ## Storage and Persistence
 
-`Engine::open(path)` opens a persistent UQA catalog. The default persistent backend is SQLite-based. SQLCipher and compressed-container variants are exposed through `Engine::open_encrypted`, `Engine::open_compressed`, and `Engine::open_compressed_encrypted`.
+`Engine::open(path)` opens a persistent UQA catalog. The default persistent backend is SQLite-based. SQLCipher and compressed-container variants are exposed through `Engine::open_encrypted`, `Engine::open_compressed`, and `Engine::open_compressed_encrypted`. Security-sensitive deployments should prefer SQLCipher. Encrypted compressed containers use authenticated format v2, deliberately reject unauthenticated v1 files, and require the external exact-state anchor API to detect replacement by an internally valid database snapshot or fork; see [the compressed VFS security contract](docs/design/compressed-vfs-security.md).
+
+Engine state is split into storage, durable-catalog, session, runtime-extension, epoch, and query-runtime ownership domains. Derived sessions rebuild private storage/catalog caches and share only explicitly designated epoch counters and runtime extensions; see [the engine state ownership contract](docs/design/engine-state-ownership.md).
 
 Persistent catalogs store table schemas, documents, postings, GIN-style inverted indexes, vector and tensor records, IVF metadata, named analyzers, named graphs, graph members, path indexes, scoring parameters, foreign server/table definitions, model specs, sequences, views, schemas, catalog indexes, and column statistics. Reopen paths attach to persisted inverted/vector index metadata lazily instead of rebuilding search indexes just because a database was opened.
 
@@ -200,11 +202,12 @@ cargo bench -p uqa-engine    --bench query_matrix
 cargo bench -p uqa-engine    --bench knn
 cargo bench -p uqa-engine    --bench join
 cargo bench -p uqa-engine    --bench relevance
+cargo bench -p uqa-engine    --bench analytical_comparison
 cargo bench -p uqa-graph     --bench rpq
 cargo bench -p uqa-graph     --bench graph_workloads
 ```
 
-The `query_matrix` bench validates and measures every unified relational root, source form, retrieval path, and DML family with fixed-state mutations. The `relevance` and `beir_calibration` benches replay BEIR-style fixtures and assert ranking metrics stay above the declared floors. Reference numbers measured on Apple silicon live in [docs/design/performance.md](docs/design/performance.md).
+The `query_matrix` bench validates and measures every unified relational root, source form, retrieval path, and DML family with fixed-state mutations. The `relevance` and `beir_calibration` benches replay BEIR-style fixtures and assert ranking metrics stay above the declared floors. `bash scripts/run-analytical-comparison.sh` runs the versioned synthetic analytical workload against UQA, SQLite, and DuckDB, then emits a provenance report and enforces same-host ratio ceilings. These are regression measurements, not independently reproduced OLAP claims. Reference numbers and limitations live in [docs/design/performance.md](docs/design/performance.md).
 
 ## Layout
 

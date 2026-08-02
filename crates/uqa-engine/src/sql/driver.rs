@@ -76,7 +76,7 @@ pub(crate) fn execute(
             uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
             uqa_planner::UnifiedPlan::Command(_) => false,
         };
-        let needs_implicit_transaction = engine.backend.is_some() || !is_read_query;
+        let needs_implicit_transaction = engine.storage.backend.is_some() || !is_read_query;
         if needs_implicit_transaction {
             engine.begin_implicit_statement_transaction(is_read_query)?;
             // Catalog/table refresh intentionally invalidates cached logical
@@ -92,7 +92,7 @@ pub(crate) fn execute(
                     Arc::new(plan.clone()),
                 );
             }
-            let must_restart_as_writer = if is_read_query && engine.backend.is_some() {
+            let must_restart_as_writer = if is_read_query && engine.storage.backend.is_some() {
                 match &plan {
                     uqa_planner::UnifiedPlan::Query(query) => {
                         match query_may_mutate_engine(engine, query) {
@@ -152,7 +152,7 @@ pub(crate) fn execute(
     Ok(last)
 }
 
-fn rollback_implicit_statement(engine: &Engine, action: &str) -> Result<(), SQLError> {
+pub(super) fn rollback_implicit_statement(engine: &Engine, action: &str) -> Result<(), SQLError> {
     engine
         .run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback)
         .map_err(|rollback_error| {
@@ -162,10 +162,10 @@ fn rollback_implicit_statement(engine: &Engine, action: &str) -> Result<(), SQLE
         })
 }
 
-fn rollback_after_statement_error(
+pub(super) fn rollback_after_statement_error<T>(
     engine: &Engine,
     statement_error: SQLError,
-) -> Result<SQLResult, SQLError> {
+) -> Result<T, SQLError> {
     match engine.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback) {
         Ok(()) => Err(statement_error),
         Err(rollback_error) => Err(SQLError::Internal(format!(

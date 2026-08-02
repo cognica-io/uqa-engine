@@ -71,6 +71,8 @@ pg_query = "6.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 argon2 = { version = "0.5", default-features = false }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hmac = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
 crc32fast = "1.4"
 fs2 = "0.4"
 lz4_flex = "0.13"

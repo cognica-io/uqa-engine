@@ -20,7 +20,7 @@ impl Engine {
             return Ok(vec![RelationIdentity::new(schema, relation)]);
         }
         let mut candidates = Vec::new();
-        for schema in self.search_path.read().iter() {
+        for schema in &self.session.state.read().search_path {
             if schema == "pg_catalog" || schema == "information_schema" {
                 continue;
             }
@@ -34,15 +34,15 @@ impl Engine {
             .map_err(|err| format!("refresh schema catalog: {err}"))?;
         let (schema, relation) = RelationIdentity::parse_reference(name)?;
         if let Some(schema) = schema {
-            if !self.schemas.read().contains(&schema) {
+            if !self.durable.schemas.read().contains(&schema) {
                 return Err(format!("schema `{schema}` does not exist"));
             }
             return Ok(RelationIdentity::new(schema, relation).qualified_name());
         }
-        let schemas = self.schemas.read();
-        let schema = self
+        let session = self.session.state.read();
+        let schemas = self.durable.schemas.read();
+        let schema = session
             .search_path
-            .read()
             .iter()
             .find(|schema| {
                 schema.as_str() != "pg_catalog"
@@ -63,13 +63,13 @@ impl Engine {
         self.refresh_sequences_from_catalog()?;
         let relation = RelationIdentity::from_legacy_name(canonical_name)
             .map_err(StorageBackendError::Other)?;
-        if self.tables.read().contains_key(&relation) {
+        if self.storage.tables.read().contains_key(&relation) {
             Ok(Some("table"))
-        } else if self.views.read().contains_key(&relation) {
+        } else if self.durable.views.read().contains_key(&relation) {
             Ok(Some("view"))
-        } else if self.sequences.read().contains_key(&relation) {
+        } else if self.durable.sequences.read().contains_key(&relation) {
             Ok(Some("sequence"))
-        } else if self.foreign_tables.read().contains_key(&relation) {
+        } else if self.durable.foreign_tables.read().contains_key(&relation) {
             Ok(Some("foreign table"))
         } else {
             Ok(None)
@@ -87,13 +87,13 @@ impl Engine {
         self.synchronize_catalog_registries()?;
         self.refresh_sequences_from_catalog()?;
         for relation in self.relation_lookup_candidates(name)? {
-            let kind = if self.tables.read().contains_key(&relation) {
+            let kind = if self.storage.tables.read().contains_key(&relation) {
                 Some("table")
-            } else if self.views.read().contains_key(&relation) {
+            } else if self.durable.views.read().contains_key(&relation) {
                 Some("view")
-            } else if self.sequences.read().contains_key(&relation) {
+            } else if self.durable.sequences.read().contains_key(&relation) {
                 Some("sequence")
-            } else if self.foreign_tables.read().contains_key(&relation) {
+            } else if self.durable.foreign_tables.read().contains_key(&relation) {
                 Some("foreign table")
             } else {
                 None
@@ -115,7 +115,7 @@ impl Engine {
     ) -> StorageBackendResult<Option<String>> {
         self.synchronize_table_catalog()?;
         self.synchronize_table_data()?;
-        let tables = self.tables.read();
+        let tables = self.storage.tables.read();
         Ok(self
             .relation_lookup_candidates(name)?
             .into_iter()
@@ -129,7 +129,7 @@ impl Engine {
 
     pub(crate) fn try_resolve_view_name(&self, name: &str) -> StorageBackendResult<Option<String>> {
         self.synchronize_catalog_registries()?;
-        let views = self.views.read();
+        let views = self.durable.views.read();
         Ok(self
             .relation_lookup_candidates(name)?
             .into_iter()
@@ -142,7 +142,7 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<String>> {
         self.refresh_sequences_from_catalog()?;
-        let sequences = self.sequences.read();
+        let sequences = self.durable.sequences.read();
         Ok(self
             .relation_lookup_candidates(name)?
             .into_iter()
@@ -155,7 +155,7 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<String>> {
         self.synchronize_catalog_registries()?;
-        let tables = self.foreign_tables.read();
+        let tables = self.durable.foreign_tables.read();
         Ok(self
             .relation_lookup_candidates(name)?
             .into_iter()
@@ -169,7 +169,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&resolved).map_err(StorageBackendError::Other)?;
-        Ok(self.tables.read().get(&relation).cloned())
+        Ok(self.storage.tables.read().get(&relation).cloned())
     }
 
     pub(crate) fn try_table(&self, name: &str) -> StorageBackendResult<Option<Arc<TableState>>> {
@@ -178,7 +178,7 @@ impl Engine {
         };
         let relation =
             RelationIdentity::from_legacy_name(&resolved).map_err(StorageBackendError::Other)?;
-        Ok(self.tables.read().get(&relation).cloned())
+        Ok(self.storage.tables.read().get(&relation).cloned())
     }
 
     pub(crate) fn require_table(&self, name: &str) -> Result<Arc<TableState>, SQLError> {

@@ -14,7 +14,7 @@ use super::{
 
 impl Engine {
     pub(crate) fn is_persistent(&self) -> bool {
-        self.catalog.is_some()
+        self.storage.catalog.is_some()
     }
 
     pub(crate) fn try_save_table_schema(
@@ -47,7 +47,7 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
     ) -> StorageBackendResult<()> {
-        let Some(catalog) = self.catalog.as_ref() else {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
         let analyzer_json =
@@ -120,7 +120,7 @@ impl Engine {
             )));
         }
         let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) =
-            if let Some(backend) = self.backend.as_ref() {
+            if let Some(backend) = self.storage.backend.as_ref() {
                 (
                     backend.document_store(&name),
                     backend.inverted_index(&name, analyzer.clone()),
@@ -153,7 +153,7 @@ impl Engine {
         if self.is_persistent() {
             self.try_save_table_schema(&name, &table_arc)?;
         }
-        self.tables.write().insert(relation, table_arc);
+        self.storage.tables.write().insert(relation, table_arc);
         Ok(())
     }
 
@@ -215,7 +215,7 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> StorageBackendResult<()> {
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             backend.drop_vector_index_metadata(table, field)?;
         }
         Ok(())
@@ -253,7 +253,7 @@ impl Engine {
                 .write()
                 .set_field_analyzer(field, analyzer, AnalyzerPhase::Both)
                 .map_err(|e| format!("restore_fts_field: {e}"))?;
-            self.table_field_analyzers.write().insert(
+            self.durable.table_field_analyzers.write().insert(
                 (table.to_string(), field.to_string()),
                 (analyzer_name.to_string(), "both".to_string()),
             );
@@ -344,7 +344,7 @@ impl Engine {
         params: Option<IVFIndexParams>,
         initialize: bool,
     ) -> Box<dyn VectorIndex> {
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             backend.vector_index(
                 table,
                 field,

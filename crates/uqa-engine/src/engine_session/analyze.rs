@@ -43,6 +43,7 @@ impl Engine {
             // for the catalog-wide form; an explicitly named table above is
             // always an error.
             let names: Vec<String> = self
+                .storage
                 .tables
                 .read()
                 .keys()
@@ -68,7 +69,7 @@ impl Engine {
         table: &Arc<TableState>,
     ) -> StorageBackendResult<()> {
         if !table.column_stats_dirty.load(Ordering::Acquire) {
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.delete_column_stats(canonical_table_name)?;
             }
         }
@@ -141,7 +142,7 @@ impl Engine {
         }
 
         if persist {
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 Self::persist_column_stats(catalog.as_ref(), canonical_table_name, &stats_out)?;
             }
         }
@@ -239,7 +240,7 @@ impl Engine {
         // stale scan must not publish `column_stats_dirty = false` after a
         // concurrent writer marked the table dirty. The gate is re-entrant
         // for optimizer calls already executing inside Engine::sql.
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         self.synchronize_table_data()?;
         let canonical_name = self
             .try_resolve_table_name(table)?

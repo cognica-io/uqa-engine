@@ -317,6 +317,7 @@ impl Engine {
             .ok_or_else(|| table_not_found(&table))?;
         let mut out: Vec<(String, uqa_sql::ast::ForeignKey)> = Vec::new();
         let names: Vec<String> = self
+            .storage
             .tables
             .read()
             .keys()

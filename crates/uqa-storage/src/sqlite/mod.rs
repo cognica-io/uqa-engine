@@ -23,7 +23,10 @@ pub use crate::catalog::{
 };
 pub use btree_index::SQLiteBTreeIndexStore;
 pub use catalog::{Catalog, CURRENT_SCHEMA_VERSION};
-pub use compressed_vfs::{SQLiteCompressionCodec, SQLiteCompressionOptions};
+pub use compressed_vfs::{
+    read_authenticated_anchor, SQLiteCompressedContainerAnchor, SQLiteCompressionCodec,
+    SQLiteCompressionOptions,
+};
 pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;

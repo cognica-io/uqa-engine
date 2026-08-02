@@ -39,7 +39,7 @@ pub(super) fn migrate_column_stats(
     if !table_exists(conn, "_column_stats")? {
         return Ok(0);
     }
-    let Some(catalog) = engine.catalog.as_ref() else {
+    let Some(catalog) = engine.storage.catalog.as_ref() else {
         return Ok(0);
     };
     let mut stmt = conn.prepare(
@@ -138,7 +138,7 @@ pub(super) fn migrate_models(
     } else {
         "body"
     };
-    let Some(catalog) = engine.catalog.as_ref() else {
+    let Some(catalog) = engine.storage.catalog.as_ref() else {
         return Ok(0);
     };
     let sql = format!("SELECT {name_col}, {body_col} FROM _models ORDER BY {name_col}");

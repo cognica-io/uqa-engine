@@ -8,7 +8,8 @@
 //!
 //! The facade exposes compilation while statement-family modules own
 //! validation and lowering. Tree-shaped SELECT/DDL/expression lowering remains
-//! in [`tree`], and `PostgreSQL` type interpretation remains in [`types`].
+//! in the private `tree` module, and `PostgreSQL` type interpretation remains
+//! in the private `types` module.
 
 use crate::ast::{
     AlterTableAction, AlterTableStmt, ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement,

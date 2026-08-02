@@ -26,14 +26,11 @@
 //! terms without an explicit operator are treated as implicit AND.
 //! Precedence: NOT > AND > OR.
 //!
-//! `compile` lowers the AST into an [`OperatorTree`]. Term and phrase
-//! nodes become `Term` / `Intersect(Term*)` (phrases are tokenized
-//! into individual terms by the caller-supplied phrase tokenizer);
-//! vectors become `KNN { k = 10_000 }`; AND uses robust positive-evidence
-//! pooling when one side has a vector signal and the other does not.
+//! This module stops at the syntax AST. Physical retrieval lowering belongs
+//! to the engine/planner boundary, so the SQL crate remains independent of
+//! storage, scoring, fusion, and operator implementations.
 
 use crate::error::{Result, SQLError};
-use uqa_operators::{GatingSpec, OperatorTree};
 
 // ---------------------------------------------------------------------
 // Token
@@ -386,151 +383,16 @@ fn parse_vector_literal(content: &str) -> Result<Vec<f32>> {
         .collect()
 }
 
-// ---------------------------------------------------------------------
-// AST -> OperatorTree compilation
-// ---------------------------------------------------------------------
-
-/// Pluggable hook for tokenizing a phrase into individual terms. The
-/// parser doesn't know about analyzers, so the caller (the SQL
-/// compiler in the engine) wires this through. Returns the analyzed
-/// tokens used to construct an `Intersect(Term*)` retrieval.
-pub type PhraseTokenizer<'a> =
-    dyn Fn(/*field*/ Option<&str>, /*phrase*/ &str) -> Vec<String> + 'a;
-
-/// Resolve `_all` to `None` (all-field search). Mirrors
-/// `_resolve_field`.
-pub fn resolve_field(node_field: Option<&str>, default_field: Option<&str>) -> Option<String> {
-    let field = node_field.or(default_field)?;
-    if field == "_all" {
-        None
-    } else {
-        Some(field.to_string())
-    }
-}
-
-/// Default `k` used by the compiled vector node. Mirrors
-/// `_CalibratedKNNOperator(query_vec, k=10000, field=field)` in the
-/// canonical UQA behavior.
-pub const FTS_VECTOR_K: usize = 10_000;
-
-/// Lower an [`FTSNode`] into an [`OperatorTree`]. The phrase
-/// tokenizer is called for every `PhraseNode`; if it returns an empty
-/// vector the result is the `Empty` operator.
-pub fn compile(
-    node: &FTSNode,
-    default_field: Option<&str>,
-    phrase_tokenizer: &PhraseTokenizer<'_>,
-) -> OperatorTree {
-    match node {
-        FTSNode::Term { field, term } => {
-            let resolved = resolve_field(field.as_deref(), default_field);
-            OperatorTree::Term {
-                query: term.clone(),
-                field: resolved,
-                scoring: None,
-                top_k: None,
-            }
-        }
-        FTSNode::Phrase { field, phrase } => {
-            let resolved = resolve_field(field.as_deref(), default_field);
-            let terms = phrase_tokenizer(resolved.as_deref(), phrase);
-            if terms.is_empty() {
-                return OperatorTree::Empty;
-            }
-            if terms.len() == 1 {
-                let Some(query) = terms.into_iter().next() else {
-                    return OperatorTree::Empty;
-                };
-                return OperatorTree::Term {
-                    query,
-                    field: resolved,
-                    scoring: None,
-                    top_k: None,
-                };
-            }
-            OperatorTree::Intersect(
-                terms
-                    .into_iter()
-                    .map(|t| OperatorTree::Term {
-                        query: t,
-                        field: resolved.clone(),
-                        scoring: None,
-                        top_k: None,
-                    })
-                    .collect(),
-            )
-        }
-        FTSNode::Vector { field, values } => {
-            let resolved = resolve_field(field.as_deref(), default_field)
-                .unwrap_or_else(|| "embedding".into());
-            OperatorTree::KNN {
-                query_vector: values.clone(),
-                k: FTS_VECTOR_K,
-                field: resolved,
-            }
-        }
-        FTSNode::And(left, right) => {
-            let l = compile(left, default_field, phrase_tokenizer);
-            let r = compile(right, default_field, phrase_tokenizer);
-            // Mixed text + vector AND -> robust positive-evidence pooling
-            // (same shape as the canonical UQA implementation's `_compile_and`).
-            let mixed = has_vector_signal(left) ^ has_vector_signal(right);
-            if mixed {
-                OperatorTree::RobustPositiveEvidencePool {
-                    signals: vec![l, r],
-                    alpha: 0.5,
-                    gating: GatingSpec::Softplus,
-                    weights: None,
-                    logit_min: None,
-                    logit_max: None,
-                    adaptive_weights: false,
-                }
-            } else {
-                OperatorTree::Intersect(vec![l, r])
-            }
-        }
-        FTSNode::Or(left, right) => OperatorTree::Union(vec![
-            compile(left, default_field, phrase_tokenizer),
-            compile(right, default_field, phrase_tokenizer),
-        ]),
-        FTSNode::Not(operand) => {
-            OperatorTree::Complement(Box::new(compile(operand, default_field, phrase_tokenizer)))
-        }
-    }
-}
-
-/// Convenience: tokenize, parse, compile in one call. Returns the
-/// resulting [`OperatorTree`].
-pub fn compile_query_string(
-    query_string: &str,
-    default_field: Option<&str>,
-    phrase_tokenizer: &PhraseTokenizer<'_>,
-) -> Result<OperatorTree> {
+/// Tokenize and parse a full-text query string without choosing a physical
+/// retrieval representation.
+pub fn parse_query_string(query_string: &str) -> Result<FTSNode> {
     let tokens = tokenize(query_string)?;
-    let ast = FTSParser::new(tokens).parse()?;
-    Ok(compile(&ast, default_field, phrase_tokenizer))
-}
-
-/// Returns `true` when the AST subtree contains any `VectorNode`.
-pub fn has_vector_signal(node: &FTSNode) -> bool {
-    match node {
-        FTSNode::Vector { .. } => true,
-        FTSNode::Term { .. } | FTSNode::Phrase { .. } => false,
-        FTSNode::And(l, r) | FTSNode::Or(l, r) => has_vector_signal(l) || has_vector_signal(r),
-        FTSNode::Not(inner) => has_vector_signal(inner),
-    }
+    FTSParser::new(tokens).parse()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn whitespace_tokenizer(_field: Option<&str>, phrase: &str) -> Vec<String> {
-        phrase
-            .split_whitespace()
-            .map(|s| s.to_ascii_lowercase())
-            .collect()
-    }
 
     #[test]
     fn tokenize_terms_and_phrase() {
@@ -590,64 +452,8 @@ mod tests {
     }
 
     #[test]
-    fn compile_phrase_intersects_terms() {
-        let ast = FTSNode::Phrase {
-            field: Some("body".into()),
-            phrase: "rust ferris crab".into(),
-        };
-        let op = compile(&ast, None, &whitespace_tokenizer);
-        match op {
-            OperatorTree::Intersect(children) => assert_eq!(children.len(), 3),
-            _ => panic!("expected Intersect"),
-        }
-    }
-
-    #[test]
-    fn compile_mixed_and_uses_robust_positive_evidence_pool() {
-        let ast = FTSNode::And(
-            Box::new(FTSNode::Term {
-                field: None,
-                term: "rust".into(),
-            }),
-            Box::new(FTSNode::Vector {
-                field: None,
-                values: vec![1.0, 0.0],
-            }),
-        );
-        let op = compile(&ast, Some("body"), &whitespace_tokenizer);
-        assert!(matches!(
-            op,
-            OperatorTree::RobustPositiveEvidencePool {
-                alpha: 0.5,
-                gating: GatingSpec::Softplus,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn compile_resolves_all_field_to_none() {
-        let ast = FTSNode::Term {
-            field: Some("_all".into()),
-            term: "rust".into(),
-        };
-        let op = compile(&ast, Some("body"), &whitespace_tokenizer);
-        match op {
-            OperatorTree::Term { field, .. } => assert!(field.is_none()),
-            _ => panic!("expected Term"),
-        }
-    }
-
-    #[test]
-    fn compile_leaves_text_scoring_unbound() {
-        let ast = FTSNode::Term {
-            field: Some("body".into()),
-            term: "rust".into(),
-        };
-        let op = compile(&ast, None, &whitespace_tokenizer);
-        match op {
-            OperatorTree::Term { scoring, .. } => assert!(scoring.is_none()),
-            _ => panic!("expected Term"),
-        }
+    fn parse_query_string_stops_at_syntax_ast() {
+        let ast = parse_query_string("body:rust OR embedding:[1, 0]").unwrap();
+        assert!(matches!(ast, FTSNode::Or(_, _)));
     }
 }

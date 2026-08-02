@@ -60,6 +60,7 @@
 
 pub mod batch;
 pub mod column_selection;
+pub mod columnar_batch;
 pub mod distinct;
 pub mod external_sort;
 pub mod join;
@@ -76,12 +77,13 @@ pub mod spill_scan;
 
 pub use batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
 pub use column_selection::ColumnSelection;
+pub use columnar_batch::{ColumnVector, ColumnarBatch};
 pub use distinct::{Distinct, ExactRowSet};
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
-pub use physical::{ExecError, ExecResult, PhysicalOperator};
+pub use physical::{ExecError, ExecResult, OperatorBatchCursor, PhysicalOperator};
 pub use project_set::{ProjectRows, ProjectSet, SetProjector};
 pub use relational::{
     AggregateExecutor, AggregateKind, AggregateSpec, ExpressionEvaluator, Filter, HashAggregate,
@@ -94,5 +96,5 @@ pub use scalar::{
 };
 pub use scan::{RowIteratorScan, RowSource, TableScan};
 pub use set_operation::ExternalSetOperation;
-pub use spill::{IndexedSpill, SharedSpill, SpillBuffer};
+pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};

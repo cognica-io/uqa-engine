@@ -11,7 +11,13 @@ use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, Stor
 impl Engine {
     pub fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         self.synchronize_catalog_registries()?;
-        let mut out: Vec<CatalogIndexRow> = self.catalog_indexes.read().values().cloned().collect();
+        let mut out: Vec<CatalogIndexRow> = self
+            .durable
+            .catalog_indexes
+            .read()
+            .values()
+            .cloned()
+            .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
     }
@@ -27,7 +33,7 @@ impl Engine {
     fn register_schema_inner(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         Self::validate_schema_name(name)?;
-        let mut schemas = self.schemas.write();
+        let mut schemas = self.durable.schemas.write();
         if schemas.contains(name) {
             if if_not_exists {
                 return Ok(false);
@@ -36,7 +42,7 @@ impl Engine {
                 "schema `{name}` already exists"
             )));
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.save_schema(name)?;
         }
         schemas.insert(name.to_string());
@@ -58,7 +64,7 @@ impl Engine {
                 "schema `{name}` cannot be dropped"
             )));
         }
-        if !self.schemas.read().contains(name) {
+        if !self.durable.schemas.read().contains(name) {
             return Ok(false);
         }
         if !self.schema_is_empty(name) {
@@ -73,8 +79,8 @@ impl Engine {
         if !self.preflight_drop_schema(name)? {
             return Ok(false);
         }
-        let mut schemas = self.schemas.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut schemas = self.durable.schemas.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_schema(name)?;
         }
         let removed = schemas.remove(name);
@@ -87,7 +93,7 @@ impl Engine {
 
     pub fn has_schema(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.schemas.read().contains(name))
+        Ok(self.durable.schemas.read().contains(name))
     }
 
     pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
@@ -106,26 +112,30 @@ impl Engine {
 
     fn schema_is_empty(&self, schema: &str) -> bool {
         !self
+            .storage
             .tables
             .read()
             .keys()
             .any(|relation| relation.schema == schema)
             && !self
+                .durable
                 .views
                 .read()
                 .keys()
                 .any(|relation| relation.schema == schema)
             && !self
+                .durable
                 .sequences
                 .read()
                 .keys()
                 .any(|relation| relation.schema == schema)
             && !self
+                .durable
                 .foreign_tables
                 .read()
                 .keys()
                 .any(|relation| relation.schema == schema)
-            && !self.sql_user_functions.read().keys().any(|name| {
+            && !self.durable.sql_user_functions.read().keys().any(|name| {
                 RelationIdentity::from_legacy_name(name)
                     .map_or(true, |relation| relation.schema == schema)
             })
@@ -135,7 +145,7 @@ impl Engine {
     /// `Engine._tables.schemas`.
     pub fn list_schemas(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        Ok(self.schemas.read().iter().cloned().collect())
+        Ok(self.durable.schemas.read().iter().cloned().collect())
     }
 
     /// Local names of tables whose structural relation identity is owned by
@@ -143,7 +153,7 @@ impl Engine {
     pub fn tables_in_schema(&self, schema: &str) -> StorageBackendResult<Vec<String>> {
         self.synchronize_table_catalog()?;
         let mut out: Vec<String> = Vec::new();
-        for relation in self.tables.read().keys() {
+        for relation in self.storage.tables.read().keys() {
             if relation.schema == schema {
                 out.push(relation.name.clone());
             }
@@ -155,6 +165,7 @@ impl Engine {
     pub fn list_sequences(&self) -> StorageBackendResult<Vec<String>> {
         self.refresh_sequences_from_catalog()?;
         let mut out: Vec<String> = self
+            .durable
             .sequences
             .read()
             .keys()

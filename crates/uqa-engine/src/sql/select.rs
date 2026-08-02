@@ -100,6 +100,15 @@ pub(super) struct QueryOutput {
 }
 
 impl QueryOutput {
+    pub(super) fn into_cursor(self) -> Result<super::SQLCursor, SQLError> {
+        match self.rows {
+            QueryRows::SharedSpill(rows) => super::SQLCursor::from_spill(self.columns, rows),
+            QueryRows::Rows(_) => Err(SQLError::Internal(
+                "cursor query unexpectedly used unbounded row materialization".into(),
+            )),
+        }
+    }
+
     pub(super) fn into_sql_result(self) -> Result<SQLResult, SQLError> {
         let mut rows = match self.rows {
             QueryRows::Rows(rows) => rows,

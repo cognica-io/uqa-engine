@@ -11,6 +11,7 @@ use super::*;
 
 fn end_backend_transaction_early(engine: &Engine) {
     engine
+        .storage
         .backend
         .as_ref()
         .expect("persistent test engine")
@@ -30,6 +31,7 @@ fn implicit_read_transaction_rolls_back_an_unclassified_storage_write() {
 
     engine.begin_implicit_statement_transaction(true).unwrap();
     engine
+        .storage
         .sqlite_session
         .as_ref()
         .unwrap()
@@ -47,6 +49,7 @@ fn implicit_read_transaction_rolls_back_an_unclassified_storage_write() {
     assert_eq!(engine.transaction_depth(), 0);
     assert_eq!(
         engine
+            .storage
             .catalog
             .as_ref()
             .unwrap()
@@ -115,6 +118,7 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
     // This deterministically models the interval after SQLite COMMIT has
     // released its writer lock but before Engine::commit publishes it.
     writer
+        .storage
         .backend
         .as_ref()
         .unwrap()
@@ -126,7 +130,7 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
-    writer.tx_stack.lock().clear();
+    writer.session.transactions.lock().clear();
     assert!(root
         .new_session()
         .unwrap()
@@ -182,7 +186,7 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     let writer = root.new_session().unwrap();
 
     {
-        let mut stack = reader.tx_stack.lock();
+        let mut stack = reader.session.transactions.lock();
         reader.begin_transaction_frame(&mut stack, true).unwrap();
     }
     assert!(!reader.has_schema("later").unwrap());

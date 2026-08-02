@@ -13,8 +13,10 @@ impl Engine {
     /// sessions. Their physical stores are rebuilt lazily from their own
     /// session-bound backend on the next table lookup.
     pub(crate) fn note_table_catalog_changed(&self) {
-        if !self.tx_stack.lock().is_empty() {
-            self.table_catalog_dirty
+        if !self.session.transactions.lock().is_empty() {
+            self.epochs
+                .table_catalog
+                .dirty
                 .store(true, std::sync::atomic::Ordering::Release);
             return;
         }
@@ -22,9 +24,13 @@ impl Engine {
     }
 
     pub(crate) fn publish_table_catalog_changes(&self) {
-        self.table_catalog_epoch
+        self.epochs
+            .table_catalog
+            .published
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        self.table_catalog_dirty
+        self.epochs
+            .table_catalog
+            .dirty
             .store(false, std::sync::atomic::Ordering::Release);
         // The writer's physical stores are current, but cached optimized and
         // prepared plans may retain a removed access path or old schema.
@@ -43,9 +49,11 @@ impl Engine {
         // of an active transaction: wait for the stack and inspect its state.
         // This prevents an unrelated session thread from turning an
         // autocommit write into an unpublished dirty generation.
-        let transaction_active = !self.tx_stack.lock().is_empty();
+        let transaction_active = !self.session.transactions.lock().is_empty();
         if transaction_active {
-            self.table_data_dirty
+            self.epochs
+                .table_data
+                .dirty
                 .store(true, std::sync::atomic::Ordering::Release);
             return;
         }
@@ -53,13 +61,17 @@ impl Engine {
     }
 
     pub(crate) fn publish_table_data_changes(&self) {
-        self.table_data_epoch
+        self.epochs
+            .table_data
+            .published
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         // Keep this session's observed generation behind too. Its ordinary
         // write caches were updated incrementally, but prepared/optimized
         // plans and every derived store must cross the same refresh boundary
         // as sibling sessions before the next statement.
-        self.table_data_dirty
+        self.epochs
+            .table_data
+            .dirty
             .store(false, std::sync::atomic::Ordering::Release);
         self.clear_sql_statement_cache();
     }
@@ -70,6 +82,7 @@ impl Engine {
     /// snapshot and will observe the new generation after it finishes.
     pub(crate) fn synchronize_table_data(&self) -> StorageBackendResult<()> {
         if self
+            .storage
             .sqlite_session
             .as_ref()
             .is_some_and(ManagedConnection::in_transaction)
@@ -85,7 +98,7 @@ impl Engine {
     /// `new_session`; `SQLite`'s per-connection `data_version` closes the same
     /// visibility gap for every other writer.
     pub(super) fn synchronize_external_commits(&self) -> StorageBackendResult<()> {
-        let Some(connection) = self.sqlite_session.as_ref() else {
+        let Some(connection) = self.storage.sqlite_session.as_ref() else {
             return Ok(());
         };
         if connection.in_transaction() {
@@ -95,6 +108,7 @@ impl Engine {
             return Ok(());
         };
         if self
+            .epochs
             .seen_sqlite_data_version
             .load(std::sync::atomic::Ordering::Acquire)
             == version
@@ -102,8 +116,8 @@ impl Engine {
             return Ok(());
         }
 
-        let _statement = self.statement_gate.lock();
-        let _refresh = self.external_commit_refresh.lock();
+        let _statement = self.runtime.statement_gate.lock();
+        let _refresh = self.epochs.external_commit_refresh.lock();
         if connection.in_transaction() {
             return Ok(());
         }
@@ -111,6 +125,7 @@ impl Engine {
             return Ok(());
         };
         if self
+            .epochs
             .seen_sqlite_data_version
             .load(std::sync::atomic::Ordering::Acquire)
             == version
@@ -123,22 +138,28 @@ impl Engine {
         // refresh lock. Restore the old marker on failure; a commit racing the
         // rebuild will advance the monitor again and be handled next time.
         let previous_version = self
+            .epochs
             .seen_sqlite_data_version
             .swap(version, std::sync::atomic::Ordering::AcqRel);
         let refresh_result = (|| {
             self.clear_persistent_table_bindings_for_catalog_reload();
             let table_catalog_epoch = self
-                .table_catalog_epoch
+                .epochs
+                .table_catalog
+                .published
                 .load(std::sync::atomic::Ordering::Acquire);
             self.reload_table_catalog(table_catalog_epoch)?;
             self.refresh_table_data_cache(true)?;
             let catalog_registry_epoch = self
-                .catalog_registry_epoch
+                .epochs
+                .catalog_registry
+                .published
                 .load(std::sync::atomic::Ordering::Acquire);
             self.reload_catalog_registries(catalog_registry_epoch)
         })();
         if refresh_result.is_err() {
-            self.seen_sqlite_data_version
+            self.epochs
+                .seen_sqlite_data_version
                 .store(previous_version, std::sync::atomic::Ordering::Release);
         }
         refresh_result
@@ -146,29 +167,38 @@ impl Engine {
 
     pub(super) fn refresh_table_data_cache(&self, force: bool) -> StorageBackendResult<()> {
         let target_epoch = self
-            .table_data_epoch
+            .epochs
+            .table_data
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         if !force
             && self
-                .seen_table_data_epoch
+                .epochs
+                .table_data
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire)
                 == target_epoch
         {
             return Ok(());
         }
 
-        let _refresh = self.table_data_refresh.lock();
+        let _refresh = self.epochs.table_data.refresh.lock();
         let target_epoch = self
-            .table_data_epoch
+            .epochs
+            .table_data
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         let previous_epoch = self
-            .seen_table_data_epoch
+            .epochs
+            .table_data
+            .seen
             .load(std::sync::atomic::Ordering::Acquire);
         if !force && previous_epoch == target_epoch {
             return Ok(());
         }
 
         let tables = self
+            .storage
             .tables
             .read()
             .iter()
@@ -176,7 +206,7 @@ impl Engine {
             .collect::<Vec<_>>();
         for (name, table) in tables {
             let name = name.qualified_name();
-            if self.backend.is_some() {
+            if self.storage.backend.is_some() {
                 self.rebind_persistent_table_stores(&name, &table)?;
                 let next_id = u128::from(table.document_store.read().max_doc_id()?) + 1;
                 let mut current = table.next_id.lock();
@@ -187,7 +217,7 @@ impl Engine {
             table
                 .doc_count_dirty
                 .store(true, std::sync::atomic::Ordering::Release);
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 let stats = Self::load_column_stats_from_catalog(catalog.as_ref(), &name)?;
                 let stats_dirty = stats.is_empty() && !table.columns.read().is_empty();
                 *table.column_stats.write() = stats;
@@ -206,10 +236,14 @@ impl Engine {
         self.clear_sql_statement_cache();
         // Set the generation before rebinding prepared plans so optimizer
         // statistics can resolve tables without recursively refreshing.
-        self.seen_table_data_epoch
+        self.epochs
+            .table_data
+            .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
         if let Err(error) = self.rebind_prepared_plans() {
-            self.seen_table_data_epoch
+            self.epochs
+                .table_data
+                .seen
                 .store(previous_epoch, std::sync::atomic::Ordering::Release);
             return Err(StorageBackendError::Other(format!(
                 "re-optimize prepared plans after table data refresh: {error}"
@@ -224,7 +258,7 @@ impl Engine {
     /// epochs, while allowing unchanged statements to retain their caches.
     pub(crate) fn refresh_pinned_transaction_snapshot(&self) -> StorageBackendResult<()> {
         let (sqlite_snapshot_unchanged, stable_sqlite_version) =
-            if let Some(connection) = self.sqlite_session.as_ref() {
+            if let Some(connection) = self.storage.sqlite_session.as_ref() {
                 if connection.data_version_monitor_is_nonblocking()? {
                     let before = connection.data_version()?;
                     connection.pin_transaction_snapshot()?;
@@ -233,7 +267,8 @@ impl Engine {
                     (
                         stable
                             && after.is_some_and(|version| {
-                                self.seen_sqlite_data_version
+                                self.epochs
+                                    .seen_sqlite_data_version
                                     .load(std::sync::atomic::Ordering::Acquire)
                                     == version
                             }),
@@ -251,25 +286,37 @@ impl Engine {
                 (true, None)
             };
         let table_catalog_epoch = self
-            .table_catalog_epoch
+            .epochs
+            .table_catalog
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         let table_data_epoch = self
-            .table_data_epoch
+            .epochs
+            .table_data
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         let catalog_registry_epoch = self
-            .catalog_registry_epoch
+            .epochs
+            .catalog_registry
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         if sqlite_snapshot_unchanged
             && self
-                .seen_table_catalog_epoch
+                .epochs
+                .table_catalog
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire)
                 == table_catalog_epoch
             && self
-                .seen_table_data_epoch
+                .epochs
+                .table_data
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire)
                 == table_data_epoch
             && self
-                .seen_catalog_registry_epoch
+                .epochs
+                .catalog_registry
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire)
                 == catalog_registry_epoch
         {
@@ -281,7 +328,8 @@ impl Engine {
         self.refresh_table_data_cache(true)?;
         self.reload_catalog_registries(catalog_registry_epoch)?;
         if let Some(version) = stable_sqlite_version {
-            self.seen_sqlite_data_version
+            self.epochs
+                .seen_sqlite_data_version
                 .store(version, std::sync::atomic::Ordering::Release);
         }
         Ok(())

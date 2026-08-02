@@ -419,7 +419,7 @@ fn compressed_file_reopens_through_vfs() {
 
     let compressed = std::fs::read(&path).unwrap();
     let plain_len = std::fs::metadata(&plain_path).unwrap().len();
-    assert_eq!(&compressed[..8], b"UQACDB1\0");
+    assert_eq!(&compressed[..8], b"UQACDB2\0");
     assert!(compressed.len() < plain_len as usize);
     assert!(ManagedConnection::open(&path).is_err());
 }
@@ -445,7 +445,7 @@ fn lz4_compressed_file_reopens_through_vfs() {
     }
 
     let bytes = std::fs::read(&path).unwrap();
-    assert_eq!(&bytes[..8], b"UQACDB1\0");
+    assert_eq!(&bytes[..8], b"UQACDB2\0");
 
     let mc = ManagedConnection::open_compressed(&path, options).unwrap();
     let count: i64 = mc
@@ -494,4 +494,82 @@ fn compressed_encrypted_file_requires_matching_key() {
         ManagedConnection::open_compressed_encrypted(&path, "", options),
         Err(SQLiteError::EmptyEncryptionKey)
     ));
+}
+
+#[test]
+fn compressed_encrypted_anchor_rejects_whole_file_rollback() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("anchored.uqac.sqlite3");
+    let old_snapshot = dir.path().join("anchored-old.uqac.sqlite3");
+    let options = SQLiteCompressionOptions::default();
+    let key = "trusted anchor key";
+
+    {
+        let connection = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
+        connection
+            .with(|sqlite| {
+                sqlite.execute_batch(
+                    "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+    let old_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
+    std::fs::copy(&path, &old_snapshot).unwrap();
+
+    {
+        let connection = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
+        connection
+            .with(|sqlite| {
+                sqlite.execute("INSERT INTO t VALUES (2)", [])?;
+                Ok(())
+            })
+            .unwrap();
+    }
+    let current_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
+    assert_eq!(current_anchor.database_id, old_anchor.database_id);
+    assert!(current_anchor.generation > old_anchor.generation);
+    assert_ne!(current_anchor.state_tag, old_anchor.state_tag);
+    {
+        let anchored = ManagedConnection::open_compressed_encrypted_with_anchor(
+            &path,
+            key,
+            options,
+            current_anchor,
+        )
+        .unwrap();
+        anchored
+            .with(|sqlite| {
+                sqlite.execute("INSERT INTO t VALUES (3)", [])?;
+                Ok(())
+            })
+            .unwrap();
+    }
+    let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
+        panic!("stale registered anchor unexpectedly accepted a newer state");
+    };
+    assert!(!error.to_string().is_empty());
+    let advanced_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
+    assert!(advanced_anchor.generation > current_anchor.generation);
+    ManagedConnection::open_compressed_encrypted_with_anchor(&path, key, options, advanced_anchor)
+        .unwrap();
+
+    std::fs::copy(&old_snapshot, &path).unwrap();
+    let Err(error) = ManagedConnection::open_compressed_encrypted_with_anchor(
+        &path,
+        key,
+        options,
+        advanced_anchor,
+    ) else {
+        panic!("rolled-back container unexpectedly satisfied its trusted anchor");
+    };
+    assert!(error
+        .to_string()
+        .contains("does not match trusted generation"));
+
+    let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
+        panic!("unanchored re-registration weakened an existing trusted anchor");
+    };
+    assert!(!error.to_string().is_empty());
 }

@@ -7,10 +7,16 @@
 //! Versioned container header and chunk-record encoding/validation.
 
 use super::{
-    chunk_count_for, ChunkEntry, Header, SQLiteCompressionCodec, SQLiteCompressionOptions,
-    AEAD_TAG_LEN, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, ENTRY_SIZE, FLAG_ENCRYPTED, HEADER_SIZE,
-    MAGIC, NONCE_LEN, SALT_LEN, VERSION,
+    chunk_count_for, AuthenticatedChunkRecord, ChunkEntry, Header, HeaderMetadata, HmacSha256, Mac,
+    SQLiteCompressionCodec, SQLiteCompressionOptions, AEAD_TAG_LEN, AUTH_TAG_LEN,
+    CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, ENTRY_SIZE, FILE_ID_LEN,
+    FLAG_ENCRYPTED, HEADER_AUTH_OFFSET, HEADER_FILE_ID_OFFSET, HEADER_SIZE, LEGACY_MAGIC, MAGIC,
+    NONCE_LEN, SALT_LEN, VERSION,
 };
+
+const HEADER_DOMAIN: &[u8] = b"uqa-compressed-header-v2";
+const CHUNK_DOMAIN: &[u8] = b"uqa-compressed-chunk-v2";
+const COMMIT_DOMAIN: &[u8] = b"uqa-compressed-commit-v2";
 
 pub(super) fn allocate_payload(length: usize, context: &str) -> std::io::Result<Vec<u8>> {
     let mut payload = Vec::new();
@@ -75,6 +81,11 @@ pub(super) fn parse_header(bytes: &[u8]) -> std::io::Result<Header> {
     if bytes.len() < HEADER_SIZE {
         return Err(invalid_data("compressed container header is truncated"));
     }
+    if &bytes[..LEGACY_MAGIC.len()] == LEGACY_MAGIC {
+        return Err(invalid_data(
+            "legacy compressed container version 1 has no authenticated metadata",
+        ));
+    }
     if &bytes[..MAGIC.len()] != MAGIC {
         return Err(invalid_data("not a UQA compressed SQLite container"));
     }
@@ -104,6 +115,15 @@ pub(super) fn parse_header(bytes: &[u8]) -> std::io::Result<Header> {
     let mut salt = [0_u8; SALT_LEN];
     salt.copy_from_slice(&bytes[60..60 + SALT_LEN]);
     let codec = SQLiteCompressionCodec::from_id(read_u32(bytes, 76)?).map_err(invalid_data)?;
+    let mut file_id = [0_u8; FILE_ID_LEN];
+    file_id.copy_from_slice(&bytes[HEADER_FILE_ID_OFFSET..HEADER_FILE_ID_OFFSET + FILE_ID_LEN]);
+    if file_id == [0_u8; FILE_ID_LEN] {
+        return Err(invalid_data(
+            "compressed container file identity is missing",
+        ));
+    }
+    let mut auth_tag = [0_u8; AUTH_TAG_LEN];
+    auth_tag.copy_from_slice(&bytes[HEADER_AUTH_OFFSET..HEADER_AUTH_OFFSET + AUTH_TAG_LEN]);
     let compression = SQLiteCompressionOptions {
         codec,
         page_size,
@@ -124,24 +144,57 @@ pub(super) fn parse_header(bytes: &[u8]) -> std::io::Result<Header> {
         logical_len,
         generation,
         salt,
+        file_id,
+        auth_tag,
     })
 }
 
+pub(super) fn verify_header_authentication(
+    bytes: &[u8],
+    header: &Header,
+    mac_key: Option<&[u8; 32]>,
+) -> std::io::Result<()> {
+    let encrypted = header.flags & FLAG_ENCRYPTED != 0;
+    match (encrypted, mac_key) {
+        (true, Some(mac_key)) => verify_metadata_tag(
+            mac_key,
+            HEADER_DOMAIN,
+            &[&bytes[..HEADER_AUTH_OFFSET]],
+            &header.auth_tag,
+            "compressed container header authentication failed",
+        ),
+        (true, None) => Err(invalid_data(
+            "compressed container requires an encryption key",
+        )),
+        (false, Some(_)) => Err(invalid_data(
+            "plaintext compressed container was opened with an encryption key",
+        )),
+        (false, None) if header.auth_tag == [0_u8; AUTH_TAG_LEN] => Ok(()),
+        (false, None) => Err(invalid_data(
+            "plaintext compressed container has an unexpected authentication tag",
+        )),
+    }
+}
+
 pub(super) fn build_header(
-    flags: u32,
-    compression: SQLiteCompressionOptions,
-    chunk_count: usize,
-    logical_len: usize,
-    generation: u64,
-    salt: [u8; SALT_LEN],
+    metadata: &HeaderMetadata,
+    mac_key: Option<&[u8; 32]>,
 ) -> std::io::Result<[u8; HEADER_SIZE]> {
+    if (metadata.flags & FLAG_ENCRYPTED != 0) != mac_key.is_some() {
+        return Err(invalid_data(
+            "container header encryption flag and authentication key disagree",
+        ));
+    }
+    if metadata.file_id == [0_u8; FILE_ID_LEN] {
+        return Err(invalid_data("container file identity must not be empty"));
+    }
     let mut out = [0_u8; HEADER_SIZE];
     out[..MAGIC.len()].copy_from_slice(MAGIC);
     write_u32(&mut out, 8, VERSION);
-    write_u32(&mut out, 12, flags);
-    write_u32(&mut out, 16, compression.page_size);
-    write_u32(&mut out, 20, compression.chunk_pages);
-    write_i32(&mut out, 24, compression.level);
+    write_u32(&mut out, 12, metadata.flags);
+    write_u32(&mut out, 16, metadata.compression.page_size);
+    write_u32(&mut out, 20, metadata.compression.chunk_pages);
+    write_i32(&mut out, 24, metadata.compression.level);
     write_u32(
         &mut out,
         28,
@@ -155,17 +208,172 @@ pub(super) fn build_header(
     write_u64(
         &mut out,
         36,
-        usize_to_u64(chunk_count, "header chunk count")?,
+        usize_to_u64(metadata.chunk_count, "header chunk count")?,
     );
     write_u64(
         &mut out,
         44,
-        usize_to_u64(logical_len, "header logical length")?,
+        usize_to_u64(metadata.logical_len, "header logical length")?,
     );
-    write_u64(&mut out, 52, generation);
-    out[60..60 + SALT_LEN].copy_from_slice(&salt);
-    write_u32(&mut out, 76, compression.codec.id());
+    write_u64(&mut out, 52, metadata.generation);
+    out[60..60 + SALT_LEN].copy_from_slice(&metadata.salt);
+    write_u32(&mut out, 76, metadata.compression.codec.id());
+    out[HEADER_FILE_ID_OFFSET..HEADER_FILE_ID_OFFSET + FILE_ID_LEN]
+        .copy_from_slice(&metadata.file_id);
+    if let Some(mac_key) = mac_key {
+        let tag = metadata_tag(mac_key, HEADER_DOMAIN, &[&out[..HEADER_AUTH_OFFSET]])?;
+        out[HEADER_AUTH_OFFSET..HEADER_AUTH_OFFSET + AUTH_TAG_LEN].copy_from_slice(&tag);
+    }
     Ok(out)
+}
+
+pub(super) fn chunk_aad(
+    file_id: &[u8; FILE_ID_LEN],
+    record_offset: u64,
+    entry: &ChunkEntry,
+) -> std::io::Result<Vec<u8>> {
+    let entry = build_entry(entry)?;
+    let mut aad = Vec::with_capacity(CHUNK_DOMAIN.len() + FILE_ID_LEN + 8 + ENTRY_SIZE);
+    aad.extend_from_slice(CHUNK_DOMAIN);
+    aad.extend_from_slice(file_id);
+    aad.extend_from_slice(&record_offset.to_le_bytes());
+    aad.extend_from_slice(&entry);
+    Ok(aad)
+}
+
+pub(super) fn commit_authentication_tag(
+    mac_key: &[u8; 32],
+    file_id: &[u8; FILE_ID_LEN],
+    record_offset: u64,
+    entry: &ChunkEntry,
+    previous_state_tag: &[u8; AUTH_TAG_LEN],
+    pending_records: &[AuthenticatedChunkRecord],
+) -> std::io::Result<[u8; AUTH_TAG_LEN]> {
+    let mac = commit_authenticator(
+        mac_key,
+        file_id,
+        record_offset,
+        entry,
+        previous_state_tag,
+        pending_records,
+    )?;
+    let mut tag = [0_u8; AUTH_TAG_LEN];
+    tag.copy_from_slice(&mac.finalize().into_bytes());
+    Ok(tag)
+}
+
+pub(super) fn verify_commit_authentication(
+    mac_key: &[u8; 32],
+    file_id: &[u8; FILE_ID_LEN],
+    record_offset: u64,
+    entry: &ChunkEntry,
+    previous_state_tag: &[u8; AUTH_TAG_LEN],
+    pending_records: &[AuthenticatedChunkRecord],
+    tag: &[u8],
+) -> std::io::Result<()> {
+    if tag.len() != AUTH_TAG_LEN {
+        return Err(invalid_data(
+            "compressed container commit authentication tag has an invalid length",
+        ));
+    }
+    let mac = commit_authenticator(
+        mac_key,
+        file_id,
+        record_offset,
+        entry,
+        previous_state_tag,
+        pending_records,
+    )?;
+    mac.verify_slice(tag)
+        .map_err(|_| invalid_data("compressed container commit authentication failed"))
+}
+
+fn commit_authenticator(
+    mac_key: &[u8; 32],
+    file_id: &[u8; FILE_ID_LEN],
+    record_offset: u64,
+    entry: &ChunkEntry,
+    previous_state_tag: &[u8; AUTH_TAG_LEN],
+    pending_records: &[AuthenticatedChunkRecord],
+) -> std::io::Result<HmacSha256> {
+    let entry = build_entry(entry)?;
+    let pending_count = usize_to_u64(pending_records.len(), "pending authenticated record count")?;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(mac_key)
+        .map_err(|_| invalid_data("failed to initialize metadata authenticator"))?;
+    mac.update(COMMIT_DOMAIN);
+    mac.update(file_id);
+    mac.update(&record_offset.to_le_bytes());
+    mac.update(previous_state_tag);
+    mac.update(&entry);
+    mac.update(&pending_count.to_le_bytes());
+    for record in pending_records {
+        mac.update(&build_entry(&record.entry)?);
+        mac.update(&record.payload_tag);
+    }
+    Ok(mac)
+}
+
+pub(super) fn chunk_payload_tag(payload: &[u8]) -> std::io::Result<[u8; AEAD_TAG_LEN]> {
+    let tag = payload
+        .get(payload.len().saturating_sub(AEAD_TAG_LEN)..)
+        .filter(|tag| tag.len() == AEAD_TAG_LEN)
+        .ok_or_else(|| invalid_data("encrypted chunk payload is shorter than its tag"))?;
+    let mut out = [0_u8; AEAD_TAG_LEN];
+    out.copy_from_slice(tag);
+    Ok(out)
+}
+
+pub(super) fn validate_commit_entry(
+    entry: &ChunkEntry,
+    container_encrypted: bool,
+) -> std::io::Result<()> {
+    let expected_flags = if container_encrypted {
+        CHUNK_COMMIT | CHUNK_AUTHENTICATED
+    } else {
+        CHUNK_COMMIT
+    };
+    let expected_tag_len = if container_encrypted { AUTH_TAG_LEN } else { 0 };
+    if entry.flags != expected_flags
+        || entry.stored_len != expected_tag_len
+        || entry.allocated_len != expected_tag_len
+        || entry.crc32 != 0
+        || entry.nonce != [0_u8; NONCE_LEN]
+    {
+        return Err(invalid_data("invalid compressed container commit record"));
+    }
+    Ok(())
+}
+
+fn metadata_tag(
+    mac_key: &[u8; 32],
+    domain: &[u8],
+    parts: &[&[u8]],
+) -> std::io::Result<[u8; AUTH_TAG_LEN]> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(mac_key)
+        .map_err(|_| invalid_data("failed to initialize metadata authenticator"))?;
+    mac.update(domain);
+    for part in parts {
+        mac.update(part);
+    }
+    let mut tag = [0_u8; AUTH_TAG_LEN];
+    tag.copy_from_slice(&mac.finalize().into_bytes());
+    Ok(tag)
+}
+
+fn verify_metadata_tag(
+    mac_key: &[u8; 32],
+    domain: &[u8],
+    parts: &[&[u8]],
+    expected: &[u8],
+    error: &str,
+) -> std::io::Result<()> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(mac_key)
+        .map_err(|_| invalid_data("failed to initialize metadata authenticator"))?;
+    mac.update(domain);
+    for part in parts {
+        mac.update(part);
+    }
+    mac.verify_slice(expected).map_err(|_| invalid_data(error))
 }
 
 pub(super) fn parse_entry(bytes: &[u8]) -> std::io::Result<ChunkEntry> {

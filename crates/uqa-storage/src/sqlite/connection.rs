@@ -19,7 +19,9 @@ use std::sync::Arc;
 use parking_lot::{Condvar, Mutex, RwLock};
 use rusqlite::{Connection, OpenFlags};
 
-use crate::sqlite::compressed_vfs::{self, SQLiteCompressionOptions};
+use crate::sqlite::compressed_vfs::{
+    self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
@@ -287,7 +289,7 @@ impl ManagedConnection {
     }
 
     pub fn open_compressed(path: &Path, compression: SQLiteCompressionOptions) -> Result<Self> {
-        Self::open_compressed_with_optional_key(path, compression, None)
+        Self::open_compressed_with_optional_key(path, compression, None, None)
     }
 
     pub fn open_compressed_encrypted(
@@ -298,7 +300,21 @@ impl ManagedConnection {
         if key.is_empty() {
             return Err(SQLiteError::EmptyEncryptionKey);
         }
-        Self::open_compressed_with_optional_key(path, compression, Some(key))
+        Self::open_compressed_with_optional_key(path, compression, Some(key), None)
+    }
+
+    /// Open an encrypted compressed database while enforcing an exact trusted
+    /// external state anchor in the VFS main-file open path.
+    pub fn open_compressed_encrypted_with_anchor(
+        path: &Path,
+        key: &str,
+        compression: SQLiteCompressionOptions,
+        trusted_anchor: SQLiteCompressedContainerAnchor,
+    ) -> Result<Self> {
+        if key.is_empty() {
+            return Err(SQLiteError::EmptyEncryptionKey);
+        }
+        Self::open_compressed_with_optional_key(path, compression, Some(key), Some(trusted_anchor))
     }
 
     fn open_with_optional_key(path: &Path, key: Option<&str>) -> Result<Self> {
@@ -313,12 +329,21 @@ impl ManagedConnection {
         path: &Path,
         compression: SQLiteCompressionOptions,
         key: Option<&str>,
+        trusted_anchor: Option<SQLiteCompressedContainerAnchor>,
     ) -> Result<Self> {
         let compression = compression
             .validate()
             .map_err(SQLiteError::CompressedContainer)?;
-        compressed_vfs::register_database(path, compression, key)
-            .map_err(SQLiteError::CompressedContainer)?;
+        match trusted_anchor {
+            Some(anchor) => compressed_vfs::register_database_with_anchor(
+                path,
+                compression,
+                key.ok_or(SQLiteError::EncryptionKeyRequired)?,
+                anchor,
+            ),
+            None => compressed_vfs::register_database(path, compression, key),
+        }
+        .map_err(SQLiteError::CompressedContainer)?;
         let spec = ConnectionSpec::Compressed {
             path: path.to_path_buf(),
             compression,

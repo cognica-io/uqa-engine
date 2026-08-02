@@ -753,7 +753,7 @@ pub(crate) fn execute_operator_tree(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    let _statement = engine.statement_gate.lock();
+    let _statement = engine.runtime.statement_gate.lock();
     execute_operator_tree_gated(engine, table, params, tree)
 }
 

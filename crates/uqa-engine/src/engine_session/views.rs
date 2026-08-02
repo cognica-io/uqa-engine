@@ -143,8 +143,8 @@ impl Engine {
             }
         }
         self.bind_view_plan_for_create(&mut plan)?;
-        let mut views = self.views.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut views = self.durable.views.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             let definition_json = serde_json::to_string(&plan)
                 .map_err(|err| SQLError::Internal(format!("serialize view `{name}`: {err}")))?;
             catalog
@@ -210,8 +210,8 @@ impl Engine {
     fn drop_view_state_inner(&self, name: &str) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
-        let mut views = self.views.write();
-        let removed = if let Some(catalog) = self.catalog.as_ref() {
+        let mut views = self.durable.views.write();
+        let removed = if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_view(&relation)
                 .map_err(|err| SQLError::Internal(format!("drop view `{name}`: {err}")))?
@@ -243,7 +243,7 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&resolved)
             .map_err(|err| SQLError::Internal(format!("resolve view `{resolved}`: {err}")))?;
-        Ok(self.views.read().get(&relation).cloned())
+        Ok(self.durable.views.read().get(&relation).cloned())
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
@@ -254,6 +254,7 @@ impl Engine {
         self.synchronize_catalog_registries()
             .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
         let mut out: Vec<String> = self
+            .durable
             .views
             .read()
             .keys()
@@ -279,6 +280,7 @@ impl Engine {
             .map_err(StorageBackendError::Other)?;
         let empty_ctes = std::collections::BTreeSet::new();
         let mut dependents = self
+            .durable
             .views
             .read()
             .iter()
@@ -301,6 +303,7 @@ impl Engine {
         let target = RelationIdentity::from_legacy_name(canonical_name)
             .map_err(StorageBackendError::Other)?;
         let mut dependents = self
+            .durable
             .views
             .read()
             .iter()
@@ -317,12 +320,13 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let rows = catalog.load_views()?;
         let mut relations = self
+            .storage
             .tables
             .read()
             .keys()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
-        relations.extend(self.foreign_tables.read().keys().cloned());
+        relations.extend(self.durable.foreign_tables.read().keys().cloned());
         relations.extend(rows.iter().map(|row| row.relation.clone()));
 
         let mut views = BTreeMap::new();
@@ -335,7 +339,7 @@ impl Engine {
                 })?;
             views.insert(row.relation, plan);
         }
-        *self.views.write() = views;
+        *self.durable.views.write() = views;
         Ok(())
     }
 }

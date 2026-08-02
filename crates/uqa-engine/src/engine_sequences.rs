@@ -36,7 +36,7 @@ impl Engine {
                     "invalid persisted sequence reference `{reference}`: {error}"
                 ))
             })?;
-        let sequences = self.sequences.read();
+        let sequences = self.durable.sequences.read();
         if let Some(schema) = schema {
             let target = RelationIdentity::new(schema, local_name);
             if sequences.contains_key(&target) {
@@ -103,7 +103,7 @@ impl Engine {
             current: start,
             called: false,
         };
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
                     &Self::sequence_row(&name, state)
@@ -118,7 +118,7 @@ impl Engine {
                 };
             }
         } else {
-            let seqs = self.sequences.read();
+            let seqs = self.durable.sequences.read();
             if seqs.contains_key(&relation) {
                 return if if_not_exists {
                     Ok(false)
@@ -127,7 +127,7 @@ impl Engine {
                 };
             }
         }
-        self.sequences.write().insert(relation, state);
+        self.durable.sequences.write().insert(relation, state);
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -191,6 +191,7 @@ impl Engine {
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
         let mut state = self
+            .durable
             .sequences
             .read()
             .get(&relation)
@@ -211,7 +212,7 @@ impl Engine {
             state.current = restart_val;
             state.called = false;
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             if !catalog
                 .replace_sequence_row(
                     &Self::sequence_row(&name, state)
@@ -222,7 +223,7 @@ impl Engine {
                 return Err(format!("Sequence `{name}` does not exist"));
             }
         }
-        self.sequences.write().insert(relation, state);
+        self.durable.sequences.write().insert(relation, state);
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -259,16 +260,20 @@ impl Engine {
                 dependent_views.join("`, `")
             ));
         }
-        let removed = if let Some(catalog) = self.catalog.as_ref() {
+        let removed = if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_sequence_row(&name)
                 .map_err(|err| format!("persist sequence catalog: {err}"))?
         } else {
-            self.sequences.read().contains_key(&relation)
+            self.durable.sequences.read().contains_key(&relation)
         };
         if removed {
-            self.sequences.write().remove(&relation);
-            self.sequence_currvals.write().remove(&relation);
+            self.durable.sequences.write().remove(&relation);
+            self.session
+                .state
+                .write()
+                .sequence_currvals
+                .remove(&relation);
             self.note_catalog_registry_changed();
         }
         Ok(removed)
@@ -281,13 +286,13 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let current = if let Some(catalog) = self.catalog.as_ref() {
+        let current = if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .next_sequence_value(&name)
                 .map_err(|err| format!("allocate sequence value: {err}"))?
                 .ok_or_else(|| format!("Sequence `{name}` does not exist"))?
         } else {
-            let mut seqs = self.sequences.write();
+            let mut seqs = self.durable.sequences.write();
             let seq = seqs
                 .get_mut(&relation)
                 .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
@@ -301,11 +306,15 @@ impl Engine {
             }
             seq.current
         };
-        if let Some(state) = self.sequences.write().get_mut(&relation) {
+        if let Some(state) = self.durable.sequences.write().get_mut(&relation) {
             state.current = current;
             state.called = true;
         }
-        self.sequence_currvals.write().insert(relation, current);
+        self.session
+            .state
+            .write()
+            .sequence_currvals
+            .insert(relation, current);
         Ok(current)
     }
 
@@ -316,8 +325,10 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        self.sequence_currvals
+        self.session
+            .state
             .read()
+            .sequence_currvals
             .get(&relation)
             .copied()
             .ok_or_else(|| {
@@ -332,20 +343,24 @@ impl Engine {
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .set_sequence_value(&name, value)
                 .map_err(|err| format!("persist sequence value: {err}"))?
                 .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         }
-        let mut seqs = self.sequences.write();
+        let mut seqs = self.durable.sequences.write();
         let seq = seqs
             .get_mut(&relation)
             .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
         seq.current = value;
         seq.called = true;
         drop(seqs);
-        self.sequence_currvals.write().insert(relation, value);
+        self.session
+            .state
+            .write()
+            .sequence_currvals
+            .insert(relation, value);
         Ok(value)
     }
 
@@ -353,6 +368,7 @@ impl Engine {
     pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
         self.refresh_sequences_from_catalog()?;
         Ok(self
+            .durable
             .sequences
             .read()
             .iter()
@@ -374,7 +390,7 @@ impl Engine {
             return Ok(None);
         };
         let relation = Self::resolved_relation_identity(&canonical)?;
-        let seqs = self.sequences.read();
+        let seqs = self.durable.sequences.read();
         Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
     }
 
@@ -390,11 +406,11 @@ impl Engine {
     }
 
     pub(crate) fn refresh_sequences_from_catalog(&self) -> StorageBackendResult<()> {
-        let Some(catalog) = self.catalog.as_ref() else {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
         let rows = catalog.load_sequence_rows()?;
-        *self.sequences.write() = rows
+        *self.durable.sequences.write() = rows
             .into_iter()
             .map(Self::sequence_state_from_row)
             .collect::<StorageBackendResult<_>>()?;
@@ -433,7 +449,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         let rows = catalog.load_sequence_rows()?;
-        *self.sequences.write() = rows
+        *self.durable.sequences.write() = rows
             .into_iter()
             .map(Self::sequence_state_from_row)
             .collect::<StorageBackendResult<_>>()?;
@@ -481,23 +497,29 @@ impl Engine {
         logical_plan: uqa_planner::UnifiedPlan,
     ) -> Result<(), uqa_sql::SQLError> {
         let plan = crate::sql::optimize_engine_plan(self, logical_plan.clone())?;
-        self.prepared
+        self.session
+            .state
             .write()
+            .prepared
             .insert(name, super::PreparedStatementPlan { logical_plan, plan });
         Ok(())
     }
 
     pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
-        self.prepared
+        self.session
+            .state
             .read()
+            .prepared
             .get(name)
             .map(|entry| entry.plan.clone())
     }
 
     pub(crate) fn rebind_prepared_plans(&self) -> Result<(), uqa_sql::SQLError> {
         let plans = self
-            .prepared
+            .session
+            .state
             .read()
+            .prepared
             .iter()
             .map(|(name, prepared)| (name.clone(), prepared.logical_plan.clone()))
             .collect::<Vec<_>>();
@@ -505,9 +527,9 @@ impl Engine {
         for (name, plan) in plans {
             rebound.push((name, crate::sql::optimize_engine_plan(self, plan)?));
         }
-        let mut prepared = self.prepared.write();
+        let mut session = self.session.state.write();
         for (name, plan) in rebound {
-            if let Some(entry) = prepared.get_mut(&name) {
+            if let Some(entry) = session.prepared.get_mut(&name) {
                 entry.plan = plan;
             }
         }
@@ -517,9 +539,9 @@ impl Engine {
     pub fn deallocate_prepared(&self, name: Option<&str>) {
         match name {
             Some(n) => {
-                self.prepared.write().remove(n);
+                self.session.state.write().prepared.remove(n);
             }
-            None => self.prepared.write().clear(),
+            None => self.session.state.write().prepared.clear(),
         }
     }
 }

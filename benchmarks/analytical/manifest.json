@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "workload": "uqa-synthetic-analytical-v1",
+  "disclaimer": "This is a deterministic TPC-H-style micro-workload, not an audited TPC-H result or independent third-party validation.",
+  "rows": 20000,
+  "seed": 20260802,
+  "work_mem": "4MB",
+  "generator": {
+    "sample": "id XOR seed",
+    "return_flag": ["A", "N", "R"],
+    "line_status": ["F", "O"],
+    "quantity": "1 + sample % 50",
+    "extended_price": "10000 + sample % 90000",
+    "discount": "sample % 11",
+    "ship_day": "sample % 2500"
+  },
+  "schema_sql": "CREATE TABLE lineitem (id BIGINT PRIMARY KEY, return_flag TEXT, line_status TEXT, quantity BIGINT, extended_price BIGINT, discount BIGINT, ship_day BIGINT)",
+  "queries": {
+    "q1": "SELECT return_flag, line_status, COUNT(*) AS count_order, CAST(SUM(quantity) AS BIGINT) AS sum_qty FROM lineitem WHERE ship_day <= 2449 GROUP BY return_flag, line_status ORDER BY return_flag, line_status",
+    "q6": "SELECT CAST(SUM(extended_price * discount) AS BIGINT) AS revenue FROM lineitem WHERE ship_day BETWEEN 365 AND 2190 AND discount BETWEEN 2 AND 8 AND quantity < 40",
+    "scan": "SELECT id, extended_price FROM lineitem WHERE quantity < 40 ORDER BY id"
+  },
+  "criterion": {
+    "sample_size": 20,
+    "warm_up_ms": 500,
+    "measurement_ms": 2000
+  },
+  "ratio_gates": [
+    {
+      "name": "q1_uqa_vs_sqlite",
+      "numerator": "analytical_external_q1/uqa",
+      "denominator": "analytical_external_q1/sqlite",
+      "max": 50.0
+    },
+    {
+      "name": "q1_uqa_vs_duckdb",
+      "numerator": "analytical_external_q1/uqa",
+      "denominator": "analytical_external_q1/duckdb",
+      "max": 550.0
+    },
+    {
+      "name": "q6_uqa_vs_sqlite",
+      "numerator": "analytical_external_q6/uqa",
+      "denominator": "analytical_external_q6/sqlite",
+      "max": 150.0
+    },
+    {
+      "name": "q6_uqa_vs_duckdb",
+      "numerator": "analytical_external_q6/uqa",
+      "denominator": "analytical_external_q6/duckdb",
+      "max": 650.0
+    },
+    {
+      "name": "cursor_vs_materialized_scan",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "denominator": "analytical_result_scan/uqa_materialized",
+      "max": 1.35
+    },
+    {
+      "name": "cursor_scan_vs_sqlite",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "denominator": "analytical_result_scan/sqlite",
+      "max": 220.0
+    },
+    {
+      "name": "cursor_scan_vs_duckdb",
+      "numerator": "analytical_result_scan/uqa_cursor",
+      "denominator": "analytical_result_scan/duckdb",
+      "max": 350.0
+    }
+  ]
+}

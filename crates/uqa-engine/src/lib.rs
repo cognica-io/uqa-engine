@@ -44,6 +44,8 @@
 //!   functions: `text_match`, `knn_match`, `fuse_bayesian_evidence`,
 //!   `pool_positive_evidence` (plus compatibility alias `fuse_log_odds`),
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
+//! - [`Engine::sql_cursor`] / [`Engine::sql_columnar`] - bounded, schema-ordered
+//!   column batches for result sets that should not be retained in memory.
 //! - [`Engine::search`] - direct text-only retrieval returning a posting
 //!   list.
 //! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN
@@ -84,6 +86,7 @@ mod engine_search;
 mod engine_sequences;
 mod engine_session;
 mod engine_sql_registry;
+mod engine_state;
 mod engine_table_storage;
 mod engine_tables;
 mod engine_transactions;
@@ -114,13 +117,19 @@ use uqa_storage::{
     ColumnStatsInput, ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow,
     IVFIndex, InvertedIndex, ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex,
     MemoryVectorIndex, PersistentStorageBackend, PersistentVectorIndexParams, RelationIdentity,
-    SQLiteStorageBackend, SequenceRow, StorageBackendError, StorageBackendResult, TableSchema,
-    VectorFieldSchema, VectorIndex, ViewRow,
+    SQLiteCompressedContainerAnchor, SQLiteStorageBackend, SequenceRow, StorageBackendError,
+    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex, ViewRow,
 };
 
+pub use sql::{SQLCursor, SQLCursorSummary};
+pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{ast::SequenceRestart, SQLParam, SQLResult};
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
+use engine_state::{
+    DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
+    SessionContext, StorageContext,
+};
 use functions::RegisteredSQLFunction;
 pub use functions::{
     SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
@@ -210,153 +219,15 @@ impl Default for ScoringMode {
 
 type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
 
-/// Engine: per-table document store + inverted index + vector indexes,
-/// each behind a `RwLock<Box<dyn ...>>` so the `Memory*` and `SQLite*`
-/// backends drop in interchangeably.
+/// Unified query engine composed from explicit storage, durable-catalog,
+/// session, extension, epoch, and query-runtime ownership domains.
 pub struct Engine {
-    /// Re-entrant statement boundary for one logical SQL session. `Engine`
-    /// methods may call back into compiled SQL routines on the same thread,
-    /// while concurrent callers must never interleave physical work on the
-    /// session's pinned transaction connection or session-local registries.
-    statement_gate: parking_lot::ReentrantMutex<()>,
-    /// Session-bound table stores. Logical table definitions are durable and
-    /// synchronized through `table_catalog_epoch`, but every entry here is
-    /// built from this engine session's backend so explicit transactions never
-    /// leak onto another session's `SQLite` connection.
-    tables: RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>,
-    catalog: Option<Arc<dyn CatalogFacade>>,
-    backend: Option<Arc<dyn PersistentStorageBackend>>,
-    /// `SQLite` handle used to derive independent logical sessions. Catalog and
-    /// backend objects for this `Engine` are always built from clones of this
-    /// exact handle, preserving cross-store transaction affinity.
-    sqlite_session: Option<ManagedConnection>,
-    /// Last `PRAGMA data_version` observed on this session's dedicated monitor
-    /// connection. Unlike in-process epochs, this detects commits made by an
-    /// independently opened `Engine` or another process.
-    seen_sqlite_data_version: std::sync::atomic::AtomicU64,
-    external_commit_refresh: parking_lot::Mutex<()>,
-    /// Shared logical-catalog generation for sessions derived from the same
-    /// engine. Physical table stores remain session-bound and are rebound when
-    /// this generation advances.
-    table_catalog_epoch: Arc<std::sync::atomic::AtomicU64>,
-    seen_table_catalog_epoch: std::sync::atomic::AtomicU64,
-    table_catalog_dirty: AtomicBool,
-    table_catalog_refresh: parking_lot::Mutex<()>,
-    /// Generation for committed table contents shared by sessions derived
-    /// from this engine. Table stores and their value/vector/text caches are
-    /// session-bound, so a sibling commit invalidates every derived cache
-    /// before the next statement starts.
-    table_data_epoch: Arc<std::sync::atomic::AtomicU64>,
-    seen_table_data_epoch: std::sync::atomic::AtomicU64,
-    table_data_dirty: AtomicBool,
-    table_data_refresh: parking_lot::Mutex<()>,
-    /// Generation for durable non-table catalog registries (graphs, views,
-    /// schemas, analyzers, FDW objects, indexes, and SQL routines). Each SQL
-    /// session owns a private cache and publishes this generation only after
-    /// its outer transaction commits, so uncommitted catalog state cannot
-    /// leak through shared in-memory maps.
-    catalog_registry_epoch: Arc<std::sync::atomic::AtomicU64>,
-    seen_catalog_registry_epoch: std::sync::atomic::AtomicU64,
-    catalog_registry_dirty: AtomicBool,
-    catalog_registry_refresh: parking_lot::Mutex<()>,
-    /// Session-local cache of named graphs reachable from SQL via the
-    /// `graph_*` function family. Durable definitions and graph contents are
-    /// restored from the catalog and synchronized by `catalog_registry_epoch`.
-    graphs: Arc<RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>>,
-    /// Saved deep-fusion models. Mirrors the catalog `_models` table
-    /// when the engine is SQLite-backed.
-    models: RwLock<BTreeMap<String, DeepModel>>,
-    /// Bayesian calibration parameters (`alpha`, `beta`, `base_rate`, ...)
-    /// keyed by signal name. Round-trips through the catalog when the
-    /// engine is `SQLite`-backed.
-    scoring_params: RwLock<BTreeMap<String, String>>,
-    /// Persisted, fully lowered view definitions. Execution and catalog
-    /// restoration both use the same `QueryPlan`; no AST carrier is kept.
-    views: Arc<RwLock<BTreeMap<RelationIdentity, uqa_planner::QueryPlan>>>,
-    /// Registered secondary indexes from `CREATE INDEX`.
-    catalog_indexes: Arc<RwLock<BTreeMap<String, CatalogIndexRow>>>,
-    /// Durable schema catalog. `public` is an ordinary, always-present
-    /// catalog object; qualified relation creation validates against this set.
-    schemas: Arc<RwLock<std::collections::BTreeSet<String>>>,
-    /// Resolution order for unqualified table names. Mirrors the canonical UQA implementation's
-    /// `Engine._tables._search_path`. Defaults to `["public"]`.
-    search_path: RwLock<Vec<String>>,
-    /// Session-scoped runtime parameters. Anything assigned via SET
-    /// lands here so SHOW can echo it back; `DISCARD ALL` clears the
-    /// map. Mirrors the canonical UQA implementation's `Engine._session_vars`.
-    session_vars: RwLock<BTreeMap<String, String>>,
-    /// Logical-session PRNG state used by SQL `random()` / `setseed()`.
-    /// It is deliberately not shared by sibling `SQLite` sessions.
-    random_state: parking_lot::Mutex<u64>,
-    /// Pre-built RPQ path indexes keyed by `<graph>::<name>`. Each
-    /// entry materialises a fixed set of label sequences so RPQ can
-    /// short-circuit NFA simulation when the expression matches.
-    path_indexes: Arc<RwLock<BTreeMap<String, uqa_graph::PathIndex>>>,
-    /// Open transaction stack. `BEGIN` pushes a new frame, `COMMIT`
-    /// / `ROLLBACK` pop one, savepoint statements update the top
-    /// frame's savepoint set.
-    tx_stack: parking_lot::Mutex<Vec<TransactionFrame>>,
-    /// Per-engine cancellation token. Operators cloned through
-    /// [`Engine::cancellation_token`] check the flag at chunk
-    /// boundaries; calling [`Engine::cancel`] from any thread tears
-    /// every in-flight query down with `SQLError::Cancelled`.
-    cancel: uqa_core::CancellationToken,
-    /// Named sequences. Mirrors `_engine._sequences` in the UQA implementation
-    /// reference. Each entry tracks `(start, increment, current)`.
-    sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
-    /// Last sequence value observed by this logical SQL session. Durable
-    /// sequence definitions and allocation state live in `sequences` and the
-    /// catalog; `currval` must never leak a sibling session's allocation.
-    sequence_currvals: RwLock<BTreeMap<RelationIdentity, i64>>,
-    /// Prepared unified execution plans. Mirrors `_engine._prepared` while
-    /// ensuring EXECUTE cannot re-enter an AST-only dispatch path.
-    prepared: RwLock<BTreeMap<String, PreparedStatementPlan>>,
-    /// Parsed single statements and their lowered logical plans, keyed by SQL
-    /// text. In-memory read-only statements also retain the optimized plan;
-    /// persistent statements replan after acquiring their storage snapshot.
-    sql_statement_cache: RwLock<SQLStatementCache>,
-    /// Named analyzers from `CREATE ANALYZER`. Stores the config
-    /// JSON string for `list_analyzers` introspection. Mirrors
-    /// `_engine.create_analyzer` / `drop_analyzer`.
-    named_analyzers: Arc<RwLock<BTreeMap<String, String>>>,
-    /// Per-(table, field) analyzer assignments from
-    /// `set_table_analyzer`. Stores `(analyzer_name, phase)` so the
-    /// FTS pipeline can pick up index-time vs query-time analyzers.
-    table_field_analyzers: Arc<RwLock<TableFieldAnalyzerRegistry>>,
-    /// `CREATE SERVER` registry. Keyed by server name; the value is
-    /// the FDW handler descriptor.
-    foreign_servers: Arc<RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>>,
-    /// `CREATE FOREIGN TABLE` registry. Keyed by table name.
-    foreign_tables: Arc<RwLock<BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>>>,
-    /// Row payloads for `memory_fdw` foreign tables. This keeps the
-    /// reference FDW executable without pretending that memory rows are
-    /// part of the persistent catalog.
-    foreign_memory_tables: Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>>>,
-    /// Engine-local Rust scalar SQL functions. Rust API registrations are
-    /// runtime configuration, not SQL-catalog state, and deliberately do not
-    /// participate in SQL transaction/savepoint rollback.
-    sql_scalar_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLScalarFunction>>>>,
-    /// Engine-local Rust table SQL functions (non-transactional runtime
-    /// configuration, shared by sibling sessions).
-    sql_table_functions: Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>>,
-    /// Engine-local Rust aggregate SQL functions (non-transactional runtime
-    /// configuration, shared by sibling sessions).
-    sql_aggregate_functions:
-        Arc<RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>>,
-    /// User-defined SQL / PL/pgSQL routines from `CREATE FUNCTION` /
-    /// `CREATE PROCEDURE`, keyed by canonical qualified `schema.name`.
-    /// Each entry holds the parameter-type overload set for that name.
-    /// Definitions persist to catalog metadata; compiled bodies are rebuilt
-    /// on restore.
-    sql_user_functions:
-        Arc<RwLock<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>>,
-    /// `RAISE NOTICE` / `WARNING` / ... sink: `(level, message)`
-    /// pairs in emission order, drained by [`Engine::take_sql_notices`].
-    sql_notices: parking_lot::Mutex<Vec<(String, String)>>,
-    /// Nesting cap for user-defined routine calls. This Rust runtime setting is
-    /// intentionally outside SQL transaction rollback.
-    sql_function_depth_limit: std::sync::atomic::AtomicUsize,
+    storage: StorageContext,
+    durable: DurableCatalogState,
+    session: SessionContext,
+    extensions: RuntimeExtensions,
+    epochs: EpochCoordinator,
+    runtime: QueryRuntime,
 }
 
 #[derive(Clone, Default)]
@@ -478,20 +349,8 @@ struct SessionStateSnapshot {
 #[derive(Clone)]
 struct EngineDataSnapshot {
     tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
-    graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
-    models: BTreeMap<String, DeepModel>,
-    scoring_params: BTreeMap<String, String>,
-    views: BTreeMap<RelationIdentity, uqa_planner::QueryPlan>,
-    sequences: BTreeMap<RelationIdentity, SequenceState>,
-    catalog_indexes: BTreeMap<String, CatalogIndexRow>,
-    schemas: std::collections::BTreeSet<String>,
-    path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
-    named_analyzers: BTreeMap<String, String>,
-    table_field_analyzers: TableFieldAnalyzerRegistry,
-    foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
-    foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
+    durable: DurableCatalogSnapshot,
     foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>,
-    sql_user_functions: BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>,
 }
 
 #[derive(Clone)]
@@ -676,59 +535,17 @@ impl Engine {
     /// In-memory engine. State lives only as long as this `Engine`.
     pub fn new() -> Self {
         Self {
-            statement_gate: parking_lot::ReentrantMutex::new(()),
-            tables: RwLock::new(BTreeMap::new()),
-            catalog: None,
-            backend: None,
-            sqlite_session: None,
-            seen_sqlite_data_version: std::sync::atomic::AtomicU64::new(0),
-            external_commit_refresh: parking_lot::Mutex::new(()),
-            table_catalog_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_table_catalog_epoch: std::sync::atomic::AtomicU64::new(1),
-            table_catalog_dirty: AtomicBool::new(false),
-            table_catalog_refresh: parking_lot::Mutex::new(()),
-            table_data_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_table_data_epoch: std::sync::atomic::AtomicU64::new(1),
-            table_data_dirty: AtomicBool::new(false),
-            table_data_refresh: parking_lot::Mutex::new(()),
-            catalog_registry_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-            seen_catalog_registry_epoch: std::sync::atomic::AtomicU64::new(1),
-            catalog_registry_dirty: AtomicBool::new(false),
-            catalog_registry_refresh: parking_lot::Mutex::new(()),
-            graphs: Arc::new(RwLock::new(BTreeMap::new())),
-            models: RwLock::new(BTreeMap::new()),
-            scoring_params: RwLock::new(BTreeMap::new()),
-            views: Arc::new(RwLock::new(BTreeMap::new())),
-            catalog_indexes: Arc::new(RwLock::new(BTreeMap::new())),
-            schemas: Arc::new(RwLock::new(std::collections::BTreeSet::from([
-                "public".to_string()
-            ]))),
-            search_path: RwLock::new(vec!["public".to_string()]),
-            session_vars: RwLock::new(BTreeMap::new()),
-            random_state: parking_lot::Mutex::new(initial_random_state()),
-            path_indexes: Arc::new(RwLock::new(BTreeMap::new())),
-            tx_stack: parking_lot::Mutex::new(Vec::new()),
-            cancel: uqa_core::CancellationToken::new(),
-            sequences: RwLock::new(BTreeMap::new()),
-            sequence_currvals: RwLock::new(BTreeMap::new()),
-            prepared: RwLock::new(BTreeMap::new()),
-            sql_statement_cache: RwLock::new(SQLStatementCache::default()),
-            named_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
-            table_field_analyzers: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_servers: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_scalar_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_table_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_aggregate_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_user_functions: Arc::new(RwLock::new(BTreeMap::new())),
-            sql_notices: parking_lot::Mutex::new(Vec::new()),
-            sql_function_depth_limit: std::sync::atomic::AtomicUsize::new(SQL_FUNCTION_DEPTH_LIMIT),
+            storage: StorageContext::memory(),
+            durable: DurableCatalogState::new(),
+            session: SessionContext::new(initial_random_state()),
+            extensions: RuntimeExtensions::new(),
+            epochs: EpochCoordinator::new(),
+            runtime: QueryRuntime::new(SQL_FUNCTION_DEPTH_LIMIT),
         }
     }
 
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
-        self.sql_statement_cache.read().get(sql)
+        self.session.state.read().sql_statement_cache.get(sql)
     }
 
     pub(crate) fn cache_sql_statement(
@@ -737,8 +554,10 @@ impl Engine {
         statement: Arc<uqa_sql::ast::Statement>,
         logical_plan: Arc<uqa_planner::UnifiedPlan>,
     ) {
-        self.sql_statement_cache
+        self.session
+            .state
             .write()
+            .sql_statement_cache
             .insert(sql, statement, logical_plan);
     }
 
@@ -747,8 +566,10 @@ impl Engine {
         sql: &str,
         optimized_plan: Arc<uqa_planner::UnifiedPlan>,
     ) {
-        self.sql_statement_cache
+        self.session
+            .state
             .write()
+            .sql_statement_cache
             .set_optimized(sql, optimized_plan);
     }
 
@@ -759,7 +580,7 @@ impl Engine {
     }
 
     pub(crate) fn clear_sql_statement_cache(&self) {
-        self.sql_statement_cache.write().clear();
+        self.session.state.write().sql_statement_cache.clear();
     }
 
     // -----------------------------------------------------------------

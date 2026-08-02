@@ -28,8 +28,8 @@ impl Engine {
     fn save_model_inner(&self, name: &str, model: &DeepModel) -> Result<(), SQLError> {
         let json = serde_json::to_string(model)
             .map_err(|e| SQLError::Internal(format!("model serialise: {e}")))?;
-        let mut models = self.models.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut models = self.durable.models.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_model(name, &json)
                 .map_err(|e| SQLError::Internal(format!("catalog save_model: {e}")))?;
@@ -41,8 +41,8 @@ impl Engine {
     }
 
     pub fn load_model(&self, name: &str) -> Result<Option<DeepModel>, SQLError> {
-        let Some(catalog) = self.catalog.as_ref() else {
-            return Ok(self.models.read().get(name).cloned());
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return Ok(self.durable.models.read().get(name).cloned());
         };
         let json = catalog
             .load_model(name)
@@ -52,7 +52,7 @@ impl Engine {
             .map(serde_json::from_str::<DeepModel>)
             .transpose()
             .map_err(|err| SQLError::Internal(format!("catalog model decode: {err}")))?;
-        let mut cache = self.models.write();
+        let mut cache = self.durable.models.write();
         match model.as_ref() {
             Some(model) => {
                 cache.insert(name.to_string(), model.clone());
@@ -72,8 +72,8 @@ impl Engine {
         if self.load_model(name)?.is_none() {
             return Ok(false);
         }
-        let mut models = self.models.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut models = self.durable.models.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_model(name)
                 .map_err(|err| SQLError::Internal(format!("catalog drop_model: {err}")))?;
@@ -139,8 +139,8 @@ impl Engine {
         name: &str,
         params_json: &str,
     ) -> Result<(), SQLError> {
-        let mut scoring_params = self.scoring_params.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut scoring_params = self.durable.scoring_params.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_scoring_params(name, params_json)
                 .map_err(|e| SQLError::Internal(format!("catalog save_scoring_params: {e}")))?;
@@ -155,13 +155,13 @@ impl Engine {
     /// back to the in-memory cache when the engine is not catalog-
     /// backed. Mirrors the canonical UQA implementation's `Engine.load_scoring_params`.
     pub fn load_scoring_params(&self, name: &str) -> Result<Option<String>, SQLError> {
-        let Some(catalog) = self.catalog.as_ref() else {
-            return Ok(self.scoring_params.read().get(name).cloned());
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return Ok(self.durable.scoring_params.read().get(name).cloned());
         };
         let value = catalog
             .load_scoring_params(name)
             .map_err(|err| SQLError::Internal(format!("catalog load_scoring_params: {err}")))?;
-        let mut cache = self.scoring_params.write();
+        let mut cache = self.durable.scoring_params.write();
         match value.as_ref() {
             Some(json) => {
                 cache.insert(name.to_string(), json.clone());
@@ -184,16 +184,17 @@ impl Engine {
     /// Snapshot every persisted `(name, params_json)` pair. Mirrors
     /// the canonical UQA implementation's `Engine.load_all_scoring_params`.
     pub fn load_all_scoring_params(&self) -> Result<Vec<(String, String)>, SQLError> {
-        let mut out = if let Some(catalog) = self.catalog.as_ref() {
+        let mut out = if let Some(catalog) = self.storage.catalog.as_ref() {
             let rows = catalog.load_all_scoring_params().map_err(|err| {
                 SQLError::Internal(format!("catalog load_all_scoring_params: {err}"))
             })?;
-            let mut cache = self.scoring_params.write();
+            let mut cache = self.durable.scoring_params.write();
             cache.clear();
             cache.extend(rows.iter().cloned());
             rows
         } else {
-            self.scoring_params
+            self.durable
+                .scoring_params
                 .read()
                 .iter()
                 .map(|(name, json)| (name.clone(), json.clone()))
@@ -248,8 +249,8 @@ impl Engine {
         if self.load_scoring_params(name)?.is_none() {
             return Ok(false);
         }
-        let mut scoring_params = self.scoring_params.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut scoring_params = self.durable.scoring_params.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_scoring_params(name)
                 .map_err(|err| SQLError::Internal(format!("catalog drop_scoring_params: {err}")))?;

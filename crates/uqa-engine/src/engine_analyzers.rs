@@ -19,7 +19,7 @@ impl Engine {
         if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
             return Ok(analyzer);
         }
-        let Some(config_json) = self.named_analyzers.read().get(name).cloned() else {
+        let Some(config_json) = self.durable.named_analyzers.read().get(name).cloned() else {
             return Err(format!("analyzer `{name}` is not registered"));
         };
         parse_analyzer_config(name, &config_json)
@@ -43,8 +43,8 @@ impl Engine {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
         parse_analyzer_config(name, config_json)?;
-        let mut analyzers = self.named_analyzers.write();
-        if let Some(catalog) = self.catalog.as_ref() {
+        let mut analyzers = self.durable.named_analyzers.write();
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_analyzer(name, config_json)
                 .map_err(|err| format!("persist analyzer `{name}`: {err}"))?;
@@ -63,6 +63,7 @@ impl Engine {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
         if self
+            .durable
             .table_field_analyzers
             .read()
             .values()
@@ -72,11 +73,11 @@ impl Engine {
                 "analyzer `{name}` is still assigned to a table field"
             ));
         }
-        let mut analyzers = self.named_analyzers.write();
+        let mut analyzers = self.durable.named_analyzers.write();
         if !analyzers.contains_key(name) {
             return Ok(false);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_analyzer(name)
                 .map_err(|err| format!("drop analyzer `{name}`: {err}"))?;
@@ -92,7 +93,13 @@ impl Engine {
     pub fn list_named_analyzers(&self) -> Result<Vec<String>, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
-        let mut names: Vec<String> = self.named_analyzers.read().keys().cloned().collect();
+        let mut names: Vec<String> = self
+            .durable
+            .named_analyzers
+            .read()
+            .keys()
+            .cloned()
+            .collect();
         names.sort();
         Ok(names)
     }
@@ -155,7 +162,7 @@ impl Engine {
                 ));
             }
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             if let Err(err) =
                 catalog.replace_table_field_analyzer(&table_name, field, &phase_name, analyzer_name)
             {
@@ -169,7 +176,7 @@ impl Engine {
                 ));
             }
         }
-        self.table_field_analyzers.write().insert(
+        self.durable.table_field_analyzers.write().insert(
             (table_name, field.to_string()),
             (analyzer_name.to_string(), phase_name),
         );
@@ -264,6 +271,7 @@ impl Engine {
             return Ok(None);
         };
         Ok(self
+            .durable
             .table_field_analyzers
             .read()
             .get(&(table, field.to_string()))

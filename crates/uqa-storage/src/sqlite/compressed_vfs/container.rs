@@ -7,23 +7,34 @@
 //! Append-only compressed-container lifecycle, chunk cache, and compaction.
 
 use super::{
-    allocate_payload, build_entry, build_header, cipher_from_key, compress_chunk, decompress_chunk,
-    fill_random, fs, invalid_data, parse_entry, parse_header, usize_to_u64, validate_chunk_entry,
-    Aead, BTreeMap, BTreeSet, ChunkEntry, ContainerFile, File, OpenOptions, OpenOptionsEntry,
-    PathBuf, Payload, Read, Seek, SeekFrom, Write, XChaCha20Poly1305, XNonce, CHUNK_COMMIT,
-    CHUNK_COMPRESSED, CHUNK_ENCRYPTED, COMMIT_CHUNK_ID, ENTRY_SIZE, FLAG_ENCRYPTED, HEADER_SIZE,
-    MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES, NONCE_LEN, SALT_LEN,
+    allocate_payload, build_entry, build_header, chunk_aad, chunk_payload_tag,
+    commit_authentication_tag, compress_chunk, decompress_chunk, fill_random, fs, invalid_data,
+    keys_from_key, parse_header, scan_committed_records, usize_to_u64,
+    verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap, BTreeSet, ChunkEntry,
+    ContainerFile, File, HeaderMetadata, OpenOptions, OpenOptionsEntry, PathBuf, Payload, Read,
+    SQLiteCompressedContainerAnchor, Seek, SeekFrom, Write, XNonce, AEAD_TAG_LEN, AUTH_TAG_LEN,
+    CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, COMMIT_CHUNK_ID,
+    ENTRY_SIZE, FILE_ID_LEN, FLAG_ENCRYPTED, HEADER_SIZE, NONCE_LEN, SALT_LEN,
 };
 
 impl ContainerFile {
     pub(super) fn open(path: PathBuf, options: OpenOptionsEntry) -> std::io::Result<Self> {
         if path.exists() && path.metadata()?.len() > 0 {
-            return Self::load(path, options.key);
+            return Self::load(path, options.key.as_deref());
         }
+        let OpenOptionsEntry {
+            compression, key, ..
+        } = options;
         let mut salt = [0_u8; SALT_LEN];
-        if options.key.is_some() {
+        if key.is_some() {
             fill_random(&mut salt)?;
         }
+        let mut file_id = [0_u8; FILE_ID_LEN];
+        fill_random(&mut file_id)?;
+        let keys = key
+            .as_deref()
+            .map(|key| keys_from_key(key, &salt))
+            .transpose()?;
         Ok(Self {
             path,
             logical_len: 0,
@@ -31,102 +42,78 @@ impl ContainerFile {
             chunks: BTreeMap::new(),
             cache: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
-            compression: options.compression,
-            key: options.key,
+            compression,
+            keys,
             salt,
+            file_id,
             generation: 0,
+            state_tag: [0_u8; AUTH_TAG_LEN],
             dirty_header: false,
         })
     }
 
-    pub(super) fn load(path: PathBuf, key: Option<String>) -> std::io::Result<Self> {
+    pub(super) fn load(path: PathBuf, key: Option<&str>) -> std::io::Result<Self> {
         let mut file = File::open(&path)?;
         let mut header_bytes = [0_u8; HEADER_SIZE];
         file.read_exact(&mut header_bytes)?;
         let header = parse_header(&header_bytes)?;
         let chunk_size = header.compression.chunk_size().map_err(invalid_data)?;
-        let encrypted = header.flags & FLAG_ENCRYPTED != 0;
-        if encrypted && key.is_none() {
-            return Err(invalid_data(
-                "compressed container requires an encryption key",
-            ));
-        }
-        let file_len = file.metadata()?.len();
-        let mut committed_generation = header.generation;
-        let mut committed_logical_len = header.logical_len;
-        let mut committed_chunk_count = header.chunk_count;
-        let entry_size = usize_to_u64(ENTRY_SIZE, "container entry size")?;
-        let mut record_offset = usize_to_u64(HEADER_SIZE, "container header size")?;
-        let mut entries = Vec::new();
-        loop {
-            let entry_end = record_offset
-                .checked_add(entry_size)
-                .ok_or_else(|| invalid_data("container entry offset overflow"))?;
-            if entry_end > file_len {
-                break;
-            }
-            file.seek(SeekFrom::Start(record_offset))?;
-            let mut entry_bytes = [0_u8; ENTRY_SIZE];
-            file.read_exact(&mut entry_bytes)?;
-            let entry = parse_entry(&entry_bytes)?;
-            if entry.flags & CHUNK_COMMIT != 0 {
-                if entry.chunk_id != COMMIT_CHUNK_ID
-                    || entry.flags != CHUNK_COMMIT
-                    || entry.stored_len != 0
-                    || entry.allocated_len != 0
-                {
-                    return Err(invalid_data("invalid compressed container commit record"));
-                }
-                if entry.generation > committed_generation {
-                    committed_generation = entry.generation;
-                    committed_logical_len = usize::try_from(entry.offset)
-                        .map_err(|_| invalid_data("commit logical length"))?;
-                    committed_chunk_count = entry.raw_len;
-                }
-                record_offset = entry_end;
-                continue;
-            }
-            validate_chunk_entry(&entry, chunk_size, encrypted)?;
-            let payload_offset = entry_end;
-            let allocated_len = usize_to_u64(entry.allocated_len, "chunk allocated length")?;
-            let payload_end = payload_offset
-                .checked_add(allocated_len)
-                .ok_or_else(|| invalid_data("chunk payload offset overflow"))?;
-            if payload_end > file_len {
-                break;
-            }
-            if entry.offset != payload_offset {
-                return Err(invalid_data("chunk payload offset mismatch"));
-            }
-            entries.push(entry);
-            record_offset = payload_end;
-        }
-        let expected_chunk_count = chunk_count_for(committed_logical_len, chunk_size);
-        if committed_chunk_count != expected_chunk_count {
-            return Err(invalid_data(
-                "compressed container commit chunk count mismatch",
-            ));
-        }
-        let committed_chunk_count = usize_to_u64(committed_chunk_count, "committed chunk count")?;
-        let mut chunks = BTreeMap::new();
-        for entry in entries {
-            if entry.generation <= committed_generation && entry.chunk_id < committed_chunk_count {
-                chunks.insert(entry.chunk_id, entry);
-            }
-        }
+        let keys = key
+            .map(|key| keys_from_key(key, &header.salt))
+            .transpose()?;
+        verify_header_authentication(
+            &header_bytes,
+            &header,
+            keys.as_ref().map(|keys| &keys.mac_key),
+        )?;
+        let committed = scan_committed_records(&mut file, &header, keys.as_ref(), chunk_size)?;
         Ok(Self {
             path,
-            logical_len: committed_logical_len,
-            append_offset: record_offset,
-            chunks,
+            logical_len: committed.logical_len,
+            append_offset: committed.end_offset,
+            chunks: committed.chunks,
             cache: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
             compression: header.compression,
-            key,
+            keys,
             salt: header.salt,
-            generation: committed_generation,
+            file_id: header.file_id,
+            generation: committed.generation,
+            state_tag: committed.state_tag,
             dirty_header: false,
         })
+    }
+
+    pub(super) fn authenticated_anchor(&self) -> SQLiteCompressedContainerAnchor {
+        SQLiteCompressedContainerAnchor {
+            database_id: self.file_id,
+            generation: self.generation,
+            state_tag: self.state_tag,
+        }
+    }
+
+    pub(super) fn require_trusted_anchor(
+        &self,
+        trusted: SQLiteCompressedContainerAnchor,
+    ) -> std::io::Result<()> {
+        let current = self.authenticated_anchor();
+        if current.database_id != trusted.database_id {
+            return Err(invalid_data(
+                "compressed container identity does not match the trusted anchor",
+            ));
+        }
+        if current.generation != trusted.generation {
+            return Err(invalid_data(format!(
+                "compressed container generation {} does not match trusted generation {}",
+                current.generation, trusted.generation
+            )));
+        }
+        if current.state_tag != trusted.state_tag {
+            return Err(invalid_data(
+                "compressed container state does not match the trusted anchor",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn flush(&mut self) -> std::io::Result<()> {
@@ -136,19 +123,11 @@ impl ContainerFile {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if self.key.is_some() && self.salt == [0_u8; SALT_LEN] {
-            fill_random(&mut self.salt)?;
-        }
         let next_generation = self
             .generation
             .checked_add(1)
             .ok_or_else(|| invalid_data("container generation overflow"))?;
-        let cipher = self
-            .key
-            .as_deref()
-            .map(|key| cipher_from_key(key, &self.salt))
-            .transpose()?;
-        let encrypted = cipher.is_some();
+        let encrypted = self.keys.is_some();
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -167,10 +146,10 @@ impl ContainerFile {
             .collect();
         let mut append_offset = self.append_offset;
         let entry_size = usize_to_u64(ENTRY_SIZE, "container entry size")?;
-        let mut pending_entries = Vec::with_capacity(dirty_chunks.len());
+        let mut pending_records = Vec::with_capacity(dirty_chunks.len());
         for chunk_id in dirty_chunks {
             let (entry, stored) =
-                self.encode_dirty_chunk(chunk_id, append_offset, next_generation, cipher.as_ref())?;
+                self.encode_dirty_chunk(chunk_id, append_offset, next_generation)?;
             file.write_all(&build_entry(&entry)?)?;
             file.write_all(&stored)?;
             let allocated_len = usize_to_u64(entry.allocated_len, "chunk allocated length")?;
@@ -178,25 +157,59 @@ impl ContainerFile {
                 .checked_add(entry_size)
                 .and_then(|offset| offset.checked_add(allocated_len))
                 .ok_or_else(|| invalid_data("container append offset overflow"))?;
-            pending_entries.push(entry);
+            let payload_tag = if encrypted {
+                chunk_payload_tag(&stored)?
+            } else {
+                [0_u8; AEAD_TAG_LEN]
+            };
+            pending_records.push(AuthenticatedChunkRecord { entry, payload_tag });
         }
-        let commit = build_commit_entry(next_generation, self.logical_len, self.chunk_count()?)?;
+        let commit_offset = append_offset;
+        let commit = build_commit_entry(
+            next_generation,
+            self.logical_len,
+            self.chunk_count()?,
+            encrypted,
+        )?;
         file.write_all(&build_entry(&commit)?)?;
+        let next_state_tag = if let Some(keys) = &self.keys {
+            let tag = commit_authentication_tag(
+                &keys.mac_key,
+                &self.file_id,
+                commit_offset,
+                &commit,
+                &self.state_tag,
+                &pending_records,
+            )?;
+            file.write_all(&tag)?;
+            tag
+        } else {
+            [0_u8; AUTH_TAG_LEN]
+        };
+        let commit_payload_len = usize_to_u64(
+            commit.allocated_len,
+            "container commit authentication tag length",
+        )?;
         append_offset = append_offset
             .checked_add(entry_size)
+            .and_then(|offset| offset.checked_add(commit_payload_len))
             .ok_or_else(|| invalid_data("container commit offset overflow"))?;
         file.flush()?;
         file.sync_all()?;
         self.generation = next_generation;
+        self.state_tag = next_state_tag;
         self.append_offset = append_offset;
-        drop(file);
-        for entry in pending_entries {
-            self.chunks.insert(entry.chunk_id, entry);
+        for record in pending_records {
+            self.chunks.insert(record.entry.chunk_id, record.entry);
         }
         self.chunks
             .retain(|chunk_id, _| *chunk_id < active_chunk_count);
         self.dirty_chunks.clear();
         self.dirty_header = false;
+        self.write_current_header(&mut file)?;
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
         self.compact_if_needed()?;
         Ok(())
     }
@@ -219,13 +232,49 @@ impl ContainerFile {
             self.logical_len
         };
         file.write_all(&build_header(
-            if encrypted { FLAG_ENCRYPTED } else { 0 },
-            self.compression,
-            header_chunk_count,
-            header_logical_len,
-            self.generation,
-            self.salt,
+            &self.header_metadata(
+                if encrypted { FLAG_ENCRYPTED } else { 0 },
+                header_chunk_count,
+                header_logical_len,
+                self.generation,
+            ),
+            self.keys.as_ref().map(|keys| &keys.mac_key),
         )?)
+    }
+
+    fn write_current_header(&self, file: &mut File) -> std::io::Result<()> {
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&build_header(
+            &self.header_metadata(
+                if self.keys.is_some() {
+                    FLAG_ENCRYPTED
+                } else {
+                    0
+                },
+                self.chunk_count()?,
+                self.logical_len,
+                self.generation,
+            ),
+            self.keys.as_ref().map(|keys| &keys.mac_key),
+        )?)
+    }
+
+    pub(super) fn header_metadata(
+        &self,
+        flags: u32,
+        chunk_count: usize,
+        logical_len: usize,
+        generation: u64,
+    ) -> HeaderMetadata {
+        HeaderMetadata {
+            flags,
+            compression: self.compression,
+            chunk_count,
+            logical_len,
+            generation,
+            salt: self.salt,
+            file_id: self.file_id,
+        }
     }
 
     pub(super) fn encode_dirty_chunk(
@@ -233,7 +282,6 @@ impl ContainerFile {
         chunk_id: u64,
         append_offset: u64,
         generation: u64,
-        cipher: Option<&XChaCha20Poly1305>,
     ) -> std::io::Result<(ChunkEntry, Vec<u8>)> {
         let raw = self.load_chunk(chunk_id)?.clone();
         let compressed = compress_chunk(self.compression, &raw)?;
@@ -245,36 +293,48 @@ impl ContainerFile {
             raw.clone()
         };
         let mut nonce = [0_u8; NONCE_LEN];
-        if let Some(cipher) = cipher {
+        if self.keys.is_some() {
             flags |= CHUNK_ENCRYPTED;
             fill_random(&mut nonce)?;
-            stored = cipher
+        }
+        let stored_len = stored
+            .len()
+            .checked_add(if self.keys.is_some() {
+                super::AEAD_TAG_LEN
+            } else {
+                0
+            })
+            .ok_or_else(|| invalid_data("encrypted chunk length overflow"))?;
+        let entry = ChunkEntry {
+            chunk_id,
+            offset: append_offset
+                .checked_add(usize_to_u64(ENTRY_SIZE, "container entry size")?)
+                .ok_or_else(|| invalid_data("chunk payload offset overflow"))?,
+            stored_len,
+            raw_len: raw.len(),
+            flags,
+            crc32: crc32fast::hash(&raw),
+            nonce,
+            generation,
+            allocated_len: stored_len,
+        };
+        if let Some(keys) = &self.keys {
+            let aad = chunk_aad(&self.file_id, append_offset, &entry)?;
+            stored = keys
+                .cipher
                 .encrypt(
                     XNonce::from_slice(&nonce),
                     Payload {
                         msg: &stored,
-                        aad: &chunk_id.to_le_bytes(),
+                        aad: &aad,
                     },
                 )
                 .map_err(|_| invalid_data("chunk encryption failed"))?;
         }
-        let stored_len = stored.len();
-        Ok((
-            ChunkEntry {
-                chunk_id,
-                offset: append_offset
-                    .checked_add(usize_to_u64(ENTRY_SIZE, "container entry size")?)
-                    .ok_or_else(|| invalid_data("chunk payload offset overflow"))?,
-                stored_len,
-                raw_len: raw.len(),
-                flags,
-                crc32: crc32fast::hash(&raw),
-                nonce,
-                generation,
-                allocated_len: stored_len,
-            },
-            stored,
-        ))
+        if stored.len() != stored_len {
+            return Err(invalid_data("encrypted chunk length mismatch"));
+        }
+        Ok((entry, stored))
     }
 
     pub(super) fn read_at(&mut self, offset: usize, dest: &mut [u8]) -> std::io::Result<usize> {
@@ -391,21 +451,25 @@ impl ContainerFile {
         let mut payload = allocate_payload(entry.stored_len, "chunk stored payload")?;
         file.read_exact(&mut payload)?;
         if entry.flags & CHUNK_ENCRYPTED != 0 {
-            let cipher = cipher_from_key(
-                self.key
-                    .as_deref()
-                    .ok_or_else(|| invalid_data("encrypted chunk without key"))?,
-                &self.salt,
-            )?;
-            payload = cipher
+            let keys = self
+                .keys
+                .as_ref()
+                .ok_or_else(|| invalid_data("encrypted chunk without key"))?;
+            let record_offset = entry
+                .offset
+                .checked_sub(usize_to_u64(ENTRY_SIZE, "container entry size")?)
+                .ok_or_else(|| invalid_data("chunk record offset underflow"))?;
+            let aad = chunk_aad(&self.file_id, record_offset, entry)?;
+            payload = keys
+                .cipher
                 .decrypt(
                     XNonce::from_slice(&entry.nonce),
                     Payload {
                         msg: &payload,
-                        aad: &entry.chunk_id.to_le_bytes(),
+                        aad: &aad,
                     },
                 )
-                .map_err(|_| invalid_data("invalid compressed container encryption key"))?;
+                .map_err(|_| invalid_data("compressed container chunk authentication failed"))?;
         }
         let mut raw = if entry.flags & CHUNK_COMPRESSED != 0 {
             decompress_chunk(self.compression.codec, &payload, entry.raw_len)?
@@ -440,90 +504,6 @@ impl ContainerFile {
             usize::try_from(chunk_id).map_err(|_| invalid_data("chunk id exceeds usize"))?,
         ))
     }
-
-    pub(super) fn active_record_bytes(&self) -> std::io::Result<u64> {
-        let chunk_count = usize_to_u64(self.chunk_count()?, "active chunk count")?;
-        let entry_size = usize_to_u64(ENTRY_SIZE, "container entry size")?;
-        let mut total = 0_u64;
-        for entry in self
-            .chunks
-            .iter()
-            .filter(|(chunk_id, _)| **chunk_id < chunk_count)
-            .map(|(_, entry)| entry)
-        {
-            let allocated_len = usize_to_u64(entry.allocated_len, "chunk allocated length")?;
-            total = total
-                .checked_add(entry_size)
-                .and_then(|value| value.checked_add(allocated_len))
-                .ok_or_else(|| invalid_data("active container byte count overflow"))?;
-        }
-        Ok(total)
-    }
-
-    pub(super) fn compact_if_needed(&mut self) -> std::io::Result<()> {
-        let active_record_bytes = self.active_record_bytes()?;
-        let compact_len = usize_to_u64(HEADER_SIZE, "container header size")?
-            .checked_add(active_record_bytes)
-            .ok_or_else(|| invalid_data("compacted container length overflow"))?;
-        let stale_bytes = self.append_offset.saturating_sub(compact_len);
-        let compact_threshold = (active_record_bytes.saturating_mul(2))
-            .clamp(MIN_COMPACT_STALE_BYTES, MAX_COMPACT_STALE_BYTES);
-        if stale_bytes <= compact_threshold {
-            return Ok(());
-        }
-        let tmp_path = self.path.with_extension(format!(
-            "{}.compact.tmp",
-            self.path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or("uqac")
-        ));
-        let mut source = File::open(&self.path)?;
-        let mut tmp = File::create(&tmp_path)?;
-        tmp.write_all(&build_header(
-            if self.key.is_some() {
-                FLAG_ENCRYPTED
-            } else {
-                0
-            },
-            self.compression,
-            self.chunk_count()?,
-            self.logical_len,
-            self.generation,
-            self.salt,
-        )?)?;
-        let chunk_count = usize_to_u64(self.chunk_count()?, "active chunk count")?;
-        let entry_size = usize_to_u64(ENTRY_SIZE, "container entry size")?;
-        let mut append_offset = usize_to_u64(HEADER_SIZE, "container header size")?;
-        let mut compacted = BTreeMap::new();
-        for (&chunk_id, entry) in self.chunks.iter().filter(|(id, _)| **id < chunk_count) {
-            let mut payload = allocate_payload(entry.stored_len, "compacted chunk payload")?;
-            source.seek(SeekFrom::Start(entry.offset))?;
-            source.read_exact(&mut payload)?;
-            let mut compacted_entry = entry.clone();
-            compacted_entry.offset = append_offset
-                .checked_add(entry_size)
-                .ok_or_else(|| invalid_data("compacted payload offset overflow"))?;
-            compacted_entry.allocated_len = compacted_entry.stored_len;
-            tmp.write_all(&build_entry(&compacted_entry)?)?;
-            tmp.write_all(&payload)?;
-            append_offset = compacted_entry
-                .offset
-                .checked_add(usize_to_u64(
-                    compacted_entry.allocated_len,
-                    "compacted chunk allocated length",
-                )?)
-                .ok_or_else(|| invalid_data("compacted append offset overflow"))?;
-            compacted.insert(chunk_id, compacted_entry);
-        }
-        tmp.set_len(append_offset)?;
-        tmp.sync_all()?;
-        drop(tmp);
-        fs::rename(&tmp_path, &self.path)?;
-        self.append_offset = append_offset;
-        self.chunks = compacted;
-        Ok(())
-    }
 }
 
 pub(super) fn chunk_count_for(logical_len: usize, chunk_size: usize) -> usize {
@@ -545,20 +525,22 @@ fn expected_chunk_len_for(logical_len: usize, chunk_size: usize, chunk_id: usize
     logical_len - chunk_id * chunk_size
 }
 
-fn build_commit_entry(
+pub(super) fn build_commit_entry(
     generation: u64,
     logical_len: usize,
     chunk_count: usize,
+    encrypted: bool,
 ) -> std::io::Result<ChunkEntry> {
+    let authentication_len = if encrypted { AUTH_TAG_LEN } else { 0 };
     Ok(ChunkEntry {
         chunk_id: COMMIT_CHUNK_ID,
         offset: usize_to_u64(logical_len, "commit logical length")?,
-        stored_len: 0,
+        stored_len: authentication_len,
         raw_len: chunk_count,
-        flags: CHUNK_COMMIT,
+        flags: CHUNK_COMMIT | if encrypted { CHUNK_AUTHENTICATED } else { 0 },
         crc32: 0,
         nonce: [0_u8; NONCE_LEN],
         generation,
-        allocated_len: 0,
+        allocated_len: authentication_len,
     })
 }

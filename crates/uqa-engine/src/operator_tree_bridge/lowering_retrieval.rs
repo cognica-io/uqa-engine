@@ -6,6 +6,8 @@
 
 //! Text, vector, and staged-retrieval argument validation and lowering.
 
+mod fts;
+
 use super::{
     column_name, const_f64, const_string, const_usize, const_vector, eval_scalar, lower_function,
     named_arg_expr, BTreeSet, DriverResult, Engine, ExternalPriorMode, MultiStageCutoff,
@@ -251,13 +253,7 @@ pub(super) fn try_lower_fts_match(
     let query = const_string(&args[1], params).ok_or_else(|| {
         SQLError::TypeMismatch("fts_match.query must be a constant string".into())
     })?;
-    let tokenizer = |_field: Option<&str>, phrase: &str| {
-        phrase
-            .split_whitespace()
-            .map(str::to_ascii_lowercase)
-            .collect::<Vec<_>>()
-    };
-    let tree = uqa_sql::compile_fts_query_string(&query, default_field.as_deref(), &tokenizer)
+    let tree = fts::compile_query_string(&query, default_field.as_deref())
         .map_err(|error| SQLError::TypeMismatch(format!("fts_match.query: {error}")))?;
     Ok(prepare_fts_probability_tree(tree))
 }

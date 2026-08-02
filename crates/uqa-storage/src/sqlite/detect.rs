@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::sqlite::compressed_vfs::{FLAG_ENCRYPTED, HEADER_FLAGS_OFFSET, MAGIC};
+use crate::sqlite::compressed_vfs::{FLAG_ENCRYPTED, HEADER_FLAGS_OFFSET, LEGACY_MAGIC, MAGIC};
 
 /// First 16 bytes of every plaintext `SQLite` database file.
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
@@ -35,8 +35,9 @@ pub enum DatabaseFileFormat {
     Missing,
     /// A plaintext `SQLite` database (`SQLite format 3\0` magic).
     PlainSQLite,
-    /// A UQA compressed container (`UQACDB1\0` magic). `encrypted`
-    /// reflects the header flag: when set, opening requires a key.
+    /// A UQA compressed container (`UQACDB2\0`, or legacy `UQACDB1\0`,
+    /// magic). `encrypted` reflects the header flag: when set, opening
+    /// requires a key.
     CompressedContainer { encrypted: bool },
     /// No recognizable magic. Either a `SQLCipher`-encrypted database or
     /// not a database at all; the two cannot be told apart without
@@ -89,7 +90,7 @@ pub fn detect_database_file_format(path: &Path) -> std::io::Result<DatabaseFileF
     if &prefix == SQLITE_MAGIC {
         return Ok(DatabaseFileFormat::PlainSQLite);
     }
-    if &prefix[..MAGIC.len()] == MAGIC {
+    if &prefix[..MAGIC.len()] == MAGIC || &prefix[..LEGACY_MAGIC.len()] == LEGACY_MAGIC {
         let flags = u32::from_le_bytes([
             prefix[HEADER_FLAGS_OFFSET],
             prefix[HEADER_FLAGS_OFFSET + 1],
@@ -194,6 +195,22 @@ mod tests {
         }
         assert_eq!(
             detect_database_file_format(&encrypted).unwrap(),
+            DatabaseFileFormat::CompressedContainer { encrypted: true }
+        );
+    }
+
+    #[test]
+    fn legacy_compressed_header_is_classified_for_an_explicit_migration_error() {
+        let dir = temp_dir();
+        let path = dir.path().join("legacy-container.db");
+        let mut prefix = [0_u8; DETECT_PREFIX_LEN];
+        prefix[..LEGACY_MAGIC.len()].copy_from_slice(LEGACY_MAGIC);
+        prefix[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        prefix[HEADER_FLAGS_OFFSET..HEADER_FLAGS_OFFSET + 4]
+            .copy_from_slice(&FLAG_ENCRYPTED.to_le_bytes());
+        std::fs::write(&path, prefix).unwrap();
+        assert_eq!(
+            detect_database_file_format(&path).unwrap(),
             DatabaseFileFormat::CompressedContainer { encrypted: true }
         );
     }

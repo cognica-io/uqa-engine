@@ -18,7 +18,7 @@ impl Engine {
         // Step 1: register every named graph (the registry table is
         // authoritative for empty graphs).
         let names = catalog.load_named_graphs()?;
-        let mut graphs = self.graphs.write();
+        let mut graphs = self.durable.graphs.write();
         for name in &names {
             graphs.entry(name.clone()).or_default();
             if let Some(store) = graphs.get_mut(name) {

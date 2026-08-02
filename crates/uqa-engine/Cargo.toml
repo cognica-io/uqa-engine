@@ -109,5 +109,9 @@ harness = false
 name = "text_top_k"
 harness = false
 
+[[bench]]
+name = "analytical_comparison"
+harness = false
+
 [lints]
 workspace = true

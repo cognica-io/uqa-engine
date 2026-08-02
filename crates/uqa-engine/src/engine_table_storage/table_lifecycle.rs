@@ -161,20 +161,22 @@ impl Engine {
 
     pub(super) fn drop_table_state_inner(&self, name: &str) -> StorageBackendResult<()> {
         let relation = Self::resolved_relation_identity(name)?;
-        if !self.tables.read().contains_key(&relation) {
+        if !self.storage.tables.read().contains_key(&relation) {
             return Err(table_not_found(name));
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_table_and_data(name)?;
             self.note_table_catalog_changed();
         }
-        self.tables.write().remove(&relation);
+        self.storage.tables.write().remove(&relation);
         // Sweep every related per-table registry so catalog state
         // does not outlive the table.
-        self.table_field_analyzers
+        self.durable
+            .table_field_analyzers
             .write()
             .retain(|(t, _), _| t != name);
-        self.catalog_indexes
+        self.durable
+            .catalog_indexes
             .write()
             .retain(|_, row| row.table_name != name);
         Ok(())
@@ -249,6 +251,7 @@ impl Engine {
     pub fn table_names(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_table_catalog()?;
         Ok(self
+            .storage
             .tables
             .read()
             .keys()

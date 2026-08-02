@@ -8,18 +8,18 @@ use super::Engine;
 
 impl Engine {
     pub fn cancel(&self) {
-        self.cancel.cancel();
+        self.runtime.cancellation.cancel();
     }
 
     /// Reset the cancellation flag so subsequent queries run
     /// normally. Call between query batches when reusing the same
     /// engine for many cancellable executions.
     pub fn reset_cancellation(&self) {
-        self.cancel.reset();
+        self.runtime.cancellation.reset();
     }
 
     pub fn cancellation_token(&self) -> uqa_core::CancellationToken {
-        self.cancel.clone()
+        self.runtime.cancellation.clone()
     }
 
     /// compatibility alias for [`Engine::cancellation_token`].
@@ -28,6 +28,6 @@ impl Engine {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancel.is_cancelled()
+        self.runtime.cancellation.is_cancelled()
     }
 }

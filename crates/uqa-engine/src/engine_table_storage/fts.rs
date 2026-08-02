@@ -50,11 +50,11 @@ impl Engine {
                 .write()
                 .set_field_analyzer(&field, analyzer, AnalyzerPhase::Both)
                 .map_err(|e| format!("add_fts_field: {e}"))?;
-            self.table_field_analyzers.write().insert(
+            self.durable.table_field_analyzers.write().insert(
                 (table_name.clone(), field.clone()),
                 (analyzer_name.to_string(), "both".to_string()),
             );
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog
                     .replace_table_field_analyzer(&table_name, &field, "both", analyzer_name)
                     .map_err(|err| format!("persist FTS analyzer: {err}"))?;
@@ -111,14 +111,15 @@ impl Engine {
         Self::rebuild_fts_index(&t)
             .map_err(|err| format!("rebuild FTS index for `{table_name}`: {err}"))?;
 
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_table_field_analyzer_field(&table_name, field)
                 .map_err(|err| {
                     format!("drop persisted FTS analyzer `{table_name}`.`{field}`: {err}")
                 })?;
         }
-        self.table_field_analyzers
+        self.durable
+            .table_field_analyzers
             .write()
             .remove(&(table_name.clone(), field.to_string()));
         if self.is_persistent() {

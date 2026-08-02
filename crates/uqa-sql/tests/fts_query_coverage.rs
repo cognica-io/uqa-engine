@@ -6,15 +6,7 @@
 
 //! Lexer/parser coverage for `test_fts_match`.
 
-use uqa_operators::OperatorTree;
-use uqa_sql::{compile_fts_node, fts_tokenize, FTSNode, FTSParser, FTSTokenType};
-
-fn whitespace_tokenizer(_field: Option<&str>, phrase: &str) -> Vec<String> {
-    phrase
-        .split_whitespace()
-        .map(str::to_ascii_lowercase)
-        .collect()
-}
+use uqa_sql::{fts_tokenize, FTSNode, FTSParser, FTSTokenType};
 
 fn parse(query: &str) -> FTSNode {
     FTSParser::new(fts_tokenize(query).unwrap())
@@ -234,25 +226,5 @@ fn test_three_implicit_and_left_associative() {
     match parse("a b c") {
         FTSNode::And(left, _) => assert!(matches!(*left, FTSNode::And(_, _))),
         other => panic!("expected left-associative AND, got {other:?}"),
-    }
-}
-
-#[test]
-fn test_compile_mixed_text_vector_and_uses_robust_positive_evidence_pool() {
-    let ast = parse("body:search AND embedding:[0.1, 0.9, 0.0]");
-    let op = compile_fts_node(&ast, Some("_all"), &whitespace_tokenizer);
-    assert!(matches!(
-        op,
-        OperatorTree::RobustPositiveEvidencePool { .. }
-    ));
-}
-
-#[test]
-fn test_compile_all_field_resolves_to_none() {
-    let ast = parse("database");
-    let op = compile_fts_node(&ast, Some("_all"), &whitespace_tokenizer);
-    match op {
-        OperatorTree::Term { field, .. } => assert!(field.is_none()),
-        _ => panic!("expected term"),
     }
 }

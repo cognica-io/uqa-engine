@@ -23,23 +23,35 @@ impl Engine {
     fn transaction_dirty_state(&self) -> TransactionDirtyState {
         TransactionDirtyState {
             table_data: self
-                .table_data_dirty
+                .epochs
+                .table_data
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire),
             table_catalog: self
-                .table_catalog_dirty
+                .epochs
+                .table_catalog
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire),
             catalog_registry: self
-                .catalog_registry_dirty
+                .epochs
+                .catalog_registry
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire),
         }
     }
 
     fn restore_transaction_dirty_state(&self, state: TransactionDirtyState) {
-        self.table_data_dirty
+        self.epochs
+            .table_data
+            .dirty
             .store(state.table_data, std::sync::atomic::Ordering::Release);
-        self.table_catalog_dirty
+        self.epochs
+            .table_catalog
+            .dirty
             .store(state.table_catalog, std::sync::atomic::Ordering::Release);
-        self.catalog_registry_dirty
+        self.epochs
+            .catalog_registry
+            .dirty
             .store(state.catalog_registry, std::sync::atomic::Ordering::Release);
     }
 
@@ -87,7 +99,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         self.begin()?;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
@@ -122,8 +134,8 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        let _statement = self.statement_gate.lock();
-        if self.transaction_depth() != 0 || self.backend.is_none() {
+        let _statement = self.runtime.statement_gate.lock();
+        if self.transaction_depth() != 0 || self.storage.backend.is_none() {
             return f(self);
         }
         self.transaction(f)
@@ -141,8 +153,8 @@ impl Engine {
     where
         E: std::fmt::Display,
     {
-        let _statement = self.statement_gate.lock();
-        if self.transaction_depth() != 0 || self.backend.is_none() {
+        let _statement = self.runtime.statement_gate.lock();
+        if self.transaction_depth() != 0 || self.storage.backend.is_none() {
             return f(self);
         }
         self.begin().map_err(|error| {
@@ -181,7 +193,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             return f(self);
         }
@@ -218,7 +230,7 @@ impl Engine {
         &self,
         f: impl FnOnce(&Self) -> Result<R, String>,
     ) -> Result<R, String> {
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             return f(self);
         }
@@ -265,7 +277,7 @@ impl Engine {
     /// minus `COMMIT/ROLLBACK` count). Useful for assertions in tests
     /// and for status displays in the CLI.
     pub fn transaction_depth(&self) -> usize {
-        self.tx_stack.lock().len()
+        self.session.transactions.lock().len()
     }
 
     /// Tear down engine state cleanly. Rolls back any open transaction
@@ -275,7 +287,7 @@ impl Engine {
     /// exit, but this method exists for API compatibility
     /// reference and for explicit shutdown ordering.
     pub fn close(&self) -> Result<(), SQLError> {
-        let _statement = self.statement_gate.lock();
+        let _statement = self.runtime.statement_gate.lock();
         // Use the ordinary state machine for every frame. Clearing the stack
         // before asking SQLite to roll back loses the session snapshot and can
         // leave dirty flags/caches inconsistent when physical cleanup fails.
@@ -291,8 +303,8 @@ impl Engine {
     }
 
     pub fn run_transaction_statement(&self, tx: TransactionStmt) -> Result<(), SQLError> {
-        let _statement = self.statement_gate.lock();
-        let mut guard = self.tx_stack.lock();
+        let _statement = self.runtime.statement_gate.lock();
+        let mut guard = self.session.transactions.lock();
         match tx {
             TransactionStmt::Begin => self.begin_transaction_frame(&mut guard, false)?,
             TransactionStmt::Commit => self.commit_transaction_frame(&mut guard)?,
@@ -314,8 +326,8 @@ impl Engine {
         &self,
         read_only: bool,
     ) -> Result<(), SQLError> {
-        let _statement = self.statement_gate.lock();
-        let mut stack = self.tx_stack.lock();
+        let _statement = self.runtime.statement_gate.lock();
+        let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
             return Err(SQLError::Internal(
                 "implicit statement transaction started inside an explicit transaction".into(),
@@ -331,7 +343,7 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot) = if stack.is_empty() {
-            if let Some(backend) = self.backend.as_ref() {
+            if let Some(backend) = self.storage.backend.as_ref() {
                 if read_only {
                     backend
                         .begin_read_transaction()
@@ -362,7 +374,7 @@ impl Engine {
             }
         } else {
             let savepoint = format!("__uqa_nested_tx_{}", stack.len());
-            if let Some(backend) = self.backend.as_ref() {
+            if let Some(backend) = self.storage.backend.as_ref() {
                 backend
                     .savepoint(&savepoint)
                     .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
@@ -423,7 +435,7 @@ impl Engine {
         let storage_savepoint = frame.storage_savepoint.clone();
         let read_only = frame.read_only;
         if read_only && storage_savepoint.is_none() {
-            if let Some(connection) = self.sqlite_session.as_ref() {
+            if let Some(connection) = self.storage.sqlite_session.as_ref() {
                 let violation = match connection.transaction_has_written() {
                     Ok(false) => None,
                     Ok(true) => Some(SQLError::Internal(
@@ -443,7 +455,7 @@ impl Engine {
                 }
             }
         }
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             let commit_result = if let Some(savepoint) = storage_savepoint.as_ref() {
                 backend
                     .release_savepoint(savepoint)
@@ -463,19 +475,25 @@ impl Engine {
         }
         if storage_savepoint.is_none() {
             if self
-                .table_catalog_dirty
+                .epochs
+                .table_catalog
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire)
             {
                 self.publish_table_catalog_changes();
             }
             if self
-                .catalog_registry_dirty
+                .epochs
+                .catalog_registry
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire)
             {
                 self.publish_catalog_registry_changes();
             }
             if self
-                .table_data_dirty
+                .epochs
+                .table_data
+                .dirty
                 .load(std::sync::atomic::Ordering::Acquire)
             {
                 self.publish_table_data_changes();
@@ -503,7 +521,7 @@ impl Engine {
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         let mut cleanup_errors = Vec::new();
         if nested {
-            if let Some(backend) = self.backend.as_ref() {
+            if let Some(backend) = self.storage.backend.as_ref() {
                 if let Err(error) = backend.rollback_transaction() {
                     cleanup_errors.push(format!("storage rollback: {error}"));
                 }
@@ -516,7 +534,7 @@ impl Engine {
                 cleanup_errors.push(format!("memory restore: {error}"));
             }
         }
-        if self.backend.is_some() {
+        if self.storage.backend.is_some() {
             if let Err(error) = self.reload_persistent_value_indexes() {
                 cleanup_errors.push(format!("btree restore: {error}"));
             }
@@ -549,7 +567,7 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
             .storage_savepoint
             .clone();
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             let rollback_result = if let Some(savepoint) = storage_savepoint.as_ref() {
                 backend
                     .rollback_to_savepoint(savepoint)
@@ -589,7 +607,7 @@ impl Engine {
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
-        if self.backend.is_some() {
+        if self.storage.backend.is_some() {
             if let Err(error) = self.reload_table_catalog_after_rollback() {
                 cleanup_errors.push(format!("table catalog restore: {error}"));
             }
@@ -622,7 +640,7 @@ impl Engine {
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("SAVEPOINT lost its checked transaction frame".into())
         })?;
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             backend
                 .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
@@ -648,7 +666,7 @@ impl Engine {
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             backend
                 .release_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
@@ -671,7 +689,7 @@ impl Engine {
         if !frame.savepoints.contains(name) {
             return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
         }
-        if let Some(backend) = self.backend.as_ref() {
+        if let Some(backend) = self.storage.backend.as_ref() {
             backend
                 .rollback_to_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
@@ -688,7 +706,7 @@ impl Engine {
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
-        if self.backend.is_some() {
+        if self.storage.backend.is_some() {
             if let Err(error) = self.reload_table_catalog_after_rollback() {
                 cleanup_errors.push(format!("table catalog restore: {error}"));
             }
@@ -714,31 +732,19 @@ impl Engine {
     }
 
     fn snapshot_session_state(&self) -> SessionStateSnapshot {
-        SessionStateSnapshot {
-            search_path: self.search_path.read().clone(),
-            session_vars: self.session_vars.read().clone(),
-            random_state: *self.random_state.lock(),
-            sequence_currvals: self.sequence_currvals.read().clone(),
-            prepared: self.prepared.read().clone(),
-            sql_statement_cache: self.sql_statement_cache.read().clone(),
-        }
+        self.session.state.read().clone()
     }
 
     fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
-        self.search_path.write().clone_from(&snapshot.search_path);
-        *self.session_vars.write() = snapshot.session_vars.clone();
-        *self.random_state.lock() = snapshot.random_state;
-        *self.sequence_currvals.write() = snapshot.sequence_currvals.clone();
-        *self.prepared.write() = snapshot.prepared.clone();
-        *self.sql_statement_cache.write() = snapshot.sql_statement_cache.clone();
+        *self.session.state.write() = snapshot.clone();
     }
 
     fn snapshot_transaction_data(&self) -> Result<Option<EngineDataSnapshot>, SQLError> {
-        if self.backend.is_some() {
+        if self.storage.backend.is_some() {
             return Ok(None);
         }
         let mut tables = BTreeMap::new();
-        for (name, table) in self.tables.read().iter() {
+        for (name, table) in self.storage.tables.read().iter() {
             // Capture an already-writable deep copy once. Calling `snapshot`
             // and then probing `writable_snapshot` would allocate and discard
             // a second database-sized clone before the statement even starts.
@@ -790,20 +796,8 @@ impl Engine {
         }
         Ok(Some(EngineDataSnapshot {
             tables,
-            graphs: self.graphs.read().clone(),
-            models: self.models.read().clone(),
-            scoring_params: self.scoring_params.read().clone(),
-            views: self.views.read().clone(),
-            sequences: self.sequences.read().clone(),
-            catalog_indexes: self.catalog_indexes.read().clone(),
-            schemas: self.schemas.read().clone(),
-            path_indexes: self.path_indexes.read().clone(),
-            named_analyzers: self.named_analyzers.read().clone(),
-            table_field_analyzers: self.table_field_analyzers.read().clone(),
-            foreign_servers: self.foreign_servers.read().clone(),
-            foreign_tables: self.foreign_tables.read().clone(),
-            foreign_memory_tables: self.foreign_memory_tables.read().clone(),
-            sql_user_functions: self.sql_user_functions.read().clone(),
+            durable: self.durable.snapshot(),
+            foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
         }))
     }
 
@@ -814,7 +808,7 @@ impl Engine {
     /// a half-restored engine behind a successful-looking rollback.
     fn restore_transaction_data(&self, snapshot: &EngineDataSnapshot) -> Result<(), SQLError> {
         {
-            let mut tables = self.tables.write();
+            let mut tables = self.storage.tables.write();
             tables.retain(|name, _| snapshot.tables.contains_key(name));
             for (name, table_snapshot) in &snapshot.tables {
                 tables
@@ -882,20 +876,8 @@ impl Engine {
                 std::sync::atomic::Ordering::Release,
             );
         }
-        *self.graphs.write() = snapshot.graphs.clone();
-        *self.models.write() = snapshot.models.clone();
-        *self.scoring_params.write() = snapshot.scoring_params.clone();
-        *self.views.write() = snapshot.views.clone();
-        *self.sequences.write() = snapshot.sequences.clone();
-        *self.catalog_indexes.write() = snapshot.catalog_indexes.clone();
-        self.schemas.write().clone_from(&snapshot.schemas);
-        *self.path_indexes.write() = snapshot.path_indexes.clone();
-        *self.named_analyzers.write() = snapshot.named_analyzers.clone();
-        *self.table_field_analyzers.write() = snapshot.table_field_analyzers.clone();
-        *self.foreign_servers.write() = snapshot.foreign_servers.clone();
-        *self.foreign_tables.write() = snapshot.foreign_tables.clone();
-        *self.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
-        *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
+        self.durable.restore(&snapshot.durable);
+        *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
         Ok(())
     }
 }

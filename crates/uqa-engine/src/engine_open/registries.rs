@@ -41,7 +41,10 @@ impl Engine {
         for (name, config_json) in catalog.load_analyzers()? {
             super::parse_analyzer_config(&name, &config_json)
                 .map_err(StorageBackendError::Other)?;
-            self.named_analyzers.write().insert(name, config_json);
+            self.durable
+                .named_analyzers
+                .write()
+                .insert(name, config_json);
         }
         for (table, field, phase, analyzer_name) in catalog.load_table_field_analyzers()? {
             let t = self.try_table(&table)?.ok_or_else(|| {
@@ -60,7 +63,8 @@ impl Engine {
                 .write()
                 .set_field_analyzer(&field, analyzer, normalized_phase)
                 .map_err(StorageBackendError::Other)?;
-            self.table_field_analyzers
+            self.durable
+                .table_field_analyzers
                 .write()
                 .insert((table, field), (analyzer_name, phase_name));
         }
@@ -73,7 +77,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         for (name, fdw_type, options_json) in catalog.load_foreign_servers()? {
             let options: BTreeMap<String, String> = serde_json::from_str(&options_json)?;
-            self.foreign_servers.write().insert(
+            self.durable.foreign_servers.write().insert(
                 name.clone(),
                 uqa_fdw::ForeignServer {
                     name,
@@ -84,7 +88,12 @@ impl Engine {
         }
         for row in catalog.load_foreign_tables()? {
             let relation_name = row.relation.qualified_name();
-            if !self.foreign_servers.read().contains_key(&row.server_name) {
+            if !self
+                .durable
+                .foreign_servers
+                .read()
+                .contains_key(&row.server_name)
+            {
                 return Err(StorageBackendError::Other(format!(
                     "foreign table `{}` references missing server `{}`",
                     relation_name, row.server_name
@@ -99,7 +108,7 @@ impl Engine {
                     ty: crate::engine_fdw::sql_column_type_to_fdw(&c.ty),
                 })
                 .collect();
-            self.foreign_tables.write().insert(
+            self.durable.foreign_tables.write().insert(
                 row.relation,
                 uqa_fdw::ForeignTable {
                     name: relation_name,
@@ -123,7 +132,8 @@ impl Engine {
                     row.name, row.table_name
                 )));
             }
-            self.catalog_indexes
+            self.durable
+                .catalog_indexes
                 .write()
                 .insert(row.name.clone(), row.clone());
             let columns: Vec<String> = serde_json::from_str(&row.columns_json)?;
@@ -177,6 +187,7 @@ impl Engine {
             return Ok(());
         }
         let tables = self
+            .durable
             .catalog_indexes
             .read()
             .values()
@@ -208,7 +219,7 @@ impl Engine {
                     "invalid path-index key `{key}`"
                 )));
             }
-            let graphs = self.graphs.read();
+            let graphs = self.durable.graphs.read();
             let store = graphs.get(graph).ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "path index `{key}` references missing graph `{graph}`"
@@ -217,7 +228,7 @@ impl Engine {
             let idx = uqa_graph::PathIndex::build(store, graph, &label_sequences)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             drop(graphs);
-            self.path_indexes.write().insert(key, idx);
+            self.durable.path_indexes.write().insert(key, idx);
         }
         Ok(())
     }

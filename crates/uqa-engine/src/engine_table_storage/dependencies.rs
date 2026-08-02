@@ -69,7 +69,7 @@ impl Engine {
         table: &str,
         column: &str,
     ) -> StorageBackendResult<()> {
-        let mut rows = self.catalog_indexes.write();
+        let mut rows = self.durable.catalog_indexes.write();
         let mut removals = Vec::new();
         for (name, row) in rows.iter() {
             if row.table_name == table && Self::catalog_index_references_column(row, column)? {
@@ -83,7 +83,7 @@ impl Engine {
     }
 
     pub(super) fn rename_catalog_index_table_refs(&self, from: &str, to: &str) {
-        for row in self.catalog_indexes.write().values_mut() {
+        for row in self.durable.catalog_indexes.write().values_mut() {
             if row.table_name == from {
                 row.table_name = to.to_string();
             }
@@ -96,7 +96,7 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<()> {
-        let mut rows = self.catalog_indexes.write();
+        let mut rows = self.durable.catalog_indexes.write();
         let mut updates = Vec::new();
         for (name, row) in rows.iter() {
             if row.table_name == table && Self::catalog_index_references_column(row, from)? {
@@ -128,7 +128,8 @@ impl Engine {
     }
 
     pub(super) fn table_entries(&self) -> Vec<(String, Arc<TableState>)> {
-        self.tables
+        self.storage
+            .tables
             .read()
             .iter()
             .map(|(relation, state)| (relation.qualified_name(), state.clone()))
@@ -160,7 +161,7 @@ impl Engine {
                     "invalid persisted foreign-key target `{reference}`: {error}"
                 ))
             })?;
-        let tables = self.tables.read();
+        let tables = self.storage.tables.read();
         if let Some(schema) = schema {
             let target = RelationIdentity::new(schema, local_name);
             if tables.contains_key(&target) {
@@ -525,7 +526,7 @@ impl Engine {
         }
         // Parse every owned index before any mutation so malformed catalog
         // metadata cannot turn a failed drop into a partial in-memory change.
-        for row in self.catalog_indexes.read().values() {
+        for row in self.durable.catalog_indexes.read().values() {
             if row.table_name == table_name {
                 let _ = Self::catalog_index_references_column(row, column)?;
             }
@@ -538,7 +539,7 @@ impl Engine {
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<IVFIndexParams>> {
-        for row in self.catalog_indexes.read().values() {
+        for row in self.durable.catalog_indexes.read().values() {
             let is_vector_index = row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw");
             if row.table_name == table
@@ -560,7 +561,7 @@ impl Engine {
         column: &str,
     ) -> StorageBackendResult<Vec<String>> {
         let mut names = Vec::new();
-        for row in self.catalog_indexes.read().values() {
+        for row in self.durable.catalog_indexes.read().values() {
             if row.table_name == table
                 && (row.index_type.eq_ignore_ascii_case("ivf")
                     || row.index_type.eq_ignore_ascii_case("hnsw"))

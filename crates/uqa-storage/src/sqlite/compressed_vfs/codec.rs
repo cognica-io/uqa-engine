@@ -7,22 +7,23 @@
 //! Chunk compression, bounded decompression, and authenticated encryption.
 
 use super::{
-    allocate_payload, invalid_data, Argon2, Block, KeyInit, Read, SQLiteCompressionCodec,
-    SQLiteCompressionOptions, XChaCha20Poly1305, SALT_LEN,
+    allocate_payload, invalid_data, Argon2, Block, ContainerKeys, KeyInit, Read,
+    SQLiteCompressionCodec, SQLiteCompressionOptions, XChaCha20Poly1305, SALT_LEN,
 };
 
-pub(super) fn cipher_from_key(
-    key: &str,
-    salt: &[u8; SALT_LEN],
-) -> std::io::Result<XChaCha20Poly1305> {
-    let mut derived = [0_u8; 32];
+pub(super) fn keys_from_key(key: &str, salt: &[u8; SALT_LEN]) -> std::io::Result<ContainerKeys> {
+    let mut derived = [0_u8; 64];
     let argon2 = Argon2::default();
     let mut memory_blocks = vec![Block::default(); argon2.params().block_count()];
     argon2
         .hash_password_into_with_memory(key.as_bytes(), salt, &mut derived, &mut memory_blocks)
         .map_err(|_| invalid_data("failed to derive compressed container key"))?;
-    XChaCha20Poly1305::new_from_slice(&derived)
-        .map_err(|_| invalid_data("failed to initialize compressed container cipher"))
+    let cipher = XChaCha20Poly1305::new_from_slice(&derived[..32])
+        .map_err(|_| invalid_data("failed to initialize compressed container cipher"))?;
+    let mut mac_key = [0_u8; 32];
+    mac_key.copy_from_slice(&derived[32..]);
+    derived.fill(0);
+    Ok(ContainerKeys { cipher, mac_key })
 }
 
 pub(super) fn compress_chunk(

@@ -30,6 +30,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Check workspace dependency policy
+        run: python3 scripts/check-workspace-dependencies.py
       - run: cargo fmt --all --check
 
   clippy:
@@ -160,3 +162,27 @@ jobs:
           cache-bin: false
           cache-targets: false
       - run: cargo bench --workspace --no-run --locked
+
+  analytical-benchmark:
+    name: analytical comparison gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Run UQA, SQLite, and DuckDB comparison
+        run: bash scripts/run-analytical-comparison.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analytical-comparison-${{ github.sha }}
+          path: |
+            target/benchmark-runs/analytical-comparison.json
+            target/criterion/analytical_external_q1/*/new/estimates.json
+            target/criterion/analytical_external_q6/*/new/estimates.json
+            target/criterion/analytical_result_scan/*/new/estimates.json

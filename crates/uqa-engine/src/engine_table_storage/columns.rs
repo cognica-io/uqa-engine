@@ -123,7 +123,8 @@ impl Engine {
             }
         }
         self.remove_catalog_indexes_for_column(&table_name, column)?;
-        self.table_field_analyzers
+        self.durable
+            .table_field_analyzers
             .write()
             .retain(|(table, field), _| !(table == &table_name && field == column));
         let ids = t.document_store.read().doc_ids()?;
@@ -137,7 +138,7 @@ impl Engine {
             }
         }
         if self.is_persistent() {
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.drop_column_data(&table_name, column)?;
             }
             self.try_save_table_schema(&table_name, &t)?;
@@ -305,7 +306,7 @@ impl Engine {
         }
         self.rename_catalog_index_column_refs(&table_name, from, to)?;
         {
-            let mut analyzers = self.table_field_analyzers.write();
+            let mut analyzers = self.durable.table_field_analyzers.write();
             let mut moved = Vec::new();
             analyzers.retain(|(table, field), value| {
                 if table == &table_name && field == from {
@@ -318,7 +319,7 @@ impl Engine {
             analyzers.extend(moved);
         }
         if self.is_persistent() {
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
             }
             if let Some(dimensions) = vector_dimensions {
@@ -360,7 +361,7 @@ impl Engine {
             target_schema.unwrap_or_else(|| from_relation.schema.clone()),
             target_name,
         );
-        if !self.schemas.read().contains(&to_relation.schema) {
+        if !self.durable.schemas.read().contains(&to_relation.schema) {
             return Err(StorageBackendError::Other(format!(
                 "schema `{}` does not exist",
                 to_relation.schema
@@ -373,18 +374,18 @@ impl Engine {
             )));
         }
         {
-            let tables = self.tables.read();
+            let tables = self.storage.tables.read();
             if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
                 return Ok(false);
             }
         }
         self.rewrite_table_rename_dependencies(&from, &to)?;
         if self.is_persistent() {
-            if let Some(catalog) = self.catalog.as_ref() {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_table_data(&from, &to)?;
             }
         }
-        let mut tables = self.tables.write();
+        let mut tables = self.storage.tables.write();
         if tables.contains_key(&to_relation) {
             return Ok(false);
         }
@@ -395,7 +396,7 @@ impl Engine {
         drop(tables);
         self.rename_catalog_index_table_refs(&from, &to);
         {
-            let mut analyzers = self.table_field_analyzers.write();
+            let mut analyzers = self.durable.table_field_analyzers.write();
             let mut moved = Vec::new();
             analyzers.retain(|(table, field), value| {
                 if table == &from {

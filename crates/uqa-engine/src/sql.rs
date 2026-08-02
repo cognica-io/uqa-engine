@@ -44,6 +44,7 @@ mod age_cypher;
 mod aggregates;
 mod catalog;
 mod correlation;
+mod cursor;
 mod ddl;
 mod dml;
 mod driver;
@@ -60,6 +61,7 @@ mod volatility;
 mod where_eval;
 mod window;
 
+pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use driver::execute;
 use mutability::{is_transaction_control, query_may_mutate_engine};
 #[cfg(test)]
@@ -560,6 +562,7 @@ mod unified_plan_tests {
         let query = "SELECT id FROM items WHERE id = 1";
 
         let version_before_query = observer
+            .storage
             .sqlite_session
             .as_ref()
             .expect("persistent observer")
@@ -568,6 +571,7 @@ mod unified_plan_tests {
         observer.sql(query, &[]).expect("warm statement plan");
         assert_eq!(
             observer
+                .storage
                 .sqlite_session
                 .as_ref()
                 .expect("persistent observer")
@@ -577,6 +581,7 @@ mod unified_plan_tests {
             "a read-only statement persisted an alias-scoped value index"
         );
         assert!(observer
+            .storage
             .backend
             .as_ref()
             .expect("persistent observer")
@@ -585,6 +590,7 @@ mod unified_plan_tests {
             .is_empty());
         assert_eq!(
             observer
+                .storage
                 .backend
                 .as_ref()
                 .expect("persistent observer")
@@ -595,20 +601,26 @@ mod unified_plan_tests {
         assert!(observer.cached_sql_plans(query).is_some());
         assert_eq!(
             observer
-                .seen_table_data_epoch
+                .epochs
+                .table_data
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire),
             observer
-                .table_data_epoch
+                .epochs
+                .table_data
+                .published
                 .load(std::sync::atomic::Ordering::Acquire),
             "the completed read statement left its in-process data generation stale"
         );
         assert_eq!(
             Some(
                 observer
+                    .epochs
                     .seen_sqlite_data_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),
             observer
+                .storage
                 .sqlite_session
                 .as_ref()
                 .expect("persistent observer")
@@ -622,9 +634,12 @@ mod unified_plan_tests {
             "reading the observer's table count cleared its statement cache"
         );
         let epoch_before_rollback = observer
-            .table_data_epoch
+            .epochs
+            .table_data
+            .published
             .load(std::sync::atomic::Ordering::Acquire);
         let data_version_before_rollback = observer
+            .storage
             .sqlite_session
             .as_ref()
             .expect("persistent observer")
@@ -632,7 +647,9 @@ mod unified_plan_tests {
             .expect("read SQLite data version");
         assert_eq!(
             observer
-                .seen_table_data_epoch
+                .epochs
+                .table_data
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire),
             epoch_before_rollback,
             "the warmed observer did not consume the current in-process data generation"
@@ -640,6 +657,7 @@ mod unified_plan_tests {
         assert_eq!(
             Some(
                 observer
+                    .epochs
                     .seen_sqlite_data_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),
@@ -662,13 +680,16 @@ mod unified_plan_tests {
         writer.rollback().expect("rollback write");
         assert_eq!(
             observer
-                .table_data_epoch
+                .epochs
+                .table_data
+                .published
                 .load(std::sync::atomic::Ordering::Acquire),
             epoch_before_rollback,
             "a rolled-back mutation published an in-process data generation"
         );
         assert_eq!(
             observer
+                .storage
                 .sqlite_session
                 .as_ref()
                 .expect("persistent observer")
@@ -679,7 +700,9 @@ mod unified_plan_tests {
         );
         assert_eq!(
             observer
-                .seen_table_data_epoch
+                .epochs
+                .table_data
+                .seen
                 .load(std::sync::atomic::Ordering::Acquire),
             epoch_before_rollback,
             "a rolled-back mutation changed the observer's consumed data generation"
@@ -687,6 +710,7 @@ mod unified_plan_tests {
         assert_eq!(
             Some(
                 observer
+                    .epochs
                     .seen_sqlite_data_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),

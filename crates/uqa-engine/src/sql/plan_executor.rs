@@ -46,6 +46,26 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         select::execute_query_plan(self.engine, query, self.params)
     }
 
+    pub(super) fn execute_query_to_spill(
+        &self,
+        plan: &UnifiedPlan,
+    ) -> Result<select::QueryOutput, SQLError> {
+        self.engine.cancellation_token().check()?;
+        let UnifiedPlan::Query(query) = plan else {
+            return Err(SQLError::Unsupported(
+                "SQL cursor accepts exactly one query statement".into(),
+            ));
+        };
+        let mut ctes = select::CteScope::new();
+        select::execute_query_plan_output(
+            self.engine,
+            query,
+            self.params,
+            &mut ctes,
+            select::QueryOutputMode::SharedSpill,
+        )
+    }
+
     fn execute_insert(&self, plan: &InsertPlan) -> Result<SQLResult, SQLError> {
         run_insert(self.engine, plan.clone(), self.params)
     }

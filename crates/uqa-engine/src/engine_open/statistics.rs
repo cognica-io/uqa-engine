@@ -25,7 +25,7 @@ impl Engine {
                 "catalog is missing required schema `public`".to_string(),
             ));
         }
-        *self.schemas.write() = schemas.into_iter().collect();
+        *self.durable.schemas.write() = schemas.into_iter().collect();
         Ok(())
     }
 

@@ -51,7 +51,7 @@ impl Iterator for MemoryForeignRowStream<'_> {
         }
         loop {
             let row = {
-                let tables = self.engine.foreign_memory_tables.read();
+                let tables = self.engine.extensions.foreign_memory_tables.read();
                 let Some(rows) = tables.get(&self.table_name) else {
                     return Some(Err(format!(
                         "Foreign table `{}` lost its loaded memory data during the scan",
@@ -101,7 +101,7 @@ impl Engine {
     ) -> std::result::Result<(), String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut servers = self.foreign_servers.write();
+        let mut servers = self.durable.foreign_servers.write();
         if servers.contains_key(&name) {
             if if_not_exists {
                 return Ok(());
@@ -121,7 +121,7 @@ impl Engine {
             fdw_type: fdw_type.to_string(),
             options: opt_map.clone(),
         };
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             let options_json = serde_json::to_string(&opt_map)
                 .map_err(|err| format!("serialize foreign server `{name}`: {err}"))?;
             catalog
@@ -173,14 +173,19 @@ impl Engine {
                 return Err(format!("Relation `{name}` already exists as {kind}"));
             }
         }
-        let mut tables = self.foreign_tables.write();
+        let mut tables = self.durable.foreign_tables.write();
         if tables.contains_key(&relation) {
             if if_not_exists {
                 return Ok(());
             }
             return Err(format!("Foreign table `{name}` already exists"));
         }
-        if !self.foreign_servers.read().contains_key(server_name) {
+        if !self
+            .durable
+            .foreign_servers
+            .read()
+            .contains_key(server_name)
+        {
             return Err(format!("Foreign server `{server_name}` does not exist"));
         }
         let fdw_columns: Vec<uqa_fdw::ColumnDef> = columns
@@ -201,7 +206,7 @@ impl Engine {
             columns: fdw_columns,
             options: opt_map.clone(),
         };
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             let columns_json = serde_json::to_string(columns)
                 .map_err(|err| format!("serialize foreign table `{name}` columns: {err}"))?;
             let options_json = serde_json::to_string(&opt_map)
@@ -225,6 +230,7 @@ impl Engine {
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         // Reject when any foreign table references this server.
         let referenced = self
+            .durable
             .foreign_tables
             .read()
             .values()
@@ -234,15 +240,15 @@ impl Engine {
                 "foreign server `{name}` is referenced by a foreign table"
             ));
         }
-        if !self.foreign_servers.read().contains_key(name) {
+        if !self.durable.foreign_servers.read().contains_key(name) {
             return Ok(false);
         }
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_foreign_server(name)
                 .map_err(|err| format!("drop foreign server `{name}`: {err}"))?;
         }
-        let removed = self.foreign_servers.write().remove(name).is_some();
+        let removed = self.durable.foreign_servers.write().remove(name).is_some();
         if removed {
             self.note_catalog_registry_changed();
         }
@@ -263,13 +269,21 @@ impl Engine {
             return Ok(false);
         };
         let relation = RelationIdentity::from_legacy_name(&name)?;
-        if let Some(catalog) = self.catalog.as_ref() {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_foreign_table(&relation)
                 .map_err(|err| format!("drop foreign table `{name}`: {err}"))?;
         }
-        self.foreign_memory_tables.write().remove(&relation);
-        let removed = self.foreign_tables.write().remove(&relation).is_some();
+        self.extensions
+            .foreign_memory_tables
+            .write()
+            .remove(&relation);
+        let removed = self
+            .durable
+            .foreign_tables
+            .write()
+            .remove(&relation)
+            .is_some();
         if removed {
             self.note_catalog_registry_changed();
         }
@@ -279,7 +293,7 @@ impl Engine {
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        Ok(self.foreign_servers.read().get(name).cloned())
+        Ok(self.durable.foreign_servers.read().get(name).cloned())
     }
 
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
@@ -292,13 +306,19 @@ impl Engine {
             return Ok(None);
         };
         let relation = RelationIdentity::from_legacy_name(&resolved)?;
-        Ok(self.foreign_tables.read().get(&relation).cloned())
+        Ok(self.durable.foreign_tables.read().get(&relation).cloned())
     }
 
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
-        let mut out: Vec<String> = self.foreign_servers.read().keys().cloned().collect();
+        let mut out: Vec<String> = self
+            .durable
+            .foreign_servers
+            .read()
+            .keys()
+            .cloned()
+            .collect();
         out.sort();
         Ok(out)
     }
@@ -307,6 +327,7 @@ impl Engine {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         let mut out: Vec<String> = self
+            .durable
             .foreign_tables
             .read()
             .keys()
@@ -350,7 +371,10 @@ impl Engine {
                 server.fdw_type
             ));
         }
-        self.foreign_memory_tables.write().insert(relation, rows);
+        self.extensions
+            .foreign_memory_tables
+            .write()
+            .insert(relation, rows);
         Ok(())
     }
 
@@ -378,7 +402,12 @@ impl Engine {
             match server.fdw_type.as_str() {
                 "memory_fdw" => {
                     let relation = RelationIdentity::from_legacy_name(&table.name)?;
-                    if !self.foreign_memory_tables.read().contains_key(&relation) {
+                    if !self
+                        .extensions
+                        .foreign_memory_tables
+                        .read()
+                        .contains_key(&relation)
+                    {
                         return Err(format!(
                             "Foreign table `{}` has no loaded memory data",
                             table.name

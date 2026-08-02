@@ -21,7 +21,19 @@ impl VfsFile {
         if options.key.is_none() && should_store_plain(flags, &path) {
             PlainFile::open(path, read_only, flags & ffi::SQLITE_OPEN_CREATE != 0).map(Self::Plain)
         } else {
-            ContainerFile::open(path, options).map(Self::Compressed)
+            let trusted_anchor = if flags & ffi::SQLITE_OPEN_MAIN_DB != 0 {
+                options.trusted_anchor
+            } else {
+                None
+            };
+            ContainerFile::open(path, options)
+                .and_then(|file| {
+                    if let Some(trusted) = trusted_anchor {
+                        file.require_trusted_anchor(trusted)?;
+                    }
+                    Ok(Box::new(file))
+                })
+                .map(Self::Compressed)
         }
     }
 

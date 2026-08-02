@@ -22,7 +22,7 @@ impl Engine {
         for schema in schemas {
             let relation = schema.relation.clone();
             let table = Self::load_session_table(catalog, backend, schema)?;
-            self.tables.write().insert(relation, table);
+            self.storage.tables.write().insert(relation, table);
         }
         self.restore_graphs_from_catalog(catalog)?;
         self.restore_engine_registries_from_catalog(catalog)?;

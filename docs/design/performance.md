@@ -1,6 +1,40 @@
 # Performance baseline
 
-This document records UQA-RS benchmark baselines measured on the developer's Apple silicon macOS workstation (Apple M1 Ultra, 20 cores, 128 GB). Every number is reproducible via the `cargo bench` invocations listed below. All measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`).
+This document records UQA-RS benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. All measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`).
+
+## External-engine analytical comparison (2026-08-02)
+
+`analytical_comparison` runs the same generated rows and SQL through UQA,
+SQLite, and DuckDB in one process. Its versioned
+[`manifest.json`](../../benchmarks/analytical/manifest.json) records the row
+count, seed, generator, schema, queries, Criterion configuration, and ratio
+ceilings. The runner writes toolchain, platform, commit/dirty state, manifest
+hash, benchmark-source hash, raw medians, and gate results to a JSON artifact;
+CI uploads that artifact on every run.
+
+The first full 20-sample run used 20,000 rows on macOS arm64. The complete
+artifact is
+[`macos-arm64-2026-08-02.json`](../../benchmarks/analytical/reference/macos-arm64-2026-08-02.json).
+
+| Workload | UQA | SQLite | DuckDB | UQA / SQLite | UQA / DuckDB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q1-style grouped aggregate | 234.015 ms | 7.389 ms | 0.630 ms | 31.67x | 371.62x |
+| Q6-style filtered aggregate | 96.089 ms | 1.014 ms | 0.225 ms | 94.74x | 427.22x |
+| Ordered result scan | 185.070 ms materialized / 191.201 ms cursor | 1.457 ms | 0.861 ms | 131.25x cursor | 222.18x cursor |
+
+The result is negative evidence for an OLAP claim: UQA is currently much
+slower than both comparison engines on these shapes. The columnar cursor's
+purpose is bounded result memory, not a vectorized execution claim; it cost
+3.3% over the legacy materialized scan in this run. `work_mem = 1B` integration
+tests force its backing spill and verify that it yields at most 1,024 rows per
+batch. The ratio ceilings are regression alarms with substantial cross-host
+headroom, not performance targets or proof of parity.
+
+Reproduce and emit a fresh provenance artifact with:
+
+```sh
+bash scripts/run-analytical-comparison.sh
+```
 
 ## Hot-path optimization pass (2026-07-17)
 

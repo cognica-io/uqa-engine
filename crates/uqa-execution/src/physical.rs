@@ -64,35 +64,75 @@ pub trait PhysicalOperator: Send {
     fn close(&mut self) -> ExecResult<()>;
 }
 
+/// Borrowing iterator over a physical operator. Construction opens the
+/// pipeline; exhaustion and execution errors close it exactly once. Dropping
+/// an unfinished cursor performs best-effort cleanup.
+pub struct OperatorBatchCursor<'operator> {
+    operator: &'operator mut dyn PhysicalOperator,
+    finished: bool,
+}
+
+impl<'operator> OperatorBatchCursor<'operator> {
+    pub fn open(operator: &'operator mut dyn PhysicalOperator) -> ExecResult<Self> {
+        if let Err(open_error) = operator.open() {
+            return match operator.close() {
+                Ok(()) => Err(open_error),
+                Err(close_error) => Err(ExecError::Other(format!(
+                    "{open_error}; operator close after open failure also failed: {close_error}"
+                ))),
+            };
+        }
+        Ok(Self {
+            operator,
+            finished: false,
+        })
+    }
+
+    fn finish(&mut self) -> ExecResult<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+        self.operator.close()
+    }
+}
+
+impl Iterator for OperatorBatchCursor<'_> {
+    type Item = ExecResult<Batch>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        match self.operator.next() {
+            Ok(Some(batch)) => Some(Ok(batch)),
+            Ok(None) => match self.finish() {
+                Ok(()) => None,
+                Err(error) => Some(Err(error)),
+            },
+            Err(next_error) => {
+                let close = self.finish();
+                Some(with_cleanup(
+                    Err(next_error),
+                    close,
+                    "operator close after execution failure also failed",
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for OperatorBatchCursor<'_> {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
 /// Convenience: collect every batch from `op` until exhaustion. The
 /// operator is `open`ed and `close`d for the caller. Useful for tests
 /// and for callers that do not need streaming behaviour.
 pub fn run_to_batches(op: &mut dyn PhysicalOperator) -> ExecResult<Vec<Batch>> {
-    if let Err(open_error) = op.open() {
-        return match op.close() {
-            Ok(()) => Err(open_error),
-            Err(close_error) => Err(ExecError::Other(format!(
-                "{open_error}; operator close after open failure also failed: {close_error}"
-            ))),
-        };
-    }
-    let mut out = Vec::new();
-    loop {
-        match op.next() {
-            Ok(Some(batch)) => out.push(batch),
-            Ok(None) => break,
-            Err(next_error) => {
-                return match op.close() {
-                    Ok(()) => Err(next_error),
-                    Err(close_error) => Err(ExecError::Other(format!(
-                        "{next_error}; operator close after execution failure also failed: {close_error}"
-                    ))),
-                };
-            }
-        }
-    }
-    op.close()?;
-    Ok(out)
+    OperatorBatchCursor::open(op)?.collect()
 }
 
 /// Run the operator and concatenate all output batches into a single
@@ -101,9 +141,9 @@ pub fn run_to_rows(
     op: &mut dyn PhysicalOperator,
 ) -> ExecResult<(Vec<String>, Vec<uqa_sql::ResultRow>)> {
     let schema = op.schema().to_vec();
-    let batches = run_to_batches(op)?;
     let mut rows: Vec<uqa_sql::ResultRow> = Vec::new();
-    for batch in batches {
+    for batch in OperatorBatchCursor::open(op)? {
+        let batch = batch?;
         rows.extend(batch.rows);
     }
     Ok((schema, rows))
@@ -195,5 +235,18 @@ mod tests {
         .to_string();
         assert!(error.contains("primary"), "{error}");
         assert!(error.contains("cleanup"), "{error}");
+    }
+
+    #[test]
+    fn dropping_cursor_closes_an_unfinished_pipeline() {
+        let mut operator = FailingOperator {
+            fail_open: false,
+            fail_close: false,
+            closed: false,
+        };
+        {
+            let _cursor = OperatorBatchCursor::open(&mut operator).unwrap();
+        }
+        assert!(operator.closed);
     }
 }

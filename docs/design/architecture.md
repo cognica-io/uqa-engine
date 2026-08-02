@@ -4,6 +4,19 @@ This is a high-level pointer for newcomers; the formal contract lives in [`docs/
 
 ## Crate dependency layers
 
+`uqa-sql` is a syntax frontend: it depends only on `uqa-core` and stops FTS
+processing at a syntax AST. Retrieval lowering into `OperatorTree` happens at
+the engine/planner boundary. `uqa-engine` is the composition root, so it may
+wire concrete subsystems together, but subsystem state remains inside the
+ownership domains documented in
+[`engine-state-ownership.md`](engine-state-ownership.md).
+
+The complete runtime edge set and direct-dependency budgets are executable
+policy in [`scripts/workspace-dependency-policy.json`](../../scripts/workspace-dependency-policy.json).
+CI runs [`check-workspace-dependencies.py`](../../scripts/check-workspace-dependencies.py),
+so adding a dependency requires an explicit architecture-policy change in the
+same review. Dev-only benchmark/test edges are deliberately excluded.
+
 ```mermaid
 graph TD
     core["uqa-core"]
@@ -16,6 +29,9 @@ graph TD
     joins["uqa-joins"]
     sql["uqa-sql"]
     fdw["uqa-fdw"]
+    execution["uqa-execution"]
+    planner["uqa-planner"]
+    ml["uqa-ml"]
     engine["uqa-engine"]
     api["uqa-api"]
     cli["uqa-cli"]
@@ -34,12 +50,31 @@ graph TD
     joins --> core
     joins --> analysis
     joins --> graph
+    joins --> sql
     sql --> core
     fdw --> core
+    execution --> core
+    execution --> sql
+    planner --> core
+    planner --> execution
+    planner --> graph
+    planner --> joins
+    planner --> operators
+    planner --> sql
+    planner --> storage
+    ml --> core
+    ml --> operators
+    ml --> scoring
+    ml --> storage
     engine --> sql
     engine --> operators
     engine --> graph
     engine --> storage
+    engine --> execution
+    engine --> planner
+    engine --> joins
+    engine --> ml
+    engine --> fdw
     api --> engine
     cli --> engine
 ```
@@ -54,7 +89,7 @@ graph TD
 - `uqa-operators` — `Operator` trait + `ExecutionContext`, primitive (TermOperator, FilterOperator, ScoreOperator, FacetOperator), boolean (Union/Intersect/Complement), hybrid (`HybridTextVectorOperator`, exact `BayesianEvidenceFusionOperator`, robust `RobustPositiveEvidencePoolOperator`), vector (Cosine/KNN/VectorSimilarity and the explicitly unsupervised `QueryPoolVectorScoreOperator`), multi-stage, sparse, progressive-fusion, hierarchical (PathFilter/Project/Aggregate / UnifiedFilter), deep-fusion (Embed/Signal/Dense/Flatten/GlobalPool/ Softmax/BatchNorm/Dropout/CNN1D/CNN2D/RNN/LSTM/Propagate/Conv/Pool/ Attention). The deep-fusion graph layers depend only on a `GraphNeighborLookup` trait so they remain decoupled from `uqa-graph`.
 - `uqa-graph` — `MemoryGraphStore` with named graphs, invariant-checked `GraphPostingList` with a lossless Phi storage codec and explicit subgraph collision policies, representation adapters (not categorical functors), pattern matching (`GMatch` with arc consistency + MRV + negated-edge post-filter), RPQ parser/NFA/DFA + `RegularPathQuery` operator, an openCypher-oriented lexer/AST/recursive-descent parser for the supported clause set, read-only and mutating executors, centrality (PageRank, HITS, betweenness), message passing, embedding, indexes, incremental matcher, deltas + versioned store with rollback, temporal filtering, cross-paradigm operators.
 - `uqa-joins` — text-similarity (Jaccard), vector-similarity (cosine), hybrid (structured + cosine), graph-driven, cross-paradigm vertex/document bridging.
-- `uqa-sql` — `libpg_query` Postgres parser → internal AST → compiled statement; SQL function registry covers `text_match`, `knn_match`, exact `fuse_bayesian_evidence`, robust `pool_positive_evidence` (plus compatibility `fuse_log_odds`), `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`.
+- `uqa-sql` — `libpg_query` Postgres parser → internal syntax AST → compiled statement. The FTS mini-language also ends at a syntax AST here. SQL function registry covers `text_match`, `knn_match`, exact `fuse_bayesian_evidence`, robust `pool_positive_evidence` (plus compatibility `fuse_log_odds`), `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`; concrete retrieval/operator lowering is owned by the engine/planner boundary.
 - `uqa-fdw` — `ForeignServer`, `ForeignTable`, `FDWPredicate`, `FDWHandler` trait, `MemoryHandler` reference implementation with predicate pushdown, projection, limit, and `LIKE` matching.
 - `uqa-engine` — top-level `Engine` with table state, catalog restore, `search` / `knn_search` / `hybrid_search` / `sql` entry points, named graph storage, deep-model save/load/predict, parameter persistence.
 - `uqa-api` — fluent `QueryBuilder` for common read and retrieval flows. Validated literal, vector, staged-retrieval, fusion, highlight, and facet helpers are fallible; retrieval and fusion helpers render `WHERE` predicates that enter the shared retrieval IR. Raw projection/predicate fragments cover appropriate expression-level extensions, while complete SQL remains available through `Engine::sql`.
@@ -106,6 +141,18 @@ flowchart LR
 `EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent tuple-support operations. Graph output remains a `GraphPostingList`, so homogeneous graph union/intersection use explicit subgraph set policies. A graph result combined with an ordinary SQL document predicate receives an explicit `EncodeGraphPosting` Phi-codec node; heterogeneous set operators never silently coerce carriers. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
 
 A score-ordered `LIMIT` over one field-bound text leaf is planned as a physical `TextTopKPlan`. The planner chooses exact WAND by default and Block-Max WAND only when every non-empty query posting has persisted bounds whose fingerprint matches the active BM25 parameters and field statistics. Duplicate query-term occurrences remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. If a write invalidates blocks after planning, execution falls back to exact WAND rather than consuming stale bounds. Boolean and fusion parents do not receive this pushdown because truncating a child would change their carrier.
+
+`Engine::sql` remains the compatibility API that returns a fully materialized
+`SQLResult`. Large consumers can use `Engine::sql_cursor` or
+`Engine::sql_columnar`: the query is materialized through `SharedSpill` under
+`work_mem`, the statement snapshot commits, and the returned cursor yields
+schema-ordered `ColumnarBatch` values. This bounds retained result memory.
+Duplicate schema labels remain visible as separate column slots, but the
+current map-backed physical row carrier cannot preserve different values for
+duplicate labels; that requires a future positional physical row contract.
+This is not a claim that the physical operator pipeline is vectorized;
+internal operators still use row batches, and blocking operators still
+spill/materialize when their semantics require it.
 
 The first `QueryOptimizer` pass applies idempotence and absorption through address-independent structural equivalence. It restricts those identities to membership-only subtrees whose execution emits default payloads. Score-bearing and decorated operators are deliberately excluded: `PostingList` payload merges add colliding scores and merge payload fields, so removing a duplicate there would change an observable `_score` or carrier value.
 

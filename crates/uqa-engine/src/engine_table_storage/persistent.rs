@@ -17,7 +17,7 @@ impl Engine {
         table_name: &str,
         table: &TableState,
     ) -> StorageBackendResult<()> {
-        let Some(backend) = self.backend.as_ref() else {
+        let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
         let analyzer = table.analyzer.read().clone();
@@ -29,6 +29,7 @@ impl Engine {
         *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
 
         let analyzer_rows: Vec<(String, String, String)> = self
+            .durable
             .table_field_analyzers
             .read()
             .iter()

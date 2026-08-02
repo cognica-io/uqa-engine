@@ -62,6 +62,7 @@ impl Engine {
             .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
             .flatten();
         let mut tables: Vec<(String, Arc<TableState>)> = self
+            .storage
             .tables
             .read()
             .iter()
