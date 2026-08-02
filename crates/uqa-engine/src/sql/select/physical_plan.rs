@@ -236,11 +236,12 @@ pub(in crate::sql) fn order_projection(
             continue;
         }
 
-        // A bare source column does not need a computed shadow slot. Reusing
-        // it preserves scan ordering through the append-project stage and
-        // avoids evaluating and cloning the same value a second time.
+        // A bare source column with the same public label does not need a
+        // computed shadow slot. Renamed or repeated columns still need their
+        // own slot: ColumnSelection consumes each physical input once, so two
+        // output mappings cannot safely share the same source column.
         if let ScalarExpr::Column(source) = &projection.expr {
-            if input_columns.contains(source) {
+            if &labels[index] == source && input_columns.contains(source) {
                 output.push((labels[index].clone(), source.clone()));
                 continue;
             }

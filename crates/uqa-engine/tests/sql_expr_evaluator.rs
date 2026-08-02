@@ -662,6 +662,17 @@ fn order_by_output_alias_wins_over_same_named_input_column() {
 }
 
 #[test]
+fn order_by_preserves_repeated_source_column_under_alias() {
+    let eng = engine();
+    let r = rows(
+        &eng,
+        "SELECT name, name AS name_copy FROM products ORDER BY id",
+    );
+    assert_eq!(str_col(&r[0], "name"), Some("Widget"));
+    assert_eq!(str_col(&r[0], "name_copy"), Some("Widget"));
+}
+
+#[test]
 fn order_by_can_use_ordinal_or_unselected_input_column() {
     let eng = engine();
     let ordinal = rows(&eng, "SELECT name, quantity FROM products ORDER BY 2 DESC");
