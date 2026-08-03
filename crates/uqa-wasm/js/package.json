@@ -15,6 +15,7 @@
   "files": [
     "index.mjs",
     "index.d.ts",
+    "LICENSE-NOTICE.md",
     "uqa.js",
     "uqa.wasm"
   ],

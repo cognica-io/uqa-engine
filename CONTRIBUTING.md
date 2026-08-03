@@ -9,6 +9,7 @@ The master plan in [`docs/plans/0001-uqa-rs-implementation-plan.md`](docs/plans/
 Every change has to clear all of:
 
 ```sh
+bash scripts/check-public-repository-hygiene.sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -25,7 +26,7 @@ If a clippy lint surfaces something legitimately user-driven, prefer fixing the 
 
 ### Naming
 
-Per the user's global instructions, technology and acronym names use their canonical case. SQL is SQL, not Sql. JSON is JSON, not Json. HTML is HTML, not Html. This applies to type names, struct fields, function names, and documentation prose.
+Technology and acronym names use their canonical case. SQL is SQL, not Sql. JSON is JSON, not Json. HTML is HTML, not Html. This applies to type names, struct fields, function names, and documentation prose.
 
 ### Comments
 
@@ -65,7 +66,7 @@ A property test that catches a real bug should land in the same PR as the fix. R
 
 The workspace lives under `crates/`. New crates follow the existing shape:
 
-1. `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `[lints] workspace = true`.
+1. `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `license-file.workspace = true`, `readme.workspace = true`, and `[lints] workspace = true`.
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
 4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.1.0", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
@@ -83,6 +84,20 @@ If a single PR introduces several logically distinct changes (for example, an im
 - Keep the PR scope focused; reviews are easier when each PR has one reason to exist.
 - The PR description should mention which gates were run locally and call out anything that needs reviewer attention (intentional divergences from upstream, performance trade-offs, deferred follow-ups).
 - Squash-merge is the default; if the PR has a non-trivial multi-commit history that aids review, prefer rebase-merge.
+
+## Contributor licensing
+
+UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and
+separate commercial terms. Cognica must have sufficient rights to distribute
+every accepted contribution through all of those paths.
+
+External copyrightable code and documentation contributions require a
+contributor agreement accepted by Cognica. The execution workflow and final
+agreement are not yet published, so such contributions will not be merged
+until that process is available. Issues, bug reports, design discussion, and
+non-copyrightable factual corrections remain welcome. See
+[CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the
+public-core commitment.
 
 ## Filing bugs
 

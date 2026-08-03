@@ -29,7 +29,6 @@ version = 2
 # already vetted. Anything outside this list trips the gate so it
 # gets a human review.
 allow = [
-    "AGPL-3.0",
     "AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -39,10 +38,7 @@ allow = [
     "CC0-1.0",
     "ISC",
     "MIT",
-    "MIT-0",
-    "MPL-2.0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Zlib",
 ]
 # Keep non-project-wide licenses scoped to the crates that require them.

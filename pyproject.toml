@@ -20,6 +20,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/cognica-io/uqa-rs"
 Repository = "https://github.com/cognica-io/uqa-rs"
+Licensing = "https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md"
 
 [tool.maturin]
 manifest-path = "crates/uqa-python/Cargo.toml"

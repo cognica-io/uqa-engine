@@ -10,8 +10,9 @@
 //! The default fixture is deterministic and self-contained so CI can
 //! compile and run the benchmark without external data. Set
 //! `UQA_BENCH_REAL_BEIR=1` to load real BEIR-prepared JSON and NPY data
-//! from `UQA_BENCH_BEIR_DIR` or the sibling Python benchmark data
-//! directory.
+//! from the directory specified by `UQA_BENCH_BEIR_DIR`. That directory
+//! must contain a child named by `UQA_BENCH_BEIR_DATASET` (default:
+//! `nfcorpus`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -157,10 +158,10 @@ fn fixture() -> Fixture {
 
 fn load_real_beir_fixture() -> Result<Fixture, String> {
     let dataset = optional_env("UQA_BENCH_BEIR_DATASET")?.unwrap_or_else(|| "nfcorpus".to_string());
-    let root = optional_env("UQA_BENCH_BEIR_DIR")?.map_or_else(
-        || PathBuf::from("/Users/jaepil/work/research/uqa/benchmarks/data/beir"),
-        PathBuf::from,
-    );
+    let root = optional_env("UQA_BENCH_BEIR_DIR")?
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "UQA_BENCH_BEIR_DIR is required when UQA_BENCH_REAL_BEIR=1".to_string())?;
     load_beir_dataset(&dataset, &root.join(&dataset))
 }
 
