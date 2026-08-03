@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "workload": "uqa-synthetic-analytical-v1",
   "disclaimer": "This is a deterministic TPC-H-style micro-workload, not an audited TPC-H result or independent third-party validation.",
   "rows": 20000,
@@ -27,7 +27,7 @@
     "sampling_mode": "linear",
     "point_estimator": "slope"
   },
-  "ratio_gates": [
+  "external_ratio_checks": [
     {
       "name": "q1_uqa_vs_sqlite",
       "numerator": "analytical_external_q1/uqa",
@@ -69,6 +69,33 @@
       "numerator": "analytical_result_scan/uqa_cursor",
       "denominator": "analytical_result_scan/duckdb",
       "max": 15.0
+    }
+  ],
+  "regression_protocol": {
+    "pairs": 4,
+    "ordering": "counterbalanced",
+    "point_estimator": "median_of_paired_slope_ratios"
+  },
+  "regression_gates": [
+    {
+      "name": "q1_uqa_head_vs_base",
+      "benchmark": "analytical_external_q1/uqa",
+      "max": 1.1
+    },
+    {
+      "name": "q6_uqa_head_vs_base",
+      "benchmark": "analytical_external_q6/uqa",
+      "max": 1.1
+    },
+    {
+      "name": "materialized_scan_head_vs_base",
+      "benchmark": "analytical_result_scan/uqa_materialized",
+      "max": 1.15
+    },
+    {
+      "name": "cursor_scan_head_vs_base",
+      "benchmark": "analytical_result_scan/uqa_cursor",
+      "max": 1.15
     }
   ]
 }

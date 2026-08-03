@@ -4,9 +4,11 @@ This document records UQA-RS benchmark baselines measured on developer hardware.
 
 ## External-engine analytical comparison (2026-08-03)
 
-`analytical_comparison` runs the same generated rows and SQL through UQA, SQLite, and DuckDB in one process and validates identical results before timing. Its versioned [`manifest.json`](../../benchmarks/analytical/manifest.json) records the row count, seed, generator, schema, queries, Criterion configuration, estimator, and ratio ceilings. UQA, SQLite, and DuckDB all execute with warmed statement or plan caches; the comparison backends use `prepare_cached`, matching UQA's cached SQL boundary.
+`analytical_comparison` runs the same generated rows and SQL through UQA, SQLite, and DuckDB in one process and validates identical results before timing. Its versioned [`manifest.json`](../../benchmarks/analytical/manifest.json) records the row count, seed, generator, schema, queries, Criterion configuration, external ratio checks, and base/head regression ceilings. UQA, SQLite, and DuckDB all execute with warmed statement or plan caches; the comparison backends use `prepare_cached`, matching UQA's cached SQL boundary.
 
-The measurement contract explicitly fixes Criterion's linear sampling mode and slope point estimator. Linear sampling changes the iteration count between samples, so the regression slope of elapsed time against iterations is the per-iteration estimate used for the gate; the median of sample averages is a different statistic and must not be substituted. The runner writes toolchain, platform, commit and dirty state, manifest hash, benchmark-source hash, raw slope estimates, and gate results to a versioned JSON artifact, and CI uploads that artifact on every run.
+The measurement contract explicitly fixes Criterion's linear sampling mode and slope point estimator. Linear sampling changes the iteration count between samples, so the regression slope of elapsed time against iterations is the per-iteration estimate used for every comparison; the median of sample averages is a different statistic and must not be substituted. The runner writes toolchain, CPU model, platform, commit and dirty state, manifest, workload-identity, benchmark-source, and executable hashes, raw slope samples, medians, paired ratios, and check results to a versioned JSON artifact, and CI uploads that artifact on every run.
+
+Pull-request CI treats the external-engine ratios as advisory evidence rather than a regression oracle. It builds the base and head benchmark binaries on one runner, executes four adjacent pairs in counterbalanced `head → base`, `base → head` order, and gates the median of the four paired head/base slope ratios. Q1 and Q6 permit at most a 1.10x slowdown; materialized and cursor scans permit 1.15x. The runner refuses the comparison unless the generator, row count, seed, memory budget, schema, and queries have identical workload identities at both revisions. This distinguishes a code regression from heterogeneous hosted-runner behavior while retaining the SQLite and DuckDB measurements for interpretation.
 
 The refreshed full 20-sample run used 20,000 rows on macOS arm64 at clean commit `886d091e10ec884eee0f609446809c11632a8157`. The complete artifact is [`macos-arm64-2026-08-03.json`](../../benchmarks/analytical/reference/macos-arm64-2026-08-03.json).
 
@@ -37,7 +39,7 @@ The cursor originally calculated exact encoded sizes, blocked until the complete
 | Cursor: 1.018x materialized UQA | Moving uniquely owned batches removed the deep clone; exact-size accounting, blocking, and row-to-column conversion remain within run noise. |
 | Scan: external engines are 4.89-6.55x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; dynamic map-backed rows and transfer stages remain the gap. |
 
-The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. The regression test intentionally supplies contradictory median and slope values so a future change cannot silently restore the invalid statistic.
+The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. A later documentation-only commit then produced Q6 slope ratios of 3.169x and 3.140x on two hosted runners even though its executable inputs, runner image, and compiler matched a 1.827x passing run. That demonstrated a second flaw: an absolute cross-engine ceiling on heterogeneous hardware cannot identify a code regression. Tests now pin both corrections by supplying contradictory median/slope values and by proving that a repeatable paired head/base slowdown fails while an advisory external-ratio excursion does not.
 
 `cargo bench --workspace --no-run` validates that every benchmark target builds, but it is not a measurement command. Workspace feature unification can produce a different LTO or code-layout binary from the package-scoped runner. Published comparisons must use `run-analytical-comparison.sh` end to end and must not mix measurements from different executable hashes.
 
@@ -47,6 +49,12 @@ Reproduce and emit a fresh provenance artifact with:
 
 ```sh
 bash scripts/run-analytical-comparison.sh
+```
+
+Reproduce the CI regression protocol against a reachable base commit with:
+
+```sh
+python3 scripts/run-analytical-regression.py <base-commit>
 ```
 
 ## Hot-path optimization pass (2026-07-17)
