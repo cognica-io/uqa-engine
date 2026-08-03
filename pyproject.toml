@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Python bindings for the UQA Rust engine"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "AGPL-3.0-only" }
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "LICENSING.md", "LICENSES/*.txt"]
 authors = [{ name = "Jaepil Jeong", email = "jaepil@cognica.io" }]
 classifiers = [
     "Programming Language :: Python :: 3",

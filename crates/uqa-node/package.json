@@ -14,7 +14,11 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "LICENSE-NOTICE.md"
+    "LICENSE-NOTICE.md",
+    "LICENSE",
+    "LICENSING.md",
+    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
+    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt"
   ],
   "engines": {
     "node": ">= 16"

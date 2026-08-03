@@ -17,11 +17,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## Mathematical foundation
 
-[A Typed Carrier Algebra for Unified Query Execution](docs/papers/typed-carrier-algebra.md)
-states the implementation-grounded theory behind UQA-RS. It distinguishes
-document support, weighted relations, decorated postings, ranked views, SQL
-bags, join tuples, graph context, and aggregate state while showing how they
-compose through one typed planning and execution framework.
+[A Typed Carrier Algebra for Unified Query Execution](docs/papers/typed-carrier-algebra.md) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
 ## Try it in a terminal
 
@@ -192,19 +188,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate 
 
 ## License
 
-UQA-RS is open-source software licensed under AGPL-3.0-only. See
-[LICENSE](https://github.com/cognica-io/uqa-rs/blob/main/LICENSE).
+UQA-RS is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-rs/blob/main/LICENSE).
 
 Two optional additional permissions are available:
 
-- the [FOSS exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete
-  qualifying open-source application retain its OSI-approved license while
-  UQA-RS and modifications to UQA-RS remain under the AGPL; and
-- the [noncommercial application exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt)
-  lets a qualifying personal, educational, academic, or charitable
-  application keep its independent code under terms chosen by its author
-  while UQA-RS and modifications to UQA-RS remain under the AGPL.
+- the [FOSS exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA-RS and modifications to UQA-RS remain under the AGPL; and
+- the [noncommercial application exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA-RS and modifications to UQA-RS remain under the AGPL.
 
-Separate [commercial licensing](https://github.com/cognica-io/uqa-rs/blob/main/COMMERCIAL.md) is available for proprietary
-applications, closed modifications, SaaS, and OEM distribution. The complete
-decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md).
+Separate [commercial licensing](https://github.com/cognica-io/uqa-rs/blob/main/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md).

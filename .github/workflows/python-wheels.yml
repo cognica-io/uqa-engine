@@ -10,9 +10,13 @@ on:
       - ".github/workflows/python-wheels.yml"
       - "Cargo.lock"
       - "Cargo.toml"
+      - "LICENSE"
+      - "LICENSES/**"
+      - "LICENSING.md"
       - "crates/uqa-*/**"
       - "pyproject.toml"
       - "python/**"
+      - "scripts/check-release-licenses.py"
       - "tests/python/**"
 
 permissions:
@@ -83,6 +87,10 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           args: --release --locked --compatibility pypi --out dist
 
+      - name: Check wheel license contents
+        shell: bash
+        run: python scripts/check-release-licenses.py dist/*.whl
+
       - name: Test wheel
         shell: bash
         run: |
@@ -122,6 +130,9 @@ jobs:
           command: sdist
           maturin-version: v1.11.5
           args: --out dist
+
+      - name: Check sdist license contents
+        run: python scripts/check-release-licenses.py dist/*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
