@@ -132,7 +132,7 @@ A database snapshot is written
 \Sigma=(U,\mathcal T,\mathcal I,\mathcal G,\Theta,\mathcal C),
 \]
 
-where \(U\) is the finite identifier universe, \(\mathcal T\) is relational and document data, \(\mathcal I\) is the family of physical indexes, \(\mathcal G\) is the named-graph state, \(\Theta\) is scoring and model metadata, and \(\mathcal C\) is catalog state. A read operator is pure relative to a pinned \(\Sigma\). A state-changing operator is modeled separately in Section 10.
+where \(U\) is the finite identifier universe, \(\mathcal T\) is relational and document data, \(\mathcal I\) is the family of physical indexes, \(\mathcal G\) is the named-graph state, \(\Theta\) is scoring and model metadata, and \(\mathcal C\) is catalog state. A read operator is pure relative to a pinned \(\Sigma\). A state-changing operator is modeled separately in Section 9.
 
 ### 3.2 Core carriers
 

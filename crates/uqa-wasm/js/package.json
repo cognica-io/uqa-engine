@@ -16,6 +16,10 @@
     "index.mjs",
     "index.d.ts",
     "LICENSE-NOTICE.md",
+    "LICENSE",
+    "LICENSING.md",
+    "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
+    "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
     "uqa.js",
     "uqa.wasm"
   ],

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Machine-checked inventory of Rust benchmark entrypoints and representative semantic probes.",
+  "description": "Machine-checked inventory of Rust benchmark entrypoints and required semantic probes.",
   "surfaces": [
     {
       "path": "crates/uqa-core/benches/carrier_layers.rs",
@@ -8,7 +8,19 @@
     },
     {
       "path": "crates/uqa-core/benches/posting_list.rs",
-      "tokens": ["posting_list_union_by_size", "posting_list_top_k"]
+      "tokens": [
+        "posting_list_difference_by_overlap",
+        "posting_list_difference_by_size",
+        "posting_list_get_entry_binary_search_100k",
+        "posting_list_intersect_by_overlap",
+        "posting_list_intersect_by_size",
+        "posting_list_nway_intersect",
+        "posting_list_nway_union",
+        "posting_list_top_k",
+        "posting_list_union_by_overlap",
+        "posting_list_union_by_size",
+        "posting_list_union_with_scores_10k"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/analytical_comparison.rs",
@@ -16,15 +28,38 @@
     },
     {
       "path": "crates/uqa-engine/benches/compiler.rs",
-      "tokens": ["sql_parse_compile", "sql_compile_relational_execute"]
+      "tokens": [
+        "compile_dml_delete",
+        "compile_dml_insert",
+        "compile_dml_update",
+        "sql_compile_relational_execute",
+        "sql_compile_select_execute",
+        "sql_parse_compile"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/execution.rs",
-      "tokens": ["execution_seq_scan_full", "execution_pipeline"]
+      "tokens": [
+        "execution_aggregate_distinct_window",
+        "execution_filter_project_sort",
+        "execution_limit",
+        "execution_pipeline",
+        "execution_seq_scan_full"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/graph_sql.rs",
-      "tokens": ["graph_centrality_sql", "graph_sql_bounded_rpq"]
+      "tokens": [
+        "graph_centrality_sql",
+        "graph_sql_betweenness",
+        "graph_sql_bounded_rpq",
+        "graph_sql_hits",
+        "graph_sql_named_rpq",
+        "graph_sql_named_temporal_traverse",
+        "graph_sql_named_traverse",
+        "graph_sql_pagerank",
+        "graph_sql_pagerank_where"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/hybrid_relevance.rs",
@@ -64,7 +99,16 @@
     },
     {
       "path": "crates/uqa-engine/benches/sql_workloads.rs",
-      "tokens": ["e2e_oltp", "e2e_olap", "e2e_join"]
+      "tokens": [
+        "e2e_join",
+        "e2e_olap",
+        "e2e_oltp",
+        "e2e_oltp_delete_where",
+        "e2e_oltp_insert_single",
+        "e2e_subquery_cte_window_analyze",
+        "planner_histogram_analyze",
+        "planner_selectivity"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/text_top_k.rs",
@@ -76,11 +120,68 @@
     },
     {
       "path": "crates/uqa-fusion/benches/fusion.rs",
-      "tokens": ["bayesian_evidence_fusion", "robust_positive_evidence_pool"]
+      "tokens": [
+        "bayesian_evidence_fusion",
+        "fusion_learned",
+        "fusion_learned_fit_1000",
+        "fusion_query_feature_extract",
+        "robust_positive_evidence_pool"
+      ]
     },
     {
       "path": "crates/uqa-graph/benches/graph_workloads.rs",
-      "tokens": ["graph_store_add_vertices_1000", "graph_pagerank_default", "named_graph_isolation"]
+      "tokens": [
+        "graph_betweenness",
+        "graph_bfs_depth",
+        "graph_bfs_with_label",
+        "graph_cached_pattern_match",
+        "graph_cypher_compile",
+        "graph_delta_apply",
+        "graph_delta_rollback",
+        "graph_embedding_dimensions",
+        "graph_hits_default",
+        "graph_hits_low_iterations",
+        "graph_incremental_add_edge",
+        "graph_incremental_remove_vertex",
+        "graph_message_passing",
+        "graph_message_passing_aggregation",
+        "graph_pagerank_default",
+        "graph_pagerank_high_damping",
+        "graph_pagerank_low_iterations",
+        "graph_path_index_build",
+        "graph_path_index_lookup",
+        "graph_pattern_labeled_edge",
+        "graph_pattern_single_edge",
+        "graph_rpq_bounded_execute",
+        "graph_rpq_bounded_vs_kleene",
+        "graph_rpq_indexed_vs_unindexed",
+        "graph_rpq_parse",
+        "graph_store_add_edges_1000",
+        "graph_store_add_vertices_1000",
+        "graph_store_in_neighbors",
+        "graph_store_neighbors",
+        "graph_store_neighbors_with_label",
+        "graph_subgraph_index_build",
+        "graph_subgraph_index_lookup",
+        "graph_temporal_filter_vs_unfiltered",
+        "graph_temporal_traverse",
+        "graph_vertices_by_label",
+        "graph_weighted_path_max",
+        "graph_weighted_path_sum",
+        "graph_weighted_path_with_predicate",
+        "named_graph_create_100_graphs",
+        "named_graph_intersect_graphs",
+        "named_graph_isolation",
+        "named_graph_property_index_build",
+        "named_graph_property_index_lookup",
+        "named_graph_rpq_kleene",
+        "named_graph_traverse_1hop",
+        "named_graph_traverse_3hop",
+        "named_graph_traverse_operator_1hop",
+        "named_graph_traverse_operator_3hop",
+        "named_graph_triangle_pattern",
+        "named_graph_union_graphs"
+      ]
     },
     {
       "path": "crates/uqa-graph/benches/rpq.rs",
@@ -88,15 +189,32 @@
     },
     {
       "path": "crates/uqa-operators/benches/operators.rs",
-      "tokens": ["sparse_threshold_by_size", "multi_stage_three_stage"]
+      "tokens": [
+        "attention_fusion_operator",
+        "multi_field_operator_execute",
+        "multi_stage_three_stage",
+        "multi_stage_two_stage",
+        "progressive_fusion_two_stage",
+        "sparse_threshold_by_size",
+        "sparse_threshold_levels"
+      ]
     },
     {
       "path": "crates/uqa-planner/benches/planner.rs",
-      "tokens": ["planner_dpccp_topology", "planner_greedy_chain"]
+      "tokens": [
+        "planner_dpccp_fixed_8",
+        "planner_dpccp_topology",
+        "planner_greedy_chain",
+        "planner_greedy_star"
+      ]
     },
     {
       "path": "crates/uqa-scoring/benches/beir_calibration.rs",
-      "tokens": ["beir_calibration_sources", "beir_hybrid_method_report"]
+      "tokens": [
+        "beir_calibration_sources",
+        "beir_hybrid_method_report",
+        "beir_real_fixture_probe"
+      ]
     },
     {
       "path": "crates/uqa-scoring/benches/bm25.rs",
@@ -104,11 +222,25 @@
     },
     {
       "path": "crates/uqa-scoring/benches/calibration.rs",
-      "tokens": ["calibration_log_loss_100k", "calibration_ece"]
+      "tokens": [
+        "calibration_brier_100k",
+        "calibration_ece",
+        "calibration_log_loss_100k",
+        "calibration_reliability_diagram",
+        "calibration_report",
+        "parameter_learner_fit",
+        "parameter_learner_update_single",
+        "parameter_learner_update_stream_1000"
+      ]
     },
     {
       "path": "crates/uqa-scoring/benches/external_prior.rs",
-      "tokens": ["external_prior_score_with_prior", "external_prior_authority_computation"]
+      "tokens": [
+        "external_prior_authority_computation",
+        "external_prior_recency_computation",
+        "external_prior_score_batch",
+        "external_prior_score_with_prior"
+      ]
     },
     {
       "path": "crates/uqa-scoring/benches/fusion_wand.rs",
@@ -120,7 +252,20 @@
     },
     {
       "path": "crates/uqa-scoring/benches/scoring.rs",
-      "tokens": ["bm25_score_single", "vector_cosine_similarity", "log_odds_fusion"]
+      "tokens": [
+        "bayesian_bm25_combine_scores",
+        "bayesian_bm25_score_batch_100k",
+        "bayesian_bm25_score_single",
+        "bm25_combine_scores",
+        "bm25_idf",
+        "bm25_score_batch_100k",
+        "bm25_score_single",
+        "log_odds_fuse_batch_10k",
+        "log_odds_fusion",
+        "vector_cosine_batch_10k_dim128",
+        "vector_cosine_similarity",
+        "vector_similarity_to_probability"
+      ]
     },
     {
       "path": "crates/uqa-storage/benches/spatial.rs",
@@ -128,7 +273,23 @@
     },
     {
       "path": "crates/uqa-storage/benches/storage.rs",
-      "tokens": ["document_store_put_single", "vector_index_knn_trained", "vector_index_persistence_roundtrip"]
+      "tokens": [
+        "document_store_get_random_10k",
+        "document_store_put_batch",
+        "document_store_put_single",
+        "document_store_scan_all_10k",
+        "inverted_index_add_document",
+        "inverted_index_doc_freq",
+        "inverted_index_get_posting_list",
+        "vector_index_add_single",
+        "vector_index_build_500",
+        "vector_index_delete",
+        "vector_index_knn_brute_force",
+        "vector_index_knn_trained",
+        "vector_index_persistence_roundtrip",
+        "vector_index_threshold_search",
+        "vector_index_train"
+      ]
     }
   ]
 }

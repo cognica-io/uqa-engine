@@ -36,7 +36,28 @@ jobs:
         run: python3 scripts/check-workspace-dependencies.py
       - name: Check benchmark coverage
         run: python3 scripts/check-benchmark-coverage.py
+      - name: Check release license sources
+        run: python3 scripts/check-release-licenses.py
       - run: cargo fmt --all --check
+
+  release-package-licenses:
+    name: release package licenses
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Prepare package output
+        run: mkdir -p "${RUNNER_TEMP}/uqa-packages"
+      - name: Pack Node.js bindings
+        working-directory: crates/uqa-node
+        run: npm pack --pack-destination "${RUNNER_TEMP}/uqa-packages"
+      - name: Pack WebAssembly bindings
+        working-directory: crates/uqa-wasm/js
+        run: npm pack --pack-destination "${RUNNER_TEMP}/uqa-packages"
+      - name: Check package license contents
+        run: python3 scripts/check-release-licenses.py "${RUNNER_TEMP}"/uqa-packages/*.tgz
 
   clippy:
     name: cargo clippy
