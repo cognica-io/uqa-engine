@@ -4,9 +4,11 @@ description = "Tokenizers, char/token filters, and analyzers for UQA full-text s
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme.workspace = true
 rust-version.workspace = true
 
 [dependencies]

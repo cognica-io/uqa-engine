@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Check public repository hygiene
+        run: bash scripts/check-public-repository-hygiene.sh
       - name: Check Rust file headers
         run: bash scripts/check-rust-file-headers.sh
       - name: Check Rust file line limit

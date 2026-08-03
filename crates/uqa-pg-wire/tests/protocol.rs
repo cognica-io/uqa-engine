@@ -33,7 +33,7 @@ fn frontend_packet(tag: u8, body: &[u8]) -> Vec<u8> {
 
 #[test]
 fn decodes_startup_parameters_without_network_state() {
-    let body = b"user\0jaepil\0database\0uqa\0application_name\0psql\0\0";
+    let body = b"user\0alice\0database\0uqa\0application_name\0psql\0\0";
     let packet = startup_packet(PROTOCOL_VERSION_3_0, body);
 
     let Some((StartupFrame::Startup(startup), consumed)) =
@@ -45,14 +45,14 @@ fn decodes_startup_parameters_without_network_state() {
     assert_eq!(consumed, packet.len());
     assert_eq!(startup.version.major, 3);
     assert_eq!(startup.version.minor, 0);
-    assert_eq!(startup.user(), Some("jaepil"));
+    assert_eq!(startup.user(), Some("alice"));
     assert_eq!(startup.database(), Some("uqa"));
     assert_eq!(startup.application_name(), Some("psql"));
 }
 
 #[test]
 fn startup_decoder_reports_incomplete_packets() {
-    let packet = startup_packet(PROTOCOL_VERSION_3_0, b"user\0jaepil\0\0");
+    let packet = startup_packet(PROTOCOL_VERSION_3_0, b"user\0alice\0\0");
     let truncated = &packet[..packet.len() - 1];
 
     assert_eq!(decode_startup(truncated).expect("not malformed"), None);

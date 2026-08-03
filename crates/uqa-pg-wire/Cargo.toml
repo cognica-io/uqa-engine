@@ -4,9 +4,11 @@ description = "Network-independent PostgreSQL wire protocol parsing and encoding
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme.workspace = true
 rust-version.workspace = true
 
 [dependencies]

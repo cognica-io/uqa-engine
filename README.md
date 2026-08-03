@@ -171,6 +171,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Compressed VFS security](docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
+| [Licensing policy](https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
 | [History](HISTORY.md) | Release-by-release changes |
 
 ## Project layout
@@ -179,8 +180,23 @@ The repository is a Rust workspace with small crates for the algebra, storage, s
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate boundaries, and pull request guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
 
 ## License
 
-UQA-RS is licensed under AGPL-3.0-only. See [LICENSE](LICENSE).
+UQA-RS is open-source software licensed under AGPL-3.0-only. See
+[LICENSE](https://github.com/cognica-io/uqa-rs/blob/main/LICENSE).
+
+Two optional additional permissions are available:
+
+- the [FOSS exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete
+  qualifying open-source application retain its OSI-approved license while
+  UQA-RS and modifications to UQA-RS remain under the AGPL; and
+- the [noncommercial application exception](https://github.com/cognica-io/uqa-rs/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt)
+  lets a qualifying personal, educational, academic, or charitable
+  application keep its independent code under terms chosen by its author
+  while UQA-RS and modifications to UQA-RS remain under the AGPL.
+
+Separate [commercial licensing](https://github.com/cognica-io/uqa-rs/blob/main/COMMERCIAL.md) is available for proprietary
+applications, closed modifications, SaaS, and OEM distribution. The complete
+decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md).
