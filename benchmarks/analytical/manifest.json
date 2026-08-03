@@ -23,7 +23,9 @@
   "criterion": {
     "sample_size": 20,
     "warm_up_ms": 500,
-    "measurement_ms": 2000
+    "measurement_ms": 2000,
+    "sampling_mode": "linear",
+    "point_estimator": "slope"
   },
   "ratio_gates": [
     {

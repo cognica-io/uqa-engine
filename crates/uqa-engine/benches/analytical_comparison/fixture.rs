@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use criterion::SamplingMode;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -37,6 +38,20 @@ pub struct CriterionConfig {
     pub sample_size: usize,
     pub warm_up_ms: u64,
     pub measurement_ms: u64,
+    pub sampling_mode: CriterionSamplingMode,
+    pub point_estimator: PointEstimator,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CriterionSamplingMode {
+    Linear,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PointEstimator {
+    Slope,
 }
 
 impl Fixture {
@@ -57,6 +72,15 @@ impl Fixture {
 
     pub fn measurement(&self) -> Duration {
         Duration::from_millis(self.manifest.criterion.measurement_ms)
+    }
+
+    pub fn sampling_mode(&self) -> SamplingMode {
+        match (
+            self.manifest.criterion.sampling_mode,
+            self.manifest.criterion.point_estimator,
+        ) {
+            (CriterionSamplingMode::Linear, PointEstimator::Slope) => SamplingMode::Linear,
+        }
     }
 
     pub fn expected_scan_rows(&self) -> usize {

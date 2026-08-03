@@ -25,6 +25,7 @@ fn configured_group<'a>(
     group.sample_size(fixture.manifest.criterion.sample_size);
     group.warm_up_time(fixture.warm_up());
     group.measurement_time(fixture.measurement());
+    group.sampling_mode(fixture.sampling_mode());
     group
 }
 
