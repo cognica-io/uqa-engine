@@ -112,7 +112,7 @@ def measure(
     print(f"==> measuring {label}", flush=True)
     environment = os.environ.copy()
     environment["CRITERION_HOME"] = str(criterion_home)
-    run(str(executable), "--noplot", cwd=worktree, env=environment)
+    run(str(executable), "--bench", "--noplot", cwd=worktree, env=environment)
 
 
 def main() -> int:
