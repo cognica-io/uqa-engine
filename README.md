@@ -148,6 +148,8 @@ Read the [compressed VFS security contract](docs/design/compressed-vfs-security.
 | Node.js | [`uqa-node`](crates/uqa-node) | Node-API bindings with asynchronous query and search methods |
 | Browser | [`uqa-wasm`](crates/uqa-wasm) | Emscripten build with SQLite persistence mounted on IndexedDB |
 
+Prebuilt Linux Python wheels target glibc 2.28 or newer because the bundled DuckDB runtime requires the modern C++11 ABI.
+
 ## Build and test
 
 Build the complete workspace:
