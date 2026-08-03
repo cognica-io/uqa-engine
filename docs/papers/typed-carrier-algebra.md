@@ -67,7 +67,7 @@ The model concerns finite database snapshots and an embeddable single-node runti
 
 ### 1.3 Relation to the Earlier Unified-Algebra Formulation
 
-This manuscript consolidates and revises the 2023 unified-query-algebra paper and its 2024 graph extension in light of the executable system. It retains their central objective—one compositional framework for relational, textual, vector, and graph queries—and preserves the useful Boolean-support, cross-paradigm join, aggregate, hierarchical-value, traversal, and regular-path constructions. It changes the foundation where implementation exposed stronger semantic requirements.
+This manuscript consolidates and revises the original unified-query-algebra formulation [18] and its graph-data extension [19] in light of the executable system. It retains their central objective—one compositional framework for relational, textual, vector, and graph queries—and preserves the useful Boolean-support, cross-paradigm join, aggregate, hierarchical-value, traversal, and regular-path constructions. It changes the foundation where implementation exposed stronger semantic requirements.
 
 The principal revision is to replace the proposed universal posting-list representation with a typed family of carriers. The earlier document-set/posting-list bijection is retained only as the support/lift round trip for default-decorated postings; it is not asserted for postings with observable payload. Likewise, the graph extension's broad graph/document isomorphism is replaced by a lossless, versioned codec theorem over the invariant-checked graph-posting carrier. Score combination is divided into exact single-prior Bayesian evidence fusion and explicitly heuristic pooling, while optimizer identities are stated relative to the observation under which they are sound. These are not reductions in the system's compositional ambition. They are the conditions that let the broader claim survive contact with tuple identity, bags, payload collisions, ranking, graph context, and persistent execution.
 
@@ -407,6 +407,8 @@ A path \(p\) defines a partial evaluation
 A deterministic path filter distributes over bag union because it evaluates each row independently. Path projection and unnesting have different carriers: projection changes row values, while unnesting changes multiplicity and therefore belongs to the row-bag algebra. Idempotence of projection is claimed only for a normalized representation whose output paths are stable under repeated evaluation; it is not inferred merely from the word “projection.”
 
 ## 6. Retrieval Scores and Probabilistic Evidence
+
+The score-domain treatment builds on the Bayesian hybrid-search framework [20] while narrowing its claims at implementation boundaries: unlabeled monotone mappings remain score transforms until labeled validation, and exact signed-evidence fusion remains distinct from robust positive-evidence pooling.
 
 ### 6.1 Raw text scores
 
@@ -895,6 +897,7 @@ The central claim is therefore substantial but precise: a single embedded runtim
 15. Mendelzon, A. O., and Wood, P. T. (1995). Finding regular simple paths in graph databases. *SIAM Journal on Computing*, 24(6), 1235–1258.
 16. Moerkotte, G., and Neumann, T. (2006). Analysis of two existing and one new dynamic programming algorithm for the generation of optimal bushy join trees without cross products. In *Proceedings of VLDB 2006*, 930–941.
 17. Robertson, S. E., and Zaragoza, H. (2009). The probabilistic relevance framework: BM25 and beyond. *Foundations and Trends in Information Retrieval*, 3(4), 333–389.
-18. Jeong, J. (2023). *A Unified Mathematical Framework for Query Algebras Across Heterogeneous Data Paradigms*. Unpublished manuscript.
-19. Jeong, J. (2024). *Extending the Unified Mathematical Framework to Support Graph Data Structures*. Unpublished manuscript.
-20. Jeong, J. and Cognica, Inc. (2026). UQA-RS 0.1.0 preproduction software artifact. https://github.com/cognica-io/uqa-rs
+18. Jeong, J. (2025). *A Unified Mathematical Framework for Query Algebras Across Heterogeneous Data Paradigms*. OSF Preprints. https://doi.org/10.31219/osf.io/f56j2_v2
+19. Jeong, J. (2025). *Extending the Unified Mathematical Framework to Support Graph Data Structures*. OSF Preprints. https://doi.org/10.31219/osf.io/cgfae_v1
+20. Jeong, J. (2026). *A Unified Bayesian Framework for Hybrid Search: Calibration and Log-Odds Fusion of Lexical and Vector Retrieval*. Zenodo. https://doi.org/10.5281/zenodo.20768747
+21. Jeong, J. and Cognica, Inc. (2026). UQA-RS 0.1.0 preproduction software artifact. https://github.com/cognica-io/uqa-rs
