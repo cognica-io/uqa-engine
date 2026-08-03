@@ -195,6 +195,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
@@ -202,14 +204,16 @@ jobs:
         with:
           cache-bin: false
           cache-targets: false
-      - name: Run UQA, SQLite, and DuckDB comparison
-        run: bash scripts/run-analytical-comparison.sh
+      - name: Run paired base/head analytical regression
+        env:
+          UQA_ANALYTICAL_BASE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/run-analytical-regression.py "${UQA_ANALYTICAL_BASE_REVISION}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: analytical-comparison-${{ github.sha }}
           path: |
             target/benchmark-runs/analytical-comparison.json
-            target/criterion/analytical_external_q1/*/new/estimates.json
-            target/criterion/analytical_external_q6/*/new/estimates.json
-            target/criterion/analytical_result_scan/*/new/estimates.json
+            target/criterion/analytical-ab/**/analytical_external_q1/*/new/estimates.json
+            target/criterion/analytical-ab/**/analytical_external_q6/*/new/estimates.json
+            target/criterion/analytical-ab/**/analytical_result_scan/*/new/estimates.json

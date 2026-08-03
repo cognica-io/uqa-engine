@@ -296,7 +296,7 @@ Correctness is covered by unit, integration, property, differential, golden, fuz
 
 Parity fixtures are versioned and described in [`parity.md`](parity.md). The benchmark coverage manifest enumerates every current Rust benchmark entrypoint and checks representative semantic evidence tokens so workload surfaces cannot disappear silently.
 
-Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. Published measurements are internal regression baselines unless independently reproduced, and the methodology, provenance artifacts, ratio gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
+Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. Published measurements are internal regression baselines unless independently reproduced; pull-request analytical regression uses counterbalanced base/head measurements on one runner, while cross-engine ratios remain advisory. The methodology, provenance artifacts, gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
 
 The all-workspace benchmark command is a compile gate, not a published performance run. Focused runners define their own fixture, feature set, warmup, sample count, validation, and provenance so results from different executable hashes are not mixed.
 
