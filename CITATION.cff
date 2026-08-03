@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+message: >-
+  If you use UQA-RS, cite the software and the papers under references that
+  correspond to the features used.
+title: UQA-RS
+type: software
+authors:
+  - family-names: Jeong
+    given-names: Jaepil
+    orcid: "https://orcid.org/0009-0006-5881-8907"
+version: 0.1.0
+date-released: 2026-08-03
+repository-code: "https://github.com/cognica-io/uqa-rs"
+url: "https://github.com/cognica-io/uqa-rs"
+license: AGPL-3.0-only
+keywords:
+  - database
+  - query algebra
+  - information retrieval
+  - vector search
+  - graph query
+  - hybrid search
+references:
+  - type: article
+    authors:
+      - family-names: Jeong
+        given-names: Jaepil
+        orcid: "https://orcid.org/0009-0006-5881-8907"
+    title: A Unified Mathematical Framework for Query Algebras Across Heterogeneous Data Paradigms
+    doi: 10.31219/osf.io/f56j2_v2
+    url: "https://doi.org/10.31219/osf.io/f56j2_v2"
+    publisher:
+      name: Center for Open Science
+    year: 2025
+  - type: article
+    authors:
+      - family-names: Jeong
+        given-names: Jaepil
+        orcid: "https://orcid.org/0009-0006-5881-8907"
+    title: Extending the Unified Mathematical Framework to Support Graph Data Structures
+    doi: 10.31219/osf.io/cgfae_v1
+    url: "https://doi.org/10.31219/osf.io/cgfae_v1"
+    publisher:
+      name: Center for Open Science
+    year: 2025
+  - type: article
+    authors:
+      - family-names: Jeong
+        given-names: Jaepil
+    title: "A Unified Bayesian Framework for Hybrid Search: Calibration and Log-Odds Fusion of Lexical and Vector Retrieval"
+    doi: 10.5281/zenodo.20768747
+    url: "https://doi.org/10.5281/zenodo.20768747"
+    publisher:
+      name: Zenodo
+    year: 2026

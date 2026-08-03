@@ -19,6 +19,8 @@ It is designed for applications that need more than a relational table but do no
 
 [A Typed Carrier Algebra for Unified Query Execution](docs/papers/typed-carrier-algebra.md) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
+The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
+
 ## Try it in a terminal
 
 You need Rust 1.85 or newer and the native build tools required by Cargo dependencies.
@@ -177,6 +179,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Compressed VFS security](docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
+| [Citation metadata](CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
 | [Licensing policy](https://github.com/cognica-io/uqa-rs/blob/main/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
 | [History](HISTORY.md) | Release-by-release changes |
 

@@ -22,7 +22,7 @@ Build UQA-RS as an embeddable Rust engine for the Unified Query Algebra:
 
 ## 2. Theoretical anchors
 
-The implementation uses the papers as design input, with the executable contracts stated at the type boundary:
+The implementation uses the [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747) as design input, with the executable contracts stated at the type boundary:
 
 - **Document-set Boolean algebra.** `DocSet` is the carrier for union, intersection, complement relative to an explicit universe, empty, De Morgan, and distributivity. The 11 Boolean laws are property-tested with ordinary `DocSet` equality.
 - **Support projection, not a posting-list isomorphism.** `PostingList::support` forgets payloads. Constructing a posting list from `D: DocSet` assigns default payloads, so `support(PostingList::from(D)) == D`; reconstructing from `support(L)` equals a decorated `L` only when every payload is already default.
