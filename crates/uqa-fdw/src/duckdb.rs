@@ -6,7 +6,7 @@
 
 //! `DuckDBFDWHandler`: in-process `DuckDB` foreign data wrapper.
 //!
-//! DuckDB SQL generation and execution: source-string normalization
+//! `DuckDB` SQL generation and execution: source-string normalization
 //! ([`normalize_source`]), parameterized `WHERE` clause assembly
 //! ([`build_where_clause`]), full `SELECT` builder ([`prepare_query`]),
 //! and row materialization through the `duckdb` Rust crate.
