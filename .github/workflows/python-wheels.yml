@@ -85,6 +85,7 @@ jobs:
           maturin-version: v1.11.5
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
+          before-script-linux: bash .github/scripts/install-manylinux-openssl-build-deps.sh
           args: --release --locked --compatibility pypi --out dist
 
       - name: Check wheel license contents
