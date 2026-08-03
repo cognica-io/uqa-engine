@@ -32,6 +32,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Test analytical benchmark gate
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Check workspace dependency policy
         run: python3 scripts/check-workspace-dependencies.py
       - name: Check benchmark coverage

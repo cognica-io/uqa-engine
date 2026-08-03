@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+#
+# Unified Query Algebra
+#
+# Copyright (c) 2023-2026 Cognica, Inc.
+#
+
 """Build a provenance report and enforce same-host analytical ratios."""
 
 from __future__ import annotations
@@ -21,6 +27,8 @@ BENCHMARK_SOURCES = [
     ROOT / "crates/uqa-engine/benches/analytical_comparison.rs",
     ROOT / "crates/uqa-engine/benches/analytical_comparison/backends.rs",
     ROOT / "crates/uqa-engine/benches/analytical_comparison/fixture.rs",
+    ROOT / "scripts/check-analytical-benchmark.py",
+    ROOT / "scripts/run-analytical-comparison.sh",
 ]
 
 
@@ -34,15 +42,15 @@ def command(*args: str) -> str:
     ).stdout.strip()
 
 
-def estimate(criterion_root: pathlib.Path, benchmark: str) -> float:
+def slope_estimate(criterion_root: pathlib.Path, benchmark: str) -> float:
     path = criterion_root.joinpath(*benchmark.split("/"), "new", "estimates.json")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        value = float(payload["median"]["point_estimate"])
+        value = float(payload["slope"]["point_estimate"])
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"read Criterion estimate {path}: {error}") from error
+        raise RuntimeError(f"read Criterion linear-sampling slope {path}: {error}") from error
     if not value > 0:
-        raise RuntimeError(f"Criterion median must be positive: {path}: {value}")
+        raise RuntimeError(f"Criterion slope must be positive: {path}: {value}")
     return value
 
 
@@ -75,14 +83,20 @@ def main() -> int:
 
     manifest_bytes = MANIFEST_PATH.read_bytes()
     manifest = json.loads(manifest_bytes)
-    medians: dict[str, float] = {}
+    criterion_config = manifest.get("criterion", {})
+    if criterion_config.get("sampling_mode") != "linear":
+        raise RuntimeError("analytical ratio gates require Criterion linear sampling")
+    if criterion_config.get("point_estimator") != "slope":
+        raise RuntimeError("analytical ratio gates require the Criterion slope estimator")
+
+    estimates: dict[str, float] = {}
     ratios: list[dict[str, object]] = []
     failed = False
 
     def load_estimate(name: str) -> float:
-        if name not in medians:
-            medians[name] = estimate(args.criterion_root, name)
-        return medians[name]
+        if name not in estimates:
+            estimates[name] = slope_estimate(args.criterion_root, name)
+        return estimates[name]
 
     for gate in manifest["ratio_gates"]:
         numerator_name = gate["numerator"]
@@ -105,7 +119,7 @@ def main() -> int:
 
     status = command("git", "status", "--porcelain")
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "manifest": str(MANIFEST_PATH.relative_to(ROOT)),
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -117,7 +131,7 @@ def main() -> int:
         "processor": platform.processor() or "unknown",
         "rustc": command("rustc", "--version"),
         "cargo": command("cargo", "--version"),
-        "criterion_median_nanoseconds": dict(sorted(medians.items())),
+        "criterion_slope_nanoseconds_per_iteration": dict(sorted(estimates.items())),
         "ratio_gates": ratios,
         "passed": not failed,
         "independent_reproduction": False,
