@@ -1,25 +1,25 @@
 {
-  "benchmark_source_sha256": "797bd0b552a83bf47970ff399c6103b12b73e1975d91b917aba0de373b5785b4",
+  "benchmark_source_sha256": "aeed9f257cd8646f67189dde2807b23684f148dec3598b075e6d36531c5b2a11",
   "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
-  "criterion_median_nanoseconds": {
-    "analytical_external_q1/duckdb": 549205.1382352941,
-    "analytical_external_q1/sqlite": 7533910.651785715,
-    "analytical_external_q1/uqa": 2974979.5147058824,
-    "analytical_external_q6/duckdb": 127237.28093567252,
-    "analytical_external_q6/sqlite": 1025559.5090225564,
-    "analytical_external_q6/uqa": 1820141.2404761906,
-    "analytical_result_scan/duckdb": 772542.0895655272,
-    "analytical_result_scan/sqlite": 1444319.5324675324,
-    "analytical_result_scan/uqa_cursor": 6029596.28125,
-    "analytical_result_scan/uqa_materialized": 6069541.414285714
+  "criterion_slope_nanoseconds_per_iteration": {
+    "analytical_external_q1/duckdb": 492088.4767421603,
+    "analytical_external_q1/sqlite": 7521533.550696864,
+    "analytical_external_q1/uqa": 2540099.1846689894,
+    "analytical_external_q6/duckdb": 401709.1430313589,
+    "analytical_external_q6/sqlite": 1172541.1649390245,
+    "analytical_external_q6/uqa": 2227475.1414634148,
+    "analytical_result_scan/duckdb": 1236363.8580574912,
+    "analytical_result_scan/sqlite": 1654886.238095238,
+    "analytical_result_scan/uqa_cursor": 8098339.56533101,
+    "analytical_result_scan/uqa_materialized": 7955505.13641115
   },
-  "generated_at_utc": "2026-08-02T12:33:47.625826+00:00",
-  "git_commit": "a933ac3aa9f21a899572582eb10224ba38c8f7eb",
-  "git_dirty": true,
+  "generated_at_utc": "2026-08-03T13:05:22.391646+00:00",
+  "git_commit": "886d091e10ec884eee0f609446809c11632a8157",
+  "git_dirty": false,
   "independent_reproduction": false,
   "machine": "arm64",
   "manifest": "benchmarks/analytical/manifest.json",
-  "manifest_sha256": "162a919253fba2b17f3851c78b3e37bc3b024fc6bb7e9546aec45d793a291ae6",
+  "manifest_sha256": "89362d2ab384d13cfcafd98839c51f45f3873994bdab72bda5a5aaab8a2b3080",
   "passed": true,
   "platform": "macOS-26.5.1-arm64-arm-64bit",
   "processor": "arm",
@@ -30,7 +30,7 @@
       "name": "q1_uqa_vs_sqlite",
       "numerator": "analytical_external_q1/uqa",
       "passed": true,
-      "ratio": 0.3948785235461668
+      "ratio": 0.337710277770901
     },
     {
       "denominator": "analytical_external_q1/duckdb",
@@ -38,7 +38,7 @@
       "name": "q1_uqa_vs_duckdb",
       "numerator": "analytical_external_q1/uqa",
       "passed": true,
-      "ratio": 5.416882158577551
+      "ratio": 5.161874956888954
     },
     {
       "denominator": "analytical_external_q6/sqlite",
@@ -46,7 +46,7 @@
       "name": "q6_uqa_vs_sqlite",
       "numerator": "analytical_external_q6/uqa",
       "passed": true,
-      "ratio": 1.7747787665787789
+      "ratio": 1.8996988831340944
     },
     {
       "denominator": "analytical_external_q6/duckdb",
@@ -54,7 +54,7 @@
       "name": "q6_uqa_vs_duckdb",
       "numerator": "analytical_external_q6/uqa",
       "passed": true,
-      "ratio": 14.3050938144175
+      "ratio": 5.544994880262235
     },
     {
       "denominator": "analytical_result_scan/uqa_materialized",
@@ -62,7 +62,7 @@
       "name": "cursor_vs_materialized_scan",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 0.9934187559966728
+      "ratio": 1.0179541621142483
     },
     {
       "denominator": "analytical_result_scan/sqlite",
@@ -70,7 +70,7 @@
       "name": "cursor_scan_vs_sqlite",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 4.174696904464623
+      "ratio": 4.893592912254887
     },
     {
       "denominator": "analytical_result_scan/duckdb",
@@ -78,9 +78,9 @@
       "name": "cursor_scan_vs_duckdb",
       "numerator": "analytical_result_scan/uqa_cursor",
       "passed": true,
-      "ratio": 7.804877381685452
+      "ratio": 6.550126415094896
     }
   ],
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-  "schema_version": 1
+  "schema_version": 2
 }
