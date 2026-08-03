@@ -439,6 +439,72 @@ fn hnsw_is_a_distinct_persistent_index_and_survives_reopen() {
 }
 
 #[test]
+fn sqlite_reopen_repairs_legacy_hnsw_alias_backed_by_ivf() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("legacy-hnsw-alias.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO articles (id, embedding) VALUES
+                 (1, ARRAY[1.0, 0.0]), (2, ARRAY[0.0, 1.0])",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX articles_embedding_idx ON articles USING ivf (embedding)",
+                &[],
+            )
+            .unwrap();
+    }
+    let connection = ManagedConnection::open(&database).unwrap();
+    connection
+        .with(|conn| {
+            conn.execute(
+                "UPDATE _catalog_indexes SET index_type = 'hnsw'
+                  WHERE name = 'articles_embedding_idx'",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE _metadata SET value = '19'
+                  WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    drop(connection);
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        vector_index_kind(&reopened, "articles", "embedding"),
+        "sqlite-ivf"
+    );
+    assert_eq!(
+        reopened
+            .knn_search("articles", "embedding", vec![1.0, 0.0], 1)
+            .unwrap()[0]
+            .doc_id,
+        1
+    );
+    assert_eq!(
+        reopened
+            .catalog_index("articles_embedding_idx")
+            .unwrap()
+            .unwrap()
+            .index_type,
+        "ivf"
+    );
+}
+
+#[test]
 fn sqlite_ivf_restore_reuses_persisted_assignments() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("vectors.db");

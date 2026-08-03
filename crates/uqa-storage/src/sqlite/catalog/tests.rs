@@ -246,6 +246,57 @@ fn migration_19_creates_complete_hnsw_storage_schema() {
 }
 
 #[test]
+fn migration_20_repairs_only_hnsw_rows_backed_by_legacy_ivf_metadata() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    drop(current);
+    connection
+        .with(|conn| {
+            conn.execute_batch(
+                "INSERT INTO _catalog_indexes
+                     (name, index_type, table_name, columns, parameters)
+                 VALUES
+                     ('legacy_idx', 'hnsw', 'public.legacy', '[\"embedding\"]', '{}'),
+                     ('native_idx', 'hnsw', 'public.native', '[\"embedding\"]', '{}');
+                 INSERT INTO _ivf_indexes
+                     (table_name, field, dimensions, nlist, nprobe,
+                      train_threshold, state, trained_size,
+                      deletes_since_train, vector_count)
+                 VALUES
+                     ('public.legacy', 'embedding', 2, 100, 10,
+                      256, 'untrained', 0, 0, 0);
+                 INSERT INTO _hnsw_indexes
+                     (table_name, field, dimensions, m, ef_construction,
+                      ef_search, rebuild_threshold, seed, entry_node_id,
+                      max_level, next_node_id, live_count, deleted_count,
+                      revision, format_version)
+                 VALUES
+                     ('public.native', 'embedding', 2, 16, 200,
+                      64, 1000, '7', NULL, 0, 0, 0, 0, 1, 1);
+                 UPDATE _metadata SET value = '19'
+                  WHERE key = 'schema_version';",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection.clone()).unwrap();
+    let rows = upgraded.load_catalog_indexes().unwrap();
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.name == "legacy_idx")
+            .map(|row| row.index_type.as_str()),
+        Some("ivf")
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.name == "native_idx")
+            .map(|row| row.index_type.as_str()),
+        Some("hnsw")
+    );
+}
+
+#[test]
 fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let _current = Catalog::open(mc.clone()).unwrap();

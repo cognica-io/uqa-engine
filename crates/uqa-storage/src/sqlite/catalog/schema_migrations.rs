@@ -444,4 +444,11 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
         ON _hnsw_edges (table_name, field, source_node_id, layer, target_node_id);
     ",
     ),
+    // Before persistent HNSW existed, `CREATE INDEX ... USING hnsw` was an
+    // alias for the SQLite IVF implementation. Some historical catalogs kept
+    // the requested `hnsw` spelling even though their physical metadata lives
+    // in `_ivf_indexes`. The data-dependent rewrite is implemented in Rust so
+    // it can parse the catalog's JSON column list without requiring SQLite's
+    // optional JSON extension.
+    (20, ""),
 ];

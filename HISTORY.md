@@ -10,6 +10,7 @@ Initial release of the current UQA-RS implementation.
 
 ### Fixed
 
+- **Legacy HNSW alias reopen:** SQLite catalog migration v20 recognizes historical `hnsw` rows whose durable metadata is IVF, records their actual physical index kind, and prevents persistent-HNSW restore from rejecting valid pre-HNSW databases.
 - **HNSW duplicate-vector connectivity:** Layer-zero pruning preserves a bounded deterministic backbone, so large groups of identical or near-identical vectors cannot isolate the entry point or produce a graph that fails persistence validation.
 
 ### Added
