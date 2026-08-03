@@ -679,7 +679,7 @@ fn value_to_usize(value: &Value) -> Result<usize, String> {
 }
 
 // -----------------------------------------------------------------
-// ANALYZE helpers (mirror Table._build_histogram / _build_mcv).
+// ANALYZE histogram and most-common-value helpers.
 // -----------------------------------------------------------------
 
 const HISTOGRAM_BUCKETS: usize = 100;

@@ -432,8 +432,7 @@ fn is_null_lowers_to_filter() {
 fn standalone_knn_match_lowers_to_raw_knn() {
     // Outside fusion contexts `knn_match` keeps raw cosine scores so
     // `engine.knn_search` and `WHERE knn_match(...)` agree at byte
-    // level. The calibrated_signal rewrite only fires in fusion
-    // contexts (`_compile_calibrated_signal` parity).
+    // level. Calibration rewrites fire only inside fusion contexts.
     let expr = where_of("SELECT id FROM notes WHERE knn_match(body, ARRAY[0.1, 0.2], 5)");
     let lowered = lower_where(&expr, &[]).expect("lowers");
     let OperatorTree::KNN { k, field, .. } = lowered else {
@@ -473,8 +472,8 @@ fn fuse_log_odds_calibrates_knn_signal() {
 #[test]
 fn attention_fusion_lowers_with_calibrated_signals() {
     // `attention(...)` is the SQL handle for `fuse_attention`; the
-    // lowering builds an AttentionFusion IR node whose arms are
-    // calibrated through `_compile_calibrated_signal` parity.
+    // lowering builds an AttentionFusion IR node whose arms are calibrated
+    // onto the common probability scale.
     let expr = where_of(
         "SELECT id FROM notes \
          WHERE attention( \

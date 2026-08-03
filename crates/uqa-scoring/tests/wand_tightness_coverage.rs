@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_wand_tightness`.
+//! WAND upper-bound tightness coverage.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

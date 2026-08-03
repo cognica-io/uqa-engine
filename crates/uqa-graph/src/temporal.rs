@@ -207,8 +207,7 @@ impl<'a> TemporalTraverse<'a> {
     }
 }
 
-/// Temporal-aware pattern matching (Section 10, Paper 2). Mirrors
-/// `uqa.graph.temporal_pattern_match.TemporalPatternMatchOperator`.
+/// Temporal-aware pattern matching (Section 10, Paper 2).
 ///
 /// Same algorithm as the standard subgraph matcher but every edge
 /// candidate is filtered through a [`TemporalFilter`] before it is
@@ -361,9 +360,8 @@ impl<'a> TemporalPatternMatch<'a> {
             matches.push(assignment.clone());
             return Ok(());
         }
-        // Pick the variable with the fewest candidates first (MRV
-        // heuristic, same as the canonical UQA implementation's `min(unassigned, key=lambda v:
-        // len(candidates[v]))`).
+        // Pick the variable with the fewest candidates first (the
+        // minimum-remaining-values heuristic).
         let pick: String = unassigned
             .iter()
             .min_by_key(|v| candidates.get(*v).map_or(usize::MAX, Vec::len))

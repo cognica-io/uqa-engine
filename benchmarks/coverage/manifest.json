@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "description": "Machine-checked inventory of Rust benchmark entrypoints and representative semantic probes.",
+  "surfaces": [
+    {
+      "path": "crates/uqa-core/benches/carrier_layers.rs",
+      "tokens": ["doc_set_by_size", "boolean_relation_100k", "log_relation_100k"]
+    },
+    {
+      "path": "crates/uqa-core/benches/posting_list.rs",
+      "tokens": ["posting_list_union_by_size", "posting_list_top_k"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/analytical_comparison.rs",
+      "tokens": ["bench_external_analytical", "uqa_cursor"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/compiler.rs",
+      "tokens": ["sql_parse_compile", "sql_compile_relational_execute"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/execution.rs",
+      "tokens": ["execution_seq_scan_full", "execution_pipeline"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/graph_sql.rs",
+      "tokens": ["graph_centrality_sql", "graph_sql_bounded_rpq"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/hybrid_relevance.rs",
+      "tokens": ["bench_hybrid_relevance"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/join.rs",
+      "tokens": ["sql_inner_join_10k_x_1k"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/knn.rs",
+      "tokens": ["knn_top10_10k_dim32"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/query_matrix.rs",
+      "tokens": ["unified_read", "unified_retrieval", "unified_mutation"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/relevance.rs",
+      "tokens": ["bench_relevance"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/retrieval_workloads.rs",
+      "tokens": ["retrieval_index_build", "retrieval_search"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/sql_1m.rs",
+      "tokens": ["text_match_top10"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/sql_e2e.rs",
+      "tokens": ["sql_text_match_10k", "sql_select_filter_10k"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/sql_sqlite_e2e.rs",
+      "tokens": ["sqlite_e2e", "indexed_filter_order_limit_10k"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/sql_workloads.rs",
+      "tokens": ["e2e_oltp", "e2e_olap", "e2e_join"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/text_top_k.rs",
+      "tokens": ["engine_text_top_k", "block_max_wand"]
+    },
+    {
+      "path": "crates/uqa-engine/benches/tpch_style.rs",
+      "tokens": ["tpch_style", "q1_100k", "q6_100k"]
+    },
+    {
+      "path": "crates/uqa-fusion/benches/fusion.rs",
+      "tokens": ["bayesian_evidence_fusion", "robust_positive_evidence_pool"]
+    },
+    {
+      "path": "crates/uqa-graph/benches/graph_workloads.rs",
+      "tokens": ["graph_store_add_vertices_1000", "graph_pagerank_default", "named_graph_isolation"]
+    },
+    {
+      "path": "crates/uqa-graph/benches/rpq.rs",
+      "tokens": ["rpq_kleene_star_from_vertex_1k", "rpq_concat_3hop_1k"]
+    },
+    {
+      "path": "crates/uqa-operators/benches/operators.rs",
+      "tokens": ["sparse_threshold_by_size", "multi_stage_three_stage"]
+    },
+    {
+      "path": "crates/uqa-planner/benches/planner.rs",
+      "tokens": ["planner_dpccp_topology", "planner_greedy_chain"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/beir_calibration.rs",
+      "tokens": ["beir_calibration_sources", "beir_hybrid_method_report"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/bm25.rs",
+      "tokens": ["bm25_score_100k", "bayesian_bm25_score_100k"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/calibration.rs",
+      "tokens": ["calibration_log_loss_100k", "calibration_ece"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/external_prior.rs",
+      "tokens": ["external_prior_score_with_prior", "external_prior_authority_computation"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/fusion_wand.rs",
+      "tokens": ["fusion_wand_top_k", "fusion_wand_by_signal_count"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/multi_field.rs",
+      "tokens": ["multi_field_score_document", "multi_field_score_batch_1000"]
+    },
+    {
+      "path": "crates/uqa-scoring/benches/scoring.rs",
+      "tokens": ["bm25_score_single", "vector_cosine_similarity", "log_odds_fusion"]
+    },
+    {
+      "path": "crates/uqa-storage/benches/spatial.rs",
+      "tokens": ["spatial_radius_5km_100k", "spatial_radius_500km_100k"]
+    },
+    {
+      "path": "crates/uqa-storage/benches/storage.rs",
+      "tokens": ["document_store_put_single", "vector_index_knn_trained", "vector_index_persistence_roundtrip"]
+    }
+  ]
+}

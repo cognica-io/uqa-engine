@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for scorer/helper cases in `test_external_prior`.
+//! External-prior scorer and helper coverage.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

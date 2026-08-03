@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL coverage for `test_fusion_wand`.
+//! SQL fusion and WAND coverage.
 
 use std::collections::BTreeMap;
 

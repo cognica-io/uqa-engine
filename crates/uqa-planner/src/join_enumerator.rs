@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! DPccp join enumeration (Moerkotte and Neumann, 2006). Rust implementation of
-//! UQA `planner/join_enumerator`.
+//! DPccp join enumeration following Moerkotte and Neumann (2006).
 //!
 //! Enumerates connected-subgraph / complement pairs of the
 //! [`JoinGraph`] in canonical order: each connected subgraph S is
@@ -33,8 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::cost_model::OperatorKind;
 use crate::join_graph::{JoinEdge, JoinGraph};
 
-/// Mirrors the canonical UQA implementation's `MAX_DP_RELATIONS`. Beyond this count the exact
-/// enumeration switches to the greedy fallback.
+/// Beyond this count, exact enumeration switches to the greedy fallback.
 pub const MAX_DP_RELATIONS: usize = 16;
 
 type StarLeaves = Vec<(usize, Vec<JoinEdge>)>;
@@ -48,9 +46,8 @@ struct StarState {
     leaf_pos: usize,
 }
 
-/// A (sub)plan for joining a set of relations. Mirrors the canonical UQA implementation's
-/// `JoinPlan` dataclass: `relations` is the bitmask of relation
-/// indices in the plan, `cardinality` and `cost` are the running
+/// A (sub)plan for joining a set of relations. `relations` is the bitmask
+/// of relation indices in the plan; `cardinality` and `cost` are the running
 /// estimates, and `left` / `right` / `join_edge` are populated for
 /// internal nodes.
 #[derive(Debug, Clone)]
@@ -96,9 +93,9 @@ pub fn enumerate_dpccp(graph: &JoinGraph) -> Option<JoinPlan> {
     DPccp::new(graph).optimize()
 }
 
-/// DPccp join order optimiser. Public so callers that need the
+/// DPccp join-order optimiser. Public so callers that need the
 /// cancellation-friendly stages (`optimize`, `find_connected_components`)
-/// can drive it directly. Mirrors the canonical UQA implementation's `DPccp` class.
+/// can drive them directly.
 pub struct DPccp<'g> {
     graph: &'g JoinGraph,
     dp: BTreeMap<u64, JoinPlan>,
@@ -147,9 +144,8 @@ impl<'g> DPccp<'g> {
         self.join_disconnected_components()
     }
 
-    /// Enumerate every connected subgraph / complement pair and feed
-    /// them through `enumerate_splits`. Mirrors the canonical UQA implementation's
-    /// `_enumerate_csg_cmp_pairs`.
+    /// Enumerate every connected-subgraph/complement pair and feed it
+    /// through `enumerate_splits`.
     fn enumerate_csg_cmp_pairs(&mut self, n: usize) {
         let neighbors: Vec<Vec<usize>> = (0..n).map(|i| self.graph.neighbors(i)).collect();
 
@@ -316,8 +312,7 @@ impl<'g> DPccp<'g> {
     /// Enumerate every canonical split `(s1, s2)` of `subset_mask`
     /// where `s1` contains the lowest set bit. Connectivity is
     /// checked via the `connected` table; only pairs that survive get
-    /// fed through `emit_csg_cmp_pair`. Mirrors the canonical UQA implementation's
-    /// `_enumerate_splits`.
+    /// fed through `emit_csg_cmp_pair`.
     fn enumerate_splits(&mut self, subset_mask: u64, connected: &BTreeSet<u64>) {
         let lowest_bit = subset_mask & subset_mask.wrapping_neg();
         let rest = subset_mask ^ lowest_bit;
@@ -408,8 +403,7 @@ impl<'g> DPccp<'g> {
         (c1 + c2, OperatorKind::HashJoinInner)
     }
 
-    /// Cross-join every connected component in cardinality-ascending
-    /// order. Mirrors the canonical UQA implementation's `_join_disconnected_components`.
+    /// Cross-join every connected component in cardinality-ascending order.
     fn join_disconnected_components(&mut self) -> Option<JoinPlan> {
         let components = self.find_connected_components();
         let mut component_plans: Vec<JoinPlan> = Vec::with_capacity(components.len());
@@ -425,8 +419,8 @@ impl<'g> DPccp<'g> {
                 component_plans.push(plan);
                 continue;
             }
-            // Component was not solved; recurse on a sub-graph. This
-            // path mirrors the canonical UQA implementation's defensive fallback.
+            // Component was not solved; recurse on a subgraph as a
+            // defensive fallback.
             let original_indices: Vec<usize> = {
                 let mut v: Vec<usize> = comp.clone();
                 v.sort_unstable();
@@ -456,8 +450,7 @@ impl<'g> DPccp<'g> {
         Some(result)
     }
 
-    /// BFS the join graph to enumerate the connected components.
-    /// Mirrors the canonical UQA implementation's `_find_connected_components`.
+    /// Use BFS to enumerate the join graph's connected components.
     fn find_connected_components(&self) -> Vec<Vec<usize>> {
         let n = self.graph.relation_count();
         let mut remaining: std::collections::BTreeSet<usize> = (0..n).collect();
@@ -482,9 +475,9 @@ impl<'g> DPccp<'g> {
         components
     }
 
-    /// Project a sub-graph containing only `nodes` (in their original
-    /// indices). Edge bitmasks are remapped to the dense [0..k) range
-    /// used by the recursive solve. Mirrors the canonical UQA implementation's `_build_subgraph`.
+    /// Project a subgraph containing only `nodes` in their original indices.
+    /// Edge bitmasks are remapped to the dense `[0, k)` range used by the
+    /// recursive solve.
     fn build_subgraph(&self, nodes: &[usize]) -> Option<JoinGraph> {
         let mut sub = JoinGraph::new();
         let mut index_map: BTreeMap<usize, usize> = BTreeMap::new();
@@ -509,9 +502,8 @@ impl<'g> DPccp<'g> {
     }
 
     /// Greedy fallback for graphs with more than `MAX_DP_RELATIONS`
-    /// relations: at every step pick the cheapest joinable pair until
-    /// only one plan remains. `O(n^3)`. Mirrors the canonical UQA implementation's
-    /// `_greedy_optimize`.
+    /// relations: at every step, pick the cheapest joinable pair until
+    /// only one plan remains. `O(n^3)`.
     fn greedy_optimize(self) -> Option<JoinPlan> {
         let mut active: BTreeMap<u64, JoinPlan> = self.dp.clone();
         while active.len() > 1 {
@@ -591,9 +583,8 @@ impl<'g> DPccp<'g> {
     }
 }
 
-/// Remap relation indices in `plan` from a sub-graph's dense range
-/// back to the parent graph's original indices. Mirrors the canonical UQA implementation's
-/// `_remap_plan`.
+/// Remap relation indices in `plan` from a subgraph's dense range back to
+/// the parent graph's original indices.
 fn remap_plan(plan: &JoinPlan, original_indices: &[usize]) -> JoinPlan {
     let new_relations = remap_mask(plan.relations, original_indices);
     JoinPlan {

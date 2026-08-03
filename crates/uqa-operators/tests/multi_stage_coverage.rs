@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! operator coverage for `test_multi_stage`.
+//! Multi-stage operator coverage.
 
 use std::sync::Arc;
 

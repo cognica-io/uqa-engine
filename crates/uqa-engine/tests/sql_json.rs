@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_json`.
+//! SQL JSON coverage.
 
 use std::collections::BTreeMap;
 

@@ -41,10 +41,8 @@ impl uqa_operators::base::Operator for StaticPostingList {
 }
 
 /// Combine a vector of per-signal posting lists into a single fused
-/// posting list. `fuse` receives the per-signal probability vector
-/// for one document and returns the fused score. Mirrors the
-/// `collect_score_maps` + per-doc loop in
-/// `uqa_operators::fusion_wrappers`.
+/// posting list. `fuse` receives one document's per-signal probability vector
+/// and returns its fused score.
 pub(super) fn fuse_signals_with<F>(
     posting_lists: &[PostingList],
     fuse: F,

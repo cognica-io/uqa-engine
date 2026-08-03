@@ -77,9 +77,8 @@ impl BlockMaxIndex {
     }
 
     /// Compute and store per-block maxima for `posting_list`. Each
-    /// block's max is `max_{e in block} scorer.score(tf(e), tf(e), df)`,
-    /// matching the canonical UQA behavior (which uses tf as a stand-in for
-    /// doc length when none is supplied).
+    /// block's max is `max_{e in block} scorer.score(tf(e), tf(e), df)` and
+    /// uses term frequency as the document-length stand-in when none is given.
     pub fn build<S: BlockMaxScorer + ?Sized>(
         &mut self,
         posting_list: &PostingList,

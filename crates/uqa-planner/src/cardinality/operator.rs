@@ -12,9 +12,8 @@ use super::{
 };
 
 impl CardinalityEstimator {
-    /// Estimate the cardinality of `op` against an inverted index
-    /// described by `stats`. Mirrors `CardinalityEstimator.estimate(op,
-    /// stats)`.
+    /// Estimate the cardinality of `op` against an inverted index described
+    /// by `stats`.
     pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
         let n = if stats.total_docs > 0 {
             stats.total_docs as f64
@@ -92,8 +91,7 @@ impl CardinalityEstimator {
         result.max(1.0)
     }
 
-    /// Choose damping exponent based on predicate correlation. Mirrors
-    /// `_intersection_damping`.
+    /// Choose a damping exponent based on predicate correlation.
     fn intersection_damping(&self, ops: &[OperatorTree]) -> f64 {
         let fields: Vec<&str> = ops
             .iter()

@@ -66,8 +66,7 @@ pub fn eval_path(doc: &Document, path: &[PathSegment]) -> Option<Value> {
 }
 
 /// Project `paths` out of `doc` into a flat map keyed by the dotted
-/// path string. Mirrors `uqa.core.hierarchical.project_paths` --
-/// segments stringify in the same way (numeric indices render as
+/// path string. Numeric path segments render as
 /// their integer literal).
 pub fn project_paths(
     doc: &Document,
@@ -90,7 +89,7 @@ pub fn project_paths(
 }
 
 /// Unnest an array at `path` into a sequence of synthesised
-/// documents. Mirrors `uqa.core.hierarchical.unnest_array`. Each
+/// documents. Each
 /// emitted document is a clone of the source merged with two
 /// metadata fields:
 ///

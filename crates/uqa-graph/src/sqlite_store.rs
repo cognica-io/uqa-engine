@@ -6,7 +6,7 @@
 
 //! `SQLite`-backed graph store with write-through persistence.
 //!
-//! Mirrors UQA `storage/sqlite_graph_store`. A [`MemoryGraphStore`] serves
+//! A [`MemoryGraphStore`] serves
 //! the in-memory query path. Each fallible mutation is first applied to a
 //! candidate snapshot, persisted atomically in one `SQLite` savepoint, and
 //! published to memory only after the savepoint commits. Reopened catalogs

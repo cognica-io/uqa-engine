@@ -41,9 +41,8 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
             .map(serde_json::Value::Number)
             .unwrap_or_else(|| serde_json::Value::String(d.to_sql_string())),
         Value::Str(s) => {
-            // Try to parse strings already containing JSON; otherwise
-            // wrap as a JSON string. Matches UQA behavior for `to_json` semantics
-            // for nested expressions.
+            // Parse strings already containing JSON; otherwise wrap them as a
+            // JSON string for nested `to_json` expressions.
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
                 if matches!(
                     parsed,

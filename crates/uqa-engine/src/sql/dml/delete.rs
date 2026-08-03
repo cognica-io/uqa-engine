@@ -35,8 +35,7 @@ pub(in crate::sql) fn run_delete_inner(
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     // DELETE FROM t USING other WHERE ... -- materialise the join
-    // first, then collect target doc ids whose joined image
-    // satisfies WHERE. Mirrors the canonical UQA implementation's _compile_delete_using.
+    // first, then collect target doc ids whose joined image satisfies WHERE.
     let using_rows: Option<uqa_execution::SharedSpill> = match stmt.source.as_deref() {
         Some(source) => Some(build_join_spill_with_ctes(
             engine, source, params, &mut ctes,

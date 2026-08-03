@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_posting_list`.
+//! Posting-list algebra and payload coverage.
 
 use std::collections::{BTreeMap, BTreeSet};
 

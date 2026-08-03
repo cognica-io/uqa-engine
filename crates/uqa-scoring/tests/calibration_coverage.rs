@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for metric-wrapper cases in `test_calibration`.
+//! Calibration metric-wrapper coverage.
 
 use uqa_scoring::CalibrationMetrics;
 

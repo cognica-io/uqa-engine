@@ -6,11 +6,9 @@
 
 //! Operator tree IR for the planner.
 //!
-//! Mirrors UQA `operators/base` + the concrete operator subclass
-//! taxonomy. the canonical UQA implementation's `QueryOptimizer` uses `isinstance` to walk an
-//! operator tree and rewrite it; the UQA-RS implementation lifts every concrete
-//! operator into a single [`OperatorTree`] enum so the rewriter can
-//! pattern-match the same way.
+//! Every concrete logical operator is represented in one [`OperatorTree`]
+//! enum so the optimizer can traverse and rewrite the tree with exhaustive
+//! pattern matching.
 //!
 //! The enum is *additive* over the existing trait-object operators:
 //! the engine still composes operators through `Arc<dyn Operator>` at
@@ -293,7 +291,7 @@ pub enum ExternalPriorMode {
     Recency,
 }
 
-/// Concrete operator tree mirroring `uqa/operators` operator class hierarchy.
+/// Concrete logical operator tree used by planning and rewrite passes.
 #[derive(Clone)]
 pub enum OperatorTree {
     /// Empty leaf (no input). The optimizer treats `Intersect([])` and
@@ -498,7 +496,7 @@ pub enum OperatorTree {
     },
 
     // -----------------------------------------------------------------
-    // Cross-paradigm operators (mirrors `_estimate_cross_paradigm`).
+    // Cross-paradigm operators.
     // -----------------------------------------------------------------
     /// `MultiStageOperator(stages=[(child, cutoff), ...])`. The cutoff
     /// determines the cardinality at the final stage.
@@ -622,16 +620,15 @@ pub enum OperatorTree {
     },
 }
 
-/// A single entry in a [`OperatorTree::MultiStage`] cascade. Mirrors
-/// `MultiStageOperator.stages` -- `(child, cutoff)` -- where the
-/// cutoff is either a fixed top-K or a fractional ratio.
+/// A single entry in an [`OperatorTree::MultiStage`] cascade, pairing a child
+/// with either a fixed top-k or fractional cutoff.
 #[derive(Clone)]
 pub struct MultiStageEntry {
     pub child: OperatorTree,
     pub cutoff: MultiStageCutoff,
 }
 
-/// Mirrors `multi_stage.Cutoff`.
+/// Candidate cutoff for one stage of a multi-stage cascade.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MultiStageCutoff {
     /// Top-K results -- final cardinality is `k`.
@@ -647,10 +644,7 @@ pub struct ProgressiveFusionEntry {
     pub k: usize,
 }
 
-/// Layer in a [`OperatorTree::DeepFusion`] pipeline. Mirrors
-/// `uqa.operators.deep_fusion.{ConvLayer, FlattenLayer, PoolLayer,
-/// PropagateLayer, SignalLayer, DenseLayer, SoftmaxLayer,
-/// BatchNormLayer, DropoutLayer}`.
+/// Layer in a [`OperatorTree::DeepFusion`] pipeline.
 #[derive(Clone)]
 pub enum DeepFusionLayer {
     Signal {
@@ -690,10 +684,9 @@ pub enum DeepFusionLayer {
     },
 }
 
-/// Tree-local view of a temporal filter. Mirrors
-/// `uqa.graph.temporal_filter.TemporalFilter`. The filter accepts
+/// Tree-local view of a temporal filter. The filter accepts
 /// either an exact timestamp or a `[low, high]` time range; both can
-/// be present (the canonical UQA implementation's class follows the same shape).
+/// be present simultaneously.
 #[derive(Clone, Debug, Default)]
 pub struct TemporalFilterIR {
     pub timestamp: Option<f64>,

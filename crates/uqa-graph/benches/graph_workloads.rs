@@ -4,10 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Graph benchmarks mirroring UQA `bench_graph.py`,
-//! `bench_graph_advanced.py`, `bench_graph_centrality.py`,
-//! `bench_named_graphs.py`, and the graph-store portion of
-//! `bench_storage.py`.
+//! Graph-store, traversal, indexing, temporal, centrality, message-passing,
+//! incremental-update, and named-graph benchmarks.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;

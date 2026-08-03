@@ -5,7 +5,7 @@
 //
 
 //! WAND-style top-k pruning for multi-signal fusion (Section 8.7,
-//! Paper 4). Rust implementation of `uqa.scoring.fusion_wand`.
+//! Paper 4).
 //!
 //! Treats each input posting list as a "term" in the WAND framework.
 //! Per-signal upper bounds compose into a fused upper bound through
@@ -26,8 +26,7 @@ use crate::prob::log_odds_conjunction;
 use crate::wand::BoundTightnessAnalyzer;
 use crate::ScoringResult;
 
-/// Per-signal score map -- mirrors the dict-of-dicts shape used by the
-/// canonical UQA behavior's `score_maps`.
+/// Per-signal score map keyed by document identifier.
 pub type SignalScoreMap = BTreeMap<u64, f64>;
 
 #[derive(Debug, Clone)]
@@ -54,9 +53,8 @@ impl FusionWANDScorer {
         })
     }
 
-    /// Run the WAND pivot loop and return the top-k `(doc_id, score)`
-    /// pairs sorted by descending score. Mirrors `score_top_k` in the
-    /// canonical UQA behavior.
+    /// Run the WAND pivot loop and return the top-k `(doc_id, score)` pairs
+    /// sorted by descending score.
     pub fn score_top_k(&self) -> ScoringResult<Vec<(u64, f64)>> {
         validate_fusion_inputs(&self.signals, &self.upper_bounds, self.alpha)?;
         if self.signals.is_empty() {
@@ -156,9 +154,8 @@ impl FusionWANDScorer {
     }
 }
 
-/// Tightened variant: scales the supplied upper bounds by
-/// `tightening_factor` (default 0.9) before pruning. Mirrors
-/// `TightenedFusionWANDScorer`.
+/// Tightened variant that scales the supplied upper bounds by
+/// `tightening_factor` (default 0.9) before pruning.
 #[derive(Debug, Clone)]
 pub struct TightenedFusionWANDScorer {
     pub inner: FusionWANDScorer,

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_aggregates`. Covers `COUNT DISTINCT`,
+//! SQL aggregate coverage, including `COUNT DISTINCT`,
 //! `STRING_AGG` / `ARRAY_AGG` with `DISTINCT` and `ORDER BY`, `BOOL_AND` /
 //! `BOOL_OR`, `FILTER (WHERE ...)`, `GROUP BY` by ordinal / alias,
 //! complex `HAVING`, `NUMERIC` precision/scale, `STDDEV` / `VARIANCE`,

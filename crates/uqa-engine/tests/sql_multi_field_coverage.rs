@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL call-shape coverage for `TestMultiFieldSQL` in `test_multi_field`.
+//! Multi-field SQL call-shape coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

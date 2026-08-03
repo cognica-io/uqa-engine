@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Scoring benchmarks mirroring the canonical UQA `bench_scoring.py`.
+//! Scalar scoring and fusion-substrate benchmarks.
 //!
 //! Covers BM25, Bayesian BM25, vector similarity, probability mapping,
 //! and log-odds fusion helpers that paper 3 and paper 4 use as the

@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fusion benchmarks mirroring UQA `bench_scoring.py` and
-//! `bench_scoring_advanced.py`.
+//! Bayesian, robust-positive, attention, and learned fusion benchmarks.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_fusion::{

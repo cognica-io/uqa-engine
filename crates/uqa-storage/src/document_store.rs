@@ -250,8 +250,6 @@ pub trait DocumentStore: Send + Sync {
     }
 
     /// Evaluate a hierarchical path expression against a document.
-    /// Matches UQA behavior for `DocumentStore.eval_path` /
-    /// `HierarchicalDocument.eval_path` semantics.
     fn eval_path(
         &self,
         doc_id: DocId,
@@ -334,9 +332,8 @@ pub trait DocumentStore: Send + Sync {
     }
 }
 
-/// Walk a document along a [`PathSegment`] sequence. Matches UQA behavior for
-/// `HierarchicalDocument.eval_path` — descending strings into maps,
-/// integers into lists, with the implicit array-wildcard rule that
+/// Walk a document along a [`PathSegment`] sequence: strings descend into
+/// maps, integers descend into lists, and the implicit array-wildcard rule
 /// applies a string component over every map element of an array.
 pub fn eval_path_in_document(doc: &Document, path: &[PathSegment]) -> Option<Value> {
     let mut current: Value = match path.first()? {

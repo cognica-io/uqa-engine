@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the `RobustPositiveEvidencePoolOperator` coverage for `test_fusion_wand`.
+//! WAND coverage for `RobustPositiveEvidencePoolOperator`.
 
 use std::sync::Arc;
 

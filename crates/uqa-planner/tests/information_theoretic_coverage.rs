@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_information_theoretic`.
+//! Information-theoretic estimator coverage.
 
 use std::collections::BTreeMap;
 

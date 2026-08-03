@@ -6,7 +6,7 @@
 
 //! Aggregation monoids and posting-list aggregate operators.
 //!
-//! Mirrors UQA `operators/aggregation`. Aggregation functions
+//! Aggregation functions
 //! form a monoid (Section 5.1, Paper 1) so a parallel executor can
 //! split the input, fold each shard with [`AggregationMonoid::accumulate`],
 //! merge the partial states with [`AggregationMonoid::combine`], and

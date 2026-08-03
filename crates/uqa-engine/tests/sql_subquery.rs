@@ -5,8 +5,7 @@
 //
 
 //! Subquery shapes: scalar `(SELECT ...)`, `EXISTS (...)`, and
-//! `IN (SELECT ...)`. Mirrors the UQA SQL compiler's
-//! `_compile_sublink_in_where` paths.
+//! `IN (SELECT ...)` coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! fusion-core coverage for `test_attention_fusion`.
+//! Attention-fusion core coverage.
 
 use uqa_core::IndexStats;
 use uqa_fusion::{AttentionFusion, LearnedFusion, QueryFeatureExtractor};

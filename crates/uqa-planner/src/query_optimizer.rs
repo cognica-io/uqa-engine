@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `QueryOptimizer`: Rust implementation of UQA `planner/optimizer`.
+//! Rule-based and cost-aware operator-tree optimizer.
 //!
 //! Walks an [`OperatorTree`] and applies the ten rewrite stages from
 //! Theorem 6.1.2 (Paper 1) and Theorem 6.1.1 (Paper 2):
@@ -156,7 +156,7 @@ impl QueryOptimizer {
         self
     }
 
-    /// Top-level entry point. Mirrors `QueryOptimizer.optimize`.
+    /// Optimize a query through the complete rewrite pipeline.
     pub fn optimize(&self, op: OperatorTree) -> OperatorTree {
         let mut op = op;
         if self.config.enable_simplify_algebra {

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for learner-level cases in `test_parameter_learning`.
+//! Scoring-parameter learner coverage.
 
 use uqa_scoring::ParameterLearner;
 

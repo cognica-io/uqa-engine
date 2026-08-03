@@ -1,6 +1,6 @@
 # UQA-RS system architecture
 
-This document is the technical overview of the current UQA-RS implementation. It describes the boundaries that new code must preserve, while focused contracts for state ownership, storage security, parity, and performance live in neighboring design documents.
+This document is the technical overview of UQA-RS. It describes the boundaries that new code must preserve, while focused contracts for state ownership, storage security, compatibility, and performance live in neighboring design documents.
 
 ## Design goals
 
@@ -294,7 +294,7 @@ The CLI does not duplicate the UQA SQL function list. Completion and highlightin
 
 Correctness is covered by unit, integration, property, differential, golden, fuzz-style, storage-reopen, transaction, compatibility, and exactness tests. Algebraic laws are tested on their declared carriers, WAND/BMW top-K is compared with exhaustive scoring, and graph codec tests preserve complete payloads.
 
-Parity fixtures are versioned and described in [`parity.md`](parity.md). The benchmark parity manifest pins the source snapshot, file hashes, named cases, and Rust evidence mappings used to compare the predecessor implementation with this workspace.
+Parity fixtures are versioned and described in [`parity.md`](parity.md). The benchmark coverage manifest enumerates every current Rust benchmark entrypoint and checks representative semantic evidence tokens so workload surfaces cannot disappear silently.
 
 Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. Published measurements are internal regression baselines unless independently reproduced, and the methodology, provenance artifacts, ratio gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
 

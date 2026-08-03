@@ -12,7 +12,6 @@ use super::{
 
 impl Catalog {
     /// Register the existence of a named graph in the catalog.
-    /// Matches UQA behavior for `Catalog.save_named_graph`.
     pub fn save_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -26,9 +25,8 @@ impl Catalog {
     /// Drop the named-graph registry row plus every membership entry
     /// that scopes a vertex or edge to this graph. Vertex / edge rows
     /// stay in `_graph_vertices` / `_graph_edges` until they go
-    /// orphan; call [`Catalog::purge_orphan_graph_entities`] after to
-    /// GC them. Matches UQA behavior for `Catalog.drop_named_graph` plus the
-    /// orphan sweep that the engine performs on its behalf.
+    /// orphan; call [`Catalog::purge_orphan_graph_entities`] afterwards to
+    /// collect them. The engine performs that sweep on the catalog's behalf.
     pub fn drop_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute("DELETE FROM _named_graphs WHERE name = ?1", params![name])?;
@@ -40,8 +38,7 @@ impl Catalog {
         })
     }
 
-    /// Sorted list of every persisted named graph.
-    /// Matches UQA behavior for `Catalog.load_named_graphs`.
+    /// Return every persisted named graph in sorted order.
     pub fn load_named_graphs(&self) -> Result<Vec<String>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare("SELECT name FROM _named_graphs ORDER BY name")?;
@@ -54,10 +51,7 @@ impl Catalog {
         })
     }
 
-    /// Persist a vertex by global id. `properties_json` is the JSON
-    /// encoding of the property map. Matches UQA behavior for
-    /// `Catalog.save_vertex` extended with the `label` column the
-    /// `SQLiteGraphStore` writes alongside it.
+    /// Persist a vertex by global id, label, and JSON-encoded property map.
     pub fn save_vertex(&self, vertex_id: u64, label: &str, properties_json: &str) -> Result<()> {
         let vertex_id = encode_catalog_id("vertex", vertex_id)?;
         self.conn.with(|c| {
@@ -83,9 +77,8 @@ impl Catalog {
     }
 
     /// Every vertex row sorted by id, returned as
-    /// `(vertex_id, label, properties_json)` so the caller rebuilds
-    /// the `Vertex` from the typed columns plus the JSON-encoded
-    /// property map. Matches UQA behavior for `Catalog.load_vertices`.
+    /// `(vertex_id, label, properties_json)` so the caller can rebuild each
+    /// `Vertex` from typed columns and the JSON-encoded property map.
     pub fn load_vertices(&self) -> Result<Vec<(u64, String, String)>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
@@ -107,9 +100,8 @@ impl Catalog {
         })
     }
 
-    /// Persist an edge by global id with its source / target vertices,
-    /// label, and JSON-encoded property map. Matches UQA behavior for
-    /// `Catalog.save_edge`.
+    /// Persist an edge by global id with its source and target vertices,
+    /// label, and JSON-encoded property map.
     pub fn save_edge(
         &self,
         edge_id: u64,
@@ -144,7 +136,7 @@ impl Catalog {
         })
     }
 
-    /// Every edge row sorted by id. Matches UQA behavior for `Catalog.load_edges`.
+    /// Return every edge row in identifier order.
     pub fn load_edges(&self) -> Result<Vec<EdgeRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(

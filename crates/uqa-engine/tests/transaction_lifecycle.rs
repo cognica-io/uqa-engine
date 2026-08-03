@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine-level transaction lifecycle convenience methods. Mirrors
-//! the canonical UQA implementation's `Engine.begin/commit/rollback/savepoint`.
+//! Engine-level transaction lifecycle convenience methods for begin, commit,
+//! rollback, and savepoint operations.
 
 use uqa_engine::Engine;
 

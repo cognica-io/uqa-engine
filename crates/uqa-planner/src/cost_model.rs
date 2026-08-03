@@ -8,8 +8,7 @@
 //!
 //! The cost is unitless: relative numbers across plans are what
 //! matters. We use the System-R style breakdown of `cpu_cost +
-//! io_cost + memory_cost`, scaled by per-operator constants from the
-//! canonical UQA behavior (UQA `planner/cost_model`).
+//! io_cost + memory_cost`, scaled by per-operator constants.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OperatorKind {
@@ -60,9 +59,8 @@ impl OperatorCost {
     }
 }
 
-/// Coefficients tuned against the canonical UQA behavior benchmarks.
-/// Stable enough that the join enumerator picks the same shapes the
-/// the optimizer does on the parity test corpus.
+/// Coefficients tuned against the workspace benchmark corpus. They are stable
+/// enough for deterministic join-shape choices in optimizer regression tests.
 #[derive(Debug, Clone, Copy)]
 pub struct CostCoefficients {
     pub scan_per_row: f64,
@@ -232,7 +230,7 @@ impl CostEstimator {
 }
 
 // ---------------------------------------------------------------
-// Algebraic-tree cost model (implementation of the canonical UQA implementation's `CostModel` class).
+// Algebraic-tree cost model constants and estimator.
 // ---------------------------------------------------------------
 
 use uqa_core::IndexStats;
@@ -240,22 +238,20 @@ use uqa_operators::{DeepFusionLayer, OperatorTree};
 
 use crate::cardinality::GraphStats;
 
-/// Mirrors the canonical UQA implementation's `SCORE_OVERHEAD_FACTOR`.
+/// Multiplier for score-producing operators.
 pub const SCORE_OVERHEAD_FACTOR: f64 = 1.1;
-/// Mirrors the canonical UQA implementation's `FILTER_SCAN_FRACTION`.
+/// Fraction of a scan charged to a selective filter.
 pub const FILTER_SCAN_FRACTION: f64 = 0.1;
-/// Mirrors the canonical UQA implementation's `GROUP_BY_OVERHEAD_FACTOR`.
+/// Multiplier for grouping overhead.
 pub const GROUP_BY_OVERHEAD_FACTOR: f64 = 1.5;
-/// Mirrors the canonical UQA implementation's `VERTEX_AGG_FRACTION`.
+/// Fractional cost assigned to vertex aggregation.
 pub const VERTEX_AGG_FRACTION: f64 = 0.2;
-/// Mirrors the canonical UQA implementation's `TRAVERSE_FRACTION`.
+/// Fractional cost assigned to graph traversal.
 pub const TRAVERSE_FRACTION: f64 = 0.1;
 
-/// Algebraic operator-tree cost model. Rust implementation of the canonical UQA implementation's
-/// `uqa.planner.cost_model.CostModel` — produces a unitless cost for
+/// Algebraic operator-tree cost model. Produces a unitless cost for
 /// each [`OperatorTree`] node so the query optimiser's
-/// `reorder_intersect` pass can pick a join order that matches the
-/// canonical UQA behavior.
+/// `reorder_intersect` pass can pick the lowest estimated join order.
 #[derive(Debug, Clone, Default)]
 pub struct CostModel {
     pub graph_stats: Option<GraphStats>,
@@ -271,8 +267,7 @@ impl CostModel {
         self
     }
 
-    /// Estimate the cost of a sub-plan against `stats`. Mirrors
-    /// the canonical UQA implementation's `CostModel.estimate` (line 30 of `cost_model`).
+    /// Estimate the cost of a subplan against `stats`.
     pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
         let n = stats.total_docs as f64;
         match op {
@@ -294,10 +289,9 @@ impl CostModel {
                 dims * ((stats.total_docs as f64) + 1.0).log2() * SCORE_OVERHEAD_FACTOR
             }
             OperatorTree::IndexScan { .. } => {
-                // The UQA-RS implementation lacks an `IndexScanOperator.cost_estimate`
-                // hook; mirror the canonical UQA implementation's behaviour by treating the index
-                // scan as proportional to the number of documents the
-                // index covers.
+                // Treat index-scan cost as proportional to the number of
+                // documents covered until index-specific estimates are
+                // available through the operator interface.
                 n * 0.1
             }
             OperatorTree::Score { source, .. } => {
@@ -385,8 +379,8 @@ impl CostModel {
                 let k = pattern.vertex_patterns.len() as f64;
                 // Negated edge patterns aren't represented in the Rust
                 // IR yet (`EdgePatternIR` carries no `negated` flag).
-                // The base cost matches the canonical UQA implementation's path; the +20% per
-                // negated edge will land once the IR adds the flag.
+                // Use the positive-pattern base cost until the IR can carry a
+                // negated-edge flag and its additional per-edge cost.
                 if let Some(gs) = self.graph_stats.as_ref() {
                     let nv = if gs.num_vertices > 0 {
                         gs.num_vertices as f64
@@ -423,11 +417,9 @@ impl CostModel {
                 .map(|s| self.estimate(&s.child, stats))
                 .sum::<f64>()
                 .max(n * 0.1),
-            // the canonical UQA implementation's `CostModel` reads `op.max_iterations` directly.
-            // The Rust IR doesn't carry this field today, so we use
-            // the canonical UQA implementation's default (20). Tracking the iteration count
-            // accurately requires extending `OperatorTree::PageRank` /
-            // `HITS`.
+            // The plan IR does not yet carry maximum iterations, so PageRank
+            // and HITS use a default of 20. Accurate per-query costing requires
+            // extending these `OperatorTree` variants.
             OperatorTree::PageRank { .. } => n * 20.0 * 0.1,
             OperatorTree::HITS { .. } => n * 20.0 * 0.2,
             OperatorTree::BetweennessCentrality { .. } => n * n * 0.5,
@@ -477,10 +469,9 @@ impl CostModel {
     }
 }
 
-/// Quick check for `Concat(Label, Concat(Label, ...))` shape in UQA
-/// recognises path-indexable RPQs and short-circuits the cost. Since
-/// the UQA-RS implementation only stores the source string, we approximate by
-/// disallowing any quantifier (`*`, `+`, `?`) or alternation (`|`).
+/// Approximate the `Concat(Label, Concat(Label, ...))` shape used by
+/// path-indexable RPQs. Because the plan stores the source string, reject
+/// quantifiers (`*`, `+`, `?`) and alternation (`|`).
 fn is_label_chain(source: &str) -> bool {
     !source.contains('*')
         && !source.contains('+')
@@ -489,9 +480,9 @@ fn is_label_chain(source: &str) -> bool {
         && !source.contains('{')
 }
 
-/// Mirror of the canonical UQA implementation's `_expr_label_count`, but operates on the raw
-/// source string. Falls back to alphanumeric token counting + `* / +
-/// / ?` doubling so empty / unparseable inputs degrade to 1.
+/// Count label-bearing terms in a raw RPQ source string. Falls back to
+/// alphanumeric token counting plus quantifier weighting, so empty or
+/// unparseable inputs degrade to 1.
 fn rpq_source_label_count(source: &str) -> usize {
     let mut labels = 0_usize;
     let mut in_ident = false;

@@ -6,7 +6,7 @@
 
 //! Index type definitions for the storage layer.
 //!
-//! Mirrors UQA `storage/index_types`. Values map onto the wire-
+//! Index type values map onto the wire-
 //! visible names that flow through `CREATE INDEX ... USING <name>`
 //! at SQL parse time.
 

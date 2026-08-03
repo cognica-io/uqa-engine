@@ -12,8 +12,7 @@ use super::{
 };
 
 impl CardinalityEstimator {
-    /// Cardinality estimation for cross-paradigm operators. Mirrors
-    /// `_estimate_cross_paradigm`.
+    /// Estimate cardinality for cross-paradigm operators.
     pub(super) fn estimate_cross_paradigm(
         &self,
         op: &OperatorTree,

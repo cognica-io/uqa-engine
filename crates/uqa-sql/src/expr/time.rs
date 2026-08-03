@@ -597,9 +597,8 @@ pub(super) fn make_timestamp(
 
 pub(super) fn pg_to_chrono_fmt(fmt: &str) -> String {
     // Translate a small subset of PostgreSQL `to_date` template tokens
-    // into chrono format specifiers. The canonical UQA behavior relies on
-    // datetime.strptime; this routine mirrors the most common patterns
-    // (`YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`).
+    // into chrono format specifiers, covering the common `YYYY`, `MM`, `DD`,
+    // `HH24`, `MI`, and `SS` patterns.
     fmt.replace("YYYY", "%Y")
         .replace("YY", "%y")
         .replace("Month", "%B")

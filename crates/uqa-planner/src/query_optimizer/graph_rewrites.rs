@@ -63,8 +63,8 @@ impl QueryOptimizer {
                             graph: graph.clone(),
                         };
                     }
-                    // Try edge variable: "src_tgt.prop". Mirror the canonical UQA implementation's
-                    // two-stage match: first build the
+                    // Try edge variable: "src_tgt.prop". Use a two-stage
+                    // match: first build the
                     // `source_target -> ep` lookup (last-write-wins so
                     // multi-label edges between the same vertices fall
                     // through to the most recently declared label),

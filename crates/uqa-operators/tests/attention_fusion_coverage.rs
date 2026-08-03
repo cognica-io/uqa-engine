@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! operator coverage for `test_attention_fusion`.
+//! Attention-fusion operator coverage.
 
 use std::sync::Arc;
 

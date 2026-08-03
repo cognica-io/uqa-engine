@@ -40,9 +40,8 @@ pub(in crate::sql) fn run_update_inner(
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
     // UPDATE ... FROM other [WHERE ...]: build the joined relation,
-    // evaluate the WHERE against each joined row, and apply
-    // assignments to the matching target rows. Mirrors the canonical UQA implementation's
-    // _compile_update_from.
+    // evaluate WHERE against each joined row, and apply assignments to the
+    // matching target rows.
     if let Some(source) = stmt.source.as_deref() {
         return run_update_from(engine, stmt, source, params, &mut ctes);
     }

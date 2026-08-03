@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SHOW <var>` / `DISCARD ...` compatibility `_compile_show` /
-//! `_compile_discard`.
+//! `SHOW <var>` and `DISCARD ...` compatibility coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

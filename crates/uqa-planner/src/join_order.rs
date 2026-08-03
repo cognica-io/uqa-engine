@@ -26,8 +26,7 @@ use crate::cost_model::{CostEstimator, OperatorKind};
 use crate::join_enumerator::{enumerate_dpccp, JoinPlan};
 use crate::join_graph::{JoinEdge, JoinGraph, JoinGraphResult};
 
-/// Description of a base relation feeding a join. Mirrors the dict
-/// shape used by `uqa.planner.join_order.JoinOrderOptimizer.optimize`.
+/// Description of a base relation feeding a join-order search.
 #[derive(Debug, Clone)]
 pub struct JoinRelation {
     pub alias: String,
@@ -89,8 +88,7 @@ pub struct JoinOrderResult {
     pub primary_alias: Option<String>,
 }
 
-/// Determines optimal join ordering using DPccp. Mirrors
-/// `uqa.planner.join_order.JoinOrderOptimizer`.
+/// Determines an optimal join ordering using DPccp.
 #[derive(Debug, Clone, Default)]
 pub struct JoinOrderOptimizer {
     pub cost_estimator: CostEstimator,

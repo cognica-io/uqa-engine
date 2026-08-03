@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for Engine calibration report cases in `test_calibration`.
+//! Engine calibration-report coverage.
 
 use std::collections::BTreeMap;
 

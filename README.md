@@ -15,6 +15,14 @@ It is designed for applications that need more than a relational table but do no
 > [!NOTE]
 > UQA-RS is under active development at version 0.1.0. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
+## Mathematical foundation
+
+[A Typed Carrier Algebra for Unified Query Execution](docs/papers/typed-carrier-algebra.md)
+states the implementation-grounded theory behind UQA-RS. It distinguishes
+document support, weighted relations, decorated postings, ranked views, SQL
+bags, join tuples, graph context, and aggregate state while showing how they
+compose through one typed planning and execution framework.
+
 ## Try it in a terminal
 
 You need Rust 1.85 or newer and the native build tools required by Cargo dependencies.

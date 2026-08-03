@@ -4,11 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Table functions in FROM + standalone `VALUES` + scalar table
-//! function body. Mirrors the canonical UQA behavior's
-//! `_build_generate_series` / `_build_unnest` /
-//! `_build_regexp_split_to_table` / `_build_json_each` /
-//! `_build_json_array_elements` paths.
+//! Table functions in `FROM`, standalone `VALUES`, and scalar table-function
+//! bodies, including series generation, unnesting, regular-expression splits,
+//! and JSON object or array expansion.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

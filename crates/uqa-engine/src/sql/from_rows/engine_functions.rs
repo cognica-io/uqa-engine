@@ -220,8 +220,7 @@ pub(in crate::sql) fn validate_score_projection_args(
 }
 
 /// Evaluate a `uqa_highlight(field, query[, start_tag, end_tag,
-/// max_fragments, fragment_size])` projection. Matches UQA
-/// reference's `_run_uqa_highlight` shape: field can be either a
+/// max_fragments, fragment_size])` projection. `field` can be either a
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
 pub(in crate::sql) fn run_uqa_highlight(
@@ -342,10 +341,9 @@ pub(in crate::sql) fn run_uqa_highlight(
         max_fragments,
         fragment_size,
     };
-    // Pull every whitespace-separated token out of the query string
-    // as a candidate match term. The canonical UQA behavior parses the FTS
-    // query, but a simple split is what callers reach for in
-    // practice and matches what the test fixture exercises.
+    // Pull every whitespace-separated token from the query string as a
+    // candidate match term. A simple split matches the documented highlighting
+    // surface and its regression fixtures.
     let terms: Vec<String> = query_str
         .split_whitespace()
         .filter(|t| !matches!(t.to_ascii_lowercase().as_str(), "and" | "or" | "not"))

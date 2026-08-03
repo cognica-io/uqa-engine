@@ -4,12 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Microbenchmarks for `PostingList` support merges and payload policies.
+//! Microbenchmarks for `PostingList` support merges and payload policies:
+//! pairwise operations by input size and overlap, top-k, n-way merge,
+//! scored-payload union, and binary-search lookup.
 //!
 //! Run with `cargo bench -p uqa-core --bench posting_list`.
-//! This mirrors the canonical UQA `bench_posting_list.py` surface:
-//! pairwise support operations by input size and overlap, top-k,
-//! n-way merge, scored-payload union, and binary-search lookup.
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use uqa_core::{Payload, PostingEntry, PostingList};

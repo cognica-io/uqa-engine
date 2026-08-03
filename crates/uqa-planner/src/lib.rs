@@ -6,7 +6,7 @@
 
 //! Query optimizer: cost estimation, cardinality, join enumeration.
 //!
-//! Layout follows the canonical UQA behavior (`uqa/planner/*`):
+//! The planner is organized into these modules:
 //!
 //! * [`cost_model`] -- per-operator cost model. Estimates a unitless
 //!   cost for scans, filters, projections, sorts, hash aggregates,

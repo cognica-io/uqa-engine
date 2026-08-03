@@ -140,11 +140,10 @@ impl Operator for WeightedPathQueryOperator {
 
 /// `CypherQueryOperator` — execute a parsed openCypher query against
 /// a named graph and project the resulting `(start, end)` vertex
-/// pairs into a posting list. Matches UQA behavior for
-/// `uqa.graph.operators.CypherQueryOperator`.
+/// pairs into a posting list for downstream operator composition.
 ///
-/// The UQA-RS implementation routes through [`CypherWriter`] (the mutating
-/// executor) since it covers the full clause set including
+/// Routes through [`CypherWriter`] because it covers the full clause set,
+/// including
 /// CREATE/MERGE/SET/DELETE/UNWIND. Read-only queries still flow
 /// through the same path; the writer leaves the store untouched
 /// when the query is read-only.

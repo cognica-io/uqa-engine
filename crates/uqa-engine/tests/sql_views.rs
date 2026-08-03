@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_views`.
+//! SQL view coverage.
 
 use std::sync::{
     atomic::{AtomicUsize, Ordering},

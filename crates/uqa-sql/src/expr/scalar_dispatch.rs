@@ -14,8 +14,7 @@ type ScalarFunctionDispatcher = fn(&str, &[Value]) -> Option<Result<Value>>;
 // Built-in scalar functions
 // -------------------------------------------------------------------------
 
-/// Dispatch table for built-in scalar SQL functions. Mirrors
-/// `_call_scalar_function` in UQA `sql/expr_evaluator`. Function
+/// Dispatch table for built-in scalar SQL functions. Function
 /// names are lower-cased before lookup.
 pub(super) fn eval_sequence_function(
     name: &str,

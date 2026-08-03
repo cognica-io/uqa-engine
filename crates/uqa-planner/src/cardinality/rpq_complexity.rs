@@ -6,10 +6,8 @@
 
 //! RPQ expression complexity estimation.
 
-/// Count label-bearing tokens in an RPQ expression source. Mirrors
-/// Count label nodes in an RPQ expression. Mirrors the canonical UQA implementation's
-/// `uqa.planner.cost_model._expr_label_count`: parses the source,
-/// then walks the AST. Label = 1, Concat/Alt = sum, KleeneStar =
+/// Count label nodes in an RPQ expression by parsing the source and walking
+/// the AST. Label = 1, Concat/Alt = sum, KleeneStar =
 /// inner * 2, Bounded = inner * max_hops. Falls back to 1 when the
 /// source can't be parsed.
 pub(super) fn rpq_label_count(source: &str) -> usize {

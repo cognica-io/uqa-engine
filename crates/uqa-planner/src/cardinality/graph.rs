@@ -33,9 +33,8 @@ impl CardinalityEstimator {
             (n * 0.1).min(10.0)
         };
 
-        // Mirror the canonical UQA implementation's `branching ** max_hops` directly: hops=0
-        // collapses to a single hop's worth of branching factor (i.e.
-        // 1), keeping `result = min(n, branching ** hops)` identical
+        // Compute `branching ** max_hops` directly: hops=0 collapses to a
+        // single empty path (1), so `result = min(n, branching ** hops)`
         // to the reference.
         let hops_f = hops as f64;
         let mut result = n.min(branching.powf(hops_f));
@@ -146,8 +145,8 @@ impl CardinalityEstimator {
         n.min(n.powf(1.5))
     }
 
-    /// Estimate vector selectivity based on threshold (Paper 1,
-    /// Section 5.3). Mirrors `_vector_selectivity`.
+    /// Estimate vector selectivity from a similarity threshold (Paper 1,
+    /// Section 5.3).
     pub(super) fn vector_selectivity(threshold: f32) -> f64 {
         if threshold >= 0.9 {
             return 0.01;

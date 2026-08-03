@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `uqa/tests/test_analysis.py::TestTermOperatorSynonymUnion`.
+//! Search-time synonym-union coverage for `TermOperator`.
 //! Verifies that `TermOperator` resolves the search-time analyzer for
 //! the field, expands the user-supplied term through any synonym
 //! filter, and unions the resulting per-token posting lists.

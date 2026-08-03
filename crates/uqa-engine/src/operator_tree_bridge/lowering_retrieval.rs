@@ -501,8 +501,7 @@ pub(super) fn lower_staged_retrieval(
     (!stages.is_empty()).then_some(OperatorTree::MultiStage { stages })
 }
 
-/// Compile a signal-function call into a node on the `[0, 1]` evidence scale.
-/// Mirrors the canonical UQA implementation's `_compile_calibrated_signal`:
+/// Compile a signal-function call into a node on the `[0, 1]` evidence scale:
 /// exact fusion, robust pooling, attention, and learned combinations all need
 /// a common numeric boundary even though they make different semantic claims.
 ///

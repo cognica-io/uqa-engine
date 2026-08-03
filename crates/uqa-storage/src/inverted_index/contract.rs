@@ -10,7 +10,6 @@ use super::{
 };
 
 /// Which side of the index/search pipeline a field analyzer applies to.
-/// Matches UQA behavior for `set_field_analyzer(field, analyzer, phase=...)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalyzerPhase {
     /// Run only when *adding* documents.
@@ -252,7 +251,7 @@ pub trait InvertedIndex: Send + Sync {
         ))
     }
 
-    // -- Mirrors `uqa.storage.abc.InvertedIndex` extended surface ---
+    // -- Extended inverted-index surface ---
 
     /// Names of every field with at least one indexed document.
     /// Default implementation walks the [`IndexStats`] snapshot's
@@ -382,9 +381,8 @@ pub trait InvertedIndex: Send + Sync {
         self.analyzer().clone()
     }
 
-    /// Search-time analyzer for `field`; falls back to the index-time
-    /// analyzer, then to the default. Matches UQA behavior for
-    /// `get_search_analyzer`.
+    /// Search-time analyzer for `field`; falls back to the index-time analyzer,
+    /// then to the default.
     fn get_search_analyzer(&self, field: &str) -> Analyzer {
         self.get_field_analyzer(field)
     }

@@ -8,14 +8,13 @@
 //! Volcano operators.
 //!
 //! A [`Batch`] carries a schema (column names) and a vector of
-//! [`uqa_sql::ResultRow`]. The default batch size matches UQA
-//! reference (1024 rows). Operators are free to emit smaller or larger
-//! batches; callers must not rely on a fixed size.
+//! [`uqa_sql::ResultRow`]. The default batch-size hint is 1024 rows, but
+//! operators may emit smaller or larger batches and callers must not rely on a
+//! fixed size.
 
 use uqa_sql::ResultRow;
 
-/// Default rows-per-batch hint. Mirrors `DEFAULT_BATCH_SIZE` in
-/// UQA `execution/batch`.
+/// Default rows-per-batch hint.
 pub const DEFAULT_BATCH_SIZE: usize = 1024;
 
 /// Column-name schema. Equality is positional, like SQL projections.

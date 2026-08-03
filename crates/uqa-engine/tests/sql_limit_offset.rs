@@ -7,8 +7,7 @@
 //! End-to-end coverage for `LIMIT` / `OFFSET` across every SELECT
 //! shape: bare projection, ORDER BY by source column, parameterised
 //! LIMIT / OFFSET, GROUP BY, JOIN, set operations, CTE, and the
-//! search-aware `_score` ordering path. Mirrors the matrix
-//! `uqa.sql.compiler` exercises in its own test suite.
+//! search-aware `_score` ordering path.
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLParam};

@@ -90,9 +90,8 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters(
     Ok(())
 }
 
-/// Render the inner statement as an EXPLAIN-style plan result. Mirrors
-/// the canonical UQA implementation's `_explain_plan`: returns a single-column `plan` table with
-/// one row per line.
+/// Render the inner statement as an EXPLAIN-style, single-column `plan`
+/// result with one row per line.
 pub(in crate::sql) struct ExplainAnalysis {
     pub(in crate::sql) elapsed: std::time::Duration,
     pub(in crate::sql) rows: u64,

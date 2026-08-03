@@ -127,9 +127,8 @@ impl Engine {
     }
 
     /// Persist Bayesian calibration parameters for a named signal. The
-    /// parameters arrive serialised as a JSON string so callers can
-    /// stuff arbitrary `(alpha, beta, base_rate, ...)` shapes through
-    /// without forcing a struct. Mirrors the canonical UQA implementation's `save_scoring_params`.
+    /// Parameters arrive serialized as JSON so callers can persist arbitrary
+    /// `(alpha, beta, base_rate, ...)` shapes without a fixed struct.
     pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| engine.save_scoring_params_inner(name, params_json))
     }
@@ -151,9 +150,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Load persisted scoring parameters for a single signal. Falls
-    /// back to the in-memory cache when the engine is not catalog-
-    /// backed. Mirrors the canonical UQA implementation's `Engine.load_scoring_params`.
+    /// Load persisted scoring parameters for a single signal. Falls back to
+    /// the in-memory cache when the engine is not catalog-backed.
     pub fn load_scoring_params(&self, name: &str) -> Result<Option<String>, SQLError> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(self.durable.scoring_params.read().get(name).cloned());
@@ -181,8 +179,7 @@ impl Engine {
         self.load_scoring_params(name)
     }
 
-    /// Snapshot every persisted `(name, params_json)` pair. Mirrors
-    /// the canonical UQA implementation's `Engine.load_all_scoring_params`.
+    /// Snapshot every persisted `(name, params_json)` pair.
     pub fn load_all_scoring_params(&self) -> Result<Vec<(String, String)>, SQLError> {
         let mut out = if let Some(catalog) = self.storage.catalog.as_ref() {
             let rows = catalog.load_all_scoring_params().map_err(|err| {

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for fusion-level cases in `test_adaptive_fusion`.
+//! Adaptive-fusion core coverage.
 
 use uqa_fusion::{AdaptivePositiveEvidencePool, RobustPositiveEvidencePool, SignalQuality};
 

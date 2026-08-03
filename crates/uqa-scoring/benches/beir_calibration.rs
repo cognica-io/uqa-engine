@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! BEIR-style vector calibration and hybrid retrieval benchmarks mirroring
-//! UQA `bench_beir_calibration.py` and `bench_hybrid_fusion.py`.
+//! BEIR-style vector calibration and hybrid retrieval benchmarks.
 //!
 //! The default fixture is deterministic and self-contained so CI can
 //! compile and run the benchmark without external data. Set

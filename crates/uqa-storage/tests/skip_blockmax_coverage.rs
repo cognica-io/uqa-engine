@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_skip_blockmax`.
+//! Skip-pointer and block-max index coverage.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

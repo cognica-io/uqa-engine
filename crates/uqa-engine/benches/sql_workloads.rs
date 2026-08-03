@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL workload benchmarks mirroring Python UQA benchmark surfaces.
+//! End-to-end SQL workload benchmarks for OLTP, OLAP, joins, and planning.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::fmt::Write;

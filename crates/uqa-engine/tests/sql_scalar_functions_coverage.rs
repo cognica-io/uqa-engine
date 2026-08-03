@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Additional coverage for `test_scalar_functions`.
+//! Additional SQL scalar-function coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

@@ -6,8 +6,7 @@
 
 //! Query cancellation support.
 //!
-//! Mirrors UQA `cancel` from the canonical UQA behavior. A
-//! [`CancellationToken`] is a cheap-to-clone, thread-safe one-shot
+//! A [`CancellationToken`] is a cheap-to-clone, thread-safe one-shot
 //! flag stored on `Engine` and propagated into every
 //! `PhysicalOperator` / `Operator` hot loop. Operators call
 //! [`CancellationToken::check`] at chunk boundaries; if the flag has
@@ -36,9 +35,8 @@ use std::sync::Arc;
 use thiserror::Error;
 
 /// Raised when a query is cancelled by user request. Matches
-/// `PostgreSQL` `SQLSTATE 57014` (`query_canceled`); the `Display`
-/// payload mirrors the canonical UQA behavior's exception message so logs
-/// stay aligned across the two implementations.
+/// `PostgreSQL` `SQLSTATE 57014` (`query_canceled`); its `Display` payload
+/// stays stable for log processing.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("canceling statement due to user request")]
 pub struct QueryCancelled;

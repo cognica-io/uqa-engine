@@ -711,13 +711,13 @@ pub enum Statement {
         name: String,
         value: String,
     },
-    /// `SHOW <variable>` - return the runtime parameter as a single
-    /// `(name -> value)` row. Matches UQA behavior for `_compile_show`.
+    /// `SHOW <variable>` - return the runtime parameter as one
+    /// `(name -> value)` row.
     ShowVariable {
         name: String,
     },
-    /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session
-    /// state. Matches UQA behavior for `_compile_discard`. The engine resets
+    /// `DISCARD [ALL|PLANS|SEQUENCES|TEMP|TEMPORARY]` - clear session state.
+    /// The engine resets
     /// session vars, prepared statements and sequences. `TEMP` is rejected
     /// until temporary tables are supported instead of being silently ignored.
     Discard {

@@ -4,11 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the ANALYZE persistence coverage from
-//! `test_cost_optimizer` and `test_catalog`.
+//! `ANALYZE` statistics persistence coverage.
 //!
-//! The important parity point is not just that ANALYZE runs: the
-//! histogram and MCV payloads must survive an `Engine::open` round trip
+//! The histogram and MCV payloads must survive an `Engine::open` round trip
 //! so the planner keeps its selectivity inputs after restart.
 
 use std::sync::Arc;

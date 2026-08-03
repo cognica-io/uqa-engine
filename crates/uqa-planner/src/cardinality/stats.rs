@@ -9,12 +9,10 @@
 use super::{BTreeMap, Value, VertexConstraint};
 
 /// Jaccard-style selectivity assumed for text-similarity joins when no
-/// per-column statistics are available. Mirrors
-/// `JACCARD_JOIN_SELECTIVITY` in the canonical UQA behavior.
+/// per-column statistics are available.
 pub const JACCARD_JOIN_SELECTIVITY: f64 = 0.05;
 
-/// Default vector-similarity join selectivity. Matches UQA
-/// `VECTOR_JOIN_SELECTIVITY` constant.
+/// Default vector-similarity join selectivity.
 pub const VECTOR_JOIN_SELECTIVITY: f64 = 0.1;
 
 /// Fallback average out-degree used by graph traversal cardinality
@@ -74,8 +72,8 @@ pub struct EdgeSample {
     pub label: String,
 }
 
-/// Minimal graph store interface used by the sampler. Mirrors the
-/// vertex, adjacency, and edge snapshots required by the planner.
+/// Minimal graph-store interface exposing the vertex, adjacency, and edge
+/// snapshots required by the sampler.
 pub trait GraphStoreSampler: Send + Sync {
     /// IDs of every vertex in the store.
     fn vertex_ids(&self) -> Vec<u64>;
@@ -83,10 +81,8 @@ pub trait GraphStoreSampler: Send + Sync {
     /// Outgoing edges from `vid`.
     fn outgoing_edges(&self, vid: u64) -> Vec<EdgeSample>;
 
-    /// Apply a vertex constraint closure. The canonical UQA behavior calls
-    /// `c(vertex)` directly; the UQA-RS implementation packages this as a callback
-    /// so the sampler can hide vertex storage behind whichever store
-    /// implements the trait.
+    /// Apply a vertex-constraint callback so the sampler can keep vertex
+    /// storage behind the store implementation.
     fn vertex_satisfies(&self, vid: u64, constraint: &VertexConstraint) -> bool;
 }
 

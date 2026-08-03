@@ -13,8 +13,7 @@ use crate::{ScoringError, ScoringResult};
 const MAX_EXACT_F64_INTEGER: u64 = 1u64 << f64::MANTISSA_DIGITS;
 
 /// Likelihood-ratio calibrator for vector distances (Theorem 3.1.1,
-/// Paper 5). Mirrors the `VectorProbabilityTransform` referenced by
-/// `uqa.scoring.vector.VectorScorer.calibrated_probabilities`.
+/// Paper 5). Converts vector similarity into calibrated probability.
 ///
 /// The transform models distances to relevant documents (`f_R`) and
 /// to background (random) documents (`f_G`) as Gaussian distributions.
@@ -25,8 +24,8 @@ const MAX_EXACT_F64_INTEGER: u64 = 1u64 << f64::MANTISSA_DIGITS;
 /// log f_R(d) - log f_G(d) + logit(base_rate)  ->  sigmoid
 /// ```
 ///
-/// The UQA-RS implementation keeps the formulation deliberately small; downstream
-/// callers fit the means / std dev offline (e.g. via the parameter
+/// The formulation is deliberately small; downstream callers fit the
+/// means and standard deviations offline (for example, via the parameter
 /// learner) and pass the transform through. Optional per-distance
 /// weights bias the computed log-odds before the sigmoid.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -79,9 +78,8 @@ impl VectorProbabilityTransform {
         Ok(1.0 / (1.0 + (-logit_post).exp()))
     }
 
-    /// Vectorized calibration. Optional `weights` bias the per-distance
-    /// log-odds before the sigmoid -- mirrors the canonical UQA behavior's
-    /// `weights` keyword argument.
+    /// Vectorized calibration. Optional `weights` bias each distance's
+    /// log-odds before the sigmoid.
     pub fn calibrate(&self, distances: &[f64], weights: Option<&[f64]>) -> ScoringResult<Vec<f64>> {
         if let Some(weights) = weights {
             if weights.len() != distances.len() {

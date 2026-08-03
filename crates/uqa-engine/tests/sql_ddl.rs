@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_ddl`.
+//! SQL DDL coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

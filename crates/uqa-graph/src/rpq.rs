@@ -26,7 +26,7 @@ pub const MAX_RPQ_AST_DEPTH: usize = 256;
 pub const MAX_NFA_STATES: usize = 16_384;
 pub const MAX_DFA_STATES: usize = 16_384;
 
-/// Regular path expression. Matches UQA behavior for `pattern.RegularPathExpr`.
+/// Regular path expression.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RegularPathExpr {
     /// A single edge label.

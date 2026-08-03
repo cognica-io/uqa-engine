@@ -5,8 +5,7 @@
 //
 
 //! Rayon-backed parallel split + recombine, plus a branch-level
-//! [`ParallelExecutor`] that mirrors the canonical UQA implementation's
-//! UQA `planner/parallel`.
+//! [`ParallelExecutor`] for independent plan fragments.
 //!
 //! Two parallelism shapes live here:
 //!
@@ -14,8 +13,8 @@
 //!   aware operators (large hash joins, blocking sorts, hash
 //!   aggregates) to fan out per-partition work.
 //! * [`ParallelExecutor`] — runs N independent worker closures
-//!   concurrently and returns their results in input order. Mirrors
-//!   `ParallelExecutor.execute_branches` so the operator-tree driver
+//!   concurrently and returns their results in input order, allowing the
+//!   operator-tree driver
 //!   can fork independent branches (`Intersect` / `Union` /
 //!   `BayesianEvidenceFusion` / `RobustPositiveEvidencePool` /
 //!   `ProbBoolFusion` children, deep-fusion
@@ -129,16 +128,15 @@ mod tests {
 }
 
 // ---------------------------------------------------------------
-// Branch-level parallel executor (mirrors the canonical UQA implementation's `ParallelExecutor`)
+// Branch-level parallel executor
 // ---------------------------------------------------------------
 
-/// Default thread pool size; matches `_DEFAULT_MAX_WORKERS` in the
-/// canonical UQA behavior. Setting `0` disables parallel execution.
+/// Default thread-pool size. Setting the runtime value to `0` disables
+/// parallel execution.
 pub const DEFAULT_PARALLEL_WORKERS: usize = 4;
 
-/// Minimum number of branches before parallel dispatch kicks in.
-/// Below this, sequential execution wins on overhead. Mirrors
-/// `_MIN_PARALLEL_BRANCHES`.
+/// Minimum number of branches before parallel dispatch kicks in. Below this,
+/// sequential execution wins on overhead.
 pub const MIN_PARALLEL_BRANCHES: usize = 2;
 
 /// Branch-level parallel executor.
@@ -181,8 +179,7 @@ impl ParallelExecutor {
     /// Run each `worker` and collect results in the same order. Uses
     /// rayon's work-stealing pool when [`Self::enabled`] is `true` and
     /// the branch count is at least [`MIN_PARALLEL_BRANCHES`];
-    /// otherwise falls back to sequential execution. Mirrors the canonical UQA implementation's
-    /// `ParallelExecutor.execute_branches`.
+    /// otherwise falls back to sequential execution.
     pub fn execute_branches<R, F>(&self, workers: &[F]) -> Vec<R>
     where
         R: Send,

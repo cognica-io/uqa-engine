@@ -141,8 +141,7 @@ impl Engine {
             })
     }
 
-    /// Sorted list of every registered schema. Mirrors the canonical UQA implementation's
-    /// `Engine._tables.schemas`.
+    /// Return every registered schema in sorted order.
     pub fn list_schemas(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
         Ok(self.durable.schemas.read().iter().cloned().collect())

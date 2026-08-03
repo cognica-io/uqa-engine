@@ -51,7 +51,6 @@ impl Catalog {
     }
 
     /// Persist Bayesian calibration parameters for a named signal.
-    /// Matches UQA behavior for `Catalog.save_scoring_params`.
     pub fn save_scoring_params(&self, name: &str, params_json: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(

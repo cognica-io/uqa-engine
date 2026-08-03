@@ -386,8 +386,8 @@ fn validate_added_key_constraint(
 /// Apply the new column's DEFAULT (or NULL) value to every row that
 /// existed before the ADD COLUMN. `PostgreSQL` evaluates the default
 /// once per existing row at ALTER TABLE time so NOT NULL columns stay
-/// consistent on non-empty tables; the UQA-RS implementation mirrors that
-/// semantics by sweeping the document store.
+/// consistent on non-empty tables; this function preserves that semantic by
+/// sweeping the document store.
 fn backfill_added_column(
     engine: &Engine,
     table: &str,

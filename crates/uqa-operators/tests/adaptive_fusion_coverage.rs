@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for operator-level cases in `test_adaptive_fusion`.
+//! Adaptive-fusion operator coverage.
 
 use std::sync::Arc;
 

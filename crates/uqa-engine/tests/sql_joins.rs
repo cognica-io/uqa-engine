@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_sql_joins`.
+//! SQL join coverage.
 
 use std::collections::BTreeSet;
 

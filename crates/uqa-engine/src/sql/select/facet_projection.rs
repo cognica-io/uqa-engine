@@ -261,8 +261,8 @@ pub(in crate::sql) fn explain_int_expr(expr: &ScalarExpr) -> String {
 }
 
 /// Evaluate a `LIMIT` / `OFFSET` expression to a non-negative `u64`.
-/// Mirrors the canonical UQA implementation's `_extract_int_value` - accepts integer constants,
-/// `$N` parameter references, and any expression that the row-evaluator
+/// Accepts integer constants, `$N` parameter references, and any expression
+/// that the row evaluator
 /// can fold to an integer at execute time. Returns `None` when the
 /// clause was absent.
 pub(in crate::sql) fn resolve_limit_offset_with_ctes(

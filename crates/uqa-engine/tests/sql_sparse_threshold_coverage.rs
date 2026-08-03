@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for SQL sparse-threshold cases in `test_sparse_threshold`.
+//! Sparse-threshold SQL coverage.
 
 use uqa_engine::Engine;
 
