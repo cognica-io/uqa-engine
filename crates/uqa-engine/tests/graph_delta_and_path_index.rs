@@ -4,9 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine-level wiring for `apply_graph_delta` and the
-//! `build/drop/get_path_index` lifecycle. Mirrors the canonical UQA implementation's
-//! `Engine.apply_graph_delta` / `Engine.build_path_index`.
+//! Engine-level wiring for `apply_graph_delta` and the complete path-index
+//! build, lookup, and drop lifecycle.
 
 use tempfile::tempdir;
 use uqa_core::{Edge, Vertex};

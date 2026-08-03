@@ -305,8 +305,7 @@ impl Engine {
 
     /// Resolve the analyzer assigned to `(table, field)` for the given
     /// phase. `phase` is `"index"`, `"search"`, or `"both"`. Returns the
-    /// analyzer config JSON (the raw form the engine persists).
-    /// Mirrors the canonical UQA implementation's `Engine.get_table_analyzer`.
+    /// analyzer config JSON in the raw persisted form.
     pub fn get_table_analyzer(
         &self,
         table: &str,

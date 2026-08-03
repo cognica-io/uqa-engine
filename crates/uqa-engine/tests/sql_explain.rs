@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `EXPLAIN SELECT ...` returns a single-column `plan` table mirroring
-//! the canonical UQA implementation's `_explain_plan` output shape.
+//! `EXPLAIN SELECT ...` returns one plan line per row in a single `plan`
+//! column.
 
 use uqa_engine::Engine;
 

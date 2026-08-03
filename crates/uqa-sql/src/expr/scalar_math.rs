@@ -156,9 +156,7 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
             "degrees" => float1(args, "degrees", f64::to_degrees),
             "radians" => float1(args, "radians", f64::to_radians),
             "random" => {
-                // Deterministic-ish pseudo random based on system time so
-                // tests can assert ranges deterministically; the canonical
-                // UQA behavior also wraps the platform RNG.
+                // Lightweight pseudo-random value derived from system time.
                 use std::time::{SystemTime, UNIX_EPOCH};
                 let t = SystemTime::now()
                     .duration_since(UNIX_EPOCH)

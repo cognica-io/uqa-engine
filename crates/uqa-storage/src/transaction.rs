@@ -6,7 +6,7 @@
 
 //! Explicit user transactions with savepoint stacks.
 //!
-//! Mirrors UQA `storage/transaction`.
+//! Transaction state and savepoint management.
 //!
 //! Two flavours:
 //! * [`SQLiteTransaction`] -- wraps a [`ManagedConnection`] and routes

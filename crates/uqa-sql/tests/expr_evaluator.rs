@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `uqa/tests/test_expr_evaluator.py::TestExprEvaluatorDirect`.
+//! Direct expression-evaluator coverage.
 //! Drives `uqa_sql::expr::eval` against AST fragments produced by
 //! `compile()` and asserts the result against per-row dictionaries.
 
@@ -201,8 +201,8 @@ fn unsupported_function() {
 
 #[test]
 fn unknown_column_returns_null() {
-    // Mirrors the canonical UQA implementation's behaviour for an unknown ColumnRef in scalar
-    // evaluation: returns Null rather than panicking.
+    // An unknown ColumnRef in scalar evaluation returns Null rather than
+    // panicking.
     let expr = projection_expr("SELECT y FROM t");
     let row = row_from(&[("x", Value::Int(1))]);
     let ctx = EvalContext::new(Some(&row), &[]);

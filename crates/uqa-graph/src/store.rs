@@ -174,10 +174,10 @@ pub trait GraphStore {
     // --- Bulk accessors ---
 
     /// Snapshot every vertex in the store, keyed by id. Mirrors the
-    /// `vertices` property on the canonical UQA implementation's abstract `GraphStore`.
+    /// `vertices` property on the current abstract `GraphStore`.
     fn vertices(&self) -> BTreeMap<VertexId, Vertex>;
 
     /// Snapshot every edge in the store, keyed by id. Mirrors the
-    /// `edges` property on the canonical UQA implementation's abstract `GraphStore`.
+    /// `edges` property on the current abstract `GraphStore`.
     fn edges(&self) -> BTreeMap<EdgeId, Edge>;
 }

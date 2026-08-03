@@ -6,8 +6,7 @@
 
 //! `ArrowFlightSQLFDWHandler`: remote Arrow Flight SQL handler.
 //!
-//! Coverage for `uqa.fdw.arrow_handler`. The UQA-RS implementation covers SQL
-//! generation: SQL literal quoting ([`quote_literal`]), `WHERE`
+//! Arrow Flight SQL generation: SQL literal quoting ([`quote_literal`]), `WHERE`
 //! clause assembly ([`build_where_clause`]), and the full SELECT /
 //! pre-existing-query builder ([`prepare_query`]). Actual Flight
 //! SQL execution is left to the caller because the `arrow-flight`
@@ -104,9 +103,8 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
     })
 }
 
-/// Render a Flight-SQL `WHERE` fragment from pushdown predicates.
-/// Mirrors `_build_where_clause` in the canonical UQA behavior. Flight
-/// SQL has no parameter binding API, so literal values are inlined
+/// Render a Flight-SQL `WHERE` fragment from pushdown predicates. Flight SQL
+/// has no parameter-binding API, so literal values are inlined
 /// via [`quote_literal`].
 pub fn build_where_clause(predicates: &[FDWPredicate]) -> Result<String, ArrowFlightPrepareError> {
     let mut clauses: Vec<String> = Vec::with_capacity(predicates.len());

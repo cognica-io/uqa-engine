@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_semi_join` onto row-oriented joins.
+//! Row-oriented semi-join coverage.
 
 use uqa_core::Value;
 use uqa_joins::{anti_join, semi_join, JoinKey};

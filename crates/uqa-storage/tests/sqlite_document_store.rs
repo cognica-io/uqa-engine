@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_sqlite_document_store`.
+//! SQLite document-store coverage.
 //!
 //! The Rust store persists documents in the catalog `_documents` table
 //! as typed JSON rather than creating one `SQLite` column per logical

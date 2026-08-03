@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Vector similarity to probability conversion. Rust implementation of
-//! `uqa.scoring.vector`.
+//! Vector similarity to probability conversion.
 //!
 //! Two modes:
 //!
@@ -16,9 +15,7 @@
 //!   caller supplies a pre-fitted transform built from a background
 //!   distance distribution.
 //!
-//! The Rust API is associated functions on [`VectorScorer`]; there is
-//! no instance state. This matches the canonical UQA behavior's static-only
-//! shape.
+//! [`VectorScorer`] exposes associated functions and carries no instance state.
 
 use crate::calibration::VectorProbabilityTransform;
 use crate::error::{invalid_input, require_finite};
@@ -82,9 +79,8 @@ impl VectorScorer {
         Ok(f64::midpoint(1.0 + cosine_sim, 0.0))
     }
 
-    /// Likelihood-ratio calibration for a batch of similarities.
-    /// Mirrors `calibrated_probabilities`. The caller pre-fits the
-    /// [`VectorProbabilityTransform`]; the shim here just maps cosine
+    /// Likelihood-ratio calibration for a batch of similarities. The caller
+    /// pre-fits the [`VectorProbabilityTransform`]; this method maps cosine
     /// similarities to distances (`1 - sim`) and forwards them.
     pub fn calibrated_probabilities(
         similarities: &[f64],

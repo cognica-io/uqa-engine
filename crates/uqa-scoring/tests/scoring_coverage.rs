@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_scoring`.
+//! Core scoring-law coverage.
 
 use std::sync::Arc;
 

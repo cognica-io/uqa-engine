@@ -6,7 +6,7 @@
 
 //! Common contract every index implementation honours.
 //!
-//! Mirrors UQA `storage/index_abc`. An [`Index`] supports
+//! An [`Index`] supports
 //! predicate-driven scans, scan cost estimation, build, and drop.
 //! The storage-layer concrete types ([`crate::btree_index::BTreeIndex`],
 //! the SQLite-backed inverted index, the IVF index, ...) all

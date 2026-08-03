@@ -13,11 +13,9 @@ use super::{
 use crate::{HNSWIndexParams, VectorIndexSpec};
 
 impl Engine {
-    /// Re-hydrate the named-analyzer / table-field-analyzer / foreign
-    /// server / foreign table / catalog index / path index registries
-    /// from the catalog. Mirrors the side effects of every
-    /// `register_*` method but skips their catalog write-back so the
-    /// load is idempotent.
+    /// Rehydrate analyzer, foreign-data, catalog-index, and path-index
+    /// registries from the catalog. Apply registration side effects without
+    /// writing them back, so loading remains idempotent.
     pub(super) fn restore_engine_registries_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,

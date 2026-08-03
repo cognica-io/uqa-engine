@@ -268,7 +268,7 @@ fn insert_python_table_rows(conn: &Connection) {
         params![
             2_i64,
             2_i64,
-            "canonical UQA behavior",
+            "Catalog migration",
             "Python catalog reference",
             "[0.0, 1.0, 0.0]",
             "2026-05-13 10:00:00",
@@ -415,7 +415,7 @@ fn insert_python_graph_rows(conn: &Connection) {
     conn.execute(
         "INSERT INTO _graph_vertices (vertex_id, label, properties_json)
          VALUES (?1, ?2, ?3)",
-        params![2_i64, "Doc", "{\"title\":\"canonical UQA behavior\"}"],
+        params![2_i64, "Doc", "{\"title\":\"Catalog migration\"}"],
     )
     .unwrap();
     conn.execute(

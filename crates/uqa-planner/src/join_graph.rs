@@ -133,9 +133,8 @@ impl JoinGraph {
         }
     }
 
-    /// Indices of every relation directly connected to `node` by any
-    /// edge. Mirrors the canonical UQA implementation's `JoinGraph.neighbors`. Each call walks
-    /// the edge list once; O(|edges|).
+    /// Indices of every relation directly connected to `node` by any edge.
+    /// Each call walks the edge list once: `O(|edges|)`.
     pub fn neighbors(&self, node: usize) -> Vec<usize> {
         if node >= self.relations.len() {
             return Vec::new();

@@ -44,9 +44,8 @@ impl Operator for TermOperator {
         let Some(idx) = ctx.inverted_index.as_ref() else {
             return Err(missing_backend("inverted-index", "term search"));
         };
-        // Search-time analyzer: synonym filters etc. expand `term` into
-        // a multi-token vector that gets unioned across the field's
-        // posting lists. Matches UQA behavior for `TermOperator.execute`.
+        // Search-time analyzer: synonym filters and similar transforms expand
+        // `term` into tokens that are unioned across the field's posting lists.
         let analyzer = idx.get_search_analyzer(&self.field);
         let tokens = analyzer.analyze(&self.term)?;
         if tokens.is_empty() {
@@ -66,8 +65,7 @@ impl Operator for TermOperator {
 
 /// `SpatialWithin_{f, center, distance}`: return all documents whose
 /// `field` value lies within `distance` (great-circle metres) of
-/// `(center_x, center_y)`. Mirrors
-/// `uqa.operators.primitive.SpatialWithinOperator`. Brute-force
+/// `(center_x, center_y)`. Brute-force
 /// scans the document store using
 /// [`uqa_storage::haversine_distance`]; spatial indexes plug in via
 /// the engine layer.

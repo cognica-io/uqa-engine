@@ -165,9 +165,8 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             Ok(out)
         }
         // -------------------------------------------------------------
-        // Analyzer DDL exposed as table-functions. Mirror the canonical UQA implementation's
-        // _build_create_analyzer / _build_drop_analyzer /
-        // _build_list_analyzers / _build_set_table_analyzer.
+        // Analyzer DDL exposed as table functions: create, drop, list,
+        // and assign table analyzers.
         // -------------------------------------------------------------
         "create_analyzer" => {
             if evaluated.len() != 2 {
@@ -244,8 +243,8 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
                     actual: evaluated.len(),
                 });
             }
-            // Match UQA behavior for: include the four built-in analyzers
-            // (`whitespace`, `standard`, `standard_cjk`, `keyword`) on
+            // Include the four built-in analyzers (`whitespace`, `standard`,
+            // `standard_cjk`, `keyword`) in addition to
             // top of every user-registered named analyzer.
             let mut names: std::collections::BTreeSet<String> = engine
                 .list_named_analyzers()

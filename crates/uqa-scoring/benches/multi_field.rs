@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Multi-field Bayesian scoring benchmarks mirroring UQA
-//! `bench_multi_field.py`.
+//! Multi-field Bayesian scoring benchmarks for single documents and batches.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

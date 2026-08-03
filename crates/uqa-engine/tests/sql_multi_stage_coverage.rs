@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL coverage for `test_multi_stage`.
+//! Multi-stage retrieval SQL coverage.
 
 use uqa_engine::Engine;
 

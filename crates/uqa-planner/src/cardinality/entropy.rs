@@ -12,8 +12,8 @@ use super::ColumnStats;
 // Information-theoretic helpers (Paper 1, Section 7).
 // ---------------------------------------------------------------------
 
-/// Estimate column entropy from MCV frequencies, equi-depth histogram,
-/// or distinct count. Mirrors `_column_entropy`.
+/// Estimate column entropy from MCV frequencies, an equi-depth histogram, or
+/// a distinct count.
 pub fn column_entropy(cs: &ColumnStats) -> f64 {
     let ndv = cs.distinct_count;
     if ndv <= 1 {
@@ -53,8 +53,7 @@ pub fn column_entropy(cs: &ColumnStats) -> f64 {
     (ndv as f64).log2()
 }
 
-/// Estimate mutual information `I(X;Y) = H(X) + H(Y) - H(X,Y)`. Mirrors
-/// `_mutual_information_estimate`.
+/// Estimate mutual information `I(X;Y) = H(X) + H(Y) - H(X,Y)`.
 pub fn mutual_information_estimate(
     cs_x: &ColumnStats,
     cs_y: &ColumnStats,

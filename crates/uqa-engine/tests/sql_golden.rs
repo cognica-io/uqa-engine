@@ -9,9 +9,8 @@
 //! Loads `tests/parity/sql_golden_fixture.json` and replays every
 //! case against a fresh in-memory `Engine`, asserting the result rows
 //! match the expected values. The fixture is intentionally
-//! engine-agnostic so the same JSON can be regenerated from the
-//! canonical UQA behavior implementation when we want to lock down parity
-//! at a deeper level.
+//! engine-agnostic so expected values can be reviewed and regenerated
+//! independently.
 
 use std::path::PathBuf;
 

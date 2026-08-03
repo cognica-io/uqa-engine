@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Additional coverage for `test_update_delete`.
+//! Additional SQL `UPDATE` and `DELETE` coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

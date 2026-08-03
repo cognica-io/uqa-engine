@@ -4,9 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SET search_path TO ...` parsing/execution and the namespace
-//! introspection accessors. Mirrors the canonical UQA implementation's
-//! `Engine._tables.search_path / list_schemas / tables_in_schema`.
+//! `SET search_path TO ...` parsing and execution, plus namespace
+//! introspection through search-path, schema-list, and table-list accessors.
 
 use uqa_engine::Engine;
 

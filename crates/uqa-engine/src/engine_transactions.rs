@@ -59,33 +59,29 @@ impl Engine {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Begin)
     }
 
-    /// Commit the top-most transaction frame. Matches UQA behavior for
-    /// `Engine.commit`.
+    /// Commit the topmost transaction frame.
     pub fn commit(&self) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Commit)
     }
 
-    /// Roll back the top-most transaction frame. Matches UQA behavior for
-    /// `Engine.rollback`.
+    /// Roll back the topmost transaction frame.
     pub fn rollback(&self) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback)
     }
 
-    /// Mark a savepoint inside the current transaction. Matches UQA behavior for
-    /// `Engine.savepoint(name)`.
+    /// Mark a savepoint inside the current transaction.
     pub fn savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::Savepoint(name.to_string()))
     }
 
-    /// Release a savepoint. Matches UQA behavior for `Engine.release_savepoint`.
+    /// Release a savepoint.
     pub fn release_savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::ReleaseSavepoint(
             name.to_string(),
         ))
     }
 
-    /// Roll back to a named savepoint. Matches UQA behavior for
-    /// `Engine.rollback_to_savepoint`.
+    /// Roll back to a named savepoint.
     pub fn rollback_to_savepoint(&self, name: &str) -> Result<(), SQLError> {
         self.run_transaction_statement(uqa_sql::ast::TransactionStmt::RollbackToSavepoint(
             name.to_string(),
@@ -280,8 +276,8 @@ impl Engine {
         self.session.transactions.lock().len()
     }
 
-    /// Tear down engine state cleanly. Rolls back any open transaction
-    /// frames and clears registries. Matches UQA behavior for `Engine.close`.
+    /// Tear down engine state cleanly, rolling back open transaction frames
+    /// and clearing registries.
     /// The engine value can no longer be used afterwards in a
     /// well-defined sense; idiomatic Rust drops the value at scope
     /// exit, but this method exists for API compatibility

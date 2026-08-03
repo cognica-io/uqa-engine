@@ -14,8 +14,7 @@
 //!   are what the SQL engine in `uqa-engine` calls into for row-tuple
 //!   join shapes.
 //! * Cross-paradigm joins ([`cross_paradigm`]) that bridge text,
-//!   vector, hybrid, and graph posting lists. Mirrors
-//!   UQA `joins/cross_paradigm`.
+//!   vector, hybrid, and graph posting lists.
 
 #![allow(
     clippy::enum_glob_use,

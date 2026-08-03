@@ -16,8 +16,7 @@ use uqa_core::{GeneralizedPostingList, PostingList};
 use uqa_graph::GraphPostingList;
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 
-/// Statistics from plan execution. Mirrors
-/// `uqa.planner.executor.ExecutionStats`.
+/// Statistics collected during plan execution.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionStats {
     pub operator_name: String,

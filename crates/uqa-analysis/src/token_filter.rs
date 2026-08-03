@@ -37,7 +37,7 @@ pub enum TokenFilter {
         /// Path to a Solr / Elasticsearch-style synonym file. The file
         /// is parsed every time the filter runs so reload-on-edit is
         /// free; for production use cache the parsed map upstream.
-        /// Matches UQA behavior for `SynonymFilter(synonyms_path=...)`.
+        /// Optional path to a reloadable synonym map.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         synonyms_path: Option<PathBuf>,
     },
@@ -96,8 +96,8 @@ impl TokenFilter {
         }
     }
 
-    /// Build a `Synonym` filter from a Solr / Elasticsearch synonym
-    /// file. The file format follows UQA behavior for `SynonymFilter`:
+    /// Build a `Synonym` filter from a Solr or Elasticsearch synonym file.
+    /// In this format,
     /// blank lines and `#` comments are skipped, `a => b, c` defines a
     /// one-way mapping, and `a, b, c` defines an equivalent group
     /// where every term expands to the other group members.

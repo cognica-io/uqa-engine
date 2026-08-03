@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Full-text search query string parser. Rust implementation of
-//! `uqa.sql.fts_query`.
+//! Full-text search query-string parser.
 //!
 //! Grammar
 //! -------

@@ -109,7 +109,7 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
         ON _graph_edges (graph);
     ",
     ),
-    // Re-shape graph storage to mirror the canonical UQA implementation's UQA `storage/catalog`:
+    // Re-shape graph storage into normalized global graph tables:
     // global vertex / edge tables keyed by id, a separate
     // `_graph_membership` table mapping each entity to one or more
     // named graphs, and the four supporting indexes the planner needs
@@ -161,8 +161,7 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
     // Persist the five engine-side registries that previously lived
     // only in `Engine`'s in-memory maps (named analyzers, table-field
     // analyzer overrides, foreign servers / tables, registered
-    // indexes, graph path indexes). Tables and column shapes mirror
-    // the canonical UQA implementation's UQA `storage/catalog` exactly.
+    // indexes, graph path indexes) with durable table and column shapes.
     (
         7,
         r"
@@ -207,8 +206,7 @@ pub(super) const MIGRATIONS: &[(u32, &str)] = &[
     ",
     ),
     // Persist per-column statistics produced by ANALYZE so that the
-    // optimiser still has cardinality / range estimates after a
-    // restart. Mirrors the canonical UQA implementation's `_column_stats` table.
+    // optimiser still has cardinality and range estimates after a restart.
     (
         8,
         r"

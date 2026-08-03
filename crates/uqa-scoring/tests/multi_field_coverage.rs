@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Focused implementation of `TestMultiFieldBayesianScorer` from `test_multi_field`.
+//! Multi-field Bayesian scorer coverage.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

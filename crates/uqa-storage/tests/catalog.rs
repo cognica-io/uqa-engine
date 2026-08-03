@@ -4,14 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_catalog` covering the SQLite-backed
-//! `Catalog` plus the per-module persistence stores it orchestrates.
+//! Coverage for the SQLite-backed `Catalog` and the per-module persistence
+//! stores it orchestrates.
 //!
-//! The canonical UQA behavior exposes one fat `Catalog` class with methods
-//! like `save_document`, `save_postings`, `save_vector`. The UQA-RS implementation
-//! splits those concerns across `Catalog`, `SQLiteDocumentStore`,
-//! `SQLiteInvertedIndex`, and `SQLiteVectorIndex`. Tests below exercise
-//! the same observable behaviour through the Rust API surface.
+//! Persistence concerns are split across `Catalog`, `SQLiteDocumentStore`,
+//! `SQLiteInvertedIndex`, and `SQLiteVectorIndex`.
 
 use std::collections::BTreeMap;
 
@@ -111,7 +108,7 @@ fn doc<const N: usize>(pairs: [(&str, Value); N]) -> uqa_storage::document_store
 }
 
 // =====================================================================
-// TestCatalogMetadata
+// Catalog metadata
 // =====================================================================
 
 #[test]
@@ -136,7 +133,7 @@ fn metadata_overwrite() {
 }
 
 // =====================================================================
-// TestCatalogTableSchemas
+// Catalog table schemas
 // =====================================================================
 
 #[test]
@@ -250,7 +247,7 @@ fn multiple_tables_round_trip() {
 }
 
 // =====================================================================
-// TestCatalogDocuments (via SQLiteDocumentStore)
+// Catalog documents through SQLiteDocumentStore
 // =====================================================================
 
 #[test]
@@ -336,7 +333,7 @@ fn document_upsert_overwrites() {
 }
 
 // =====================================================================
-// TestCatalogPostings (via SQLiteInvertedIndex)
+// Catalog postings through SQLiteInvertedIndex
 // =====================================================================
 
 #[test]
@@ -407,7 +404,7 @@ fn postings_tables_isolated() {
 }
 
 // =====================================================================
-// TestCatalogGraph
+// Catalog graph state
 // =====================================================================
 
 #[test]
@@ -440,7 +437,7 @@ fn graph_edges_round_trip() {
 }
 
 // =====================================================================
-// TestCatalogVectors (via SQLiteVectorIndex)
+// Catalog vectors through SQLiteVectorIndex
 // =====================================================================
 
 #[test]
@@ -492,7 +489,7 @@ fn vector_delete_removes_only_target() {
 }
 
 // =====================================================================
-// TestCatalogColumnStats
+// Catalog column statistics
 // =====================================================================
 
 #[test]
@@ -648,7 +645,7 @@ fn column_stats_tables_isolated() {
 }
 
 // =====================================================================
-// TestCatalogScoringParams
+// Catalog scoring parameters
 // =====================================================================
 
 #[test]
@@ -701,7 +698,7 @@ fn scoring_params_delete() {
 }
 
 // =====================================================================
-// TestCatalogTransactions (via ManagedConnection)
+// Catalog transactions through ManagedConnection
 // =====================================================================
 
 #[test]
@@ -746,7 +743,7 @@ fn auto_commit_outside_transaction_persists() {
 }
 
 // =====================================================================
-// TestCatalogPersistence -- close + reopen restores every store
+// Catalog persistence: close and reopen restore every store
 // =====================================================================
 
 #[test]

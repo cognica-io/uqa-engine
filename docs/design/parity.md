@@ -1,6 +1,6 @@
 # Parity Fixtures
 
-The UQA-RS implementation keeps three kinds of golden fixtures under `tests/parity/`:
+UQA-RS keeps three kinds of golden fixtures under `tests/parity/`:
 
 - **SQL golden file** (`sql_golden_fixture.json`) — replayed by [`crates/uqa-engine/tests/sql_golden.rs`](../../crates/uqa-engine/tests/sql_golden.rs). Each case is a `(name, sql, expected: [{column: value, ...}])` triple. The harness applies `schema_sql` and `data_sql` once, then runs every case against a fresh in-memory `Engine` and compares the result rows column by column.
 - **BEIR-style relevance fixture** (`beir_fixture.json`) — replayed by [`crates/uqa-engine/tests/beir_fixture.rs`](../../crates/uqa-engine/tests/beir_fixture.rs). Encodes the corpus, a query set, graded judgments per query, and the floors for `NDCG@K` and `MAP@K` the harness must clear.
@@ -73,7 +73,10 @@ To swap the small synthetic fixture for a real BEIR dataset (`scifact`, `trec-co
 3. For each query, build a `judgments` object from the `qrels` file (graded BEIR relevance is `0`/`1`/`2`).
 4. Pick `min_ndcg` / `min_map` floors from a baseline run (BM25 or Bayesian BM25). Aim for a couple of points below the observed numbers so the gate catches regressions but tolerates noise.
 
-A `python3 tools/parity/build_beir_fixture.py beir/scifact > beir_fixture.json` helper script can generate the same schema; the same approach works in Rust by writing a small `clap` program that reuses `serde_json::to_string_pretty`. Either way the resulting JSON plugs straight into `crates/uqa-engine/tests/beir_fixture.rs` without code changes.
+The resulting JSON plugs directly into
+`crates/uqa-engine/tests/beir_fixture.rs` without code changes. Keep any
+one-time dataset converter outside the regression fixture itself and record
+its input dataset revision alongside the generated artifact.
 
 ## CI guidance
 

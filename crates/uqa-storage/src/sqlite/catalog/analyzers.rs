@@ -11,8 +11,7 @@ use super::{params, Catalog, Result};
 impl Catalog {
     // -- Named analyzers ---------------------------------------------------
 
-    /// Persist a named analyzer configuration. Matches UQA behavior for
-    /// `Catalog.save_analyzer`.
+    /// Persist a named analyzer configuration.
     pub fn save_analyzer(&self, name: &str, config_json: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(
@@ -45,8 +44,7 @@ impl Catalog {
 
     // -- Per-field analyzer overrides --------------------------------------
 
-    /// Persist a `(table, field, phase) -> analyzer_name` row. Mirrors
-    /// Persist a table-field analyzer mapping.
+    /// Persist a `(table, field, phase) -> analyzer_name` mapping.
     pub fn save_table_field_analyzer(
         &self,
         table_name: &str,

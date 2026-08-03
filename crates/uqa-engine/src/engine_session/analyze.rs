@@ -13,9 +13,8 @@ use super::{
 };
 
 impl Engine {
-    /// Refresh per-column statistics for a single table or every
-    /// table when `table` is `None`. Mirrors `Table.analyze` in
-    /// the canonical UQA behavior: scans every document, collects per-
+    /// Refresh per-column statistics for one table, or every table when
+    /// `table` is `None`. The analysis scans each document and collects per-
     /// column distinct count / null count / min / max / equi-depth
     /// histogram (100 buckets) / MCV list (top 10 above-average
     /// frequency), and stores the result on the per-table state so the

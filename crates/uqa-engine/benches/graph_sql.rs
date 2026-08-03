@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL graph function benchmarks mirroring the centrality SQL portion
-//! of UQA `bench_graph_centrality.py`.
+//! SQL graph-function benchmarks for centrality, bounded RPQs, and named graphs.
 
 use std::fmt::Write as _;
 

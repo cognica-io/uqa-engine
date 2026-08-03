@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Cost coverage from `test_semi_join`.
+//! Semi-join cost-model coverage.
 
 use uqa_planner::{CostEstimator, OperatorKind};
 

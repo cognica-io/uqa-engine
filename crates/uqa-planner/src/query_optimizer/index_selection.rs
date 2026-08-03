@@ -48,10 +48,9 @@ impl QueryOptimizer {
                 (None, None) => None,
             };
             if let Some((name, scan_cost)) = best {
-                // the canonical UQA implementation's `_apply_index_scan` only rewrites when the
-                // index's `scan_cost(predicate)` beats a full scan.
-                // Mirror that gate exactly: prefer the index only when
-                // its cost is strictly cheaper.
+                // Prefer the index only when its `scan_cost(predicate)` beats
+                // a full scan; otherwise keep the filter over the original
+                // operator.
                 let full_scan_cost = self.row_count.unwrap_or(0) as f64;
                 if scan_cost < full_scan_cost {
                     return OperatorTree::IndexScan {

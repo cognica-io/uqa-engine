@@ -9,7 +9,7 @@ This is a design doc only. No code lands until the plan in [Phasing](#phasing) i
 - **Backend portability.** SQLite is excellent on desktop / server but drags the full SQL surface onto every embed. iOS and WASM ship fine with SQLite today, but a future Rust-native Key/Value (`redb`) or RocksDB backend would need a much smaller blast radius than today's 19-table schema permits.
 - **Catalog complexity.** Most catalog tables are already `(name PRIMARY KEY, json_blob)` shaped. The relational form buys little — row counts are tiny (tens to thousands) and queries reduce to point lookups. The two genuine relational consumers are `_graph_membership` joins and `_postings` prefix scans, both of which are expressible as Key/Value prefix iteration.
 - **Migration cost.** Each new schema column on a hot table (`_postings`, `_documents`) carries a v_N ALTER and a backfill. A Key/Value layout pushes all such evolution into JSON value-side encoding, forward-compatible by default.
-- **Compatibility tradeoff.** The current UQA catalog contract is relational. Splitting on this boundary lets the UQA-RS implementation diverge where it actually wins (mobile / edge embedding) while keeping everything above the storage trait identical.
+- **Compatibility tradeoff.** The catalog contract is currently relational. Splitting on this boundary permits a storage layout optimized for mobile and edge embedding while keeping everything above the storage trait unchanged.
 
 ## Non-goals
 
@@ -84,7 +84,7 @@ sequence/<name>                                  → next-id u64-be
 
 Today's `_graph_edges_out (source_id, label)` and `_graph_edges_in (target_id, label)` indexes are the only graph queries that need sub-PK lookup. The Key/Value equivalent is two sibling prefixes (`graph-edge-out`, `graph-edge-in`) that hold presence-only markers. Inserting an edge becomes one primary write + two secondary writes; deleting symmetric. Adjacency queries scan one prefix and dereference the resolved edge ids back through the primary `edge/` namespace.
 
-For other graph queries (vertex by label, edges by label), the canonical UQA implementation's `_graph_vertices_label` and `_graph_edges_label` indexes are also prefix-friendly and follow the same pattern.
+For other graph queries (vertex by label, edges by label), the current `_graph_vertices_label` and `_graph_edges_label` indexes are also prefix-friendly and follow the same pattern.
 
 ### Posting list scan ordering
 

@@ -4,9 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Operator-side facades over the [`uqa_fusion`] family. Mirrors
-//! UQA `operators/attention`, UQA `operators/learned_fusion`,
-//! UQA `operators/multi_field`, and UQA `operators/calibrated_vector`.
+//! Operator-side facades over attention, learned, multi-field, and calibrated
+//! vector fusion in the [`uqa_fusion`] family.
 //!
 //! Each wrapper folds the per-signal [`PostingList`]s its child
 //! operators emit into a single [`PostingList`]. In the heterogeneous
@@ -74,9 +73,8 @@ fn require_single_active_evidence(probabilities: &[Option<f64>]) -> StorageBacke
         })
 }
 
-/// Single-head / multi-head attention-weighted fusion operator.
-/// Mirrors `AttentionFusionOperator` from the canonical UQA behavior and
-/// shares the dispatch with [`MultiHeadAttentionFusion`] via the
+/// Single-head or multi-head attention-weighted fusion operator. Shares
+/// dispatch with [`MultiHeadAttentionFusion`] via the
 /// [`AttentionFuser`] enum.
 pub enum AttentionFuser {
     Single(AttentionFusion),
@@ -188,8 +186,7 @@ impl Operator for AttentionFusionOperator {
     }
 }
 
-/// Learned-weight multi-signal fusion operator. Mirrors
-/// `LearnedFusionOperator` in UQA `operators/learned_fusion`.
+/// Learned-weight multi-signal fusion operator.
 pub struct LearnedFusionOperator {
     pub signals: Vec<Arc<dyn Operator>>,
     pub learned: LearnedFusion,

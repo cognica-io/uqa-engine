@@ -4,9 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Engine-level Bayesian calibration parameter persistence.
-//! Mirrors the canonical UQA implementation's `Engine.save_scoring_params /
-//! load_scoring_params / load_all_scoring_params`.
+//! Engine-level Bayesian calibration parameter persistence through the save,
+//! single-load, and bulk-load APIs.
 
 use uqa_engine::Engine;
 

@@ -73,8 +73,8 @@ impl QueryOptimizer {
                 .into_iter()
                 .map(|c| self.recurse_children(c))
                 .collect();
-            // Match UQA behavior for: the optimizer ranks intersect arms by the
-            // algebraic operator cost (`CostModel.estimate`), not the
+            // Rank intersect arms by algebraic operator cost
+            // (`CostModel.estimate`), not the
             // cardinality estimator. The two diverge for `Filter`,
             // `Score`, `Traverse`, `RegularPathQuery`, fusion / hybrid
             // / cross-paradigm join nodes, and any operator with a

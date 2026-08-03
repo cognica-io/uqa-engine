@@ -6,10 +6,9 @@
 
 //! Relational joins over `ResultRow` row sets.
 //!
-//! Implements the row-join behavior from UQA `joins/inner`,
-//! UQA `joins/outer`, UQA `joins/semi`, UQA `joins/cross`,
-//! UQA `joins/sort_merge`, UQA `joins/index`. The UQA-RS implementation
-//! operates on `ResultRow` (`BTreeMap<String, Value>`) directly so it
+//! Implements inner, outer, semi, cross, sort-merge, and index-assisted
+//! joins. The implementation operates on `ResultRow`
+//! (`BTreeMap<String, Value>`) directly so it
 //! can be plugged into the engine's row-tuple SQL pipeline without an
 //! extra adapter; the returned `Vec<ResultRow>` carries qualifier-
 //! prefixed columns that the projection layer consumes verbatim.

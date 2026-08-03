@@ -6,8 +6,8 @@
 
 //! Bayesian BM25 with an external prior (Section 12.2 #6, Paper 3).
 //!
-//! Mirrors `uqa.scoring.external_prior`. Combines the BM25 likelihood
-//! with a document-level prior via log-odds addition:
+//! Combines the BM25 likelihood with a document-level prior via log-odds
+//! addition:
 //!
 //! ```text
 //! logit(posterior) = logit(likelihood) + logit(prior)
@@ -15,14 +15,13 @@
 //!
 //! The prior is a `Fn(&BTreeMap<String, Value>) -> f64` that maps a
 //! document's field bag to a probability in `(0, 1)`. The bundled
-//! [`recency_prior`] / [`authority_prior`] helpers cover the common
-//! shapes from the canonical UQA behavior.
+//! [`recency_prior`] and [`authority_prior`] helpers cover common
+//! time- and authority-based shapes.
 //!
 //! Numerical safety: probabilities are clamped to `[1e-10, 1 - 1e-10]`
 //! before the logit transform, so the combined posterior is always
 //! finite. A likelihood of `>= 1` saturates the logit at `+10`; a
-//! likelihood of `<= 0` saturates at `-10` -- same constants as
-//! the canonical UQA implementation's reference for cross-language parity.
+//! likelihood of `<= 0` saturates at `-10`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -56,8 +55,7 @@ impl ExternalPriorScorer {
         })
     }
 
-    /// Fused posterior with the external prior. Mirrors
-    /// `score_with_prior` in the canonical UQA behavior.
+    /// Compute a fused posterior with the external prior.
     pub fn score_with_prior(
         &self,
         term_freq: u64,
@@ -115,7 +113,7 @@ pub fn recency_prior(field: impl Into<String>, decay_days: f64) -> PriorFn {
 }
 
 /// Authority-based prior. Maps categorical authority levels to prior
-/// probabilities. The default mapping mirrors the canonical UQA behavior:
+/// probabilities. The default mapping is:
 /// `high -> 0.8`, `medium -> 0.6`, `low -> 0.4`. Returns `0.5`
 /// (neutral) when the field is missing or unrecognized.
 pub fn authority_prior(field: impl Into<String>, levels: Option<BTreeMap<String, f64>>) -> PriorFn {

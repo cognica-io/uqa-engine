@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the `FusionWAND` scoring coverage for `test_fusion_wand`.
+//! `FusionWAND` scoring coverage.
 
 use std::collections::BTreeMap;
 

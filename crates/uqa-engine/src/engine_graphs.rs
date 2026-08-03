@@ -57,22 +57,19 @@ impl Engine {
         Ok(true)
     }
 
-    /// Sorted list of every named graph registered on this engine.
-    /// Mirrors the canonical UQA implementation's `Engine.list_graphs`.
+    /// Return every named graph registered on this engine in sorted order.
     pub fn list_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
         Ok(self.durable.graphs.read().keys().cloned().collect())
     }
 
     /// Return `true` when a graph with `name` is registered.
-    /// Mirrors the canonical UQA implementation's `Engine.has_graph`.
     pub fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         Ok(self.durable.graphs.read().contains_key(name))
     }
 
-    /// Insert a vertex into a named graph. Auto-creates the graph if
-    /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_vertex`.
+    /// Insert a vertex into a named graph, creating the graph if needed.
     pub fn add_graph_vertex(
         &self,
         vertex: uqa_core::Vertex,
@@ -106,8 +103,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Insert an edge into a named graph. Auto-creates the graph if
-    /// missing. Mirrors the canonical UQA implementation's `Engine.add_graph_edge`.
+    /// Insert an edge into a named graph, creating the graph if needed.
     pub fn add_graph_edge(&self, edge: uqa_core::Edge, graph: &str) -> StorageBackendResult<()> {
         self.with_implicit_storage_transaction(move |engine| {
             engine.add_graph_edge_inner(edge, graph)
@@ -131,9 +127,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Apply a [`uqa_graph::GraphDelta`] to a named graph as a single
-    /// atomic batch of `add/remove vertex/edge` ops. Mirrors the canonical UQA implementation's
-    /// `Engine.apply_graph_delta`.
+    /// Apply a [`uqa_graph::GraphDelta`] to a named graph as one atomic batch
+    /// of vertex and edge additions or removals.
     pub fn apply_graph_delta(
         &self,
         graph: &str,
@@ -175,9 +170,8 @@ impl Engine {
     }
 
     /// Build (or replace) a path index for `graph` keyed by `name`.
-    /// `label_sequences` is the set of label sequences to materialise;
-    /// each sequence becomes a hash-friendly direct lookup for RPQ.
-    /// Mirrors the canonical UQA implementation's `Engine.build_path_index`.
+    /// `label_sequences` is the set of label sequences to materialize; each
+    /// sequence becomes a hash-friendly direct lookup for RPQ.
     pub fn build_path_index(
         &self,
         name: &str,
@@ -213,8 +207,7 @@ impl Engine {
         Ok(true)
     }
 
-    /// Drop a path index by `(graph, name)`. Returns `true` when an
-    /// index was removed. Mirrors the canonical UQA implementation's `Engine.drop_path_index`.
+    /// Drop a path index by `(graph, name)`. Return `true` when one existed.
     pub fn drop_path_index(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| engine.drop_path_index_inner(name, graph))
     }
@@ -235,9 +228,8 @@ impl Engine {
         Ok(removed)
     }
 
-    /// Look up a path index by `(graph, name)`. Returns a clone so the
-    /// caller is not tied to the engine's lock. Mirrors the canonical UQA implementation's
-    /// `Engine.get_path_index`.
+    /// Look up a path index by `(graph, name)`. Return a clone so the caller
+    /// is not tied to the engine's lock.
     pub fn get_path_index(
         &self,
         name: &str,
@@ -302,9 +294,8 @@ impl Engine {
     /// empty vectors when the query has no `RETURN`).
     ///
     /// This wires the full `CREATE` / `MERGE` / `SET` / `DELETE` /
-    /// `UNWIND` surface through to the in-memory store. The graph is
-    /// auto-created on first use, mirroring the canonical UQA implementation's
-    /// `CypherCompiler.execute` behaviour.
+    /// `UNWIND` surface through to the in-memory store. The named graph is
+    /// auto-created on first use.
     pub fn run_cypher(
         &self,
         graph: &str,

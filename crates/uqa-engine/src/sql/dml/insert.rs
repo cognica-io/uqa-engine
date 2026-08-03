@@ -216,8 +216,7 @@ pub(in crate::sql) fn run_insert_inner(
     )?;
 
     // No explicit id and no auto-increment column: allocate a synthetic
-    // u64 doc_id at insert time. Mirrors the canonical UQA behavior, which
-    // treats every table as having an implicit doc_id even when the
+    // u64 doc_id at insert time. Every table has an implicit doc_id even when the
     // schema declares no primary key.
 
     let mut affected = 0u64;

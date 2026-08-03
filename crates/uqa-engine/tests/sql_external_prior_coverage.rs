@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for SQL cases in `test_external_prior`.
+//! External-prior SQL coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

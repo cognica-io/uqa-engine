@@ -6,9 +6,8 @@
 
 //! Volcano-model physical operator pipeline.
 //!
-//! The canonical UQA behavior (`uqa/execution/*`) is built on top of Apache
-//! Arrow `RecordBatch`es. This implementation keeps the same iterator
-//! protocol (`open` / `next` / `close`) with row-oriented batches so the
+//! The pipeline uses an `open` / `next` / `close` iterator protocol with
+//! row-oriented batches so the
 //! engine can expose the operator surface without the `arrow-rs` build
 //! dependency. The operator trait and operator catalogue defined here are
 //! the execution contract.

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Storage benchmarks mirroring UQA `bench_storage.py`.
+//! Document, inverted-index, and vector-index storage benchmarks.
 //!
 //! Covers document-store put/get/scan, inverted-index add/lookup,
 //! brute-force, IVF, and HNSW vector search, vector deletion, index builds,

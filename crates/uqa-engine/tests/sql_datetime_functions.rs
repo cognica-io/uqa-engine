@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_datetime`.
+//! SQL date and time function coverage.
 //!
 //! The Rust core `Value` surface stores date/time values as ISO strings,
 //! so these tests assert the same observable SQL semantics through that

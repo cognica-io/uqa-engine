@@ -332,7 +332,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     // -----------------------------------------------------------------
-    // Convenience methods porting `uqa.api.query_builder.QueryBuilder`.
+    // Fluent full-text and retrieval helpers.
     // -----------------------------------------------------------------
 
     /// Add a bare term filter (`text_match(field, 'term')`). When
@@ -500,7 +500,7 @@ impl<'a> QueryBuilder<'a> {
 
     /// Add a `staged_retrieval(...)` predicate from pre-rendered retrieval
     /// signals paired with their `top_k` cutoffs. The builder method retains
-    /// its established name, while the generated SQL uses the registered
+    /// its current name, while the generated SQL uses the registered
     /// shared-IR function.
     ///
     /// # Errors
@@ -591,16 +591,15 @@ impl<'a> QueryBuilder<'a> {
         Ok(self.r#where(predicate))
     }
 
-    /// `RPQ` (Regular Path Query) over a named graph. Matches UQA behavior for
-    /// `QueryBuilder.rpq`. Replaces the FROM clause with a table-
+    /// Build an `RPQ` (Regular Path Query) over a named graph. Replaces the
+    /// `FROM` clause with a table-
     /// function reference, since RPQ is a relation-producing function.
     pub fn rpq(mut self, expr: &str, start: u64, graph: &str) -> Self {
         self.table = format!("rpq({}, {start}, {})", quote_str(expr), quote_str(graph));
         self
     }
 
-    /// Graph traversal as a relation. Matches UQA behavior for
-    /// `QueryBuilder.traverse`.
+    /// Build a graph traversal as a relation.
     pub fn traverse(mut self, graph: &str, start: u64, label: Option<&str>, max_hops: u32) -> Self {
         let lbl = match label {
             Some(s) => quote_str(s),
@@ -613,8 +612,7 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// Temporally-bounded graph traversal. Matches UQA behavior for
-    /// `QueryBuilder.temporal_traverse`.
+    /// Build a temporally bounded graph traversal.
     pub fn temporal_traverse(
         mut self,
         graph: &str,
@@ -635,9 +633,8 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    /// `uqa_highlight(field, query [, start_tag, end_tag, max_fragments,
-    /// fragment_size])` projection. Matches UQA behavior for `QueryBuilder`'s
-    /// highlight helper.
+    /// Add a `uqa_highlight(field, query [, start_tag, end_tag,
+    /// max_fragments, fragment_size])` projection.
     ///
     /// # Errors
     ///
@@ -672,8 +669,7 @@ impl<'a> QueryBuilder<'a> {
         Ok(self)
     }
 
-    /// `deep_learn(model, training_set)` projection. Mirrors the canonical UQA implementation's
-    /// analytical training trigger.
+    /// Add a `deep_learn(model, training_set)` analytical training projection.
     pub fn deep_learn(mut self, model: &str, training_set: &str) -> Self {
         self.projections.push(format!(
             "deep_learn({}, {})",
@@ -744,9 +740,8 @@ impl<'a> QueryBuilder<'a> {
         Ok(self)
     }
 
-    /// Run `EXPLAIN <assembled SELECT>` and return the planner's
-    /// rendered plan as a single string. Matches UQA behavior for
-    /// `QueryBuilder.explain`.
+    /// Run `EXPLAIN <assembled SELECT>` and return the planner's rendered plan
+    /// as a single string.
     pub fn explain(&self) -> Result<String, SQLError> {
         let stmt = self.to_sql();
         let result = self.engine.sql(&format!("EXPLAIN {stmt}"), &[])?;

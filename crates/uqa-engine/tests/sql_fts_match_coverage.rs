@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for SQL `@@` queries in `test_fts_match`.
+//! SQL `@@` full-text match coverage.
 
 use uqa_core::Value;
 use uqa_engine::Engine;

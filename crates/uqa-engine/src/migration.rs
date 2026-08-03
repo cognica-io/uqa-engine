@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Migration support for `SQLite` databases produced by the Python UQA
-//! reference implementation.
+//! Migration support for legacy UQA `SQLite` catalog directories.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

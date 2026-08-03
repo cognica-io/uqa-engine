@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_expr_evaluator`. Mirrors the SQL
-//! expression evaluator integration suite: IS NULL / IS NOT NULL,
+//! SQL expression-evaluator integration coverage: IS NULL / IS NOT NULL,
 //! arithmetic, string concat, CASE / WHEN, CAST, COALESCE, string and
 //! math scalar functions, expression-based WHERE clauses, mixed
 //! projections, and IS NULL interactions with physical operators.

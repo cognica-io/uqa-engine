@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Volcano `PhysicalOperator` trait shared by every operator in this
-//! crate. Mirrors UQA `execution/physical`.
+//! Volcano `PhysicalOperator` trait shared by every operator in this crate.
 
 use thiserror::Error;
 

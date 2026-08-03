@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_analysis`. Mirrors the Lucene-style text
-//! analysis pipeline tests: tokenizers, token filters, char filters,
+//! Coverage for the Lucene-style text-analysis pipeline: tokenizers, token
+//! filters, character filters,
 //! analyzer composition, serialization round-trips, and the named
 //! analyzer registry.
 

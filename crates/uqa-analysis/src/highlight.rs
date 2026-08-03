@@ -6,7 +6,7 @@
 
 //! Search-result highlighting.
 //!
-//! Mirrors UQA `search/highlight`. Operates in two phases:
+//! Highlighting operates in two phases:
 //!
 //! 1. Build a set of *analyzed* query terms (lower-cased + stemmed +
 //!    char/token filtered through the same [`Analyzer`] pipeline used
@@ -19,9 +19,8 @@
 //!    `end_tag`, or projected into a fragment view when
 //!    `max_fragments > 0`.
 //!
-//! The matcher operates on character offsets (not byte offsets) so
-//! highlight spans in CJK / multi-byte text line up the same way the
-//! canonical UQA behavior produces them.
+//! The matcher operates on character offsets rather than byte offsets, so
+//! highlight spans align correctly in CJK and other multibyte text.
 //!
 //! ```rust
 //! use uqa_analysis::{highlight, HighlightOptions};
@@ -52,8 +51,8 @@ use regex::Regex;
 use crate::analyzer::Analyzer;
 use crate::error::AnalysisResult;
 
-/// Per-call configuration. Defaults match the canonical UQA behavior:
-/// `<b>` / `</b>` tags, full-text highlight (no fragment cap),
+/// Per-call configuration. Defaults use `<b>` / `</b>` tags, a full-text
+/// highlight with no fragment cap, and
 /// 150-char fragments when `max_fragments > 0`.
 #[derive(Debug, Clone)]
 pub struct HighlightOptions {

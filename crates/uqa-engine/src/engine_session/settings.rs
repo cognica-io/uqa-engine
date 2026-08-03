@@ -9,8 +9,7 @@
 use super::{parse_search_path_list, Engine, SQLError, StorageBackendResult};
 
 impl Engine {
-    /// Current `search_path`. Mirrors the canonical UQA implementation's
-    /// `Engine._tables.search_path`.
+    /// Return the current `search_path`.
     pub fn search_path(&self) -> Vec<String> {
         self.session.state.read().search_path.clone()
     }
@@ -101,8 +100,7 @@ impl Engine {
 
     /// Apply `SET <name> [TO|=] <value>`. Honours `search_path`
     /// directly; every other parameter is stored in the session-vars
-    /// map so a subsequent `SHOW <name>` can echo it back. Mirrors
-    /// the canonical UQA implementation's session-variable behaviour.
+    /// map so a subsequent `SHOW <name>` can echo it back.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
         if !crate::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
@@ -215,8 +213,8 @@ impl Engine {
         })
     }
 
-    /// Apply `DISCARD <target>`. Mirrors the canonical UQA implementation's `_compile_discard`:
-    /// `ALL` resets every kind of session state; the narrower
+    /// Apply `DISCARD <target>`. `ALL` resets every kind of session state;
+    /// the narrower
     /// variants are scoped accordingly.
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;

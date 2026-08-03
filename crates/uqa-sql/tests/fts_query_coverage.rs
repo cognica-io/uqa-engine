@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Lexer/parser coverage for `test_fts_match`.
+//! Full-text query lexer and parser coverage.
 
 use uqa_sql::{fts_tokenize, FTSNode, FTSParser, FTSTokenType};
 

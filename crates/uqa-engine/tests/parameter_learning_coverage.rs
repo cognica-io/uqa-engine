@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for Engine parameter-learning cases in `test_parameter_learning`.
+//! Engine parameter-learning coverage.
 
 use uqa_engine::Engine;
 

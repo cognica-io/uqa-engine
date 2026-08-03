@@ -18,7 +18,6 @@ use super::{
 
 impl Catalog {
     /// Store an arbitrary key/value pair in the `_metadata` table.
-    /// Mirrors the canonical UQA implementation's `Catalog.set_metadata`.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
         self.conn.with(|c| {
             c.execute(

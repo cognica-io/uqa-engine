@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Additional coverage for `test_sql_facets_highlight`.
+//! Additional facet and highlighting SQL coverage.
 
 use std::collections::BTreeMap;
 

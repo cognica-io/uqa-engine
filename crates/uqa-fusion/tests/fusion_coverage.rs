@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for `test_fusion`.
+//! Probabilistic-fusion coverage.
 
 use uqa_fusion::{ProbabilisticBoolean, RobustPositiveEvidencePool};
 

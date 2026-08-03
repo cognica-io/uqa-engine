@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Fusion WAND benchmarks mirroring UQA `bench_scoring_advanced.py`.
+//! Fusion WAND top-k benchmarks across document and signal counts.
 
 use std::collections::BTreeMap;
 

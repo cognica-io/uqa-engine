@@ -467,9 +467,8 @@ impl EngineDriver<'_> {
         source: &OperatorTree,
     ) -> DriverResult<PostingList> {
         // Lift cosine similarities in `[-1, 1]` onto the (0, 1)
-        // probability scale via `(1 + s) / 2`. Mirrors
-        // [`uqa_operators::CosineProbabilityOperator`] but skips the
-        // trait wrapper because the source has already been driven
+        // probability scale via `(1 + s) / 2`. The source is already driven,
+        // so this path skips the operator trait wrapper
         // through the engine. Standalone `knn_match` keeps this
         // Definition 7.1.2 map; fusion contexts route through
         // [`Self::execute_cosine_evidence`] instead.

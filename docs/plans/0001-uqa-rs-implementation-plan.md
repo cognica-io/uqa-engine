@@ -6,7 +6,7 @@ Status: Living implementation plan Target repo: `uqa-rs`
 
 ### 1.1 Goal
 
-Build UQA-RS as a native Rust implementation of the Unified Query Algebra:
+Build UQA-RS as an embeddable Rust engine for the Unified Query Algebra:
 
 1. **Contract-faithful.** Document support, payload merge, graph encoding, scoring, fusion, and aggregation each have their own property or golden tests.
 2. **SQL and API compatible.** The public contract is the UQA SQL surface, `Engine`, `QueryBuilder`, `usql`, graph APIs, and crate-level Rust APIs.

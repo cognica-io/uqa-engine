@@ -477,7 +477,7 @@ impl Engine {
     }
 
     // -----------------------------------------------------------------
-    // Prepared statements. Mirrors `_engine._prepared`.
+    // Prepared statements.
     // -----------------------------------------------------------------
 
     pub fn register_prepared(
