@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Coverage for the SQLite-backed `Catalog` and the per-module persistence
+//! Coverage for the `SQLite`-backed `Catalog` and the per-module persistence
 //! stores it orchestrates.
 //!
 //! Persistence concerns are split across `Catalog`, `SQLiteDocumentStore`,
