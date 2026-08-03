@@ -62,12 +62,15 @@ impl HNSWIndex {
                 self.params.ef_construction,
                 layer,
             );
-            let selected = self.select_neighbors(
+            let mut selected = self.select_neighbors(
                 &normalized_vector,
                 candidates.iter().map(|candidate| candidate.node_id),
                 self.max_connections(layer),
                 Some(node_id),
             );
+            if layer == 0 {
+                self.ensure_layer_zero_backbone(node_id, &mut selected);
+            }
             if let Some(node) = self.nodes.get_mut(&node_id) {
                 node.neighbors[layer].clone_from(&selected);
             }

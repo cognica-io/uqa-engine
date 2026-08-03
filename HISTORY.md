@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 Initial release of the current UQA-RS implementation.
 
+### Fixed
+
+- **HNSW duplicate-vector connectivity:** Layer-zero pruning preserves a bounded deterministic backbone, so large groups of identical or near-identical vectors cannot isolate the entry point or produce a graph that fails persistence validation.
+
 ### Added
 
 - **Unified query runtime:** PostgreSQL-oriented SQL, full-text retrieval, vector search, graph queries, ranking, fusion, and machine-learning operators execute through one embeddable Rust engine.

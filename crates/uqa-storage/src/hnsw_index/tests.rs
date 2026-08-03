@@ -152,6 +152,28 @@ fn default_search_has_a_recall_floor_against_bruteforce() {
 }
 
 #[test]
+fn repeated_vectors_keep_a_large_graph_connected_and_restorable() {
+    let params = HNSWIndexParams::default();
+    let mut index = HNSWIndex::with_params(2, params).unwrap();
+    for doc_id in 1_u64..=2_000 {
+        let value = if doc_id % 200 == 1 {
+            vec![0.9, 0.1]
+        } else {
+            vec![0.1, 0.9]
+        };
+        index.add(doc_id, value).unwrap();
+    }
+
+    index.validate_invariants().unwrap();
+    assert_eq!(index.search_knn(&[0.9, 0.1], 10).unwrap().len(), 10);
+
+    let snapshot = index.persistence_snapshot();
+    let restored = HNSWIndex::from_persistence(2, params, snapshot.meta, snapshot.nodes).unwrap();
+    restored.validate_invariants().unwrap();
+    assert_eq!(restored.search_knn(&[0.9, 0.1], 10).unwrap().len(), 10);
+}
+
+#[test]
 fn non_finite_vectors_are_rejected_before_mutation() {
     let mut index = HNSWIndex::new(2);
     assert!(index.add(1, vec![f32::NAN, 0.0]).is_err());

@@ -13,6 +13,16 @@ use super::search::Candidate;
 use super::types::{HNSWIndex, NodeId};
 
 impl HNSWIndex {
+    pub(super) fn ensure_layer_zero_backbone(&self, node_id: NodeId, neighbors: &mut Vec<NodeId>) {
+        let Some(previous_id) = node_id.checked_sub(1) else {
+            return;
+        };
+        if self.nodes.contains_key(&previous_id) && !neighbors.contains(&previous_id) {
+            neighbors.push(previous_id);
+            neighbors.sort_unstable();
+        }
+    }
+
     pub(super) fn prune_node(&mut self, node_id: NodeId, layer: usize) {
         let Some(node) = self.nodes.get(&node_id) else {
             return;
@@ -20,12 +30,25 @@ impl HNSWIndex {
         let Some(current) = node.neighbors.get(layer).cloned() else {
             return;
         };
-        let selected = self.select_neighbors(
-            &node.normalized_vector,
-            current.iter().copied(),
-            self.max_connections(layer),
-            Some(node_id),
+        let protected = current
+            .iter()
+            .copied()
+            .filter(|neighbor_id| layer == 0 && node_id.abs_diff(*neighbor_id) == 1)
+            .collect::<BTreeSet<_>>();
+        let limit = self.max_connections(layer);
+        let mut selected = protected.iter().copied().collect::<Vec<_>>();
+        selected.extend(
+            self.select_neighbors(
+                &node.normalized_vector,
+                current
+                    .iter()
+                    .copied()
+                    .filter(|neighbor_id| !protected.contains(neighbor_id)),
+                limit.saturating_sub(selected.len()),
+                Some(node_id),
+            ),
         );
+        selected.sort_unstable();
         let selected_set = selected.iter().copied().collect::<BTreeSet<_>>();
         let removed = current
             .into_iter()

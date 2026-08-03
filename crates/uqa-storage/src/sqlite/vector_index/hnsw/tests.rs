@@ -86,6 +86,27 @@ fn graph_persists_and_reopens_without_rebuilding() {
 }
 
 #[test]
+fn repeated_vectors_build_a_connected_persistent_graph() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let _catalog = Catalog::open(connection.clone()).unwrap();
+    let params = HNSWIndexParams::default();
+    let mut index =
+        SQLiteHNSWIndex::with_params(connection.clone(), "messages", "embedding", 2, params);
+    for doc_id in 1_u64..=2_000 {
+        let vector = if doc_id % 200 == 1 {
+            vec![0.9, 0.1]
+        } else {
+            vec![0.1, 0.9]
+        };
+        index.add(doc_id, vector).unwrap();
+    }
+    index.initialize().unwrap();
+
+    let reopened = SQLiteHNSWIndex::open_existing(connection, "messages", "embedding", 2, params);
+    assert_eq!(reopened.search_knn(&[0.9, 0.1], 10).unwrap().len(), 10);
+}
+
+#[test]
 fn cached_generation_observes_committed_revision_changes() {
     let (connection, mut writer) = initialized_index();
     let observer = SQLiteHNSWIndex::open_existing(connection, "articles", "embedding", 2, params());
