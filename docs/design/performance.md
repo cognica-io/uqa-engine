@@ -2,115 +2,46 @@
 
 This document records UQA-RS benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. All measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`).
 
-## External-engine analytical comparison (2026-08-02)
+## External-engine analytical comparison (2026-08-03)
 
-`analytical_comparison` runs the same generated rows and SQL through UQA,
-SQLite, and DuckDB in one process. Its versioned
-[`manifest.json`](../../benchmarks/analytical/manifest.json) records the row
-count, seed, generator, schema, queries, Criterion configuration, and ratio
-ceilings. The runner writes toolchain, platform, commit/dirty state, manifest
-hash, benchmark-source hash, raw medians, and gate results to a JSON artifact;
-CI uploads that artifact on every run.
+`analytical_comparison` runs the same generated rows and SQL through UQA, SQLite, and DuckDB in one process and validates identical results before timing. Its versioned [`manifest.json`](../../benchmarks/analytical/manifest.json) records the row count, seed, generator, schema, queries, Criterion configuration, estimator, and ratio ceilings. UQA, SQLite, and DuckDB all execute with warmed statement or plan caches; the comparison backends use `prepare_cached`, matching UQA's cached SQL boundary.
 
-The refreshed full 20-sample run used 20,000 rows on macOS arm64. UQA,
-SQLite, and DuckDB all execute with warmed statement/plan caches; the
-comparison backends use `prepare_cached`, matching UQA's cached SQL boundary.
-The complete artifact is
-[`macos-arm64-2026-08-02.json`](../../benchmarks/analytical/reference/macos-arm64-2026-08-02.json).
+The measurement contract explicitly fixes Criterion's linear sampling mode and slope point estimator. Linear sampling changes the iteration count between samples, so the regression slope of elapsed time against iterations is the per-iteration estimate used for the gate; the median of sample averages is a different statistic and must not be substituted. The runner writes toolchain, platform, commit and dirty state, manifest hash, benchmark-source hash, raw slope estimates, and gate results to a versioned JSON artifact, and CI uploads that artifact on every run.
+
+The refreshed full 20-sample run used 20,000 rows on macOS arm64 at clean commit `886d091e10ec884eee0f609446809c11632a8157`. The complete artifact is [`macos-arm64-2026-08-03.json`](../../benchmarks/analytical/reference/macos-arm64-2026-08-03.json).
 
 | Workload | UQA | SQLite | DuckDB | UQA / SQLite | UQA / DuckDB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Q1-style grouped aggregate | 2.975 ms | 7.534 ms | 0.549 ms | 0.395x | 5.42x |
-| Q6-style filtered aggregate | 1.820 ms | 1.026 ms | 0.127 ms | 1.77x | 14.31x |
-| Ordered result scan | 6.070 ms materialized / 6.030 ms cursor | 1.444 ms | 0.773 ms | 4.17x cursor | 7.80x cursor |
+| Q1-style grouped aggregate | 2.540 ms | 7.522 ms | 0.492 ms | 0.338x | 5.16x |
+| Q6-style filtered aggregate | 2.227 ms | 1.173 ms | 0.402 ms | 1.90x | 5.54x |
+| Ordered result scan | 7.956 ms materialized / 8.098 ms cursor | 1.655 ms | 1.236 ms | 4.89x cursor | 6.55x cursor |
 
-The earlier artifact measured UQA at 234.015 ms for Q1, 96.089 ms for Q6,
-and 185.070/191.201 ms for the materialized/cursor scan. Those were real
-physical-execution costs, not an external-engine anomaly:
+The earlier unoptimized artifact measured UQA at 234.015 ms for Q1, 96.089 ms for Q6, and 185.070/191.201 ms for the materialized/cursor scan. Those were real physical-execution costs, not an external-engine anomaly:
 
-1. Aggregation first serialized every input row into a `SpillBuffer`, then
-   externally sorted the entire input even for one global group or six small
-   groups. The 4 MB benchmark budget crossed into disk I/O. The adaptive
-   executor now retains mergeable aggregate states and spills compact partial
-   states only when the state budget is exceeded.
-2. The table source cloned complete document maps and repeatedly resolved
-   string-keyed fields. It now fetches batches of document IDs, projects only
-   required fields through interned layouts, and passes borrowed positional
-   values directly into compiled aggregate inputs.
-3. Ordered scans sorted primary-key-ordered input again. Ordering metadata now
-   crosses scan/project boundaries, allowing the redundant sort to be elided.
-   The cursor benchmark also consumes its column vectors directly instead of
-   converting them back into map-backed rows.
+1. Aggregation serialized every input row into a `SpillBuffer` and externally sorted the complete input even for one global group or six small groups, crossing the 4 MB budget into disk I/O. The adaptive executor now retains mergeable aggregate states and spills compact partial states only when the state budget is exceeded.
+2. The table source cloned complete document maps and repeatedly resolved string-keyed fields. It now fetches document IDs in batches, projects only required fields through interned layouts, and passes borrowed positional values into compiled aggregate inputs.
+3. Ordered scans sorted primary-key-ordered input again. Ordering metadata now crosses scan and project boundaries, allowing the redundant sort to be elided, while the cursor consumes column vectors directly instead of converting them back into map-backed rows.
 
-The separate indexed `tpch_style` path had another cost: its optimizer
-materialized each broad posting list to estimate cardinality and execution
-materialized it again. Cardinality now comes from value-bucket lengths, while
-membership-only intersections discard payloads and avoid graph-envelope
-decoding. That fix explains part of the indexed 100k-row result below; it does
-not explain the index-free external fixture in this section.
+The separate indexed `tpch_style` path had another cost: its optimizer materialized each broad posting list to estimate cardinality and execution materialized it again. Cardinality now comes from value-bucket lengths, while membership-only intersections discard payloads and avoid graph-envelope decoding. That fix explains part of the indexed 100k-row result below; it does not explain the index-free external fixture in this section.
 
-The remaining differences follow the execution models. DuckDB evaluates these
-integer filters and aggregates over vectorized contiguous columns; UQA still
-dispatches row-at-a-time over dynamic `Value` instances and map-backed document
-storage. This external fixture declares no secondary indexes, so both Q1 and
-Q6 use UQA's borrowed projected-row scan. Q6 is a simple three-predicate scan
-and one aggregate, where dynamic-value and row-dispatch overhead costs more
-than SQLite's compact VM loop. Q1 instead favors UQA because compiled
-positional expressions and six retained aggregate groups avoid SQLite's
-grouping overhead. The separate 100k-row `tpch_style` Q6 does declare three
-secondary indexes; its broad posting-support branches and intersections are
-therefore more sensitive to Rayon scheduling. The earlier cursor was 26.3%
-slower than materialization because it calculated exact encoded sizes, blocked
-until the complete result was sealed as a `SharedSpill`, deep-cloned every
-retained batch through the independent-reader API, and then pivoted map-backed
-rows into columns. `SQLCursor` uniquely owns that materialization, so it now
-uses a consuming reader that moves in-memory batches; repeatable shared CTE
-readers retain the clone behavior. Cursor latency fell from 7.547 ms to 6.030
-ms (-20.1%) and is now 0.993x the materialized path. The remaining small delta
-is exact-size accounting, full-result blocking, and row-to-column conversion.
-The result occupies about 0.86 MiB in the spill encoding and the benchmark
-asserts that it remains in memory under the 4 MB budget, so disk I/O and codec
-decode are not causes here. Larger results add spill encode, I/O, and decode
-costs. The public materialized UQA path also constructs
-`BTreeMap<String, Value>` rows before this benchmark extracts tuples, while
-SQLite and DuckDB read typed tuple slots directly. That API-boundary cost is
-part of the measured end-to-end result, especially for the 15,602-row scan;
-it is not evidence that the scan predicate alone is five times slower.
+The remaining differences follow the execution models. DuckDB evaluates integer filters and aggregates over vectorized contiguous columns, while UQA dispatches row-at-a-time over dynamic `Value` instances and map-backed document storage. This fixture declares no secondary indexes, so Q1 and Q6 use UQA's borrowed projected-row scan. Q6 is a simple three-predicate scan and one aggregate, where dynamic-value and row-dispatch overhead cost more than SQLite's compact VM loop. Q1 favors UQA because compiled positional expressions and six retained aggregate groups avoid SQLite's grouping overhead. The separate 100k-row `tpch_style` Q6 declares three secondary indexes, so its broad posting-support branches and intersections are more sensitive to Rayon scheduling.
+
+The cursor originally calculated exact encoded sizes, blocked until the complete result was sealed as a `SharedSpill`, deep-cloned every retained batch through the independent-reader API, and then pivoted map-backed rows into columns. `SQLCursor` uniquely owns that materialization, so it now uses a consuming reader that moves in-memory batches; repeatable shared CTE readers retain clone behavior. The current 1.018x cursor/materialized ratio is within run noise. The remaining delta is exact-size accounting, full-result blocking, and row-to-column conversion. The result occupies about 0.86 MiB in the spill encoding and the benchmark asserts that it remains in memory under the 4 MB budget, so disk I/O and codec decode are not causes here. The public materialized UQA path also constructs `BTreeMap<String, Value>` rows before extracting tuples, while SQLite and DuckDB read typed tuple slots directly; that API-boundary cost is part of the measured end-to-end result, especially for the 15,602-row scan.
 
 | Observed difference | Dominant mechanism in this fixture |
 | --- | --- |
-| Q1: UQA is 2.53x faster than SQLite | Six retained groups plus compiled positional aggregate inputs avoid the general grouping/sort path; SQLite reports `USE TEMP B-TREE FOR GROUP BY`. |
-| Q1: DuckDB is 5.42x faster than UQA | DuckDB keeps filter/group/aggregate data in vectorized typed columns; UQA crosses dynamic row/value dispatch. |
-| Q6: SQLite is 1.77x faster than UQA | Both plans are full scans (confirmed by SQLite `EXPLAIN QUERY PLAN`); SQLite's compact typed VM has less per-row dispatch. |
-| Q6: DuckDB is 14.31x faster than UQA | The same simple shape maximizes the advantage of vectorized predicate evaluation and aggregation. |
-| Cursor: 0.993x materialized UQA | Moving uniquely owned batches removed the deep clone; exact-size accounting, blocking, and row-to-column conversion remain within run noise. |
-| Scan: external engines are 4.17-7.80x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; UQA's dynamic map-backed rows and transfer stages, rather than a redundant sort, remain the gap. |
+| Q1: UQA is 2.96x faster than SQLite | Six retained groups plus compiled positional aggregate inputs avoid the general grouping/sort path; SQLite reports `USE TEMP B-TREE FOR GROUP BY`. |
+| Q1: DuckDB is 5.16x faster than UQA | DuckDB keeps filter, group, and aggregate data in vectorized typed columns; UQA crosses dynamic row/value dispatch. |
+| Q6: SQLite is 1.90x faster than UQA | Both plans are full scans, confirmed by SQLite `EXPLAIN QUERY PLAN`; SQLite's compact typed VM has less per-row dispatch. |
+| Q6: DuckDB is 5.54x faster than UQA | The simple filter-and-aggregate shape exposes DuckDB's vectorized predicate and aggregation advantage. |
+| Cursor: 1.018x materialized UQA | Moving uniquely owned batches removed the deep clone; exact-size accounting, blocking, and row-to-column conversion remain within run noise. |
+| Scan: external engines are 4.89-6.55x faster than the cursor | SQLite satisfies `ORDER BY id` through its primary-key auto-index, while UQA propagates document-ID order; dynamic map-backed rows and transfer stages remain the gap. |
 
-Back-to-back runs of the exact same release binary also quantified workstation
-drift. After the all-workspace release build and package-scoped relink, the
-first run measured Q6 at
-1.860 ms for UQA and 0.170 ms for DuckDB; one minute later the unchanged binary
-measured 1.820 ms and 0.127 ms. The materialized/cursor scans moved from
-6.527/6.595 ms to 6.070/6.030 ms. SQLite moved by 1-4% over the same cases.
-Because every engine moved and DuckDB Q6 alone changed by 25%, this is
-scheduler, frequency, temperature, and cache state rather than a UQA plan
-change. Ratio gates therefore decide this developer-host regression check; a
-single Criterion comparison against a prior host state does not.
+The estimator correction was driven by ten retained Linux CI artifacts. Their Q6 UQA/SQLite ratios ranged from 1.596x to 3.390x when computed from sample medians and falsely failed the 3.0x ceiling five times; the slope ratios from the same measurements ranged from 1.608x to 2.751x and all passed. The regression test intentionally supplies contradictory median and slope values so a future change cannot silently restore the invalid statistic.
 
-`cargo bench --workspace --no-run` validates that every benchmark target
-builds, but it is not a measurement command. Workspace feature unification can
-produce a different LTO/code-layout binary from the package-scoped runner.
-Published comparisons must use `run-analytical-comparison.sh` end to end and
-must not mix measurements from those two executable hashes.
+`cargo bench --workspace --no-run` validates that every benchmark target builds, but it is not a measurement command. Workspace feature unification can produce a different LTO or code-layout binary from the package-scoped runner. Published comparisons must use `run-analytical-comparison.sh` end to end and must not mix measurements from different executable hashes.
 
-That exact-binary drift moved the unchanged Q6/DuckDB mechanism ratio from
-10.91x to 14.31x. Its ceiling is 18x so ordinary same-host drift cannot trip
-the gate; the pre-fix 427x path still fails by more than an order of magnitude.
-
-These are same-process developer-machine measurements, not independent OLAP
-validation. The ratio ceilings are regression alarms rather than proof of
-parity. `work_mem = 1B` integration tests force backing spill and verify that
-the cursor yields at most 1,024 rows per batch.
+These are same-process developer-machine measurements, not independent OLAP validation. The ratio ceilings are regression alarms rather than proof of parity. `work_mem = 1B` integration tests force backing spill and verify that the cursor yields at most 1,024 rows per batch.
 
 Reproduce and emit a fresh provenance artifact with:
 
