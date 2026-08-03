@@ -425,6 +425,11 @@ fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Result<Value, FDWError> {
                 .collect::<Result<BTreeMap<_, _>, FDWError>>()?,
         ),
         DuckValue::Union(v) => duck_value_to_uqa(*v)?,
+        _ => {
+            return Err(FDWError::UnsupportedValue(
+                "DuckDB returned a value type that this UQA version does not support".into(),
+            ));
+        }
     })
 }
 

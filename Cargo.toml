@@ -85,7 +85,7 @@ zstd = "0.13"
 arrow-array = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
-duckdb = { version = "=1.10502.0", features = ["bundled", "parquet"] }
+duckdb = { version = "=1.10505.0", features = ["bundled", "parquet"] }
 parquet = { version = "58", features = ["arrow"] }
 pyo3 = "0.29"
 napi = { version = "3.10", default-features = false, features = ["napi8"] }
