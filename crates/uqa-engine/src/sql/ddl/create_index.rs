@@ -7,7 +7,8 @@
 //! CREATE INDEX execution and index option validation.
 
 use super::{
-    ddl_storage_error, ColumnType, CreateIndex, Engine, IVFIndexParams, SQLError, SQLResult,
+    ddl_storage_error, ColumnType, CreateIndex, Engine, HNSWIndexParams, IVFIndexParams, SQLError,
+    SQLResult, VectorIndexSpec,
 };
 
 pub(in crate::sql) fn run_create_index(
@@ -57,38 +58,7 @@ pub(in crate::sql) fn run_create_index(
             }
         }
         "" | "btree" => {}
-        "ivf" | "hnsw" => {
-            let params = parse_ivf_index_params(&c.options)?;
-            for col in &c.columns {
-                match engine
-                    .column_type(&c.table, col)
-                    .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
-                {
-                    Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
-                        if !engine
-                            .rebuild_ivf_vector_field(&c.table, col.clone(), dim, params)
-                            .map_err(|err| ddl_storage_error("CREATE INDEX vector field", err))?
-                        {
-                            return Err(SQLError::Unsupported(format!(
-                                "CREATE INDEX USING ivf: relation `{}` does not exist",
-                                c.table
-                            )));
-                        }
-                    }
-                    Some(other) => {
-                        return Err(SQLError::Unsupported(format!(
-                            "CREATE INDEX USING ivf requires VECTOR or TENSOR column `{col}`, got {other:?}"
-                        )));
-                    }
-                    None => {
-                        return Err(SQLError::Unsupported(format!(
-                            "CREATE INDEX USING ivf: column `{}`.`{col}` does not exist",
-                            c.table
-                        )));
-                    }
-                }
-            }
-        }
+        "ivf" | "hnsw" => create_vector_index(engine, &c, &am)?,
         _ => unreachable!("access method was validated above"),
     }
     // Persist the CREATE INDEX statement itself so reopen sees the
@@ -96,15 +66,72 @@ pub(in crate::sql) fn run_create_index(
     // `parameters_json` back into `(key, value)` pairs and re-runs
     // any access-method-specific side effects (e.g. add_fts_field
     // for `gin`) on restore.
-    let catalog_index_type = match am.as_str() {
-        "" => "btree",
-        "hnsw" => "ivf",
-        other => other,
-    };
+    let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     engine
         .try_register_catalog_index(&name, catalog_index_type, &c.table, &c.columns, &c.options)
         .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
+}
+
+fn create_vector_index(
+    engine: &Engine,
+    statement: &CreateIndex,
+    access_method: &str,
+) -> Result<(), SQLError> {
+    let spec = match access_method {
+        "ivf" => VectorIndexSpec::IVF(parse_ivf_index_params(&statement.options)?),
+        "hnsw" => VectorIndexSpec::HNSW(parse_hnsw_index_params(&statement.options)?),
+        _ => unreachable!("vector access method was validated above"),
+    };
+    let table = engine
+        .try_resolve_table_name(&statement.table)
+        .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
+        .ok_or_else(|| {
+            SQLError::Unsupported(format!(
+                "CREATE INDEX USING {access_method}: relation `{}` does not exist",
+                statement.table
+            ))
+        })?;
+    let mut fields = Vec::with_capacity(statement.columns.len());
+    for column in &statement.columns {
+        let dimensions = match engine
+            .column_type(&table, column)
+            .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
+        {
+            Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => dim,
+            Some(other) => {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE INDEX USING {access_method} requires VECTOR or TENSOR column `{column}`, got {other:?}"
+                )));
+            }
+            None => {
+                return Err(SQLError::Unsupported(format!(
+                    "CREATE INDEX USING {access_method}: column `{table}`.`{column}` does not exist"
+                )));
+            }
+        };
+        let existing = engine
+            .vector_catalog_index_names_for_column(&table, column)
+            .map_err(|err| ddl_storage_error("CREATE INDEX", err))?;
+        if !existing.is_empty() {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX USING {access_method}: `{table}`.`{column}` already has physical vector index `{}`",
+                existing.join("`, `")
+            )));
+        }
+        fields.push((column, dimensions));
+    }
+    for (column, dimensions) in fields {
+        if !engine
+            .rebuild_vector_field_with_spec(&table, column.clone(), dimensions, spec)
+            .map_err(|err| ddl_storage_error("CREATE INDEX vector field", err))?
+        {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX USING {access_method}: relation `{table}` does not exist"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn allocate_default_index_name(
@@ -160,16 +187,20 @@ fn allocate_default_index_name(
 
 fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IVFIndexParams, SQLError> {
     let mut params = IVFIndexParams::default();
+    let mut seen = std::collections::BTreeSet::new();
     for (key, value) in options {
         if key.eq_ignore_ascii_case("lists") || key.eq_ignore_ascii_case("nlist") {
-            params.nlist = parse_positive_usize_option(key, value)?;
+            claim_index_option(&mut seen, "nlist", "ivf", key)?;
+            params.nlist = parse_positive_usize_option("ivf", key, value)?;
         } else if key.eq_ignore_ascii_case("probes") || key.eq_ignore_ascii_case("nprobe") {
-            params.nprobe = parse_positive_usize_option(key, value)?;
+            claim_index_option(&mut seen, "nprobe", "ivf", key)?;
+            params.nprobe = parse_positive_usize_option("ivf", key, value)?;
         } else if key.eq_ignore_ascii_case("train_threshold")
             || key.eq_ignore_ascii_case("train-threshold")
             || key.eq_ignore_ascii_case("min_train")
         {
-            params.train_threshold = parse_positive_usize_option(key, value)?;
+            claim_index_option(&mut seen, "train_threshold", "ivf", key)?;
+            params.train_threshold = parse_positive_usize_option("ivf", key, value)?;
         } else {
             return Err(SQLError::Unsupported(format!(
                 "CREATE INDEX USING ivf option `{key}` is not supported"
@@ -179,15 +210,71 @@ fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IVFIndexParams
     Ok(params)
 }
 
-fn parse_positive_usize_option(key: &str, value: &str) -> Result<usize, SQLError> {
+fn parse_hnsw_index_params(options: &[(String, String)]) -> Result<HNSWIndexParams, SQLError> {
+    let mut params = HNSWIndexParams::default();
+    let mut seen = std::collections::BTreeSet::new();
+    for (key, value) in options {
+        if key.eq_ignore_ascii_case("m") {
+            claim_index_option(&mut seen, "m", "hnsw", key)?;
+            params.m = parse_positive_usize_option("hnsw", key, value)?;
+        } else if key.eq_ignore_ascii_case("ef_construction")
+            || key.eq_ignore_ascii_case("ef-construction")
+        {
+            claim_index_option(&mut seen, "ef_construction", "hnsw", key)?;
+            params.ef_construction = parse_positive_usize_option("hnsw", key, value)?;
+        } else if key.eq_ignore_ascii_case("ef_search") || key.eq_ignore_ascii_case("ef-search") {
+            claim_index_option(&mut seen, "ef_search", "hnsw", key)?;
+            params.ef_search = parse_positive_usize_option("hnsw", key, value)?;
+        } else if key.eq_ignore_ascii_case("rebuild_threshold")
+            || key.eq_ignore_ascii_case("rebuild-threshold")
+        {
+            claim_index_option(&mut seen, "rebuild_threshold", "hnsw", key)?;
+            params.rebuild_threshold = parse_positive_usize_option("hnsw", key, value)?;
+        } else if key.eq_ignore_ascii_case("seed") {
+            claim_index_option(&mut seen, "seed", "hnsw", key)?;
+            params.seed = value.parse::<u64>().map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "CREATE INDEX USING hnsw option `{key}` must be an unsigned integer"
+                ))
+            })?;
+        } else {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX USING hnsw option `{key}` is not supported"
+            )));
+        }
+    }
+    params
+        .validate()
+        .map_err(|error| SQLError::TypeMismatch(format!("CREATE INDEX USING hnsw: {error}")))
+}
+
+fn claim_index_option(
+    seen: &mut std::collections::BTreeSet<&'static str>,
+    canonical: &'static str,
+    access_method: &str,
+    source: &str,
+) -> Result<(), SQLError> {
+    if !seen.insert(canonical) {
+        return Err(SQLError::Unsupported(format!(
+            "CREATE INDEX USING {access_method} option `{source}` duplicates `{canonical}`"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_positive_usize_option(
+    access_method: &str,
+    key: &str,
+    value: &str,
+) -> Result<usize, SQLError> {
     let parsed = value.parse::<usize>().map_err(|_| {
         SQLError::TypeMismatch(format!(
-            "CREATE INDEX USING ivf option `{key}` must be a positive integer"
+            "CREATE INDEX USING {access_method} option `{key}` must be a positive integer"
         ))
     })?;
     if parsed == 0 {
         return Err(SQLError::TypeMismatch(format!(
-            "CREATE INDEX USING ivf option `{key}` must be a positive integer"
+            "CREATE INDEX USING {access_method} option `{key}` must be a positive integer"
         )));
     }
     Ok(parsed)

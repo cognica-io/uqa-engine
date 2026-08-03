@@ -46,35 +46,41 @@ impl SQLiteVectorIndex {
     }
 
     pub(super) fn load_all_with_ordinals(&self) -> SQLiteResult<Vec<(DocId, u32, Vec<f32>)>> {
-        self.conn.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT doc_id, vector_ordinal, vector FROM _vectors
+        self.conn
+            .with(|connection| self.load_all_with_ordinals_from(connection))
+    }
+
+    pub(super) fn load_all_with_ordinals_from(
+        &self,
+        connection: &rusqlite::Connection,
+    ) -> SQLiteResult<Vec<(DocId, u32, Vec<f32>)>> {
+        let mut stmt = connection.prepare(
+            "SELECT doc_id, vector_ordinal, vector FROM _vectors
                  WHERE table_name = ?1 AND field = ?2
                  ORDER BY doc_id, vector_ordinal",
-            )?;
-            let rows = stmt.query_map(params![self.table, self.field], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, Vec<u8>>(2)?,
+        )?;
+        let rows = stmt.query_map(params![self.table, self.field], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (doc_id, ordinal, blob) = row?;
+            let ordinal = u32::try_from(ordinal).map_err(|_| {
+                SQLiteError::StorageBackend(format!(
+                    "invalid vector ordinal {ordinal} for {}.{}",
+                    self.table, self.field
                 ))
             })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (doc_id, ordinal, blob) = row?;
-                let ordinal = u32::try_from(ordinal).map_err(|_| {
-                    SQLiteError::StorageBackend(format!(
-                        "invalid vector ordinal {ordinal} for {}.{}",
-                        self.table, self.field
-                    ))
-                })?;
-                let vector = blob_to_vector(&blob)?;
-                self.validate_dimensions_sqlite(&vector)?;
-                out.push((decode_doc_id(doc_id)?, ordinal, vector));
-            }
-            validate_persisted_ordinal_sequence(&out)?;
-            Ok(out)
-        })
+            let vector = blob_to_vector(&blob)?;
+            self.validate_dimensions_sqlite(&vector)?;
+            out.push((decode_doc_id(doc_id)?, ordinal, vector));
+        }
+        validate_persisted_ordinal_sequence(&out)?;
+        Ok(out)
     }
 
     pub(super) fn validate_dimensions_sqlite(&self, vector: &[f32]) -> SQLiteResult<()> {

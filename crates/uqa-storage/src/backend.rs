@@ -18,10 +18,10 @@ use uqa_core::{DocId, Value};
 use crate::document_store::DocumentStore;
 use crate::inverted_index::InvertedIndex;
 use crate::sqlite::{
-    ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError, SQLiteIVFIndex,
-    SQLiteInvertedIndex, SQLiteVectorIndex,
+    ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError, SQLiteHNSWIndex,
+    SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
 };
-use crate::vector_index::VectorIndex;
+use crate::vector_index::{VectorIndex, VectorIndexOpenMode, VectorIndexSpec};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
@@ -37,28 +37,6 @@ pub enum StorageBackendError {
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PersistentVectorIndexParams {
-    pub nlist: usize,
-    pub nprobe: usize,
-    pub train_threshold: usize,
-    /// Whether constructing the persistent vector index may initialize or
-    /// retrain auxiliary IVF metadata. Restore paths attach lazily to persisted
-    /// state and must not do index work just because the database was opened.
-    pub initialize: bool,
-}
-
-impl Default for PersistentVectorIndexParams {
-    fn default() -> Self {
-        Self {
-            nlist: 100,
-            nprobe: 10,
-            train_threshold: 256,
-            initialize: true,
-        }
-    }
-}
-
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore>;
@@ -70,8 +48,9 @@ pub trait PersistentStorageBackend: Send + Sync {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: Option<PersistentVectorIndexParams>,
-    ) -> Box<dyn VectorIndex>;
+        spec: VectorIndexSpec,
+        mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>>;
 
     fn drop_vector_index_metadata(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
         Ok(())
@@ -178,43 +157,69 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: Option<PersistentVectorIndexParams>,
-    ) -> Box<dyn VectorIndex> {
-        match params {
-            Some(params) => {
-                if params.initialize {
-                    Box::new(SQLiteIVFIndex::with_params(
-                        self.conn.clone(),
-                        table,
-                        field,
-                        dimensions,
-                        params.nlist,
-                        params.nprobe,
-                        params.train_threshold,
-                    ))
-                } else {
-                    Box::new(SQLiteIVFIndex::open_existing(
-                        self.conn.clone(),
-                        table,
-                        field,
-                        dimensions,
-                        params.nlist,
-                        params.nprobe,
-                        params.train_threshold,
-                    ))
-                }
-            }
-            None => Box::new(SQLiteVectorIndex::new(
+        spec: VectorIndexSpec,
+        mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        let index: Box<dyn VectorIndex> = match spec {
+            VectorIndexSpec::BruteForce => Box::new(SQLiteVectorIndex::new(
                 self.conn.clone(),
                 table,
                 field,
                 dimensions,
             )),
-        }
+            VectorIndexSpec::IVF(params) => {
+                params.validate()?;
+                match mode {
+                    VectorIndexOpenMode::Create => Box::new(SQLiteIVFIndex::with_params(
+                        self.conn.clone(),
+                        table,
+                        field,
+                        dimensions,
+                        params.nlist,
+                        params.nprobe,
+                        params.train_threshold,
+                    )),
+                    VectorIndexOpenMode::Restore => Box::new(SQLiteIVFIndex::open_existing(
+                        self.conn.clone(),
+                        table,
+                        field,
+                        dimensions,
+                        params.nlist,
+                        params.nprobe,
+                        params.train_threshold,
+                    )),
+                }
+            }
+            VectorIndexSpec::HNSW(params) => {
+                params.validate()?;
+                match mode {
+                    VectorIndexOpenMode::Create => Box::new(SQLiteHNSWIndex::with_params(
+                        self.conn.clone(),
+                        table,
+                        field,
+                        dimensions,
+                        params,
+                    )),
+                    VectorIndexOpenMode::Restore => {
+                        let index = SQLiteHNSWIndex::open_existing(
+                            self.conn.clone(),
+                            table,
+                            field,
+                            dimensions,
+                            params,
+                        );
+                        index.validate_existing()?;
+                        Box::new(index)
+                    }
+                }
+            }
+        };
+        Ok(index)
     }
 
     fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {
         SQLiteIVFIndex::drop_metadata(&self.conn, table, field)?;
+        SQLiteHNSWIndex::drop_metadata(&self.conn, table, field)?;
         Ok(())
     }
 
@@ -333,17 +338,19 @@ mod tests {
         .unwrap();
         assert_eq!(inv.doc_freq("title", "rust").unwrap(), 1);
 
-        let mut vectors = backend.vector_index(
-            "articles",
-            "embedding",
-            2,
-            Some(PersistentVectorIndexParams {
-                nlist: 2,
-                nprobe: 1,
-                train_threshold: 2,
-                initialize: true,
-            }),
-        );
+        let mut vectors = backend
+            .vector_index(
+                "articles",
+                "embedding",
+                2,
+                VectorIndexSpec::IVF(crate::IVFIndexParams {
+                    nlist: 2,
+                    nprobe: 1,
+                    train_threshold: 2,
+                }),
+                VectorIndexOpenMode::Create,
+            )
+            .unwrap();
         vectors.add(1, vec![1.0, 0.0]).unwrap();
         let hits = vectors.search_knn(&[1.0, 0.0], 1).unwrap();
         assert_eq!(hits.entries().len(), 1);
@@ -388,10 +395,26 @@ mod tests {
 
         let mut writer_docs = writer.document_store("articles");
         let mut writer_inv = writer.inverted_index("articles", standard_analyzer("english"));
-        let mut writer_vectors = writer.vector_index("articles", "embedding", 2, None);
+        let mut writer_vectors = writer
+            .vector_index(
+                "articles",
+                "embedding",
+                2,
+                VectorIndexSpec::BruteForce,
+                VectorIndexOpenMode::Create,
+            )
+            .unwrap();
         let observer_docs = observer.document_store("articles");
         let observer_inv = observer.inverted_index("articles", standard_analyzer("english"));
-        let observer_vectors = observer.vector_index("articles", "embedding", 2, None);
+        let observer_vectors = observer
+            .vector_index(
+                "articles",
+                "embedding",
+                2,
+                VectorIndexSpec::BruteForce,
+                VectorIndexOpenMode::Restore,
+            )
+            .unwrap();
 
         writer.begin_transaction().unwrap();
         writer_docs
@@ -446,7 +469,15 @@ mod tests {
         let backend = SQLiteStorageBackend::new(conn.clone());
         let observer = conn.new_session();
         let mut docs = backend.document_store("articles");
-        let mut vectors = backend.vector_index("articles", "embedding", 2, None);
+        let mut vectors = backend
+            .vector_index(
+                "articles",
+                "embedding",
+                2,
+                VectorIndexSpec::BruteForce,
+                VectorIndexOpenMode::Create,
+            )
+            .unwrap();
 
         backend.begin_transaction().unwrap();
         docs.put(

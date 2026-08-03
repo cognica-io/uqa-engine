@@ -481,7 +481,9 @@ mod tests {
     use uqa_analysis::standard_analyzer;
     use uqa_core::Value;
     use uqa_storage::catalog::{ColumnStatsInput, TableSchema};
-    use uqa_storage::{CatalogFacade, PersistentStorageBackend};
+    use uqa_storage::{
+        CatalogFacade, PersistentStorageBackend, VectorIndexOpenMode, VectorIndexSpec,
+    };
 
     use super::*;
 
@@ -581,7 +583,15 @@ mod tests {
             .unwrap();
         assert_eq!(index.doc_freq("title", "rust").unwrap(), 1);
 
-        let mut vectors = backend.vector_index("articles", "embedding", 2, None);
+        let mut vectors = backend
+            .vector_index(
+                "articles",
+                "embedding",
+                2,
+                VectorIndexSpec::BruteForce,
+                VectorIndexOpenMode::Create,
+            )
+            .unwrap();
         vectors.add(1, vec![1.0, 0.0]).unwrap();
         vectors.add(2, vec![0.0, 1.0]).unwrap();
         let hits = vectors.search_knn(&[1.0, 0.0], 1).unwrap();

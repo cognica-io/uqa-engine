@@ -19,8 +19,6 @@ pub enum IndexType {
     BTree,
     Gin,
     Inverted,
-    /// Reserved for catalog compatibility with older metadata. SQL
-    /// normalizes `USING hnsw` onto the IVF backend.
     HNSW,
     IVF,
     Graph,
@@ -33,7 +31,8 @@ impl IndexType {
             "btree" => Some(IndexType::BTree),
             "gin" => Some(IndexType::Gin),
             "inverted" => Some(IndexType::Inverted),
-            "ivf" | "hnsw" => Some(IndexType::IVF),
+            "hnsw" => Some(IndexType::HNSW),
+            "ivf" => Some(IndexType::IVF),
             "graph" => Some(IndexType::Graph),
             "rtree" | "r*tree" => Some(IndexType::RTree),
             _ => None,
@@ -99,6 +98,7 @@ mod tests {
             IndexType::BTree,
             IndexType::Gin,
             IndexType::Inverted,
+            IndexType::HNSW,
             IndexType::IVF,
             IndexType::Graph,
             IndexType::RTree,
@@ -110,6 +110,6 @@ mod tests {
     #[test]
     fn parse_is_case_insensitive() {
         assert_eq!(IndexType::parse("BTREE"), Some(IndexType::BTree));
-        assert_eq!(IndexType::parse("HnSw"), Some(IndexType::IVF));
+        assert_eq!(IndexType::parse("HnSw"), Some(IndexType::HNSW));
     }
 }

@@ -29,11 +29,11 @@ pub(super) fn create_tables(
                     spec.name, vector.field
                 )));
             }
-            engine.rebuild_ivf_vector_field(
+            engine.rebuild_vector_field_with_spec(
                 &spec.name,
                 vector.field.clone(),
                 vector.dimensions,
-                vector.params,
+                vector.index,
             )?;
         }
         report.tables += 1;

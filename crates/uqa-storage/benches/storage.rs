@@ -7,7 +7,7 @@
 //! Storage benchmarks mirroring UQA `bench_storage.py`.
 //!
 //! Covers document-store put/get/scan, inverted-index add/lookup,
-//! brute-force and IVF vector search, vector deletion, IVF training,
+//! brute-force, IVF, and HNSW vector search, vector deletion, index builds,
 //! and `SQLite` vector persistence round trips.
 
 use std::collections::BTreeMap;
@@ -17,8 +17,8 @@ use uqa_analysis::standard_analyzer;
 use uqa_core::Value;
 use uqa_storage::sqlite::{Catalog, ManagedConnection, SQLiteVectorIndex};
 use uqa_storage::{
-    DocumentStore, IVFIndex, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex,
-    MemoryVectorIndex, VectorIndex,
+    DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, InvertedIndex, MemoryDocumentStore,
+    MemoryInvertedIndex, MemoryVectorIndex, VectorIndex,
 };
 
 fn doc(id: u64) -> BTreeMap<String, Value> {
@@ -82,6 +82,24 @@ fn populated_ivf(n: u64, dim: usize) -> IVFIndex {
     }
     idx.train().expect("train IVF benchmark index");
     idx
+}
+
+fn populated_hnsw(n: u64, dim: usize) -> HNSWIndex {
+    let mut index = HNSWIndex::with_params(
+        dim as u32,
+        HNSWIndexParams {
+            m: 16,
+            ef_construction: 64,
+            ef_search: 64,
+            rebuild_threshold: 1_024,
+            seed: 7,
+        },
+    )
+    .expect("valid HNSW benchmark parameters");
+    for doc_id in 0..n {
+        index.add(doc_id, vector(doc_id + 1, dim)).unwrap();
+    }
+    index
 }
 
 fn bench_document_store(c: &mut Criterion) {
@@ -185,6 +203,7 @@ fn bench_vector_index(c: &mut Criterion) {
 
     let brute = populated_vector(10_000, 32);
     let trained = populated_ivf(10_000, 32);
+    let hnsw = populated_hnsw(10_000, 32);
     let query = vector(1, 32);
     let mut brute_group = c.benchmark_group("vector_index_knn_brute_force");
     for k in [10_usize, 50] {
@@ -209,6 +228,17 @@ fn bench_vector_index(c: &mut Criterion) {
         });
     }
     trained_group.finish();
+
+    let mut hnsw_group = c.benchmark_group("vector_index_knn_hnsw");
+    for k in [10_usize, 50] {
+        hnsw_group.bench_with_input(BenchmarkId::from_parameter(k), &k, |bencher, k| {
+            bencher.iter(|| {
+                let result = hnsw.search_knn(black_box(&query), black_box(*k)).unwrap();
+                black_box(result.len())
+            });
+        });
+    }
+    hnsw_group.finish();
 
     c.bench_function("vector_index_threshold_search", |bencher| {
         bencher.iter(|| {
@@ -236,6 +266,10 @@ fn bench_vector_index(c: &mut Criterion) {
             idx.train().expect("train IVF benchmark index");
             black_box(idx.count().unwrap())
         });
+    });
+
+    c.bench_function("vector_index_hnsw_build_1k", |bencher| {
+        bencher.iter(|| black_box(populated_hnsw(1_000, 32).count().unwrap()));
     });
 }
 

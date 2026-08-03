@@ -7,6 +7,7 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{table_not_found, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+use crate::VectorIndexSpec;
 
 impl Engine {
     /// Append a column to the schema. No data migration is needed because
@@ -200,12 +201,10 @@ impl Engine {
         let table_name = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
-        let params = self.ivf_catalog_params_for_column(&table_name, column)?;
-        let rebuilt = if let Some(params) = params {
-            self.rebuild_ivf_vector_field(&table_name, column, dimensions, params)
-        } else {
-            self.rebuild_vector_field(&table_name, column, dimensions)
-        }?;
+        let spec = self
+            .vector_index_spec_for_column(&table_name, column)?
+            .unwrap_or(VectorIndexSpec::BruteForce);
+        let rebuilt = self.rebuild_vector_field_with_spec(&table_name, column, dimensions, spec)?;
         if !rebuilt {
             return Err(StorageBackendError::Other(format!(
                 "failed to rebuild vector index for `{table_name}`.`{column}`"
@@ -323,10 +322,10 @@ impl Engine {
                 catalog.rename_column_data(&table_name, from, to)?;
             }
             if let Some(dimensions) = vector_dimensions {
-                if let Some(params) = self.ivf_catalog_params_for_column(&table_name, to)? {
-                    if !self.rebuild_ivf_vector_field(&table_name, to, dimensions, params)? {
+                if let Some(spec) = self.vector_index_spec_for_column(&table_name, to)? {
+                    if !self.rebuild_vector_field_with_spec(&table_name, to, dimensions, spec)? {
                         return Err(StorageBackendError::Other(format!(
-                            "failed to rebuild IVF index for `{table_name}`.`{to}`"
+                            "failed to rebuild vector index for `{table_name}`.`{to}`"
                         )));
                     }
                 }

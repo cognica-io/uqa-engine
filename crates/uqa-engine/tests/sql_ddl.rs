@@ -140,7 +140,7 @@ fn create_index_using_ivf_accepts_vector_columns() {
 }
 
 #[test]
-fn create_index_using_hnsw_aliases_ivf() {
+fn create_index_using_hnsw_accepts_graph_parameters() {
     let engine = Engine::new();
     exec(
         &engine,
@@ -149,7 +149,52 @@ fn create_index_using_hnsw_aliases_ivf() {
     exec(
         &engine,
         "CREATE INDEX docs_embedding_hnsw ON docs USING hnsw (embedding) \
-         WITH (lists = 4, probes = 2, train_threshold = 4)",
+         WITH (m = 4, ef_construction = 24, ef_search = 12, \
+               rebuild_threshold = 32, seed = 7)",
+    );
+}
+
+#[test]
+fn hnsw_rejects_ivf_options_and_invalid_graph_bounds() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+    );
+    assert_err_contains(
+        &engine,
+        "CREATE INDEX bad_hnsw ON docs USING hnsw (embedding) WITH (lists = 4)",
+        "option `lists` is not supported",
+    );
+    assert_err_contains(
+        &engine,
+        "CREATE INDEX bad_hnsw ON docs USING hnsw (embedding) \
+         WITH (m = 8, ef_construction = 4)",
+        "ef_construction",
+    );
+    assert_err_contains(
+        &engine,
+        "CREATE INDEX bad_hnsw ON docs USING hnsw (embedding) \
+         WITH (ef_search = 8, ef_search = 16)",
+        "duplicates `ef_search`",
+    );
+}
+
+#[test]
+fn vector_field_rejects_a_second_physical_index() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(3))",
+    );
+    exec(
+        &engine,
+        "CREATE INDEX docs_embedding_ivf ON docs USING ivf (embedding)",
+    );
+    assert_err_contains(
+        &engine,
+        "CREATE INDEX docs_embedding_hnsw ON docs USING hnsw (embedding)",
+        "already has physical vector index",
     );
 }
 

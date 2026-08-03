@@ -1,6 +1,6 @@
 [package]
 name = "uqa-storage"
-description = "Document store, inverted index, IVF, B-tree, R*Tree, catalog"
+description = "Document store, inverted index, IVF/HNSW vectors, B-tree, R*Tree, catalog"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

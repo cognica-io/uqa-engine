@@ -20,7 +20,7 @@ use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 use uqa_storage::sqlite::ColumnStatsInput;
 
 use crate::sql::convert_value_to_column_type;
-use crate::{Engine, IVFIndexParams};
+use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PythonMigrationReport {
@@ -89,7 +89,7 @@ struct TableSpec {
 struct VectorSpec {
     field: String,
     dimensions: u32,
-    params: IVFIndexParams,
+    index: VectorIndexSpec,
 }
 
 #[derive(Debug, Clone)]

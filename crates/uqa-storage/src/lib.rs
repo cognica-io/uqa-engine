@@ -13,6 +13,7 @@ pub mod block_max_index;
 pub mod btree_index;
 pub mod catalog;
 pub mod document_store;
+pub mod hnsw_index;
 pub mod index_abc;
 pub mod index_manager;
 pub mod index_types;
@@ -25,8 +26,7 @@ pub mod transaction;
 pub mod vector_index;
 
 pub use backend::{
-    PersistentStorageBackend, PersistentVectorIndexParams, SQLiteStorageBackend,
-    StorageBackendError, StorageBackendResult,
+    PersistentStorageBackend, SQLiteStorageBackend, StorageBackendError, StorageBackendResult,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
@@ -36,6 +36,7 @@ pub use catalog::{
     VectorFieldSchema, ViewRow,
 };
 pub use document_store::{DocumentStore, MemoryDocumentStore};
+pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};
 pub use index_types::{IndexDef, IndexType};
@@ -50,9 +51,12 @@ pub use sqlite::{
     detect_database_file_format, read_authenticated_anchor, Catalog, DatabaseFileFormat,
     ManagedConnection, SQLiteBTreeIndexStore, SQLiteCompressedContainerAnchor,
     SQLiteCompressionCodec, SQLiteCompressionOptions, SQLiteDocumentStore, SQLiteError,
-    SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
+    SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
 };
 pub use transaction::{
     InMemoryTransaction, SQLiteTransaction, Snapshotable, TransactionError, TxResult,
 };
-pub use vector_index::{cosine_similarity, MemoryVectorIndex, VectorIndex};
+pub use vector_index::{
+    cosine_similarity, HNSWIndexParams, IVFIndexParams, MemoryVectorIndex, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec,
+};

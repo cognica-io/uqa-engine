@@ -7,8 +7,8 @@
 //! Vector index abstraction and an in-memory brute-force fallback.
 //!
 //! Operators (`KNNOperator`, `VectorSimilarityOperator`,
-//! `QueryPoolVectorScoreOperator`) depend only on this trait. IVF backends
-//! slot in by implementing the same surface.
+//! `QueryPoolVectorScoreOperator`) depend only on this trait. IVF and HNSW
+//! backends slot in by implementing the same surface.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -16,6 +16,10 @@ use std::sync::Arc;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::{StorageBackendError, StorageBackendResult};
+
+mod config;
+
+pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
 
 pub(crate) fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {
@@ -106,8 +110,8 @@ pub trait VectorIndex: Send + Sync {
 
     /// Build any auxiliary physical metadata required by this index from its
     /// current vector contents. Brute-force indexes need no extra work;
-    /// persistent IVF implementations use this during explicit index
-    /// creation, while restore paths deliberately skip it.
+    /// persistent IVF and HNSW implementations use this during explicit
+    /// index creation, while restore paths deliberately skip it.
     fn initialize(&mut self) -> StorageBackendResult<()> {
         Ok(())
     }

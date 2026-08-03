@@ -6,10 +6,10 @@
 
 use super::{
     standard_analyzer, Analyzer, AnalyzerPhase, Arc, AtomicBool, BTreeMap, DocId, Document,
-    DocumentStore, Engine, FieldName, IVFIndex, IVFIndexParams, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, PersistentVectorIndexParams, RelationIdentity, RwLock,
-    SQLError, StorageBackendError, StorageBackendResult, TableSchema, TableState,
-    VectorFieldSchema, VectorIndex,
+    DocumentStore, Engine, FieldName, HNSWIndex, IVFIndex, InvertedIndex, MemoryDocumentStore,
+    MemoryInvertedIndex, MemoryVectorIndex, RelationIdentity, RwLock, SQLError,
+    StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorFieldSchema,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 
 impl Engine {
@@ -160,7 +160,8 @@ impl Engine {
     /// Register a vector field on a table. Existing document values in the
     /// same field are indexed immediately; later calls to [`Engine::add_vector`]
     /// or [`Engine::add_document_with_vectors`] keep it current. `CREATE INDEX
-    /// ... USING ivf` upgrades the field to an IVF backend.
+    /// ... USING ivf` or `CREATE INDEX ... USING hnsw` upgrades the field to
+    /// the corresponding approximate backend.
     pub fn create_vector_field(
         &self,
         table: &str,
@@ -169,20 +170,27 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         let field = field.into();
         self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, None, false, true)
+            engine.install_vector_field(
+                table,
+                field,
+                dimensions,
+                VectorIndexSpec::BruteForce,
+                false,
+                true,
+            )
         })
     }
 
-    pub(crate) fn rebuild_ivf_vector_field(
+    pub(crate) fn rebuild_vector_field_with_spec(
         &self,
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
-        params: IVFIndexParams,
+        spec: VectorIndexSpec,
     ) -> StorageBackendResult<bool> {
         let field = field.into();
         self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, Some(params), true, true)
+            engine.install_vector_field(table, field, dimensions, spec, true, true)
         })
     }
 
@@ -192,22 +200,16 @@ impl Engine {
         field: impl Into<FieldName>,
         dimensions: u32,
     ) -> StorageBackendResult<bool> {
-        let field = field.into();
-        self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, None, true, true)
-        })
+        self.rebuild_vector_field_with_spec(table, field, dimensions, VectorIndexSpec::BruteForce)
     }
 
-    pub(crate) fn drop_ivf_vector_field_index(
+    pub(crate) fn drop_vector_field_index(
         &self,
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
     ) -> StorageBackendResult<bool> {
-        let field = field.into();
-        self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, None, true, true)
-        })
+        self.rebuild_vector_field(table, field, dimensions)
     }
 
     pub(crate) fn drop_vector_index_metadata(
@@ -221,18 +223,18 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn restore_ivf_vector_field(
+    pub(crate) fn restore_vector_field_index(
         &self,
         table: &str,
         field: impl Into<FieldName>,
         dimensions: u32,
-        params: IVFIndexParams,
+        spec: VectorIndexSpec,
     ) -> StorageBackendResult<bool> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let field = field.into();
-        let idx = self.build_vector_index_for_restore(table, &field, dimensions, params);
+        let idx = self.build_vector_index_for_restore(table, &field, dimensions, spec)?;
         t.vector_indexes.write().insert(field, idx);
         Ok(true)
     }
@@ -272,7 +274,7 @@ impl Engine {
         table: &str,
         field: FieldName,
         dimensions: u32,
-        params: Option<IVFIndexParams>,
+        spec: VectorIndexSpec,
         replace_existing: bool,
         persist_schema: bool,
     ) -> StorageBackendResult<bool> {
@@ -297,7 +299,7 @@ impl Engine {
                 )));
             }
         }
-        let mut idx = self.build_vector_index(&table_name, &field, dimensions, params);
+        let mut idx = self.build_vector_index(&table_name, &field, dimensions, spec)?;
         if idx.count()? == 0 {
             Self::backfill_vector_index(&t, &field, idx.as_mut())?;
         }
@@ -321,9 +323,15 @@ impl Engine {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: Option<IVFIndexParams>,
-    ) -> Box<dyn VectorIndex> {
-        self.build_vector_index_with_initialize(table, field, dimensions, params, true)
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.build_vector_index_with_mode(
+            table,
+            field,
+            dimensions,
+            spec,
+            VectorIndexOpenMode::Create,
+        )
     }
 
     pub(crate) fn build_vector_index_for_restore(
@@ -331,40 +339,41 @@ impl Engine {
         table: &str,
         field: &str,
         dimensions: u32,
-        params: IVFIndexParams,
-    ) -> Box<dyn VectorIndex> {
-        self.build_vector_index_with_initialize(table, field, dimensions, Some(params), false)
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        self.build_vector_index_with_mode(
+            table,
+            field,
+            dimensions,
+            spec,
+            VectorIndexOpenMode::Restore,
+        )
     }
 
-    pub(crate) fn build_vector_index_with_initialize(
+    pub(crate) fn build_vector_index_with_mode(
         &self,
         table: &str,
         field: &str,
         dimensions: u32,
-        params: Option<IVFIndexParams>,
-        initialize: bool,
-    ) -> Box<dyn VectorIndex> {
+        spec: VectorIndexSpec,
+        mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         if let Some(backend) = self.storage.backend.as_ref() {
-            backend.vector_index(
-                table,
-                field,
-                dimensions,
-                params.map(|params| PersistentVectorIndexParams {
-                    nlist: params.nlist,
-                    nprobe: params.nprobe,
-                    train_threshold: params.train_threshold,
-                    initialize,
-                }),
-            )
-        } else if let Some(params) = params {
-            Box::new(IVFIndex::with_params(
-                dimensions,
-                params.nlist,
-                params.nprobe,
-                params.train_threshold,
-            ))
+            backend.vector_index(table, field, dimensions, spec, mode)
         } else {
-            Box::new(MemoryVectorIndex::new(dimensions))
+            let index: Box<dyn VectorIndex> = match spec {
+                VectorIndexSpec::BruteForce => Box::new(MemoryVectorIndex::new(dimensions)),
+                VectorIndexSpec::IVF(params) => Box::new(IVFIndex::with_params(
+                    dimensions,
+                    params.nlist,
+                    params.nprobe,
+                    params.train_threshold,
+                )),
+                VectorIndexSpec::HNSW(params) => {
+                    Box::new(HNSWIndex::with_params(dimensions, params)?)
+                }
+            };
+            Ok(index)
         }
     }
 

@@ -201,6 +201,51 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
 }
 
 #[test]
+fn migration_19_creates_complete_hnsw_storage_schema() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    drop(current);
+    connection
+        .with(|conn| {
+            conn.execute_batch(
+                "DROP TABLE _hnsw_edges;
+                 DROP TABLE _hnsw_nodes;
+                 DROP TABLE _hnsw_indexes;
+                 UPDATE _metadata SET value = '18' WHERE key = 'schema_version';",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let _upgraded = Catalog::open(connection.clone()).unwrap();
+    connection
+        .with(|conn| {
+            for table in ["_hnsw_indexes", "_hnsw_nodes", "_hnsw_edges"] {
+                let count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(count, 1, "missing HNSW migration table {table}");
+            }
+            let mut statement = conn.prepare("PRAGMA table_info(_hnsw_indexes)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?;
+            assert!(columns.contains("revision"));
+            assert!(columns.contains("format_version"));
+            let version: String = conn.query_row(
+                "SELECT value FROM _metadata WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let _current = Catalog::open(mc.clone()).unwrap();

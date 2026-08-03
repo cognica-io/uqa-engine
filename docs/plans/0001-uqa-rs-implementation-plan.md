@@ -19,7 +19,6 @@ Build UQA-RS as a native Rust implementation of the Unified Query Algebra:
 - Distributed execution in the core engine.
 - Runtime dependency on another language implementation.
 - A separate SQL dialect that drifts from the UQA SQL contract.
-- HNSW as the first vector-index backend. IVF and explicit query-pool or persisted-model vector score paths remain the implemented baseline.
 
 ## 2. Theoretical anchors
 
@@ -34,6 +33,7 @@ The implementation uses the papers as design input, with the executable contract
 - **Bayesian BM25.** Query-level sigmoid transforms, priors, WAND/BMW bounds, calibration metrics, and parameter learning use deterministic numeric contracts. Score-ordered limits become physical WAND/BMW leaves; duplicate terms are retained, field statistics are scoped correctly, and Bayesian finalization occurs once after the raw sum. Persisted BMW bounds are scorer-versioned and atomically invalidated by posting writes. Unlabeled parameter estimation is named as a score transform; probability claims require held-out labels.
 - **Fusion modes.** Exact signed `BayesianEvidenceFusion` preserves neutral evidence and applies the prior once. Confidence-scaled positive-evidence pooling is an explicitly separate robust ranking heuristic.
 - **Vector calibration.** Query-pool Gaussian fitting is an unsupervised score transform. Reusable `VectorCalibrationModel` values store corpus/index/embedding-model/K/version provenance, reject mismatched runtime targets, and are gated with held-out reliability, ECE, Brier, log-loss, bootstrap confidence intervals, and threshold transfer.
+- **Physical vector indexes.** Exact brute force is the default carrier; IVF and HNSW are separate opt-in physical indexes with independent parameters, persisted metadata, differential recall tests, and transaction-safe mutation paths.
 
 Cardinality estimates are planner heuristics, not data-correctness contracts. Sampling accuracy requires an explicit estimator model and assumptions. For independent Bernoulli trials with mean `mu = E[X]`, the usual two-sided multiplicative Chernoff form for `0 < epsilon <= 1` gives a sufficient condition `epsilon >= sqrt(3 ln(2/delta) / mu)` for failure probability at most `delta`; a bare `1 / sqrt(E[X])` expression is not a universal guarantee. Cost and accuracy claims belong in reproducible benchmark reports with the corpus, sample count, estimator assumptions, error metric, and confidence procedure recorded.
 

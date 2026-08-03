@@ -8,6 +8,12 @@
 
 use super::{DocId, SQLiteError, SQLiteResult};
 
+pub(super) fn i64_to_usize(field: &str, value: i64) -> SQLiteResult<usize> {
+    value.try_into().map_err(|_| {
+        SQLiteError::StorageBackend(format!("invalid {field}: {value} does not fit in usize"))
+    })
+}
+
 pub(super) fn encode_doc_id(doc_id: DocId) -> SQLiteResult<i64> {
     i64::try_from(doc_id).map_err(|_| {
         SQLiteError::StorageBackend(format!(

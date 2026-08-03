@@ -31,4 +31,4 @@ pub use connection::{ManagedConnection, Result, SQLiteError};
 pub use detect::{detect_database_file_format, DatabaseFileFormat};
 pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
-pub use vector_index::{SQLiteIVFIndex, SQLiteVectorIndex};
+pub use vector_index::{SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteVectorIndex};

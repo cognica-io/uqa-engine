@@ -19,10 +19,12 @@ use serde::{Deserialize, Serialize};
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Value};
 
-use crate::backend::{PersistentStorageBackend, PersistentVectorIndexParams};
+use crate::backend::PersistentStorageBackend;
 use crate::document_store::{Document, DocumentStore};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
-use crate::vector_index::{cosine_similarity, validate_vector_values, VectorIndex};
+use crate::vector_index::{
+    cosine_similarity, validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+};
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog;

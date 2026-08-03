@@ -59,10 +59,17 @@ fn migration_rejects_invalid_persisted_vector_index_parameters() {
         numeric_precision: None,
         numeric_scale: None,
     }];
-    for (parameter, value) in [("lists", "invalid"), ("probes", "0")] {
+    for (index_type, parameter, value) in [
+        ("ivf", "lists", "invalid"),
+        ("ivf", "probes", "0"),
+        ("ivf", "m", "4"),
+        ("hnsw", "m", "invalid"),
+        ("hnsw", "ef_search", "0"),
+        ("hnsw", "lists", "4"),
+    ] {
         let indexes = [CatalogIndex {
             name: "embedding_idx".into(),
-            index_type: "hnsw".into(),
+            index_type: index_type.into(),
             table_name: "items".into(),
             columns: vec!["embedding".into()],
             parameters: BTreeMap::from([(parameter.into(), value.into())]),

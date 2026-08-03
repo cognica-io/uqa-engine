@@ -10,6 +10,7 @@ use super::{
     Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, Engine, FieldName,
     PersistentStorageBackend, RwLock, StorageBackendResult, TableSchema, TableState, VectorIndex,
 };
+use crate::{VectorIndexOpenMode, VectorIndexSpec};
 
 impl Engine {
     pub(super) fn restore_from_catalog(
@@ -63,8 +64,9 @@ impl Engine {
                     &table_name,
                     &vector_field.field,
                     vector_field.dimensions,
-                    None,
-                ),
+                    VectorIndexSpec::BruteForce,
+                    VectorIndexOpenMode::Restore,
+                )?,
             );
         }
         let columns: Vec<uqa_sql::ast::ColumnDef> = if schema.columns_json.is_empty() {

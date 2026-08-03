@@ -352,6 +352,93 @@ fn vector_fields_use_bruteforce_until_explicit_ivf_index() {
 }
 
 #[test]
+fn hnsw_is_a_distinct_persistent_index_and_survives_reopen() {
+    let memory = Engine::new();
+    memory
+        .sql(
+            "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    memory
+        .sql(
+            "CREATE INDEX articles_embedding_hnsw ON articles USING hnsw (embedding) \
+             WITH (m = 4, ef_construction = 24, ef_search = 16, seed = 7)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(vector_index_kind(&memory, "articles", "embedding"), "hnsw");
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("hnsw.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO articles (id, embedding) VALUES \
+                 (1, ARRAY[1.0, 0.0]), (2, ARRAY[0.0, 1.0]), (3, ARRAY[-1.0, 0.0])",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX articles_embedding_hnsw ON articles USING hnsw (embedding) \
+                 WITH (m = 4, ef_construction = 24, ef_search = 16, seed = 7)",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(vector_index_kind(&engine, "articles", "embedding"), "hnsw");
+        assert_eq!(
+            engine
+                .knn_search("articles", "embedding", vec![-1.0, 0.0], 1)
+                .unwrap()[0]
+                .doc_id,
+            3
+        );
+    }
+    let connection = ManagedConnection::open(&database).unwrap();
+    let (kind, nodes): (String, i64) = connection
+        .with(|conn| {
+            Ok((
+                conn.query_row(
+                    "SELECT index_type FROM _catalog_indexes
+                      WHERE name = 'articles_embedding_hnsw'",
+                    [],
+                    |row| row.get(0),
+                )?,
+                conn.query_row(
+                    "SELECT COUNT(*) FROM _hnsw_nodes
+                      WHERE table_name = 'public.articles' AND field = 'embedding'",
+                    [],
+                    |row| row.get(0),
+                )?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(kind, "hnsw");
+    assert_eq!(nodes, 3);
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        vector_index_kind(&reopened, "articles", "embedding"),
+        "hnsw"
+    );
+    assert_eq!(
+        reopened
+            .knn_search("articles", "embedding", vec![1.0, 0.0], 1)
+            .unwrap()[0]
+            .doc_id,
+        1
+    );
+}
+
+#[test]
 fn sqlite_ivf_restore_reuses_persisted_assignments() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("vectors.db");
@@ -370,7 +457,7 @@ fn sqlite_ivf_restore_reuses_persisted_assignments() {
         )
         .unwrap();
         eng.sql(
-            "CREATE INDEX articles_embedding_ivf ON articles USING hnsw (embedding) \
+            "CREATE INDEX articles_embedding_ivf ON articles USING ivf (embedding) \
              WITH (lists = 2, probes = 1, train_threshold = 2)",
             &[],
         )
@@ -428,7 +515,7 @@ fn sqlite_ivf_create_index_reuses_existing_persistent_vectors() {
     .unwrap();
 
     eng.sql(
-        "CREATE INDEX articles_embedding_ivf ON articles USING hnsw (embedding) \
+        "CREATE INDEX articles_embedding_ivf ON articles USING ivf (embedding) \
          WITH (lists = 2, probes = 1, train_threshold = 2)",
         &[],
     )

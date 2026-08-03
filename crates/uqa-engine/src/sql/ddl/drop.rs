@@ -149,7 +149,7 @@ fn drop_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(),
     } else if row.index_type.eq_ignore_ascii_case("ivf")
         || row.index_type.eq_ignore_ascii_case("hnsw")
     {
-        drop_ivf_index_side_effects(engine, row)?;
+        drop_vector_index_side_effects(engine, row)?;
     }
     Ok(())
 }
@@ -202,7 +202,7 @@ fn drop_gin_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result
     Ok(())
 }
 
-fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
+fn drop_vector_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {
     let columns = catalog_index_columns(row, "DROP INDEX")?;
     for col in columns {
         match engine
@@ -211,7 +211,7 @@ fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result
         {
             Some(ColumnType::Vector(dim) | ColumnType::Tensor(dim)) => {
                 if !engine
-                    .drop_ivf_vector_field_index(&row.table_name, col.clone(), dim)
+                    .drop_vector_field_index(&row.table_name, col.clone(), dim)
                     .map_err(|err| ddl_storage_error("DROP INDEX vector field", err))?
                 {
                     return Err(SQLError::Unsupported(format!(
@@ -223,14 +223,14 @@ fn drop_ivf_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result
                     .drop_vector_index_metadata(&row.table_name, &col)
                     .map_err(|e| {
                         SQLError::Internal(format!(
-                            "DROP INDEX `{}`: failed to drop IVF metadata for `{}`.`{col}`: {e}",
+                            "DROP INDEX `{}`: failed to drop vector-index metadata for `{}`.`{col}`: {e}",
                             row.name, row.table_name
                         ))
                     })?;
             }
             Some(other) => {
                 return Err(SQLError::Unsupported(format!(
-                    "DROP INDEX `{}`: IVF column `{}`.`{col}` is no longer VECTOR or TENSOR, got {other:?}",
+                    "DROP INDEX `{}`: vector-index column `{}`.`{col}` is no longer VECTOR or TENSOR, got {other:?}",
                     row.name, row.table_name
                 )));
             }

@@ -8,8 +8,8 @@
 
 use super::{
     Analyzer, Arc, DocumentStore, InvertedIndex, KeyValueDocumentStore, KeyValueInvertedIndex,
-    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, PersistentVectorIndexParams,
-    StorageBackendResult, VectorIndex,
+    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, StorageBackendError,
+    StorageBackendResult, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 
 /// Persistent storage factory implemented over [`KeyValueStore`].
@@ -46,14 +46,21 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         table: &str,
         field: &str,
         dimensions: u32,
-        _params: Option<PersistentVectorIndexParams>,
-    ) -> Box<dyn VectorIndex> {
-        Box::new(KeyValueVectorIndex::new(
-            Arc::clone(&self.store),
-            table,
-            field,
-            dimensions,
-        ))
+        spec: VectorIndexSpec,
+        _mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        match spec {
+            VectorIndexSpec::BruteForce => Ok(Box::new(KeyValueVectorIndex::new(
+                Arc::clone(&self.store),
+                table,
+                field,
+                dimensions,
+            ))),
+            other => Err(StorageBackendError::Other(format!(
+                "{} vector indexes are not supported by the key/value backend",
+                other.access_method()
+            ))),
+        }
     }
 
     fn begin_transaction(&self) -> StorageBackendResult<()> {

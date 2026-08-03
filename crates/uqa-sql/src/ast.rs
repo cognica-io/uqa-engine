@@ -206,7 +206,7 @@ pub enum ForeignKeyMatch {
 pub struct CreateIndex {
     pub name: Option<String>,
     pub table: String,
-    /// `gin`, `btree`, `ivf`, `hnsw` (alias for `ivf`), `rtree`, ...
+    /// `gin`, `btree`, `ivf`, `hnsw`, `rtree`, ...
     pub access_method: String,
     pub columns: Vec<String>,
     /// `CREATE INDEX IF NOT EXISTS`.

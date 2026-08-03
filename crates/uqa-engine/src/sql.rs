@@ -38,7 +38,7 @@ use uqa_sql::expr::{value_to_tensor, value_to_vector};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, IVFIndexParams, ScoredEntry};
+use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
 
 mod age_cypher;
 mod aggregates;

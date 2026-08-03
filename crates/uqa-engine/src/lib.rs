@@ -115,10 +115,11 @@ use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
     ColumnStatsInput, ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow,
-    IVFIndex, InvertedIndex, ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex,
-    MemoryVectorIndex, PersistentStorageBackend, PersistentVectorIndexParams, RelationIdentity,
-    SQLiteCompressedContainerAnchor, SQLiteStorageBackend, SequenceRow, StorageBackendError,
-    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex, ViewRow,
+    HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
+    RelationIdentity, SQLiteCompressedContainerAnchor, SQLiteStorageBackend, SequenceRow,
+    StorageBackendError, StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
@@ -415,64 +416,6 @@ pub(crate) struct TableState {
     /// by every write and recomputed on demand.
     doc_count_cache: std::sync::atomic::AtomicU64,
     doc_count_dirty: AtomicBool,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct IVFIndexParams {
-    pub nlist: usize,
-    pub nprobe: usize,
-    pub train_threshold: usize,
-}
-
-impl Default for IVFIndexParams {
-    fn default() -> Self {
-        Self {
-            nlist: 100,
-            nprobe: 10,
-            train_threshold: 256,
-        }
-    }
-}
-
-impl IVFIndexParams {
-    pub(crate) fn from_catalog_map(
-        parameters: &BTreeMap<String, String>,
-    ) -> StorageBackendResult<Self> {
-        fn read_positive(
-            parameters: &BTreeMap<String, String>,
-            keys: &[&str],
-            default: usize,
-        ) -> StorageBackendResult<usize> {
-            let Some((key, raw)) = parameters.iter().find(|(key, _)| {
-                keys.iter()
-                    .any(|candidate| key.eq_ignore_ascii_case(candidate))
-            }) else {
-                return Ok(default);
-            };
-            let value = raw.parse::<usize>().map_err(|_| {
-                StorageBackendError::Other(format!(
-                    "invalid persisted IVF parameter `{key}` value `{raw}`"
-                ))
-            })?;
-            if value == 0 {
-                return Err(StorageBackendError::Other(format!(
-                    "persisted IVF parameter `{key}` must be greater than zero"
-                )));
-            }
-            Ok(value)
-        }
-
-        let default = Self::default();
-        Ok(Self {
-            nlist: read_positive(parameters, &["lists", "nlist"], default.nlist)?,
-            nprobe: read_positive(parameters, &["probes", "nprobe"], default.nprobe)?,
-            train_threshold: read_positive(
-                parameters,
-                &["train_threshold", "train-threshold", "min_train"],
-                default.train_threshold,
-            )?,
-        })
-    }
 }
 
 impl TableState {

@@ -13,6 +13,7 @@ use super::{
     BTreeMap, CatalogIndexRow, Engine, IVFIndexParams, RelationIdentity, StorageBackendError,
     StorageBackendResult, TableState,
 };
+use crate::{HNSWIndexParams, VectorIndexSpec};
 
 impl Engine {
     pub(super) fn resolve_table_ddl_target(
@@ -534,11 +535,12 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn ivf_catalog_params_for_column(
+    pub(super) fn vector_index_spec_for_column(
         &self,
         table: &str,
         column: &str,
-    ) -> StorageBackendResult<Option<IVFIndexParams>> {
+    ) -> StorageBackendResult<Option<VectorIndexSpec>> {
+        let mut found = None;
         for row in self.durable.catalog_indexes.read().values() {
             let is_vector_index = row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw");
@@ -549,13 +551,22 @@ impl Engine {
                 let parameters: BTreeMap<String, String> =
                     serde_json::from_str(&row.parameters_json)
                         .map_err(StorageBackendError::from)?;
-                return Ok(Some(IVFIndexParams::from_catalog_map(&parameters)?));
+                let spec = if row.index_type.eq_ignore_ascii_case("ivf") {
+                    VectorIndexSpec::IVF(IVFIndexParams::from_catalog_map(&parameters)?)
+                } else {
+                    VectorIndexSpec::HNSW(HNSWIndexParams::from_catalog_map(&parameters)?)
+                };
+                if found.replace(spec).is_some() {
+                    return Err(StorageBackendError::Other(format!(
+                        "multiple physical vector indexes target `{table}`.`{column}`"
+                    )));
+                }
             }
         }
-        Ok(None)
+        Ok(found)
     }
 
-    pub(super) fn vector_catalog_index_names_for_column(
+    pub(crate) fn vector_catalog_index_names_for_column(
         &self,
         table: &str,
         column: &str,

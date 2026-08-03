@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL coverage for `TENSOR(N)` chunk embeddings backed by IVF.
+//! SQL coverage for `TENSOR(N)` chunk embeddings backed by IVF and HNSW.
 
 use tempfile::tempdir;
 use uqa_core::Value;
@@ -73,6 +73,59 @@ fn tensor_ivf_knn_scores_best_chunk_per_row() {
     );
     assert!((float_column(&result.rows[0], "_score") - 1.0).abs() < 1e-6);
     assert!(float_column(&result.rows[1], "_score") < 1.0);
+}
+
+#[test]
+fn tensor_hnsw_persists_and_scores_each_row_once() {
+    let directory = tempdir().unwrap();
+    let database = directory.path().join("tensor-hnsw.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE docs (id INTEGER PRIMARY KEY, chunks TENSOR(2))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO docs (id, chunks) VALUES \
+                 (1, ARRAY[ARRAY[1.0, 0.0], ARRAY[0.0, 1.0]]), \
+                 (2, ARRAY[ARRAY[0.2, 0.8]]), \
+                 (3, ARRAY[ARRAY[-1.0, 0.0]])",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX docs_chunks_hnsw ON docs USING hnsw (chunks) \
+                 WITH (m = 4, ef_construction = 24, ef_search = 16, seed = 7)",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let engine = Engine::open(&database).unwrap();
+    let result = engine
+        .sql(
+            "SELECT id, _score FROM docs \
+             WHERE knn_match(chunks, ARRAY[0.0, 1.0], 2) \
+             ORDER BY _score DESC",
+            &[],
+        )
+        .unwrap();
+    let ids = result
+        .rows
+        .iter()
+        .map(|row| int_column(row, "id"))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![1, 2]);
+    assert!((float_column(&result.rows[0], "_score") - 1.0).abs() < 1e-6);
+    let connection = Connection::open(&database).unwrap();
+    let node_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM _hnsw_nodes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(node_count, 4);
 }
 
 #[test]

@@ -10,6 +10,7 @@ use super::{
     normalize_analyzer_phase, BTreeMap, CatalogFacade, Engine, IVFIndexParams, StorageBackendError,
     StorageBackendResult,
 };
+use crate::{HNSWIndexParams, VectorIndexSpec};
 
 impl Engine {
     /// Re-hydrate the named-analyzer / table-field-analyzer / foreign
@@ -150,7 +151,11 @@ impl Engine {
             } else if row.index_type.eq_ignore_ascii_case("ivf")
                 || row.index_type.eq_ignore_ascii_case("hnsw")
             {
-                let params = IVFIndexParams::from_catalog_map(&parameters)?;
+                let spec = if row.index_type.eq_ignore_ascii_case("ivf") {
+                    VectorIndexSpec::IVF(IVFIndexParams::from_catalog_map(&parameters)?)
+                } else {
+                    VectorIndexSpec::HNSW(HNSWIndexParams::from_catalog_map(&parameters)?)
+                };
                 for col in &columns {
                     let Some(
                         uqa_sql::ast::ColumnType::Vector(dim)
@@ -162,7 +167,7 @@ impl Engine {
                             row.name, row.table_name
                         )));
                     };
-                    if !self.restore_ivf_vector_field(&row.table_name, col, dim, params)? {
+                    if !self.restore_vector_field_index(&row.table_name, col, dim, spec)? {
                         return Err(StorageBackendError::Other(format!(
                             "failed to restore vector index `{}` for table `{}`",
                             row.name, row.table_name

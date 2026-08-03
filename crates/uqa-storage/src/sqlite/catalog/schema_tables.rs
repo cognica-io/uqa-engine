@@ -171,7 +171,7 @@ impl Catalog {
 
     /// Wipe the rows owned by `table` from the per-table data tables
     /// (`_documents`, `_postings`, `_doc_lengths`, `_field_stats`,
-    /// `_vectors`, IVF metadata). Run after [`Catalog::drop_table`]
+    /// `_vectors`, IVF/HNSW metadata). Run after [`Catalog::drop_table`]
     /// when the engine drops the table from its in-memory registry as
     /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
@@ -190,6 +190,9 @@ impl Catalog {
                     "_ivf_indexes",
                     "_ivf_centroids",
                     "_ivf_assignments",
+                    "_hnsw_indexes",
+                    "_hnsw_nodes",
+                    "_hnsw_edges",
                     "_column_stats",
                     "_btree_index_entries",
                     "_btree_indexes",
@@ -223,6 +226,9 @@ impl Catalog {
                     "_ivf_indexes",
                     "_ivf_centroids",
                     "_ivf_assignments",
+                    "_hnsw_indexes",
+                    "_hnsw_nodes",
+                    "_hnsw_edges",
                     "_column_stats",
                     "_btree_index_entries",
                     "_btree_indexes",
@@ -280,6 +286,9 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_hnsw_indexes",
+                "_hnsw_nodes",
+                "_hnsw_edges",
                 "_column_stats",
                 "_table_field_analyzers",
                 "_catalog_indexes",
@@ -312,6 +321,9 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_hnsw_indexes",
+                "_hnsw_nodes",
+                "_hnsw_edges",
                 "_btree_index_entries",
                 "_btree_indexes",
             ] {
@@ -360,6 +372,9 @@ impl Catalog {
                 "_ivf_indexes",
                 "_ivf_centroids",
                 "_ivf_assignments",
+                "_hnsw_indexes",
+                "_hnsw_nodes",
+                "_hnsw_edges",
             ] {
                 rename_field_rows_or_keep_existing(&tx, table, "field", table_name, from, to)?;
             }

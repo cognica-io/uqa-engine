@@ -196,6 +196,30 @@ fn ivf_metadata_count(db: &Path, table: &str, field: &str) -> i64 {
     .unwrap()
 }
 
+fn hnsw_metadata_counts(db: &Path, table: &str, field: &str) -> (i64, i64, i64) {
+    let table = physical_relation_name(table);
+    let connection = ManagedConnection::open(db).unwrap();
+    connection
+        .with(|conn| {
+            let count = |metadata_table: &str| {
+                conn.query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {metadata_table} \
+                         WHERE table_name = ?1 AND field = ?2"
+                    ),
+                    params![table, field],
+                    |row| row.get::<_, i64>(0),
+                )
+            };
+            Ok((
+                count("_hnsw_indexes")?,
+                count("_hnsw_nodes")?,
+                count("_hnsw_edges")?,
+            ))
+        })
+        .unwrap()
+}
+
 #[test]
 fn gin_index_backfills_existing_rows_and_does_not_auto_index_other_text_columns() {
     let eng = Engine::new();
@@ -643,4 +667,79 @@ fn reopen_attaches_ivf_index_without_bootstrap_retraining() {
         let _eng = Engine::open(&db).unwrap();
         assert_eq!(ivf_metadata_count(&db, "docs", "embedding"), 0);
     }
+}
+
+#[test]
+fn hnsw_metadata_follows_column_and_table_rename_then_drops_atomically() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("hnsw-lifecycle.db");
+    let engine = Engine::open(&database).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE docs (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO docs (id, embedding) VALUES \
+             (1, ARRAY[1.0, 0.0]), (2, ARRAY[0.0, 1.0])",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX docs_embedding_hnsw ON docs USING hnsw (embedding) \
+             WITH (m = 4, ef_construction = 24, ef_search = 16)",
+            &[],
+        )
+        .unwrap();
+    let initial = hnsw_metadata_counts(&database, "docs", "embedding");
+    assert_eq!(initial.0, 1);
+    assert_eq!(initial.1, 2);
+
+    engine
+        .sql(
+            "ALTER TABLE docs RENAME COLUMN embedding TO vector_data",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        hnsw_metadata_counts(&database, "docs", "embedding"),
+        (0, 0, 0)
+    );
+    assert_eq!(hnsw_metadata_counts(&database, "docs", "vector_data").0, 1);
+    engine
+        .sql("ALTER TABLE docs RENAME TO archived_docs", &[])
+        .unwrap();
+    assert_eq!(
+        hnsw_metadata_counts(&database, "docs", "vector_data"),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        hnsw_metadata_counts(&database, "archived_docs", "vector_data").0,
+        1
+    );
+    assert_eq!(
+        engine
+            .knn_search("archived_docs", "vector_data", vec![1.0, 0.0], 1)
+            .unwrap()[0]
+            .doc_id,
+        1
+    );
+
+    engine.sql("DROP INDEX docs_embedding_hnsw", &[]).unwrap();
+    assert_eq!(
+        hnsw_metadata_counts(&database, "archived_docs", "vector_data"),
+        (0, 0, 0)
+    );
+    drop(engine);
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        reopened
+            .knn_search("archived_docs", "vector_data", vec![1.0, 0.0], 1)
+            .unwrap()[0]
+            .doc_id,
+        1
+    );
 }

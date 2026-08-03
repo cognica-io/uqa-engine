@@ -8,8 +8,8 @@
 
 use super::{
     json_to_value, parameters_to_string_map, table_exists, BTreeMap, BTreeSet, CatalogIndex,
-    ColumnDef, ColumnType, Connection, Expr, IVFIndexParams, PythonColumnDef, PythonMigrationError,
-    TableSpec, VectorSpec,
+    ColumnDef, ColumnType, Connection, Expr, HNSWIndexParams, IVFIndexParams, PythonColumnDef,
+    PythonMigrationError, TableSpec, VectorIndexSpec, VectorSpec,
 };
 
 pub(super) fn load_catalog_indexes(
@@ -107,20 +107,37 @@ pub(super) fn infer_vector_fields(
     columns: &[PythonColumnDef],
     indexes: &[CatalogIndex],
 ) -> Result<Vec<VectorSpec>, PythonMigrationError> {
-    let mut params_by_field = BTreeMap::new();
+    let mut indexes_by_field = BTreeMap::new();
     for idx in indexes.iter().filter(|idx| {
         idx.table_name == table
             && (idx.index_type.eq_ignore_ascii_case("ivf")
                 || idx.index_type.eq_ignore_ascii_case("hnsw"))
     }) {
         for col in &idx.columns {
-            let params = IVFIndexParams::from_catalog_map(&idx.parameters).map_err(|error| {
-                PythonMigrationError::Invalid(format!(
-                    "invalid persisted {} index `{}` parameters for {table}.{col}: {error}",
-                    idx.index_type, idx.name
-                ))
-            })?;
-            params_by_field.insert(col.clone(), params);
+            let index = if idx.index_type.eq_ignore_ascii_case("ivf") {
+                VectorIndexSpec::IVF(
+                    IVFIndexParams::from_catalog_map(&idx.parameters).map_err(|error| {
+                        PythonMigrationError::Invalid(format!(
+                            "invalid persisted IVF index `{}` parameters for {table}.{col}: {error}",
+                            idx.name
+                        ))
+                    })?,
+                )
+            } else {
+                VectorIndexSpec::HNSW(
+                    HNSWIndexParams::from_catalog_map(&idx.parameters).map_err(|error| {
+                        PythonMigrationError::Invalid(format!(
+                            "invalid persisted HNSW index `{}` parameters for {table}.{col}: {error}",
+                            idx.name
+                        ))
+                    })?,
+                )
+            };
+            if indexes_by_field.insert(col.clone(), index).is_some() {
+                return Err(PythonMigrationError::Invalid(format!(
+                    "multiple physical vector indexes target {table}.{col}"
+                )));
+            }
         }
     }
 
@@ -135,9 +152,9 @@ pub(super) fn infer_vector_fields(
             specs.push(VectorSpec {
                 field: col.name.clone(),
                 dimensions,
-                params: params_by_field
+                index: indexes_by_field
                     .remove(&col.name)
-                    .unwrap_or_else(IVFIndexParams::default),
+                    .unwrap_or_else(|| VectorIndexSpec::IVF(IVFIndexParams::default())),
             });
         }
     }

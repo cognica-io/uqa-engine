@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, body TEXT)",
         &[],
     )?;
+    engine.sql("CREATE INDEX notes_body_gin ON notes USING gin (body)", &[])?;
     engine.sql(
         "INSERT INTO notes (id, title, body) VALUES \
          (1, 'rust async', 'rust async story with futures and tokio runtime in rust'), \

@@ -10,6 +10,7 @@ use super::{
     AnalyzerPhase, BTreeMap, Document, Engine, FieldName, SQLError, StorageBackendError,
     StorageBackendResult, TableState, Value,
 };
+use crate::VectorIndexSpec;
 
 impl Engine {
     pub(crate) fn rebind_persistent_table_stores(
@@ -62,13 +63,10 @@ impl Engine {
             .collect();
         let mut rebound = BTreeMap::new();
         for (field, dimensions) in vector_fields {
-            let idx = if let Some(params) =
-                self.ivf_catalog_params_for_column(table_name, &field)?
-            {
-                self.build_vector_index_for_restore(table_name, &field, dimensions, params)
-            } else {
-                self.build_vector_index_with_initialize(table_name, &field, dimensions, None, false)
-            };
+            let spec = self
+                .vector_index_spec_for_column(table_name, &field)?
+                .unwrap_or(VectorIndexSpec::BruteForce);
+            let idx = self.build_vector_index_for_restore(table_name, &field, dimensions, spec)?;
             rebound.insert(field, idx);
         }
         *table.vector_indexes.write() = rebound;

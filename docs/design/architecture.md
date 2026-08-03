@@ -1,27 +1,51 @@
-# UQA-RS Architecture
+# UQA-RS system architecture
 
-This is a high-level pointer for newcomers; the formal contract lives in [`docs/plans/0001-uqa-rs-implementation-plan.md`](../plans/0001-uqa-rs-implementation-plan.md).
+This document is the technical overview of the current UQA-RS implementation. It describes the boundaries that new code must preserve, while focused contracts for state ownership, storage security, parity, and performance live in neighboring design documents.
 
-## Crate dependency layers
+## Design goals
 
-`uqa-sql` is a syntax frontend: it depends only on `uqa-core` and stops FTS
-processing at a syntax AST. Retrieval lowering into `OperatorTree` happens at
-the engine/planner boundary. `uqa-engine` is the composition root, so it may
-wire concrete subsystems together, but subsystem state remains inside the
-ownership domains documented in
-[`engine-state-ownership.md`](engine-state-ownership.md).
+- Give relational SQL, text retrieval, vector search, graph operations, scoring, and fusion one planning and execution boundary without forcing every semantic into one physical carrier.
+- Keep algebraic laws attached to the representation for which they are valid, especially separating document membership, payload combination, and ranking.
+- Make `uqa-engine` the composition root while keeping storage, planning, execution, scoring, graph, and runtime-extension state behind explicit subsystem boundaries.
+- Preserve errors and transactional atomicity across storage, indexes, catalogs, graphs, models, and runtime caches.
+- Bound blocking execution with `work_mem`, spill formats, and streaming result APIs instead of assuming every result fits in memory.
+- Keep persistent storage replaceable through catalog, document, index, vector, and key/value traits.
 
-The complete runtime edge set and direct-dependency budgets are executable
-policy in [`scripts/workspace-dependency-policy.json`](../../scripts/workspace-dependency-policy.json).
-CI runs [`check-workspace-dependencies.py`](../../scripts/check-workspace-dependencies.py),
-so adding a dependency requires an explicit architecture-policy change in the
-same review. Dev-only benchmark/test edges are deliberately excluded.
+## System context
+
+```mermaid
+flowchart LR
+    Apps["Rust / Python / Node.js / WASM / usql"] --> API["Engine and QueryBuilder APIs"]
+    API --> Compile["uqa-sql compilation"]
+    Compile --> Plan["UnifiedPlan and plan-native optimizer"]
+    Plan --> Execute["UnifiedPlanExecutor"]
+    Execute --> Row["Relational physical operators"]
+    Execute --> Hybrid["Hybrid candidate plus residual path"]
+    Execute --> Operator["OperatorTree access algebra"]
+    Row --> Storage["Catalog, documents, indexes, vectors"]
+    Hybrid --> Storage
+    Operator --> Storage
+    Operator --> Graph["Named graph stores and indexes"]
+    Operator --> Scoring["Scoring, calibration, and fusion"]
+    Row --> Results["SQLResult / SQLCursor / ColumnarBatch"]
+    Hybrid --> Results
+    Operator --> Results
+```
+
+The shared boundary is the compiled `UnifiedPlan`, not a claim that every query uses the same data structure. Relational rows, document-id postings, graph matches, and join tuples retain different carriers because their identities and combination laws differ.
+
+## Workspace dependency layers
+
+`uqa-sql` is a syntax frontend that depends only on `uqa-core` and stops retrieval parsing at syntax-level expressions. Concrete retrieval lowering happens at the engine/planner boundary, and `uqa-engine` wires the concrete subsystems together as the composition root.
+
+The complete runtime edge set and direct-dependency budgets are executable policy in [`scripts/workspace-dependency-policy.json`](../../scripts/workspace-dependency-policy.json). CI runs [`scripts/check-workspace-dependencies.py`](../../scripts/check-workspace-dependencies.py), so a new runtime dependency requires an explicit architecture-policy change in the same review.
 
 ```mermaid
 graph TD
     core["uqa-core"]
     analysis["uqa-analysis"]
     storage["uqa-storage"]
+    storage_sqlite["uqa-storage-sqlite"]
     scoring["uqa-scoring"]
     fusion["uqa-fusion"]
     operators["uqa-operators"]
@@ -35,12 +59,14 @@ graph TD
     engine["uqa-engine"]
     api["uqa-api"]
     cli["uqa-cli"]
+    pgwire["uqa-pg-wire"]
+    bindings["uqa-python / uqa-node / uqa-wasm"]
     analysis --> core
     storage --> core
     storage --> analysis
+    storage_sqlite --> storage
     scoring --> core
     scoring --> storage
-    fusion --> core
     fusion --> scoring
     operators --> storage
     operators --> scoring
@@ -48,28 +74,25 @@ graph TD
     graph --> core
     graph --> analysis
     joins --> core
-    joins --> analysis
     joins --> graph
     joins --> sql
     sql --> core
     fdw --> core
     execution --> core
     execution --> sql
-    planner --> core
     planner --> execution
     planner --> graph
     planner --> joins
     planner --> operators
     planner --> sql
     planner --> storage
-    ml --> core
     ml --> operators
     ml --> scoring
-    ml --> storage
     engine --> sql
     engine --> operators
     engine --> graph
     engine --> storage
+    engine --> storage_sqlite
     engine --> execution
     engine --> planner
     engine --> joins
@@ -77,126 +100,229 @@ graph TD
     engine --> fdw
     api --> engine
     cli --> engine
+    bindings --> engine
 ```
 
-## What lives where
+## Crate responsibilities
 
-- `uqa-core` — `DocSet`, `Relation<K>`, `PostingList`, `RankedView`, `GeneralizedPostingList`, `Value`, `Vertex`, `Edge`, `IndexStats`, `Predicate`. The Boolean algebra over `DocSet` is property-tested against the 11 axioms; payload merge and ranking have separate contracts.
-- `uqa-analysis` — porter stemmer, character filters, token filters, analyzer pipelines, language presets.
-- `uqa-storage` — `DocumentStore`, `InvertedIndex`, `VectorIndex`, `BTreeIndex`, `BlockMaxIndex`, an in-memory `SpatialIndex` using a Haversine scan, and `Catalog` with schema migrations. Document, inverted, vector, B-tree, and catalog interfaces have SQLite-backed implementations. SQLite also persists scorer-versioned block-max bounds; posting mutations invalidate them atomically, while the spatial index remains in-memory.
-- `uqa-scoring` — `BM25Scorer`, `BayesianBM25Scorer`, typed raw/evidence/prior/posterior score domains, the explicitly legacy composite-prior transform, `WANDScorer`, `BlockMaxWANDScorer`, calibration metrics, provenance-bound `VectorCalibrationModel`, held-out bootstrap/threshold-transfer gates, `MultiFieldBayesianScorer`, `ParameterLearner`.
-- `uqa-fusion` — exact `BayesianEvidenceFusion`, heuristic `RobustPositiveEvidencePool` / `AdaptivePositiveEvidencePool`, `ProbabilisticBoolean`, `LearnedFusion`, `AttentionFusion`, `MultiHeadAttentionFusion`, query feature extractor.
-- `uqa-operators` — `Operator` trait + `ExecutionContext`, primitive (TermOperator, FilterOperator, ScoreOperator, FacetOperator), boolean (Union/Intersect/Complement), hybrid (`HybridTextVectorOperator`, exact `BayesianEvidenceFusionOperator`, robust `RobustPositiveEvidencePoolOperator`), vector (Cosine/KNN/VectorSimilarity and the explicitly unsupervised `QueryPoolVectorScoreOperator`), multi-stage, sparse, progressive-fusion, hierarchical (PathFilter/Project/Aggregate / UnifiedFilter), deep-fusion (Embed/Signal/Dense/Flatten/GlobalPool/ Softmax/BatchNorm/Dropout/CNN1D/CNN2D/RNN/LSTM/Propagate/Conv/Pool/ Attention). The deep-fusion graph layers depend only on a `GraphNeighborLookup` trait so they remain decoupled from `uqa-graph`.
-- `uqa-graph` — `MemoryGraphStore` with named graphs, invariant-checked `GraphPostingList` with a lossless Phi storage codec and explicit subgraph collision policies, representation adapters (not categorical functors), pattern matching (`GMatch` with arc consistency + MRV + negated-edge post-filter), RPQ parser/NFA/DFA + `RegularPathQuery` operator, an openCypher-oriented lexer/AST/recursive-descent parser for the supported clause set, read-only and mutating executors, centrality (PageRank, HITS, betweenness), message passing, embedding, indexes, incremental matcher, deltas + versioned store with rollback, temporal filtering, cross-paradigm operators.
-- `uqa-joins` — text-similarity (Jaccard), vector-similarity (cosine), hybrid (structured + cosine), graph-driven, cross-paradigm vertex/document bridging.
-- `uqa-sql` — `libpg_query` Postgres parser → internal syntax AST → compiled statement. The FTS mini-language also ends at a syntax AST here. SQL function registry covers `text_match`, `knn_match`, exact `fuse_bayesian_evidence`, robust `pool_positive_evidence` (plus compatibility `fuse_log_odds`), `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`; concrete retrieval/operator lowering is owned by the engine/planner boundary.
-- `uqa-fdw` — `ForeignServer`, `ForeignTable`, `FDWPredicate`, `FDWHandler` trait, `MemoryHandler` reference implementation with predicate pushdown, projection, limit, and `LIKE` matching.
-- `uqa-engine` — top-level `Engine` with table state, catalog restore, `search` / `knn_search` / `hybrid_search` / `sql` entry points, named graph storage, deep-model save/load/predict, parameter persistence.
-- `uqa-api` — fluent `QueryBuilder` for common read and retrieval flows. Validated literal, vector, staged-retrieval, fusion, highlight, and facet helpers are fallible; retrieval and fusion helpers render `WHERE` predicates that enter the shared retrieval IR. Raw projection/predicate fragments cover appropriate expression-level extensions, while complete SQL remains available through `Engine::sql`.
-- `uqa-cli` — `usql` REPL (multi-line SQL, meta commands, in-memory or persistent engines). The TTY path uses `rustyline` for editing, persistent prompt history, history hints, completion, and ANSI highlighting; completion combines static SQL keywords, live engine schema names, and `uqa-sql` registry names for UQA functions.
+| Crate | Responsibility |
+| --- | --- |
+| `uqa-core` | `DocSet`, `Relation<K>`, `PostingList`, `RankedView`, generalized postings, values, predicates, and shared graph value types |
+| `uqa-analysis` | Tokenizers, character filters, token filters, analyzers, stemming, and highlighting primitives |
+| `uqa-storage` | Document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, and backend-neutral key/value abstractions |
+| `uqa-storage-sqlite` | Physical SQLite implementation of the backend-neutral `KeyValueStore` contract |
+| `uqa-scoring` | BM25, Bayesian BM25, typed score domains, WAND/BMW, calibration, metrics, priors, and parameter learning |
+| `uqa-fusion` | Exact Bayesian evidence fusion, robust positive-evidence pooling, probabilistic Boolean operations, learned fusion, and attention fusion |
+| `uqa-operators` | Posting-list, Boolean, hybrid, staged, sparse, hierarchical, aggregation, fusion, and deep-fusion operators |
+| `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, message passing, temporal traversal, and graph indexes |
+| `uqa-joins` | Relational and cross-paradigm join algorithms for text, vectors, graphs, and structured values |
+| `uqa-sql` | `libpg_query` parsing, syntax ASTs, PostgreSQL-oriented statement compilation, scalar IR, and SQL function registry |
+| `uqa-execution` | Volcano-style physical operators, columnar result batches, spill formats, sorting, aggregation, joins, and bounded materialization |
+| `uqa-planner` | Cardinality and cost models, DPccp join enumeration, unified-plan optimization, and physical text top-K selection |
+| `uqa-engine` | Composition root, SQL lifecycle, transactions, catalog restore, persistent state, graph/model integration, and public embedded API |
+| `uqa-fdw` | Foreign server/table contracts and pushdown handlers for DuckDB, Arrow IPC, and in-memory data |
+| `uqa-api` | Fluent `QueryBuilder` for common SQL, retrieval, graph, fusion, highlight, facet, and ML flows |
+| `uqa-cli` | `usql` interactive shell, scripts, history, completion, highlighting, introspection, and database migration commands |
+| `uqa-ml` | Serializable model specifications, CPU inference, analytical training, and optional Apple MLX backend integration |
+| `uqa-pg-wire` | Network-independent PostgreSQL v3 frontend decoding and backend message encoding |
+| `uqa-python`, `uqa-node`, `uqa-wasm` | Language and browser bindings over the engine boundary |
 
 ## Carrier boundaries
 
-The query stack separates membership, value combination, physical storage, and ranking:
+The query stack separates membership, value combination, physical storage, and ranking so that algebraic laws do not silently change when payloads are present.
 
 | Layer | Representation | Contract |
 | --- | --- | --- |
-| Document membership | `DocSet` | Finite Boolean algebra relative to an explicit universe; equality is document-id equality. |
-| Semiring values | `Relation<K>` | Finite-support `DocId -> K`; pointwise `plus` and `times` use the laws supplied by `K`. `bool` gives support union/intersection, while `LogSemiring` gives log-space weighted relations. |
-| Decorated storage | `PostingList` | Sorted unique `(doc_id, Payload)` entries. Collision merge unions positions, adds scores, and gives right-hand fields precedence. Full values are therefore not generally idempotent or commutative. |
-| Ranking | `RankedView` | Descending score order and top-K selection, separate from the document-id ordering required by posting storage. |
+| Document membership | `DocSet` | Finite Boolean algebra relative to an explicit universe; equality compares document ids only |
+| Semiring values | `Relation<K>` | Finite-support `DocId -> K`; pointwise `plus` and `times` use the laws supplied by `K` |
+| Decorated storage | `PostingList` | Sorted unique `(doc_id, Payload)` entries; collision merge combines positions and scores and applies explicit field precedence |
+| Ranking | `RankedView` | Descending score order and top-K selection, separate from posting storage order |
+| Graph matches | `GraphPostingList` | Document support plus invariant-checked graph context and explicit overlap policies |
+| Join tuples | `GeneralizedPostingList` | Tuple identity retained without inventing scalar document ids |
 
-`PostingList::support` is a lossy projection: multiple payload-bearing posting lists map to the same `DocSet`. The supported round trip is `support(PostingList::from(D)) == D`. The reverse reconstruction assigns default payloads and is not equal to a decorated input in general.
+`PostingList::support` is a lossy projection because multiple payload-bearing lists map to the same `DocSet`. The supported round trip is `support(PostingList::from(D)) == D`; reconstructing from support assigns default payloads and cannot recover a decorated input.
 
-Planner cardinality values are estimates used for cost decisions. Analytical or sampling accuracy is documented with estimator assumptions and reproducible benchmarks; it is not treated as an implementation theorem or a query-correctness invariant.
+Full `PostingList` values are not generally idempotent or commutative because collision policies can add scores and select one side's fields. Boolean laws and optimizer idempotence therefore apply to membership-only trees, while score-bearing and decorated branches remain distinct.
 
-## Data flow at a glance
+Planner cardinalities are estimates used for cost decisions. Sampling error and accuracy claims belong to estimator assumptions and reproducible benchmark evidence rather than query-correctness invariants.
+
+## Unified SQL planning and execution
+
+Every compiled statement follows `Statement -> UnifiedPlan -> plan-native optimizer -> UnifiedPlanExecutor`. There is no second top-level row dispatcher that bypasses the unified executor.
 
 ```mermaid
 flowchart LR
-    SQL["SQL string"] --> Parse["uqa-sql::compile"]
+    SQL["SQL string"] --> Parse["libpg_query and uqa-sql"]
     Parse --> Lower["UnifiedPlan lowering"]
-    Lower --> PlanOpt["plan-native optimizer"]
-    PlanOpt --> Unified["UnifiedPlanExecutor"]
-    Unified --> Query["QueryPlan / ScalarExpr"]
-    Unified --> Command["physical command plans"]
+    Lower --> Optimize["Plan-native optimizer"]
+    Optimize --> Execute["UnifiedPlanExecutor"]
+    Execute --> Query["QueryPlan and ScalarExpr"]
+    Execute --> Command["Physical command plans"]
     Query --> Access{"AccessPathPlan"}
-    Access -->|row| Row["relational physical operators"]
-    Access -->|hybrid| Hybrid["posting candidates + scalar residual"]
-    Access -->|operator| IR["OperatorTree"]
-    Hybrid --> IR
-    IR --> Optimize["QueryOptimizer (10 passes)"]
-    Optimize --> Execute["PlanExecutor + EngineDriver"]
-    Execute --> Output["OperatorOutput"]
-    Output --> Posting["PostingList"]
-    Output --> Graph["GraphPostingList"]
-    Output --> Generalized["GeneralizedPostingList"]
-    Row --> Result["SQLResult"]
+    Access -->|row| Row["Relational pipeline"]
+    Access -->|hybrid| Hybrid["Posting candidates plus residual"]
+    Access -->|operator| Tree["OperatorTree"]
+    Tree --> TreeOpt["QueryOptimizer, 10 passes"]
+    TreeOpt --> Driver["PlanExecutor and EngineDriver"]
+    Row --> Result["SQL result boundary"]
+    Hybrid --> Result
+    Driver --> Result
     Command --> Result
-    Posting --> Result
-    Graph --> Result
-    Generalized --> Result
 ```
 
-`EngineDriver` exhaustively dispatches every concrete `OperatorTree` variant, including graph traversal and pattern matching, joins and centrality, aggregation, progressive fusion, and deep fusion. Join output remains a `GeneralizedPostingList`; it is not assigned synthetic scalar ids, so tuple identity survives subsequent tuple-support operations. Graph output remains a `GraphPostingList`, so homogeneous graph union/intersection use explicit subgraph set policies. A graph result combined with an ordinary SQL document predicate receives an explicit `EncodeGraphPosting` Phi-codec node; heterogeneous set operators never silently coerce carriers. Deep-layer parameters and progressive-fusion gating are explicit IR data, and weighted RPQ execution evaluates the stored path predicate rather than treating its selectivity estimate as a score. Physical failures propagate through `PlanExecutor` as errors, and unknown opaque operators fail explicitly.
+The relational tree owns CTEs, set operations, joins, values and function sources, subqueries, filters, arithmetic projections, aggregates, windows, ordering, distinctness, and limits. INSERT, UPDATE, DELETE, and MERGE own physical scalar, source, conflict, CTE, and returning plans rather than retaining parser statements.
 
-A score-ordered `LIMIT` over one field-bound text leaf is planned as a physical `TextTopKPlan`. The planner chooses exact WAND by default and Block-Max WAND only when every non-empty query posting has persisted bounds whose fingerprint matches the active BM25 parameters and field statistics. Duplicate query-term occurrences remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. If a write invalidates blocks after planning, execution falls back to exact WAND rather than consuming stale bounds. Boolean and fusion parents do not receive this pushdown because truncating a child would change their carrier.
+`ScalarExpr` is the executable scalar IR at relational and DML expression sites. Scalar subqueries point to owned `QueryPlan` slots and run through the current physical query scope, while query blocks execute directly from `QueryBlockPlan` without reconstructing a `SelectStmt`.
 
-`Engine::sql` remains the compatibility API that returns a fully materialized
-`SQLResult`. Large consumers can use `Engine::sql_cursor` or
-`Engine::sql_columnar`: the query is materialized through `SharedSpill` under
-`work_mem`, the statement snapshot commits, and the returned cursor yields
-schema-ordered `ColumnarBatch` values. This bounds retained result memory.
-Duplicate schema labels remain visible as separate column slots, but the
-current map-backed physical row carrier cannot preserve different values for
-duplicate labels; that requires a future positional physical row contract.
-This is not a claim that the physical operator pipeline is vectorized;
-internal operators still use row batches, and blocking operators still
-spill/materialize when their semantics require it.
+Prepared statements and stored views retain optimized plans. The exact single-statement cache retains parsed and lowered plans, in-memory read-only calls can reuse optimized plans until relevant state changes, and persistent calls optimize after pinning the current storage snapshot.
 
-The first `QueryOptimizer` pass applies idempotence and absorption through address-independent structural equivalence. It restricts those identities to membership-only subtrees whose execution emits default payloads. Score-bearing and decorated operators are deliberately excluded: `PostingList` payload merges add colliding scores and merge payload fields, so removing a duplicate there would change an observable `_score` or carrier value.
+The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered.
 
-`OperatorTree` is a child access algebra, not the container for every SQL semantic. Arithmetic, subqueries, windows, and row mutations are represented by `ScalarExpr`, `QueryPlan`, and physical command nodes in the enclosing `UnifiedPlan`; retrieval, graph, join, centrality, and fusion nodes use `OperatorTree` where its posting-list or tuple carrier is the correct representation. The plan-native optimizer sees the complete relational/scalar plan and chooses row, operator-capable, or hybrid access after lowering. Every successfully compiled SQL form enters the same exhaustive `UnifiedPlanExecutor`, so this representation choice is not an execution bypass.
+## OperatorTree access algebra
 
-Relational/DML parser expressions, DML statements, and `SelectStmt` values end at lowering. Scalar subqueries use owned `QueryPlan` slots, query blocks execute directly without rebuilding an AST carrier, and CTE, view, prepared, and EXPLAIN bodies remain plan children. Catalog/procedural DDL keeps its typed command data, but it cannot re-enter a separate SQL executor.
+`OperatorTree` is the specialized child algebra for posting-list, graph, scoring, fusion, and cross-paradigm access paths. Relational arithmetic, windows, subqueries, and row mutations remain in the enclosing `UnifiedPlan` instead of being distorted into document-id operators.
 
-The plan-native optimizer flattens reorderable INNER JOIN regions, obtains live row/column statistics from the engine, and materializes the DPccp order without crossing outer/lateral boundaries. DPccp costs equijoins using the physically available hash-join cost, retains `Hash` on the materialized `SourcePlan`, and physical lowering rejects the plan if its equality keys cannot be recovered; an unavailable index join is never used to influence the order. An unreordered clean equality between left/right qualified columns also selects `HashJoin`, while other predicates select `NestedLoopJoin`. Both consume the left child as batches, store the right child in `IndexedSpill`, spill output through `SpillBuffer`, and keep RIGHT/FULL match flags on disk. The hash index starts in memory and migrates to exact disk buckets when `work_mem` is exceeded. See [`crates/uqa-execution/src/join.rs`](../../crates/uqa-execution/src/join.rs) and the physical construction in [`crates/uqa-engine/src/sql/from_rows.rs`](../../crates/uqa-engine/src/sql/from_rows.rs).
+Every concrete tree follows `OperatorTree -> QueryOptimizer -> PlanExecutor -> EngineDriver`. The driver match is exhaustive, unknown opaque kinds fail explicitly, and filter or physical execution errors propagate instead of becoming empty results.
 
-## Inference and persistence
+The first optimizer pass performs idempotence and absorption through address-independent structural equivalence. It restricts those rewrites to membership-only subtrees whose execution emits default payloads, so duplicate scored terms and decorated operands keep their observable score effects.
 
-- `uqa-engine` keeps a session-local `MemoryGraphStore` cache for named graphs, but a persistent engine restores and atomically publishes graph definitions, vertices, edges, memberships, and path indexes through the catalog. Graph SQL functions and `OperatorTree` reads use the fallible `Engine::graph_with` boundary; Cypher writes apply the same persist-before-publish discipline by mutating a candidate graph, persisting it, and only then publishing it to the session cache.
-- `uqa-ml` exposes serializable `DeepModel` specs, deep-fusion inference backends for dense, CNN, RNN, LSTM, graph, pooling, and attention layers, analytical `deep_learn`, and optional Apple MLX support through the official `mlx-c` system library when MLX development files are available. `uqa-engine` persists those models through the catalog's `_models` table and exposes the SQL adapters `deep_learn('model_name', 'training_table')` and `deep_predict('model_name')`.
-- `uqa-scoring::ParameterLearner` uses the same sigmoid calibration: it updates `alpha` and `beta` with SGD on logistic loss and, when enabled, tracks `base_rate` with a positive-label-rate EMA.
-- `uqa-engine` persists typed `VectorCalibrationModel` JSON through the scoring-parameter catalog. Every model carries schema/model versions plus exact corpus, index, embedding model, dimensions, and candidate-K provenance. `calibrated_vector_search_with_model` checks that target and the live physical index before applying the fixed transform; the compatibility SQL function `calibrated_vector_match` remains a query-pool score transform.
+Ordinary, aggregation, fusion, and deep-fusion nodes produce `PostingList`; graph nodes retain `GraphPostingList` through homogeneous graph set operations; graph/document combinations insert an explicit Phi codec boundary; and join nodes preserve tuples as `GeneralizedPostingList`.
 
-## Parity, IR quality, and benchmarks
+## Relational physical execution
 
-- SQL golden harness — `crates/uqa-engine/tests/sql_golden.rs`, fixture at `tests/parity/sql_golden_fixture.json`.
-- BEIR-style relevance gate — `crates/uqa-engine/tests/beir_fixture.rs`, fixture at `tests/parity/beir_fixture.json`. Reads the corpus, graded judgments, and the `min_ndcg` / `min_map` floors directly from JSON so swapping in a real BEIR dataset is a file replacement. Format spec: [`docs/design/parity.md`](parity.md).
-- IR metrics — `dcg_at_k`, `ndcg_at_k`, `average_precision_at_k`, `mean_average_precision_at_k` in `uqa-scoring::metrics`.
-- Calibration metrics and uncertainty — reliability bins, ECE, Brier, log-loss, deterministic bootstrap confidence intervals, and validation-to-held-out threshold transfer in `uqa-scoring`.
-- Vector calibration gate — `crates/uqa-scoring/tests/vector_calibration_contract.rs`, versioned manifest at `tests/parity/vector_calibration_fixture.json`; records the target population, seed, bootstrap count/confidence, model provenance, candidate-K drift ceilings, and held-out metric floors/ceilings.
-- Criterion benches:
-  - `cargo bench -p uqa-core    --bench posting_list`
-  - `cargo bench -p uqa-scoring --bench bm25`
-  - `cargo bench -p uqa-scoring --bench calibration`
-  - `cargo bench -p uqa-engine  --bench sql_e2e`
-  - `cargo bench -p uqa-engine  --bench sql_1m`
-  - `cargo bench -p uqa-engine  --bench knn`
-  - `cargo bench -p uqa-engine  --bench join`
-  - `cargo bench -p uqa-graph   --bench rpq`
+Relational operators use pull-based batches, but the internal physical row carrier is still dynamic and row-oriented rather than a fully vectorized typed-column engine. This is an intentional current boundary, not a claim of DuckDB-style vectorization.
 
-## CLI
+Filters can compile projected predicates once and evaluate positional values without rebuilding string-keyed row maps. Analytical aggregates use streaming accumulator state, low-cardinality adaptive grouping, compiled projected inputs, and compact partial-state spill instead of retaining and sorting every input value.
 
-`usql` (built from `uqa-cli`) is a multi-line REPL: `--db <path>` opens persistent storage, `-c <sql>` executes and exits, and positional script files run before the REPL when stdin is interactive. Statement history persists to `$UQA_HISTORY` or the default `$HOME/.cognica/uqa/.usql_history`; `\history` dumps the buffer and `\history clear` deletes it. Interactive sessions add readline editing, history suggestions, backslash-command completion, table / foreign table / column completion from the live engine, and syntax highlighting. UQA function names are not duplicated in the CLI; the completer and highlighter ask `uqa_sql::registry` for registered SQL functions, so adding a function to the compiler registry makes it visible to the shell. Meta commands include `\?`, `\dt`, `\d`, `\di`, `\dF`, `\dS`, `\dg`, `\ds`, `\stats`, `\x`, `\o`, `\timing`, `\reset`, `\q`, plus migration and engine-switching helpers (`\open`, `\new`, `\where`, `\run`, `\migrate-python-db`).
+The optimizer propagates ordering only through operations that preserve the relevant expression prefix. Primary-key document scans can therefore avoid redundant output sorts, while a projection that overwrites an ordered expression invalidates that ordering metadata.
+
+Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization use disk-backed structures after `work_mem` is exceeded. Hash joins migrate exact build keys to disk, retain RIGHT/FULL match state outside unbounded memory, and spill output through the same execution layer.
+
+`Engine::sql` returns a fully materialized `SQLResult`. `Engine::sql_cursor` and `Engine::sql_columnar` seal the result through `SharedSpill`, release the statement snapshot, and yield schema-ordered `ColumnarBatch` values; a uniquely owned in-memory cursor moves batches instead of cloning them, while shared CTE readers remain repeatable.
+
+Duplicate schema labels remain visible as distinct column slots at the columnar boundary, but the current map-backed physical row carrier cannot preserve two different values under the same label. Supporting that case throughout execution requires a future positional row contract.
+
+## Join planning
+
+The plan-native optimizer flattens reorderable INNER JOIN regions, reads live row and column statistics, and materializes a DPccp order without crossing outer or lateral boundaries.
+
+DPccp costs equijoins using the physically available hash-join strategy and retains that strategy in the materialized plan. Physical lowering rejects a hash plan when equality keys cannot be recovered, and an unavailable index join is never allowed to influence the selected order.
+
+Clean equality predicates between left and right qualified columns select hash join; other predicates select nested-loop join. Both consume their left input as batches, use bounded storage for the right input and output, and preserve the required outer-join semantics.
+
+## Text scoring and exact top-K
+
+Text scoring keeps raw BM25, evidence logits, prior logits, and posterior probabilities in distinct types. The legacy composite-prior transform remains explicitly named so it cannot be confused with query-level Bayesian BM25 calibration.
+
+For a score-ordered `LIMIT` over one field-bound text leaf, the planner creates a physical `TextTopKPlan`. It chooses exact WAND by default and Block-Max WAND only when every non-empty posting has persisted bounds whose fingerprint matches active BM25 parameters and field statistics.
+
+Duplicate query terms remain separate cursors, document lengths and statistics stay field-scoped, and Bayesian BM25 finalizes the complete raw term sum once. A write invalidates persisted block bounds atomically, and execution falls back to exact WAND if validity changes after planning.
+
+Boolean or fusion parents do not receive text top-K pushdown because truncating a child can change the parent carrier and result. `Engine::search_profiled` reports the algorithm, candidate and scored counts, skip rate, cursor advances, and latency for engine-level benchmarks.
+
+## Fusion and vector calibration
+
+Exact `BayesianEvidenceFusion` adds signed likelihood-ratio evidence and one explicit prior. Robust positive-evidence pooling is a separately named ranking heuristic with gating, confidence scaling, and optional adaptive weights; it does not claim exact posterior calibration.
+
+Vector calibration models carry schema and model versions plus corpus, index, embedding model, dimensions, and candidate-K provenance. Model-based vector search validates that provenance before applying a fixed transform, while the compatibility query-pool operator remains explicitly unsupervised and query-local.
+
+Vector fields begin with exact brute-force search and can be upgraded explicitly to IVF or HNSW. These are distinct physical implementations and catalog identities rather than aliases; their construction, approximation, persistence, and mutation contracts are specified in [`vector-indexes.md`](vector-indexes.md).
+
+Calibration quality is evaluated on held-out labels with reliability, ECE, Brier, log-loss, deterministic bootstrap confidence intervals, threshold transfer, and candidate-K drift gates. Unlabeled percentile transforms are not described as identified probability models.
+
+## Graph model
+
+`uqa-graph` provides memory and SQLite graph stores, named graph workspaces, graph pattern matching, RPQ parsing, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas.
+
+`GraphPostingList` requires graph payload keys to be contained in the underlying document support. Union, intersection, difference, graph-name conflicts, and overlapping subgraphs use explicit policies instead of inheriting generic payload precedence accidentally.
+
+The Phi representation is a versioned lossless codec between `GraphPostingList` and reserved posting payload fields, not a claim that arbitrary graphs and document sets are isomorphic. Object-only representation transforms are named adapters rather than categorical functors unless identity and composition laws are implemented and tested.
+
+RPQ is treated as regular-language recognition over an automaton-product traversal. Parser, NFA, and DFA limits bound state expansion, and weighted RPQ evaluates the stored path predicate rather than reusing a selectivity estimate as a score.
+
+## SQL surface and extensions
+
+The SQL compiler is PostgreSQL-oriented and currently covers schemas and `search_path`, DDL and DML, constraints and referential actions, MERGE, CTAS, recursive CTEs, subqueries, LATERAL joins, window frames, grouping sets, sequences, views, prepared statements, JSON/JSONB, arrays, temporal and numeric types, `BYTEA`, analyzer DDL, foreign server/table DDL, SQL and PL/pgSQL routines, and virtual `information_schema` and `pg_catalog` views.
+
+Retrieval and graph functions include text and Bayesian match, KNN, exact and robust fusion, multi-field and staged retrieval, calibration, sparse thresholds, highlighting, facets, graph lifecycle and traversal, RPQ, centrality, Cypher, and deep model training and inference.
+
+Embedding applications can register Rust scalar, table, and aggregate functions. Scalar callbacks participate in projection and filtering, table callbacks stream from `FROM`, aggregates participate in grouping and ordered aggregation, and explicit callback properties drive transaction classification and optimization safety.
+
+`uqa-fdw` defines foreign servers, tables, predicates, projection and limit pushdown, and handler contracts. DuckDB, Arrow IPC, and in-memory handlers plug into this boundary without giving the SQL compiler concrete backend dependencies.
+
+## Persistence and storage abstraction
+
+`Engine::new` creates an in-memory engine. `Engine::open` uses the persistent SQLite-backed catalog, while encrypted and compressed constructors select SQLCipher or the custom compressed VFS path.
+
+Persistent catalogs store schemas, documents, postings, inverted and vector index metadata, tensors, analyzers, named graphs and memberships, path indexes, scoring parameters, foreign definitions, models, sequences, views, catalog indexes, SQL routines, and column statistics. Reopen attaches persisted search and vector structures lazily rather than rebuilding indexes merely because a database opened.
+
+`CatalogFacade` and `PersistentStorageBackend` are the engine-facing metadata and storage boundaries. `Engine::from_persistent_backends` composes implementations without synthesizing a hidden SQLite session, and the backend-neutral key/value path implements the same document, inverted-index, vector-index, catalog, and transaction contracts.
+
+`KeyValueStore` provides point reads, ordered prefix scans, bounded key-only paging, atomic batches, and range deletion. Binary keys use unambiguous segment encoding and big-endian numeric ids so lexicographic iteration preserves identity and document order.
+
+Statistics are invalidated by writes and schema changes and recomputed lazily when planning or introspection requires them. `ANALYZE` remains the eager refresh mechanism.
+
+## Engine state and transactions
+
+`Engine` is a coordinator over six ownership domains: storage context, durable catalog state, session context, runtime extensions, epoch coordination, and query runtime. The detailed sharing and lock contract is documented in [`engine-state-ownership.md`](engine-state-ownership.md).
+
+Each logical session owns SQLite transaction affinity, variables, search path, prepared plans, cancellation, sequence state, statement cache, and statement gate. Sibling sessions share published generation counters and selected runtime extensions, not mutable transaction state.
+
+Multi-store writes enter one statement or explicit transaction. Candidate catalog, graph, model, index, and cache state is persisted before publication, and rollback restores all transaction-owned registries rather than leaving a partially visible in-memory update.
+
+## Storage security
+
+SQLCipher is the recommended encrypted backend for security-sensitive deployments. Its page format and integrity behavior have broader deployment and review history than the custom compressed container.
+
+Compressed encrypted containers use authenticated format v2, reject unauthenticated v1 containers, bind chunk and commit metadata through AEAD, and chain committed states. Detecting replacement by an older but internally valid whole-file snapshot requires the external exact-state anchor API described in [`compressed-vfs-security.md`](compressed-vfs-security.md).
+
+## ML, protocol, and bindings
+
+`uqa-ml` owns serializable model specifications, training data, inference backends, analytical `deep_learn`, and `deep_predict`. CPU inference supports dense, convolutional, recurrent, graph, pooling, normalization, dropout, softmax, and attention layers; the optional `mlx` feature implements the same backend boundary through Apple's `mlx-c` library.
+
+`uqa-pg-wire` only parses and encodes PostgreSQL v3 protocol messages. Socket ownership, scheduling, TLS, authentication storage, planning, and SQL execution remain responsibilities of an embedding server.
+
+`uqa-api` provides a fluent `QueryBuilder`, while `uqa-python`, `uqa-node`, and `uqa-wasm` expose the engine to Python, Node.js, and Emscripten browser environments. Bindings reuse the engine boundary instead of maintaining independent query semantics.
+
+## CLI boundary
+
+`usql` is a multi-line shell over `uqa-engine`. It supports in-memory and persistent sessions, command and script execution, durable history, completion from live schema and SQL registries, syntax highlighting, output redirection, timing, introspection, database switching, and Python-catalog migration.
+
+The CLI does not duplicate the UQA SQL function list. Completion and highlighting read the compiler registry, so a newly registered compiler function becomes visible without a parallel CLI inventory.
+
+## Verification and benchmark contracts
+
+Correctness is covered by unit, integration, property, differential, golden, fuzz-style, storage-reopen, transaction, compatibility, and exactness tests. Algebraic laws are tested on their declared carriers, WAND/BMW top-K is compared with exhaustive scoring, and graph codec tests preserve complete payloads.
+
+Parity fixtures are versioned and described in [`parity.md`](parity.md). The benchmark parity manifest pins the source snapshot, file hashes, named cases, and Rust evidence mappings used to compare the predecessor implementation with this workspace.
+
+Criterion benchmarks cover storage, scoring, fusion, operators, planning, SQL, graph, retrieval, and analytical execution. Published measurements are internal regression baselines unless independently reproduced, and the methodology, provenance artifacts, ratio gates, and remaining execution-model differences are documented in [`performance.md`](performance.md).
+
+The all-workspace benchmark command is a compile gate, not a published performance run. Focused runners define their own fixture, feature set, warmup, sample count, validation, and provenance so results from different executable hashes are not mixed.
+
+## Architecture change checklist
+
+- Put syntax-only concerns in `uqa-sql`; concrete storage, scoring, graph, or operator decisions belong at the engine/planner boundary.
+- Choose the correct carrier before adding a rewrite and state which equality and merge laws the rewrite assumes.
+- Add runtime dependencies only with a matching update to the executable workspace dependency policy.
+- Keep new mutable state in one documented ownership domain and define its transaction, session-sharing, invalidation, and publication rules.
+- Give blocking structures a `work_mem` accounting model and a tested spill or explicit bounded-input contract.
+- Persist candidate state before publishing caches and propagate failures instead of returning empty results.
+- Add property or differential tests for algebraic, optimizer, top-K, codec, or storage invariants.
+- Record performance claims as reproducible benchmark evidence with provenance and limitations.
 
 ## Where to read next
 
-- Document-set algebra and posting projection — `crates/uqa-core/tests/algebra.rs`
-- Lossless graph Phi encoding — `crates/uqa-graph/tests/algebra.rs`
-- Cypher parsing — `crates/uqa-graph/src/cypher/parser.rs`
-- SQL compilation — `crates/uqa-sql/src/compiler.rs`
-- Hash join — [`crates/uqa-execution/src/join.rs`](../../crates/uqa-execution/src/join.rs) and its SQL physical lowering in [`crates/uqa-engine/src/sql/from_rows.rs`](../../crates/uqa-engine/src/sql/from_rows.rs)
-- Engine entry — `crates/uqa-engine/src/lib.rs`
-- Parity fixtures — [`docs/design/parity.md`](parity.md)
-- Master plan — `docs/plans/0001-uqa-rs-implementation-plan.md`
+| Topic | Document or implementation |
+| --- | --- |
+| Design document index | [`README.md`](README.md) |
+| State ownership and locking | [`engine-state-ownership.md`](engine-state-ownership.md) |
+| Compressed encrypted storage | [`compressed-vfs-security.md`](compressed-vfs-security.md) |
+| Key/value migration design | [`kv-storage-migration.md`](kv-storage-migration.md) |
+| Parity fixtures | [`parity.md`](parity.md) |
+| Performance evidence | [`performance.md`](performance.md) |
+| Staged implementation plan | [`../plans/0001-uqa-rs-implementation-plan.md`](../plans/0001-uqa-rs-implementation-plan.md) |
+| Document-set algebra tests | [`../../crates/uqa-core/tests/algebra.rs`](../../crates/uqa-core/tests/algebra.rs) |
+| Query optimizer | [`../../crates/uqa-planner/src/query_optimizer.rs`](../../crates/uqa-planner/src/query_optimizer.rs) |
+| SQL compiler | [`../../crates/uqa-sql/src/compiler.rs`](../../crates/uqa-sql/src/compiler.rs) |
+| Engine entry point | [`../../crates/uqa-engine/src/lib.rs`](../../crates/uqa-engine/src/lib.rs) |
