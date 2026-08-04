@@ -47,8 +47,10 @@ impl SQLiteDocumentStore {
             ))?
             .execute(params![self.table, sqlite_doc_id])?;
             c.prepare_cached(
-                "INSERT OR REPLACE INTO _documents (table_name, doc_id, body)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO _documents (table_name, doc_id, body)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT (table_name, doc_id)
+                 DO UPDATE SET body = excluded.body",
             )?
             .execute(params![self.table, sqlite_doc_id, body])?;
             for (field, bytes) in blobs {

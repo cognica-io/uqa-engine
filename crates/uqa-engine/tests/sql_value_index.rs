@@ -269,6 +269,220 @@ fn persistent_reopen_keeps_index_semantics() {
     assert_all_predicates(&engine);
 }
 
+fn seed_engine_meta(path: &std::path::Path) {
+    let engine = Engine::open(path).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE engine_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            &[],
+        )
+        .unwrap();
+    for index in 1..=20 {
+        engine
+            .sql(
+                "INSERT INTO engine_meta (key, value) VALUES ($1, $2)",
+                &[
+                    uqa_sql::SQLParam::scalar(Value::Str(format!("key-{index}"))),
+                    uqa_sql::SQLParam::scalar(Value::Str(format!("value-{index}"))),
+                ],
+            )
+            .unwrap();
+    }
+}
+
+fn simulate_legacy_btree_inconsistency(path: &std::path::Path) {
+    // Recreate both historical structural failure shapes: a dangling posting
+    // after delete and a missing posting after insert.
+    // The schema version is lowered only to model a database last written by
+    // the pre-atomic persistent-index implementation.
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute_batch(
+            "DROP TRIGGER IF EXISTS _btree_documents_delete;
+             DROP TRIGGER IF EXISTS _btree_entries_document_insert;
+             DROP TRIGGER IF EXISTS _btree_entries_document_update;
+             DROP TRIGGER IF EXISTS _btree_documents_doc_id_update;
+             CREATE TABLE _btree_repair_audit (operation TEXT NOT NULL);
+             CREATE TRIGGER test_btree_repair_delete
+                 AFTER DELETE ON _btree_index_entries
+                 BEGIN
+                     INSERT INTO _btree_repair_audit(operation) VALUES ('delete');
+                 END;
+             CREATE TRIGGER test_btree_repair_insert
+                 AFTER INSERT ON _btree_index_entries
+                 BEGIN
+                     INSERT INTO _btree_repair_audit(operation) VALUES ('insert');
+                 END;",
+        )
+        .unwrap();
+    let doc_id = |key: &str| -> i64 {
+        connection
+            .query_row(
+                "SELECT doc_id FROM _documents
+                 WHERE table_name = 'public.engine_meta'
+                   AND json_extract(body, '$.key') = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    connection
+        .execute(
+            "DELETE FROM _documents
+             WHERE table_name = 'public.engine_meta' AND doc_id = ?1",
+            [doc_id("key-19")],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM _btree_index_entries
+             WHERE table_name = 'public.engine_meta'
+               AND field = 'key' AND doc_id = ?1",
+            [doc_id("key-17")],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE _metadata SET value = '20' WHERE key = 'schema_version'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute("DELETE FROM _btree_repair_audit", [])
+        .unwrap();
+}
+
+fn assert_repaired_queries(path: &std::path::Path) {
+    let engine = Engine::open(path).unwrap();
+    let deleted = engine
+        .sql("SELECT value FROM engine_meta WHERE key = 'key-19'", &[])
+        .unwrap();
+    assert!(deleted.rows.is_empty());
+    for index in [17, 18] {
+        let result = engine
+            .sql(
+                &format!("SELECT value FROM engine_meta WHERE key = 'key-{index}'"),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            result.rows[0].get("value"),
+            Some(&Value::Str(format!("value-{index}")))
+        );
+    }
+}
+
+fn assert_sparse_repair(path: &std::path::Path) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let document_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM _documents
+             WHERE table_name = 'public.engine_meta'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        persisted_index_count(path, "engine_meta", "key"),
+        document_count
+    );
+    let audit_connection = rusqlite::Connection::open(path).unwrap();
+    let mut audit_statement = audit_connection
+        .prepare(
+            "SELECT operation, COUNT(*) FROM _btree_repair_audit
+             GROUP BY operation ORDER BY operation",
+        )
+        .unwrap();
+    let repaired_rows = audit_statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        repaired_rows,
+        vec![("delete".into(), 1), ("insert".into(), 1)]
+    );
+}
+
+fn assert_delete_guard_without_foreign_keys(path: &std::path::Path) {
+    // The v21 delete guard is independent of SQLite's optional foreign-key
+    // setting, so even a direct storage-level delete cannot leave the exact
+    // dangling-posting state from the crash report.
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let cascaded_doc_id: i64 = connection
+        .query_row(
+            "SELECT doc_id FROM _documents
+             WHERE table_name = 'public.engine_meta'
+               AND json_extract(body, '$.key') = 'key-16'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM _documents
+             WHERE table_name = 'public.engine_meta' AND doc_id = ?1",
+            [cascaded_doc_id],
+        )
+        .unwrap();
+    let dangling: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM _btree_index_entries
+             WHERE table_name = 'public.engine_meta' AND doc_id = ?1",
+            [cascaded_doc_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(dangling, 0);
+}
+
+fn remove_key_posting(path: &std::path::Path, key: &str) {
+    // If an external writer deletes a posting itself, loading the durable
+    // index still verifies its document-id support and rebuilds the in-memory
+    // accelerator from authoritative documents instead of returning a false
+    // negative or surfacing an invalid access-path document.
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute(
+            "DELETE FROM _btree_index_entries
+             WHERE table_name = 'public.engine_meta'
+               AND field = 'key'
+               AND doc_id = (
+                   SELECT doc_id FROM _documents
+                    WHERE table_name = 'public.engine_meta'
+                      AND json_extract(body, '$.key') = ?1
+               )",
+            [key],
+        )
+        .unwrap();
+}
+
+#[test]
+fn schema_21_rebuilds_historically_inconsistent_btree_postings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy-inconsistent-btree.db");
+    seed_engine_meta(&path);
+    simulate_legacy_btree_inconsistency(&path);
+    assert_repaired_queries(&path);
+    assert_sparse_repair(&path);
+    assert_delete_guard_without_foreign_keys(&path);
+    remove_key_posting(&path, "key-18");
+
+    let engine = Engine::open(&path).unwrap();
+    let repaired = engine
+        .sql("SELECT value FROM engine_meta WHERE key = 'key-18'", &[])
+        .unwrap();
+    assert_eq!(
+        repaired.rows[0].get("value"),
+        Some(&Value::Str("value-18".into()))
+    );
+}
+
 #[test]
 fn persistent_btree_tracks_rollback_savepoint_and_truncate() {
     let dir = tempfile::tempdir().unwrap();

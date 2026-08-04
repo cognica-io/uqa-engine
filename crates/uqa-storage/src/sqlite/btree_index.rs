@@ -130,6 +130,33 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
+    pub fn repairs(&self) -> Result<Vec<(String, String)>> {
+        self.conn.with(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT table_name, field FROM _btree_index_repairs ORDER BY table_name, field",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut repairs = Vec::new();
+            for row in rows {
+                repairs.push(row?);
+            }
+            Ok(repairs)
+        })
+    }
+
+    pub fn clear_repair(&self, table: &str, field: &str) -> Result<()> {
+        self.conn.with(|conn| {
+            conn.execute(
+                "DELETE FROM _btree_index_repairs
+                 WHERE table_name = ?1 AND field = ?2",
+                params![table, field],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Load a complete persisted index. `None` means this field has not been
     /// built yet and the engine must backfill it from the document store once.
     pub fn load(&self, table: &str, field: &str) -> Result<Option<Vec<(DocId, Value)>>> {
@@ -165,30 +192,96 @@ impl SQLiteBTreeIndexStore {
 
     /// Atomically replace the complete persisted posting set and mark it built.
     pub fn replace(&self, table: &str, field: &str, values: &[(DocId, Value)]) -> Result<()> {
-        let encoded = values
+        self.replace_many(table, &[(field, values)])
+    }
+
+    /// Apply a sparse structural repair while retaining every valid posting.
+    /// All ids and values are encoded before opening the savepoint so a range
+    /// or serialization error cannot leave half of the delta applied.
+    pub fn repair(
+        &self,
+        table: &str,
+        field: &str,
+        stale_doc_ids: &[DocId],
+        missing: &[(DocId, Value)],
+    ) -> Result<()> {
+        let stale_doc_ids = stale_doc_ids
+            .iter()
+            .map(|doc_id| encode_doc_id(*doc_id))
+            .collect::<Result<Vec<_>>>()?;
+        let missing = missing
             .iter()
             .map(|(doc_id, value)| Ok((encode_doc_id(*doc_id)?, encode_value(value)?)))
             .collect::<Result<Vec<_>>>()?;
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             tx.execute(
-                "DELETE FROM _btree_index_entries
-                 WHERE table_name = ?1 AND field = ?2",
-                params![table, field],
-            )?;
-            tx.execute(
                 "INSERT OR IGNORE INTO _btree_indexes (table_name, field)
                  VALUES (?1, ?2)",
                 params![table, field],
             )?;
             {
-                let mut stmt = tx.prepare_cached(
+                let mut delete = tx.prepare_cached(
+                    "DELETE FROM _btree_index_entries
+                     WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3",
+                )?;
+                for doc_id in &stale_doc_ids {
+                    delete.execute(params![table, field, doc_id])?;
+                }
+            }
+            {
+                let mut insert = tx.prepare_cached(
+                    "INSERT INTO _btree_index_entries
+                       (table_name, field, doc_id, value_json)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (table_name, field, doc_id)
+                     DO UPDATE SET value_json = excluded.value_json",
+                )?;
+                for (doc_id, value_json) in &missing {
+                    insert.execute(params![table, field, doc_id, value_json])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Atomically replace several complete posting sets for one table. Repair
+    /// paths commonly rebuild every indexed column together; one savepoint and
+    /// one set of prepared statements avoids repeating `SQLite` setup per field.
+    pub fn replace_many(&self, table: &str, indexes: &[(&str, &[(DocId, Value)])]) -> Result<()> {
+        let encoded = indexes
+            .iter()
+            .map(|(field, values)| {
+                let values = values
+                    .iter()
+                    .map(|(doc_id, value)| Ok((encode_doc_id(*doc_id)?, encode_value(value)?)))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((*field, values))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.conn.with_mut(|conn| {
+            let tx = conn.savepoint()?;
+            {
+                let mut delete = tx.prepare_cached(
+                    "DELETE FROM _btree_index_entries
+                     WHERE table_name = ?1 AND field = ?2",
+                )?;
+                let mut mark = tx.prepare_cached(
+                    "INSERT OR IGNORE INTO _btree_indexes (table_name, field)
+                     VALUES (?1, ?2)",
+                )?;
+                let mut insert = tx.prepare_cached(
                     "INSERT INTO _btree_index_entries
                        (table_name, field, doc_id, value_json)
                      VALUES (?1, ?2, ?3, ?4)",
                 )?;
-                for (doc_id, value_json) in &encoded {
-                    stmt.execute(params![table, field, doc_id, value_json])?;
+                for (field, values) in &encoded {
+                    delete.execute(params![table, field])?;
+                    mark.execute(params![table, field])?;
+                    for (doc_id, value_json) in values {
+                        insert.execute(params![table, field, doc_id, value_json])?;
+                    }
                 }
             }
             tx.commit()?;
@@ -284,6 +377,14 @@ mod tests {
     fn store() -> SQLiteBTreeIndexStore {
         let conn = ManagedConnection::open_in_memory().unwrap();
         let _catalog = Catalog::open(conn.clone()).unwrap();
+        conn.with(|connection| {
+            connection.execute_batch(
+                "INSERT INTO _documents (table_name, doc_id, body)
+                 VALUES ('messages', 1, '{}'), ('messages', 2, '{}');",
+            )?;
+            Ok(())
+        })
+        .unwrap();
         SQLiteBTreeIndexStore::new(conn)
     }
 
@@ -350,6 +451,71 @@ mod tests {
     }
 
     #[test]
+    fn sparse_repair_preserves_valid_postings() {
+        let store = store();
+        store
+            .replace(
+                "messages",
+                "public_id",
+                &[(1, Value::Str("m1".into())), (2, Value::Str("m2".into()))],
+            )
+            .unwrap();
+        let row_id_before: i64 = store
+            .conn
+            .with(|conn| {
+                Ok(conn.query_row(
+                    "SELECT rowid FROM _btree_index_entries
+                     WHERE table_name = 'messages'
+                       AND field = 'public_id' AND doc_id = 2",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        store
+            .conn
+            .with(|conn| {
+                conn.execute(
+                    "INSERT INTO _documents (table_name, doc_id, body)
+                     VALUES ('messages', 3, '{}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        store
+            .repair(
+                "messages",
+                "public_id",
+                &[1],
+                &[(3, Value::Str("m3".into()))],
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.load("messages", "public_id").unwrap(),
+            Some(vec![
+                (2, Value::Str("m2".into())),
+                (3, Value::Str("m3".into()))
+            ])
+        );
+        let row_id_after: i64 = store
+            .conn
+            .with(|conn| {
+                Ok(conn.query_row(
+                    "SELECT rowid FROM _btree_index_entries
+                     WHERE table_name = 'messages'
+                       AND field = 'public_id' AND doc_id = 2",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(row_id_after, row_id_before);
+    }
+
+    #[test]
     fn out_of_range_document_ids_fail_before_replacing_existing_entries() {
         let store = store();
         store
@@ -391,6 +557,11 @@ mod tests {
         store
             .conn
             .with(|conn| {
+                conn.execute(
+                    "INSERT INTO _documents (table_name, doc_id, body)
+                     VALUES ('messages', -1, '{}')",
+                    [],
+                )?;
                 conn.execute(
                     "INSERT INTO _btree_index_entries
                        (table_name, field, doc_id, value_json)

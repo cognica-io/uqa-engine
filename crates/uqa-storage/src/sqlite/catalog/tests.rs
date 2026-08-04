@@ -297,6 +297,95 @@ fn migration_20_repairs_only_hnsw_rows_backed_by_legacy_ivf_metadata() {
 }
 
 #[test]
+fn migration_21_schedules_only_invalid_btree_fields_and_installs_guards() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    drop(current);
+    connection
+        .with(|conn| {
+            conn.execute_batch(
+                "INSERT INTO _documents (table_name, doc_id, body)
+                     VALUES
+                     ('public.engine_meta', 1, '{\"key\":\"missing\"}'),
+                     ('public.clean', 1, '{\"key\":\"kept\"}');
+                 INSERT INTO _btree_indexes (table_name, field)
+                     VALUES
+                     ('public.engine_meta', 'key'),
+                     ('public.clean', 'key');
+                 INSERT INTO _btree_index_entries
+                     (table_name, field, doc_id, value_json)
+                     VALUES
+                     ('public.clean', 'key', 1,
+                      '{\"type\":\"Str\",\"value\":\"kept\"}');
+                 DROP TRIGGER IF EXISTS _btree_documents_delete;
+                 DROP TRIGGER IF EXISTS _btree_entries_document_insert;
+                 DROP TRIGGER IF EXISTS _btree_entries_document_update;
+                 DROP TRIGGER IF EXISTS _btree_documents_doc_id_update;
+                 UPDATE _metadata SET value = '20'
+                  WHERE key = 'schema_version';",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let _upgraded = Catalog::open(connection.clone()).unwrap();
+    connection
+        .with(|conn| {
+            let definitions: i64 =
+                conn.query_row("SELECT COUNT(*) FROM _btree_indexes", [], |row| row.get(0))?;
+            let entries: i64 =
+                conn.query_row("SELECT COUNT(*) FROM _btree_index_entries", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(definitions, 2);
+            assert_eq!(entries, 1);
+            let kept: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM _btree_indexes
+                  WHERE table_name = 'public.clean' AND field = 'key'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(kept, 1);
+            let pending: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM _btree_index_repairs
+                  WHERE table_name = 'public.engine_meta' AND field = 'key'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(pending, 1);
+
+            let guards: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                  WHERE type = 'trigger' AND name IN (
+                      '_btree_documents_delete',
+                      '_btree_entries_document_insert',
+                      '_btree_entries_document_update',
+                      '_btree_documents_doc_id_update'
+                  )",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(guards, 4);
+
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
+            conn.execute(
+                "DELETE FROM _documents
+                  WHERE table_name = 'public.clean' AND doc_id = 1",
+                [],
+            )?;
+            let cascaded: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM _btree_index_entries
+                  WHERE table_name = 'public.clean' AND doc_id = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(cascaded, 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let _current = Catalog::open(mc.clone()).unwrap();
@@ -610,6 +699,8 @@ fn relation_namespace_migration_moves_btree_parent_and_entries_without_fk_cascad
                  );
                  INSERT INTO _btree_indexes(table_name, field)
                      VALUES ('docs', 'id');
+                 INSERT INTO _documents(table_name, doc_id, body)
+                     VALUES ('docs', 1, '{}');
                  INSERT INTO _btree_index_entries
                      (table_name, field, doc_id, value_json)
                      VALUES ('docs', 'id', 1, '{\"type\":\"Int\",\"value\":1}');",
@@ -666,6 +757,11 @@ fn table_and_column_rename_move_btree_children_without_fk_cascade() {
     catalog
         .conn
         .with(|conn| {
+            conn.execute(
+                "INSERT INTO _documents(table_name, doc_id, body)
+                 VALUES ('public.docs', 1, '{}')",
+                [],
+            )?;
             conn.execute(
                 "INSERT INTO _btree_indexes(table_name, field)
                  VALUES ('public.docs', 'id')",
