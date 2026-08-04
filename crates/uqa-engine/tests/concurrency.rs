@@ -27,11 +27,15 @@ fn build_engine() -> Arc<Engine> {
         .sql("CREATE INDEX docs_body_gin ON docs USING gin (body)", &[])
         .unwrap();
     let mut sql = String::from("INSERT INTO docs (id, body) VALUES ");
-    for i in 0..200 {
+    for i in 0_usize..200 {
         if i > 0 {
             sql.push_str(", ");
         }
-        let token = if i % 5 == 0 { "alpha" } else { "bravo" };
+        let token = if i.is_multiple_of(5) {
+            "alpha"
+        } else {
+            "bravo"
+        };
         write!(sql, "({i}, 'doc {i} body has {token} content')").unwrap();
     }
     engine.sql(&sql, &[]).unwrap();

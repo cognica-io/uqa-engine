@@ -202,7 +202,7 @@ pub(super) fn load_marked_document_blob(
 }
 
 pub(super) fn decode_f64_list_blob(bytes: &[u8]) -> SQLiteResult<Option<Value>> {
-    if bytes.len() % std::mem::size_of::<f64>() != 0 {
+    if !bytes.len().is_multiple_of(std::mem::size_of::<f64>()) {
         return Ok(None);
     }
     let count = bytes.len() / std::mem::size_of::<f64>();

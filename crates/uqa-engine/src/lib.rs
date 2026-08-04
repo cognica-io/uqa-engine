@@ -7,10 +7,9 @@
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores
-//! ([`Engine::new`]) or by `SQLite`, `SQLCipher`, and compressed `SQLite`
-//! containers ([`Engine::open`], [`Engine::open_encrypted`],
-//! [`Engine::open_compressed`], [`Engine::open_compressed_encrypted`]);
-//! the operator pipeline is identical across backends.
+//! ([`Engine::new`]), the `SQLite`/`SQLCipher` constructors, or a swappable
+//! [`uqa_storage::PersistentStorageProvider`]; the operator pipeline is
+//! identical across backends.
 //!
 //! # Public API surface
 //!
@@ -23,6 +22,8 @@
 //! - [`Engine::open_compressed`] - schema-neutral compressed `SQLite` VFS.
 //! - [`Engine::open_compressed_encrypted`] - compressed chunks encrypted
 //!   after compression.
+//! - [`Engine::from_persistent_provider`] - storage-neutral construction for
+//!   redb and application-defined providers, with backend-neutral sessions.
 //!
 //! Schema and table lifecycle:
 //! - [`Engine::create_table`] - register a table with declared columns.
@@ -113,13 +114,14 @@ use uqa_scoring::{
 };
 use uqa_sql::SQLError;
 use uqa_storage::{
-    document_store::Document, AnalyzerPhase, Catalog, CatalogFacade, CatalogIndexRow,
-    ColumnStatsInput, ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow,
-    HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
+    document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
+    ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow, HNSWIndex,
+    HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
-    RelationIdentity, SQLiteCompressedContainerAnchor, SQLiteStorageBackend, SequenceRow,
-    StorageBackendError, StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
+    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceRow, StorageBackendError,
+    StorageBackendResult, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
+    VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
@@ -324,13 +326,17 @@ struct TransactionDirtyState {
 struct TransactionFrame {
     storage_savepoint: Option<String>,
     read_only: bool,
-    savepoints: std::collections::BTreeSet<String>,
+    savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
-    session_savepoints: BTreeMap<String, SessionStateSnapshot>,
     data_snapshot: Option<EngineDataSnapshot>,
-    data_savepoints: BTreeMap<String, EngineDataSnapshot>,
     dirty_at_begin: TransactionDirtyState,
-    dirty_savepoints: BTreeMap<String, TransactionDirtyState>,
+}
+
+struct TransactionSavepoint {
+    name: String,
+    session_snapshot: SessionStateSnapshot,
+    data_snapshot: Option<EngineDataSnapshot>,
+    dirty: TransactionDirtyState,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback

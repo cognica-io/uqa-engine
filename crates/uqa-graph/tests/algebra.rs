@@ -21,13 +21,13 @@ fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
         let mut payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for id in ids {
             let mut fields = BTreeMap::from([("id".into(), Value::Int(id as i64))]);
-            if id % 2 == 0 {
+            if id.is_multiple_of(2) {
                 fields.insert(GRAPH_PHI_FIELD.into(), Value::Str(format!("user-{id}")));
             }
-            if id % 3 == 0 {
+            if id.is_multiple_of(3) {
                 fields.insert(GRAPH_PHI_VERTICES_FIELD.into(), Value::Null);
             }
-            if id % 5 == 0 {
+            if id.is_multiple_of(5) {
                 fields.insert(
                     GRAPH_PHI_EDGES_FIELD.into(),
                     Value::Map(BTreeMap::from([("edge".into(), Value::Int(id as i64))])),
@@ -41,14 +41,14 @@ fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
                     fields,
                 },
             ));
-            if id % 4 != 0 {
+            if !id.is_multiple_of(4) {
                 payloads.insert(
                     id,
                     GraphPayload {
                         subgraph_vertices: vec![id, u64::MAX - id, id],
                         subgraph_edges: vec![id * 10, id * 10],
                         graph_name: format!("graph-{id}"),
-                        score_override: (id % 2 == 0).then_some(id as f64 + 0.25),
+                        score_override: id.is_multiple_of(2).then_some(id as f64 + 0.25),
                     },
                 );
             }

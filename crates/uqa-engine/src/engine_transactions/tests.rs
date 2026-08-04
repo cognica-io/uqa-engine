@@ -32,16 +32,10 @@ fn implicit_read_transaction_rolls_back_an_unclassified_storage_write() {
     engine.begin_implicit_statement_transaction(true).unwrap();
     engine
         .storage
-        .sqlite_session
+        .catalog
         .as_ref()
         .unwrap()
-        .with(|connection| {
-            connection.execute(
-                "INSERT OR REPLACE INTO _metadata (key, value) VALUES ('hidden-write', 'x')",
-                [],
-            )?;
-            Ok(())
-        })
+        .set_metadata("hidden-write", "x")
         .unwrap();
 
     let error = engine.commit().unwrap_err().to_string();

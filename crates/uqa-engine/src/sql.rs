@@ -563,20 +563,20 @@ mod unified_plan_tests {
 
         let version_before_query = observer
             .storage
-            .sqlite_session
+            .backend
             .as_ref()
             .expect("persistent observer")
-            .data_version()
-            .expect("read SQLite data version");
+            .change_version()
+            .expect("read storage change version");
         observer.sql(query, &[]).expect("warm statement plan");
         assert_eq!(
             observer
                 .storage
-                .sqlite_session
+                .backend
                 .as_ref()
                 .expect("persistent observer")
-                .data_version()
-                .expect("read SQLite data version"),
+                .change_version()
+                .expect("read storage change version"),
             version_before_query,
             "a read-only statement persisted an alias-scoped value index"
         );
@@ -616,16 +616,16 @@ mod unified_plan_tests {
             Some(
                 observer
                     .epochs
-                    .seen_sqlite_data_version
+                    .seen_storage_change_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),
             observer
                 .storage
-                .sqlite_session
+                .backend
                 .as_ref()
                 .expect("persistent observer")
-                .data_version()
-                .expect("read SQLite data version"),
+                .change_version()
+                .expect("read storage change version"),
             "the completed read statement left its SQLite data version stale"
         );
         assert_eq!(observer.table_doc_count("items").expect("warm count"), 0);
@@ -640,11 +640,11 @@ mod unified_plan_tests {
             .load(std::sync::atomic::Ordering::Acquire);
         let data_version_before_rollback = observer
             .storage
-            .sqlite_session
+            .backend
             .as_ref()
             .expect("persistent observer")
-            .data_version()
-            .expect("read SQLite data version");
+            .change_version()
+            .expect("read storage change version");
         assert_eq!(
             observer
                 .epochs
@@ -658,7 +658,7 @@ mod unified_plan_tests {
             Some(
                 observer
                     .epochs
-                    .seen_sqlite_data_version
+                    .seen_storage_change_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),
             data_version_before_rollback,
@@ -690,11 +690,11 @@ mod unified_plan_tests {
         assert_eq!(
             observer
                 .storage
-                .sqlite_session
+                .backend
                 .as_ref()
                 .expect("persistent observer")
-                .data_version()
-                .expect("read SQLite data version"),
+                .change_version()
+                .expect("read storage change version"),
             data_version_before_rollback,
             "a rolled-back mutation changed SQLite's committed data version"
         );
@@ -711,7 +711,7 @@ mod unified_plan_tests {
             Some(
                 observer
                     .epochs
-                    .seen_sqlite_data_version
+                    .seen_storage_change_version
                     .load(std::sync::atomic::Ordering::Acquire)
             ),
             data_version_before_rollback,

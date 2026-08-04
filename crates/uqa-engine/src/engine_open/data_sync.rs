@@ -6,7 +6,7 @@
 
 //! Cross-session table-data epochs and physical cache refresh.
 
-use super::{Engine, ManagedConnection, StorageBackendError, StorageBackendResult};
+use super::{Engine, StorageBackendError, StorageBackendResult};
 
 impl Engine {
     /// Publish a committed logical table-definition change to sibling
@@ -77,15 +77,15 @@ impl Engine {
     }
 
     /// Refresh every session-local dependency of committed table contents.
-    /// Calls made inside an already-pinned `SQLite` transaction intentionally
+    /// Calls made inside an already-pinned storage transaction intentionally
     /// defer the refresh: that transaction must keep using its original
     /// snapshot and will observe the new generation after it finishes.
     pub(crate) fn synchronize_table_data(&self) -> StorageBackendResult<()> {
         if self
             .storage
-            .sqlite_session
+            .backend
             .as_ref()
-            .is_some_and(ManagedConnection::in_transaction)
+            .is_some_and(|backend| backend.in_transaction())
         {
             return Ok(());
         }
@@ -95,21 +95,21 @@ impl Engine {
 
     /// Detect commits made by independently opened engines or other
     /// processes. In-process Arc epochs only coordinate sessions derived via
-    /// `new_session`; `SQLite`'s per-connection `data_version` closes the same
-    /// visibility gap for every other writer.
+    /// `new_session`; a backend commit generation closes the same visibility
+    /// gap for every other writer when the backend exposes one.
     pub(super) fn synchronize_external_commits(&self) -> StorageBackendResult<()> {
-        let Some(connection) = self.storage.sqlite_session.as_ref() else {
+        let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
-        if connection.in_transaction() {
+        if backend.in_transaction() {
             return Ok(());
         }
-        let Some(version) = connection.data_version()? else {
+        let Some(version) = backend.change_version()? else {
             return Ok(());
         };
         if self
             .epochs
-            .seen_sqlite_data_version
+            .seen_storage_change_version
             .load(std::sync::atomic::Ordering::Acquire)
             == version
         {
@@ -118,15 +118,15 @@ impl Engine {
 
         let _statement = self.runtime.statement_gate.lock();
         let _refresh = self.epochs.external_commit_refresh.lock();
-        if connection.in_transaction() {
+        if backend.in_transaction() {
             return Ok(());
         }
-        let Some(version) = connection.data_version()? else {
+        let Some(version) = backend.change_version()? else {
             return Ok(());
         };
         if self
             .epochs
-            .seen_sqlite_data_version
+            .seen_storage_change_version
             .load(std::sync::atomic::Ordering::Acquire)
             == version
         {
@@ -139,7 +139,7 @@ impl Engine {
         // rebuild will advance the monitor again and be handled next time.
         let previous_version = self
             .epochs
-            .seen_sqlite_data_version
+            .seen_storage_change_version
             .swap(version, std::sync::atomic::Ordering::AcqRel);
         let refresh_result = (|| {
             self.clear_persistent_table_bindings_for_catalog_reload();
@@ -159,7 +159,7 @@ impl Engine {
         })();
         if refresh_result.is_err() {
             self.epochs
-                .seen_sqlite_data_version
+                .seen_storage_change_version
                 .store(previous_version, std::sync::atomic::Ordering::Release);
         }
         refresh_result
@@ -253,33 +253,32 @@ impl Engine {
     }
 
     /// Bring every session-local cache onto the outer transaction's pinned
-    /// database snapshot. A stable `data_version` closes the gap between a
-    /// physical `SQLite` commit and publication of the matching in-process
+    /// database snapshot. A stable backend change version closes the gap
+    /// between a physical commit and publication of the matching in-process
     /// epochs, while allowing unchanged statements to retain their caches.
     pub(crate) fn refresh_pinned_transaction_snapshot(&self) -> StorageBackendResult<()> {
-        let (sqlite_snapshot_unchanged, stable_sqlite_version) =
-            if let Some(connection) = self.storage.sqlite_session.as_ref() {
-                if connection.data_version_monitor_is_nonblocking()? {
-                    let before = connection.data_version()?;
-                    connection.pin_transaction_snapshot()?;
-                    let after = connection.data_version()?;
+        let (storage_snapshot_unchanged, stable_storage_version) =
+            if let Some(backend) = self.storage.backend.as_ref() {
+                if backend.change_version_monitor_is_nonblocking()? {
+                    let before = backend.change_version()?;
+                    backend.pin_transaction_snapshot()?;
+                    let after = backend.change_version()?;
                     let stable = before == after;
                     (
                         stable
                             && after.is_some_and(|version| {
                                 self.epochs
-                                    .seen_sqlite_data_version
+                                    .seen_storage_change_version
                                     .load(std::sync::atomic::Ordering::Acquire)
                                     == version
                             }),
                         stable.then_some(after).flatten(),
                     )
                 } else {
-                    // A compressed rollback-journal writer owns the VFS's
-                    // whole-file exclusive lock. Pin and refresh through that
-                    // connection; querying the independent monitor would wait on
-                    // a lock held by this same session.
-                    connection.pin_transaction_snapshot()?;
+                    // A backend may own a whole-file exclusive lock. Pin and
+                    // refresh through the session itself because an independent
+                    // monitor could wait on a lock held by this same session.
+                    backend.pin_transaction_snapshot()?;
                     (false, None)
                 }
             } else {
@@ -300,7 +299,7 @@ impl Engine {
             .catalog_registry
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        if sqlite_snapshot_unchanged
+        if storage_snapshot_unchanged
             && self
                 .epochs
                 .table_catalog
@@ -327,9 +326,9 @@ impl Engine {
         self.reload_table_catalog(table_catalog_epoch)?;
         self.refresh_table_data_cache(true)?;
         self.reload_catalog_registries(catalog_registry_epoch)?;
-        if let Some(version) = stable_sqlite_version {
+        if let Some(version) = stable_storage_version {
             self.epochs
-                .seen_sqlite_data_version
+                .seen_storage_change_version
                 .store(version, std::sync::atomic::Ordering::Release);
         }
         Ok(())

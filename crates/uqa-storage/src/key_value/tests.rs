@@ -11,14 +11,16 @@ use uqa_core::Value;
 
 use crate::document_store::DocumentStore;
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
-use crate::vector_index::VectorIndex;
+use crate::vector_index::{
+    HNSWIndexParams, IVFIndexParams, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+};
 
 use super::codec::*;
 use super::{
     KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex, KeyValueStore,
     KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V1_PREFIX,
 };
-use crate::StorageBackendError;
+use crate::{PersistentStorageBackend, StorageBackendError};
 
 #[test]
 fn key_segment_length_rejects_values_outside_the_disk_format() {
@@ -49,6 +51,11 @@ use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
 fn store() -> Arc<dyn KeyValueStore> {
     Arc::new(MemoryKeyValueStore::new())
+}
+
+#[test]
+fn memory_store_passes_the_reusable_backend_contract() {
+    super::conformance::verify_store(&MemoryKeyValueStore::new()).unwrap();
 }
 
 #[test]
@@ -102,6 +109,149 @@ fn memory_key_value_scan_and_batch_are_ordered_and_atomic() {
             (b"p/a/3".to_vec(), b"three".to_vec())
         ]
     );
+}
+
+#[test]
+fn key_value_backend_persists_btree_definitions_and_incremental_values() {
+    let store = store();
+    let backend = super::KeyValueStorageBackend::new(Arc::clone(&store));
+    backend
+        .replace_btree_index("items", "price", &[(1, Value::Int(10)), (2, Value::Null)])
+        .unwrap();
+    assert_eq!(backend.btree_index_fields("items").unwrap(), vec!["price"]);
+    assert_eq!(
+        backend.load_btree_index("items", "price").unwrap(),
+        Some(vec![(1, Value::Int(10)), (2, Value::Null)])
+    );
+
+    backend
+        .apply_btree_index_write(
+            "items",
+            2,
+            Some(&BTreeMap::from([("price".into(), Value::Int(25))])),
+        )
+        .unwrap();
+    backend.apply_btree_index_write("items", 1, None).unwrap();
+    assert_eq!(
+        backend.load_btree_index("items", "price").unwrap(),
+        Some(vec![(2, Value::Int(25))])
+    );
+
+    backend.clear_btree_indexes("items").unwrap();
+    assert_eq!(
+        backend.load_btree_index("items", "price").unwrap(),
+        Some(Vec::new())
+    );
+    backend.drop_btree_index("items", "price").unwrap();
+    assert_eq!(backend.load_btree_index("items", "price").unwrap(), None);
+}
+
+#[test]
+fn key_value_ivf_restores_physical_state_and_mutations() {
+    let store = store();
+    let backend = super::KeyValueStorageBackend::new(Arc::clone(&store));
+    let params = IVFIndexParams {
+        nlist: 2,
+        nprobe: 2,
+        train_threshold: 2,
+    };
+    let mut index = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::IVF(params),
+            VectorIndexOpenMode::Create,
+        )
+        .unwrap();
+    index.add(1, vec![1.0, 0.0]).unwrap();
+    index.add(2, vec![0.0, 1.0]).unwrap();
+    index.initialize().unwrap();
+    assert_eq!(index.index_kind(), "ivf");
+    drop(index);
+
+    let mut restored = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::IVF(params),
+            VectorIndexOpenMode::Restore,
+        )
+        .unwrap();
+    assert_eq!(ids(&restored.search_knn(&[1.0, 0.0], 1).unwrap()), vec![1]);
+    restored.add(3, vec![0.9, 0.1]).unwrap();
+    restored.delete(1).unwrap();
+    drop(restored);
+
+    let restored = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::IVF(params),
+            VectorIndexOpenMode::Restore,
+        )
+        .unwrap();
+    assert_eq!(restored.count().unwrap(), 2);
+    assert_eq!(ids(&restored.search_knn(&[1.0, 0.0], 1).unwrap()), vec![3]);
+}
+
+#[test]
+fn key_value_hnsw_restores_graph_and_incremental_deltas() {
+    let store = store();
+    let backend = super::KeyValueStorageBackend::new(Arc::clone(&store));
+    let params = HNSWIndexParams {
+        m: 4,
+        ef_construction: 16,
+        ef_search: 16,
+        rebuild_threshold: 8,
+        seed: 7,
+    };
+    let mut index = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::HNSW(params),
+            VectorIndexOpenMode::Create,
+        )
+        .unwrap();
+    index.add(1, vec![1.0, 0.0]).unwrap();
+    index.add(2, vec![0.0, 1.0]).unwrap();
+    index.initialize().unwrap();
+    assert_eq!(index.index_kind(), "hnsw");
+    drop(index);
+
+    let mut restored = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::HNSW(params),
+            VectorIndexOpenMode::Restore,
+        )
+        .unwrap();
+    assert_eq!(ids(&restored.search_knn(&[0.0, 1.0], 1).unwrap()), vec![2]);
+    restored.add(3, vec![0.1, 0.9]).unwrap();
+    restored.delete(2).unwrap();
+    drop(restored);
+
+    let restored = backend
+        .vector_index(
+            "items",
+            "embedding",
+            2,
+            VectorIndexSpec::HNSW(params),
+            VectorIndexOpenMode::Restore,
+        )
+        .unwrap();
+    assert_eq!(restored.count().unwrap(), 2);
+    assert_eq!(ids(&restored.search_knn(&[0.0, 1.0], 1).unwrap()), vec![3]);
+}
+
+fn ids(postings: &uqa_core::PostingList) -> Vec<uqa_core::DocId> {
+    postings.iter().map(|entry| entry.doc_id).collect()
 }
 
 #[test]

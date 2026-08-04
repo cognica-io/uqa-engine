@@ -6,6 +6,7 @@
 
 //! Legacy catalog namespace discovery and atomic relation migration.
 
+use super::physical_indexes::table_index_prefixes;
 use super::records::{
     LegacySequenceState, LegacyTableSchema, StoredCatalogIndex, StoredForeignTable, StoredRelation,
     StoredSequence, StoredView, LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY,
@@ -283,8 +284,8 @@ pub(super) fn put_relation_parents(
     Ok(())
 }
 
-pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<[Vec<u8>; 8]> {
-    Ok([
+pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<Vec<u8>>> {
+    let mut prefixes = vec![
         document_key_prefix(table_name)?,
         posting_key_prefix(table_name)?,
         doc_length_key_prefix(table_name)?,
@@ -293,7 +294,9 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<[Vec
         vector_key_prefix(table_name)?,
         column_stats_prefix(table_name)?,
         table_field_analyzer_prefix(table_name)?,
-    ])
+    ];
+    prefixes.extend(table_index_prefixes(table_name)?);
+    Ok(prefixes)
 }
 
 pub(super) fn apply_table_migration(

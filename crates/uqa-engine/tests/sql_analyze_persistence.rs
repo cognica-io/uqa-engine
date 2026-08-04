@@ -85,7 +85,7 @@ fn analyze_histogram_and_mcv_survive_engine_reopen() {
 }
 
 #[test]
-fn persisted_column_stats_are_loaded_during_open() {
+fn persisted_column_stats_refresh_after_an_external_commit() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("uqa.sqlite3");
 
@@ -99,18 +99,17 @@ fn persisted_column_stats_are_loaded_during_open() {
     }
 
     write_persisted_row_count(&db_path, 999);
-    // Exercise the storage-neutral open boundary directly. `Engine::open`
-    // attaches an external-commit monitor after this restore; that monitor is
-    // intentionally allowed to replace the cache when the write below
-    // commits, which would mask whether the restore itself was eager.
+    // Exercise the storage-neutral open boundary directly. Change monitoring
+    // is a backend capability, so this low-level constructor must refresh just
+    // like `Engine::open` when another writer commits.
     let connection = ManagedConnection::open(&db_path).unwrap();
     let catalog = Arc::new(Catalog::open(connection.clone()).unwrap());
     let backend = Arc::new(SQLiteStorageBackend::new(connection));
     let reopened = Engine::from_persistent_backends(catalog, backend).unwrap();
-    write_persisted_row_count(&db_path, 123);
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 999);
 
-    let stats = reopened.column_stats("t").unwrap();
-    assert_eq!(stats["val"].row_count, 999);
+    write_persisted_row_count(&db_path, 123);
+    assert_eq!(reopened.column_stats("t").unwrap()["val"].row_count, 123);
 }
 
 #[test]

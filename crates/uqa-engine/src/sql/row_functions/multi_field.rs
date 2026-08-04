@@ -119,7 +119,7 @@ pub(super) fn multi_field_match_shape(
             });
         }
     }
-    if args.len() < 4 || args.len() % 2 != 0 {
+    if args.len() < 4 || !args.len().is_multiple_of(2) {
         if let Some(query_idx) = first_non_column {
             if query_idx < 2 && args.len() >= 3 {
                 return Err(SQLError::TypeMismatch(format!(

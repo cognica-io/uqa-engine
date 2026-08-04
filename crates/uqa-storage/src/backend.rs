@@ -11,6 +11,7 @@
 //! without changing query execution code.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, Value};
@@ -18,10 +19,11 @@ use uqa_core::{DocId, Value};
 use crate::document_store::DocumentStore;
 use crate::inverted_index::InvertedIndex;
 use crate::sqlite::{
-    ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError, SQLiteHNSWIndex,
-    SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
+    Catalog, ManagedConnection, SQLiteBTreeIndexStore, SQLiteDocumentStore, SQLiteError,
+    SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteInvertedIndex, SQLiteVectorIndex,
 };
 use crate::vector_index::{VectorIndex, VectorIndexOpenMode, VectorIndexSpec};
+use crate::CatalogFacade;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageBackendError {
@@ -31,11 +33,57 @@ pub enum StorageBackendError {
     SQLite(#[from] SQLiteError),
     #[error("payload serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("{backend} storage failed: {source}")]
+    Backend {
+        backend: &'static str,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("{0}")]
     Other(String),
 }
 
+impl StorageBackendError {
+    pub fn backend(
+        backend: &'static str,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Backend {
+            backend,
+            source: Box::new(source),
+        }
+    }
+}
+
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
+
+/// Session-bound catalog and physical storage handles created together.
+///
+/// Both handles must share the same transaction context. Keeping their
+/// construction behind one provider prevents a catalog write from escaping
+/// through a different connection or transaction than document/index writes.
+pub struct PersistentStorageSession {
+    pub catalog: Arc<dyn CatalogFacade>,
+    pub backend: Arc<dyn PersistentStorageBackend>,
+}
+
+impl PersistentStorageSession {
+    pub fn new(
+        catalog: Arc<dyn CatalogFacade>,
+        backend: Arc<dyn PersistentStorageBackend>,
+    ) -> Self {
+        Self { catalog, backend }
+    }
+}
+
+/// Factory for independent sessions over one durable database.
+///
+/// A provider owns the database-level resource while each returned session
+/// owns its transaction state. This is the engine-facing extension point for
+/// `SQLite`, redb, and application-defined Key/Value stores.
+pub trait PersistentStorageProvider: Send + Sync {
+    fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
+}
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
@@ -148,6 +196,32 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.begin_transaction()
     }
 
+    /// Whether this session currently owns a pinned storage transaction.
+    fn in_transaction(&self) -> bool;
+
+    /// Whether the current transaction has performed a physical write.
+    ///
+    /// The engine uses this to enforce read-only statement transactions even
+    /// for writes made through catalog/index helpers it did not classify.
+    fn transaction_has_written(&self) -> StorageBackendResult<bool>;
+
+    /// Backend commit generation visible to this session, when available.
+    /// A changing value invalidates session-local catalog and index caches.
+    fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(None)
+    }
+
+    /// Whether reading [`Self::change_version`] can proceed while this
+    /// session owns its write transaction.
+    fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
+        Ok(true)
+    }
+
+    /// Pin the transaction's read snapshot before cache restoration.
+    fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()>;
 
     fn rollback_transaction(&self) -> StorageBackendResult<()>;
@@ -178,6 +252,28 @@ impl SQLiteStorageBackend {
     #[must_use]
     pub fn new_session(&self) -> Self {
         Self::new(self.conn.new_session())
+    }
+}
+
+/// Database-level owner that creates isolated `SQLite` engine sessions.
+#[derive(Clone)]
+pub struct SQLiteStorageProvider {
+    connection: ManagedConnection,
+}
+
+impl SQLiteStorageProvider {
+    pub fn new(connection: ManagedConnection) -> Self {
+        Self { connection }
+    }
+}
+
+impl PersistentStorageProvider for SQLiteStorageProvider {
+    fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        let connection = self.connection.new_session();
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(SQLiteStorageBackend::new(connection));
+        Ok(PersistentStorageSession::new(catalog, backend))
     }
 }
 
@@ -349,6 +445,27 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
         self.conn.begin_deferred_transaction()?;
+        Ok(())
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.conn.in_transaction()
+    }
+
+    fn transaction_has_written(&self) -> StorageBackendResult<bool> {
+        Ok(self.conn.transaction_has_written()?)
+    }
+
+    fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(self.conn.data_version()?)
+    }
+
+    fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
+        Ok(self.conn.data_version_monitor_is_nonblocking()?)
+    }
+
+    fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        self.conn.pin_transaction_snapshot()?;
         Ok(())
     }
 

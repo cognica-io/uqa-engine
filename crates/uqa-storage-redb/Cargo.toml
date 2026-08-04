@@ -1,0 +1,23 @@
+[package]
+name = "uqa-storage-redb"
+description = "redb physical KeyValue storage provider for UQA"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+license-file.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+uqa-storage = { workspace = true }
+parking_lot = { workspace = true }
+redb = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[lints]
+workspace = true

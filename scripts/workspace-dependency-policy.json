@@ -24,6 +24,7 @@
     "uqa-scoring": ["uqa-core", "uqa-storage"],
     "uqa-sql": ["uqa-core"],
     "uqa-storage": ["uqa-analysis", "uqa-core"],
+    "uqa-storage-redb": ["uqa-storage"],
     "uqa-storage-sqlite": ["uqa-storage"],
     "uqa-wasm": ["uqa-core", "uqa-engine", "uqa-scoring", "uqa-sql", "uqa-storage"]
   }

@@ -124,7 +124,7 @@ impl IVFIndex {
         }
     }
 
-    pub(super) fn detached_clone(&self) -> Self {
+    pub(crate) fn detached_clone(&self) -> Self {
         Self {
             dimensions: self.dimensions,
             nlist: self.nlist,

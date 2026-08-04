@@ -249,7 +249,7 @@ pub(super) fn positions_to_blob(positions: &[u32]) -> StorageBackendResult<Vec<u
 }
 
 pub(super) fn blob_to_positions(blob: &[u8]) -> StorageBackendResult<Vec<u32>> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(other_error("invalid posting positions KeyValue payload"));
     }
     Ok(blob
@@ -282,7 +282,7 @@ pub(super) fn validate_vector_ordinal_count(count: u64) -> StorageBackendResult<
 }
 
 pub(super) fn blob_to_vector(blob: &[u8]) -> StorageBackendResult<Vec<f32>> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(other_error("invalid vector KeyValue payload"));
     }
     Ok(blob

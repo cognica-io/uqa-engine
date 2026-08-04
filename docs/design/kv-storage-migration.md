@@ -1,132 +1,82 @@
-# Key/Value-only Storage Migration
+# Key/Value Storage Backends
 
-This document captures the proposed move from the current relational SQLite catalog (19 typed tables) to a single Key/Value store backed by SQLite (`_key_value (key BLOB PRIMARY KEY, value BLOB)`), with the long-term goal of swappable backends (RocksDB / redb / LMDB / sled) for non-SQL deployment targets such as iOS, WASM, and embedded / edge devices.
+This document defines the implemented Key/Value storage boundary, session ownership contract, redb behavior, and remaining compatibility limits. SQLite remains the default engine format, while applications can compose `uqa-engine` with `uqa-storage-redb` or another provider without changing query execution.
 
-This is a design doc only. No code lands until the plan in [Phasing](#phasing) is signed off.
+## Architecture
 
-## Why move
+```mermaid
+flowchart TD
+    E[Engine] --> P[PersistentStorageProvider]
+    P --> S[PersistentStorageSession]
+    S --> C[CatalogFacade]
+    S --> B[PersistentStorageBackend]
+    C --> K[KeyValueStore]
+    B --> K
+    K --> M[Memory]
+    K --> Q[SQLite _key_value]
+    K --> R[redb]
+```
 
-- **Backend portability.** SQLite is excellent on desktop / server but drags the full SQL surface onto every embed. iOS and WASM ship fine with SQLite today, but a future Rust-native Key/Value (`redb`) or RocksDB backend would need a much smaller blast radius than today's 19-table schema permits.
-- **Catalog complexity.** Most catalog tables are already `(name PRIMARY KEY, json_blob)` shaped. The relational form buys little — row counts are tiny (tens to thousands) and queries reduce to point lookups. The two genuine relational consumers are `_graph_membership` joins and `_postings` prefix scans, both of which are expressible as Key/Value prefix iteration.
-- **Migration cost.** Each new schema column on a hot table (`_postings`, `_documents`) carries a v_N ALTER and a backfill. A Key/Value layout pushes all such evolution into JSON value-side encoding, forward-compatible by default.
-- **Compatibility tradeoff.** The catalog contract is currently relational. Splitting on this boundary permits a storage layout optimized for mobile and edge embedding while keeping everything above the storage trait unchanged.
+`PersistentStorageProvider` owns a durable database and creates independent `PersistentStorageSession` values. Each session contains a `CatalogFacade` and `PersistentStorageBackend` bound to the same transaction context, which prevents catalog mutations and document/index mutations from committing through different physical sessions. `Engine::from_persistent_provider` retains the provider so `Engine::new_session` works for every backend; `Engine::from_persistent_backends` remains available for already-bound handles but intentionally cannot manufacture another session.
 
-## Non-goals
+## Physical store contract
 
-- Replacing SQLite as the _physical_ backend in v1. SQLite stays; only the _logical schema_ collapses to a single table.
-- Removing relational catalog inspection. `usql` introspection commands stay relational over the Key/Value layer (decode-and-display).
-- Performance regression. The Key/Value layout must equal or beat the current schema on the BEIR fixture and the existing benchmark harness; otherwise we abort.
+`KeyValueStore` provides byte-exact point reads and writes, lexicographically ordered prefix scans, bounded key cursors, atomic batches, prefix deletion, read/write and read-first transaction boundaries, savepoints, and transaction-state observation. `KeyValueStorageBackend` and `KeyValueCatalog` implement UQA documents, text postings, B-tree postings, brute-force vectors, IVF centroid assignments, HNSW graph generations, graph data, and durable registries once above this byte-key boundary.
 
-## Storage trait
+Every physical implementation must provide independent transaction state per session even when sessions share one database. `in_transaction` and `transaction_has_written` are correctness hooks used by the engine to preserve pinned snapshots and reject unclassified writes in read-only statements. `change_version` is an optional committed generation used to notice writes made by separately opened engines or processes; implementations that return `None` still receive in-process epoch synchronization for sessions derived from the same engine.
 
-The first code-level preparation is already separated from RocksDB itself: `uqa-storage::PersistentStorageBackend` is the engine-facing factory for persistent document stores, inverted indexes, vector indexes, and transaction control, while `uqa-storage::CatalogFacade` is the engine-facing metadata boundary for tables, analyzers, models, graph registries, path indexes, and planner statistics. `SQLiteStorageBackend` and `Catalog` are the legacy relational implementations today, while `uqa-storage::KeyValueStorageBackend` and `uqa-storage::KeyValueCatalog` provide the backend-neutral Key/Value implementation. `uqa-engine` rebuilds persistent state through trait objects via `Engine::from_persistent_backends(...)` instead of constructing SQLite table/index stores or calling a concrete catalog facade directly. A future RocksDB backend still needs only the physical `KeyValueStore` implementation; it should not need to reopen the engine restore path.
+Third-party implementations should run `uqa_storage::key_value::conformance::verify_store` on a fresh disposable store and `verify_session_isolation` on two stores sharing one physical database. These checks cover byte ordering, cursors, atomic batches, outer commit and rollback, SAVEPOINT after prior writes, read-first write observation, and MVCC visibility.
+
+## Implementations
+
+| Implementation | Crate | Durable | Session model | Notes |
+| --- | --- | --- | --- | --- |
+| Relational SQLite | `uqa-storage` | yes | one `ManagedConnection` session per engine session | Default engine backend; supports persisted B-tree, IVF, and HNSW indexes plus SQLCipher and compressed-container variants |
+| `SQLiteKeyValueStore` | `uqa-storage-sqlite` | yes | independent SQLite session over a shared pool | Stores all logical Key/Value data in `_key_value (key BLOB PRIMARY KEY, value BLOB NOT NULL) WITHOUT ROWID` |
+| `RedbKeyValueStore` | `uqa-storage-redb` | yes | one redb read or write transaction per store session | Pure Rust, single file, MVCC readers, one concurrent writer, committed generation tracking, durable B-tree/IVF/HNSW through the shared logical layer |
+| `MemoryKeyValueStore` | `uqa-storage` | no | one in-process test state | Reference implementation for logical tests, not a durable engine provider |
+
+## redb transaction mapping
+
+An autocommit mutation or `KeyValueBatch` opens one redb `WriteTransaction`, applies all operations, increments the metadata generation in the same transaction, and commits once. An explicit engine transaction keeps one redb transaction in that engine session until COMMIT or ROLLBACK. A read-only engine statement uses a redb `ReadTransaction`, so readers do not acquire the single-writer slot and retain a stable MVCC snapshot.
+
+redb native savepoints cannot be created after a transaction has opened a table, while SQL permits `SAVEPOINT` after arbitrary earlier writes. `RedbKeyValueStore` therefore keeps a transaction-local undo journal from the earliest active SQL savepoint. Each changed key records its previous value, prefix deletion records every removed pair, `ROLLBACK TO` replays inverse operations in reverse order, and `RELEASE` discards the named savepoint and its descendants. The outer redb transaction remains atomic throughout; no SAVEPOINT operation commits or splits it.
+
+The engine stores savepoints in creation order rather than a name set. Duplicate names shadow older savepoints, `ROLLBACK TO` retains the selected savepoint while invalidating later ones, and `RELEASE` removes the selected savepoint and all descendants, matching the physical backends and avoiding stale engine-side snapshots.
+
+## Logical key layout
+
+Logical keys begin with a one-byte namespace tag, encode user-controlled string segments with explicit lengths, and encode numeric identifiers in big-endian order. This makes prefix boundaries unambiguous and preserves document ordering under bytewise iteration. Values use versioned JSON or compact binary encodings owned by the logical catalog, document, posting, and vector adapters rather than by redb or SQLite.
+
+Representative namespaces include metadata, schemas, relations, tables, views, analyzers, foreign definitions, catalog indexes, graph vertices and edges, graph membership, path indexes, documents, text postings, reverse postings, B-tree definitions and entries, document lengths, field statistics, canonical vectors, IVF metadata/centroids/assignments, HNSW metadata/nodes, models, scoring parameters, and sequences. The exact tag and codec definitions in `uqa-storage::key_value` are the storage-format source of truth.
+
+## Capability boundary
+
+The Key/Value logical backend provides document storage, full-text postings, graph and catalog persistence, durable B-tree postings, exact brute-force vector search, and distinct physical IVF and HNSW indexes. B-tree definitions and `(table, field, DocId) -> Value` entries are maintained incrementally. IVF persists versioned parameters, state, centroids, and per-vector assignments; HNSW persists a versioned graph header and dirty-node deltas. Canonical vectors and physical metadata change in one `KeyValueBatch`, and restore rejects missing metadata, parameter or dimension mismatches, malformed state, canonical-vector drift, and stale revisions rather than downgrading an index to brute force.
+
+The same physical-index logic is inherited by redb, `SQLiteKeyValueStore`, and conforming third-party stores because it lives above `KeyValueStore`. Engine rollback and savepoint recovery rebind session-local index generations from the rolled-back K/V snapshot, while `change_version` refreshes sibling sessions after committed writes. The relational SQLite backend retains its native relational index tables, but B-tree, IVF, and HNSW capability is no longer a reason to require it.
+
+redb is not an encrypted storage format and does not provide SQLCipher-equivalent confidentiality. Applications that require encrypted-at-rest storage should continue to use `Engine::open_encrypted` until a separately reviewed encryption layer exists. redb compaction is an explicit maintenance operation rather than an automatic action on every commit, and the current provider does not run compaction implicitly.
+
+The redb crate is suitable for native Rust targets supported by redb. This implementation does not claim durable browser IndexedDB integration; the existing Emscripten SQLite path remains the supported browser persistence route.
+
+## Opening an engine
 
 ```rust
-pub trait KeyValueStore: Send + Sync {
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
-    fn put(&self, key: &[u8], value: &[u8]) -> Result<()>;
-    fn delete(&self, key: &[u8]) -> Result<()>;
-    fn scan_prefix(&self, prefix: &[u8])
-        -> Result<Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>)>> + '_>>;
-    fn batch(&self) -> Box<dyn KeyValueBatch + '_>;
-}
+use std::sync::Arc;
+use uqa_engine::Engine;
+use uqa_storage::PersistentStorageProvider;
+use uqa_storage_redb::RedbStorage;
 
-pub trait KeyValueBatch {
-    fn put(&mut self, key: &[u8], value: &[u8]);
-    fn delete(&mut self, key: &[u8]);
-    fn delete_range(&mut self, start: &[u8], end: &[u8]);
-    fn commit(self: Box<Self>) -> Result<()>;
-}
+let provider: Arc<dyn PersistentStorageProvider> =
+    Arc::new(RedbStorage::open("catalog.redb")?);
+let engine = Engine::from_persistent_provider(provider)?;
+let second_session = engine.new_session()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`KeyValueStore` is the boundary every higher crate (`uqa-engine`, `uqa-graph`, the catalog) talks to. Concrete implementations:
+Opening a redb file does not import an existing relational SQLite or `_key_value` SQLite database. Those are different physical formats, and automatic cross-format migration is not implemented; data transfer must use an explicit logical export/import path when one becomes available.
 
-| impl | crate | platform | notes |
-| --- | --- | --- | --- |
-| `SQLiteKeyValueStore` | `uqa-storage-sqlite` | desktop | one table `_key_value (key BLOB PK, value BLOB)` |
-| `RedbKeyValueStore` | `uqa-storage-redb` (new) | iOS / WASM | pure Rust, single file |
-| `RocksDBKeyValueStore` | `uqa-storage-rocks` (new) | server / large datasets | C++ FFI, build-time cost |
-| `MemoryKeyValueStore` | `uqa-storage` | tests | `BTreeMap<Vec<u8>, Vec<u8>>` behind a lock |
+## Adding another backend
 
-A cargo feature or constructor selects the physical store at build time / open time (`SQLiteKeyValueStore` for desktop, `RedbKeyValueStore` for the iOS target).
-
-## Key layout
-
-Keys use a fixed one-byte prefix per logical table plus length-prefixed UTF-8 user segments, so encoded user strings cannot collide with the prefix boundary. Numeric ids are big-endian fixed-width so prefix iteration yields ascending order. JSON values stay as today's serde encoding.
-
-```
-metadata/<key>                                   → value
-table/<name>                                     → TableSchema JSON
-analyzer/<name>                                  → config JSON
-field-analyzer/<table>/<field>/<phase>           → analyzer_name
-foreign-server/<name>                            → ForeignServer JSON
-foreign-table/<name>                             → ForeignTable JSON
-catalog-index/<name>                             → IndexDef JSON
-named-graph/<name>                               → "" (presence-only)
-vertex/<u64-be>                                  → Vertex JSON (label + properties)
-edge/<u64-be>                                    → Edge JSON
-graph-member/<graph>/<entity-type>/<u64-be>      → "" (presence-only)
-graph-edge-out/<graph>/<source-be>/<label>/<edge-be> → "" (secondary index)
-graph-edge-in/<graph>/<target-be>/<label>/<edge-be>  → "" (secondary index)
-path-index/<graph>/<name>                        → label_sequences JSON
-document/<table>/<doc_id-be>                     → Document JSON
-posting/<table>/<field>/<term>/<doc_id-be>       → positions blob
-posting-doc-term/<table>/<doc_id-be>/<field>/<term> → "" (reverse index)
-doc-length/<table>/<doc_id-be>/<field>           → length u64-be
-field-stats/<table>/<field>                      → total_length u64-be
-vector/<table>/<field>/<doc_id-be>               → vector blob
-model/<name>                                     → DeepModel JSON
-scoring/<name>                                   → params JSON
-sequence/<name>                                  → next-id u64-be
-```
-
-### Why secondary indexes for graph edges
-
-Today's `_graph_edges_out (source_id, label)` and `_graph_edges_in (target_id, label)` indexes are the only graph queries that need sub-PK lookup. The Key/Value equivalent is two sibling prefixes (`graph-edge-out`, `graph-edge-in`) that hold presence-only markers. Inserting an edge becomes one primary write + two secondary writes; deleting symmetric. Adjacency queries scan one prefix and dereference the resolved edge ids back through the primary `edge/` namespace.
-
-For other graph queries (vertex by label, edges by label), the current `_graph_vertices_label` and `_graph_edges_label` indexes are also prefix-friendly and follow the same pattern.
-
-### Posting list scan ordering
-
-`posting/<table>/<field>/<term>/<doc_id-be>` puts the doc id at the key tail, so a prefix scan of `posting/<table>/<field>/<term>/` yields postings sorted by doc id — exactly what the existing posting-list intersection / union expects. WAND / BMW iterators get the same order-by-doc-id contract for free.
-
-## Cross-key consistency
-
-Single-batch mutations (e.g. `add_graph_edge` writing primary + two secondary keys) must commit atomically. The trait's `batch()` returns a `KeyValueBatch` that maps to:
-
-- SQLite: a `BEGIN ... COMMIT` block on the per-engine connection.
-- RocksDB: `WriteBatchWithIndex`.
-- redb: a `WriteTransaction`.
-- `MemoryKeyValueStore`: a staging buffer then a single `parking_lot::Mutex` write.
-
-Cross-batch operations (e.g. graph orphan purge after Cypher resync) wrap multiple `batch().commit()` calls in a higher-level transaction at the engine layer. The current SQLite engine already serialises these through `tx_stack`; the Key/Value port keeps that lock and adds transaction hooks on `KeyValueStore` for the RocksDB / redb backends that need an explicit handle.
-
-## Migration of existing data
-
-1. **In-place upgrade path.** `Engine::open` detects v7 (relational) catalogs by reading `_metadata.schema_version` ≤ `7`. If found, the v8 migration walks every existing table and re-writes its rows into the `_key_value` namespace using the layout above, then drops the source tables in the same transaction. The migration is idempotent (re-running on a v8 catalog is a no-op) and gated by `pragma user_version` so a concurrent reader never sees a half-migrated state.
-2. **No backwards compat shim.** Once a catalog is on v8 there is no "fall back to relational" mode. This is in line with the project's no-workarounds rule: a single source of truth at any given `schema_version`.
-3. **Dump / restore tool.** A `usql --export-keyvalue path.keyvalue` command serialises the Key/Value namespace as a sorted text dump so users on the v7 → v8 cliff can audit the migration result. Same tool reads a dump back via `usql --import-keyvalue` for fresh databases.
-
-## Operational concerns
-
-- **Backup.** A single-table SQLite Key/Value store is `cp catalog.db` friendly. Backends with WAL (RocksDB) need their native checkpoint hook surfaced through the trait.
-- **Compaction.** SQLite's auto-compaction stays in place; for RocksDB the engine triggers `CompactRange(None, None)` after a bulk-drop. redb compacts on commit.
-- **Inspection.** `usql` gains `\keyvalue list <prefix>` and `\keyvalue get <key>` meta commands so support can inspect the catalog without a SQL shell. The `parity.md` golden fixture format gains an optional `key_value_dump` block for catalog-shape regressions.
-
-## Staging
-
-Each stage ships in its own PR, gated by the BEIR fixture + the operator pipeline + golden SQL test suite passing without regression.
-
-- **Stage 1 - Trait + SQLite-backed default.** Land `KeyValueStore` / `KeyValueBatch` traits. Add `SQLiteKeyValueStore` and `MemoryKeyValueStore`. New crate test exercises every method against both backends, and an engine integration test verifies `Engine::from_persistent_backends(...)` over the Key/Value catalog/backend.
-- **Stage 2 - Move the leaf registries.** `_models`, `_scoring_params`, `_analyzers` are pure Key/Value today. Add a v8 catalog migration that copies them into the `_key_value` table and drops the originals. Update the four catalog methods to read/write through `KeyValueStore`. Smallest possible blast radius for first production exposure.
-- **Stage 3 - Move the catalog metadata.** `_tables`, `_table_field_analyzers`, `_foreign_servers`, `_foreign_tables`, `_catalog_indexes`, `_named_graphs`, `_path_indexes`. Same pattern: migration step + method swap. Engine `restore_from_catalog` rewires to Key/Value iteration.
-- **Stage 4 - Move the graph data.** `_graph_vertices`, `_graph_edges`, `_graph_membership`. Add the secondary-index prefixes. The orphan-purge logic switches from `DELETE ... NOT IN (SELECT ...)` to a Rust-side prefix scan with per-batch deletes.
-- **Stage 5 - Move the hot path.** `_documents`, `_postings`, `_doc_lengths`, `_field_stats`, `_vectors`. This is where the Key/Value layer's per-key encoding and prefix-iteration cost matter. Benchmarks gate the merge: BEIR `ndcg@5` floor unchanged, `bench_*` p95 within 10% of v7.
-- **Stage 6 - Alternative backends.** `uqa-storage-redb` for iOS / WASM, `uqa-storage-rocks` for large-corpus server deployments. Each backend reuses the trait + tests; only the constructor is platform-specific. SQLite stays the default.
-
-## Open questions
-
-- **Posting list value encoding.** Today positions are a SQLite BLOB storing varint deltas. Keep verbatim, or move to length-prefixed Postcard / bincode for consistency with other JSON values? Affects tooling more than runtime; revisit with the hot-path storage stage.
-- **Vector index in Key/Value.** HNSW node graphs and IVF posting lists are bigger than the rest of the catalog combined. The hot-path storage stage needs a dedicated benchmark; if Key/Value iteration is too slow we keep `_vectors` relational under a feature flag and isolate the regression.
-- **Multi-write call-site discipline.** Primary + secondary writes (e.g. `edge/` + `graph-edge-out/` + `graph-edge-in/`) must always go through a single `KeyValueBatch`, never two raw `put` calls. The trait alone cannot prevent this drift. We enforce it by funneling every multi-key mutation through helper methods on the catalog facade (`save_edge_with_indexes`, `delete_edge_with_indexes`) that own the batch — direct `KeyValueStore::put` is reserved for single-key updates.
-- **compatibility reconciliation.** `parity.md` currently asserts 19-table schema parity. After the hot-path storage stage, the parity claim shifts to _behavioural_ parity only - same SQL surface, same query semantics, same scoring results. Update `parity.md` accordingly once that stage lands.
+Implement `KeyValueStore` with ordered prefix iteration, atomic batches, real read/write transactions, correct savepoint behavior, and isolated session state. Implement `PersistentStorageProvider::open_session` by constructing a new store session, wrapping the same store in both `KeyValueCatalog` and `KeyValueStorageBackend`, and returning them as one `PersistentStorageSession`. Preserve backend errors with `StorageBackendError::backend`, expose a stable committed `change_version` when the physical database supports it, run both reusable conformance checks, and add an engine integration test covering reopen, full-text search, B-tree/IVF/HNSW mutation, session visibility, savepoints, and catalog/data rollback.

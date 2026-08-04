@@ -72,11 +72,11 @@ fn build_planner_engine() -> Engine {
         .expect("create planner bench");
     let mut values =
         String::from("INSERT INTO bench (id, name, value, category, quantity, active) VALUES ");
-    for i in 0..1_000 {
+    for i in 0_usize..1_000 {
         if i > 0 {
             values.push_str(", ");
         }
-        let active = if i % 2 == 0 { "TRUE" } else { "FALSE" };
+        let active = if i.is_multiple_of(2) { "TRUE" } else { "FALSE" };
         let _ = write!(
             values,
             "({i}, 'name_{i}', {}, 'cat_{}', {}, {active})",

@@ -18,14 +18,14 @@ use super::{
 pub(super) fn validated_path_elements(value: &Value) -> Result<&[Value], CypherError> {
     let elements = agtype::path_elements(value)
         .ok_or_else(|| CypherError::Storage("path entity is missing its elements".into()))?;
-    if elements.is_empty() || elements.len() % 2 == 0 {
+    if elements.is_empty() || elements.len().is_multiple_of(2) {
         return Err(CypherError::Storage(format!(
             "path entity has invalid element count {}",
             elements.len()
         )));
     }
     for (index, element) in elements.iter().enumerate() {
-        let expected = if index % 2 == 0 {
+        let expected = if index.is_multiple_of(2) {
             agtype::EntityKind::Vertex
         } else {
             agtype::EntityKind::Edge
@@ -33,7 +33,7 @@ pub(super) fn validated_path_elements(value: &Value) -> Result<&[Value], CypherE
         if agtype::entity_kind(element) != Some(expected) {
             return Err(CypherError::Storage(format!(
                 "path entity element {index} is not a {}",
-                if index % 2 == 0 {
+                if index.is_multiple_of(2) {
                     "vertex"
                 } else {
                     "relationship"

@@ -28,16 +28,16 @@ fn build_corpus() -> Vec<(DocId, String)> {
     for i in 1..=N {
         let mut tokens: Vec<&'static str> = Vec::new();
         // High-df, low-IDF noise term (kept by analyzer; not a stopword).
-        if i % 10 != 0 {
+        if !i.is_multiple_of(10) {
             tokens.push("crate");
         }
         // Mid-frequency: every 3rd doc.
-        if i % 3 == 0 {
+        if i.is_multiple_of(3) {
             tokens.extend(["rust", "rust"]);
         }
         // Low-frequency: every 20th doc, with high tf so when present
         // the score is dominant.
-        if i % 20 == 0 {
+        if i.is_multiple_of(20) {
             tokens.extend(std::iter::repeat_n("plan", 5));
         }
         let extras = (i % 7) as usize;

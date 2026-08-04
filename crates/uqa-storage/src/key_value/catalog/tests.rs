@@ -7,6 +7,10 @@
 use super::records::LEGACY_VIEWS_METADATA_KEY;
 use super::*;
 use crate::document_store::Document;
+use crate::key_value::index_keys::{
+    btree_entry_key, btree_index_key, hnsw_metadata_key, hnsw_node_key, ivf_assignment_key,
+    ivf_centroid_key, ivf_metadata_key,
+};
 use crate::key_value::MemoryKeyValueStore;
 
 fn legacy_table_value(name: &str) -> Vec<u8> {
@@ -74,6 +78,58 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         .get(&document_key_prefix("docs").unwrap())
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn relation_namespace_migration_moves_all_physical_index_namespaces() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    store
+        .put(
+            &single_str_key(TAG_TABLE, "docs").unwrap(),
+            &legacy_table_value("docs"),
+        )
+        .unwrap();
+    let physical_keys = [
+        (
+            btree_index_key("docs", "rank").unwrap(),
+            btree_index_key("public.docs", "rank").unwrap(),
+        ),
+        (
+            btree_entry_key("docs", "rank", 1).unwrap(),
+            btree_entry_key("public.docs", "rank", 1).unwrap(),
+        ),
+        (
+            ivf_metadata_key("docs", "ivf_vector").unwrap(),
+            ivf_metadata_key("public.docs", "ivf_vector").unwrap(),
+        ),
+        (
+            ivf_centroid_key("docs", "ivf_vector", 0).unwrap(),
+            ivf_centroid_key("public.docs", "ivf_vector", 0).unwrap(),
+        ),
+        (
+            ivf_assignment_key("docs", "ivf_vector", 1, 0).unwrap(),
+            ivf_assignment_key("public.docs", "ivf_vector", 1, 0).unwrap(),
+        ),
+        (
+            hnsw_metadata_key("docs", "hnsw_vector").unwrap(),
+            hnsw_metadata_key("public.docs", "hnsw_vector").unwrap(),
+        ),
+        (
+            hnsw_node_key("docs", "hnsw_vector", 0).unwrap(),
+            hnsw_node_key("public.docs", "hnsw_vector", 0).unwrap(),
+        ),
+    ];
+    for (index, (legacy, _)) in physical_keys.iter().enumerate() {
+        store.put(legacy, &[index as u8]).unwrap();
+    }
+
+    catalog.migrate_relation_namespace().unwrap();
+
+    for (index, (legacy, canonical)) in physical_keys.iter().enumerate() {
+        assert_eq!(store.get(legacy).unwrap(), None);
+        assert_eq!(store.get(canonical).unwrap(), Some(vec![index as u8]));
+    }
 }
 
 #[test]

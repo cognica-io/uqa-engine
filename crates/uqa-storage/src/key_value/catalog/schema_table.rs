@@ -6,6 +6,9 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
+use super::physical_indexes::{
+    drop_field_indexes, drop_table_indexes, rename_field_indexes, rename_table_indexes,
+};
 use super::{
     apply_relation_migrations, batch_put_or_keep_existing, batch_rekey_prefix,
     batch_rekey_prefix_or_keep_existing, catalog_index_references_column,
@@ -123,6 +126,7 @@ impl KeyValueCatalog {
             batch.delete_prefix(&vector_key_prefix(storage_name)?)?;
             batch.delete_prefix(&column_stats_prefix(storage_name)?)?;
             batch.delete_prefix(&table_field_analyzer_prefix(storage_name)?)?;
+            drop_table_indexes(batch.as_mut(), storage_name)?;
         }
         for row in self.load_catalog_indexes()? {
             if storage_names.contains(&row.table_name) {
@@ -144,6 +148,7 @@ impl KeyValueCatalog {
             batch.delete_prefix(&reverse_posting_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&vector_key_prefix(&storage_name)?)?;
             batch.delete_prefix(&column_stats_prefix(&storage_name)?)?;
+            drop_table_indexes(batch.as_mut(), &storage_name)?;
         }
         batch.commit()
     }
@@ -209,6 +214,7 @@ impl KeyValueCatalog {
                 &new_prefix,
             )?;
         }
+        rename_table_indexes(self.store.as_ref(), batch.as_mut(), from, to)?;
         for row in self.load_catalog_indexes()? {
             if row.table_name == from {
                 batch.put(
@@ -240,6 +246,7 @@ impl KeyValueCatalog {
         batch.delete_prefix(&posting_field_prefix(table_name, column_name)?)?;
         batch.delete_prefix(&field_stats_key(table_name, column_name)?)?;
         batch.delete_prefix(&vector_field_prefix(table_name, column_name)?)?;
+        drop_field_indexes(batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name)?)?;
         batch.delete(&column_stats_key(table_name, column_name)?)?;
         for (key, _) in self
@@ -306,6 +313,7 @@ impl KeyValueCatalog {
             &vector_field_prefix(table_name, from)?,
             &vector_field_prefix(table_name, to)?,
         )?;
+        rename_field_indexes(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         batch_rekey_prefix_or_keep_existing(
             self.store.as_ref(),
             batch.as_mut(),

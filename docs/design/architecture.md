@@ -45,6 +45,7 @@ graph TD
     core["uqa-core"]
     analysis["uqa-analysis"]
     storage["uqa-storage"]
+    storage_redb["uqa-storage-redb"]
     storage_sqlite["uqa-storage-sqlite"]
     scoring["uqa-scoring"]
     fusion["uqa-fusion"]
@@ -64,6 +65,7 @@ graph TD
     analysis --> core
     storage --> core
     storage --> analysis
+    storage_redb --> storage
     storage_sqlite --> storage
     scoring --> core
     scoring --> storage
@@ -110,6 +112,7 @@ graph TD
 | `uqa-core` | `DocSet`, `Relation<K>`, `PostingList`, `RankedView`, generalized postings, values, predicates, and shared graph value types |
 | `uqa-analysis` | Tokenizers, character filters, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, and backend-neutral key/value abstractions |
+| `uqa-storage-redb` | Pure-Rust redb implementation of the ordered `KeyValueStore` contract and session provider |
 | `uqa-storage-sqlite` | Physical SQLite implementation of the backend-neutral `KeyValueStore` contract |
 | `uqa-scoring` | BM25, Bayesian BM25, typed score domains, WAND/BMW, calibration, metrics, priors, and parameter learning |
 | `uqa-fusion` | Exact Bayesian evidence fusion, robust positive-evidence pooling, probabilistic Boolean operations, learned fusion, and attention fusion |
@@ -256,7 +259,7 @@ Embedding applications can register Rust scalar, table, and aggregate functions.
 
 Persistent catalogs store schemas, documents, postings, inverted and vector index metadata, tensors, analyzers, named graphs and memberships, path indexes, scoring parameters, foreign definitions, models, sequences, views, catalog indexes, SQL routines, and column statistics. Reopen attaches persisted search and vector structures lazily rather than rebuilding indexes merely because a database opened.
 
-`CatalogFacade` and `PersistentStorageBackend` are the engine-facing metadata and storage boundaries. `Engine::from_persistent_backends` composes implementations without synthesizing a hidden SQLite session, and the backend-neutral key/value path implements the same document, inverted-index, vector-index, catalog, and transaction contracts.
+`CatalogFacade` and `PersistentStorageBackend` are the engine-facing metadata and storage boundaries. `PersistentStorageProvider` creates both handles together for one transaction-isolated session, `Engine::from_persistent_provider` retains that factory for backend-neutral `new_session`, and `Engine::from_persistent_backends` remains the lower-level entry point for already-bound handles.
 
 `KeyValueStore` provides point reads, ordered prefix scans, bounded key-only paging, atomic batches, and range deletion. Binary keys use unambiguous segment encoding and big-endian numeric ids so lexicographic iteration preserves identity and document order.
 
@@ -266,7 +269,7 @@ Statistics are invalidated by writes and schema changes and recomputed lazily wh
 
 `Engine` is a coordinator over six ownership domains: storage context, durable catalog state, session context, runtime extensions, epoch coordination, and query runtime. The detailed sharing and lock contract is documented in [`engine-state-ownership.md`](engine-state-ownership.md).
 
-Each logical session owns SQLite transaction affinity, variables, search path, prepared plans, cancellation, sequence state, statement cache, and statement gate. Sibling sessions share published generation counters and selected runtime extensions, not mutable transaction state.
+Each logical session owns backend transaction affinity, variables, search path, prepared plans, cancellation, sequence state, statement cache, and statement gate. Sibling sessions share published generation counters and selected runtime extensions, not mutable transaction state; SQLite binds a `ManagedConnection` session and redb binds an independent read or write transaction over the shared database.
 
 Multi-store writes enter one statement or explicit transaction. Candidate catalog, graph, model, index, and cache state is persisted before publication, and rollback restores all transaction-owned registries rather than leaving a partially visible in-memory update.
 
@@ -318,7 +321,7 @@ The all-workspace benchmark command is a compile gate, not a published performan
 | Design document index | [`README.md`](README.md) |
 | State ownership and locking | [`engine-state-ownership.md`](engine-state-ownership.md) |
 | Compressed encrypted storage | [`compressed-vfs-security.md`](compressed-vfs-security.md) |
-| Key/value migration design | [`kv-storage-migration.md`](kv-storage-migration.md) |
+| Key/value storage backends | [`kv-storage-migration.md`](kv-storage-migration.md) |
 | Parity fixtures | [`parity.md`](parity.md) |
 | Performance evidence | [`performance.md`](performance.md) |
 | Staged implementation plan | [`../plans/0001-uqa-rs-implementation-plan.md`](../plans/0001-uqa-rs-implementation-plan.md) |

@@ -39,6 +39,7 @@ mod indexes;
 mod keys;
 mod migration;
 mod models;
+mod physical_indexes;
 mod records;
 mod relations;
 mod schema_table;

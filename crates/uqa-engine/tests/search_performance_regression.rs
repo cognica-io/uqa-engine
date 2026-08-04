@@ -44,9 +44,9 @@ fn vector_for_row(row: usize) -> Vec<f32> {
 }
 
 fn row_content(id: usize) -> String {
-    if id % 3 == 0 {
+    if id.is_multiple_of(3) {
         format!("button search message {id} with repeated global conversation text")
-    } else if id % 5 == 0 {
+    } else if id.is_multiple_of(5) {
         format!("ancient release note {id} with searchable button text")
     } else {
         format!("ordinary conversation row {id} with global search filler")
@@ -54,7 +54,12 @@ fn row_content(id: usize) -> String {
 }
 
 fn row_kind(id: usize) -> String {
-    if id % 11 == 0 { "image" } else { "chat" }.to_string()
+    if id.is_multiple_of(11) {
+        "image"
+    } else {
+        "chat"
+    }
+    .to_string()
 }
 
 fn open_profile_engine(db_name: &str, create_sql: &str) -> (Engine, TempDir) {

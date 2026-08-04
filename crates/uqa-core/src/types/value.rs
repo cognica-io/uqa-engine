@@ -177,7 +177,7 @@ fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
     }
 
     let encoded = hex.as_bytes();
-    if encoded.len() % 2 != 0 {
+    if !encoded.len().is_multiple_of(2) {
         return Ok(None);
     }
     let mut bytes = Vec::new();

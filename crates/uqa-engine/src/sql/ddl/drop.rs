@@ -116,17 +116,15 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Schema => {
             let mut schemas = Vec::new();
             for name in &stmt.names {
-                match engine
+                let exists = engine
                     .preflight_drop_schema(name)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?
-                {
-                    true => schemas.push(name.clone()),
-                    false if stmt.if_exists => {}
-                    false => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP SCHEMA: schema `{name}` does not exist"
-                        )));
-                    }
+                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
+                if exists {
+                    schemas.push(name.clone());
+                } else if !stmt.if_exists {
+                    return Err(SQLError::Unsupported(format!(
+                        "DROP SCHEMA: schema `{name}` does not exist"
+                    )));
                 }
             }
             for schema in schemas {

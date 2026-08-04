@@ -28,7 +28,7 @@ fn build_dataset() -> (Vec<f64>, Vec<u8>) {
     for i in 0..N {
         let p = 0.05 + (i % 10) as f64 * 0.1;
         probs.push(p.clamp(0.05, 0.95));
-        labels.push(u8::from((i % 3) != 0));
+        labels.push(u8::from(!i.is_multiple_of(3)));
     }
     (probs, labels)
 }
@@ -147,9 +147,11 @@ fn bench_held_out_calibration_gate(c: &mut Criterion) {
 
 fn learner_dataset(n: usize) -> (Vec<f64>, Vec<f64>) {
     let scores: Vec<f64> = (0..n)
-        .map(|i| if i % 2 == 0 { 4.0 } else { -4.0 })
+        .map(|i| if i.is_multiple_of(2) { 4.0 } else { -4.0 })
         .collect();
-    let labels: Vec<f64> = (0..n).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+    let labels: Vec<f64> = (0..n)
+        .map(|i| if i.is_multiple_of(2) { 1.0 } else { 0.0 })
+        .collect();
     (scores, labels)
 }
 

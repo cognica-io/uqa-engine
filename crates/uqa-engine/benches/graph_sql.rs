@@ -52,8 +52,8 @@ fn build_engine() -> Engine {
             }
             store.add_edge(Edge::new(edge_id, 2, 3, "works_at"), GRAPH)?;
             edge_id += 1;
-            for id in 1..=450 {
-                if id % 25 == 0 {
+            for id in 1_u64..=450 {
+                if id.is_multiple_of(25) {
                     store.add_edge(Edge::new(edge_id, id, id + 50, "knows"), GRAPH)?;
                     edge_id += 1;
                 }

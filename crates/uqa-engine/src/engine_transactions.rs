@@ -7,7 +7,7 @@
 use super::{
     BTreeMap, Engine, EngineDataSnapshot, SQLError, SQLParam, SQLResult, SessionStateSnapshot,
     StorageBackendError, StorageBackendResult, TableDataSnapshot, TransactionDirtyState,
-    TransactionFrame,
+    TransactionFrame, TransactionSavepoint,
 };
 use uqa_sql::ast::TransactionStmt;
 
@@ -382,13 +382,10 @@ impl Engine {
         stack.push(TransactionFrame {
             storage_savepoint,
             read_only,
-            savepoints: std::collections::BTreeSet::new(),
+            savepoints: Vec::new(),
             session_snapshot,
-            session_savepoints: BTreeMap::new(),
             data_snapshot,
-            data_savepoints: BTreeMap::new(),
             dirty_at_begin: self.transaction_dirty_state(),
-            dirty_savepoints: BTreeMap::new(),
         });
         Ok(())
     }
@@ -431,8 +428,8 @@ impl Engine {
         let storage_savepoint = frame.storage_savepoint.clone();
         let read_only = frame.read_only;
         if read_only && storage_savepoint.is_none() {
-            if let Some(connection) = self.storage.sqlite_session.as_ref() {
-                let violation = match connection.transaction_has_written() {
+            if let Some(backend) = self.storage.backend.as_ref() {
+                let violation = match backend.transaction_has_written() {
                     Ok(false) => None,
                     Ok(true) => Some(SQLError::Internal(
                         "read-only SQL execution attempted to mutate persistent storage".into(),
@@ -641,16 +638,12 @@ impl Engine {
                 .savepoint(&name)
                 .map_err(|err| Self::storage_tx_error("SAVEPOINT", &err))?;
         }
-        if let Some(snapshot) = data_snapshot {
-            frame.data_savepoints.insert(name.clone(), snapshot);
-        }
-        frame
-            .session_savepoints
-            .insert(name.clone(), session_snapshot);
-        frame
-            .dirty_savepoints
-            .insert(name.clone(), self.transaction_dirty_state());
-        frame.savepoints.insert(name);
+        frame.savepoints.push(TransactionSavepoint {
+            name,
+            session_snapshot,
+            data_snapshot,
+            dirty: self.transaction_dirty_state(),
+        });
         Ok(())
     }
 
@@ -662,15 +655,17 @@ impl Engine {
         let frame = stack
             .last_mut()
             .ok_or_else(|| SQLError::Internal("RELEASE SAVEPOINT outside a transaction".into()))?;
+        let position = frame
+            .savepoints
+            .iter()
+            .rposition(|savepoint| savepoint.name == name)
+            .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
         if let Some(backend) = self.storage.backend.as_ref() {
             backend
                 .release_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("RELEASE SAVEPOINT", &err))?;
         }
-        frame.savepoints.remove(name);
-        frame.session_savepoints.remove(name);
-        frame.data_savepoints.remove(name);
-        frame.dirty_savepoints.remove(name);
+        frame.savepoints.truncate(position);
         Ok(())
     }
 
@@ -682,23 +677,24 @@ impl Engine {
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("ROLLBACK TO SAVEPOINT outside a transaction".into())
         })?;
-        if !frame.savepoints.contains(name) {
-            return Err(SQLError::Internal(format!("savepoint `{name}` not found")));
-        }
+        let position = frame
+            .savepoints
+            .iter()
+            .rposition(|savepoint| savepoint.name == name)
+            .ok_or_else(|| SQLError::Internal(format!("savepoint `{name}` not found")))?;
         if let Some(backend) = self.storage.backend.as_ref() {
             backend
                 .rollback_to_savepoint(name)
                 .map_err(|err| Self::storage_tx_error("ROLLBACK TO SAVEPOINT", &err))?;
         }
         let mut cleanup_errors = Vec::new();
-        if let Some(snapshot) = frame.data_savepoints.get(name) {
+        let savepoint = &frame.savepoints[position];
+        if let Some(snapshot) = savepoint.data_snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {error}"));
             }
         }
-        if let Some(dirty) = frame.dirty_savepoints.get(name).copied() {
-            self.restore_transaction_dirty_state(dirty);
-        }
+        self.restore_transaction_dirty_state(savepoint.dirty);
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -710,9 +706,8 @@ impl Engine {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
         }
-        if let Some(snapshot) = frame.session_savepoints.get(name).cloned() {
-            self.restore_session_state(&snapshot);
-        }
+        self.restore_session_state(&savepoint.session_snapshot);
+        frame.savepoints.truncate(position + 1);
         if cleanup_errors.is_empty() {
             Ok(())
         } else {

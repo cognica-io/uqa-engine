@@ -111,7 +111,7 @@ pub(super) fn json_typeof(v: &serde_json::Value) -> &'static str {
 }
 
 pub(super) fn json_build_object(args: &[Value]) -> Result<Value> {
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(SQLError::TypeMismatch(
             "json_build_object requires an even number of args".into(),
         ));

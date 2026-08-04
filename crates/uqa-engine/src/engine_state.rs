@@ -13,16 +13,16 @@ use std::sync::Arc;
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 use super::{
-    DeepModel, ManagedConnection, RegisteredSQLFunction, RelationIdentity, SQLAggregateFunction,
-    SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
-    TableFieldAnalyzerRegistry, TableState, TransactionFrame,
+    DeepModel, RegisteredSQLFunction, RelationIdentity, SQLAggregateFunction, SQLScalarFunction,
+    SQLStatementCache, SQLTableFunction, SequenceState, TableFieldAnalyzerRegistry, TableState,
+    TransactionFrame,
 };
 
 pub(super) struct StorageContext {
     pub(super) tables: RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
-    pub(super) sqlite_session: Option<ManagedConnection>,
+    pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
 }
 
 impl StorageContext {
@@ -31,19 +31,20 @@ impl StorageContext {
             tables: RwLock::new(BTreeMap::new()),
             catalog: None,
             backend: None,
-            sqlite_session: None,
+            provider: None,
         }
     }
 
     pub(super) fn persistent(
         catalog: Arc<dyn uqa_storage::CatalogFacade>,
         backend: Arc<dyn uqa_storage::PersistentStorageBackend>,
+        provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
             tables: RwLock::new(BTreeMap::new()),
             catalog: Some(catalog),
             backend: Some(backend),
-            sqlite_session: None,
+            provider,
         }
     }
 }
@@ -232,7 +233,7 @@ impl EpochChannel {
 }
 
 pub(super) struct EpochCoordinator {
-    pub(super) seen_sqlite_data_version: AtomicU64,
+    pub(super) seen_storage_change_version: AtomicU64,
     pub(super) external_commit_refresh: Mutex<()>,
     pub(super) table_catalog: EpochChannel,
     pub(super) table_data: EpochChannel,
@@ -242,7 +243,7 @@ pub(super) struct EpochCoordinator {
 impl EpochCoordinator {
     pub(super) fn new() -> Self {
         Self {
-            seen_sqlite_data_version: AtomicU64::new(0),
+            seen_storage_change_version: AtomicU64::new(0),
             external_commit_refresh: Mutex::new(()),
             table_catalog: EpochChannel::new(1),
             table_data: EpochChannel::new(1),

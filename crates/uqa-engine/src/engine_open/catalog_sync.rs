@@ -6,9 +6,7 @@
 
 //! Table-definition and durable-registry epoch synchronization.
 
-use super::{
-    BTreeMap, DeepModel, Engine, ManagedConnection, StorageBackendError, StorageBackendResult,
-};
+use super::{BTreeMap, DeepModel, Engine, StorageBackendError, StorageBackendResult};
 
 impl Engine {
     /// Mark a durable non-table registry change. Explicit transactions keep
@@ -41,16 +39,16 @@ impl Engine {
     /// changed the durable table catalog. Logical definitions come from the
     /// catalog; document/FTS/vector handles always come from `self.storage.backend`.
     pub(crate) fn synchronize_table_catalog(&self) -> StorageBackendResult<()> {
-        // An explicit transaction owns a pinned SQLite snapshot. Never consume
+        // An explicit transaction owns a pinned storage snapshot. Never consume
         // a sibling's newer in-process epoch while reading that older
         // snapshot; the next call after COMMIT/ROLLBACK will perform the
         // refresh. Outer BEGIN uses `refresh_pinned_transaction_snapshot`
         // directly after acquiring its snapshot.
         if self
             .storage
-            .sqlite_session
+            .backend
             .as_ref()
-            .is_some_and(ManagedConnection::in_transaction)
+            .is_some_and(|backend| backend.in_transaction())
         {
             return Ok(());
         }
@@ -172,14 +170,14 @@ impl Engine {
     }
 
     /// Refresh session-local durable registry caches after a sibling commits.
-    /// The catalog connection supplies `SQLite` snapshot isolation, so a reader
+    /// The backend supplies snapshot isolation, so a reader
     /// never observes another session's uncommitted registry changes.
     pub(crate) fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
         if self
             .storage
-            .sqlite_session
+            .backend
             .as_ref()
-            .is_some_and(ManagedConnection::in_transaction)
+            .is_some_and(|backend| backend.in_transaction())
         {
             return Ok(());
         }

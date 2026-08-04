@@ -80,7 +80,7 @@ pub(super) fn validate_persisted_ordinal_sequence(
 }
 
 pub(super) fn blob_to_vector(blob: &[u8]) -> SQLiteResult<Vec<f32>> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(SQLiteError::StorageBackend(
             "invalid vector payload".to_string(),
         ));

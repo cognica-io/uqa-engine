@@ -98,7 +98,7 @@ pub(super) fn read_vector_fallbacks(
 }
 
 pub(super) fn blob_to_f32_vec(blob: &[u8]) -> Result<Vec<f32>, PythonMigrationError> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(PythonMigrationError::Invalid(format!(
             "vector blob length {} is not divisible by 4",
             blob.len()

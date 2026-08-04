@@ -16,6 +16,7 @@
 mod index;
 mod math;
 mod mutation;
+mod restore;
 mod search;
 mod state;
 mod training;

@@ -4,6 +4,7 @@ members = [
     "crates/uqa-core",
     "crates/uqa-analysis",
     "crates/uqa-storage",
+    "crates/uqa-storage-redb",
     "crates/uqa-storage-sqlite",
     "crates/uqa-scoring",
     "crates/uqa-fusion",
@@ -38,13 +39,14 @@ authors = ["Jaepil Jeong <jaepil@cognica.io>"]
 repository = "https://github.com/cognica-io/uqa-rs"
 homepage = "https://github.com/cognica-io/uqa-rs"
 readme = "README.md"
-rust-version = "1.85"
+rust-version = "1.90"
 
 [workspace.dependencies]
 # Internal crates
 uqa-core = { version = "0.1.0", path = "crates/uqa-core" }
 uqa-analysis = { version = "0.1.0", path = "crates/uqa-analysis" }
 uqa-storage = { version = "0.1.0", path = "crates/uqa-storage" }
+uqa-storage-redb = { version = "0.1.0", path = "crates/uqa-storage-redb" }
 uqa-storage-sqlite = { version = "0.1.0", path = "crates/uqa-storage-sqlite" }
 uqa-scoring = { version = "0.1.0", path = "crates/uqa-scoring" }
 uqa-fusion = { version = "0.1.0", path = "crates/uqa-fusion" }
@@ -81,6 +83,7 @@ crc32fast = "1.4"
 fs2 = "0.4"
 lz4_flex = "0.13"
 getrandom = "0.3"
+redb = "4.1"
 zstd = "0.13"
 arrow-array = "58"
 arrow-ipc = "58"

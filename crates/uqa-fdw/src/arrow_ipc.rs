@@ -231,7 +231,7 @@ fn checked_scale_micros(value: i64, factor: i64, context: &str) -> Result<i64, F
 }
 
 fn checked_nanos_to_micros(value: i64, context: &str) -> Result<i64, FDWError> {
-    if value % 1_000 != 0 {
+    if value.rem_euclid(1_000) != 0 {
         return Err(FDWError::UnsupportedValue(format!(
             "Arrow {context} value {value} has sub-microsecond precision"
         )));

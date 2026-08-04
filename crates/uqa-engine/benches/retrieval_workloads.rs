@@ -56,9 +56,9 @@ fn vector_for_row(row: usize) -> Vec<f32> {
 }
 
 fn content_for_row(row: usize) -> String {
-    if row % 3 == 0 {
+    if row.is_multiple_of(3) {
         format!("button search message {row} with repeated global conversation text")
-    } else if row % 5 == 0 {
+    } else if row.is_multiple_of(5) {
         format!("ancient release note {row} with searchable button text")
     } else {
         format!("ordinary conversation row {row} with global search filler")
@@ -79,7 +79,12 @@ fn persistent_fixture(rows: usize) -> PersistentFixture {
                         SQLParam::scalar(Value::Int(row as i64)),
                         SQLParam::scalar(Value::Str(content_for_row(row))),
                         SQLParam::scalar(Value::Str(
-                            if row % 11 == 0 { "image" } else { "chat" }.to_string(),
+                            if row.is_multiple_of(11) {
+                                "image"
+                            } else {
+                                "chat"
+                            }
+                            .to_string(),
                         )),
                         SQLParam::vector(vector_for_row(row)),
                     ],
@@ -107,7 +112,11 @@ fn graph_fixture(vertices: u64) -> MemoryGraphStore {
     for offset in 0..vertices {
         let mut vertex = Vertex::new(
             offset + 1,
-            if offset % 5 == 0 { "Company" } else { "Person" },
+            if offset.is_multiple_of(5) {
+                "Company"
+            } else {
+                "Person"
+            },
         );
         vertex
             .properties

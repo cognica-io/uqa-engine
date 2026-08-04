@@ -84,13 +84,17 @@ impl IVFIndex {
         if keys.is_empty() {
             return Ok(());
         }
-        let next_deletes = self
-            .deletes_since_train
-            .lock()
-            .checked_add(keys.len())
-            .ok_or_else(|| {
-                StorageBackendError::Other("IVF deletes-since-train counter overflow".into())
-            })?;
+        let tracks_trained_deletes = self.state() != IVFState::Untrained;
+        let next_deletes = if tracks_trained_deletes {
+            self.deletes_since_train
+                .lock()
+                .checked_add(keys.len())
+                .ok_or_else(|| {
+                    StorageBackendError::Other("IVF deletes-since-train counter overflow".into())
+                })?
+        } else {
+            0
+        };
         let removed = keys
             .into_iter()
             .filter_map(|key| vectors.remove(&key).map(|vector| (key, vector.centroid)))
@@ -102,7 +106,9 @@ impl IVFIndex {
             }
         }
         *self.deletes_since_train.lock() = next_deletes;
-        self.maybe_mark_stale();
+        if tracks_trained_deletes {
+            self.maybe_mark_stale();
+        }
         Ok(())
     }
 

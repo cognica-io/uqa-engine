@@ -138,17 +138,17 @@ fn bench_learned_fusion(c: &mut Criterion) {
     }
     group.finish();
 
-    let probs: Vec<Vec<f64>> = (0..1_000)
+    let probs: Vec<Vec<f64>> = (0_usize..1_000)
         .map(|i| {
-            if i % 2 == 0 {
+            if i.is_multiple_of(2) {
                 vec![0.9, 0.5]
             } else {
                 vec![0.1, 0.5]
             }
         })
         .collect();
-    let labels: Vec<f64> = (0..1_000)
-        .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
+    let labels: Vec<f64> = (0_usize..1_000)
+        .map(|i| if i.is_multiple_of(2) { 1.0 } else { 0.0 })
         .collect();
     c.bench_function("fusion_learned_fit_1000", |bencher| {
         bencher.iter(|| {

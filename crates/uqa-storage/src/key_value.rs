@@ -55,6 +55,13 @@ const TAG_DOC_LENGTH: u8 = b'l';
 const TAG_FIELD_STATS: u8 = b'f';
 const TAG_REVERSE_POSTING: u8 = b'r';
 const TAG_VECTOR: u8 = b'v';
+const TAG_BTREE_INDEX: u8 = b'B';
+const TAG_BTREE_ENTRY: u8 = b'b';
+const TAG_IVF_METADATA: u8 = b'I';
+const TAG_IVF_CENTROID: u8 = b'i';
+const TAG_IVF_ASSIGNMENT: u8 = b'j';
+const TAG_HNSW_METADATA: u8 = b'H';
+const TAG_HNSW_NODE: u8 = b'h';
 
 /// Prefix for the unambiguous document encoding introduced after JSON arrays
 /// became ordinary [`Value::List`] values. A legacy document is plain JSON and
@@ -126,6 +133,26 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.begin_transaction()
+    }
+
+    fn in_transaction(&self) -> bool;
+
+    fn transaction_has_written(&self) -> StorageBackendResult<bool>;
+
+    fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(None)
+    }
+
+    fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
+        Ok(true)
+    }
+
+    fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "KeyValue transaction commit is not implemented for this store".into(),
@@ -157,16 +184,25 @@ pub trait KeyValueStore: Send + Sync {
     }
 }
 
+mod btree_index;
 mod codec;
+pub mod conformance;
 mod document_store;
+mod hnsw_index;
+mod hnsw_persistence;
+mod index_keys;
 mod inverted_index;
+mod ivf_index;
+mod ivf_persistence;
 mod memory_store;
 mod storage_backend;
 mod vector_index;
 
 pub use codec::prefix_upper_bound;
 pub use document_store::KeyValueDocumentStore;
+pub use hnsw_index::KeyValueHNSWIndex;
 pub use inverted_index::KeyValueInvertedIndex;
+pub use ivf_index::KeyValueIVFIndex;
 pub use memory_store::MemoryKeyValueStore;
 pub use storage_backend::KeyValueStorageBackend;
 pub use vector_index::KeyValueVectorIndex;

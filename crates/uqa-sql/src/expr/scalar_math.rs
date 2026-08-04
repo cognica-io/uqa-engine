@@ -391,7 +391,7 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
                 match encoding.as_str() {
                     "hex" => {
                         let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-                        if cleaned.len() % 2 != 0 {
+                        if !cleaned.len().is_multiple_of(2) {
                             return Err(SQLError::TypeMismatch(
                                 "invalid hexadecimal data: odd number of digits".into(),
                             ));

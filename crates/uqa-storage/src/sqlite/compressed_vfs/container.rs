@@ -404,9 +404,9 @@ impl ContainerFile {
             .retain(|chunk_id| *chunk_id < active_chunk_count);
         if size > 0 {
             let chunk_size = self.compression.chunk_size().map_err(invalid_data)?;
-            let changed_chunk = if size < old_len && size % chunk_size != 0 {
+            let changed_chunk = if size < old_len && !size.is_multiple_of(chunk_size) {
                 Some(usize_to_u64(new_chunk_count - 1, "changed chunk id")?)
-            } else if old_len > 0 && old_len % chunk_size != 0 {
+            } else if old_len > 0 && !old_len.is_multiple_of(chunk_size) {
                 Some(usize_to_u64(old_chunk_count - 1, "changed chunk id")?)
             } else if old_chunk_count == new_chunk_count {
                 Some(usize_to_u64(new_chunk_count - 1, "changed chunk id")?)

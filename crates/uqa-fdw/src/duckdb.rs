@@ -390,7 +390,7 @@ fn duck_value_to_uqa(value: ::duckdb::types::Value) -> Result<Value, FDWError> {
             days,
             nanos,
         } => {
-            if nanos % 1_000 != 0 {
+            if nanos.rem_euclid(1_000) != 0 {
                 return Err(FDWError::UnsupportedValue(format!(
                     "DuckDB interval has sub-microsecond precision: {nanos} nanoseconds"
                 )));
@@ -460,7 +460,7 @@ fn duck_time_to_micros(
             ))
         }),
         TimeUnit::Microsecond => Ok(value),
-        TimeUnit::Nanosecond if value % 1_000 == 0 => Ok(value / 1_000),
+        TimeUnit::Nanosecond if value.rem_euclid(1_000) == 0 => Ok(value / 1_000),
         TimeUnit::Nanosecond => Err(FDWError::UnsupportedValue(format!(
             "DuckDB {context} value {value} has sub-microsecond precision"
         ))),

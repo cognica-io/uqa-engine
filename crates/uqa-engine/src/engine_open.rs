@@ -6,10 +6,10 @@
 
 use super::{
     initial_random_state, normalize_analyzer_phase, parse_analyzer_config, Analyzer, Arc,
-    AtomicBool, BTreeMap, Catalog, CatalogFacade, ColumnStatsRow, DeepModel, DurableCatalogState,
-    Engine, EpochCoordinator, FieldName, IVFIndexParams, ManagedConnection, Path,
-    PersistentStorageBackend, QueryRuntime, RuntimeExtensions, RwLock,
-    SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError, SQLiteStorageBackend,
+    AtomicBool, BTreeMap, CatalogFacade, ColumnStatsRow, DeepModel, DurableCatalogState, Engine,
+    EpochCoordinator, FieldName, IVFIndexParams, ManagedConnection, Path, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, QueryRuntime, RuntimeExtensions, RwLock,
+    SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider,
     SessionContext, StorageBackendError, StorageBackendResult, StorageContext, TableSchema,
     TableState, Value, VectorIndex, GRAPH_LABELS_METADATA_PREFIX, SQL_FUNCTION_DEPTH_LIMIT,
 };

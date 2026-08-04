@@ -17,13 +17,13 @@ fn populate(engine: &Engine, count: u64) {
         .unwrap();
     for doc_id in 1..=count {
         let mut tokens = Vec::new();
-        if doc_id % 10 != 0 {
+        if !doc_id.is_multiple_of(10) {
             tokens.push("crate");
         }
-        if doc_id % 3 == 0 {
+        if doc_id.is_multiple_of(3) {
             tokens.extend(["rust", "rust"]);
         }
-        if doc_id % 41 == 0 {
+        if doc_id.is_multiple_of(41) {
             tokens.extend(std::iter::repeat_n("plan", 8));
         }
         tokens.extend(std::iter::repeat_n("filler", (doc_id % 13) as usize));

@@ -53,6 +53,30 @@ fn rollback_to_savepoint_keeps_frame_open() {
 }
 
 #[test]
+fn savepoint_order_invalidates_descendants_and_preserves_shadowed_names() {
+    let eng = Engine::new();
+    eng.begin().unwrap();
+    eng.savepoint("dup").unwrap();
+    eng.sql("CREATE SCHEMA first_level", &[]).unwrap();
+    eng.savepoint("dup").unwrap();
+    eng.sql("CREATE SCHEMA second_level", &[]).unwrap();
+
+    eng.rollback_to_savepoint("dup").unwrap();
+    assert!(eng.has_schema("first_level").unwrap());
+    assert!(!eng.has_schema("second_level").unwrap());
+    eng.release_savepoint("dup").unwrap();
+    eng.rollback_to_savepoint("dup").unwrap();
+    assert!(!eng.has_schema("first_level").unwrap());
+
+    eng.savepoint("outer").unwrap();
+    eng.savepoint("inner").unwrap();
+    eng.rollback_to_savepoint("outer").unwrap();
+    assert!(eng.release_savepoint("inner").is_err());
+    eng.release_savepoint("outer").unwrap();
+    eng.commit().unwrap();
+}
+
+#[test]
 fn close_drops_open_transactions() {
     let eng = Engine::new();
     eng.begin().unwrap();

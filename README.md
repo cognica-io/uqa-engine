@@ -9,7 +9,7 @@ It is designed for applications that need more than a relational table but do no
 - Run relational queries, joins, aggregates, CTEs, windows, JSON operations, and transactions with a PostgreSQL-oriented SQL surface.
 - Search text with BM25 or Bayesian BM25, retrieve vectors with KNN, and combine both signals in hybrid queries.
 - Store named graphs, execute Cypher and regular path queries, and call graph traversal or centrality functions from SQL.
-- Start in memory for experiments, then open a persistent SQLite-backed catalog without changing the query API.
+- Start in memory for experiments, then choose the default SQLite backend or the pure-Rust redb backend without changing the query API.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
@@ -23,7 +23,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 
 ## Try it in a terminal
 
-You need Rust 1.85 or newer and the native build tools required by Cargo dependencies.
+You need Rust 1.90 or newer and the native build tools required by Cargo dependencies.
 
 Start the interactive `usql` shell:
 
@@ -135,7 +135,23 @@ cargo run -p uqa-engine --example compressed_encrypted_catalog
 
 ## Persistence and encryption
 
-`Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use a persistent SQLite-backed catalog. Persistent catalogs restore schemas, documents, indexes, graphs, scoring parameters, models, views, and statistics when reopened.
+`Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
+
+Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
+
+```rust
+use std::sync::Arc;
+use uqa_engine::Engine;
+use uqa_storage::PersistentStorageProvider;
+use uqa_storage_redb::RedbStorage;
+
+let provider: Arc<dyn PersistentStorageProvider> =
+    Arc::new(RedbStorage::open("notes.redb")?);
+let engine = Engine::from_persistent_provider(provider)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](docs/design/kv-storage-migration.md) for storage and transaction details.
 
 Security-sensitive deployments should use the SQLCipher path exposed by `Engine::open_encrypted`. Compressed encrypted containers are also available when compression is required, but they have a narrower, explicitly documented threat model and require an external trusted anchor for whole-file rollback detection.
 
@@ -176,6 +192,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
 | [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
 | [Engine state ownership](docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
+| [Key/Value storage](docs/design/kv-storage-migration.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
 | [Compressed VFS security](docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |

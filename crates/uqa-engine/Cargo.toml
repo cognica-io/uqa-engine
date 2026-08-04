@@ -41,6 +41,7 @@ rusqlite = { workspace = true }
 rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 
 [dev-dependencies]
+uqa-storage-redb = { workspace = true }
 uqa-storage-sqlite = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }

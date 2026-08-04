@@ -14,7 +14,7 @@ use tempfile::tempdir;
 use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::{Engine, ScoringMode};
 use uqa_graph::GraphStore as _;
-use uqa_storage::{CatalogFacade, ManagedConnection, PersistentStorageBackend};
+use uqa_storage::{ManagedConnection, PersistentStorageProvider};
 use uqa_storage_sqlite::SQLiteKeyValueStorage;
 
 #[derive(Deserialize)]
@@ -39,9 +39,8 @@ fn open_key_value_engine(path: &std::path::Path) -> Engine {
 
 fn open_key_value_storage_and_engine(path: &std::path::Path) -> (SQLiteKeyValueStorage, Engine) {
     let storage = SQLiteKeyValueStorage::open(path).expect("open SQLite KeyValue storage");
-    let catalog: Arc<dyn CatalogFacade> = Arc::new(storage.catalog());
-    let backend: Arc<dyn PersistentStorageBackend> = Arc::new(storage.backend());
-    let engine = Engine::from_persistent_backends(catalog, backend).expect("open KeyValue engine");
+    let provider: Arc<dyn PersistentStorageProvider> = Arc::new(storage.clone());
+    let engine = Engine::from_persistent_provider(provider).expect("open KeyValue engine");
     (storage, engine)
 }
 

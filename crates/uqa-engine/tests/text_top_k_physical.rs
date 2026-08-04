@@ -23,22 +23,22 @@ fn populate(engine: &Engine, count: u64) {
         .unwrap();
     for doc_id in 1..=count {
         let mut body = Vec::new();
-        if doc_id % 10 != 0 {
+        if !doc_id.is_multiple_of(10) {
             body.push("crate");
         }
-        if doc_id % 3 == 0 {
+        if doc_id.is_multiple_of(3) {
             body.extend(["rust", "rust"]);
         }
-        if doc_id % 37 == 0 {
+        if doc_id.is_multiple_of(37) {
             body.extend(std::iter::repeat_n("plan", 7));
         }
         body.extend(std::iter::repeat_n("filler", (doc_id % 11) as usize));
 
         let mut title = Vec::new();
-        if doc_id % 2 == 0 {
+        if doc_id.is_multiple_of(2) {
             title.push("engine");
         }
-        if doc_id % 7 == 0 {
+        if doc_id.is_multiple_of(7) {
             title.extend(["query", "query", "query"]);
         }
         title.extend(std::iter::repeat_n("heading", (doc_id % 5) as usize));
@@ -99,7 +99,7 @@ fn randomized_public_wand_matches_exhaustive_for_duplicate_terms_and_bayesian_fi
     });
     let terms = ["plan", "rust", "crate", "filler"];
     let mut state = 0x4d59_5df4_d0f3_3173_u64;
-    for case in 0..48 {
+    for case in 0_usize..48 {
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
@@ -113,7 +113,11 @@ fn randomized_public_wand_matches_exhaustive_for_duplicate_terms_and_bayesian_fi
         }
         let query = query.join(" ");
         let k = 1 + (state as usize % 20);
-        let mode = if case % 2 == 0 { &bm25 } else { &bayesian };
+        let mode = if case.is_multiple_of(2) {
+            &bm25
+        } else {
+            &bayesian
+        };
         assert_top_k_matches_exhaustive(
             &engine,
             "body",

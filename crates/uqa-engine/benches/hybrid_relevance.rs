@@ -242,7 +242,7 @@ fn build_corpus(spec: &RegimeSpec) -> Corpus {
                 // Latent quality tier: one document in ten is canonical
                 // for its subtopic. Quality is expressed only through
                 // higher term frequency, never through the embedding.
-                let canonical = doc_index % 10 == 0;
+                let canonical = doc_index.is_multiple_of(10);
                 let mut words: Vec<&str> = Vec::new();
                 if rng.chance(0.8) {
                     words.push(TOPIC_WORDS[topic]);

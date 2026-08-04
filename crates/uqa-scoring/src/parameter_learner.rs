@@ -185,11 +185,11 @@ mod tests {
     #[test]
     fn fit_sharpens_alpha_for_separable_labels() {
         let mut learner = ParameterLearner::new(0.5, 0.0, None).unwrap();
-        let scores: Vec<f64> = (0..40)
-            .map(|i| if i % 2 == 0 { 5.0 } else { -5.0 })
+        let scores: Vec<f64> = (0_usize..40)
+            .map(|i| if i.is_multiple_of(2) { 5.0 } else { -5.0 })
             .collect();
-        let labels: Vec<f64> = (0..40)
-            .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
+        let labels: Vec<f64> = (0_usize..40)
+            .map(|i| if i.is_multiple_of(2) { 1.0 } else { 0.0 })
             .collect();
         let alpha_before = learner.alpha();
         learner.fit(&scores, &labels, 0.5, 50).unwrap();

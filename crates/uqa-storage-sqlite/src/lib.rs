@@ -19,7 +19,10 @@ use uqa_storage::key_value::{
     prefix_upper_bound, KeyValueBatch, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore,
 };
 use uqa_storage::sqlite::{ManagedConnection, Result as SQLiteResult, SQLiteError};
-use uqa_storage::{StorageBackendError, StorageBackendResult};
+use uqa_storage::{
+    CatalogFacade, PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
+    StorageBackendError, StorageBackendResult,
+};
 
 const KEY_VALUE_TABLE: &str = "_key_value";
 
@@ -57,6 +60,14 @@ impl SQLiteKeyValueStore {
 
     pub fn connection(&self) -> ManagedConnection {
         self.conn.clone()
+    }
+
+    /// Create an isolated transaction session over the same `SQLite` database.
+    pub fn new_session(&self) -> Self {
+        Self {
+            conn: self.conn.new_session(),
+            table_ready: Arc::clone(&self.table_ready),
+        }
     }
 
     fn ensure_table(&self) -> SQLiteResult<()> {
@@ -333,6 +344,32 @@ impl KeyValueStore for SQLiteKeyValueStore {
         Ok(())
     }
 
+    fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.conn.begin_deferred_transaction()?;
+        Ok(())
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.conn.in_transaction()
+    }
+
+    fn transaction_has_written(&self) -> StorageBackendResult<bool> {
+        Ok(self.conn.transaction_has_written()?)
+    }
+
+    fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(self.conn.data_version()?)
+    }
+
+    fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
+        Ok(self.conn.data_version_monitor_is_nonblocking()?)
+    }
+
+    fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        self.conn.pin_transaction_snapshot()?;
+        Ok(())
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         self.conn.commit_transaction()?;
         Ok(())
@@ -474,6 +511,16 @@ impl SQLiteKeyValueStorage {
     }
 }
 
+impl PersistentStorageProvider for SQLiteKeyValueStorage {
+    fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
+        let store: Arc<dyn KeyValueStore> = Arc::new(self.store.new_session());
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(KeyValueStorageBackend::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -544,6 +591,16 @@ mod tests {
                 Some(&b"yellow"[..])
             );
         }
+    }
+
+    #[test]
+    fn sqlite_store_passes_the_reusable_backend_contract() {
+        let directory = tempfile::tempdir().unwrap();
+        let reader =
+            SQLiteKeyValueStore::open(&directory.path().join("conformance.sqlite3")).unwrap();
+        let writer = reader.new_session();
+        uqa_storage::key_value::conformance::verify_store(&reader).unwrap();
+        uqa_storage::key_value::conformance::verify_session_isolation(&reader, &writer).unwrap();
     }
 
     #[test]

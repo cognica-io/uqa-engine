@@ -90,14 +90,14 @@ fn retrieval_engine() -> Engine {
         if id > 1 {
             documents.push_str(", ");
         }
-        let body = if id % 3 == 0 {
+        let body = if id.is_multiple_of(3) {
             "rust query engine benchmark"
-        } else if id % 5 == 0 {
+        } else if id.is_multiple_of(5) {
             "graph vector search benchmark"
         } else {
             "ordinary document payload"
         };
-        let kind = if id % 2 == 0 { "chat" } else { "note" };
+        let kind = if id.is_multiple_of(2) { "chat" } else { "note" };
         let phase = id % 10;
         let _ = write!(
             documents,

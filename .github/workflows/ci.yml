@@ -61,6 +61,20 @@ jobs:
       - name: Check package license contents
         run: python3 scripts/check-release-licenses.py "${RUNNER_TEMP}"/uqa-packages/*.tgz
 
+  msrv:
+    name: cargo check (Rust 1.90)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - run: cargo check --workspace --locked
+
   clippy:
     name: cargo clippy
     runs-on: ${{ matrix.os }}

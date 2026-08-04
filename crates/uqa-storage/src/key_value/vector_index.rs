@@ -6,13 +6,15 @@
 
 //! Vector-index adapter over an ordered key/value store.
 
+use std::collections::BTreeMap;
+
 use super::codec::{
     blob_to_vector, other_error, read_str, read_u64, usize_to_u64, validate_vector_ordinal_count,
     vector_doc_prefix, vector_field_prefix, vector_key, vector_to_blob,
 };
 use super::{
-    cosine_similarity, validate_vector_values, Arc, DocId, KeyValueStore, Payload, PostingEntry,
-    PostingList, StorageBackendResult, VectorIndex,
+    cosine_similarity, validate_vector_values, Arc, DocId, KeyValueBatch, KeyValueStore, Payload,
+    PostingEntry, PostingList, StorageBackendResult, VectorIndex,
 };
 
 /// Brute-force vector index implemented over [`KeyValueStore`].
@@ -39,10 +41,12 @@ impl KeyValueVectorIndex {
         }
     }
 
-    fn load_all(&self) -> StorageBackendResult<Vec<(DocId, Vec<f32>)>> {
+    pub(super) fn load_all_with_ordinals(
+        &self,
+    ) -> StorageBackendResult<Vec<(DocId, u32, Vec<f32>)>> {
         let mut vectors = Vec::new();
         let mut current_doc = None;
-        let mut expected_ordinal = 0_u64;
+        let mut expected_ordinal = 0_u32;
         for (key, value) in self
             .store
             .scan_prefix(&vector_field_prefix(&self.table, &self.field)?)?
@@ -52,7 +56,7 @@ impl KeyValueVectorIndex {
             let _field = read_str(&key, &mut offset)?;
             let doc_id = read_u64(&key, &mut offset)?;
             let ordinal = read_u64(&key, &mut offset)?;
-            u32::try_from(ordinal)
+            let ordinal = u32::try_from(ordinal)
                 .map_err(|_| other_error("persisted vector ordinal exceeds u32 index format"))?;
             if offset != key.len() {
                 return Err(other_error("persisted vector key has trailing bytes"));
@@ -71,9 +75,58 @@ impl KeyValueVectorIndex {
                 .ok_or_else(|| other_error("persisted vector ordinal sequence overflow"))?;
             let vector = blob_to_vector(&value)?;
             self.validate_dimensions(&vector)?;
-            vectors.push((doc_id, vector));
+            vectors.push((doc_id, ordinal, vector));
         }
         Ok(vectors)
+    }
+
+    pub(super) fn load_all(&self) -> StorageBackendResult<Vec<(DocId, Vec<f32>)>> {
+        Ok(self
+            .load_all_with_ordinals()?
+            .into_iter()
+            .map(|(doc_id, _, vector)| (doc_id, vector))
+            .collect())
+    }
+
+    pub(super) fn load_by_document(&self) -> StorageBackendResult<BTreeMap<DocId, Vec<Vec<f32>>>> {
+        let mut grouped = BTreeMap::<DocId, Vec<Vec<f32>>>::new();
+        for (doc_id, ordinal, vector) in self.load_all_with_ordinals()? {
+            let vectors = grouped.entry(doc_id).or_default();
+            if usize::try_from(ordinal).ok() != Some(vectors.len()) {
+                return Err(other_error(format!(
+                    "invalid canonical vector ordinal for document {doc_id}: expected {}, found {ordinal}",
+                    vectors.len()
+                )));
+            }
+            vectors.push(vector);
+        }
+        Ok(grouped)
+    }
+
+    pub(super) fn stage_replace(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        doc_id: DocId,
+        vectors: &[Vec<f32>],
+    ) -> StorageBackendResult<()> {
+        for vector in vectors {
+            self.validate_dimensions(vector)?;
+        }
+        validate_vector_ordinal_count(usize_to_u64(vectors.len(), "vector count")?)?;
+        batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
+        for (ordinal, vector) in vectors.iter().enumerate() {
+            let ordinal = u32::try_from(ordinal)
+                .map_err(|_| other_error("vector ordinal exceeds u32 index format"))?;
+            batch.put(
+                &vector_key(&self.table, &self.field, doc_id, ordinal)?,
+                &vector_to_blob(vector)?,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn stage_clear(&self, batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
+        batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)
     }
 
     fn validate_dimensions(&self, vector: &[f32]) -> StorageBackendResult<()> {
@@ -100,20 +153,8 @@ impl VectorIndex for KeyValueVectorIndex {
     }
 
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
-        for vector in &vectors {
-            self.validate_dimensions(vector)?;
-        }
-        validate_vector_ordinal_count(usize_to_u64(vectors.len(), "vector count")?)?;
         let mut batch = self.store.batch();
-        batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
-        for (ordinal, vector) in vectors.iter().enumerate() {
-            let ordinal = u32::try_from(ordinal)
-                .map_err(|_| other_error("vector ordinal exceeds u32 index format"))?;
-            batch.put(
-                &vector_key(&self.table, &self.field, doc_id, ordinal)?,
-                &vector_to_blob(vector)?,
-            )?;
-        }
+        self.stage_replace(batch.as_mut(), doc_id, &vectors)?;
         batch.commit()
     }
 
@@ -125,7 +166,7 @@ impl VectorIndex for KeyValueVectorIndex {
 
     fn clear(&mut self) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
-        batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)?;
+        self.stage_clear(batch.as_mut())?;
         batch.commit()
     }
 
@@ -135,8 +176,7 @@ impl VectorIndex for KeyValueVectorIndex {
             return Ok(PostingList::new());
         }
         let entries = self.load_all()?;
-        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-            std::collections::BTreeMap::new();
+        let mut best_by_doc = BTreeMap::<DocId, f32>::new();
         for (doc_id, vector) in &entries {
             let sim = cosine_similarity(query, vector);
             best_by_doc
@@ -167,8 +207,7 @@ impl VectorIndex for KeyValueVectorIndex {
                 "vector similarity threshold must be finite, got {threshold}"
             )));
         }
-        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-            std::collections::BTreeMap::new();
+        let mut best_by_doc = BTreeMap::<DocId, f32>::new();
         for (doc_id, vector) in self.load_all()? {
             let sim = cosine_similarity(query, &vector);
             if sim >= threshold {

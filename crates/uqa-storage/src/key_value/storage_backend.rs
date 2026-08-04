@@ -7,9 +7,10 @@
 //! Persistent-storage facade that assembles the key/value adapters.
 
 use super::{
-    Analyzer, Arc, DocumentStore, InvertedIndex, KeyValueDocumentStore, KeyValueInvertedIndex,
-    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, StorageBackendError,
-    StorageBackendResult, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    btree_index, Analyzer, Arc, BTreeMap, DocId, DocumentStore, InvertedIndex,
+    KeyValueDocumentStore, KeyValueHNSWIndex, KeyValueIVFIndex, KeyValueInvertedIndex,
+    KeyValueStore, KeyValueVectorIndex, PersistentStorageBackend, StorageBackendResult, Value,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 
 /// Persistent storage factory implemented over [`KeyValueStore`].
@@ -47,7 +48,7 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         field: &str,
         dimensions: u32,
         spec: VectorIndexSpec,
-        _mode: VectorIndexOpenMode,
+        mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         match spec {
             VectorIndexSpec::BruteForce => Ok(Box::new(KeyValueVectorIndex::new(
@@ -56,15 +57,121 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
                 field,
                 dimensions,
             ))),
-            other => Err(StorageBackendError::Other(format!(
-                "{} vector indexes are not supported by the key/value backend",
-                other.access_method()
-            ))),
+            VectorIndexSpec::IVF(params) => match mode {
+                VectorIndexOpenMode::Create => Ok(Box::new(KeyValueIVFIndex::create(
+                    Arc::clone(&self.store),
+                    table,
+                    field,
+                    dimensions,
+                    params,
+                )?)),
+                VectorIndexOpenMode::Restore => Ok(Box::new(KeyValueIVFIndex::restore(
+                    Arc::clone(&self.store),
+                    table,
+                    field,
+                    dimensions,
+                    params,
+                )?)),
+            },
+            VectorIndexSpec::HNSW(params) => match mode {
+                VectorIndexOpenMode::Create => Ok(Box::new(KeyValueHNSWIndex::create(
+                    Arc::clone(&self.store),
+                    table,
+                    field,
+                    dimensions,
+                    params,
+                )?)),
+                VectorIndexOpenMode::Restore => Ok(Box::new(KeyValueHNSWIndex::restore(
+                    Arc::clone(&self.store),
+                    table,
+                    field,
+                    dimensions,
+                    params,
+                )?)),
+            },
         }
+    }
+
+    fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+        KeyValueIVFIndex::drop_metadata(self.store.as_ref(), table, field)
+    }
+
+    fn persists_btree_indexes(&self) -> bool {
+        true
+    }
+
+    fn load_btree_index(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
+        btree_index::load(self.store.as_ref(), table, field)
+    }
+
+    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        btree_index::fields(self.store.as_ref(), table)
+    }
+
+    fn replace_btree_index(
+        &self,
+        table: &str,
+        field: &str,
+        values: &[(DocId, Value)],
+    ) -> StorageBackendResult<()> {
+        btree_index::replace(self.store.as_ref(), table, field, values)
+    }
+
+    fn replace_btree_indexes(
+        &self,
+        table: &str,
+        indexes: &[(&str, &[(DocId, Value)])],
+    ) -> StorageBackendResult<()> {
+        btree_index::replace_many(self.store.as_ref(), table, indexes)
+    }
+
+    fn apply_btree_index_write(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        values: Option<&BTreeMap<String, Value>>,
+    ) -> StorageBackendResult<()> {
+        btree_index::apply_write(self.store.as_ref(), table, doc_id, values)
+    }
+
+    fn drop_btree_index(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+        btree_index::drop_index(self.store.as_ref(), table, field)
+    }
+
+    fn clear_btree_indexes(&self, table: &str) -> StorageBackendResult<()> {
+        btree_index::clear_entries(self.store.as_ref(), table)
     }
 
     fn begin_transaction(&self) -> StorageBackendResult<()> {
         self.store.begin_transaction()
+    }
+
+    fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.store.begin_read_transaction()
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.store.in_transaction()
+    }
+
+    fn transaction_has_written(&self) -> StorageBackendResult<bool> {
+        self.store.transaction_has_written()
+    }
+
+    fn change_version(&self) -> StorageBackendResult<Option<u64>> {
+        self.store.change_version()
+    }
+
+    fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
+        self.store.change_version_monitor_is_nonblocking()
+    }
+
+    fn pin_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        self.store.pin_transaction_snapshot()
     }
 
     fn commit_transaction(&self) -> StorageBackendResult<()> {

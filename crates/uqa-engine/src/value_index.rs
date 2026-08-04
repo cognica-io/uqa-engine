@@ -1183,15 +1183,16 @@ mod tests {
         // eventually return SQLITE_BUSY.
         let blocker = engine
             .storage
-            .sqlite_session
+            .provider
             .as_ref()
             .unwrap()
-            .new_session();
-        blocker.begin_transaction().unwrap();
+            .open_session()
+            .unwrap();
+        blocker.backend.begin_transaction().unwrap();
         let repair_result = engine.repair_persistent_value_indexes_on_open();
         let new_session_result = engine.new_session();
         let reopen_result = crate::Engine::open(&database);
-        blocker.rollback_transaction().unwrap();
+        blocker.backend.rollback_transaction().unwrap();
         repair_result.unwrap();
         new_session_result.unwrap();
         reopen_result.unwrap();

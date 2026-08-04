@@ -544,7 +544,7 @@ fn native_tick(state: &mut NativeState, actions: &BTreeMap<i64, &'static str>, t
         }
     }
 
-    if tick % 20 == 0 {
+    if tick.is_multiple_of(20) {
         for player in state.players.values_mut() {
             player.ammo = (player.ammo + 1).min(state.settings.ammo_max);
         }
@@ -620,7 +620,7 @@ fn native_render_3d_frame(state: &NativeState, player_id: i64) -> Vec<String> {
             let wall_h = column_heights[col as usize];
             let dist = column_dists[col as usize];
             let top = (height - wall_h) / 2;
-            let bottom = (height + wall_h) / 2;
+            let bottom = i32::midpoint(height, wall_h);
             let ch = if y < top {
                 ' '
             } else if y >= bottom {

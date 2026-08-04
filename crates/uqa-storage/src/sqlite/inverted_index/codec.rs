@@ -41,7 +41,7 @@ pub(super) fn positions_to_blob(positions: &[u32]) -> SQLiteResult<Vec<u8>> {
 }
 
 pub(super) fn blob_to_positions(blob: &[u8]) -> SQLiteResult<Vec<u32>> {
-    if blob.len() % 4 != 0 {
+    if !blob.len().is_multiple_of(4) {
         return Err(SQLiteError::StorageBackend(
             "invalid posting positions payload".to_string(),
         ));

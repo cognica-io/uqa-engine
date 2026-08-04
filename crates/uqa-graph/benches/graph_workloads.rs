@@ -28,7 +28,14 @@ fn build_graph(n: u64) -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
     g.create_graph(GRAPH);
     for id in 0..n {
-        let mut vertex = Vertex::new(id + 1, if id % 5 == 0 { "Company" } else { "Person" });
+        let mut vertex = Vertex::new(
+            id + 1,
+            if id.is_multiple_of(5) {
+                "Company"
+            } else {
+                "Person"
+            },
+        );
         vertex
             .properties
             .insert("score".to_string(), Value::Int((id % 100) as i64));
@@ -39,7 +46,11 @@ fn build_graph(n: u64) -> MemoryGraphStore {
     }
     let mut edge_id = 1_u64;
     for id in 1..n {
-        let label = if id % 3 == 0 { "works_at" } else { "knows" };
+        let label = if id.is_multiple_of(3) {
+            "works_at"
+        } else {
+            "knows"
+        };
         let mut edge = Edge::new(edge_id, id, id + 1, label);
         edge.properties
             .insert("weight".to_string(), Value::Float((id % 10) as f64 / 10.0));
@@ -52,7 +63,7 @@ fn build_graph(n: u64) -> MemoryGraphStore {
         edge_id += 1;
     }
     for id in 1..n.saturating_sub(10) {
-        if id % 10 == 0 {
+        if id.is_multiple_of(10) {
             g.add_edge(Edge::new(edge_id, id, id + 10, "knows"), GRAPH)
                 .unwrap();
             edge_id += 1;

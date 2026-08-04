@@ -14,7 +14,7 @@ use uqa_scoring::{fusion_wand::SignalScoreMap, FusionWANDScorer};
 fn signal(n_docs: u64, signal_idx: u64) -> SignalScoreMap {
     let mut map = BTreeMap::new();
     for doc_id in 0..n_docs {
-        if (doc_id + signal_idx) % (signal_idx + 2) == 0 {
+        if (doc_id + signal_idx).is_multiple_of(signal_idx + 2) {
             let score = 0.1 + ((doc_id * 17 + signal_idx * 31) % 850) as f64 / 1_000.0;
             map.insert(doc_id, score);
         }

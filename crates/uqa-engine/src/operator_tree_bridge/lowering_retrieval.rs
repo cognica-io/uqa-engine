@@ -448,7 +448,7 @@ pub(super) fn lower_multi_field_match(
         }
     }
 
-    if args.len() < 4 || args.len() % 2 != 0 {
+    if args.len() < 4 || !args.len().is_multiple_of(2) {
         return None;
     }
     let n_fields = args.len() / 2;
@@ -473,7 +473,7 @@ pub(super) fn lower_staged_retrieval(
     if matches!(args.first(), Some(ScalarExpr::Func { .. }))
         && named_arg_expr(args.first()?).is_none()
     {
-        if args.is_empty() || args.len() % 2 != 0 {
+        if args.is_empty() || !args.len().is_multiple_of(2) {
             return None;
         }
         for pair in args.chunks(2) {
@@ -483,7 +483,7 @@ pub(super) fn lower_staged_retrieval(
             });
         }
     } else {
-        if args.is_empty() || args.len() % 3 != 0 {
+        if args.is_empty() || !args.len().is_multiple_of(3) {
             return None;
         }
         for stage in args.chunks(3) {

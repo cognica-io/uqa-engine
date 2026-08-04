@@ -7,9 +7,10 @@
 //! File-format opening, connection binding, and independent session creation.
 
 use super::{
-    Arc, Catalog, CatalogFacade, DeepModel, Engine, ManagedConnection, Path,
-    PersistentStorageBackend, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions,
-    SQLiteError, SQLiteStorageBackend, StorageBackendError, StorageBackendResult,
+    Arc, DeepModel, Engine, ManagedConnection, Path, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, SQLiteCompressedContainerAnchor,
+    SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider, StorageBackendError,
+    StorageBackendResult,
 };
 
 impl Engine {
@@ -141,51 +142,28 @@ impl Engine {
     }
 
     fn open_with_connection(conn: &ManagedConnection) -> Result<Self, SQLiteError> {
-        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(conn.clone())?);
-        let backend: Arc<dyn PersistentStorageBackend> =
-            Arc::new(SQLiteStorageBackend::new(conn.clone()));
-        let mut engine =
-            Self::from_persistent_backends(catalog, backend).map_err(Self::sqlite_open_error)?;
-        // Initial catalog migrations and physical-index repairs above may
-        // commit through another pooled connection. Establish the monitor
-        // baseline only after all one-time writes have completed.
-        let data_version = conn.data_version()?.unwrap_or(0);
-        engine.storage.sqlite_session = Some(conn.clone());
-        engine
-            .epochs
-            .seen_sqlite_data_version
-            .store(data_version, std::sync::atomic::Ordering::Release);
-        Ok(engine)
+        let provider: Arc<dyn PersistentStorageProvider> =
+            Arc::new(SQLiteStorageProvider::new(conn.clone()));
+        Self::from_persistent_provider(provider).map_err(Self::sqlite_open_error)
     }
 
-    /// Create an independent SQL session over this engine's `SQLite` database.
+    /// Create an independent SQL session over this engine's durable database.
     ///
     /// The new session gets its own catalog/backend pair, transaction stack,
     /// runtime variables, prepared statements, statement cache, and
     /// cancellation token. Durable registry caches remain session-private and
     /// synchronize through shared epochs; runtime-only Rust extensions are
-    /// shared. Table storage handles are rebound to the new
-    /// [`ManagedConnection`] so all catalog/document/index/vector operations
-    /// in an explicit transaction use one pinned physical connection.
-    pub fn new_session(&self) -> Result<Self, SQLiteError> {
-        let base = self.storage.sqlite_session.as_ref().ok_or_else(|| {
-            SQLiteError::StorageBackend(
-                "independent sessions require an Engine opened through the SQLite API".into(),
+    /// shared. The provider must return catalog and data handles bound to one
+    /// session transaction so every durable mutation commits atomically.
+    pub fn new_session(&self) -> StorageBackendResult<Self> {
+        let provider = self.storage.provider.as_ref().ok_or_else(|| {
+            StorageBackendError::Other(
+                "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
-        let connection = base.new_session();
-        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
-        let backend: Arc<dyn PersistentStorageBackend> =
-            Arc::new(SQLiteStorageBackend::new(connection.clone()));
+        let storage_session = provider.open_session()?;
         let mut session =
-            Self::from_persistent_backends(catalog, backend).map_err(Self::sqlite_open_error)?;
-        let data_version = connection.data_version()?.unwrap_or(0);
-
-        session.storage.sqlite_session = Some(connection);
-        session
-            .epochs
-            .seen_sqlite_data_version
-            .store(data_version, std::sync::atomic::Ordering::Release);
+            Self::from_persistent_session(storage_session, Some(Arc::clone(provider)))?;
         session.epochs.share_published_from(&self.epochs);
         // Force one catalog rebind after attaching the shared generation.
         // Otherwise a DDL commit racing the initial restore could leave this
@@ -193,34 +171,44 @@ impl Engine {
         // as already observed.
         // Durable registries remain session-local. Sharing these maps
         // would expose a writer's uncommitted graph/schema/view/FDW changes
-        // to sibling sessions before SQLite COMMIT. Runtime-only registries
+        // to sibling sessions before storage COMMIT. Runtime-only registries
         // may remain shared.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
-        session
-            .synchronize_table_catalog()
-            .map_err(Self::sqlite_open_error)?;
-        session
-            .synchronize_table_data()
-            .map_err(Self::sqlite_open_error)?;
-        session
-            .synchronize_catalog_registries()
-            .map_err(Self::sqlite_open_error)?;
+        session.synchronize_table_catalog()?;
+        session.synchronize_table_data()?;
+        session.synchronize_catalog_registries()?;
         Ok(session)
     }
 
+    /// Build an engine and retain the provider used to create future
+    /// independent sessions.
+    pub fn from_persistent_provider(
+        provider: Arc<dyn PersistentStorageProvider>,
+    ) -> StorageBackendResult<Self> {
+        let session = provider.open_session()?;
+        Self::from_persistent_session(session, Some(provider))
+    }
+
     /// Build an engine from already-open persistent metadata and data
-    /// backends. This is the storage-neutral entry point used by
-    /// `Engine::open` after it creates the `SQLite` implementations,
-    /// and by future `RocksDB` / `redb` constructors once they provide
-    /// the same facade objects.
+    /// backends. This lower-level entry point does not retain a provider, so
+    /// the resulting engine cannot create independent sessions. Prefer
+    /// [`Self::from_persistent_provider`] when a backend has a session factory.
     pub fn from_persistent_backends(
-        catalog: Arc<dyn CatalogFacade>,
+        catalog: Arc<dyn uqa_storage::CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
     ) -> StorageBackendResult<Self> {
+        Self::from_persistent_session(PersistentStorageSession::new(catalog, backend), None)
+    }
+
+    fn from_persistent_session(
+        storage_session: PersistentStorageSession,
+        provider: Option<Arc<dyn PersistentStorageProvider>>,
+    ) -> StorageBackendResult<Self> {
+        let PersistentStorageSession { catalog, backend } = storage_session;
         let restore_catalog = Arc::clone(&catalog);
         let restore_backend = Arc::clone(&backend);
         let mut engine = Self {
-            storage: super::StorageContext::persistent(catalog, backend),
+            storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: super::DurableCatalogState::new(),
             session: super::SessionContext::new(super::initial_random_state()),
             extensions: super::RuntimeExtensions::new(),
@@ -240,6 +228,15 @@ impl Engine {
         for (name, json) in restore_catalog.load_all_scoring_params()? {
             engine.durable.scoring_params.write().insert(name, json);
         }
+        // Initial catalog migrations and physical-index repairs above may
+        // commit. Establish the backend monitor baseline only after every
+        // one-time write has completed.
+        if let Some(version) = restore_backend.change_version()? {
+            engine
+                .epochs
+                .seen_storage_change_version
+                .store(version, std::sync::atomic::Ordering::Release);
+        }
         Ok(engine)
     }
 
@@ -248,6 +245,9 @@ impl Engine {
             StorageBackendError::Analysis(err) => SQLiteError::Analysis(err),
             StorageBackendError::SQLite(err) => err,
             StorageBackendError::Serde(err) => SQLiteError::Serde(err),
+            StorageBackendError::Backend { backend, source } => {
+                SQLiteError::StorageBackend(format!("{backend} storage failed: {source}"))
+            }
             StorageBackendError::Other(msg) => SQLiteError::StorageBackend(msg),
         }
     }

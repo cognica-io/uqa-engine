@@ -4,6 +4,18 @@ All notable changes to `uqa-rs` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Pure-Rust redb storage:** `uqa-storage-redb` implements ordered byte keys, atomic batches, MVCC read sessions, explicit write transactions, committed generation tracking, reopen, and SQL-compatible savepoints through a transaction-local undo journal.
+- **Reusable storage conformance:** third-party `KeyValueStore` implementations can run shared ordering, cursor, batch, transaction, savepoint, read-only, and session-isolation checks.
+
+### Changed
+
+- **Backend-neutral sessions:** `PersistentStorageProvider` now creates catalog and physical backend handles bound to one session, so `Engine::new_session` no longer depends on a hidden SQLite connection.
+- **Rust baseline:** the workspace toolchain and declared minimum supported Rust version are now Rust 1.90.
+
 ## [0.1.0] - 2026-08-03
 
 Initial preproduction release of UQA-RS.

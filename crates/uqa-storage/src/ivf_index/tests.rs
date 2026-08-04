@@ -81,6 +81,21 @@ fn stale_index_below_training_threshold_returns_to_untrained() {
 }
 
 #[test]
+fn deletion_while_untrained_keeps_training_metadata_empty() {
+    let mut index = IVFIndex::with_params(2, 2, 2, 2);
+    index.add(1, vec![1.0, 0.0]).unwrap();
+
+    index.delete(1).unwrap();
+
+    let snapshot = index.metadata_snapshot();
+    assert_eq!(snapshot.state, IVFState::Untrained);
+    assert_eq!(snapshot.trained_size, 0);
+    assert_eq!(snapshot.deletes_since_train, 0);
+    assert!(snapshot.centroids.is_empty());
+    assert!(snapshot.assignments.is_empty());
+}
+
+#[test]
 fn delete_marks_stale_above_fraction() {
     let mut index = IVFIndex::with_params(4, 4, 2, 16);
     for doc_id in 0..32 {

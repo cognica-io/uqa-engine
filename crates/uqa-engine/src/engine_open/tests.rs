@@ -8,17 +8,19 @@ use std::sync::{mpsc, Arc, Barrier};
 use std::time::Duration;
 
 use uqa_core::Value;
+use uqa_storage::sqlite::{Catalog, ManagedConnection};
+use uqa_storage::{ColumnStatsInput, SQLiteStorageBackend};
 
 use super::Engine;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine
         .storage
-        .sqlite_session
+        .backend
         .as_ref()
         .expect("persistent test engine")
-        .data_version()
-        .expect("read SQLite data version")
+        .change_version()
+        .expect("read storage change version")
         .expect("file-backed database has a data version")
 }
 
@@ -68,6 +70,45 @@ fn contended_transaction_stack_does_not_hide_autocommit_data_generation() {
         .table_data
         .dirty
         .load(std::sync::atomic::Ordering::Acquire));
+}
+
+#[test]
+fn initial_restore_eagerly_loads_column_statistics() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("eager-column-statistics.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER); \
+                 INSERT INTO t (id, val) VALUES (1, 10)",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let connection = ManagedConnection::open(&path).unwrap();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    catalog
+        .save_column_stats(ColumnStatsInput::basic(
+            "public.t", "val", 1, 0, None, None, 999,
+        ))
+        .unwrap();
+    let engine = Engine::from_persistent_backends(
+        Arc::new(catalog),
+        Arc::new(SQLiteStorageBackend::new(connection)),
+    )
+    .unwrap();
+
+    let table = engine
+        .storage
+        .tables
+        .read()
+        .values()
+        .next()
+        .cloned()
+        .expect("restored table");
+    assert_eq!(table.column_stats.read()["val"].row_count, 999);
 }
 
 #[test]
@@ -156,7 +197,7 @@ fn legacy_fts_repair_is_one_time_and_reload_remains_read_only() {
     assert_eq!(
         engine
             .epochs
-            .seen_sqlite_data_version
+            .seen_storage_change_version
             .load(std::sync::atomic::Ordering::Acquire),
         after_initial_repair,
         "initial repair was committed after the monitor baseline"
