@@ -1,0 +1,17 @@
+# Licensing files are copied verbatim into every published package and are
+# verified byte for byte against the canonical copies at release time.
+#
+# Git converts text files to CRLF on Windows checkouts by default, so a wheel
+# built on a Windows runner embedded a CRLF LICENSE while the same file on
+# Linux was LF. The per-platform check could not see it, because on Windows
+# both the wheel's copy and the canonical file it was compared against had been
+# converted; only the final check before publication caught the mismatch.
+#
+# Pinning these paths to LF keeps the published copies identical on every
+# platform. The patterns carry no slash, so they also match the mirrored copies
+# under crates/.
+LICENSE                             text eol=lf
+LICENSE-NOTICE.md                   text eol=lf
+LICENSING.md                        text eol=lf
+UQA-FOSS-EXCEPTION-1.0.txt          text eol=lf
+UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt text eol=lf
