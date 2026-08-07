@@ -5,27 +5,142 @@
     "uqa-sql": 1
   },
   "runtime_workspace_dependencies": {
-    "uqa-analysis": ["uqa-core"],
-    "uqa-api": ["uqa-core", "uqa-engine", "uqa-sql"],
-    "uqa-cli": ["uqa-core", "uqa-engine", "uqa-fdw", "uqa-graph", "uqa-sql"],
+    "example-extensibility": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-sql"
+    ],
+    "example-graph-cypher": [
+      "uqa-core",
+      "uqa-engine"
+    ],
+    "example-storage-transactions": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-storage",
+      "uqa-storage-redb"
+    ],
+    "example-unified-search": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-sql"
+    ],
+    "example-vector-knn": [
+      "uqa-engine"
+    ],
+    "uqa-analysis": [
+      "uqa-core"
+    ],
+    "uqa-api": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-sql"
+    ],
+    "uqa-cli": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-fdw",
+      "uqa-graph",
+      "uqa-sql"
+    ],
     "uqa-core": [],
-    "uqa-engine": ["uqa-analysis", "uqa-core", "uqa-execution", "uqa-fdw", "uqa-fusion", "uqa-graph", "uqa-joins", "uqa-ml", "uqa-operators", "uqa-planner", "uqa-scoring", "uqa-sql", "uqa-storage"],
-    "uqa-execution": ["uqa-core", "uqa-sql"],
-    "uqa-fdw": ["uqa-core"],
-    "uqa-fusion": ["uqa-core", "uqa-scoring"],
-    "uqa-graph": ["uqa-analysis", "uqa-core", "uqa-operators", "uqa-storage"],
-    "uqa-joins": ["uqa-analysis", "uqa-core", "uqa-graph", "uqa-sql"],
-    "uqa-ml": ["uqa-core", "uqa-operators", "uqa-scoring", "uqa-storage"],
-    "uqa-node": ["uqa-core", "uqa-engine", "uqa-scoring", "uqa-sql", "uqa-storage"],
-    "uqa-operators": ["uqa-core", "uqa-fusion", "uqa-scoring", "uqa-storage"],
+    "uqa-engine": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-execution",
+      "uqa-fdw",
+      "uqa-fusion",
+      "uqa-graph",
+      "uqa-joins",
+      "uqa-ml",
+      "uqa-operators",
+      "uqa-planner",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
+    ],
+    "uqa-execution": [
+      "uqa-core",
+      "uqa-sql"
+    ],
+    "uqa-fdw": [
+      "uqa-core"
+    ],
+    "uqa-fusion": [
+      "uqa-core",
+      "uqa-scoring"
+    ],
+    "uqa-graph": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-operators",
+      "uqa-storage"
+    ],
+    "uqa-joins": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-graph",
+      "uqa-sql"
+    ],
+    "uqa-ml": [
+      "uqa-core",
+      "uqa-operators",
+      "uqa-scoring",
+      "uqa-storage"
+    ],
+    "uqa-node": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
+    ],
+    "uqa-operators": [
+      "uqa-core",
+      "uqa-fusion",
+      "uqa-scoring",
+      "uqa-storage"
+    ],
     "uqa-pg-wire": [],
-    "uqa-planner": ["uqa-core", "uqa-execution", "uqa-graph", "uqa-joins", "uqa-operators", "uqa-sql", "uqa-storage"],
-    "uqa-python": ["uqa-core", "uqa-engine", "uqa-scoring", "uqa-sql", "uqa-storage"],
-    "uqa-scoring": ["uqa-core", "uqa-storage"],
-    "uqa-sql": ["uqa-core"],
-    "uqa-storage": ["uqa-analysis", "uqa-core"],
-    "uqa-storage-redb": ["uqa-storage"],
-    "uqa-storage-sqlite": ["uqa-storage"],
-    "uqa-wasm": ["uqa-core", "uqa-engine", "uqa-scoring", "uqa-sql", "uqa-storage"]
+    "uqa-planner": [
+      "uqa-core",
+      "uqa-execution",
+      "uqa-graph",
+      "uqa-joins",
+      "uqa-operators",
+      "uqa-sql",
+      "uqa-storage"
+    ],
+    "uqa-python": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
+    ],
+    "uqa-scoring": [
+      "uqa-core",
+      "uqa-storage"
+    ],
+    "uqa-sql": [
+      "uqa-core"
+    ],
+    "uqa-storage": [
+      "uqa-analysis",
+      "uqa-core"
+    ],
+    "uqa-storage-redb": [
+      "uqa-storage"
+    ],
+    "uqa-storage-sqlite": [
+      "uqa-storage"
+    ],
+    "uqa-wasm": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
+    ]
   }
 }

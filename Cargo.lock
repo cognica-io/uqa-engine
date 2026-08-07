@@ -894,6 +894,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
+name = "example-extensibility"
+version = "0.1.0"
+dependencies = [
+ "uqa-core",
+ "uqa-engine",
+ "uqa-sql",
+]
+
+[[package]]
+name = "example-graph-cypher"
+version = "0.1.0"
+dependencies = [
+ "uqa-core",
+ "uqa-engine",
+]
+
+[[package]]
+name = "example-storage-transactions"
+version = "0.1.0"
+dependencies = [
+ "uqa-core",
+ "uqa-engine",
+ "uqa-storage",
+ "uqa-storage-redb",
+]
+
+[[package]]
+name = "example-unified-search"
+version = "0.1.0"
+dependencies = [
+ "uqa-core",
+ "uqa-engine",
+ "uqa-sql",
+]
+
+[[package]]
+name = "example-vector-knn"
+version = "0.1.0"
+dependencies = [
+ "uqa-engine",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

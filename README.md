@@ -17,7 +17,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## Mathematical foundation
 
-[A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.md) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
+[A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
 The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
 
@@ -188,6 +188,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 
 | Document | Use it for |
 | --- | --- |
+| [Runnable examples](examples/README.md) | Seeing search, vectors, graphs, storage, and extensions working as complete programs |
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
 | [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |

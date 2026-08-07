@@ -1,0 +1,22 @@
+[package]
+name = "example-storage-transactions"
+description = "redb-backed durability, reopen, transactions, and savepoints"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+license-file.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+
+[dependencies]
+uqa-core = { workspace = true }
+uqa-engine = { workspace = true }
+uqa-storage = { workspace = true }
+uqa-storage-redb = { workspace = true }
+
+[lints]
+workspace = true

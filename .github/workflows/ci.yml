@@ -144,6 +144,22 @@ jobs:
           cache-bin: false
           cache-targets: false
       - run: cargo build -p uqa-engine --examples --locked
+      # The standalone example crates under examples/ are runnable programs, so
+      # CI executes them rather than only compiling them: a broken query or a
+      # changed SQL contract must fail here, not silently produce no rows.
+      - name: Run standalone examples
+        run: |
+          for package in \
+            example-unified-search \
+            example-vector-knn \
+            example-graph-cypher \
+            example-storage-transactions \
+            example-extensibility
+          do
+            echo "::group::$package"
+            cargo run -p "$package" --locked
+            echo "::endgroup::"
+          done
 
   build-release:
     name: cargo build --release
