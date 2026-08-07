@@ -8,12 +8,7 @@ UQA-RS keeps three kinds of golden fixtures under `tests/parity/`:
 
 All three formats are versioned; bump `version` whenever a breaking schema change lands and update the loader to refuse older files.
 
-The vector fixture is deliberately a manifest rather than an undocumented
-array embedded in a test. Its threshold is selected only on `validation` and
-transferred unchanged to `held_out`; ECE, Brier, and log-loss gates compare
-their bootstrap upper confidence bounds, not just point estimates. Changing
-the corpus, index build, embedding model, dimensions, or candidate K requires
-new provenance and a reviewed fixture version.
+The vector fixture is deliberately a manifest rather than an undocumented array embedded in a test. Its threshold is selected only on `validation` and transferred unchanged to `held_out`; ECE, Brier, and log-loss gates compare their bootstrap upper confidence bounds, not just point estimates. Changing the corpus, index build, embedding model, dimensions, or candidate K requires new provenance and a reviewed fixture version.
 
 ## Format reference
 
@@ -73,10 +68,7 @@ To swap the small synthetic fixture for a real BEIR dataset (`scifact`, `trec-co
 3. For each query, build a `judgments` object from the `qrels` file (graded BEIR relevance is `0`/`1`/`2`).
 4. Pick `min_ndcg` / `min_map` floors from a baseline run (BM25 or Bayesian BM25). Aim for a couple of points below the observed numbers so the gate catches regressions but tolerates noise.
 
-The resulting JSON plugs directly into
-`crates/uqa-engine/tests/beir_fixture.rs` without code changes. Keep any
-one-time dataset converter outside the regression fixture itself and record
-its input dataset revision alongside the generated artifact.
+The resulting JSON plugs directly into `crates/uqa-engine/tests/beir_fixture.rs` without code changes. Keep any one-time dataset converter outside the regression fixture itself and record its input dataset revision alongside the generated artifact.
 
 ## CI guidance
 

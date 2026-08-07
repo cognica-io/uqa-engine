@@ -87,17 +87,9 @@ If a single PR introduces several logically distinct changes (for example, an im
 
 ## Contributor licensing
 
-UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and
-separate commercial terms. Cognica must have sufficient rights to distribute
-every accepted contribution through all of those paths.
+UQA-RS is distributed under AGPL-3.0-only, optional public exceptions, and separate commercial terms. Cognica must have sufficient rights to distribute every accepted contribution through all of those paths.
 
-External copyrightable code and documentation contributions require a
-contributor agreement accepted by Cognica. The execution workflow and final
-agreement are not yet published, so such contributions will not be merged
-until that process is available. Issues, bug reports, design discussion, and
-non-copyrightable factual corrections remain welcome. See
-[CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the
-public-core commitment.
+External copyrightable code and documentation contributions require a contributor agreement accepted by Cognica. The execution workflow and final agreement are not yet published, so such contributions will not be merged until that process is available. Issues, bug reports, design discussion, and non-copyrightable factual corrections remain welcome. See [CONTRIBUTOR_POLICY.md](CONTRIBUTOR_POLICY.md) for the complete policy and the public-core commitment.
 
 ## Filing bugs
 

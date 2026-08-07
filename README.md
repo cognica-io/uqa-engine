@@ -17,7 +17,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## Mathematical foundation
 
-[A Typed Carrier Algebra for Unified Query Execution](docs/papers/typed-carrier-algebra.md) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
+[A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.md) states the implementation-grounded theory behind UQA-RS. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
 The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
 
@@ -151,7 +151,7 @@ let engine = Engine::from_persistent_provider(provider)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](docs/design/kv-storage-migration.md) for storage and transaction details.
+The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](docs/design/kv-storage-backends.md) for storage and transaction details.
 
 Security-sensitive deployments should use the SQLCipher path exposed by `Engine::open_encrypted`. Compressed encrypted containers are also available when compression is required, but they have a narrower, explicitly documented threat model and require an external trusted anchor for whole-file rollback detection.
 
@@ -192,7 +192,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
 | [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
 | [Engine state ownership](docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
-| [Key/Value storage](docs/design/kv-storage-migration.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
+| [Key/Value storage](docs/design/kv-storage-backends.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
 | [Compressed VFS security](docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |

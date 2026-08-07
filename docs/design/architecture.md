@@ -321,7 +321,7 @@ The all-workspace benchmark command is a compile gate, not a published performan
 | Design document index | [`README.md`](README.md) |
 | State ownership and locking | [`engine-state-ownership.md`](engine-state-ownership.md) |
 | Compressed encrypted storage | [`compressed-vfs-security.md`](compressed-vfs-security.md) |
-| Key/value storage backends | [`kv-storage-migration.md`](kv-storage-migration.md) |
+| Key/Value storage backends | [`kv-storage-backends.md`](kv-storage-backends.md) |
 | Parity fixtures | [`parity.md`](parity.md) |
 | Performance evidence | [`performance.md`](performance.md) |
 | Staged implementation plan | [`../plans/0001-uqa-rs-implementation-plan.md`](../plans/0001-uqa-rs-implementation-plan.md) |

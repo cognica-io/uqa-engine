@@ -2,7 +2,7 @@
 
 The design directory records current architecture contracts, security boundaries, migration decisions, compatibility fixtures, and benchmark evidence. The repository README explains how to use UQA-RS; documents here explain why the implementation is shaped the way it is and which invariants future changes must preserve.
 
-The research-level foundation is developed separately in [A Typed Carrier Algebra for Unified Query Execution](../papers/typed-carrier-algebra.md), whose relationship to the DOI-published source papers is stated in the manuscript and in the repository's [citation metadata](../../CITATION.cff).
+The research-level foundation is developed separately in [A Typed Carrier Algebra for Unified Query Execution](../papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.md), whose relationship to the DOI-published source papers is stated in the manuscript and in the repository's [citation metadata](../../CITATION.cff).
 
 ## Start here
 
@@ -12,7 +12,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | [Vector indexes](vector-indexes.md) | Brute-force, IVF, and HNSW selection, parameters, mutation, persistence, cache revisions, and search guarantees | Storage and retrieval contributors |
 | [Engine state ownership](engine-state-ownership.md) | Session isolation, mutable state domains, lock ownership, epochs, transactions, and publication order | Engine and concurrency contributors |
 | [Compressed VFS security](compressed-vfs-security.md) | Authenticated format, threat boundary, rollback protection, trusted anchors, and deployment choice | Security reviewers and operators |
-| [Key/value storage backends](kv-storage-migration.md) | Provider/session ownership, logical key layout, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
+| [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, logical key layout, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
 | [Parity fixtures](parity.md) | SQL golden data, relevance fixtures, vector calibration gates, versioning, and CI use | Test and compatibility contributors |
 | [Performance](performance.md) | Benchmark provenance, regression gates, measured bottlenecks, optimizations, and limitations | Performance contributors and evaluators |
 
