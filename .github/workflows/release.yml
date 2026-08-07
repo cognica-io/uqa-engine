@@ -194,6 +194,12 @@ jobs:
   release:
     name: publish release
     needs: [resolve, python, node, node-package, wasm]
+    # Publish whatever built. One platform failing should not withhold the
+    # packages that are ready; the missing ones are named in the release notes
+    # and re-running the workflow uploads them alongside, so a release is
+    # completed rather than restarted. `!cancelled()` still skips the job when
+    # the run was cancelled deliberately.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -209,26 +215,80 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find artifacts -type f \
-            \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.node' \) \
-            -exec cp {} dist/ \;
+          if [ -d artifacts ]; then
+            find artifacts -type f \
+              \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.node' \) \
+              -exec cp {} dist/ \;
+          fi
           ls -la dist
 
+      # Every artifact this workflow can produce, by upload name. Anything
+      # absent means its build job failed, so it is reported rather than
+      # quietly omitted.
+      - name: Record which packages are present
+        id: inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            python-sdist
+            python-wheel-x86_64-unknown-linux-gnu
+            python-wheel-aarch64-unknown-linux-gnu
+            python-wheel-x86_64-apple-darwin
+            python-wheel-aarch64-apple-darwin
+            python-wheel-x86_64-pc-windows-msvc
+            python-wheel-aarch64-pc-windows-msvc
+            node-package
+            node-addon-x86_64-unknown-linux-gnu
+            node-addon-aarch64-unknown-linux-gnu
+            node-addon-x86_64-apple-darwin
+            node-addon-aarch64-apple-darwin
+            node-addon-x86_64-pc-windows-msvc
+            node-addon-aarch64-pc-windows-msvc
+            wasm-package
+          )
+          missing=()
+          for name in "${expected[@]}"; do
+            [ -d "artifacts/$name" ] || missing+=("$name")
+          done
+          {
+            echo "missing<<EOF"
+            printf '%s\n' "${missing[@]+"${missing[@]}"}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf '::warning::release is missing %d package(s): %s\n' \
+              "${#missing[@]}" "${missing[*]}"
+          fi
+          if [ -z "$(ls -A dist)" ]; then
+            echo "::error::no packages built; nothing to publish" >&2
+            exit 1
+          fi
+
       # The same contract CI enforces on sources, re-checked on the exact
-      # archives that are about to be published.
+      # archives that are about to be published. Globs are expanded first so a
+      # partial matrix does not pass an unmatched pattern to the checker.
       - name: Verify license contents of published archives
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/check-release-licenses.py dist/*.whl dist/*.tar.gz dist/*.tgz
+          shopt -s nullglob
+          archives=(dist/*.whl dist/*.tar.gz dist/*.tgz)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "no archives to verify (native addons only)"
+            exit 0
+          fi
+          python3 scripts/check-release-licenses.py "${archives[@]}"
 
       - name: Build release notes from HISTORY.md
         shell: bash
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
+          MISSING: ${{ steps.inventory.outputs.missing }}
         run: |
           set -euo pipefail
           python3 - "$TAG" <<'PY' > release-notes.md
+          import os
           import re
           import sys
 
@@ -238,10 +298,7 @@ jobs:
           # Take the section for this version, up to the next version heading.
           pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)"
           match = re.search(pattern, text, re.S | re.M)
-          if match:
-              print(match.group(1).strip())
-          else:
-              print(f"Release {tag}.")
+          print(match.group(1).strip() if match else f"Release {tag}.")
           print()
           print("## Packages")
           print()
@@ -249,6 +306,20 @@ jobs:
           print("JavaScript package with per-platform native addons, and the")
           print("browser WASM package are attached to this release. They are")
           print("not published to PyPI or npm.")
+
+          missing = [line.strip() for line in os.environ.get("MISSING", "").splitlines()]
+          missing = [name for name in missing if name]
+          if missing:
+              print()
+              print("### Packages not in this release")
+              print()
+              print("These builds did not succeed, so their packages are absent.")
+              print("Re-running the release workflow for this tag uploads them")
+              print("alongside the assets already published.")
+              print()
+              for name in missing:
+                  print(f"- `{name}`")
+
           print()
           print("Licensing: AGPL-3.0-only with optional FOSS and noncommercial")
           print("application exceptions. See LICENSING.md.")
@@ -264,6 +335,7 @@ jobs:
           set -euo pipefail
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file release-notes.md
           else
             gh release create "$TAG" \
               --title "UQA-RS $TAG" \
