@@ -93,9 +93,13 @@ jobs:
         working-directory: crates/uqa-node
         run: npm install
 
+      # `release` keeps line tables for profiling, which macOS and Windows
+      # split into .dSYM/.pdb but Linux leaves inside the binary: the published
+      # Linux addons came out at 1.2 GB against 60-90 MB elsewhere. The
+      # workspace already defines a stripped profile for exactly this.
       - name: Build native addon
         working-directory: crates/uqa-node
-        run: npx napi build --platform --release --target ${{ matrix.target }}
+        run: npx napi build --platform --profile release-stripped --target ${{ matrix.target }}
 
       - name: Smoke test the addon
         if: matrix.target != 'aarch64-pc-windows-msvc'
