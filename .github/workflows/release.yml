@@ -1,0 +1,259 @@
+name: Release
+
+# Pushing a `v*` tag builds every distributable package and publishes a
+# GitHub release with all of them attached. Nothing is pushed to PyPI or npm:
+# the artifacts are attached to the release only.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (for example v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  resolve:
+    name: resolve tag
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+  python:
+    name: python
+    uses: ./.github/workflows/python-wheels.yml
+
+  node:
+    name: node ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - label: linux aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - label: macos x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - label: macos aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - label: windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: windows aarch64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+
+      # There is no lockfile in crates/uqa-node, so `npm ci` cannot be used.
+      - name: Install Node build dependencies
+        working-directory: crates/uqa-node
+        run: npm install
+
+      - name: Build native addon
+        working-directory: crates/uqa-node
+        run: npx napi build --platform --release --target ${{ matrix.target }}
+
+      - name: Smoke test the addon
+        if: matrix.target != 'aarch64-pc-windows-msvc'
+        working-directory: crates/uqa-node
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "
+            const uqa = require('./index.js');
+            const engine = new uqa.Engine();
+            const result = engine.sqlSync('SELECT 1 AS n');
+            if (result.rows[0].n !== 1) {
+              throw new Error('unexpected result: ' + JSON.stringify(result.rows));
+            }
+            console.log('node addon smoke test OK');
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-addon-${{ matrix.target }}
+          path: crates/uqa-node/*.node
+          if-no-files-found: error
+
+  node-package:
+    name: node package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Pack the JavaScript package
+        working-directory: crates/uqa-node
+        run: npm pack --pack-destination .
+      - name: Check package license contents
+        run: python3 scripts/check-release-licenses.py crates/uqa-node/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-package
+          path: crates/uqa-node/*.tgz
+          if-no-files-found: error
+
+  wasm:
+    name: wasm package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+
+      - name: Build the browser WASM bundle
+        run: bash scripts/build-wasm.sh
+
+      - name: Pack the WASM package
+        working-directory: crates/uqa-wasm/js
+        run: npm pack --pack-destination .
+
+      - name: Check package license contents
+        run: python3 scripts/check-release-licenses.py crates/uqa-wasm/js/*.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-package
+          path: crates/uqa-wasm/js/*.tgz
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: [resolve, python, node, node-package, wasm]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f \
+            \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.tgz' -o -name '*.node' \) \
+            -exec cp {} dist/ \;
+          ls -la dist
+
+      # The same contract CI enforces on sources, re-checked on the exact
+      # archives that are about to be published.
+      - name: Verify license contents of published archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check-release-licenses.py dist/*.whl dist/*.tar.gz dist/*.tgz
+
+      - name: Build release notes from HISTORY.md
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 - "$TAG" <<'PY' > release-notes.md
+          import re
+          import sys
+
+          tag = sys.argv[1]
+          version = tag.lstrip("v")
+          text = open("HISTORY.md", encoding="utf-8").read()
+          # Take the section for this version, up to the next version heading.
+          pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)"
+          match = re.search(pattern, text, re.S | re.M)
+          if match:
+              print(match.group(1).strip())
+          else:
+              print(f"Release {tag}.")
+          print()
+          print("## Packages")
+          print()
+          print("Python wheels, a Python source distribution, the Node.js")
+          print("JavaScript package with per-platform native addons, and the")
+          print("browser WASM package are attached to this release. They are")
+          print("not published to PyPI or npm.")
+          print()
+          print("Licensing: AGPL-3.0-only with optional FOSS and noncommercial")
+          print("application exceptions. See LICENSING.md.")
+          PY
+          cat release-notes.md
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" \
+              --title "UQA-RS $TAG" \
+              --notes-file release-notes.md \
+              dist/*
+          fi

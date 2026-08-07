@@ -2,9 +2,10 @@ name: Python Wheels
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+  # Tag builds are driven by release.yml, which calls this workflow and then
+  # attaches the artifacts it uploads to the GitHub release. Keeping the tag
+  # trigger here as well would build every wheel twice for the same tag.
+  workflow_call:
   pull_request:
     paths:
       - ".github/workflows/python-wheels.yml"
