@@ -146,9 +146,13 @@ jobs:
         with:
           node-version: "20"
 
+      # The build asserts its own exception/longjmp contract (see
+      # scripts/build-wasm.sh), so it does not depend on a specific emscripten
+      # release. Pinning an old one instead risks a toolchain that predates the
+      # Rust standard library shipped for wasm32-unknown-emscripten.
       - uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.64
+          version: latest
 
       - uses: dtolnay/rust-toolchain@stable
         with:
