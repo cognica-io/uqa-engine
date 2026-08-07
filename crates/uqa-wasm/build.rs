@@ -9,6 +9,15 @@ fn main() {
         return;
     }
     let link_args = [
+        // Rust's `panic_unwind` for this target is implemented on the C++ ABI
+        // (`__cxa_throw`, `__cxa_begin_catch`, and the `__class_type_info`
+        // vtable). rustc drives the link through `emcc`, which links as C and
+        // therefore never pulls in libc++abi, so those symbols come out
+        // undefined. Emscripten's own diagnostic names the remedy: link as C++.
+        //
+        // Some emscripten distributions already default to C++ here, which is
+        // why the build can succeed locally and still fail on a clean toolchain.
+        "-sDEFAULT_TO_CXX",
         // ES-module factory (`createUQAModule`) instead of a global.
         "-sMODULARIZE=1",
         "-sEXPORT_NAME=createUQAModule",
