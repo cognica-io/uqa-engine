@@ -10,7 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and release (for example v0.1.0)"
+        description: >-
+          Existing tag to build and release, for example v0.1.0. Run this
+          workflow from that same tag ref so the jobs build the tagged commit.
         required: true
         type: string
 
@@ -157,6 +159,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-emscripten
+
+      # Belt and braces: the build cross-compiles every dependency, so a
+      # missing rust-std for this target surfaces as a confusing
+      # "can't find crate for `core`" on the first dependency rather than as a
+      # toolchain error.
+      - name: Ensure the emscripten target is installed
+        run: rustup target add wasm32-unknown-emscripten
 
       - name: Free Linux runner disk
         run: bash .github/scripts/free-linux-runner-disk.sh
