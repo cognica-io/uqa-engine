@@ -93,6 +93,25 @@ jobs:
         shell: bash
         run: python scripts/check-release-licenses.py dist/*.whl
 
+      # `requires-python = ">=3.8"` only holds because pyo3 is built against
+      # the CPython stable ABI. Dropping the abi3 feature would silently
+      # produce version-specific wheels and make that claim wrong, so the tag
+      # is asserted rather than assumed.
+      - name: Assert the wheel targets the stable ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for wheel in dist/*.whl; do
+            case "$(basename "$wheel")" in
+              *-cp38-abi3-*) ;;
+              *)
+                echo "::error::$(basename "$wheel") is not a cp38-abi3 wheel;" \
+                     "requires-python >=3.8 would no longer be true" >&2
+                exit 1
+                ;;
+            esac
+          done
+
       - name: Test wheel
         shell: bash
         run: |
@@ -141,3 +160,38 @@ jobs:
           name: python-sdist
           path: dist/*.tar.gz
           if-no-files-found: error
+
+  minimum-python:
+    name: minimum supported python
+    needs: build-wheels
+    runs-on: ubuntu-24.04
+    # The declared floor is 3.8, which is past end of life and not available
+    # from the runner tool cache. A container pins the exact interpreter, and
+    # bookworm's glibc satisfies the manylinux_2_28 wheel.
+    container: python:3.8-slim-bookworm
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-wheel-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Install and exercise the wheel on the declared minimum
+        shell: bash
+        run: |
+          set -euo pipefail
+          python --version
+          pip install --quiet --no-cache-dir dist/*.whl
+          python - <<'PY'
+          import sys
+
+          import uqa
+
+          print("python:", sys.version.split()[0])
+          engine = uqa.Engine()
+          assert engine.sql("SELECT 1 AS n").rows == [{"n": 1}]
+          engine.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)")
+          engine.sql("CREATE INDEX t_body_gin ON t USING gin (body)")
+          engine.sql("INSERT INTO t (id, body) VALUES (1, 'retrieval ranking')")
+          hits = engine.sql("SELECT id FROM t WHERE text_match(body, 'retrieval')")
+          assert hits.rows == [{"id": 1}], hits.rows
+          PY
