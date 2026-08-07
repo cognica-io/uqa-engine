@@ -62,7 +62,7 @@ pub(in crate::sql) fn run_update_inner(
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("UPDATE preselection is missing its predicate".into())
         })?;
-        crate::sql::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params)?
+        crate::sql::where_eval::collect_where_doc_ids(engine, &stmt.table, filter, params, &ctes)?
     } else {
         engine.table_doc_ids(&stmt.table)?
     };

@@ -21,9 +21,16 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
     from: &SourcePlan,
 ) -> Option<QualifierFilters> {
     let filter = stmt.r#where.as_ref()?;
-    if expr_contains_subquery(filter) {
-        return None;
-    }
+    // Pushdown is decided per conjunct, not for the WHERE clause as a whole.
+    // `qualifier_filter_for_part` already refuses any part containing a
+    // subquery, and `final_filter_after_qualifier_pushdown` recomputes the
+    // residual with that same rule, so the two stay consistent.
+    //
+    // Bailing out here whenever the clause mentioned a subquery anywhere also
+    // abandoned conjuncts that push safely. A retrieval predicate then stayed
+    // in the residual scalar filter, where registered retrieval functions
+    // cannot be evaluated at all, so `text_match(...) AND EXISTS (...)` failed
+    // with "scalar evaluation of `text_match` is not supported".
     let from_quals = from_qualifier_set(from);
     if from_quals.is_empty() {
         return None;

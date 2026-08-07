@@ -155,6 +155,10 @@ impl ScoredInput {
 
 pub(in crate::sql) struct ScoredDocumentSource {
     table_name: String,
+    /// Relation qualifier to expose alongside each bare column name, set only
+    /// when the enclosing block can evaluate a correlated subquery. See
+    /// [`ScoredDocumentSource::with_outer_qualifier`].
+    outer_qualifier: Option<String>,
     table: Arc<crate::TableState>,
     input: ScoredInputCursor,
     schema: Vec<String>,
@@ -250,6 +254,7 @@ impl ScoredDocumentSource {
         let projected_slots = ProjectedValueSlot::compile(&schema, &projected_fields);
         Self {
             table_name: table_name.to_string(),
+            outer_qualifier: None,
             table,
             input,
             schema,
@@ -261,6 +266,26 @@ impl ScoredDocumentSource {
             ordering,
             input_guarantees_presence,
         }
+    }
+
+    /// Also emit `qualifier.column` for every projected column.
+    ///
+    /// A correlated subquery is evaluated against a row that merges the inner
+    /// relation's columns over this one. Inner relations arrive already
+    /// qualified (`allowed.id`), while a plain single-table scan emits bare
+    /// names, so an outer reference such as `papers.id` had nothing to bind to:
+    /// the merge overwrote the bare `id` with the inner value, and the
+    /// qualified-lookup fallback then refused the bare name because another
+    /// qualifier claimed it. The reference silently evaluated to NULL and the
+    /// predicate matched nothing.
+    ///
+    /// Publishing the qualified name restores the symmetry. Bare lookups still
+    /// hit the bare key first, so inner-scope shadowing is unchanged. This is
+    /// opt-in because the extra keys cost row-construction time on a hot path,
+    /// and only blocks containing a subquery can observe them.
+    pub(in crate::sql) fn with_outer_qualifier(mut self, qualifier: Option<String>) -> Self {
+        self.outer_qualifier = qualifier;
+        self
     }
 
     fn row_metadata(&self, doc_id: DocId, score: f64) -> ScoredRowMetadata {

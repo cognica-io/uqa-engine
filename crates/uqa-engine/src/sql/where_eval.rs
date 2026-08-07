@@ -22,9 +22,14 @@ fn filter_documents(
     filter: &ScalarExpr,
     params: &[SQLParam],
     documents: Vec<uqa_storage::document_store::Document>,
+    ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let scope = CteScope::new();
-    let rows = execute_filter_rows(engine, documents, filter.clone(), params, &scope)?;
+    // The caller's scope must be used rather than a fresh one: it carries the
+    // CTE rows and the scalar-subquery plans this predicate may reference. A
+    // fresh scope leaves those slots empty, so a residual predicate combining
+    // a retrieval function with `IN (SELECT ...)`, `EXISTS`, or a scalar
+    // subquery would fail to resolve slot 0.
+    let rows = execute_filter_rows(engine, documents, filter.clone(), params, ctes)?;
     rows.into_iter()
         .map(|row| match row.get(super::DOC_ID_COLUMN) {
             Some(uqa_core::Value::Int(doc_id)) if *doc_id >= 0 => Ok(ScoredEntry {
@@ -43,8 +48,15 @@ fn filter_table_rows(
     table: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     let doc_ids = engine.table_doc_ids(table)?;
+    // A correlated subquery in this predicate resolves outer references such
+    // as `papers.id` against these rows, so they must publish the relation
+    // qualifier alongside the bare column name. Without it the merge with the
+    // inner relation's qualified columns leaves the outer reference NULL and
+    // the predicate silently matches nothing.
+    let publish_qualifier = crate::sql::select::expr_contains_subquery(filter);
     // When the predicate reads a known column set, evaluate it against
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document.
@@ -63,11 +75,14 @@ fn filter_table_rows(
             let mut document = uqa_storage::document_store::Document::new();
             for (name, value) in names.iter().zip(values) {
                 document.insert(name.clone(), value.clone());
+                if publish_qualifier {
+                    document.insert(format!("{table}.{name}"), value.clone());
+                }
             }
             document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
             documents.push(document);
         }
-        return filter_documents(engine, filter, params, documents);
+        return filter_documents(engine, filter, params, documents, ctes);
     }
     let mut documents = Vec::with_capacity(doc_ids.len());
     for doc_id in doc_ids {
@@ -76,10 +91,17 @@ fn filter_table_rows(
                 "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
             ))
         })?;
+        if publish_qualifier {
+            for (name, value) in document.clone() {
+                if name != super::DOC_ID_COLUMN {
+                    document.insert(format!("{table}.{name}"), value);
+                }
+            }
+        }
         document.insert(super::DOC_ID_COLUMN.into(), super::doc_id_value(doc_id)?);
         documents.push(document);
     }
-    filter_documents(engine, filter, params, documents)
+    filter_documents(engine, filter, params, documents, ctes)
 }
 
 pub(super) fn execute_mixed_where(
@@ -87,8 +109,9 @@ pub(super) fn execute_mixed_where(
     table: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let mut rows = execute_mixed_where_expr(engine, table, filter, params)?;
+    let mut rows = execute_mixed_where_expr(engine, table, filter, params, ctes)?;
     rows.sort_by_key(|e| e.doc_id);
     Ok(rows)
 }
@@ -103,9 +126,10 @@ pub(super) fn collect_where_doc_ids(
     table: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<DocId>, SQLError> {
     let scored = if is_jsonpath_fts_match_filter(filter) {
-        execute_mixed_where(engine, table, filter, params)?
+        execute_mixed_where(engine, table, filter, params, ctes)?
     } else if let Some(entries) =
         crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
     {
@@ -115,7 +139,7 @@ pub(super) fn collect_where_doc_ids(
             ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
                 execute_function(engine, table, name, args, params)?
             }
-            other => execute_mixed_where(engine, table, other, params)?,
+            other => execute_mixed_where(engine, table, other, params, ctes)?,
         }
     };
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
@@ -133,6 +157,7 @@ fn execute_mixed_where_expr(
     table: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
     match filter {
         ScalarExpr::And(parts) => {
@@ -140,9 +165,9 @@ fn execute_mixed_where_expr(
             let Some(first) = iter.next() else {
                 return all_table_rows(engine, table);
             };
-            let mut out = execute_mixed_where_expr(engine, table, first, params)?;
+            let mut out = execute_mixed_where_expr(engine, table, first, params, ctes)?;
             for part in iter {
-                let rhs = execute_mixed_where_expr(engine, table, part, params)?;
+                let rhs = execute_mixed_where_expr(engine, table, part, params, ctes)?;
                 out = intersect_scored(out, rhs);
             }
             Ok(out)
@@ -150,7 +175,10 @@ fn execute_mixed_where_expr(
         ScalarExpr::Or(parts) => {
             let mut out = Vec::new();
             for part in parts {
-                out = union_scored(out, execute_mixed_where_expr(engine, table, part, params)?);
+                out = union_scored(
+                    out,
+                    execute_mixed_where_expr(engine, table, part, params, ctes)?,
+                );
             }
             Ok(out)
         }
@@ -162,16 +190,16 @@ fn execute_mixed_where_expr(
         ScalarExpr::Not(inner) if expr_is_null_free(inner) => complement_scored(
             engine,
             table,
-            execute_mixed_where_expr(engine, table, inner, params)?,
+            execute_mixed_where_expr(engine, table, inner, params, ctes)?,
         ),
         ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
             if is_jsonpath_fts_match(name, args) {
-                filter_table_rows(engine, table, filter, params)
+                filter_table_rows(engine, table, filter, params, ctes)
             } else {
                 execute_function(engine, table, name, args, params)
             }
         }
-        other => filter_table_rows(engine, table, other, params),
+        other => filter_table_rows(engine, table, other, params, ctes),
     }
 }
 

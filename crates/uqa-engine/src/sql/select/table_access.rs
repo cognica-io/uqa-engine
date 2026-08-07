@@ -79,7 +79,7 @@ pub(in crate::sql) fn run_single_table_select_output(
             AccessPathPlan::Hybrid => {
                 let rows = match stmt.r#where.as_ref() {
                     Some(filter) => ScoredInput::entries(
-                        execute_mixed_where(engine, table, filter, params)?,
+                        execute_mixed_where(engine, table, filter, params, ctes)?,
                         uqa_planner::optimizer::contains_retrieval(filter),
                     ),
                     None => ScoredInput::All,
@@ -159,6 +159,20 @@ pub(in crate::sql) fn run_single_table_select_output(
     if pushed_predicate.is_some() {
         physical_filter = None;
     }
+    // A correlated subquery in this block resolves outer references such as
+    // `papers.id` against these rows, so they must publish their relation
+    // qualifier. Blocks without a subquery cannot observe the extra keys and
+    // skip the per-row cost.
+    let outer_qualifier = stmt
+        .r#where
+        .as_ref()
+        .is_some_and(crate::sql::select::expr_contains_subquery)
+        .then(|| match block.from.as_ref() {
+            Some(uqa_planner::SourcePlan::Table { name, alias }) => {
+                alias.clone().unwrap_or_else(|| name.clone())
+            }
+            _ => table.to_string(),
+        });
     let source = ScoredDocumentSource::new(
         table,
         table_state,
@@ -166,7 +180,8 @@ pub(in crate::sql) fn run_single_table_select_output(
         source_schema,
         ordered_primary_key,
         pushed_predicate,
-    );
+    )
+    .with_outer_qualifier(outer_qualifier);
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::TableScan::new(Box::new(source)));
     let columns = if matches!(block.compute, ComputePlan::Project) {

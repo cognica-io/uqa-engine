@@ -29,6 +29,11 @@ impl ScoredDocumentSource {
                 .zip(values)
                 .map(|(field, value)| ((*field).to_string(), (*value).clone()))
                 .collect::<ResultRow>();
+            if let Some(qualifier) = self.outer_qualifier.as_deref() {
+                for (field, value) in fields.iter().zip(values) {
+                    row.insert(format!("{qualifier}.{field}"), (*value).clone());
+                }
+            }
             self.row_metadata(doc_id, entry.score)
                 .insert_into(&mut row)?;
             rows.push(row);
