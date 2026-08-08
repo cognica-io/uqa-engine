@@ -1,5 +1,7 @@
 [package]
 name = "uqa-storage"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "Document store, inverted index, IVF/HNSW vectors, B-tree, R*Tree, catalog"
 version.workspace = true
 edition.workspace = true
@@ -42,6 +44,10 @@ tempfile = "3.13"
 criterion = { workspace = true }
 proptest = { workspace = true }
 uqa-scoring = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "spatial"

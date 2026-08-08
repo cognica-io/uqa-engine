@@ -161,7 +161,7 @@ pub(in crate::sql) struct ScoredDocumentSource {
     outer_qualifier: Option<String>,
     table: Arc<crate::TableState>,
     input: ScoredInputCursor,
-    schema: Vec<String>,
+    schema: uqa_execution::RowSchema,
     projected_fields: Vec<String>,
     projected_slots: Vec<ProjectedValueSlot>,
     predicate: Option<uqa_execution::ProjectedPredicate>,
@@ -252,6 +252,7 @@ impl ScoredDocumentSource {
             .cloned()
             .collect::<Vec<_>>();
         let projected_slots = ProjectedValueSlot::compile(&schema, &projected_fields);
+        let schema = uqa_execution::RowSchema::new(schema);
         Self {
             table_name: table_name.to_string(),
             outer_qualifier: None,
@@ -284,6 +285,14 @@ impl ScoredDocumentSource {
     /// opt-in because the extra keys cost row-construction time on a hot path,
     /// and only blocks containing a subquery can observe them.
     pub(in crate::sql) fn with_outer_qualifier(mut self, qualifier: Option<String>) -> Self {
+        if let Some(qualifier) = qualifier.as_deref() {
+            let aliases = self
+                .projected_fields
+                .iter()
+                .map(|field| (format!("{qualifier}.{field}"), field.clone()))
+                .collect::<Vec<_>>();
+            self.schema = uqa_execution::RowSchema::with_lookup_aliases(&self.schema, &aliases);
+        }
         self.outer_qualifier = qualifier;
         self
     }
@@ -326,7 +335,11 @@ impl ScoredDocumentSource {
 
 impl uqa_execution::RowSource for ScoredDocumentSource {
     fn schema(&self) -> &[String] {
-        &self.schema
+        self.schema.columns()
+    }
+
+    fn physical_schema(&self) -> Option<&uqa_execution::RowSchema> {
+        Some(&self.schema)
     }
 
     fn output_ordering(&self) -> &[uqa_execution::PhysicalOrder] {
@@ -345,6 +358,23 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
             }
             let reached_end = entries.len() < max_rows;
             let rows = self.materialize_entries(&entries)?;
+            if !rows.is_empty() || reached_end {
+                return Ok(rows);
+            }
+        }
+    }
+
+    fn next_physical_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        loop {
+            let entries = self.next_entries(max_rows)?;
+            if entries.is_empty() {
+                return Ok(Vec::new());
+            }
+            let reached_end = entries.len() < max_rows;
+            let rows = self.materialize_physical_entries(&entries)?;
             if !rows.is_empty() || reached_end {
                 return Ok(rows);
             }
@@ -376,6 +406,7 @@ impl uqa_execution::RowSource for ScoredDocumentSource {
 mod tests {
     use super::*;
     use uqa_execution::RowSource;
+    use uqa_sql::expr::RowLookup;
 
     #[test]
     fn pruned_primary_key_is_not_advertised_as_output_ordering() {
@@ -436,5 +467,36 @@ mod tests {
 
         let rows = source.next_batch(16).unwrap();
         assert_eq!(rows, vec![ResultRow::new(), ResultRow::new()]);
+    }
+
+    #[test]
+    fn physical_cursor_exposes_qualified_alias_without_copying_the_value() {
+        let engine = crate::Engine::new();
+        engine
+            .sql("CREATE TABLE alias_source (id BIGINT PRIMARY KEY)", &[])
+            .unwrap();
+        engine
+            .sql("INSERT INTO alias_source (id) VALUES (7)", &[])
+            .unwrap();
+        let table = engine.require_table("alias_source").unwrap();
+        let mut source = ScoredDocumentSource::new(
+            "alias_source",
+            table,
+            ScoredInput::All,
+            vec!["id".into()],
+            Some("id".into()),
+            None,
+        )
+        .with_outer_qualifier(Some("a".into()));
+        let schema = source.physical_schema().unwrap().clone();
+        let rows = source.next_physical_batch(16).unwrap();
+
+        assert_eq!(schema.columns(), ["id"]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].fragment_count(), 1);
+        assert_eq!(
+            schema.view(&rows[0]).qualified_column("a", "id", "a.id"),
+            Some(&Value::Int(7))
+        );
     }
 }

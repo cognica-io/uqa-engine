@@ -20,6 +20,10 @@ pub enum ColumnType {
     Integer,
     Boolean,
     Text,
+    /// `PostgreSQL` blank-padded `CHARACTER(n)` / `CHAR(n)` (`bpchar`).
+    /// The length counts Unicode scalar values and defaults to one when the
+    /// declaration omits an explicit modifier.
+    Character(u32),
     Real,
     /// `NUMERIC(precision, scale)` -- exact decimal storage. When
     /// `scale` is `Some(s)` the engine rounds `INSERT` values to `s`

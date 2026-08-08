@@ -180,15 +180,6 @@ fn doc_id_value(doc_id: DocId) -> Result<Value, SQLError> {
     })
 }
 
-fn row_column_value<'a>(row: &'a ResultRow, name: &str) -> Option<&'a Value> {
-    if let Some(value) = row.get(name) {
-        return Some(value);
-    }
-    row.iter()
-        .find(|(key, _)| key.rsplit_once('.').is_some_and(|(_, col)| col == name))
-        .map(|(_, value)| value)
-}
-
 #[cfg(test)]
 mod mutability_classifier_tests {
     use super::{

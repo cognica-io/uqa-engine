@@ -20,6 +20,7 @@ pub(super) fn typeof_value(v: &Value) -> String {
         Value::Float(_) => "double precision".into(),
         Value::Decimal(_) => "numeric".into(),
         Value::Str(_) => "text".into(),
+        Value::FixedChar(_) => "character".into(),
         Value::Bytes(_) => "bytea".into(),
         Value::Temporal(value) => match value {
             TemporalValue::Date { .. } => "date".into(),
@@ -37,7 +38,7 @@ pub(super) fn typeof_value(v: &Value) -> String {
 pub(super) fn point_xy(v: &Value) -> Result<(f64, f64)> {
     match v {
         Value::List(items) if items.len() == 2 => Ok((to_f64(&items[0])?, to_f64(&items[1])?)),
-        Value::Str(s) => {
+        Value::Str(s) | Value::FixedChar(s) => {
             let cleaned = s.trim_matches(|c: char| c == '(' || c == ')' || c == '[' || c == ']');
             let parts: Vec<&str> = cleaned.split(',').map(str::trim).collect();
             if parts.len() != 2 {
@@ -57,42 +58,111 @@ pub(super) fn point_xy(v: &Value) -> Result<(f64, f64)> {
     }
 }
 
-pub(super) fn like_match(haystack: &str, pattern: &str, case_insensitive: bool) -> bool {
-    let h: Vec<char> = if case_insensitive {
-        haystack.to_lowercase().chars().collect()
-    } else {
-        haystack.chars().collect()
-    };
-    let p: Vec<char> = if case_insensitive {
-        pattern.to_lowercase().chars().collect()
-    } else {
-        pattern.chars().collect()
-    };
-    fn rec(h: &[char], p: &[char]) -> bool {
-        let mut hi = 0;
-        let mut pi = 0;
-        let mut star: Option<(usize, usize)> = None;
-        while hi < h.len() {
-            if pi < p.len() && (p[pi] == '_' || p[pi] == h[hi]) {
-                hi += 1;
-                pi += 1;
-            } else if pi < p.len() && p[pi] == '%' {
-                star = Some((pi, hi));
-                pi += 1;
-            } else if let Some((spi, shi)) = star {
-                pi = spi + 1;
-                hi = shi + 1;
-                star = Some((spi, shi + 1));
-            } else {
-                return false;
-            }
+/// A LIKE/ILIKE pattern compiled once for repeated evaluation.
+///
+/// ASCII values use a byte matcher without per-row allocation. Unicode keeps
+/// SQL's character-oriented `_` semantics and the existing lowercase rules.
+pub struct CompiledLikePattern {
+    case_insensitive: bool,
+    pattern_chars: Vec<char>,
+    pattern_ascii: Option<Vec<u8>>,
+}
+
+impl CompiledLikePattern {
+    #[must_use]
+    pub fn new(pattern: &str, case_insensitive: bool) -> Self {
+        let normalized = if case_insensitive {
+            pattern.to_lowercase()
+        } else {
+            pattern.to_string()
+        };
+        let pattern_ascii = normalized
+            .is_ascii()
+            .then(|| normalized.as_bytes().to_vec());
+        let pattern_chars = normalized.chars().collect();
+        Self {
+            case_insensitive,
+            pattern_chars,
+            pattern_ascii,
         }
-        while pi < p.len() && p[pi] == '%' {
-            pi += 1;
-        }
-        pi == p.len()
     }
-    rec(&h, &p)
+
+    #[must_use]
+    pub fn from_value(pattern: &Value, case_insensitive: bool) -> Self {
+        Self::new(&value_to_string(pattern), case_insensitive)
+    }
+
+    #[must_use]
+    pub fn is_match(&self, haystack: &str) -> bool {
+        if self.case_insensitive {
+            let normalized = haystack.to_lowercase();
+            if let Some(pattern) = self
+                .pattern_ascii
+                .as_deref()
+                .filter(|_| normalized.is_ascii())
+            {
+                return wildcard_match(normalized.as_bytes(), pattern, b'%', b'_');
+            }
+            let haystack = normalized.chars().collect::<Vec<_>>();
+            return wildcard_match(&haystack, &self.pattern_chars, '%', '_');
+        }
+        if let Some(pattern) = self
+            .pattern_ascii
+            .as_deref()
+            .filter(|_| haystack.is_ascii())
+        {
+            return wildcard_match(haystack.as_bytes(), pattern, b'%', b'_');
+        }
+        let haystack = haystack.chars().collect::<Vec<_>>();
+        wildcard_match(&haystack, &self.pattern_chars, '%', '_')
+    }
+
+    #[must_use]
+    pub fn matches_value(&self, haystack: &Value) -> bool {
+        match haystack {
+            Value::Str(text) => self.is_match(text),
+            Value::FixedChar(text) => self.is_match(text.trim_end_matches(' ')),
+            Value::Null => self.is_match(""),
+            other => self.is_match(&value_to_string(other)),
+        }
+    }
+}
+
+fn wildcard_match<T: Copy + Eq>(
+    haystack: &[T],
+    pattern: &[T],
+    wildcard_many: T,
+    wildcard_one: T,
+) -> bool {
+    let mut haystack_index = 0;
+    let mut pattern_index = 0;
+    let mut star: Option<(usize, usize)> = None;
+    while haystack_index < haystack.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == wildcard_one
+                || pattern[pattern_index] == haystack[haystack_index])
+        {
+            haystack_index += 1;
+            pattern_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == wildcard_many {
+            star = Some((pattern_index, haystack_index));
+            pattern_index += 1;
+        } else if let Some((star_pattern, star_haystack)) = star {
+            pattern_index = star_pattern + 1;
+            haystack_index = star_haystack + 1;
+            star = Some((star_pattern, star_haystack + 1));
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == wildcard_many {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
+
+pub(super) fn like_match(haystack: &str, pattern: &str, case_insensitive: bool) -> bool {
+    CompiledLikePattern::new(pattern, case_insensitive).is_match(haystack)
 }
 
 /// `trim` / `ltrim` / `rtrim` / `btrim` with the optional

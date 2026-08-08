@@ -160,8 +160,8 @@ impl<'a> HashAggregate<'a> {
 }
 
 impl PhysicalOperator for HashAggregate<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {

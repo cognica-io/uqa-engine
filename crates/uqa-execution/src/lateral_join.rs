@@ -96,7 +96,7 @@ impl<'a> LateralJoin<'a> {
             let Some(batch) = self.left.next()? else {
                 return Ok(None);
             };
-            self.left_rows = batch.rows.into_iter();
+            self.left_rows = batch.into_result_rows().into_iter();
         }
     }
 
@@ -109,8 +109,8 @@ impl<'a> LateralJoin<'a> {
 }
 
 impl PhysicalOperator for LateralJoin<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {

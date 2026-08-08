@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use smallvec::SmallVec;
 use uqa_core::DocId;
 use uqa_execution::{
     eval_scalar, ExecResult, ExpressionEvaluator, ScalarEvalContext, ScalarExpr, ScalarFrameBound,
@@ -48,7 +49,8 @@ mod table_access;
 pub(in crate::sql) use cte_execution::*;
 pub(crate) use evaluation::CteScope;
 pub(in crate::sql) use evaluation::{
-    expr_contains_subquery, EngineExpressionEvaluator, ScopedEngineHook,
+    expr_contains_subquery, prepare_correlated_exists_predicate, DirectColumnKey,
+    EngineExpressionEvaluator, ScopedEngineHook,
 };
 pub(in crate::sql) use expression_shape::*;
 pub(in crate::sql) use facet_projection::*;
@@ -84,11 +86,13 @@ pub(super) fn execute_query_plan(
 pub(super) enum QueryOutputMode {
     Rows,
     SharedSpill,
+    ExistsKeySet,
 }
 
 pub(super) enum QueryRows {
     Rows(Vec<ResultRow>),
     SharedSpill(uqa_execution::SharedSpill),
+    ExistsKeySet(uqa_execution::CanonicalRowHashSet),
 }
 
 pub(super) struct QueryOutput {
@@ -103,7 +107,7 @@ impl QueryOutput {
     pub(super) fn into_cursor(self) -> Result<super::SQLCursor, SQLError> {
         match self.rows {
             QueryRows::SharedSpill(rows) => super::SQLCursor::from_spill(self.columns, rows),
-            QueryRows::Rows(_) => Err(SQLError::Internal(
+            QueryRows::Rows(_) | QueryRows::ExistsKeySet(_) => Err(SQLError::Internal(
                 "cursor query unexpectedly used unbounded row materialization".into(),
             )),
         }
@@ -117,6 +121,11 @@ impl QueryOutput {
                 uqa_execution::physical::run_to_rows(&mut scan)
                     .map_err(physical_exec_error)?
                     .1
+            }
+            QueryRows::ExistsKeySet(_) => {
+                return Err(SQLError::Internal(
+                    "EXISTS key-set output cannot become a SQL result".into(),
+                ));
             }
         };
         for row in &mut rows {
@@ -132,6 +141,9 @@ impl QueryOutput {
                 rows,
             )),
             QueryRows::SharedSpill(rows) => Box::new(uqa_execution::SharedSpillScan::new(rows)),
+            QueryRows::ExistsKeySet(_) => {
+                panic!("EXISTS key-set output cannot become a physical operator")
+            }
         }
     }
 
@@ -148,6 +160,11 @@ impl QueryOutput {
                     row.retain(|column, _| !is_score_provenance_column(column));
                     Ok(row)
                 }))
+            }
+            QueryRows::ExistsKeySet(_) => {
+                return Err(SQLError::Internal(
+                    "EXISTS key-set output cannot become a scalar subquery result".into(),
+                ));
             }
         };
         Ok(uqa_execution::SubqueryResult { columns, rows })
@@ -312,11 +329,173 @@ pub(super) fn collect_query_operator<'a>(
                     .map_err(physical_exec_error)?,
             )
         }
+        QueryOutputMode::ExistsKeySet => {
+            let key_positions = columns
+                .iter()
+                .map(|column| {
+                    operator.row_schema().position(column).ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "decorrelated EXISTS result is missing key column `{column}`"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut keys = uqa_execution::CanonicalRowHashSet::new();
+            if let Err(error) = operator.open() {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "open EXISTS key input",
+                ));
+            }
+            loop {
+                let batch = match operator.next() {
+                    Ok(batch) => batch,
+                    Err(error) => {
+                        return Err(close_after_physical_failure(
+                            operator.as_mut(),
+                            error,
+                            "collect EXISTS keys",
+                        ));
+                    }
+                };
+                let Some(batch) = batch else {
+                    break;
+                };
+                for row in &batch.rows {
+                    let view = batch.schema.view(row);
+                    let mut key = SmallVec::<[&Value; 4]>::with_capacity(key_positions.len());
+                    let mut contains_null = false;
+                    for position in &key_positions {
+                        let Some(value) = view.value_at(*position) else {
+                            contains_null = true;
+                            break;
+                        };
+                        if matches!(value, Value::Null) {
+                            contains_null = true;
+                            break;
+                        }
+                        key.push(value);
+                    }
+                    if !contains_null {
+                        if let Err(error) = keys.insert_borrowed(&key) {
+                            return Err(close_after_physical_failure(
+                                operator.as_mut(),
+                                error,
+                                "hash EXISTS keys",
+                            ));
+                        }
+                    }
+                }
+            }
+            operator.close().map_err(physical_exec_error)?;
+            QueryRows::ExistsKeySet(keys)
+        }
     };
     Ok(QueryOutput {
         columns,
         internal_columns,
         rows,
+    })
+}
+
+/// Collect decorrelated EXISTS keys directly from the filtered input. Direct
+/// column expressions stay as borrowed physical values; non-trivial key
+/// expressions are evaluated into an inline buffer. In either case there is
+/// no projected `PhysicalRow` materialization between the input and hash set.
+pub(in crate::sql) fn collect_exists_key_operator<'a>(
+    columns: Vec<String>,
+    mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    projections: &[ProjectionPlan],
+    evaluator: SharedExpressionEvaluator<'a>,
+) -> Result<QueryOutput, SQLError> {
+    let direct_columns = projections
+        .iter()
+        .map(|projection| DirectColumnKey::compile(&projection.expr))
+        .collect::<Option<Vec<_>>>();
+    let mut keys = uqa_execution::CanonicalRowHashSet::new();
+    if let Err(error) = operator.open() {
+        return Err(close_after_physical_failure(
+            operator.as_mut(),
+            error,
+            "open EXISTS key input",
+        ));
+    }
+    loop {
+        let batch = match operator.next() {
+            Ok(batch) => batch,
+            Err(error) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "collect EXISTS key input",
+                ));
+            }
+        };
+        let Some(batch) = batch else {
+            break;
+        };
+        for row in &batch.rows {
+            let view = batch.schema.view(row);
+            let inserted = if let Some(direct_columns) = direct_columns.as_ref() {
+                let mut key = SmallVec::<[&Value; 4]>::with_capacity(direct_columns.len());
+                let mut contains_null = false;
+                for column in direct_columns {
+                    let Some(value) = column.value(&view) else {
+                        contains_null = true;
+                        break;
+                    };
+                    if matches!(value, Value::Null) {
+                        contains_null = true;
+                        break;
+                    }
+                    key.push(value);
+                }
+                if contains_null {
+                    Ok(false)
+                } else {
+                    keys.insert_borrowed(&key)
+                }
+            } else {
+                let mut key = SmallVec::<[Value; 4]>::with_capacity(projections.len());
+                let mut contains_null = false;
+                for projection in projections {
+                    let value = match evaluator.evaluate(&projection.expr, &view) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            return Err(close_after_physical_failure(
+                                operator.as_mut(),
+                                error,
+                                "evaluate EXISTS key",
+                            ));
+                        }
+                    };
+                    if matches!(value, Value::Null) {
+                        contains_null = true;
+                        break;
+                    }
+                    key.push(value);
+                }
+                if contains_null {
+                    Ok(false)
+                } else {
+                    keys.insert_values(&key)
+                }
+            };
+            if let Err(error) = inserted {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "hash EXISTS key",
+                ));
+            }
+        }
+    }
+    operator.close().map_err(physical_exec_error)?;
+    Ok(QueryOutput {
+        internal_columns: columns.clone(),
+        columns,
+        rows: QueryRows::ExistsKeySet(keys),
     })
 }
 

@@ -75,9 +75,8 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
             Ok(Value::Decimal(value))
         }
         "text" | "name" | "uuid" => Ok(Value::Str(value_to_string(v))),
-        // char(n) / varchar(n): the explicit cast TRUNCATES to the
-        // declared length (PostgreSQL `'abc'::char(2)` = 'ab').
-        "varchar" | "character varying" | "character" | "char" | "bpchar" => {
+        // varchar(n): an explicit cast truncates to the declared length.
+        "varchar" | "character varying" => {
             let text = value_to_string(v);
             let Some(modifier) = modifier else {
                 return Ok(Value::Str(text));
@@ -87,6 +86,28 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
                 .parse()
                 .map_err(|_| SQLError::TypeMismatch(format!("bad length modifier {modifier}")))?;
             Ok(Value::Str(text.chars().take(limit).collect()))
+        }
+        // bpchar is physically blank-padded. Its implicit text coercion strips
+        // those spaces, while a direct result retains them.
+        "character" | "char" | "bpchar" => {
+            let text = value_to_string(v);
+            let limit: usize = match modifier {
+                Some(modifier) => modifier.trim().parse().map_err(|_| {
+                    SQLError::TypeMismatch(format!("bad length modifier {modifier}"))
+                })?,
+                None => 1,
+            };
+            if limit == 0 {
+                return Err(SQLError::TypeMismatch(
+                    "CHARACTER length must be greater than zero".into(),
+                ));
+            }
+            let mut text = text.chars().take(limit).collect::<String>();
+            text.extend(std::iter::repeat_n(
+                ' ',
+                limit.saturating_sub(text.chars().count()),
+            ));
+            Ok(Value::FixedChar(text))
         }
         "date" => cast_temporal(v, TemporalValue::parse_date, "date"),
         "time" | "time without time zone" => cast_temporal(v, TemporalValue::parse_time, "time"),
@@ -171,10 +192,12 @@ pub(super) fn cast_integer(v: &Value, target: &str) -> Result<Value> {
             .round_dp(0)
             .to_i64_trunc()
             .ok_or_else(|| out_of_range(target))?,
-        Value::Str(s) => s.trim().parse::<i64>().map_err(|_| SQLError::Routine {
-            sqlstate: "22P02".into(),
-            message: format!("invalid input syntax for type {target}: \"{s}\""),
-        })?,
+        Value::Str(s) | Value::FixedChar(s) => {
+            s.trim().parse::<i64>().map_err(|_| SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: format!("invalid input syntax for type {target}: \"{s}\""),
+            })?
+        }
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other:?} to {target}"
@@ -201,7 +224,7 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
         Value::Int(n) => Ok(Value::Bool(*n != 0)),
         Value::Float(f) => Ok(Value::Bool(*f != 0.0)),
         Value::Decimal(d) => Ok(Value::Bool(!d.is_zero())),
-        Value::Str(s) => {
+        Value::Str(s) | Value::FixedChar(s) => {
             let text = s.trim().to_ascii_lowercase();
             let matches_prefix = |word: &str| !text.is_empty() && word.starts_with(&text);
             let value = if matches_prefix("true") || matches_prefix("yes") || text == "1" {

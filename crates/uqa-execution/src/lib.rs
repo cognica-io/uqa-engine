@@ -75,10 +75,10 @@ pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
 
-pub use batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
+pub use batch::{Batch, PhysicalRow, PhysicalRowView, RowSchema, DEFAULT_BATCH_SIZE};
 pub use column_selection::ColumnSelection;
 pub use columnar_batch::{ColumnVector, ColumnarBatch};
-pub use distinct::{Distinct, ExactRowSet};
+pub use distinct::{hash_canonical_row, CanonicalRowHashSet, Distinct, ExactRowSet};
 pub use external_sort::{ExternalSort, EXTERNAL_SORT_MERGE_FAN_IN};
 pub use join::{HashJoin, NestedLoopJoin};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};

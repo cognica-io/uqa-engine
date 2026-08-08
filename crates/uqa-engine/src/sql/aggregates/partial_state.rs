@@ -246,7 +246,7 @@ fn decimal_component(accumulator: &AggregateAccumulator) -> Result<Option<Decima
     if accumulator.integer_sum == 0 {
         return Ok(None);
     }
-    DecimalValue::parse(&accumulator.integer_sum.to_string())
+    DecimalValue::from_i128(accumulator.integer_sum)
         .map(Some)
         .ok_or_else(|| SQLError::TypeMismatch("integer aggregate does not fit decimal".into()))
 }
@@ -293,10 +293,7 @@ fn decode_numeric_kind(value: Value) -> Result<NumericInputKind, SQLError> {
 }
 
 fn numeric_has_float(kind: NumericInputKind) -> bool {
-    matches!(
-        kind,
-        NumericInputKind::Floats | NumericInputKind::DecimalsAndFloats
-    )
+    kind.has_float()
 }
 
 fn numeric_kind(has_decimal: bool, has_float: bool) -> NumericInputKind {

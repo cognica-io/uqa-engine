@@ -173,6 +173,7 @@ pub(super) fn raise_text(value: &Value) -> String {
         Value::Float(v) => v.to_string(),
         Value::Decimal(v) => v.to_sql_string(),
         Value::Str(s) => s.clone(),
+        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Bytes(b) => {
             use std::fmt::Write as _;

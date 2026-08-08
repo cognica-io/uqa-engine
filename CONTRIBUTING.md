@@ -10,12 +10,13 @@ Every change has to clear all of:
 
 ```sh
 bash scripts/check-public-repository-hygiene.sh
+python3 scripts/check-integration-test-harnesses.py
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo doc --workspace --no-deps     # rustdoc warnings are errors
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo doc --workspace --no-deps --locked     # rustdoc warnings are errors
 cargo deny --workspace check         # cargo install cargo-deny --locked
-cargo bench --workspace --no-run     # benches must compile, run is opt-in
+cargo bench --workspace --no-run --locked     # benches must compile, run is opt-in
 ```
 
 CI runs the same set on `ubuntu-24.04` and `macos-14`. A red CI is a hard block for merge.
@@ -40,6 +41,10 @@ One main type per file. Helper types, free functions, and `#[cfg(test)] mod test
 
 Source code, doc comments, and committed text use ASCII characters only. Use `->` not `->`, `==` not `==`, plain quotes not "smart" ones. Mermaid is the diagram tool of choice for design docs; do not use ASCII art.
 
+### Markdown paragraphs
+
+Keep each prose paragraph on one physical line. Use blank lines only between paragraphs and structural newlines for headings, lists, tables, block quotes, and fenced code; do not hard-wrap paragraph text.
+
 ### Workarounds
 
 The codebase does not ship workarounds, stopgap patches, or backwards-compatibility shims. If you find yourself about to describe a change as short-lived, step back and fix the root cause instead. If the root cause is genuinely out of scope, file an issue and link to it from the PR.
@@ -51,7 +56,7 @@ The project leans heavily on `proptest` to pin algebraic invariants from the mas
 | Concern | Where it lives |
 | --- | --- |
 | Per-function unit tests | `crates/<crate>/src/<file>.rs` under `#[cfg(test)] mod tests` |
-| Property tests | `crates/<crate>/tests/<area>.rs` (separate integration target) |
+| Property tests | `crates/<crate>/tests/<area>.rs` (module of the crate's consolidated harness) |
 | Cross-crate integration | `crates/uqa-engine/tests/<area>.rs` |
 | Robustness fuzz (proptest-driven, runs in `cargo test`) | `crates/<crate>/tests/<area>_fuzz.rs` |
 | libfuzzer fuzz (nightly cron) | `fuzz/fuzz_targets/<name>.rs` |
@@ -59,6 +64,27 @@ The project leans heavily on `proptest` to pin algebraic invariants from the mas
 | BEIR-style relevance gates | `tests/parity/beir_fixture.json` + `crates/uqa-engine/tests/beir_fixture.rs` |
 
 A property test that catches a real bug should land in the same PR as the fix. Reference the bug in the commit message.
+
+Integration test source files are modules, not independent Cargo targets. Add a new source to `tests/integration.rs`; engine tests belong in the matching `tests/engine_*.rs` resource domain. Keep TPC-H separate because it loads the complete fixture. The integration harness coverage check rejects unregistered or duplicate top-level test sources. A module can still be selected directly, for example:
+
+```sh
+cargo test -p uqa-sql --test integration parser_fuzz::
+cargo test -p uqa-engine --test engine_queries sql_joins::
+```
+
+Do not add a new Cargo test target merely to isolate a module during development. Use the module filter above; a separate target requires a real process-level fixture or lifecycle boundary that cannot share its harness without changing semantics.
+
+### Performance changes
+
+Performance work must preserve an exact correctness gate and measure an optimized package-scoped executable. For the PostgreSQL 17 TPC-H-derived fixture, run:
+
+```sh
+cargo test -p uqa-engine --test sql_tpch
+cargo build --release -p uqa-engine --example tpch_runner --locked
+target/release/examples/tpch_runner --iterations 201
+```
+
+Record the statistic, iteration count, hardware class, toolchain, fixture identity, and whether compared runs were interleaved. Do not present a debug build, a `--quick` estimate, a sum of medians, or a non-interleaved cross-engine ratio as a regression gate. Update [`benchmarks/tpch/README.md`](benchmarks/tpch/README.md) and [`docs/design/performance.md`](docs/design/performance.md) when a measured execution boundary changes.
 
 `prop_assert_eq!`'s format string does not support captured-variable syntax (`{var:?}`) — pass values as positional arguments. `Strategy::new_tree(...).current()` from inside a `proptest!` block bypasses proptest's case generator and shrinker; use `prop_flat_map` to tie multiple strategies together at the strategy level.
 

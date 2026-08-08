@@ -51,7 +51,8 @@ pub(super) fn execute(
     let execution = (|| -> ExecResult<()> {
         while let Some(batch) = sorted.next()? {
             for row in batch.rows {
-                let context = ScalarEvalContext::new(Some(&row), params);
+                let view = batch.schema.view(&row);
+                let context = ScalarEvalContext::from_row_lookup(&view, params);
                 let key_values = group_keys
                     .iter()
                     .map(|(_, expression)| eval_scalar(expression, &context))
@@ -84,7 +85,7 @@ pub(super) fn execute(
                     ExecError::Other("aggregate group state was not initialized".into())
                 })?;
                 for (fold, aggregate) in state.folds.iter_mut().zip(aggregates) {
-                    fold::fold_into(fold, aggregate, &row, params)?;
+                    fold::fold_into(fold, aggregate, &view, params)?;
                 }
             }
         }

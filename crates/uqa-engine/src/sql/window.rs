@@ -216,7 +216,8 @@ fn execute_spilled_window_slot(
     let execution = (|| -> Result<(), SQLError> {
         while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
             for row in batch.rows {
-                let context = ScalarEvalContext::new(Some(&row), params)
+                let named = batch.schema.view(&row).to_result_row();
+                let context = ScalarEvalContext::new(Some(&named), params)
                     .with_function_hook(&hook)
                     .with_subquery_runner(&subquery_arena);
                 let key = slot
@@ -241,7 +242,7 @@ fn execute_spilled_window_slot(
                     partition = IndexedSpill::new().map_err(exec_to_sql_error)?;
                 }
                 partition_key = Some(key);
-                partition.push(&row).map_err(exec_to_sql_error)?;
+                partition.push(&named).map_err(exec_to_sql_error)?;
             }
         }
         if !partition.is_empty() {

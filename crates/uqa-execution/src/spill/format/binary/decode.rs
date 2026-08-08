@@ -177,6 +177,9 @@ impl<'a> BinaryReader<'a> {
                 }
                 Ok(Value::Map(values))
             }
+            10 => self
+                .read_string("fixed character value")
+                .map(Value::FixedChar),
             tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
         }
     }

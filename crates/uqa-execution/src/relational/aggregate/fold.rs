@@ -10,6 +10,7 @@ use super::{
     compare_values, eval_scalar, AggregateKind, AggregateSpec, ExecError, ExecResult, ResultRow,
     SQLParam, ScalarEvalContext, ScalarExpr, Value,
 };
+use uqa_sql::expr::RowLookup;
 
 pub(super) struct GroupState {
     pub(super) folds: Vec<AggFold>,
@@ -49,7 +50,7 @@ pub(in crate::relational) fn value_to_f64(value: &Value) -> Option<f64> {
 pub(super) fn fold_into(
     state: &mut AggFold,
     spec: &AggregateSpec,
-    row: &ResultRow,
+    row: &dyn RowLookup,
     params: &[SQLParam],
 ) -> ExecResult<()> {
     if spec.kind == AggregateKind::CountStar {
@@ -63,7 +64,7 @@ pub(super) fn fold_into(
             spec.kind
         ))
     })?;
-    let context = ScalarEvalContext::new(Some(row), params);
+    let context = ScalarEvalContext::from_row_lookup(row, params);
     let value = eval_scalar(argument, &context)?;
     if matches!(value, Value::Null) {
         return Ok(());

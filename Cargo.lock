@@ -3007,6 +3007,7 @@ dependencies = [
 name = "uqa-engine"
 version = "0.1.0"
 dependencies = [
+ "ahash 0.8.12",
  "arrow-array",
  "arrow-ipc",
  "arrow-schema",
@@ -3018,6 +3019,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-analysis",
@@ -3041,9 +3043,11 @@ dependencies = [
 name = "uqa-execution"
 version = "0.1.0"
 dependencies = [
+ "ahash 0.8.12",
  "parking_lot",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "thiserror 1.0.69",
  "uqa-core",

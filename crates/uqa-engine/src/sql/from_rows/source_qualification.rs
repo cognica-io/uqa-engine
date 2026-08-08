@@ -119,7 +119,7 @@ pub(in crate::sql) fn table_function_empty_schema(
     column_aliases: &[String],
 ) -> Vec<String> {
     let lower = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
-    let columns = if column_aliases.is_empty() {
+    let mut columns = if column_aliases.is_empty() {
         match lower.as_str() {
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
@@ -136,6 +136,21 @@ pub(in crate::sql) fn table_function_empty_schema(
     } else {
         column_aliases.to_vec()
     };
+    // Scalar set-returning functions keep the function name addressable when
+    // a relation alias is supplied without a column alias (`AS gs`). The row
+    // builder emits both `gs.gs` and `gs.generate_series`; the static schema
+    // used by a lateral join must advertise the same keys before execution.
+    if column_aliases.is_empty()
+        && alias.is_some()
+        && !is_json_array_table_function(&lower)
+        && matches!(
+            lower.as_str(),
+            "generate_series" | "unnest" | "regexp_split_to_table" | "string_to_table"
+        )
+        && !columns.contains(&lower)
+    {
+        columns.push(lower.clone());
+    }
     match alias {
         Some(alias) => columns
             .into_iter()

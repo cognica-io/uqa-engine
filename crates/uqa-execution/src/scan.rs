@@ -13,7 +13,7 @@
 //! `ArrowHandler`, and tests can implement it directly over an
 //! in-memory `Vec<ResultRow>`.
 
-use crate::batch::{Batch, RowSchema, DEFAULT_BATCH_SIZE};
+use crate::batch::{Batch, PhysicalRow, RowSchema, DEFAULT_BATCH_SIZE};
 use crate::physical::{ExecResult, PhysicalOperator, PhysicalOrder};
 use uqa_sql::ResultRow;
 
@@ -24,6 +24,18 @@ use uqa_sql::ResultRow;
 pub trait RowSource: Send {
     /// Stable column order for the rows produced by [`Self::next_row`].
     fn schema(&self) -> &[String];
+
+    /// Optional non-identity schema used by positional sources. This carries
+    /// hidden lookup aliases and slot remaps that cannot be represented by the
+    /// legacy column-name slice.
+    fn physical_schema(&self) -> Option<&RowSchema> {
+        None
+    }
+
+    /// Estimated total rows available from this source.
+    fn estimated_cardinality(&self) -> Option<u64> {
+        None
+    }
 
     /// Leading row order guaranteed by the source.
     fn output_ordering(&self) -> &[PhysicalOrder] {
@@ -45,6 +57,18 @@ pub trait RowSource: Send {
             }
         }
         Ok(rows)
+    }
+
+    /// Pull a positional batch directly. Backend-native sources override this
+    /// to avoid constructing named maps at the scan boundary; compatibility
+    /// sources are converted exactly once here.
+    fn next_physical_batch(&mut self, max_rows: usize) -> ExecResult<Vec<PhysicalRow>> {
+        let schema = RowSchema::new(self.schema().to_vec());
+        self.next_batch(max_rows).map(|rows| {
+            rows.into_iter()
+                .map(|row| PhysicalRow::from_result_row(&schema, row))
+                .collect()
+        })
     }
 
     /// Feed backend-native projected rows directly to an aggregate. Sources
@@ -88,8 +112,8 @@ impl<'a> RowIteratorScan<'a> {
 }
 
 impl PhysicalOperator for RowIteratorScan<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -139,6 +163,10 @@ impl RowSource for VecSource {
         &self.schema
     }
 
+    fn estimated_cardinality(&self) -> Option<u64> {
+        u64::try_from(self.rows.len()).ok()
+    }
+
     fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
         Ok(self.rows.next())
     }
@@ -152,17 +180,23 @@ pub struct TableScan {
     source: Option<Box<dyn RowSource>>,
     schema: RowSchema,
     ordering: Vec<PhysicalOrder>,
+    estimated_cardinality: Option<u64>,
     exhausted: bool,
 }
 
 impl TableScan {
     pub fn new(source: Box<dyn RowSource>) -> Self {
-        let schema = RowSchema::new(source.schema().to_vec());
+        let schema = source
+            .physical_schema()
+            .cloned()
+            .unwrap_or_else(|| RowSchema::new(source.schema().to_vec()));
         let ordering = source.output_ordering().to_vec();
+        let estimated_cardinality = source.estimated_cardinality();
         Self {
             source: Some(source),
             schema,
             ordering,
+            estimated_cardinality,
             exhausted: false,
         }
     }
@@ -173,8 +207,12 @@ impl TableScan {
 }
 
 impl PhysicalOperator for TableScan {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.estimated_cardinality
     }
 
     fn output_ordering(&self) -> &[PhysicalOrder] {
@@ -203,12 +241,12 @@ impl PhysicalOperator for TableScan {
         let Some(src) = self.source.as_mut() else {
             return Ok(None);
         };
-        let buf = src.next_batch(DEFAULT_BATCH_SIZE)?;
+        let buf = src.next_physical_batch(DEFAULT_BATCH_SIZE)?;
         if buf.is_empty() {
             self.exhausted = true;
             return Ok(None);
         }
-        Ok(Some(Batch::new(self.schema.clone(), buf)))
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), buf)))
     }
 
     fn close(&mut self) -> ExecResult<()> {

@@ -8,6 +8,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
+use uqa_execution::DEFAULT_BATCH_SIZE;
 
 fn corpus() -> Engine {
     let eng = Engine::new();
@@ -132,4 +133,27 @@ fn join_with_aggregate_groups_per_department() {
         Some(Value::Float(v)) => assert!((v - 100_000.0).abs() < 1e-9),
         other => panic!("expected float avg, got {other:?}"),
     }
+}
+
+#[test]
+fn pushed_filter_does_not_treat_an_empty_storage_page_as_eof() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE scan_rows (id BIGINT PRIMARY KEY)", &[])
+        .unwrap();
+    let last = DEFAULT_BATCH_SIZE + 1;
+    eng.sql(
+        &format!("INSERT INTO scan_rows SELECT n FROM generate_series(1, {last}) AS values(n)"),
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            &format!("SELECT s.id FROM scan_rows AS s WHERE s.id > {DEFAULT_BATCH_SIZE}"),
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].get("id"), Some(&Value::Int(last as i64)));
 }

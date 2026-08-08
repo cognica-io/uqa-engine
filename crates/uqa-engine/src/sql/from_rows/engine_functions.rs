@@ -7,17 +7,18 @@
 //! Engine-backed scalar interception, scoring projections, and highlighting.
 
 use super::{
-    checked_integer_value, expect_column_name, is_score_provenance_column, qualified_key,
+    checked_integer_value, expect_column_name, is_score_provenance_column,
     run_age_create_graph_with_evaluator, run_age_drop_graph_with_evaluator,
-    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, ResultRow,
-    SQLError, ScalarExpr, Value, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
+    run_graph_create_with_evaluator, run_graph_drop_with_evaluator, BTreeMap, Engine, SQLError,
+    ScalarExpr, Value, MERGE_ACTION_COLUMN, SCORE_PROVENANCE_COLUMN,
 };
+use uqa_sql::expr::RowLookup;
 
 pub(in crate::sql) fn engine_func_intercept(
     engine: Option<&Engine>,
     name: &str,
     args: &[ScalarExpr],
-    row: &ResultRow,
+    row: &dyn RowLookup,
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Option<Value>, SQLError> {
     let lower = crate::sql::builtin_function_dispatch_name(name);
@@ -41,7 +42,7 @@ pub(in crate::sql) fn engine_func_intercept(
                     actual: args.len(),
                 });
             }
-            let action = row.get(MERGE_ACTION_COLUMN).cloned().ok_or_else(|| {
+            let action = row.column(MERGE_ACTION_COLUMN).cloned().ok_or_else(|| {
                 SQLError::Unsupported("merge_action() is only valid in MERGE RETURNING".into())
             })?;
             Ok(Some(action))
@@ -78,23 +79,23 @@ pub(in crate::sql) fn engine_func_intercept(
 pub(in crate::sql) fn score_projection_value(
     function: &str,
     args: &[ScalarExpr],
-    row: &ResultRow,
+    row: &dyn RowLookup,
 ) -> Result<Value, SQLError> {
     if args.len() == 2 {
         if let ScalarExpr::QualifiedColumn { qualifier, .. } = &args[0] {
             let prefix = format!("{qualifier}.");
-            let mut scores = row.iter().filter_map(|(column, value)| {
-                (column.starts_with(&prefix) && is_score_provenance_column(column))
-                    .then_some(value)
-                    .and_then(|value| match value {
-                        Value::Float(score) => Some(*score),
-                        _ => None,
-                    })
+            let mut scores = Vec::new();
+            row.visit_columns(&mut |column, value| {
+                if column.starts_with(&prefix) && is_score_provenance_column(column) {
+                    if let Value::Float(score) = value {
+                        scores.push(*score);
+                    }
+                }
             });
-            let Some(score) = scores.next() else {
+            let Some(score) = scores.first().copied() else {
                 return Err(score_projection_context_error(function));
             };
-            if scores.next().is_some() {
+            if scores.len() > 1 {
                 return Err(SQLError::Unsupported(format!(
                     "{function}() has multiple score-bearing retrieval rows for `{qualifier}`"
                 )));
@@ -103,21 +104,21 @@ pub(in crate::sql) fn score_projection_value(
         }
     }
 
-    if let Some(Value::Float(score)) = row.get(SCORE_PROVENANCE_COLUMN) {
+    if let Some(Value::Float(score)) = row.column(SCORE_PROVENANCE_COLUMN) {
         return Ok(Value::Float(*score));
     }
-    let mut scores = row.iter().filter_map(|(column, value)| {
-        (is_score_provenance_column(column) && column != SCORE_PROVENANCE_COLUMN)
-            .then_some(value)
-            .and_then(|value| match value {
-                Value::Float(score) => Some(*score),
-                _ => None,
-            })
+    let mut scores = Vec::new();
+    row.visit_columns(&mut |column, value| {
+        if is_score_provenance_column(column) && column != SCORE_PROVENANCE_COLUMN {
+            if let Value::Float(score) = value {
+                scores.push(*score);
+            }
+        }
     });
-    let Some(score) = scores.next() else {
+    let Some(score) = scores.first().copied() else {
         return Err(score_projection_context_error(function));
     };
-    if scores.next().is_some() {
+    if scores.len() > 1 {
         return Err(SQLError::Unsupported(format!(
             "{function}() has multiple score-bearing retrieval rows; qualify its field argument"
         )));
@@ -224,7 +225,7 @@ pub(in crate::sql) fn validate_score_projection_args(
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
 pub(in crate::sql) fn run_uqa_highlight(
-    row: &ResultRow,
+    row: &dyn RowLookup,
     args: &[ScalarExpr],
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Value, SQLError> {
@@ -236,7 +237,7 @@ pub(in crate::sql) fn run_uqa_highlight(
         });
     }
     let text = match &args[0] {
-        ScalarExpr::Column(c) => match crate::sql::row_column_value(row, c) {
+        ScalarExpr::Column(c) => match row.column(c) {
             Some(Value::Str(s)) => s.clone(),
             Some(Value::Null) => return Ok(Value::Null),
             Some(other) => format!("{other:?}"),
@@ -246,24 +247,12 @@ pub(in crate::sql) fn run_uqa_highlight(
             qualifier,
             column,
             key,
-        } => {
-            let fallback_key;
-            let lookup_key = if key.is_empty() {
-                fallback_key = qualified_key(qualifier, column);
-                fallback_key.as_str()
-            } else {
-                key.as_str()
-            };
-            match row
-                .get(lookup_key)
-                .or_else(|| uqa_sql::expr::unqualified_fallback(row, column))
-            {
-                Some(Value::Str(s)) => s.clone(),
-                Some(Value::Null) => return Ok(Value::Null),
-                Some(other) => format!("{other:?}"),
-                None => return Ok(Value::Null),
-            }
-        }
+        } => match row.qualified_column(qualifier, column, key) {
+            Some(Value::Str(s)) => s.clone(),
+            Some(Value::Null) => return Ok(Value::Null),
+            Some(other) => format!("{other:?}"),
+            None => return Ok(Value::Null),
+        },
         other => match evaluate(other)? {
             Value::Str(s) => s,
             Value::Null => return Ok(Value::Null),

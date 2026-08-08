@@ -128,6 +128,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Integer => 23,
         ColumnType::Boolean => 16,
         ColumnType::Text => 25,
+        ColumnType::Character(_) => 1042,
         ColumnType::Real => 701,
         ColumnType::Numeric { .. } => 1700,
         ColumnType::Json => 114,
@@ -137,6 +138,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Integer => 1007,
             ColumnType::Boolean => 1000,
             ColumnType::Text => 1009,
+            ColumnType::Character(_) => 1014,
             ColumnType::Real => 1022,
             ColumnType::Numeric { .. } => 1231,
             ColumnType::Json => 199,
@@ -199,11 +201,35 @@ pub(super) fn pg_type_len(ty: &ColumnType) -> i64 {
     }
 }
 
+pub(super) fn pg_type_modifier(ty: &ColumnType) -> i64 {
+    match ty {
+        // PostgreSQL stores varlena type modifiers with a four-byte header.
+        ColumnType::Character(length) => i64::from(*length) + 4,
+        _ => -1,
+    }
+}
+
 pub(super) fn info_datetime_precision(ty: &ColumnType) -> Value {
     match ty {
         ColumnType::Time | ColumnType::TimeTz | ColumnType::Timestamp | ColumnType::TimestampTz => {
             Value::Int(6)
         }
+        _ => Value::Null,
+    }
+}
+
+pub(super) fn info_character_maximum_length(ty: &ColumnType) -> Value {
+    match ty {
+        ColumnType::Character(length) => Value::Int(i64::from(*length)),
+        _ => Value::Null,
+    }
+}
+
+pub(super) fn info_character_octet_length(ty: &ColumnType) -> Value {
+    match ty {
+        // The engine catalog advertises UTF8, whose maximum encoded scalar
+        // width is four bytes, matching PostgreSQL's information_schema.
+        ColumnType::Character(length) => Value::Int(i64::from(*length) * 4),
         _ => Value::Null,
     }
 }
@@ -234,6 +260,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> &'static str {
         ColumnType::Integer => "int4",
         ColumnType::Boolean => "bool",
         ColumnType::Text => "text",
+        ColumnType::Character(_) => "bpchar",
         ColumnType::Real => "float8",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
@@ -243,6 +270,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> &'static str {
             ColumnType::Integer => "_int4",
             ColumnType::Boolean => "_bool",
             ColumnType::Text => "_text",
+            ColumnType::Character(_) => "_bpchar",
             ColumnType::Real => "_float8",
             ColumnType::Numeric { .. } => "_numeric",
             ColumnType::Json => "_json",

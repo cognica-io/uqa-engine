@@ -123,14 +123,15 @@ impl<'a> ExternalSort<'a> {
 
         while let Some(batch) = self.child.next()? {
             for row in batch.rows {
+                let view = batch.schema.view(&row);
                 let mut key_values = Vec::with_capacity(self.keys.len());
                 for key in &self.keys {
-                    key_values.push(self.evaluator.evaluate(&key.expr, &row)?);
+                    key_values.push(self.evaluator.evaluate(&key.expr, &view)?);
                 }
                 let record = encode_record(DecoratedRow {
                     keys: key_values,
                     sequence,
-                    row,
+                    row: view.to_result_row(),
                 });
                 sequence = sequence.checked_add(1).ok_or_else(|| {
                     ExecError::Other("external sort input sequence overflow".into())
@@ -229,8 +230,8 @@ impl<'a> ExternalSort<'a> {
 }
 
 impl PhysicalOperator for ExternalSort<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn output_ordering(&self) -> &[PhysicalOrder] {
@@ -341,7 +342,7 @@ fn decode_record(mut record: ResultRow, expected_key_count: usize) -> ExecResult
 }
 
 fn encoded_record_size(schema: &RowSchema, record: ResultRow) -> ExecResult<(ResultRow, usize)> {
-    let bytes = SpillBuffer::encoded_single_row_size(schema, &record)?;
+    let bytes = SpillBuffer::encoded_named_single_row_size(schema, &record)?;
     Ok((record, bytes))
 }
 
@@ -522,9 +523,13 @@ mod tests {
     struct Columns;
 
     impl crate::relational::ExpressionEvaluator for Columns {
-        fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value> {
+        fn evaluate(
+            &self,
+            expression: &ScalarExpr,
+            row: &dyn uqa_sql::expr::RowLookup,
+        ) -> ExecResult<Value> {
             match expression {
-                ScalarExpr::Column(name) => Ok(row.get(name).cloned().unwrap_or(Value::Null)),
+                ScalarExpr::Column(name) => Ok(row.column(name).cloned().unwrap_or(Value::Null)),
                 _ => Err(ExecError::Other(
                     "test evaluator only supports columns".into(),
                 )),
@@ -577,7 +582,7 @@ mod tests {
         assert!(operator.merge_pass_count() >= 2);
         let mut output = Vec::new();
         while let Some(batch) = operator.next().unwrap() {
-            output.extend(batch.rows);
+            output.extend(batch.into_result_rows());
         }
         operator.close().unwrap();
         assert_eq!(

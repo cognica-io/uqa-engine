@@ -7,7 +7,7 @@
 //! Bounded sort aggregation for non-mergeable aggregate states.
 
 use super::{
-    aggregate_exprs, eval_scalar, new_aggregate_accumulators_with_budget, observe_aggregate,
+    aggregate_targets, eval_scalar, new_aggregate_accumulators_with_budget, observe_aggregate,
     AggregateAccumulator, CteScope, Engine, PlanSubqueryArena, QueryBlockPlan, SQLError, SQLParam,
     ScalarEvalContext, ScalarExpr, ScopedEngineHook, SpillBuffer, Value,
 };
@@ -45,10 +45,16 @@ pub(super) fn aggregate_sorted_input(
 
     let hook = ScopedEngineHook::new(engine, ctes);
     let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(&hook));
-    let aggregate_targets = aggregate_exprs(engine, &statement.projections)
+    let aggregate_targets = aggregate_targets(engine, statement)
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
+    let output_plan = super::output::AggregateOutputPlan::compile(
+        engine,
+        statement,
+        &aggregate_targets,
+        relaxed,
+    )?;
     let accumulator_budget = (phase_budget / aggregate_targets.len().max(1)).max(1);
     let mut current_key: Option<Vec<Value>> = None;
     let mut current_accumulators = Vec::new();
@@ -58,7 +64,8 @@ pub(super) fn aggregate_sorted_input(
     let execution = (|| -> Result<(), SQLError> {
         while let Some(batch) = sorted.next().map_err(exec_to_sql_error)? {
             for row in batch.rows {
-                let context = ScalarEvalContext::new(Some(&row), params)
+                let view = batch.schema.view(&row);
+                let context = ScalarEvalContext::from_row_lookup(&view, params)
                     .with_function_hook(&hook)
                     .with_subquery_runner(&subquery_arena);
                 let key = statement
@@ -74,11 +81,12 @@ pub(super) fn aggregate_sorted_input(
                     if let Some(row) = super::output::finish_group(
                         engine,
                         statement,
+                        &output_plan,
                         std::mem::take(&mut current_accumulators),
                         &finished_key,
+                        output_schema.columns(),
                         params,
                         ctes,
-                        relaxed,
                     )? {
                         super::output::push_output_row(
                             &mut output,
@@ -104,11 +112,12 @@ pub(super) fn aggregate_sorted_input(
             if let Some(row) = super::output::finish_group(
                 engine,
                 statement,
+                &output_plan,
                 current_accumulators,
                 &key,
+                output_schema.columns(),
                 params,
                 ctes,
-                relaxed,
             )? {
                 super::output::push_output_row(&mut output, output_schema, &mut pending, row)?;
             }
@@ -121,11 +130,12 @@ pub(super) fn aggregate_sorted_input(
             if let Some(row) = super::output::finish_group(
                 engine,
                 statement,
+                &output_plan,
                 accumulators,
                 &[],
+                output_schema.columns(),
                 params,
                 ctes,
-                relaxed,
             )? {
                 super::output::push_output_row(&mut output, output_schema, &mut pending, row)?;
             }

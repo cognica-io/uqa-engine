@@ -9,6 +9,7 @@
 use super::{
     AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
 };
+use uqa_sql::expr::{cast_value, eval_binary_values, truthy};
 
 pub(super) fn optimize_assignments(assignments: &mut [AssignmentPlan], config: &OptimizerConfig) {
     for assignment in assignments {
@@ -32,7 +33,7 @@ pub(super) fn optimize_scalar_slot(expression: &mut ScalarExpr, config: &Optimiz
 }
 
 fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarExpr {
-    match expression {
+    let optimized = match expression {
         ScalarExpr::Array(items) => ScalarExpr::Array(
             items
                 .into_iter()
@@ -185,6 +186,74 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             negated,
         },
         other => other,
+    };
+    fold_literal_expression(optimized)
+}
+
+/// Fold deterministic scalar work whose complete input is already in the
+/// physical plan. Failed folds stay in the plan so SQL errors retain their
+/// normal execution-time behavior.
+fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
+    match expression {
+        ScalarExpr::Cast { expr, ty } => match *expr {
+            ScalarExpr::Literal(value) => cast_value(&value, &ty)
+                .map(ScalarExpr::Literal)
+                .unwrap_or_else(|_| ScalarExpr::Cast {
+                    expr: Box::new(ScalarExpr::Literal(value)),
+                    ty,
+                }),
+            expr => ScalarExpr::Cast {
+                expr: Box::new(expr),
+                ty,
+            },
+        },
+        ScalarExpr::Binary { op, lhs, rhs } => match (*lhs, *rhs) {
+            (ScalarExpr::Literal(lhs), ScalarExpr::Literal(rhs)) => {
+                eval_binary_values(op, &lhs, &rhs)
+                    .map(ScalarExpr::Literal)
+                    .unwrap_or_else(|_| ScalarExpr::Binary {
+                        op,
+                        lhs: Box::new(ScalarExpr::Literal(lhs)),
+                        rhs: Box::new(ScalarExpr::Literal(rhs)),
+                    })
+            }
+            (lhs, rhs) => ScalarExpr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        },
+        ScalarExpr::Not(inner) => match *inner {
+            ScalarExpr::Literal(Value::Null) => ScalarExpr::Literal(Value::Null),
+            ScalarExpr::Literal(value) => ScalarExpr::Literal(Value::Bool(!truthy(&value))),
+            inner => ScalarExpr::Not(Box::new(inner)),
+        },
+        ScalarExpr::IsNull { expr, negated } => match *expr {
+            ScalarExpr::Literal(value) => {
+                let is_null = matches!(value, Value::Null);
+                ScalarExpr::Literal(Value::Bool(if negated { !is_null } else { is_null }))
+            }
+            expr => ScalarExpr::IsNull {
+                expr: Box::new(expr),
+                negated,
+            },
+        },
+        ScalarExpr::Array(items)
+            if items
+                .iter()
+                .all(|item| matches!(item, ScalarExpr::Literal(_))) =>
+        {
+            ScalarExpr::Literal(Value::List(
+                items
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        ScalarExpr::Literal(value) => Some(value),
+                        _ => None,
+                    })
+                    .collect(),
+            ))
+        }
+        other => other,
     }
 }
 
@@ -283,5 +352,55 @@ fn merge_vector_thresholds(expression: ScalarExpr) -> ScalarExpr {
         }
         ScalarExpr::Not(inner) => ScalarExpr::Not(Box::new(merge_vector_thresholds(*inner))),
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_sql::ast::BinaryOp;
+
+    #[test]
+    fn folds_literal_date_cast_before_row_execution() {
+        let mut expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("1993-07-01".into()))),
+            ty: "date".into(),
+        };
+
+        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
+
+        assert!(matches!(
+            expression,
+            ScalarExpr::Literal(Value::Temporal(_))
+        ));
+    }
+
+    #[test]
+    fn folds_nested_literal_arithmetic_bottom_up() {
+        let mut expression = ScalarExpr::Binary {
+            op: BinaryOp::Multiply,
+            lhs: Box::new(ScalarExpr::Binary {
+                op: BinaryOp::Add,
+                lhs: Box::new(ScalarExpr::Literal(Value::Int(2))),
+                rhs: Box::new(ScalarExpr::Literal(Value::Int(3))),
+            }),
+            rhs: Box::new(ScalarExpr::Literal(Value::Int(4))),
+        };
+
+        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
+
+        assert_eq!(expression, ScalarExpr::Literal(Value::Int(20)));
+    }
+
+    #[test]
+    fn leaves_invalid_literal_cast_for_runtime_error_reporting() {
+        let mut expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Str("not-a-date".into()))),
+            ty: "date".into(),
+        };
+
+        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
+
+        assert!(matches!(expression, ScalarExpr::Cast { .. }));
     }
 }

@@ -122,17 +122,27 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
 #[test]
 fn tiny_budget_distinct_tracker_migrates_to_disk() {
     let mut tracker = DistinctTracker::new(1);
-    assert!(tracker.insert("alpha".into()).unwrap());
+    assert!(tracker.insert(&Value::Str("alpha".into())).unwrap());
     assert!(tracker.disk.is_some());
     assert!(tracker.memory.is_empty());
-    assert!(!tracker.insert("alpha".into()).unwrap());
-    assert!(tracker.insert("beta".into()).unwrap());
+    assert!(!tracker.insert(&Value::Str("alpha".into())).unwrap());
+    assert!(tracker.insert(&Value::Str("beta".into())).unwrap());
+}
+
+#[test]
+fn distinct_tracker_uses_value_numeric_equality_without_string_keys() {
+    let mut tracker = DistinctTracker::new(1024);
+    assert!(tracker.insert(&Value::Int(1)).unwrap());
+    assert!(!tracker.insert(&Value::Float(1.0)).unwrap());
+    assert!(!tracker
+        .insert(&Value::Decimal(DecimalValue::parse("1.00").unwrap()))
+        .unwrap());
 }
 
 #[test]
 fn distinct_tracker_rejects_a_spill_record_larger_than_writer_metadata() {
     let mut tracker = DistinctTracker::new(1);
-    assert!(tracker.insert("alpha".into()).unwrap());
+    assert!(tracker.insert(&Value::Str("alpha".into())).unwrap());
     let file = tracker.disk.as_mut().unwrap().as_file_mut();
     file.seek(SeekFrom::End(0)).unwrap();
     file.write_all(&vec![b'x'; tracker.max_disk_record_bytes])
@@ -140,7 +150,7 @@ fn distinct_tracker_rejects_a_spill_record_larger_than_writer_metadata() {
     file.write_all(b"\n").unwrap();
     file.flush().unwrap();
 
-    let error = tracker.insert("missing".into()).unwrap_err();
+    let error = tracker.insert(&Value::Str("missing".into())).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 
@@ -234,6 +244,30 @@ fn decimal_sum_absorbs_integers_observed_before_and_after_it() {
     assert_eq!(
         aggregate_value("sum", &accumulator).unwrap(),
         Value::Decimal(DecimalValue::parse("5.5").unwrap())
+    );
+    assert_eq!(accumulator.sum, 0.0);
+}
+
+#[test]
+fn decimal_sum_is_converted_to_float_only_when_a_float_is_observed() {
+    let mut accumulator = AggregateAccumulator::builtin("sum");
+    accumulator.observe(&Value::Int(2)).unwrap();
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::parse("0.5").unwrap()))
+        .unwrap();
+    accumulator.observe(&Value::Int(3)).unwrap();
+    assert_eq!(accumulator.sum, 0.0);
+
+    accumulator.observe(&Value::Float(1.25)).unwrap();
+    assert_eq!(accumulator.sum, 6.75);
+    accumulator
+        .observe(&Value::Decimal(DecimalValue::parse("0.25").unwrap()))
+        .unwrap();
+    accumulator.observe(&Value::Int(1)).unwrap();
+
+    assert_eq!(
+        aggregate_value("sum", &accumulator).unwrap(),
+        Value::Float(8.0)
     );
 }
 

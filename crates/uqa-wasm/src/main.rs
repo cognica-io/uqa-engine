@@ -524,7 +524,7 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
         Value::Int(value) => json_i64(value, "SQL integer"),
         Value::Float(value) => json_number(value, "SQL float"),
         Value::Decimal(value) => Ok(json!(value.to_sql_string())),
-        Value::Str(value) => Ok(json!(value)),
+        Value::Str(value) | Value::FixedChar(value) => Ok(json!(value)),
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
         Value::List(values) => values

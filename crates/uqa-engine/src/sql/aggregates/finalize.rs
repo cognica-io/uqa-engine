@@ -56,7 +56,7 @@ pub(in crate::sql) fn aggregate_value_with_args(
                 let average = acc
                     .decimal_sum
                     .as_ref()
-                    .and_then(|sum| sum.checked_div(&divisor))
+                    .and_then(|sum| sum.checked_div_postgres(&divisor))
                     .ok_or_else(|| SQLError::TypeMismatch("decimal AVG overflow".into()))?;
                 Value::Decimal(average)
             } else if acc.numeric_inputs.all_integers() {
@@ -82,6 +82,7 @@ pub(in crate::sql) fn aggregate_value_with_args(
                 .map(|v| match v {
                     Value::Null => Ok(None),
                     Value::Str(s) => Ok(Some(s.clone())),
+                    Value::FixedChar(s) => Ok(Some(s.trim_end_matches(' ').to_string())),
                     Value::Int(n) => Ok(Some(n.to_string())),
                     Value::Float(f) => Ok(Some(f.to_string())),
                     Value::Decimal(d) => Ok(Some(d.to_sql_string())),
@@ -228,6 +229,7 @@ pub(in crate::sql) fn aggregate_json_key(value: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
+        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))

@@ -37,8 +37,12 @@ impl<'a> MapRows<'a> {
 }
 
 impl PhysicalOperator for MapRows<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.child.estimated_cardinality()
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -51,8 +55,8 @@ impl PhysicalOperator for MapRows<'_> {
         };
         let rows = batch
             .rows
-            .into_iter()
-            .map(|row| (self.mapper)(row))
+            .iter()
+            .map(|row| (self.mapper)(batch.schema.view(row).to_result_row()))
             .collect::<ExecResult<Vec<_>>>()?;
         Ok(Some(Batch::new(self.schema.clone(), rows)))
     }

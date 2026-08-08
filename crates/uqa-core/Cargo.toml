@@ -1,5 +1,7 @@
 [package]
 name = "uqa-core"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "Document sets, finite-support relations, posting storage, and value types for UQA"
 version.workspace = true
 edition.workspace = true
@@ -21,6 +23,10 @@ thiserror = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 serde_json = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "posting_list"

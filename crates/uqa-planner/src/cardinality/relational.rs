@@ -10,6 +10,8 @@ use super::{
     column_of, histogram_range_selectivity, literal_of, BinaryOp, CardinalityEstimator, Expr,
     GraphStoreSampler, RelationStats, Selectivity,
 };
+use uqa_core::Value;
+use uqa_execution::ScalarExpr;
 
 impl CardinalityEstimator {
     /// Estimate the selectivity of `predicate` against `stats`. Best
@@ -103,5 +105,145 @@ impl CardinalityEstimator {
     pub fn estimate_rows(&self, predicate: &Expr, stats: &RelationStats) -> u64 {
         let s = self.selectivity(predicate, stats).raw();
         ((stats.row_count as f64) * s).round() as u64
+    }
+
+    /// Estimate a predicate already lowered to the physical scalar IR. This
+    /// keeps join ordering sensitive to local WHERE filters without converting
+    /// the optimized plan back into parser AST nodes.
+    pub fn scalar_selectivity(&self, predicate: &ScalarExpr, stats: &RelationStats) -> Selectivity {
+        match predicate {
+            ScalarExpr::And(parts) => Selectivity(
+                parts
+                    .iter()
+                    .map(|part| self.scalar_selectivity(part, stats).raw())
+                    .product(),
+            )
+            .clamp(),
+            ScalarExpr::Or(parts) => {
+                let anti = parts.iter().fold(1.0, |anti, part| {
+                    anti * (1.0 - self.scalar_selectivity(part, stats).raw())
+                });
+                Selectivity(1.0 - anti).clamp()
+            }
+            ScalarExpr::Not(inner) => {
+                Selectivity(1.0 - self.scalar_selectivity(inner, stats).raw()).clamp()
+            }
+            ScalarExpr::IsNull { expr, negated } => {
+                let null_fraction = scalar_column(expr)
+                    .and_then(|column| stats.column(column))
+                    .map_or(0.05, |column| {
+                        if stats.row_count == 0 {
+                            0.0
+                        } else {
+                            column.null_count as f64 / stats.row_count as f64
+                        }
+                    });
+                Selectivity(if *negated {
+                    1.0 - null_fraction
+                } else {
+                    null_fraction
+                })
+                .clamp()
+            }
+            ScalarExpr::Binary { op, lhs, rhs } => {
+                self.scalar_binary_selectivity(*op, lhs, rhs, stats)
+            }
+            ScalarExpr::InList {
+                expr,
+                list,
+                negated,
+            } => {
+                let selectivity = scalar_column(expr)
+                    .and_then(|column| stats.column(column))
+                    .map_or(self.default_selectivity * list.len() as f64, |column| {
+                        list.iter()
+                            .filter_map(scalar_literal)
+                            .map(|value| {
+                                column
+                                    .matches_mcv(&value)
+                                    .unwrap_or_else(|| column.equality_selectivity())
+                            })
+                            .sum()
+                    })
+                    .min(1.0);
+                Selectivity(if *negated {
+                    1.0 - selectivity
+                } else {
+                    selectivity
+                })
+                .clamp()
+            }
+            ScalarExpr::Between { .. } => Selectivity(self.range_selectivity).clamp(),
+            ScalarExpr::Func { name, .. } if name.eq_ignore_ascii_case("like") => {
+                Selectivity(self.like_selectivity).clamp()
+            }
+            ScalarExpr::Literal(Value::Bool(value)) => Selectivity(if *value { 1.0 } else { 0.0 }),
+            _ => Selectivity(self.default_selectivity).clamp(),
+        }
+    }
+
+    fn scalar_binary_selectivity(
+        &self,
+        op: BinaryOp,
+        lhs: &ScalarExpr,
+        rhs: &ScalarExpr,
+        stats: &RelationStats,
+    ) -> Selectivity {
+        let column = scalar_column(lhs).or_else(|| scalar_column(rhs));
+        let value = scalar_literal(rhs).or_else(|| scalar_literal(lhs));
+        let column_stats = column.and_then(|column| stats.column(column));
+        match op {
+            BinaryOp::Equal => {
+                if let (Some(column), Some(value)) = (column_stats, value.as_ref()) {
+                    return Selectivity(
+                        column
+                            .matches_mcv(value)
+                            .unwrap_or_else(|| column.equality_selectivity()),
+                    )
+                    .clamp();
+                }
+                Selectivity(self.default_selectivity).clamp()
+            }
+            BinaryOp::NotEqual => {
+                let equal = self
+                    .scalar_binary_selectivity(BinaryOp::Equal, lhs, rhs, stats)
+                    .raw();
+                Selectivity(1.0 - equal).clamp()
+            }
+            BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
+                if let (Some(column), Some(value)) = (column_stats, value.as_ref()) {
+                    if let Some(selectivity) = histogram_range_selectivity(column, op, value) {
+                        return Selectivity(selectivity).clamp();
+                    }
+                }
+                Selectivity(self.range_selectivity).clamp()
+            }
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                Selectivity(self.default_selectivity).clamp()
+            }
+        }
+    }
+}
+
+fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
+    match expression {
+        ScalarExpr::Column(column) => Some(
+            column
+                .rsplit_once('.')
+                .map_or(column.as_str(), |(_, column)| column),
+        ),
+        ScalarExpr::QualifiedColumn { column, .. } => Some(column),
+        _ => None,
+    }
+}
+
+fn scalar_literal(expression: &ScalarExpr) -> Option<Value> {
+    match expression {
+        ScalarExpr::Literal(value) => Some(value.clone()),
+        ScalarExpr::Cast { expr, ty } => {
+            let value = scalar_literal(expr)?;
+            uqa_sql::expr::cast_value(&value, ty).ok()
+        }
+        _ => None,
     }
 }

@@ -96,6 +96,24 @@ fn inner_join_basic() {
 }
 
 #[test]
+fn comma_join_column_pruning_keeps_only_real_source_columns() {
+    let engine = engine_with_orders();
+    let result = query(
+        &engine,
+        "SELECT name, product
+         FROM users, orders
+         WHERE id = user_id
+         ORDER BY oid",
+    );
+
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0]["name"], Value::Str("Alice".into()));
+    assert_eq!(result.rows[0]["product"], Value::Str("Book".into()));
+    assert_eq!(result.rows[2]["name"], Value::Str("Bob".into()));
+    assert_eq!(result.rows[2]["product"], Value::Str("Notebook".into()));
+}
+
+#[test]
 fn inner_join_excludes_unmatched() {
     let engine = engine_with_orders();
     let result = query(

@@ -54,6 +54,7 @@ fn typed_lists_round_trip_without_becoming_bytes_or_floats() {
         ),
         ("long_ints", Value::List((0..64).map(Value::Int).collect())),
         ("bytes", Value::Bytes(vec![1, 2, 3])),
+        ("fixed_char", Value::FixedChar("x   ".into())),
     ]);
     s.put(2, expected.clone()).unwrap();
 

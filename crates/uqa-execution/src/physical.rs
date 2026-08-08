@@ -8,7 +8,7 @@
 
 use thiserror::Error;
 
-use crate::batch::Batch;
+use crate::batch::{Batch, RowSchema};
 
 /// A leading physical row-order property carried between operators.
 ///
@@ -68,8 +68,20 @@ pub(crate) fn with_cleanup<T>(
 /// during `open`; pipelined operators (filter / project / limit) emit
 /// batches as they arrive.
 pub trait PhysicalOperator: Send {
-    /// Schema (column names, in order) the operator will emit.
-    fn schema(&self) -> &[String];
+    /// Complete logical-to-physical row layout emitted by this operator.
+    fn row_schema(&self) -> &RowSchema;
+
+    /// Schema column names in logical output order.
+    fn schema(&self) -> &[String] {
+        self.row_schema().columns()
+    }
+
+    /// Planner/runtime cardinality estimate for choosing physical strategies.
+    /// `None` means the operator cannot provide a useful estimate. The value
+    /// is advisory rather than a correctness bound.
+    fn estimated_cardinality(&self) -> Option<u64> {
+        None
+    }
 
     /// Leading output ordering known to be preserved by this operator.
     fn output_ordering(&self) -> &[PhysicalOrder] {
@@ -183,7 +195,7 @@ pub fn run_to_rows(
     let mut rows: Vec<uqa_sql::ResultRow> = Vec::new();
     for batch in OperatorBatchCursor::open(op)? {
         let batch = batch?;
-        rows.extend(batch.rows);
+        rows.extend(batch.into_result_rows());
     }
     Ok((schema, rows))
 }
@@ -199,8 +211,9 @@ mod tests {
     }
 
     impl PhysicalOperator for FailingOperator {
-        fn schema(&self) -> &[String] {
-            &[]
+        fn row_schema(&self) -> &RowSchema {
+            static SCHEMA: std::sync::OnceLock<RowSchema> = std::sync::OnceLock::new();
+            SCHEMA.get_or_init(RowSchema::default)
         }
 
         fn open(&mut self) -> ExecResult<()> {

@@ -12,11 +12,13 @@
 //! hash collision can never turn a new row into a duplicate. Output remains
 //! streaming and preserves the first row for every key in child order.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
+use std::hash::{BuildHasher, Hasher};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use smallvec::{Array, SmallVec};
 use tempfile::{Builder as TempBuilder, TempDir};
 use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
@@ -34,6 +36,129 @@ pub const DEFAULT_DISTINCT_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 const DISK_BUCKETS: u64 = 64;
 const COPY_BUFFER_BYTES: usize = 8 * 1024;
 const MICROS_PER_DAY: i128 = 86_400_000_000;
+
+pub(crate) type EncodedKey = SmallVec<[u8; 64]>;
+
+/// Hash a borrowed positional SQL row in its canonical equality domain.
+///
+/// This streams encoded components straight into the caller's hasher, so it
+/// does not allocate or construct an intermediate byte key. Hash collisions
+/// remain possible; callers must verify complete [`Value`] equality before
+/// reusing an existing row or group.
+pub fn hash_canonical_row<'a, S: BuildHasher>(
+    build_hasher: &S,
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> ExecResult<u64> {
+    let count = values.len();
+    let mut hasher = build_hasher.build_hasher();
+    {
+        let mut output = HasherOutput(&mut hasher);
+        encode_len(count, &mut output)?;
+        for value in values {
+            if let Some(value) = value {
+                encode_value(value, &mut output)?;
+            } else {
+                output.push_byte(0);
+            }
+        }
+    }
+    Ok(hasher.finish())
+}
+
+/// Collision-safe in-memory set for positional SQL rows.
+///
+/// Probes consume borrowed values and stream their canonical representation
+/// directly into the hash function. Only the first distinct row is copied
+/// into the contiguous key arena; repeated build rows and every lookup avoid
+/// both a positional `Vec<Value>` allocation and value cloning. Hash matches
+/// always verify the complete SQL [`Value`] equality domain.
+pub struct CanonicalRowHashSet {
+    rows: Vec<SmallVec<[Value; 2]>>,
+    index: HashMap<u64, SmallVec<[usize; 1]>, ahash::RandomState>,
+}
+
+impl CanonicalRowHashSet {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            index: HashMap::with_hasher(ahash::RandomState::new()),
+        }
+    }
+
+    /// Insert a positional key assembled from borrowed values.
+    /// Returns `true` only when this is the first SQL-equal key.
+    pub fn insert_borrowed(&mut self, values: &[&Value]) -> ExecResult<bool> {
+        let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
+        if self.matching_borrowed(hash, values) {
+            return Ok(false);
+        }
+
+        let row = values
+            .iter()
+            .map(|value| (*value).clone())
+            .collect::<SmallVec<[Value; 2]>>();
+        let row_index = self.rows.len();
+        self.rows.push(row);
+        self.index.entry(hash).or_default().push(row_index);
+        Ok(true)
+    }
+
+    /// Insert an already positional key without an intermediate borrowed-row
+    /// carrier. Values are copied only for a previously unseen key.
+    pub fn insert_values(&mut self, values: &[Value]) -> ExecResult<bool> {
+        let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
+        if self.matching_values(hash, values) {
+            return Ok(false);
+        }
+
+        let row_index = self.rows.len();
+        self.rows.push(values.iter().cloned().collect());
+        self.index.entry(hash).or_default().push(row_index);
+        Ok(true)
+    }
+
+    /// Probe with a composite row of borrowed values without allocating or
+    /// copying the key.
+    pub fn contains_borrowed(&self, values: &[&Value]) -> ExecResult<bool> {
+        let hash = hash_canonical_row(self.index.hasher(), values.iter().copied().map(Some))?;
+        Ok(self.matching_borrowed(hash, values))
+    }
+
+    /// Probe with an already positional value slice.
+    pub fn contains_values(&self, values: &[Value]) -> ExecResult<bool> {
+        let hash = hash_canonical_row(self.index.hasher(), values.iter().map(Some))?;
+        Ok(self.matching_values(hash, values))
+    }
+
+    fn matching_borrowed(&self, hash: u64, values: &[&Value]) -> bool {
+        self.index.get(&hash).is_some_and(|bucket| {
+            bucket.iter().copied().any(|index| {
+                let stored = &self.rows[index];
+                stored.len() == values.len()
+                    && stored
+                        .iter()
+                        .zip(values)
+                        .all(|(stored, value)| stored == *value)
+            })
+        })
+    }
+
+    fn matching_values(&self, hash: u64, values: &[Value]) -> bool {
+        self.index.get(&hash).is_some_and(|bucket| {
+            bucket
+                .iter()
+                .copied()
+                .any(|index| self.rows[index].as_slice() == values)
+        })
+    }
+}
+
+impl Default for CanonicalRowHashSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Exact, byte-bounded row-key set that can outlive one physical operator.
 ///
@@ -67,6 +192,19 @@ impl ExactRowSet {
 
     pub fn contains_row(&mut self, row: &ResultRow, schema: &[String]) -> ExecResult<bool> {
         self.seen.contains(&row_key(row, schema)?)
+    }
+
+    /// Insert an already-positional SQL value key without constructing a
+    /// named row. The binary encoding is the same collision-safe,
+    /// cross-numeric representation used by physical DISTINCT.
+    pub fn insert_values(&mut self, values: &[Value]) -> ExecResult<bool> {
+        self.seen.insert(encode_key(values)?)
+    }
+
+    /// Probe an already-positional SQL value key without constructing a named
+    /// row. Disk-backed sets perform an exact full-key comparison.
+    pub fn contains_values(&mut self, values: &[Value]) -> ExecResult<bool> {
+        self.seen.contains(&encode_key(values)?)
     }
 
     pub fn has_spilled(&self) -> bool {
@@ -110,7 +248,7 @@ impl<'a> Distinct<'a> {
 
     /// Construct a bounded full-row `DISTINCT` with an explicit byte budget.
     pub fn all_with_work_mem(child: Box<dyn PhysicalOperator + 'a>, work_mem_bytes: usize) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
+        let schema = child.row_schema().clone();
         Self {
             child,
             keys: None,
@@ -139,7 +277,7 @@ impl<'a> Distinct<'a> {
         evaluator: SharedExpressionEvaluator<'a>,
         work_mem_bytes: usize,
     ) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
+        let schema = child.row_schema().clone();
         Self {
             child,
             keys: Some(keys),
@@ -179,7 +317,7 @@ impl<'a> Distinct<'a> {
         self.seen = SeenKeySet::new(self.work_mem_bytes, self.spill_directory.clone());
     }
 
-    fn key(&self, row: &ResultRow) -> ExecResult<Vec<Value>> {
+    fn key(&self, row: &dyn uqa_sql::expr::RowLookup) -> ExecResult<Vec<Value>> {
         if let Some(keys) = self.keys.as_ref() {
             let evaluator = self.evaluator.as_ref().ok_or_else(|| {
                 ExecError::Other("DISTINCT ON evaluator is not configured".into())
@@ -191,16 +329,17 @@ impl<'a> Distinct<'a> {
         }
         Ok(self
             .schema
-            .columns
+            .columns()
             .iter()
-            .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
+            .enumerate()
+            .map(|(index, _)| row.positional_column(index).cloned().unwrap_or(Value::Null))
             .collect())
     }
 }
 
 impl PhysicalOperator for Distinct<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -215,13 +354,14 @@ impl PhysicalOperator for Distinct<'_> {
             };
             let mut rows = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
-                let key = encode_key(&self.key(&row)?)?;
+                let view = batch.schema.view(&row);
+                let key = encode_key(&self.key(&view)?)?;
                 if self.seen.insert(key)? {
                     rows.push(row);
                 }
             }
             if !rows.is_empty() {
-                return Ok(Some(Batch::new(self.schema.clone(), rows)));
+                return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
             }
         }
     }
@@ -490,7 +630,8 @@ fn distinct_error(message: impl Into<String>) -> ExecError {
 /// equality behavior as UQA's SQL comparisons. Every structural value carries
 /// lengths/counts, preventing concatenation and nested-container collisions.
 pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
-    let mut output = Vec::new();
+    let estimated_capacity = encoded_key_capacity(values.len())?;
+    let mut output = Vec::with_capacity(estimated_capacity);
     encode_len(values.len(), &mut output)?;
     for value in values {
         encode_value(value, &mut output)?;
@@ -498,31 +639,100 @@ pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
     Ok(output)
 }
 
-fn encode_value(value: &Value, output: &mut Vec<u8>) -> ExecResult<()> {
+/// Encode a join probe key directly from physical slots. Single- and
+/// two-column numeric keys stay inline, and a NULL/missing component rejects
+/// the SQL equality key without allocating or cloning a `Value`.
+pub(crate) fn encode_non_null_key<'a>(
+    values: impl ExactSizeIterator<Item = Option<&'a Value>>,
+) -> ExecResult<Option<EncodedKey>> {
+    let count = values.len();
+    let mut output = EncodedKey::with_capacity(encoded_key_capacity(count)?);
+    encode_len(count, &mut output)?;
+    for value in values {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        if matches!(value, Value::Null) {
+            return Ok(None);
+        }
+        encode_value(value, &mut output)?;
+    }
+    Ok(Some(output))
+}
+
+fn encoded_key_capacity(values: usize) -> ExecResult<usize> {
+    values
+        .checked_mul(22)
+        .and_then(|bytes| bytes.checked_add(8))
+        .ok_or_else(|| distinct_error("DISTINCT key capacity overflow"))
+}
+
+trait KeyOutput {
+    fn push_byte(&mut self, value: u8);
+    fn extend_bytes(&mut self, values: &[u8]);
+}
+
+impl KeyOutput for Vec<u8> {
+    fn push_byte(&mut self, value: u8) {
+        self.push(value);
+    }
+
+    fn extend_bytes(&mut self, values: &[u8]) {
+        self.extend_from_slice(values);
+    }
+}
+
+impl<A: Array<Item = u8>> KeyOutput for SmallVec<A> {
+    fn push_byte(&mut self, value: u8) {
+        self.push(value);
+    }
+
+    fn extend_bytes(&mut self, values: &[u8]) {
+        self.extend_from_slice(values);
+    }
+}
+
+struct HasherOutput<'a, H: Hasher>(&'a mut H);
+
+impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
+    fn push_byte(&mut self, value: u8) {
+        self.0.write_u8(value);
+    }
+
+    fn extend_bytes(&mut self, values: &[u8]) {
+        self.0.write(values);
+    }
+}
+
+fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     match value {
-        Value::Null => output.push(0),
-        Value::Bool(value) => encode_decimal_numeric(DecimalValue::from_bool(*value), output)?,
-        Value::Int(value) => encode_decimal_numeric(DecimalValue::from_i64(*value), output)?,
+        Value::Null => output.push_byte(0),
+        Value::Bool(value) => encode_numeric_parts(i128::from(*value), 0, output),
+        Value::Int(value) => encode_numeric_parts(i128::from(*value), 0, output),
         Value::Float(value) => encode_float_numeric(*value, output)?,
-        Value::Decimal(value) => encode_decimal_numeric(value.clone(), output)?,
+        Value::Decimal(value) => encode_decimal_numeric(value, output),
         Value::Str(value) => {
-            output.push(2);
+            output.push_byte(2);
             encode_bytes(value.as_bytes(), output)?;
         }
+        Value::FixedChar(value) => {
+            output.push_byte(7);
+            encode_bytes(value.trim_end_matches(' ').as_bytes(), output)?;
+        }
         Value::Bytes(value) => {
-            output.push(3);
+            output.push_byte(3);
             encode_bytes(value, output)?;
         }
         Value::Temporal(value) => encode_temporal(value, output),
         Value::List(values) => {
-            output.push(5);
+            output.push_byte(5);
             encode_len(values.len(), output)?;
             for value in values {
                 encode_value(value, output)?;
             }
         }
         Value::Map(values) => {
-            output.push(6);
+            output.push_byte(6);
             encode_len(values.len(), output)?;
             for (name, value) in values {
                 encode_bytes(name.as_bytes(), output)?;
@@ -533,83 +743,89 @@ fn encode_value(value: &Value, output: &mut Vec<u8>) -> ExecResult<()> {
     Ok(())
 }
 
-fn encode_decimal_numeric(value: DecimalValue, output: &mut Vec<u8>) -> ExecResult<()> {
-    output.extend_from_slice(&[1, 0]);
-    encode_bytes(value.to_canonical_string().as_bytes(), output)
+fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) {
+    let (coefficient, scale) = value.canonical_parts();
+    encode_numeric_parts(coefficient, scale, output);
 }
 
-fn encode_float_numeric(value: f64, output: &mut Vec<u8>) -> ExecResult<()> {
+fn encode_numeric_parts(coefficient: i128, scale: u32, output: &mut impl KeyOutput) {
+    output.extend_bytes(&[1, 0]);
+    output.extend_bytes(&coefficient.to_be_bytes());
+    output.extend_bytes(&scale.to_be_bytes());
+}
+
+fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<()> {
     if value.is_nan() {
         // PostgreSQL groups all NaN values together for DISTINCT.
-        output.extend_from_slice(&[1, 1]);
+        output.extend_bytes(&[1, 1]);
     } else if value == f64::NEG_INFINITY {
-        output.extend_from_slice(&[1, 2]);
+        output.extend_bytes(&[1, 2]);
     } else if value == f64::INFINITY {
-        output.extend_from_slice(&[1, 3]);
+        output.extend_bytes(&[1, 3]);
     } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
-        encode_decimal_numeric(decimal, output)?;
+        encode_decimal_numeric(&decimal, output);
     } else {
         // A finite f64 outside rust_decimal's exponent range still needs a
         // lossless representation. Normalize signed zero before storing bits.
-        output.extend_from_slice(&[1, 4]);
+        output.extend_bytes(&[1, 4]);
         let normalized = if value == 0.0 { 0.0 } else { value };
-        output.extend_from_slice(&normalized.to_bits().to_be_bytes());
+        output.extend_bytes(&normalized.to_bits().to_be_bytes());
     }
     Ok(())
 }
 
-fn encode_temporal(value: &TemporalValue, output: &mut Vec<u8>) {
-    output.push(4);
+fn encode_temporal(value: &TemporalValue, output: &mut impl KeyOutput) {
+    output.push_byte(4);
     match value {
         TemporalValue::Date { days } => {
-            output.push(0);
-            output.extend_from_slice(&days.to_be_bytes());
+            output.push_byte(0);
+            output.extend_bytes(&days.to_be_bytes());
         }
         TemporalValue::Time { micros } => {
-            output.push(1);
+            output.push_byte(1);
             let normalized = i128::from(*micros).rem_euclid(MICROS_PER_DAY);
-            output.extend_from_slice(&normalized.to_be_bytes());
+            output.extend_bytes(&normalized.to_be_bytes());
         }
         TemporalValue::TimeTz {
             micros,
             offset_minutes,
         } => {
-            output.push(2);
+            output.push_byte(2);
             let normalized = (i128::from(*micros) - i128::from(*offset_minutes) * 60_000_000)
                 .rem_euclid(MICROS_PER_DAY);
-            output.extend_from_slice(&normalized.to_be_bytes());
+            output.extend_bytes(&normalized.to_be_bytes());
         }
         TemporalValue::Timestamp { micros } => {
-            output.push(3);
-            output.extend_from_slice(&micros.to_be_bytes());
+            output.push_byte(3);
+            output.extend_bytes(&micros.to_be_bytes());
         }
         TemporalValue::TimestampTz { micros } => {
-            output.push(4);
-            output.extend_from_slice(&micros.to_be_bytes());
+            output.push_byte(4);
+            output.extend_bytes(&micros.to_be_bytes());
         }
         TemporalValue::Interval {
             months,
             days,
             micros,
         } => {
-            output.push(5);
+            output.push_byte(5);
             let normalized = (i128::from(*months) * 30 + i128::from(*days)) * MICROS_PER_DAY
                 + i128::from(*micros);
-            output.extend_from_slice(&normalized.to_be_bytes());
+            output.extend_bytes(&normalized.to_be_bytes());
         }
     }
 }
 
-fn encode_bytes(bytes: &[u8], output: &mut Vec<u8>) -> ExecResult<()> {
+fn encode_bytes(bytes: &[u8], output: &mut impl KeyOutput) -> ExecResult<()> {
     encode_len(bytes.len(), output)?;
-    output.extend_from_slice(bytes);
+    output.extend_bytes(bytes);
     Ok(())
 }
 
-fn encode_len(length: usize, output: &mut Vec<u8>) -> ExecResult<()> {
+fn encode_len(length: usize, output: &mut impl KeyOutput) -> ExecResult<()> {
     let length = u64::try_from(length)
         .map_err(|_| distinct_error("DISTINCT key component exceeds the binary format"))?;
-    output.extend_from_slice(&length.to_be_bytes());
+    output.extend_bytes(&length.to_be_bytes());
     Ok(())
 }
 
@@ -637,10 +853,14 @@ mod tests {
     struct Evaluator;
 
     impl ExpressionEvaluator for Evaluator {
-        fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value> {
+        fn evaluate(
+            &self,
+            expression: &ScalarExpr,
+            row: &dyn uqa_sql::expr::RowLookup,
+        ) -> ExecResult<Value> {
             Ok(crate::eval_scalar(
                 expression,
-                &ScalarEvalContext::new(Some(row), &[]),
+                &ScalarEvalContext::from_row_lookup(row, &[]),
             )?)
         }
     }
@@ -763,6 +983,57 @@ mod tests {
     }
 
     #[test]
+    fn physical_numeric_join_key_stays_inline_and_matches_distinct_encoding() {
+        let value = Value::Int(42);
+        let key = encode_non_null_key(std::iter::once(Some(&value)))
+            .unwrap()
+            .unwrap();
+        assert!(!key.spilled());
+        assert_eq!(
+            key.as_slice(),
+            encode_key(std::slice::from_ref(&value)).unwrap()
+        );
+
+        let null = Value::Null;
+        assert!(encode_non_null_key(std::iter::once(Some(&null)))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn canonical_row_hash_streams_borrowed_composites_with_sql_equality() {
+        let integer = Value::Int(1);
+        let decimal = Value::Decimal(DecimalValue::parse("1.000").unwrap());
+        let text = Value::Str("group".into());
+        let hash_state = ahash::RandomState::new();
+        assert_eq!(
+            hash_canonical_row(&hash_state, [Some(&integer), Some(&text)].into_iter()).unwrap(),
+            hash_canonical_row(&hash_state, [Some(&decimal), Some(&text)].into_iter()).unwrap()
+        );
+
+        let null = Value::Null;
+        assert_eq!(
+            hash_canonical_row(&hash_state, std::iter::once(None)).unwrap(),
+            hash_canonical_row(&hash_state, std::iter::once(Some(&null))).unwrap()
+        );
+    }
+
+    #[test]
+    fn canonical_row_hash_set_copies_only_new_keys_and_probes_borrowed() {
+        let one = Value::Int(1);
+        let two = Value::Int(2);
+        let decimal_one = Value::Decimal(DecimalValue::parse("1.000").unwrap());
+        let mut rows = CanonicalRowHashSet::new();
+
+        assert!(rows.insert_borrowed(&[&one, &two]).unwrap());
+        assert!(!rows.insert_borrowed(&[&decimal_one, &two]).unwrap());
+        assert!(rows.contains_borrowed(&[&decimal_one, &two]).unwrap());
+        assert!(!rows.contains_borrowed(&[&two, &one]).unwrap());
+        assert_eq!(rows.rows.len(), 1);
+        assert!(!rows.rows[0].spilled());
+    }
+
+    #[test]
     fn temporary_directory_is_removed_on_drop() {
         let parent = tempfile::tempdir().unwrap();
         let scan = TableScan::from_rows(vec!["v".into()], vec![value_row(Value::Int(1))]);
@@ -810,7 +1081,11 @@ mod tests {
     struct FailingEvaluator;
 
     impl ExpressionEvaluator for FailingEvaluator {
-        fn evaluate(&self, _expression: &ScalarExpr, _row: &ResultRow) -> ExecResult<Value> {
+        fn evaluate(
+            &self,
+            _expression: &ScalarExpr,
+            _row: &dyn uqa_sql::expr::RowLookup,
+        ) -> ExecResult<Value> {
             Err(ExecError::Other("intentional evaluator failure".into()))
         }
     }

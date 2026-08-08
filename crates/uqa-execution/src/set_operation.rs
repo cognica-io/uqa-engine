@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::SetOpKind;
+use uqa_sql::expr::RowLookup;
 use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
@@ -22,19 +23,18 @@ use crate::{
 struct ColumnEvaluator;
 
 impl ExpressionEvaluator for ColumnEvaluator {
-    fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value> {
+    fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value> {
         let ScalarExpr::Column(column) = expression else {
             return Err(ExecError::Other(
                 "set-operation sort key must be a column".into(),
             ));
         };
-        Ok(row.get(column).cloned().unwrap_or(Value::Null))
+        Ok(row.column(column).cloned().unwrap_or(Value::Null))
     }
 }
 
 struct AlignSchema<'a> {
     child: Box<dyn PhysicalOperator + 'a>,
-    source: Vec<String>,
     schema: RowSchema,
 }
 
@@ -48,17 +48,15 @@ impl<'a> AlignSchema<'a> {
                 source.len()
             )));
         }
-        Ok(Self {
-            child,
-            source,
-            schema: RowSchema::new(output),
-        })
+        let mapping = output.into_iter().zip(source).collect::<Vec<_>>();
+        let schema = RowSchema::select(child.row_schema(), &mapping);
+        Ok(Self { child, schema })
     }
 }
 
 impl PhysicalOperator for AlignSchema<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -69,23 +67,10 @@ impl PhysicalOperator for AlignSchema<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        let rows = batch
-            .rows
-            .into_iter()
-            .map(|row| {
-                self.source
-                    .iter()
-                    .zip(&self.schema.columns)
-                    .map(|(source, output)| {
-                        (
-                            output.clone(),
-                            row.get(source).cloned().unwrap_or(Value::Null),
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-        Ok(Some(Batch::new(self.schema.clone(), rows)))
+        Ok(Some(Batch::from_physical_rows(
+            self.schema.clone(),
+            batch.rows,
+        )))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -132,7 +117,7 @@ impl<'a> RowCursor<'a> {
                 self.exhausted = true;
                 return Ok(None);
             };
-            self.batch = batch.rows.into_iter();
+            self.batch = batch.into_result_rows().into_iter();
         }
     }
 
@@ -275,10 +260,10 @@ impl<'a> ExternalSetOperation<'a> {
 
     fn load_groups(&mut self) -> ExecResult<()> {
         if self.left_group.is_none() && !self.left.exhausted {
-            self.left_group = self.left.take_group(&self.schema.columns)?;
+            self.left_group = self.left.take_group(self.schema.columns())?;
         }
         if self.right_group.is_none() && !self.right.exhausted {
-            self.right_group = self.right.take_group(&self.schema.columns)?;
+            self.right_group = self.right.take_group(self.schema.columns())?;
         }
         Ok(())
     }
@@ -361,8 +346,8 @@ impl<'a> ExternalSetOperation<'a> {
 }
 
 impl PhysicalOperator for ExternalSetOperation<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {

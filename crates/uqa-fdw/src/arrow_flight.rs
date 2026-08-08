@@ -57,7 +57,7 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
             )));
         }
         Value::Decimal(d) => d.to_sql_string(),
-        Value::Str(s) => {
+        Value::Str(s) | Value::FixedChar(s) => {
             let escaped = s.replace('\'', "''");
             format!("'{escaped}'")
         }

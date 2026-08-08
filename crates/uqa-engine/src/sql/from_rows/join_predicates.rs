@@ -10,6 +10,7 @@ use super::{
     eval_scalar, null_row_for, Engine, ResultRow, SQLError, SQLParam, ScalarEvalContext,
     ScalarExpr, ScalarSubqueryRunner, SourcePlan, Value,
 };
+use crate::sql::select::from_clause_output_columns;
 
 pub(in crate::sql) fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
     match expr {
@@ -55,6 +56,57 @@ pub(in crate::sql) fn decide_join_sides<'a>(
     None
 }
 
+/// Bind a join key's column lookup to the exact physical schema key whenever
+/// the side schema identifies it unambiguously. Parsed SQL commonly carries
+/// bare column names (for example `l_orderkey`) while joined rows store
+/// qualified keys (`lineitem.l_orderkey`). Leaving the bare name in the hot
+/// probe loop makes every lookup scan all row keys for a matching suffix.
+pub(in crate::sql) fn bind_join_key_to_schema(
+    expression: &ScalarExpr,
+    schema: &[String],
+) -> ScalarExpr {
+    match expression {
+        ScalarExpr::Column(name) => unique_physical_column(name, schema)
+            .map_or_else(|| expression.clone(), ScalarExpr::Column),
+        ScalarExpr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
+            let expected = if key.is_empty() {
+                format!("{qualifier}.{column}")
+            } else {
+                key.clone()
+            };
+            unique_physical_column(&expected, schema).map_or_else(
+                || expression.clone(),
+                |key| ScalarExpr::QualifiedColumn {
+                    qualifier: qualifier.clone(),
+                    column: column.clone(),
+                    key,
+                },
+            )
+        }
+        ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
+            expr: Box::new(bind_join_key_to_schema(expr, schema)),
+            ty: ty.clone(),
+        },
+        _ => expression.clone(),
+    }
+}
+
+fn unique_physical_column(name: &str, schema: &[String]) -> Option<String> {
+    if schema.iter().any(|column| column == name) {
+        return Some(name.to_string());
+    }
+    let mut matches = schema.iter().filter(|key| {
+        key.rsplit_once('.')
+            .is_some_and(|(_, column)| column == name)
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then(|| first.clone())
+}
+
 pub(in crate::sql) fn eval_yields_value(
     eval_hook: &dyn uqa_sql::expr::EngineHook,
     subquery_runner: &dyn ScalarSubqueryRunner,
@@ -73,12 +125,20 @@ pub(in crate::sql) fn pad_nulls_for_from(
     from: &SourcePlan,
     engine: &Engine,
 ) -> Result<(), SQLError> {
-    let mut tables = Vec::new();
-    from.collect_tables(&mut tables);
-    for (name, alias) in &tables {
-        let null_keys = null_row_for(name, alias.as_deref(), engine)?;
-        for (k, v) in null_keys {
-            row.entry(k).or_insert(v);
+    match from {
+        SourcePlan::Table { name, alias } => {
+            for (column, value) in null_row_for(name, alias.as_deref(), engine)? {
+                row.entry(column).or_insert(value);
+            }
+        }
+        SourcePlan::Join { left, right, .. } => {
+            pad_nulls_for_from(row, left, engine)?;
+            pad_nulls_for_from(row, right, engine)?;
+        }
+        SourcePlan::Values { .. } | SourcePlan::Function { .. } | SourcePlan::Subquery { .. } => {
+            for column in from_clause_output_columns(engine, from) {
+                row.entry(column).or_insert(Value::Null);
+            }
         }
     }
     Ok(())
@@ -89,4 +149,25 @@ pub(in crate::sql) fn join_schema_sample(columns: &[String]) -> ResultRow {
         .iter()
         .map(|column| (column.clone(), Value::Int(1)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_key_binding_uses_unique_exact_physical_column() {
+        let schema = vec!["orders.o_orderkey".into(), "orders.o_custkey".into()];
+        assert_eq!(
+            bind_join_key_to_schema(&ScalarExpr::Column("o_orderkey".into()), &schema),
+            ScalarExpr::Column("orders.o_orderkey".into())
+        );
+    }
+
+    #[test]
+    fn join_key_binding_keeps_ambiguous_bare_column() {
+        let schema = vec!["left.id".into(), "right.id".into()];
+        let expression = ScalarExpr::Column("id".into());
+        assert_eq!(bind_join_key_to_schema(&expression, &schema), expression);
+    }
 }

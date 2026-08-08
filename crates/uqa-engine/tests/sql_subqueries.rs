@@ -115,7 +115,9 @@ fn not_in_subquery() {
          WHERE dept_id NOT IN (SELECT id FROM departments WHERE name = 'Engineering') \
          ORDER BY name",
     );
-    assert_eq!(names(&result), vec!["Bob", "Dave", "Eve"]);
+    // NULL NOT IN (...) is UNKNOWN, so the nullable Eve row does not satisfy
+    // the WHERE predicate (PostgreSQL three-valued logic).
+    assert_eq!(names(&result), vec!["Bob", "Dave"]);
 }
 
 #[test]

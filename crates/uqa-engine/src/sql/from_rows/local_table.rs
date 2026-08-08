@@ -7,28 +7,178 @@
 //! Local table scans and recursive physical source assembly.
 
 use super::{
-    attach_qualifier_filter, build_info_schema_rows, build_table_function_row_stream,
-    build_values_rows, combine_filters, decide_join_sides, execute_query_plan_output,
-    execute_view_plan_output_with_parent_cache, has_filters_for_qualifier,
-    is_score_provenance_column, join_conjuncts, join_schema_sample, null_row_for_schema,
-    pad_nulls_for_from, physical_work_mem_bytes, propagated_join_filters,
+    attach_qualifier_filter, bind_join_key_to_schema, build_info_schema_rows,
+    build_table_function_row_stream, build_values_rows, combine_filters, decide_join_sides,
+    execute_query_plan_output, execute_view_plan_output_with_parent_cache,
+    has_filters_for_qualifier, is_score_provenance_column, join_conjuncts, join_schema_sample,
+    null_row_for_schema, pad_nulls_for_from, physical_work_mem_bytes, propagated_join_filters,
     push_output_filter_into_query_plan, qualified_key, qualifier_filter, qualifier_for,
     qualify_source_operator, qualify_source_operator_with_columns,
     query_contains_volatile_function, query_cte_names, query_output_shared,
-    table_function_empty_schema, BTreeSet, ColumnPrune, CteScope, Engine,
-    EngineExpressionEvaluator, EngineLateralSource, JoinExecutionStrategy, JoinKind,
-    PlanSubqueryArena, QualifierFilters, QueryOutputMode, ResultRow, SQLError, SQLParam,
-    ScalarExpr, ScopedEngineHook, ScoredDocumentSource, ScoredInput, SourcePlan,
-    TableFunctionEvalContext,
+    table_function_empty_schema, ColumnPrune, CteScope, Engine, EngineExpressionEvaluator,
+    EngineLateralSource, JoinExecutionStrategy, JoinKind, PlanSubqueryArena, QualifierFilters,
+    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
+    ScoredDocumentSource, ScoredInput, SourcePlan, TableFunctionEvalContext, Value,
 };
+
+use uqa_planner::{AccessPathPlan, ComputePlan, RelationalPlan};
+
+type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a>, bool);
 
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
     table: std::sync::Arc<crate::TableState>,
-    qualifier: String,
-    wanted: Option<BTreeSet<String>>,
+    columns: Vec<String>,
     schema: Vec<String>,
+    predicate: Option<uqa_execution::ProjectedPredicate>,
+    estimated_cardinality: u64,
     after: Option<uqa_core::DocId>,
+}
+
+impl EngineTableRowSource {
+    fn next_physical_rows_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        if max_rows == 0 {
+            return Ok(Vec::new());
+        }
+        let store = self.table.document_store.read();
+        let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut rows = Vec::with_capacity(max_rows);
+        loop {
+            // A source must not return an empty batch before end-of-stream:
+            // TableScan treats it as EOF. Keep advancing storage pages when a
+            // pushed predicate rejects an entire page, and fill the requested
+            // output batch when selectivity permits it.
+            let remaining = max_rows - rows.len();
+            if remaining == 0 {
+                break;
+            }
+            let direct_shared = store
+                .next_shared_fields(self.after, remaining, &fields)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "scan shared projected fields from `{}`: {error}",
+                        self.table_name
+                    ))
+                })?;
+            if let Some(shared_rows) = direct_shared {
+                let Some(last) = shared_rows.last().map(|(doc_id, _)| *doc_id) else {
+                    break;
+                };
+                self.after = Some(last);
+                for (_, shared) in shared_rows {
+                    let keep = shared.with_projected(|projected| {
+                        self.predicate
+                            .as_ref()
+                            .map_or(Ok(true), |predicate| predicate.keep(projected))
+                    })?;
+                    if keep {
+                        let (values, projection) = shared.into_parts();
+                        rows.push(uqa_execution::PhysicalRow::from_shared_values(
+                            values, projection,
+                        ));
+                    }
+                }
+                continue;
+            }
+            let doc_ids = store.next_doc_ids(self.after, remaining).map_err(|error| {
+                SQLError::Internal(format!(
+                    "scan document ids for `{}`: {error}",
+                    self.table_name
+                ))
+            })?;
+            let Some(last) = doc_ids.last().copied() else {
+                break;
+            };
+            self.after = Some(last);
+
+            let shared_rows = store
+                .get_shared_fields(&doc_ids, &fields)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "read shared projected fields from `{}`: {error}",
+                        self.table_name
+                    ))
+                })?;
+            if let Some(shared_rows) = shared_rows {
+                if shared_rows.len() != doc_ids.len() {
+                    return Err(SQLError::Internal(format!(
+                        "table `{}` returned {} shared rows for {} document ids",
+                        self.table_name,
+                        shared_rows.len(),
+                        doc_ids.len()
+                    ))
+                    .into());
+                }
+                let null = Value::Null;
+                for shared in shared_rows {
+                    let keep = if let Some(shared) = shared.as_ref() {
+                        shared.with_projected(|projected| {
+                            self.predicate
+                                .as_ref()
+                                .map_or(Ok(true), |predicate| predicate.keep(projected))
+                        })?
+                    } else {
+                        let projected = vec![&null; fields.len()];
+                        self.predicate
+                            .as_ref()
+                            .map_or(Ok(true), |predicate| predicate.keep(&projected))?
+                    };
+                    if !keep {
+                        continue;
+                    }
+                    rows.push(match shared {
+                        Some(shared) => {
+                            let (values, projection) = shared.into_parts();
+                            uqa_execution::PhysicalRow::from_shared_values(values, projection)
+                        }
+                        None => uqa_execution::PhysicalRow::nulls(fields.len()),
+                    });
+                }
+            } else {
+                let mut visited = 0usize;
+                let mut predicate_error = None;
+                store
+                    .for_each_fields_multi_ref(&doc_ids, &fields, &mut |_, values| {
+                        visited += 1;
+                        if let Some(predicate) = self.predicate.as_ref() {
+                            match predicate.keep(values) {
+                                Ok(true) => {}
+                                Ok(false) => return true,
+                                Err(error) => {
+                                    predicate_error = Some(error);
+                                    return false;
+                                }
+                            }
+                        }
+                        rows.push(uqa_execution::PhysicalRow::from_values(
+                            values.iter().map(|value| (*value).clone()).collect(),
+                        ));
+                        true
+                    })
+                    .map_err(|error| {
+                        SQLError::Internal(format!(
+                            "read projected fields from `{}`: {error}",
+                            self.table_name
+                        ))
+                    })?;
+                if let Some(error) = predicate_error {
+                    return Err(error.into());
+                }
+                if visited != doc_ids.len() {
+                    return Err(SQLError::Internal(format!(
+                        "table `{}` visited {visited} of {} projected cursor rows",
+                        self.table_name,
+                        doc_ids.len()
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(rows)
+    }
 }
 
 impl uqa_execution::RowSource for EngineTableRowSource {
@@ -36,42 +186,28 @@ impl uqa_execution::RowSource for EngineTableRowSource {
         &self.schema
     }
 
+    fn estimated_cardinality(&self) -> Option<u64> {
+        Some(self.estimated_cardinality)
+    }
+
     fn next_row(&mut self) -> uqa_execution::ExecResult<Option<ResultRow>> {
-        let store = self.table.document_store.read();
-        let Some(doc_id) = store.next_doc_id(self.after).map_err(|error| {
-            SQLError::Internal(format!(
-                "scan document ids for `{}`: {error}",
-                self.table_name
-            ))
-        })?
-        else {
-            return Ok(None);
-        };
-        self.after = Some(doc_id);
-        let document = store.get(doc_id).map_err(|error| {
-            SQLError::Internal(format!(
-                "read `{}` document {doc_id}: {error}",
-                self.table_name
-            ))
-        })?;
-        let document = document.ok_or_else(|| {
-            SQLError::Internal(format!(
-                "table `{}` cursor returned document {doc_id}, but materialization omitted it",
-                self.table_name
-            ))
-        })?;
-        let mut row = ResultRow::new();
-        for (column, value) in document {
-            if self
-                .wanted
-                .as_ref()
-                .is_some_and(|wanted| !wanted.contains(&column))
-            {
-                continue;
-            }
-            row.insert(qualified_key(&self.qualifier, &column), value);
-        }
-        Ok(Some(row))
+        Ok(self.next_batch(1)?.pop())
+    }
+
+    fn next_batch(&mut self, max_rows: usize) -> uqa_execution::ExecResult<Vec<ResultRow>> {
+        let rows = self.next_physical_rows_batch(max_rows)?;
+        let schema = uqa_execution::RowSchema::new(self.schema.clone());
+        Ok(rows
+            .iter()
+            .map(|row| schema.view(row).to_result_row())
+            .collect())
+    }
+
+    fn next_physical_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        self.next_physical_rows_batch(max_rows)
     }
 }
 
@@ -81,7 +217,8 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     ctes: &CteScope,
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
-) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator + 'a>>, SQLError> {
+    params: &[SQLParam],
+) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
     let SourcePlan::Table { name, alias } = source else {
         return Ok(None);
     };
@@ -113,12 +250,12 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .collect();
         let scan: Box<dyn uqa_execution::PhysicalOperator + 'a> =
             Box::new(uqa_execution::SharedSpillScan::new(materialized));
-        return Ok(Some(Box::new(
-            uqa_execution::ColumnSelection::with_mapping(scan, mapping),
+        return Ok(Some((
+            Box::new(uqa_execution::ColumnSelection::with_mapping(scan, mapping)),
+            false,
         )));
     }
-    if has_filters_for_qualifier(filters, &qualifier)
-        || engine.view_plan(name)?.is_some()
+    if engine.view_plan(name)?.is_some()
         || engine
             .foreign_table(name)
             .map_err(SQLError::Unsupported)?
@@ -133,28 +270,42 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         return Ok(None);
     };
     let wanted = prune.and_then(|prune| prune.get(&qualifier)).cloned();
-    let columns = if let Some(wanted) = wanted.as_ref() {
-        wanted.iter().cloned().collect()
-    } else {
-        engine.try_table_columns(name).map_err(|error| {
-            SQLError::Internal(format!("read table columns for `{name}`: {error}"))
-        })?
+    let table_columns = engine
+        .try_table_columns(name)
+        .map_err(|error| SQLError::Internal(format!("read table columns for `{name}`: {error}")))?;
+    // An unqualified reference is conservatively requested from every FROM
+    // source during pruning.  The scan schema must still describe only real
+    // table columns: advertising those over-inclusive requests as columns can
+    // make later joins bind an unqualified name to a non-existent value.
+    let columns = match wanted.as_ref() {
+        Some(wanted) => table_columns
+            .into_iter()
+            .filter(|column| wanted.contains(column))
+            .collect(),
+        None => table_columns,
     };
     let schema = columns
-        .into_iter()
-        .map(|column| qualified_key(&qualifier, &column))
+        .iter()
+        .map(|column| qualified_key(&qualifier, column))
         .collect();
+    let predicate = qualifier_filter(filters, &qualifier)
+        .map(|predicate| uqa_execution::ProjectedPredicate::compile(&predicate, &columns, params))
+        .transpose()?
+        .flatten();
+    let filter_pushed = predicate.is_some();
     let source = EngineTableRowSource {
         table_name: name.clone(),
         table,
-        qualifier,
-        wanted,
+        columns,
         schema,
+        predicate,
+        estimated_cardinality: engine.table_doc_count(name)?,
         after: None,
     };
-    Ok(Some(Box::new(uqa_execution::TableScan::new(Box::new(
-        source,
-    )))))
+    Ok(Some((
+        Box::new(uqa_execution::TableScan::new(Box::new(source))),
+        filter_pushed,
+    )))
 }
 
 /// Build a complete FROM source as a pull-based physical operator. Unlike the
@@ -299,15 +450,20 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 return Ok(qualify_source_operator(scan, &qualifier, prune));
             }
 
-            let Some(operator) = try_streaming_local_table_scan(engine, from, ctes, prune, None)?
+            let Some((operator, filter_pushed)) =
+                try_streaming_local_table_scan(engine, from, ctes, prune, filters, params)?
             else {
                 return Err(SQLError::Unsupported(format!(
                     "relation `{name}` does not exist"
                 )));
             };
-            Ok(attach_qualifier_filter(
-                operator, &qualifier, filters, engine, params, ctes,
-            ))
+            if filter_pushed {
+                Ok(operator)
+            } else {
+                Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ))
+            }
         }
         SourcePlan::Join {
             left,
@@ -393,8 +549,10 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                             rhs,
                             params,
                         ) {
-                            left_keys.push(left_key.clone());
-                            right_keys.push(right_key.clone());
+                            left_keys
+                                .push(bind_join_key_to_schema(left_key, left_operator.schema()));
+                            right_keys
+                                .push(bind_join_key_to_schema(right_key, right_operator.schema()));
                         } else {
                             residual.push(conjunct.clone());
                         }
@@ -417,18 +575,22 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
                 (
                     JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,
                     Some((left_keys, right_keys, residual)),
-                ) => Ok(Box::new(HashJoin::new_with_work_mem_and_predicate(
-                    left_operator,
-                    right_operator,
-                    *kind,
-                    left_keys,
-                    right_keys,
-                    residual,
-                    evaluator,
-                    left_nulls,
-                    right_nulls,
-                    work_mem,
-                ))),
+                ) => Ok(Box::new(
+                    HashJoin::try_new_with_work_mem_and_predicate(
+                        left_operator,
+                        right_operator,
+                        *kind,
+                        left_keys,
+                        right_keys,
+                        residual,
+                        evaluator,
+                        left_nulls,
+                        right_nulls,
+                        work_mem,
+                        params,
+                    )
+                    .map_err(crate::sql::select::physical_exec_error)?,
+                )),
                 (JoinExecutionStrategy::Auto, None) => {
                     Ok(Box::new(NestedLoopJoin::new_with_work_mem(
                         left_operator,
@@ -518,6 +680,22 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             alias,
             column_aliases,
         } => {
+            if let Some(operator) =
+                try_build_streaming_subquery_operator(engine, body, params, ctes)?
+            {
+                let source_columns = operator.schema().to_vec();
+                let qualifier = alias.as_deref().unwrap_or_default();
+                let operator = qualify_source_operator_with_columns(
+                    operator,
+                    &source_columns,
+                    qualifier,
+                    prune,
+                    column_aliases,
+                );
+                return Ok(attach_qualifier_filter(
+                    operator, qualifier, filters, engine, params, ctes,
+                ));
+            }
             let local_cte_names = query_cte_names(body);
             let output = execute_view_plan_output_with_parent_cache(
                 engine,
@@ -541,4 +719,74 @@ pub(in crate::sql) fn build_join_operator_with_ctes<'a>(
             ))
         }
     }
+}
+
+/// Build a single-consumer derived-table projection as a pull pipeline. These
+/// query blocks have no relational feature that requires repeatability, so a
+/// `SharedSpill` boundary would only serialize and read the same physical rows
+/// once before the parent operator consumes them.
+fn try_build_streaming_subquery_operator<'a>(
+    engine: &'a Engine,
+    body: &uqa_planner::QueryPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope,
+) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator + 'a>>, SQLError> {
+    if !body.ctes.is_empty() || query_contains_volatile_function(engine, body)? {
+        return Ok(None);
+    }
+    let RelationalPlan::QueryBlock(block) = &body.root else {
+        return Ok(None);
+    };
+    if !matches!(block.compute, ComputePlan::Project)
+        || !matches!(block.access, AccessPathPlan::Row)
+        || block.from.is_none()
+        || !block.subqueries.is_empty()
+        || !block.order_by.is_empty()
+        || block.limit.is_some()
+        || block.offset.is_some()
+        || block.distinct
+        || !block.distinct_on.is_empty()
+        || block
+            .projections
+            .iter()
+            .any(|projection| matches!(projection.expr, ScalarExpr::Star))
+    {
+        return Ok(None);
+    }
+
+    let from = block
+        .from
+        .as_ref()
+        .expect("derived-table FROM checked above");
+    let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from);
+    let qualifier_filters = crate::sql::select::qualifier_filters_for_stmt(engine, block, from);
+    let mut operator = build_join_operator_with_ctes(
+        engine,
+        from,
+        params,
+        ctes,
+        column_prune.as_ref(),
+        qualifier_filters.as_ref(),
+    )?;
+    let residual = crate::sql::select::final_filter_after_qualifier_pushdown(
+        engine,
+        block,
+        from,
+        qualifier_filters.as_ref(),
+    );
+    let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+    if let Some(predicate) = residual {
+        operator = Box::new(uqa_execution::Filter::with_evaluator(
+            operator,
+            predicate,
+            std::sync::Arc::clone(&evaluator),
+        ));
+    }
+    let mut projections = crate::sql::select::physical_projections(&block.projections);
+    crate::sql::select::append_score_provenance_projections(&mut projections, operator.schema());
+    Ok(Some(Box::new(uqa_execution::Project::with_evaluator(
+        operator,
+        projections,
+        evaluator,
+    ))))
 }

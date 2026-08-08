@@ -111,8 +111,29 @@ pub(super) fn compile_pg_type_name(
     let base = match raw.as_str() {
         "int" | "int4" | "integer" | "bigint" | "int8" | "smallint" | "int2" | "serial"
         | "bigserial" | "serial4" | "serial8" => Ok(ColumnType::Integer),
-        "text" | "varchar" | "character" | "char" | "bpchar" | "name" | "uuid" => {
-            Ok(ColumnType::Text)
+        "text" | "varchar" | "name" | "uuid" => Ok(ColumnType::Text),
+        "character" | "char" | "bpchar" => {
+            if type_name.typmods.len() > 1 {
+                return Err(SQLError::TypeMismatch(format!(
+                    "CHARACTER accepts at most one length modifier, got {}",
+                    type_name.typmods.len()
+                )));
+            }
+            let length = type_name
+                .typmods
+                .first()
+                .map(expect_integer_const)
+                .transpose()?
+                .unwrap_or(1);
+            let length = u32::try_from(length)
+                .ok()
+                .filter(|length| *length > 0)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "CHARACTER length must be greater than zero, got {length}"
+                    ))
+                })?;
+            Ok(ColumnType::Character(length))
         }
         "bool" | "boolean" => Ok(ColumnType::Boolean),
         "real" | "float4" | "float8" | "double" | "double precision" => Ok(ColumnType::Real),

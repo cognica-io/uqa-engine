@@ -42,6 +42,24 @@ impl ScoredDocumentSource {
         Ok(rows)
     }
 
+    pub(super) fn materialize_physical_entries(
+        &self,
+        entries: &[ScoredEntry],
+    ) -> ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        let mut rows = Vec::with_capacity(entries.len());
+        self.for_each_kept_entry(entries, &mut |doc_id, entry, _fields, values| {
+            let row = ProjectedDocumentRow::new(
+                &self.projected_fields,
+                &self.projected_slots,
+                values,
+                self.row_metadata(doc_id, entry.score),
+            )?;
+            rows.push(uqa_execution::PhysicalRow::from_values(row.into_values()));
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+
     fn for_each_kept_entry(
         &self,
         entries: &[ScoredEntry],

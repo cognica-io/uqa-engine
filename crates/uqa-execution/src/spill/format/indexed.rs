@@ -53,6 +53,9 @@ impl Serialize for ExactValue<'_> {
             Value::Str(value) => {
                 serializer.serialize_newtype_variant("SpillValue", 4, "Str", value)
             }
+            Value::FixedChar(value) => {
+                serializer.serialize_newtype_variant("SpillValue", 10, "FixedChar", value)
+            }
             Value::Bytes(value) => {
                 serializer.serialize_newtype_variant("SpillValue", 5, "Bytes", value)
             }
@@ -124,6 +127,7 @@ enum StoredValue {
     Int(i64),
     Float(u64),
     Str(String),
+    FixedChar(String),
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(String),
@@ -139,6 +143,7 @@ impl StoredValue {
             Self::Int(value) => Ok(Value::Int(value)),
             Self::Float(bits) => Ok(Value::Float(f64::from_bits(bits))),
             Self::Str(value) => Ok(Value::Str(value)),
+            Self::FixedChar(value) => Ok(Value::FixedChar(value)),
             Self::Bytes(value) => Ok(Value::Bytes(value)),
             Self::Temporal(value) => Ok(Value::Temporal(value)),
             Self::Decimal(value) => DecimalValue::parse(&value)

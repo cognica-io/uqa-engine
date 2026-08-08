@@ -260,6 +260,7 @@ pub(in crate::sql) fn filter_new_recursive_rows(
         let batch = batch.map_err(physical_exec_error)?;
         let mut rows = Vec::with_capacity(batch.rows.len().min(uqa_execution::DEFAULT_BATCH_SIZE));
         for row in batch.rows {
+            let row = batch.schema.view(&row).to_result_row();
             if seen
                 .insert_row(&row, columns)
                 .map_err(physical_exec_error)?

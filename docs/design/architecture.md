@@ -193,17 +193,21 @@ Ordinary, aggregation, fusion, and deep-fusion nodes produce `PostingList`; grap
 
 ## Relational physical execution
 
-Relational operators use pull-based batches, but the internal physical row carrier is still dynamic and row-oriented rather than a fully vectorized typed-column engine. This is an intentional current boundary, not a claim of DuckDB-style vectorization.
+Relational operators use pull-based batches and dynamic `Value` instances, so the execution model remains row-oriented rather than a fully vectorized typed-column engine. Rows are nevertheless positional rather than map-backed.
+
+`RowSchema` owns the immutable mapping from logical output identities and hidden `(qualifier, column)` aliases to flattened physical slots. `PhysicalRow` carries a small vector of `Arc`-backed value fragments: scans create a fragment once, selection and renaming remap schema slots, and joins concatenate fragment handles. A composite row therefore changes metadata and shares source values instead of rebuilding `BTreeMap<String, Value>` rows or cloning payloads.
 
 Filters can compile projected predicates once and evaluate positional values without rebuilding string-keyed row maps. Analytical aggregates use streaming accumulator state, low-cardinality adaptive grouping, compiled projected inputs, and compact partial-state spill instead of retaining and sorting every input value.
 
+Eligible single-consumer derived-table projections remain pull pipelines into their parent operator. Blocking, repeatable, volatile, and otherwise unsafe derived-table shapes retain the materialization path, while repeatable CTE consumers continue to use `SharedSpill`.
+
 The optimizer propagates ordering only through operations that preserve the relevant expression prefix. Primary-key document scans can therefore avoid redundant output sorts, while a projection that overwrites an ordered expression invalidates that ordering metadata.
 
-Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization use disk-backed structures after `work_mem` is exceeded. Hash joins migrate exact build keys to disk, retain RIGHT/FULL match state outside unbounded memory, and spill output through the same execution layer.
+Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization use disk-backed structures after `work_mem` is exceeded. Unique-key inner equijoins with direct column keys hash borrowed physical slots and retain only hash-to-build-row positions; every hash candidate is verified against the original slots. If the row store or direct index exceeds its budget, the join rebuilds the canonical encoded-key index and preserves the exact disk-spill path. General and outer hash joins retain that exact encoded path, RIGHT/FULL match state remains outside unbounded memory, and output spills through the same execution layer.
 
 `Engine::sql` returns a fully materialized `SQLResult`. `Engine::sql_cursor` and `Engine::sql_columnar` seal the result through `SharedSpill`, release the statement snapshot, and yield schema-ordered `ColumnarBatch` values; a uniquely owned in-memory cursor moves batches instead of cloning them, while shared CTE readers remain repeatable.
 
-Duplicate schema labels remain visible as distinct column slots at the columnar boundary, but the current map-backed physical row carrier cannot preserve two different values under the same label. Supporting that case throughout execution requires a future positional row contract.
+Duplicate schema labels remain distinct logical and physical slots throughout operator execution and at the columnar boundary. The map-backed `SQLResult` compatibility boundary still applies its established duplicate-key overwrite behavior because a `ResultRow` cannot expose two values under one string key.
 
 ## Join planning
 

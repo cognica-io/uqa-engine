@@ -5,16 +5,16 @@
 //
 
 use super::*;
-use uqa_execution::{Batch, ExecError, ExecResult, PhysicalOperator};
+use uqa_execution::{Batch, ExecError, ExecResult, PhysicalOperator, RowSchema};
 use uqa_planner::UnifiedPlan;
 
 struct CloseOperator {
-    schema: Vec<String>,
+    schema: RowSchema,
     close_error: Option<&'static str>,
 }
 
 impl PhysicalOperator for CloseOperator {
-    fn schema(&self) -> &[String] {
+    fn row_schema(&self) -> &RowSchema {
         &self.schema
     }
 
@@ -37,7 +37,7 @@ impl PhysicalOperator for CloseOperator {
 #[test]
 fn physical_failure_preserves_the_original_error_when_close_succeeds() {
     let mut operator = CloseOperator {
-        schema: Vec::new(),
+        schema: RowSchema::new(Vec::new()),
         close_error: None,
     };
     let original = SQLError::TypeMismatch("primary".into());
@@ -50,7 +50,7 @@ fn physical_failure_preserves_the_original_error_when_close_succeeds() {
 #[test]
 fn physical_failure_reports_both_execution_and_close_errors() {
     let mut operator = CloseOperator {
-        schema: Vec::new(),
+        schema: RowSchema::new(Vec::new()),
         close_error: Some("cleanup"),
     };
     let error = close_after_physical_failure(

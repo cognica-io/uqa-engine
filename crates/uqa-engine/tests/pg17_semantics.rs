@@ -66,6 +66,51 @@ fn in_list_three_valued() {
 }
 
 #[test]
+fn in_subquery_three_valued() {
+    let eng = engine();
+    eng.sql("CREATE TABLE in_values (v INTEGER)", &[]).unwrap();
+    eng.sql("INSERT INTO in_values VALUES (1), (NULL)", &[])
+        .unwrap();
+
+    assert_eq!(
+        scalar(&eng, "SELECT 3 IN (SELECT v FROM in_values)"),
+        Value::Null
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 3 NOT IN (SELECT v FROM in_values)"),
+        Value::Null
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 1 IN (SELECT v FROM in_values)"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT NULL IN (SELECT v FROM in_values)"),
+        Value::Null
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT NULL NOT IN (SELECT v FROM in_values)"),
+        Value::Null
+    );
+
+    assert_eq!(
+        scalar(&eng, "SELECT 3 IN (SELECT v FROM in_values WHERE false)"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT NULL IN (SELECT v FROM in_values WHERE false)"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT NULL NOT IN (SELECT v FROM in_values WHERE false)"
+        ),
+        Value::Bool(true)
+    );
+}
+
+#[test]
 fn kleene_and_or() {
     let eng = engine();
     assert_eq!(scalar(&eng, "SELECT NULL AND false"), Value::Bool(false));
@@ -232,7 +277,11 @@ fn char_and_varchar_casts_truncate() {
     let eng = engine();
     assert_eq!(
         scalar(&eng, "SELECT 'abc'::char(2)"),
-        Value::Str("ab".into())
+        Value::FixedChar("ab".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT 'a'::char(2)"),
+        Value::FixedChar("a ".into())
     );
     assert_eq!(
         scalar(&eng, "SELECT 'ab'::varchar(1)"),
@@ -241,6 +290,49 @@ fn char_and_varchar_casts_truncate() {
     assert_eq!(
         scalar(&eng, "SELECT 123::varchar(2)"),
         Value::Str("12".into())
+    );
+}
+
+#[test]
+fn fixed_character_columns_pad_output_and_ignore_trailing_spaces_in_comparisons() {
+    let eng = engine();
+    eng.sql("CREATE TABLE fixed_labels (code CHAR(4))", &[])
+        .unwrap();
+    eng.sql("INSERT INTO fixed_labels VALUES ('x')", &[])
+        .unwrap();
+
+    assert_eq!(
+        scalar(&eng, "SELECT code FROM fixed_labels"),
+        Value::FixedChar("x   ".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT code = 'x' FROM fixed_labels"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT code = 'x  ' FROM fixed_labels"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT code::text FROM fixed_labels"),
+        Value::Str("x".into())
+    );
+}
+
+#[test]
+fn numeric_division_selects_postgresql_result_scale() {
+    let eng = engine();
+    assert_eq!(
+        text(&eng, "SELECT 1::numeric / 2::numeric"),
+        "0.50000000000000000000"
+    );
+    assert_eq!(
+        text(&eng, "SELECT 37569624.64::numeric / 1478::numeric"),
+        "25419.231826792963"
+    );
+    assert_eq!(
+        text(&eng, "SELECT 75.18::numeric / 1478::numeric"),
+        "0.05086603518267929635"
     );
 }
 

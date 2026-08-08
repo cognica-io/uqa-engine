@@ -9,9 +9,9 @@
 use super::helpers::{
     all_schema_names, array_dimension_count, bool_value, catalog_name, catalog_ordinal,
     catalog_usize, column_constraint_rows, current_user_name, current_user_oid, default_expr_text,
-    index_columns, indexdef, int_value, list_int, pg_type_len, pg_type_oid, relation_oid,
-    routine_type_oid, row, schema_oid, split_index_name, split_schema_name, stable_oid, str_value,
-    table_columns_for,
+    index_columns, indexdef, int_value, list_int, pg_type_len, pg_type_modifier, pg_type_oid,
+    relation_oid, routine_type_oid, row, schema_oid, split_index_name, split_schema_name,
+    stable_oid, str_value, table_columns_for,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, ColumnType, Engine, ResultRow,
@@ -230,7 +230,7 @@ pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> R
         ("attnum", int_value(attnum)),
         ("attndims", int_value(array_dimension_count(&col.ty))),
         ("attcacheoff", int_value(-1)),
-        ("atttypmod", int_value(-1)),
+        ("atttypmod", int_value(pg_type_modifier(&col.ty))),
         (
             "attbyval",
             bool_value(matches!(

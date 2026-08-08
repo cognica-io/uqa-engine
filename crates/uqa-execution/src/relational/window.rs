@@ -349,8 +349,8 @@ fn emit_builtin_window_partition(
 }
 
 impl PhysicalOperator for Window<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -398,7 +398,8 @@ impl PhysicalOperator for Window<'_> {
         let execution = (|| -> ExecResult<()> {
             while let Some(batch) = sorted.next()? {
                 for row in batch.rows {
-                    let context = ScalarEvalContext::new(Some(&row), &self.params);
+                    let named_row = batch.schema.view(&row).to_result_row();
+                    let context = ScalarEvalContext::new(Some(&named_row), &self.params);
                     let key = self
                         .spec
                         .partition_by
@@ -420,7 +421,7 @@ impl PhysicalOperator for Window<'_> {
                         partition = crate::spill::IndexedSpill::new()?;
                     }
                     current_partition_key = Some(key);
-                    partition.push(&row)?;
+                    partition.push(&named_row)?;
                 }
             }
             if !partition.is_empty() {

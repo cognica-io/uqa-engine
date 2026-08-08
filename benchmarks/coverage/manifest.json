@@ -115,6 +115,10 @@
       "tokens": ["engine_text_top_k", "block_max_wand"]
     },
     {
+      "path": "crates/uqa-engine/benches/tpch.rs",
+      "tokens": ["bench_tpch_sf0001", "tpch_sf0001"]
+    },
+    {
       "path": "crates/uqa-engine/benches/tpch_style.rs",
       "tokens": ["tpch_style", "q1_100k", "q6_100k"]
     },

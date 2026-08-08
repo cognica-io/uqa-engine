@@ -113,6 +113,31 @@ pub(crate) fn convert_value_to_column_type(
             ))),
         },
         ColumnType::Text => Ok(Value::Str(value_to_text(&value))),
+        ColumnType::Character(length) => {
+            let length = usize::try_from(*length).map_err(|_| {
+                SQLError::TypeMismatch(format!(
+                    "character length {length} exceeds the platform addressable range"
+                ))
+            })?;
+            let text = value_to_text(&value);
+            let char_count = text.chars().count();
+            let significant = if char_count > length {
+                let retained = text.chars().take(length).collect::<String>();
+                let discarded = text.chars().skip(length).collect::<String>();
+                if !discarded.chars().all(|character| character == ' ') {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "value too long for type character({length})"
+                    )));
+                }
+                retained
+            } else {
+                text
+            };
+            let padding = length.saturating_sub(significant.chars().count());
+            let mut padded = significant;
+            padded.extend(std::iter::repeat_n(' ', padding));
+            Ok(Value::FixedChar(padded))
+        }
         ColumnType::Real => match value {
             Value::Float(_) => Ok(value),
             Value::Int(i) => Ok(Value::Float(i as f64)),
@@ -236,6 +261,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &'static str {
         ColumnType::Integer => "integer",
         ColumnType::Boolean => "boolean",
         ColumnType::Text => "text",
+        ColumnType::Character(_) => "character",
         ColumnType::Real => "real",
         ColumnType::Numeric { .. } => "numeric",
         ColumnType::Json => "json",
@@ -321,6 +347,7 @@ pub(in crate::sql) fn value_to_text(value: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
+        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
@@ -389,6 +416,7 @@ pub(in crate::sql) fn core_value_to_json(value: &Value) -> serde_json::Value {
             ),
         Value::Str(s) => serde_json::from_str::<serde_json::Value>(s)
             .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
+        Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(bytes) => serde_json::Value::String(String::from_utf8_lossy(bytes).into()),
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::List(items) => {

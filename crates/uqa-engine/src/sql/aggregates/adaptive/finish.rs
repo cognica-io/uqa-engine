@@ -6,8 +6,7 @@
 
 //! Finalization for in-memory and spilled adaptive aggregate state.
 
-use uqa_execution::{ExternalSort, PhysicalOperator, RowSchema, SortKey, SpillScan};
-use uqa_sql::ResultRow;
+use uqa_execution::{ExternalSort, PhysicalOperator, PhysicalRow, RowSchema, SortKey, SpillScan};
 
 use super::{
     AdaptiveAggregateSet, AggregateAccumulator, CteScope, Engine, QueryBlockPlan, SQLError,
@@ -41,19 +40,20 @@ impl AdaptiveAggregateSet {
         ctes: &CteScope,
     ) -> Result<SpillBuffer, SQLError> {
         if self.groups.is_empty() && self.statement.group_by.is_empty() {
-            self.ensure_group(engine, &[])?;
+            self.ensure_active_group(&[])?;
         }
         let mut output = SpillBuffer::new(self.spill_budget);
         let mut pending = Vec::with_capacity(uqa_execution::batch::DEFAULT_BATCH_SIZE);
-        for (key, state) in self.groups {
+        for entry in self.groups {
             if let Some(row) = super::super::output::finish_group(
                 engine,
                 &self.statement,
-                state.accumulators,
-                &key,
+                &self.output_plan,
+                entry.state.accumulators,
+                &entry.key,
+                output_schema.columns(),
                 params,
                 ctes,
-                self.relaxed,
             )? {
                 super::super::output::push_output_row(
                     &mut output,
@@ -80,7 +80,7 @@ impl AdaptiveAggregateSet {
         let group_count = self.statement.group_by.len();
         let partial_schema = super::super::partial_state::partial_schema(group_count);
         let scan: Box<dyn PhysicalOperator + '_> =
-            Box::new(SpillScan::new(partial_schema.columns.clone(), partials));
+            Box::new(SpillScan::new(partial_schema.columns().to_vec(), partials));
         let keys = (0..group_count)
             .map(|index| SortKey {
                 expr: ScalarExpr::Column(super::super::partial_state::partial_group_column(index)),
@@ -105,7 +105,7 @@ impl AdaptiveAggregateSet {
             {
                 for row in batch.rows {
                     let (key, accumulators) = super::super::partial_state::decode_partial_group(
-                        row,
+                        batch.schema.view(&row).to_result_row(),
                         &self.aggregate_targets,
                         self.accumulator_budget,
                         group_count,
@@ -114,7 +114,7 @@ impl AdaptiveAggregateSet {
                         finish_merged_group(
                             engine,
                             &self.statement,
-                            self.relaxed,
+                            &self.output_plan,
                             params,
                             ctes,
                             output_schema,
@@ -138,7 +138,7 @@ impl AdaptiveAggregateSet {
                 finish_merged_group(
                     engine,
                     &self.statement,
-                    self.relaxed,
+                    &self.output_plan,
                     params,
                     ctes,
                     output_schema,
@@ -166,23 +166,24 @@ impl AdaptiveAggregateSet {
 fn finish_merged_group(
     engine: &Engine,
     statement: &QueryBlockPlan,
-    relaxed: bool,
+    output_plan: &super::super::output::AggregateOutputPlan,
     params: &[SQLParam],
     ctes: &CteScope,
     output_schema: &RowSchema,
     output: &mut SpillBuffer,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
     key: Vec<Value>,
     accumulators: Vec<AggregateAccumulator>,
 ) -> Result<(), SQLError> {
     if let Some(row) = super::super::output::finish_group(
         engine,
         statement,
+        output_plan,
         accumulators,
         &key,
+        output_schema.columns(),
         params,
         ctes,
-        relaxed,
     )? {
         super::super::output::push_output_row(output, output_schema, pending, row)?;
     }

@@ -53,6 +53,7 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
             }
             serde_json::Value::String(s.clone())
         }
+        Value::FixedChar(s) => serde_json::Value::String(s.trim_end_matches(' ').to_string()),
         Value::Bytes(b) => serde_json::Value::String(format!("0x{}", hex_encode(b))),
         Value::Temporal(t) => serde_json::Value::String(t.to_sql_string()),
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),

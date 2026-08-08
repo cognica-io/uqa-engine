@@ -19,7 +19,7 @@ pub struct Limit<'a> {
 
 impl<'a> Limit<'a> {
     pub fn new(child: Box<dyn PhysicalOperator + 'a>, offset: u64, limit: Option<u64>) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
+        let schema = child.row_schema().clone();
         Self {
             child,
             offset,
@@ -32,8 +32,8 @@ impl<'a> Limit<'a> {
 }
 
 impl PhysicalOperator for Limit<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {
@@ -65,7 +65,7 @@ impl PhysicalOperator for Limit<'_> {
                         return if buf.is_empty() {
                             Ok(None)
                         } else {
-                            Ok(Some(Batch::new(self.schema.clone(), buf)))
+                            Ok(Some(Batch::from_physical_rows(self.schema.clone(), buf)))
                         };
                     }
                 }
@@ -73,7 +73,7 @@ impl PhysicalOperator for Limit<'_> {
                 self.emitted += 1;
             }
             if !buf.is_empty() {
-                return Ok(Some(Batch::new(self.schema.clone(), buf)));
+                return Ok(Some(Batch::from_physical_rows(self.schema.clone(), buf)));
             }
         }
     }

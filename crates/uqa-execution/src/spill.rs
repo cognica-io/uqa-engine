@@ -22,14 +22,15 @@ use std::sync::Arc;
 use tempfile::NamedTempFile;
 use uqa_sql::ResultRow;
 
-use crate::batch::{Batch, RowSchema};
+use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 
 mod format;
 
 use format::{
-    append_batches, decode_batch, decode_row, encoded_batch_size, encoded_single_row_batch_size,
-    open_spill_reader, read_bounded_spill_record, spill_error, ExactRow,
+    append_batches, decode_batch, decode_row, encoded_batch_size,
+    encoded_named_single_row_batch_size, encoded_single_row_batch_size, open_spill_reader,
+    read_bounded_spill_record, spill_error, ExactRow,
 };
 
 const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
@@ -154,9 +155,16 @@ impl SpillBuffer {
 
     pub(crate) fn encoded_single_row_size(
         schema: &RowSchema,
-        row: &ResultRow,
+        row: &PhysicalRow,
     ) -> ExecResult<usize> {
         encoded_single_row_batch_size(schema, row)
+    }
+
+    pub(crate) fn encoded_named_single_row_size(
+        schema: &RowSchema,
+        row: &ResultRow,
+    ) -> ExecResult<usize> {
+        encoded_named_single_row_batch_size(schema, row)
     }
 
     /// Total buffered rows, including rows already written to disk.
@@ -356,7 +364,11 @@ impl SpillBuffer {
     pub fn into_shared(mut self, schema: Vec<String>) -> ExecResult<SharedSpill> {
         let rows = self.rows;
         let storage = if self.spill_file.is_none() {
-            SharedSpillStorage::Memory(std::mem::take(&mut self.batches))
+            let batches = std::mem::take(&mut self.batches)
+                .into_iter()
+                .map(|batch| batch.into_canonical(&schema))
+                .collect::<ExecResult<Vec<_>>>()?;
+            SharedSpillStorage::Memory(batches)
         } else {
             self.spill_pending()?;
             SharedSpillStorage::Disk(
@@ -906,7 +918,7 @@ where
                 return Some(Ok(row));
             }
             match self.batches.next()? {
-                Ok(batch) => self.current = batch.rows.into_iter(),
+                Ok(batch) => self.current = batch.into_result_rows().into_iter(),
                 Err(error) => return Some(Err(error)),
             }
         }

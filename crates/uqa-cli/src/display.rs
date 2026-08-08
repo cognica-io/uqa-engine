@@ -101,6 +101,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Integer => "integer".into(),
         ColumnType::Boolean => "boolean".into(),
         ColumnType::Text => "text".into(),
+        ColumnType::Character(length) => format!("character({length})"),
         ColumnType::Real => "real".into(),
         ColumnType::Numeric { precision, scale } => match (precision, scale) {
             (Some(p), Some(s)) => format!("numeric({p},{s})"),

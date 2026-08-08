@@ -41,8 +41,12 @@ impl SharedSpillScan {
 }
 
 impl PhysicalOperator for SharedSpillScan {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        u64::try_from(self.source.rows()).ok()
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -73,8 +77,8 @@ impl SpillScan {
 }
 
 impl PhysicalOperator for SpillScan {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {
@@ -133,7 +137,7 @@ mod tests {
         }
         assert!(spill.has_spilled());
 
-        let mut scan = SpillScan::new(schema.columns, spill);
+        let mut scan = SpillScan::new(schema.columns().to_vec(), spill);
         let (_, rows) = run_to_rows(&mut scan).unwrap();
         assert_eq!(rows.len(), 300);
         for (expected, row) in rows.iter().enumerate() {
@@ -153,7 +157,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let shared = spill.into_shared(schema.columns).unwrap();
+        let shared = spill.into_shared(schema.columns().to_vec()).unwrap();
         let mut first = SharedSpillScan::new(shared.clone());
         let mut second = SharedSpillScan::new(shared);
         let (_, first_rows) = run_to_rows(&mut first).unwrap();
