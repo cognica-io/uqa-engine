@@ -8,8 +8,9 @@
 
 use super::{
     c_char, c_int, ffi, fill_random, fs, invalid_data, normalize_path, options_for_path, ptr,
-    AtomicOrdering, AtomicU64, CStr, CompressedSQLiteFile, Duration, File, FileHandle, OpenOptions,
-    Path, PathBuf, SystemTime, VfsFile, IO_METHODS, SQLITE_LOCK_NONE, UNIX_EPOCH,
+    sync_parent_directory, AtomicOrdering, AtomicU64, CStr, CompressedSQLiteFile, Duration, File,
+    FileHandle, OpenOptions, Path, PathBuf, SystemTime, VfsFile, IO_METHODS, SQLITE_LOCK_NONE,
+    UNIX_EPOCH,
 };
 
 pub(super) unsafe extern "C" fn vfs_open(
@@ -82,7 +83,7 @@ pub(super) unsafe extern "C" fn vfs_open(
 pub(super) unsafe extern "C" fn vfs_delete(
     _vfs: *mut ffi::sqlite3_vfs,
     name: *const c_char,
-    _sync_dir: c_int,
+    sync_dir: c_int,
 ) -> c_int {
     if name.is_null() {
         return ffi::SQLITE_OK;
@@ -101,11 +102,13 @@ pub(super) unsafe extern "C" fn vfs_delete(
     };
     let file_result = remove(&normalized);
     let lock_result = remove(&lock_path(&normalized));
-    if file_result.is_ok() && lock_result.is_ok() {
-        ffi::SQLITE_OK
-    } else {
-        ffi::SQLITE_IOERR_DELETE
+    if file_result.is_err() || lock_result.is_err() {
+        return ffi::SQLITE_IOERR_DELETE;
     }
+    if sync_dir != 0 && sync_parent_directory(&normalized).is_err() {
+        return ffi::SQLITE_IOERR_DIR_FSYNC;
+    }
+    ffi::SQLITE_OK
 }
 
 pub(super) unsafe extern "C" fn vfs_access(

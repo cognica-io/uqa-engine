@@ -7,6 +7,52 @@
 use super::*;
 
 #[test]
+fn vfs_delete_with_dir_sync_removes_real_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("delete-with-dir-sync.sqlite3");
+    std::fs::write(&path, b"content").unwrap();
+    let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+
+    // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
+    let result = unsafe { vfs_delete(ptr::null_mut(), name.as_ptr(), 1) };
+
+    assert_eq!(result, ffi::SQLITE_OK);
+    assert!(!path.exists());
+}
+
+#[test]
+fn vfs_delete_nonexistent_file_with_dir_sync_returns_ok() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing-with-dir-sync.sqlite3");
+    let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+
+    // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
+    let result = unsafe { vfs_delete(ptr::null_mut(), name.as_ptr(), 1) };
+
+    assert_eq!(result, ffi::SQLITE_OK);
+}
+
+#[test]
+fn parent_dir_sync_succeeds_for_real_temp_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("directory-entry");
+
+    sync_parent_directory(&path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn parent_dir_sync_surfaces_nonexistent_parent_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing-parent").join("directory-entry");
+
+    assert_eq!(
+        sync_parent_directory(&path).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[test]
 fn options_validate_rejects_bad_chunk_size() {
     assert!(SQLiteCompressionOptions {
         codec: SQLiteCompressionCodec::Zstd,
