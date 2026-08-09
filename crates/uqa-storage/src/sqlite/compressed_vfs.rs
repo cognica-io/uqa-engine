@@ -58,6 +58,7 @@ impl FileExt {
 mod codec;
 mod compaction;
 mod container;
+mod directory_sync;
 mod file;
 mod format;
 mod io_callbacks;
@@ -71,6 +72,7 @@ pub use registration::{register_database, register_database_with_anchor};
 
 use codec::{compress_chunk, decompress_chunk, keys_from_key};
 use container::{build_commit_entry, chunk_count_for};
+use directory_sync::sync_parent_directory;
 use format::{
     allocate_payload, build_entry, build_header, chunk_aad, chunk_payload_tag,
     commit_authentication_tag, fill_random, invalid_data, parse_entry, parse_header, usize_to_u64,

@@ -8,9 +8,9 @@
 
 use super::{
     build_commit_entry, build_entry, build_header, chunk_payload_tag, commit_authentication_tag,
-    fs, invalid_data, usize_to_u64, AuthenticatedChunkRecord, BTreeMap, ChunkEntry, ContainerFile,
-    File, Path, PathBuf, Write, AEAD_TAG_LEN, AUTH_TAG_LEN, ENTRY_SIZE, FLAG_ENCRYPTED,
-    HEADER_SIZE, MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES,
+    fs, invalid_data, sync_parent_directory, usize_to_u64, AuthenticatedChunkRecord, BTreeMap,
+    ChunkEntry, ContainerFile, File, Path, PathBuf, Write, AEAD_TAG_LEN, AUTH_TAG_LEN, ENTRY_SIZE,
+    FLAG_ENCRYPTED, HEADER_SIZE, MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES,
 };
 
 struct CompactedState {
@@ -31,6 +31,7 @@ impl ContainerFile {
         let tmp_path = self.compaction_path();
         let compacted = self.write_compacted_file(&tmp_path, next_generation)?;
         fs::rename(&tmp_path, &self.path)?;
+        sync_parent_directory(&self.path)?;
         self.generation = next_generation;
         self.state_tag = compacted.state_tag;
         self.append_offset = compacted.append_offset;
