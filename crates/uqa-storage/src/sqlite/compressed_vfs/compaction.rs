@@ -31,12 +31,15 @@ impl ContainerFile {
         let tmp_path = self.compaction_path();
         let compacted = self.write_compacted_file(&tmp_path, next_generation)?;
         fs::rename(&tmp_path, &self.path)?;
-        sync_parent_directory(&self.path)?;
+        // The rename has already replaced the container in the namespace, so
+        // adopt the compacted state before surfacing any directory-sync
+        // failure; every return path must leave this handle describing the
+        // file that is now on disk.
         self.generation = next_generation;
         self.state_tag = compacted.state_tag;
         self.append_offset = compacted.append_offset;
         self.chunks = compacted.chunks;
-        Ok(())
+        sync_parent_directory(&self.path)
     }
 
     fn needs_compaction(&self) -> std::io::Result<bool> {

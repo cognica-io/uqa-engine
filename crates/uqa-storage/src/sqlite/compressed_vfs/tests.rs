@@ -237,6 +237,49 @@ fn repeated_autocommit_updates_trigger_stale_record_compaction() {
     assert_eq!(out, 299_u16.to_le_bytes());
 }
 
+#[cfg(unix)]
+#[test]
+fn compaction_state_survives_parent_directory_sync_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sync-failure.uqac.sqlite3");
+    let compression = SQLiteCompressionOptions {
+        codec: SQLiteCompressionCodec::Zstd,
+        page_size: 512,
+        chunk_pages: 1,
+        level: 1,
+    };
+    let options = OpenOptionsEntry {
+        compression,
+        key: None,
+        trusted_anchor: None,
+    };
+
+    let mut container = ContainerFile::open(path.clone(), options.clone()).unwrap();
+    container
+        .write_at(0, &vec![b'a'; compression.chunk_size().unwrap()])
+        .unwrap();
+    container.flush().unwrap();
+    super::directory_sync::FAIL_NEXT_PARENT_SYNC.with(|flag| flag.set(true));
+    let mut injected_failures = 0;
+    for i in 0..300_u16 {
+        container.write_at(17, &i.to_le_bytes()).unwrap();
+        if let Err(error) = container.flush() {
+            assert_eq!(error.to_string(), "injected parent directory sync failure");
+            injected_failures += 1;
+        }
+    }
+    assert_eq!(injected_failures, 1);
+
+    let mut out = [0_u8; 2];
+    assert_eq!(container.read_at(17, &mut out).unwrap(), 2);
+    assert_eq!(out, 299_u16.to_le_bytes());
+    drop(container);
+
+    let mut reopened = ContainerFile::open(path, options).unwrap();
+    assert_eq!(reopened.read_at(17, &mut out).unwrap(), 2);
+    assert_eq!(out, 299_u16.to_le_bytes());
+}
+
 #[test]
 fn encrypted_compaction_reauthenticates_relocated_chunks() {
     let dir = tempfile::tempdir().unwrap();
