@@ -1,0 +1,57 @@
+name: Fuzz
+
+# Nightly fuzzing gives each target five minutes by default. Manual runs may
+# extend that bound to at most fifteen minutes without risking an unbounded job.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: Maximum fuzzing time per target in seconds
+        required: false
+        default: "300"
+        type: choice
+        options:
+          - "300"
+          - "600"
+          - "900"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - sql_compile
+          - cypher_parse
+          - posting_list_round_trip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Free Linux runner disk
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: false
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run ${{ matrix.target }} fuzzer
+        run: cargo fuzz run ${{ matrix.target }} --fuzz-dir fuzz -- -max_total_time=${{ inputs.max_total_time || 300 }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/**
+          if-no-files-found: ignore
