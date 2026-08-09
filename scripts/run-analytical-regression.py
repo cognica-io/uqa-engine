@@ -55,6 +55,16 @@ def workload_identity(path: pathlib.Path) -> dict[str, object]:
     return {key: manifest.get(key) for key in WORKLOAD_IDENTITY_KEYS}
 
 
+def build_target_path(
+    root: pathlib.Path, role: str, revision: str
+) -> pathlib.Path:
+    if role not in {"base", "head"}:
+        raise ValueError(f"unknown analytical build role: {role}")
+    if not revision:
+        raise ValueError("analytical build revision cannot be empty")
+    return root / role / revision
+
+
 def build_benchmark(worktree: pathlib.Path, target: pathlib.Path) -> pathlib.Path:
     environment = os.environ.copy()
     environment["CARGO_TARGET_DIR"] = str(target)
@@ -120,13 +130,20 @@ def main() -> int:
     parser.add_argument("base_revision")
     args = parser.parse_args()
     base_revision = output("git", "rev-parse", "--verify", f"{args.base_revision}^{{commit}}")
+    head_revision = output("git", "rev-parse", "--verify", "HEAD^{commit}")
     head_manifest_payload = json.loads(manifest_path(ROOT).read_text(encoding="utf-8"))
     pair_count = int(head_manifest_payload["regression_protocol"]["pairs"])
     if pair_count < 2 or pair_count % 2:
         raise RuntimeError("analytical regression requires an even pair count of at least two")
     criterion_parent = ROOT / "target" / "criterion" / "analytical-ab"
     report = ROOT / "target" / "benchmark-runs" / "analytical-comparison.json"
-    build_target = ROOT / "target" / "analytical-ab-build"
+    build_root = ROOT / "target" / "analytical-ab-build"
+    # Cargo target directories cannot be shared between detached worktrees
+    # whose path packages have the same names but incompatible internal APIs:
+    # fingerprint reuse can combine one revision's crate with the other's
+    # dependants. Keep both the role and exact revision in the target path.
+    base_build_target = build_target_path(build_root, "base", base_revision)
+    head_build_target = build_target_path(build_root, "head", head_revision)
 
     with tempfile.TemporaryDirectory(prefix="uqa-analytical-ab-") as temporary:
         temporary_path = pathlib.Path(temporary)
@@ -139,12 +156,12 @@ def main() -> int:
                 raise RuntimeError("base and head analytical workload identities differ")
 
             print("==> building base benchmark", flush=True)
-            base_built = build_benchmark(base_worktree, build_target)
+            base_built = build_benchmark(base_worktree, base_build_target)
             base_executable = temporary_path / "analytical-comparison-base"
             shutil.copy2(base_built, base_executable)
 
             print("==> building head benchmark", flush=True)
-            head_built = build_benchmark(ROOT, build_target)
+            head_built = build_benchmark(ROOT, head_build_target)
             head_executable = temporary_path / "analytical-comparison-head"
             shutil.copy2(head_built, head_executable)
 

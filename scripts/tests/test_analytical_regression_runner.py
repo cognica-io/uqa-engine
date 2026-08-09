@@ -28,6 +28,24 @@ def load_runner():
 
 
 class AnalyticalRegressionRunnerTest(unittest.TestCase):
+    def test_base_and_head_builds_use_revision_isolated_targets(self) -> None:
+        runner = load_runner()
+        root = pathlib.Path("/tmp/analytical-builds")
+        base_revision = "a" * 40
+        head_revision = "b" * 40
+
+        base = runner.build_target_path(root, "base", base_revision)
+        head = runner.build_target_path(root, "head", head_revision)
+
+        self.assertEqual(base, root / "base" / base_revision)
+        self.assertEqual(head, root / "head" / head_revision)
+        self.assertNotEqual(base, head)
+
+    def test_unknown_build_role_is_rejected(self) -> None:
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "unknown analytical build role"):
+            runner.build_target_path(pathlib.Path("/tmp"), "shared", "a" * 40)
+
     def test_measure_invokes_criterion_benchmark_mode(self) -> None:
         runner = load_runner()
         with tempfile.TemporaryDirectory() as temporary:
