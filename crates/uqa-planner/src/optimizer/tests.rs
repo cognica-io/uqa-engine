@@ -91,6 +91,25 @@ fn source_predicate_count(source: &SourcePlan) -> usize {
     }
 }
 
+fn source_hash_join_count(source: &SourcePlan) -> usize {
+    match source {
+        SourcePlan::Join {
+            left,
+            right,
+            strategy,
+            ..
+        } => {
+            usize::from(matches!(strategy, JoinExecutionStrategy::Hash))
+                + source_hash_join_count(left)
+                + source_hash_join_count(right)
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::Subquery { .. } => 0,
+    }
+}
+
 #[test]
 fn simplifies_boolean_expressions_after_lowering() {
     let UnifiedPlan::Query(query) = optimized("SELECT x FROM t WHERE true AND x = 1") else {
@@ -224,6 +243,112 @@ fn dpccp_reorders_inner_join_source_from_relation_statistics() {
     );
     assert!(on.is_some(), "a-b predicate must remain on the root join");
     assert_eq!(source_predicate_count(source), 2);
+}
+
+#[test]
+fn dpccp_accounts_for_single_relation_filter_selectivity() {
+    let plan = optimized_with_rows(
+        "SELECT a.id FROM a \
+         JOIN b ON a.id = b.a_id \
+         JOIN c ON b.id = c.b_id \
+         WHERE a.id = 1",
+        &[("a", 1_000_000), ("b", 10_000), ("c", 10)],
+    );
+    let source = query_block(&plan).from.as_ref().expect("join source");
+    let SourcePlan::Join { left, right, .. } = source else {
+        panic!("top-level join expected");
+    };
+
+    let filtered_pair = BTreeSet::from(["a".to_string(), "b".to_string()]);
+    assert!(
+        source_aliases(left) == filtered_pair || source_aliases(right) == filtered_pair,
+        "selective a predicate must make a-b the first join: {source:?}"
+    );
+    assert_eq!(source_predicate_count(source), 2);
+}
+
+#[test]
+fn dpccp_uses_where_equalities_for_comma_join_sources() {
+    let plan = optimized_with_rows(
+        "SELECT a.id FROM a, b, c \
+         WHERE a.id = b.a_id AND b.id = c.b_id AND c.id > 0",
+        &[("a", 1_000_000), ("b", 10_000), ("c", 10)],
+    );
+    let block = query_block(&plan);
+    let source = block.from.as_ref().expect("join source");
+    let SourcePlan::Join { left, right, .. } = source else {
+        panic!("top-level join expected");
+    };
+
+    let left_aliases = source_aliases(left);
+    let right_aliases = source_aliases(right);
+    let small_pair = BTreeSet::from(["b".to_string(), "c".to_string()]);
+    assert!(
+        left_aliases == small_pair || right_aliases == small_pair,
+        "WHERE equalities must drive the comma-join order: {source:?}"
+    );
+    assert_eq!(source_predicate_count(source), 2);
+    assert_eq!(
+        source_hash_join_count(source),
+        2,
+        "every WHERE equality edge must become an executable hash join"
+    );
+    assert!(block.r#where.is_some(), "the semantic WHERE guard remains");
+}
+
+#[test]
+fn dpccp_resolves_unique_unqualified_where_join_columns() {
+    let mut statements = compile(
+        "SELECT a_id FROM a, b, c \
+         WHERE a_id = b_a_id AND b_id = c_b_id",
+    )
+    .expect("SQL compiles");
+    let plan = UnifiedPlan::lower(statements.remove(0));
+    let plan = optimize_with_statistics(plan, &OptimizerConfig::default(), &|table: &str| {
+        let (rows, columns): (u64, &[&str]) = match table {
+            "a" => (1_000_000, &["a_id"]),
+            "b" => (10_000, &["b_id", "b_a_id"]),
+            "c" => (10, &["c_id", "c_b_id"]),
+            _ => return None,
+        };
+        let mut stats = crate::RelationStats::new(rows);
+        for column in columns {
+            stats = stats.with_column(
+                *column,
+                crate::ColumnStats {
+                    distinct_count: rows,
+                    row_count: rows,
+                    ..crate::ColumnStats::default()
+                },
+            );
+        }
+        Some(stats)
+    })
+    .expect("optimizer succeeds");
+    let source = query_block(&plan).from.as_ref().expect("join source");
+
+    assert_eq!(source_predicate_count(source), 2);
+    assert_eq!(source_hash_join_count(source), 2);
+    let SourcePlan::Join { left, right, .. } = source else {
+        panic!("top-level join expected");
+    };
+    let small_pair = BTreeSet::from(["b".to_string(), "c".to_string()]);
+    assert!(source_aliases(left) == small_pair || source_aliases(right) == small_pair);
+}
+
+#[test]
+fn dpccp_uses_join_equality_implied_by_every_or_branch() {
+    let plan = optimized_with_rows(
+        "SELECT a.id FROM a, b \
+         WHERE (a.id = b.a_id AND a.id = 1) \
+            OR (a.id = b.a_id AND a.id = 2)",
+        &[("a", 1_000_000), ("b", 10_000)],
+    );
+    let source = query_block(&plan).from.as_ref().expect("join source");
+
+    assert_eq!(source_hash_join_count(source), 1);
+    assert_eq!(source_predicate_count(source), 1);
+    assert!(query_block(&plan).r#where.is_some());
 }
 
 #[test]

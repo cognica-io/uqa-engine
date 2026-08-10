@@ -60,6 +60,34 @@ fn information_schema_columns_lists_each_column() {
 }
 
 #[test]
+fn fixed_character_catalog_metadata_preserves_declared_length() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE labels (code CHAR(4))", &[]).unwrap();
+
+    let info = eng
+        .sql(
+            "SELECT data_type, character_maximum_length, character_octet_length, udt_name \
+             FROM information_schema.columns \
+             WHERE table_name = 'labels' AND column_name = 'code'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(info.rows[0]["data_type"], Value::Str("character".into()));
+    assert_eq!(info.rows[0]["character_maximum_length"], Value::Int(4));
+    assert_eq!(info.rows[0]["character_octet_length"], Value::Int(16));
+    assert_eq!(info.rows[0]["udt_name"], Value::Str("bpchar".into()));
+
+    let attribute = eng
+        .sql(
+            "SELECT atttypid, atttypmod FROM pg_catalog.pg_attribute WHERE attname = 'code'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(attribute.rows[0]["atttypid"], Value::Int(1042));
+    assert_eq!(attribute.rows[0]["atttypmod"], Value::Int(8));
+}
+
+#[test]
 fn pg_tables_lists_user_tables() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE accounts (id INTEGER PRIMARY KEY)", &[])

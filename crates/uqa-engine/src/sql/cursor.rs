@@ -76,7 +76,7 @@ impl Iterator for SQLCursor {
             if !batch.is_empty() {
                 return Some(Ok(ColumnarBatch::from_rows(
                     &self.summary.columns,
-                    batch.rows,
+                    batch.into_result_rows(),
                 )));
             }
         }

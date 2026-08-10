@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_execution::{ScalarExpr, ScalarFrameBound};
-use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
+use uqa_planner::{ComputePlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::SQLError;
 
 use super::{projection_columns, Engine};
@@ -20,10 +20,154 @@ struct RelationColumns {
     complete: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct QueryScope {
     qualifiers: BTreeSet<String>,
     columns: RelationColumns,
+}
+
+pub(super) struct DecorrelatedExistsPlan {
+    pub(super) inner: QueryPlan,
+    pub(super) outer_keys: Vec<ScalarExpr>,
+}
+
+/// Turn a simple correlated equality EXISTS into an uncorrelated key query.
+///
+/// The caller materializes the returned inner key rows once and probes them
+/// with `outer_keys`, which is the physical equivalent of a hash semi-join.
+pub(super) fn decorrelate_exists(
+    engine: &Engine,
+    plan: &QueryPlan,
+) -> Result<Option<DecorrelatedExistsPlan>, SQLError> {
+    if !plan.ctes.is_empty() {
+        return Ok(None);
+    }
+    let RelationalPlan::QueryBlock(block) = &plan.root else {
+        return Ok(None);
+    };
+    let Some(source) = block.from.as_ref() else {
+        return Ok(None);
+    };
+    if !matches!(block.compute, ComputePlan::Project)
+        || !block.group_by.is_empty()
+        || !block.grouping_sets.is_empty()
+        || block.having.is_some()
+        || block.limit.is_some()
+        || block.offset.is_some()
+        || block.distinct
+        || !block.distinct_on.is_empty()
+        || !block.subqueries.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let scope = source_scope(engine, source, &BTreeMap::new())?;
+    let mut source_scopes = vec![scope.clone()];
+    if source_has_external_reference(engine, source, &mut source_scopes)? {
+        return Ok(None);
+    }
+    let Some(predicate) = block.r#where.as_ref() else {
+        return Ok(None);
+    };
+    let conjuncts = match predicate {
+        ScalarExpr::And(items) => items.as_slice(),
+        expression => std::slice::from_ref(expression),
+    };
+    let mut inner_keys = Vec::new();
+    let mut outer_keys = Vec::new();
+    let mut residual = Vec::new();
+    for conjunct in conjuncts {
+        if let ScalarExpr::Binary {
+            op: uqa_sql::ast::BinaryOp::Equal,
+            lhs,
+            rhs,
+        } = conjunct
+        {
+            let lhs_scope = correlation_column_scope(lhs, &scope);
+            let rhs_scope = correlation_column_scope(rhs, &scope);
+            match (lhs_scope, rhs_scope) {
+                (Some(ColumnScope::Inner), Some(ColumnScope::Outer)) => {
+                    inner_keys.push((**lhs).clone());
+                    outer_keys.push((**rhs).clone());
+                    continue;
+                }
+                (Some(ColumnScope::Outer), Some(ColumnScope::Inner)) => {
+                    inner_keys.push((**rhs).clone());
+                    outer_keys.push((**lhs).clone());
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if expression_has_external_reference(conjunct, std::slice::from_ref(&scope)) {
+            return Ok(None);
+        }
+        residual.push(conjunct.clone());
+    }
+    if inner_keys.is_empty() {
+        return Ok(None);
+    }
+
+    let output_columns: Vec<String> = (0..inner_keys.len())
+        .map(|index| format!("__uqa_exists_key_{index}"))
+        .collect();
+    let mut inner = plan.clone();
+    let RelationalPlan::QueryBlock(inner_block) = &mut inner.root else {
+        unreachable!("query-block shape checked above");
+    };
+    inner_block.projections = inner_keys
+        .into_iter()
+        .zip(&output_columns)
+        .map(|(expr, alias)| ProjectionPlan {
+            expr,
+            alias: Some(alias.clone()),
+        })
+        .collect();
+    inner_block.r#where = match residual.len() {
+        0 => None,
+        1 => residual.pop(),
+        _ => Some(ScalarExpr::And(residual)),
+    };
+    inner_block.order_by.clear();
+    Ok(Some(DecorrelatedExistsPlan { inner, outer_keys }))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnScope {
+    Inner,
+    Outer,
+}
+
+fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Option<ColumnScope> {
+    match expression {
+        ScalarExpr::Column(column) => {
+            if scope
+                .columns
+                .names
+                .iter()
+                .any(|local| local.eq_ignore_ascii_case(column))
+            {
+                Some(ColumnScope::Inner)
+            } else if scope.columns.complete {
+                Some(ColumnScope::Outer)
+            } else {
+                None
+            }
+        }
+        ScalarExpr::QualifiedColumn { qualifier, .. } => {
+            if scope
+                .qualifiers
+                .iter()
+                .any(|local| local.eq_ignore_ascii_case(qualifier))
+            {
+                Some(ColumnScope::Inner)
+            } else {
+                Some(ColumnScope::Outer)
+            }
+        }
+        ScalarExpr::Cast { expr, .. } => correlation_column_scope(expr, scope),
+        _ => None,
+    }
 }
 
 pub(super) fn query_depends_on_outer_row(

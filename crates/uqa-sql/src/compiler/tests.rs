@@ -106,6 +106,14 @@ fn create_table_preserves_boolean_column_type() {
 }
 
 #[test]
+fn create_table_preserves_fixed_character_length() {
+    let Statement::CreateTable(table) = first("CREATE TABLE labels (code CHAR(7))") else {
+        panic!("not CREATE TABLE");
+    };
+    assert_eq!(table.columns[0].ty, ColumnType::Character(7));
+}
+
+#[test]
 fn create_table_preserves_array_element_types_and_dimensions() {
     let Statement::CreateTable(table) =
         first("CREATE TABLE arrays (tags TEXT[], matrix INTEGER[][])")

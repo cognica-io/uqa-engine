@@ -123,6 +123,7 @@ pub(super) fn infer_arrow_type(column: &str, result: &SQLResult) -> DataType {
             Value::Float(_) => DataType::Float64,
             Value::Decimal(_)
             | Value::Str(_)
+            | Value::FixedChar(_)
             | Value::Bytes(_)
             | Value::Temporal(_)
             | Value::List(_)
@@ -252,7 +253,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Int(_) => "integer",
         Value::Float(_) => "float",
         Value::Decimal(_) => "decimal",
-        Value::Str(_) => "string",
+        Value::Str(_) | Value::FixedChar(_) => "string",
         Value::Bytes(_) => "bytes",
         Value::Temporal(_) => "temporal",
         Value::List(_) => "list",
@@ -267,7 +268,7 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Int(v) => Some(v.to_string()),
         Value::Float(v) => Some(v.to_string()),
         Value::Decimal(v) => Some(v.to_sql_string()),
-        Value::Str(v) => Some(v.clone()),
+        Value::Str(v) | Value::FixedChar(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
         Value::List(v) => Some(format!("{v:?}")),

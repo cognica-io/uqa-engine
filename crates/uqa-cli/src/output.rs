@@ -129,7 +129,7 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
         Some(Value::Int(n)) => n.to_string(),
         Some(Value::Float(f)) => format!("{f}"),
         Some(Value::Decimal(d)) => d.to_sql_string(),
-        Some(Value::Str(s)) => s.clone(),
+        Some(Value::Str(s) | Value::FixedChar(s)) => s.clone(),
         // PostgreSQL bytea hex output form.
         Some(Value::Bytes(b)) => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -199,7 +199,7 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Int(n) => n.to_string(),
         Value::Float(f) => format!("{f}"),
         Value::Decimal(d) => d.to_sql_string(),
-        Value::Str(s) => serde_json::Value::String(s.clone()).to_string(),
+        Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
             serde_json::Value::String(value_to_display(Some(v))).to_string()
         }

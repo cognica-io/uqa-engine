@@ -82,6 +82,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => {
             x.parse_same_kind(y).is_some_and(|parsed| parsed == *x)
         }
+        (Value::FixedChar(x) | Value::Str(x), Value::FixedChar(y))
+        | (Value::FixedChar(x), Value::Str(y)) => {
+            x.trim_end_matches(' ') == y.trim_end_matches(' ')
+        }
         _ => a == b,
     }
 }
@@ -95,6 +99,10 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Str(x), Value::Temporal(y)) => y
             .parse_same_kind(x)
             .map_or_else(|| a.cmp(b), |parsed| parsed.cmp(y)),
+        (Value::FixedChar(x) | Value::Str(x), Value::FixedChar(y))
+        | (Value::FixedChar(x), Value::Str(y)) => {
+            x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))
+        }
         _ => a.cmp(b),
     }
 }
@@ -149,5 +157,13 @@ mod tests {
         assert!(!Predicate::IsNull.evaluate(Some(&iv(0))));
         assert!(!Predicate::IsNotNull.evaluate(None));
         assert!(Predicate::IsNotNull.evaluate(Some(&iv(0))));
+    }
+
+    #[test]
+    fn fixed_character_predicates_ignore_blank_padding() {
+        let fixed = Value::FixedChar("x   ".into());
+        assert!(Predicate::Equals(Value::Str("x".into())).evaluate(Some(&fixed)));
+        assert!(Predicate::Equals(Value::Str("x  ".into())).evaluate(Some(&fixed)));
+        assert!(Predicate::LessThan(Value::Str("y".into())).evaluate(Some(&fixed)));
     }
 }

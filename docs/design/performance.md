@@ -1,6 +1,34 @@
 # Performance baseline
 
-This document records UQA-RS benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. All measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`).
+This document records UQA-RS benchmark baselines measured on developer hardware. The commands and deterministic inputs are reproducible, but the absolute numbers are machine-specific and have not been independently reproduced. Unless a section explicitly compares another engine, the measurements are internal regression baselines rather than evidence of competitive OLAP performance. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner.
+
+## PostgreSQL 17 TPC-H-derived compatibility pass (2026-08-09)
+
+The checked-in [`benchmarks/tpch`](../../benchmarks/tpch/README.md) workload contains all 22 default TPC-H-derived queries and deterministic `dbgen` data at scale factor `0.001`. It is an exact SQL compatibility and local latency fixture, not a compliant or audited TPC-H result. `cargo test -p uqa-engine --test sql_tpch` verifies columns, ordered rows, NULLs, text bytes, and type-aware canonical numeric values against PostgreSQL 17.10 before timing is considered.
+
+The current UQA snapshot was built with `cargo build --release -p uqa-engine --example tpch_runner --locked` on an Apple M1 Ultra arm64 host with Rust 1.90.0. UQA values are medians of 201 executions after an untimed validation execution; PostgreSQL values are medians of five executions in the dedicated PostgreSQL 17.10 arm64 container on the same host. The runs were not interleaved, so their ratios are local directional evidence rather than a base/head regression estimate.
+
+| Metric | Initial UQA release snapshot | Current UQA | PostgreSQL 17 |
+| --- | ---: | ---: | ---: |
+| Exact query results | 22 / 22 | 22 / 22 | Reference |
+| Queries at or below PostgreSQL median | 4 / 22 | 14 / 22 | 22 / 22 |
+| Sum of medians excluding Q20 | 45.917 ms | 14.184 ms | 16.626 ms |
+| Q09 median | 4.059 ms | 1.774 ms | 1.432 ms |
+| Q18 median | 4.708 ms | 1.227 ms | 1.340 ms |
+
+The 69.1% reduction in the Q20-excluded UQA median sum records the optimization trajectory, not a statistically paired speedup claim. Q20 is excluded because PostgreSQL's 396.945 ms plan is pathological at this tiny scale; summing per-query medians is a compact status indicator rather than a throughput metric. The full 22-row table, query runner options, fixture provenance, and live differential command are in the [TPC-H benchmark README](../../benchmarks/tpch/README.md).
+
+Sampling and exact regression tests drove the following execution changes:
+
+1. `RowSchema` now maps logical identities and hidden aliases to physical slots, while `PhysicalRow` composes shared `Arc`-backed value fragments. Projection and join shape changes no longer rebuild string-keyed maps or clone every value.
+2. Memory-table scans share stored positional values, compile supported predicates and aggregate inputs once, push independently supported `AND` conjuncts into projection, and leave only unsupported subquery residuals for scalar evaluation.
+3. Aggregation hashes borrowed canonical keys, copies only new groups into an arena, reuses accumulator templates, keeps integer state exact, and promotes decimal SUM state lazily.
+4. Immutable correlated `EXISTS` shapes decorrelate into collision-safe canonical hash key sets. Direct outer columns probe borrowed values, and safe key collection bypasses projected-row materialization.
+5. Eligible single-consumer derived-table projections remain pull pipelines instead of serializing through `SharedSpill`; blocking and repeatable shapes retain the spill boundary.
+6. Unique-key inner equijoins with direct column keys hash borrowed source slots, retain only hash-to-row positions, and resolve collisions against the original rows. Budget exhaustion rebuilds the exact encoded spill-capable index.
+7. Planner literal folding and once-per-query expression compilation remove repeated constant arithmetic, pattern construction, aggregate output evaluation, and HAVING evaluation from row loops.
+
+The remaining local gaps are Q02, Q07, Q09, Q13, Q16, Q19, Q21, and Q22. Q22 sampling attributes its largest remaining share to building and probing the correlated `NOT EXISTS` orders key set and to residual scalar evaluation; documenting that gap prevents the aggregate result from obscuring unfinished work.
 
 ## External-engine analytical comparison (2026-08-03)
 

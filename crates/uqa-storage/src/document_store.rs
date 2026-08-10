@@ -20,6 +20,77 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
 
+const MISSING_SHARED_SLOT: usize = usize::MAX;
+static SHARED_NULL_VALUE: Value = Value::Null;
+
+/// A positional projection that shares an in-memory document's stored values.
+///
+/// Persistent backends still decode owned rows through the ordinary bulk
+/// methods. The memory backend exposes this optional representation so a
+/// physical scan can carry storage-owned values through joins without
+/// cloning them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SharedDocumentRow {
+    values: Arc<Vec<Value>>,
+    projection: Arc<[usize]>,
+}
+
+impl SharedDocumentRow {
+    pub(crate) fn new(values: Arc<Vec<Value>>, projection: Arc<[usize]>) -> Self {
+        debug_assert!(projection
+            .iter()
+            .all(|slot| *slot == MISSING_SHARED_SLOT || *slot < values.len()));
+        Self { values, projection }
+    }
+
+    /// Populate a reusable borrowed projection for predicate evaluation.
+    pub fn project<'a>(&'a self, output: &mut Vec<&'a Value>) {
+        output.clear();
+        output.extend(self.projection.iter().map(|slot| {
+            if *slot == MISSING_SHARED_SLOT {
+                &SHARED_NULL_VALUE
+            } else {
+                &self.values[*slot]
+            }
+        }));
+    }
+
+    /// Borrow the projection through an inline reference array. Relational
+    /// tables normally have far fewer than 32 requested fields, so predicate
+    /// evaluation needs no scratch allocation.
+    pub fn with_projected<R>(&self, visitor: impl FnOnce(&[&Value]) -> R) -> R {
+        const INLINE_FIELDS: usize = 32;
+        if self.projection.len() <= INLINE_FIELDS {
+            let mut projected = [&SHARED_NULL_VALUE; INLINE_FIELDS];
+            for (output, slot) in projected.iter_mut().zip(self.projection.iter()) {
+                if *slot != MISSING_SHARED_SLOT {
+                    *output = &self.values[*slot];
+                }
+            }
+            visitor(&projected[..self.projection.len()])
+        } else {
+            let projected = self
+                .projection
+                .iter()
+                .map(|slot| {
+                    if *slot == MISSING_SHARED_SLOT {
+                        &SHARED_NULL_VALUE
+                    } else {
+                        &self.values[*slot]
+                    }
+                })
+                .collect::<Vec<_>>();
+            visitor(&projected)
+        }
+    }
+
+    /// Transfer the shared vector and its fragment-local projection into a
+    /// physical row without cloning either allocation.
+    pub fn into_parts(self) -> (Arc<Vec<Value>>, Arc<[usize]>) {
+        (self.values, self.projection)
+    }
+}
+
 /// Mutating methods are fallible: persistent backends surface their
 /// write failures so callers (engine DML, upserts, referential
 /// rewrites) can abort the enclosing transaction instead of silently
@@ -196,6 +267,18 @@ pub trait DocumentStore: Send + Sync {
         Ok(())
     }
 
+    /// Return rows aligned with `doc_ids` as shared positional projections
+    /// when the backend owns stable decoded value vectors. `None` means the
+    /// backend does not support zero-copy projection; entries inside the
+    /// returned vector are `None` only for missing document ids.
+    fn get_shared_fields(
+        &self,
+        _doc_ids: &[DocId],
+        _fields: &[&str],
+    ) -> StorageBackendResult<Option<Vec<Option<SharedDocumentRow>>>> {
+        Ok(None)
+    }
+
     /// Bulk variant of [`DocumentStore::get_field`]. The default
     /// implementation walks each id one at a time; persistent backends
     /// should override to run a single batched query.
@@ -289,6 +372,18 @@ pub trait DocumentStore: Send + Sync {
             .filter(|doc_id| after.is_none_or(|after| *doc_id > after))
             .take(limit)
             .collect())
+    }
+
+    /// Return the next bounded id range and its shared positional projections
+    /// in one storage traversal when stable decoded rows are available.
+    /// `None` lets persistent backends use the ordinary id + projection path.
+    fn next_shared_fields(
+        &self,
+        _after: Option<DocId>,
+        _limit: usize,
+        _fields: &[&str],
+    ) -> StorageBackendResult<Option<Vec<(DocId, SharedDocumentRow)>>> {
+        Ok(None)
     }
 
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {

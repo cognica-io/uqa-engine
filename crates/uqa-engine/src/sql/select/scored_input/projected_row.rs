@@ -75,6 +75,24 @@ impl<'schema, 'row> ProjectedDocumentRow<'schema, 'row> {
                 .and_then(|index| self.values.get(index).copied()),
         }
     }
+
+    pub(super) fn into_values(self) -> Vec<Value> {
+        self.slots
+            .iter()
+            .map(|slot| match slot {
+                ProjectedValueSlot::Field(index) => self
+                    .values
+                    .get(*index)
+                    .map_or(Value::Null, |value| (*value).clone()),
+                ProjectedValueSlot::DocId => self.doc_id.clone().unwrap_or(Value::Null),
+                ProjectedValueSlot::Score => self.score.clone().unwrap_or(Value::Null),
+                ProjectedValueSlot::ScoreProvenance => {
+                    self.score_provenance.clone().unwrap_or(Value::Null)
+                }
+                ProjectedValueSlot::Missing => Value::Null,
+            })
+            .collect()
+    }
 }
 
 impl RowLookup for ProjectedDocumentRow<'_, '_> {

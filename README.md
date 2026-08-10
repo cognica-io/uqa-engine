@@ -182,6 +182,30 @@ Run the test suite:
 cargo test --workspace --locked
 ```
 
+Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
+
+```sh
+cargo test -p uqa-engine --test engine_queries sql_joins::
+cargo test -p uqa-sql --test integration parser_fuzz::
+```
+
+## PostgreSQL 17 compatibility
+
+The repository includes a deterministic TPC-H-derived scale-factor `0.001` fixture with all 22 default queries. The self-contained correctness gate compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 17.10 results:
+
+```sh
+cargo test -p uqa-engine --test sql_tpch
+```
+
+Release-mode timing uses a machine-readable runner rather than test-profile execution:
+
+```sh
+cargo build --release -p uqa-engine --example tpch_runner --locked
+target/release/examples/tpch_runner --iterations 201
+```
+
+In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](docs/design/performance.md).
+
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation

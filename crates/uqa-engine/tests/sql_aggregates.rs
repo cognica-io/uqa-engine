@@ -188,35 +188,38 @@ fn scalar_functions_inside_aggregates_use_the_materialized_fallback() {
 }
 
 #[test]
-fn projected_group_cache_falls_back_for_high_cardinality_keys() {
+fn projected_group_hash_reuses_high_cardinality_composite_keys() {
     let eng = engine();
     eng.sql(
-        "CREATE TABLE group_cardinality (id INTEGER PRIMARY KEY, amount INTEGER)",
+        "CREATE TABLE group_cardinality (\
+            id INTEGER PRIMARY KEY, group_id INTEGER, bucket INTEGER, amount INTEGER\
+        )",
         &[],
     )
     .unwrap();
-    let values = (0..40)
-        .map(|id| format!("({id}, {})", id * 2))
+    let values = (0..512)
+        .map(|id| format!("({id}, {}, {}, 1)", id % 128, (id / 128) % 2))
         .collect::<Vec<_>>()
         .join(", ");
     eng.sql(
-        &format!("INSERT INTO group_cardinality (id, amount) VALUES {values}"),
+        &format!("INSERT INTO group_cardinality (id, group_id, bucket, amount) VALUES {values}"),
         &[],
     )
     .unwrap();
 
     let r = eng
         .sql(
-            "SELECT id, SUM(amount) AS total, COUNT(*) AS cnt \
-             FROM group_cardinality GROUP BY id ORDER BY id",
+            "SELECT group_id, bucket, SUM(amount) AS total, COUNT(*) AS cnt \
+             FROM group_cardinality GROUP BY group_id, bucket ORDER BY group_id, bucket",
             &[],
         )
         .unwrap();
 
-    assert_eq!(r.rows.len(), 40);
-    assert_eq!(int_col(&r.rows[39], "id"), Some(39));
-    assert_eq!(int_col(&r.rows[39], "total"), Some(78));
-    assert_eq!(int_col(&r.rows[39], "cnt"), Some(1));
+    assert_eq!(r.rows.len(), 256);
+    assert_eq!(int_col(&r.rows[255], "group_id"), Some(127));
+    assert_eq!(int_col(&r.rows[255], "bucket"), Some(1));
+    assert_eq!(int_col(&r.rows[255], "total"), Some(2));
+    assert_eq!(int_col(&r.rows[255], "cnt"), Some(2));
 }
 
 #[test]
@@ -330,6 +333,23 @@ fn string_agg_basic() {
     assert!(names.contains("Alice"));
     assert!(names.contains("Bob"));
     assert!(names.contains(", "));
+}
+
+#[test]
+fn string_agg_preserves_text_spaces_but_discards_fixed_character_padding() {
+    let eng = engine();
+    eng.sql("CREATE TABLE labels (plain TEXT, fixed CHAR(3))", &[])
+        .unwrap();
+    eng.sql("INSERT INTO labels VALUES ('x ', 'x'), ('y', 'y')", &[])
+        .unwrap();
+    let result = eng
+        .sql(
+            "SELECT STRING_AGG(plain, ',') AS plain, STRING_AGG(fixed, ',') AS fixed FROM labels",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["plain"], Value::Str("x ,y".into()));
+    assert_eq!(result.rows[0]["fixed"], Value::Str("x,y".into()));
 }
 
 #[test]
@@ -970,6 +990,31 @@ fn having_count_equals_grouped_column() {
     // Group 'a' has count 2 == need 2; group 'b' has count 1 != need 5.
     assert_eq!(r.rows.len(), 1);
     assert_eq!(str_col(&r.rows[0], "cat"), Some("a"));
+}
+
+#[test]
+fn having_can_use_an_aggregate_not_projected_by_select() {
+    let eng = engine();
+    eng.sql("CREATE TABLE hidden_having (cat TEXT, amount INTEGER)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO hidden_having (cat, amount) VALUES \
+         ('a', 10), ('a', 20), ('b', 5)",
+        &[],
+    )
+    .unwrap();
+
+    let result = eng
+        .sql(
+            "SELECT cat FROM hidden_having GROUP BY cat \
+             HAVING SUM(amount) > 20 ORDER BY cat",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.columns, vec!["cat"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(str_col(&result.rows[0], "cat"), Some("a"));
 }
 
 #[path = "sql_aggregates/numeric_statistics.rs"]

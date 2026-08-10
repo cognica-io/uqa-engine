@@ -240,6 +240,60 @@ impl ScalarExpr {
     }
 
     #[must_use]
+    pub fn contains_subquery(&self) -> bool {
+        match self {
+            Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. } => true,
+            Self::Func {
+                args,
+                order_by,
+                filter,
+                ..
+            } => {
+                args.iter().any(Self::contains_subquery)
+                    || order_by.iter().any(|order| order.expr.contains_subquery())
+                    || filter.as_deref().is_some_and(Self::contains_subquery)
+            }
+            Self::Array(items) | Self::And(items) | Self::Or(items) => {
+                items.iter().any(Self::contains_subquery)
+            }
+            Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
+            Self::Not(expr) | Self::IsNull { expr, .. } | Self::Cast { expr, .. } => {
+                expr.contains_subquery()
+            }
+            Self::Between { expr, low, high } => {
+                expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
+            }
+            Self::InList { expr, list, .. } => {
+                expr.contains_subquery() || list.iter().any(Self::contains_subquery)
+            }
+            Self::WindowCall { args, spec, .. } => {
+                args.iter().any(Self::contains_subquery)
+                    || spec.partition_by.iter().any(Self::contains_subquery)
+                    || spec
+                        .order_by
+                        .iter()
+                        .any(|order| order.expr.contains_subquery())
+            }
+            Self::Case {
+                base,
+                when,
+                else_branch,
+            } => {
+                base.as_deref().is_some_and(Self::contains_subquery)
+                    || when.iter().any(|(condition, result)| {
+                        condition.contains_subquery() || result.contains_subquery()
+                    })
+                    || else_branch.as_deref().is_some_and(Self::contains_subquery)
+            }
+            Self::Star
+            | Self::Column(_)
+            | Self::QualifiedColumn { .. }
+            | Self::Literal(_)
+            | Self::Param(_) => false,
+        }
+    }
+
+    #[must_use]
     pub fn contains_aggregate(&self, is_aggregate: &dyn Fn(&str) -> bool) -> bool {
         match self {
             Self::Func {
@@ -315,14 +369,14 @@ pub trait ScalarSubqueryRunner {
     fn execute_subquery(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
 
     fn scalar_subquery_value(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         self.execute_subquery(subquery, outer_row, params)?
@@ -332,7 +386,7 @@ pub trait ScalarSubqueryRunner {
     fn subquery_exists(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         self.execute_subquery(subquery, outer_row, params)?
@@ -343,9 +397,9 @@ pub trait ScalarSubqueryRunner {
         &self,
         subquery: SubqueryId,
         needle: &Value,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
-    ) -> Result<bool, SQLError> {
+    ) -> Result<Option<bool>, SQLError> {
         self.execute_subquery(subquery, outer_row, params)?
             .contains(needle)
     }
@@ -387,17 +441,30 @@ impl SubqueryResult {
         Ok(self.rows.next().transpose()?.is_some())
     }
 
-    pub fn contains(self, needle: &Value) -> Result<bool, SQLError> {
+    pub fn contains(self, needle: &Value) -> Result<Option<bool>, SQLError> {
         let Some(first_column) = self.columns.first() else {
-            return Ok(false);
+            return Ok(Some(false));
         };
+        let mut saw_row = false;
+        let mut saw_null = false;
         for row in self.rows {
             let row = row?;
-            if row.get(first_column).is_some_and(|value| value == needle) {
-                return Ok(true);
+            saw_row = true;
+            match row.get(first_column) {
+                Some(Value::Null) | None => saw_null = true,
+                Some(value) if !matches!(needle, Value::Null) && value == needle => {
+                    return Ok(Some(true));
+                }
+                Some(_) => {}
             }
         }
-        Ok(false)
+        Ok(if !saw_row {
+            Some(false)
+        } else if matches!(needle, Value::Null) || saw_null {
+            None
+        } else {
+            Some(false)
+        })
     }
 }
 
@@ -424,7 +491,7 @@ impl<'a> ScalarEvalContext<'a> {
     #[must_use]
     pub fn from_row_lookup(row: &'a dyn RowLookup, params: &'a [SQLParam]) -> Self {
         Self {
-            row: row.result_row(),
+            row: None,
             row_lookup: Some(row),
             params,
             function_hook: None,
@@ -453,6 +520,10 @@ impl<'a> ScalarEvalContext<'a> {
             Some(hook) => context.with_engine(hook),
             None => context,
         }
+    }
+
+    fn outer_row(&self) -> Option<&dyn RowLookup> {
+        self.row_lookup
     }
 }
 
@@ -532,7 +603,9 @@ pub fn eval_scalar(
         } => {
             let needle = eval_scalar(expr, context)?;
             let found = execute_in_subquery(*subquery, &needle, context)?;
-            Ok(Value::Bool(if *negated { !found } else { found }))
+            Ok(found.map_or(Value::Null, |found| {
+                Value::Bool(if *negated { !found } else { found })
+            }))
         }
     }
 }
@@ -704,7 +777,7 @@ fn execute_scalar_subquery(
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.scalar_subquery_value(subquery, context.row, context.params)
+    runner.scalar_subquery_value(subquery, context.outer_row(), context.params)
 }
 
 fn execute_exists_subquery(
@@ -714,18 +787,18 @@ fn execute_exists_subquery(
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.subquery_exists(subquery, context.row, context.params)
+    runner.subquery_exists(subquery, context.outer_row(), context.params)
 }
 
 fn execute_in_subquery(
     subquery: SubqueryId,
     needle: &Value,
     context: &ScalarEvalContext<'_>,
-) -> Result<bool, SQLError> {
+) -> Result<Option<bool>, SQLError> {
     let runner = context
         .subquery_runner
         .ok_or_else(|| SQLError::Unsupported("physical subquery requires a plan runner".into()))?;
-    runner.subquery_contains(subquery, needle, context.row, context.params)
+    runner.subquery_contains(subquery, needle, context.outer_row(), context.params)
 }
 
 #[cfg(test)]

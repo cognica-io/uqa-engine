@@ -8,8 +8,9 @@
 
 use super::helpers::{
     all_schema_names, catalog_name, catalog_ordinal, column_constraint_rows, current_user_name,
-    default_expr_text, info_data_type, info_datetime_precision, info_numeric_precision,
-    info_numeric_scale, info_udt_name, int_value, row, split_schema_name, stable_oid, str_value,
+    default_expr_text, info_character_maximum_length, info_character_octet_length, info_data_type,
+    info_datetime_precision, info_numeric_precision, info_numeric_scale, info_udt_name, int_value,
+    row, split_schema_name, stable_oid, str_value,
 };
 use super::{
     registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLError, Value,
@@ -135,8 +136,14 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
                     }),
                 ),
                 ("data_type", str_value(info_data_type(&col.ty))),
-                ("character_maximum_length", Value::Null),
-                ("character_octet_length", Value::Null),
+                (
+                    "character_maximum_length",
+                    info_character_maximum_length(&col.ty),
+                ),
+                (
+                    "character_octet_length",
+                    info_character_octet_length(&col.ty),
+                ),
                 ("numeric_precision", info_numeric_precision(&col.ty)),
                 ("numeric_precision_radix", Value::Int(10)),
                 ("numeric_scale", info_numeric_scale(&col.ty)),

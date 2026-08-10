@@ -6,69 +6,57 @@
 
 //! Physical relational join operators.
 
+mod nested_loop;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
+use std::hash::BuildHasher;
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+use smallvec::SmallVec;
 use tempfile::{Builder as TempBuilder, NamedTempFile, TempDir};
 use uqa_core::Value;
 use uqa_sql::ast::JoinKind;
 use uqa_sql::expr::truthy;
 use uqa_sql::ResultRow;
 
+use crate::distinct::{encode_non_null_key, hash_canonical_row, EncodedKey};
 use crate::{
-    Batch, ExecError, ExecResult, IndexedSpill, PhysicalOperator, RowSchema, ScalarExpr,
-    SharedExpressionEvaluator, SpillBuffer,
+    Batch, ExecError, ExecResult, IndexedSpill, PhysicalOperator, PhysicalRow, ProjectedPredicate,
+    RowSchema, ScalarExpr, SharedExpressionEvaluator, SpillBuffer,
 };
+
+pub use nested_loop::NestedLoopJoin;
 
 const DEFAULT_JOIN_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 const HASH_BUCKETS: u64 = 64;
 
 fn output_schema(
-    left: &[String],
-    right: &[String],
+    left: &RowSchema,
+    right: &RowSchema,
     left_nulls: &ResultRow,
     right_nulls: &ResultRow,
 ) -> RowSchema {
-    let mut columns = left.to_vec();
-    for column in right
-        .iter()
-        .chain(left_nulls.keys())
-        .chain(right_nulls.keys())
-    {
-        if !columns.contains(column) {
-            columns.push(column.clone());
-        }
-    }
-    RowSchema::new(columns)
-}
-
-fn merge_rows(left: &ResultRow, right: &ResultRow) -> ResultRow {
-    let mut output = left.clone();
-    for (column, value) in right {
-        output.insert(column.clone(), value.clone());
-    }
-    output
-}
-
-fn merge_with_nulls(row: &ResultRow, nulls: &ResultRow, row_is_left: bool) -> ResultRow {
-    if row_is_left {
-        merge_rows(row, nulls)
-    } else {
-        merge_rows(nulls, row)
-    }
+    RowSchema::join(
+        left,
+        right,
+        left_nulls.keys().chain(right_nulls.keys()).cloned(),
+    )
 }
 
 fn push_output_row(
     output: &mut SpillBuffer,
-    pending: &mut Vec<ResultRow>,
+    pending: &mut Vec<PhysicalRow>,
     schema: &RowSchema,
-    row: ResultRow,
+    row: PhysicalRow,
 ) -> ExecResult<()> {
     pending.push(row);
     if pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
-        output.push(Batch::new(schema.clone(), std::mem::take(pending)))?;
+        output.push(Batch::from_physical_rows(
+            schema.clone(),
+            std::mem::take(pending),
+        ))?;
         pending.reserve(crate::batch::DEFAULT_BATCH_SIZE);
     }
     Ok(())
@@ -76,6 +64,266 @@ fn push_output_row(
 
 fn join_io_error(operation: &str, error: impl std::fmt::Display) -> ExecError {
     ExecError::Other(format!("join spill {operation}: {error}"))
+}
+
+/// Positional build-side row storage that only touches disk after its encoded
+/// memory budget is exhausted. Once spilled, every row lives in the indexed
+/// disk store so positional indices remain stable across the transition.
+struct HybridRowStore {
+    schema: RowSchema,
+    memory: Vec<PhysicalRow>,
+    rows: u64,
+    memory_bytes: usize,
+    budget_bytes: usize,
+    disk: Option<IndexedSpill>,
+}
+
+impl HybridRowStore {
+    fn new(schema: RowSchema, budget_bytes: usize) -> Self {
+        Self {
+            schema,
+            memory: Vec::new(),
+            rows: 0,
+            memory_bytes: 0,
+            budget_bytes,
+            disk: None,
+        }
+    }
+
+    fn len(&self) -> u64 {
+        self.disk.as_ref().map_or(self.rows, IndexedSpill::len)
+    }
+
+    fn has_spilled(&self) -> bool {
+        self.disk.is_some()
+    }
+
+    fn memory_row(&self, index: u64) -> Option<&PhysicalRow> {
+        if self.disk.is_some() {
+            return None;
+        }
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| self.memory.get(index))
+    }
+
+    fn push(&mut self, row: PhysicalRow) -> ExecResult<()> {
+        if let Some(disk) = self.disk.as_mut() {
+            return disk.push(&self.schema.view(&row).to_result_row());
+        }
+
+        let row_bytes = SpillBuffer::encoded_single_row_size(&self.schema, &row)?;
+        let next_rows = self
+            .rows
+            .checked_add(1)
+            .ok_or_else(|| ExecError::Other("join build row count overflow".into()))?;
+        let fits = self
+            .memory_bytes
+            .checked_add(row_bytes)
+            .is_some_and(|bytes| bytes <= self.budget_bytes);
+        if fits {
+            self.memory.push(row);
+            self.rows = next_rows;
+            self.memory_bytes += row_bytes;
+            return Ok(());
+        }
+
+        // Build the complete disk representation before publishing it. If any
+        // append fails, the original in-memory rows remain available and the
+        // operator aborts without exposing a partial positional store.
+        let mut disk = IndexedSpill::new()?;
+        for existing in &self.memory {
+            disk.push(&self.schema.view(existing).to_result_row())?;
+        }
+        disk.push(&self.schema.view(&row).to_result_row())?;
+        self.memory.clear();
+        self.rows = disk.len();
+        self.memory_bytes = 0;
+        self.disk = Some(disk);
+        Ok(())
+    }
+
+    fn with_row<T>(
+        &mut self,
+        index: u64,
+        visitor: impl FnOnce(&PhysicalRow) -> ExecResult<T>,
+    ) -> ExecResult<T> {
+        if let Some(disk) = self.disk.as_mut() {
+            let row = disk.get(index)?;
+            let row = PhysicalRow::from_result_row(&self.schema, row);
+            return visitor(&row);
+        }
+
+        let index = usize::try_from(index)
+            .map_err(|_| ExecError::Other(format!("join row index {index} exceeds usize")))?;
+        let row = self.memory.get(index).ok_or_else(|| {
+            ExecError::Other(format!(
+                "join row {index} is outside 0..{}",
+                self.memory.len()
+            ))
+        })?;
+        visitor(row)
+    }
+}
+
+/// Allocation-free in-memory index for simple positional equality keys.
+///
+/// Only the canonical hash and build-row position are retained. The key itself
+/// stays in the original [`PhysicalRow`]; hash collisions are resolved by
+/// comparing the mapped source slots. If the index exceeds its budget, its
+/// state is discarded and the caller rebuilds the spill-capable encoded index
+/// from the row store.
+struct DirectHashIndex {
+    buckets: HashMap<u64, SmallVec<[u64; 1]>, ahash::RandomState>,
+    memory_bytes: usize,
+    budget_bytes: usize,
+    overflowed: bool,
+}
+
+impl DirectHashIndex {
+    fn new(budget_bytes: usize) -> Self {
+        Self {
+            buckets: HashMap::with_hasher(ahash::RandomState::new()),
+            memory_bytes: 0,
+            budget_bytes,
+            overflowed: false,
+        }
+    }
+
+    fn hasher(&self) -> &ahash::RandomState {
+        self.buckets.hasher()
+    }
+
+    fn insert(&mut self, hash: u64, row_index: u64) -> ExecResult<()> {
+        if self.overflowed {
+            return Ok(());
+        }
+
+        // Account for the hash, inline first row index, control bytes, and
+        // allocator/table slack. Duplicate-key indices need only one u64.
+        let record_bytes = if self.buckets.contains_key(&hash) {
+            8
+        } else {
+            64
+        };
+        let fits = self
+            .memory_bytes
+            .checked_add(record_bytes)
+            .is_some_and(|bytes| bytes <= self.budget_bytes);
+        if !fits {
+            self.buckets.clear();
+            self.memory_bytes = 0;
+            self.overflowed = true;
+            return Ok(());
+        }
+
+        self.buckets.entry(hash).or_default().push(row_index);
+        self.memory_bytes += record_bytes;
+        Ok(())
+    }
+
+    fn is_available(&self) -> bool {
+        !self.overflowed
+    }
+
+    fn candidates(&self, hash: u64) -> &[u64] {
+        self.buckets.get(&hash).map_or(&[], SmallVec::as_slice)
+    }
+
+    fn keys_are_unique(
+        &self,
+        rows: &HybridRowStore,
+        schema: &RowSchema,
+        positions: &[usize],
+    ) -> bool {
+        self.is_available()
+            && self.buckets.values().all(|bucket| {
+                bucket.iter().enumerate().all(|(offset, left_index)| {
+                    bucket[offset + 1..].iter().all(|right_index| {
+                        let Some(left) = rows.memory_row(*left_index) else {
+                            return false;
+                        };
+                        let Some(right) = rows.memory_row(*right_index) else {
+                            return false;
+                        };
+                        !positional_keys_equal(schema, left, positions, schema, right, positions)
+                    })
+                })
+            })
+    }
+}
+
+fn positional_key_hash<S: BuildHasher>(
+    build_hasher: &S,
+    schema: &RowSchema,
+    row: &PhysicalRow,
+    positions: &[usize],
+) -> ExecResult<Option<u64>> {
+    let view = schema.view(row);
+    if positions.iter().any(|position| {
+        view.value_at(*position)
+            .is_none_or(|value| matches!(value, Value::Null))
+    }) {
+        return Ok(None);
+    }
+    hash_canonical_row(
+        build_hasher,
+        positions.iter().map(|position| view.value_at(*position)),
+    )
+    .map(Some)
+}
+
+fn positional_keys_equal(
+    left_schema: &RowSchema,
+    left_row: &PhysicalRow,
+    left_positions: &[usize],
+    right_schema: &RowSchema,
+    right_row: &PhysicalRow,
+    right_positions: &[usize],
+) -> bool {
+    if left_positions.len() != right_positions.len() {
+        return false;
+    }
+    let left = left_schema.view(left_row);
+    let right = right_schema.view(right_row);
+    left_positions
+        .iter()
+        .zip(right_positions)
+        .all(|(left_position, right_position)| {
+            let Some(left) = left.value_at(*left_position) else {
+                return false;
+            };
+            let Some(right) = right.value_at(*right_position) else {
+                return false;
+            };
+            !matches!(left, Value::Null) && !matches!(right, Value::Null) && left == right
+        })
+}
+
+fn direct_unique_match(
+    index: &DirectHashIndex,
+    build_rows: &HybridRowStore,
+    build_positions: &[usize],
+    probe_schema: &RowSchema,
+    probe_row: &PhysicalRow,
+    probe_positions: &[usize],
+) -> ExecResult<Option<u64>> {
+    let Some(hash) = positional_key_hash(index.hasher(), probe_schema, probe_row, probe_positions)?
+    else {
+        return Ok(None);
+    };
+    Ok(index.candidates(hash).iter().copied().find(|row_index| {
+        build_rows.memory_row(*row_index).is_some_and(|build_row| {
+            positional_keys_equal(
+                &build_rows.schema,
+                build_row,
+                build_positions,
+                probe_schema,
+                probe_row,
+                probe_positions,
+            )
+        })
+    }))
 }
 
 /// One byte per build-side row, held in a temporary file rather than a
@@ -138,23 +386,33 @@ impl MatchFlags {
 /// row-index records would exceed its byte budget. Disk probes always compare
 /// the full key, so bucket hash collisions cannot create false join matches.
 struct HybridHashIndex {
-    memory: HashMap<Vec<u8>, Vec<u64>>,
+    memory: HashMap<EncodedKey, Vec<u64>, ahash::RandomState>,
     memory_bytes: usize,
     budget_bytes: usize,
     disk: Option<DiskHashIndex>,
 }
 
+#[derive(Clone, Copy)]
+enum MemoryMatchSummary {
+    Absent,
+    Single(u64),
+    Multiple,
+}
+
 impl HybridHashIndex {
     fn new(budget_bytes: usize) -> Self {
         Self {
-            memory: HashMap::new(),
+            // AHash keeps a per-index random seed while avoiding SipHash's
+            // cryptographic-round overhead after the canonical SQL key has
+            // already been encoded byte-for-byte.
+            memory: HashMap::with_hasher(ahash::RandomState::new()),
             memory_bytes: 0,
             budget_bytes,
             disk: None,
         }
     }
 
-    fn insert(&mut self, key: Vec<u8>, row_index: u64) -> ExecResult<()> {
+    fn insert(&mut self, key: EncodedKey, row_index: u64) -> ExecResult<()> {
         if let Some(disk) = self.disk.as_mut() {
             return disk.insert(&key, row_index);
         }
@@ -203,8 +461,25 @@ impl HybridHashIndex {
         Ok(!indices.is_empty())
     }
 
+    /// Summarize a probe without allocation when the index still resides in
+    /// memory. Disk-backed indexes return `None` and use the streaming probe.
+    fn memory_match_summary(&self, key: &[u8]) -> Option<MemoryMatchSummary> {
+        if self.disk.is_some() {
+            return None;
+        }
+        Some(match self.memory.get(key).map(Vec::as_slice) {
+            None | Some([]) => MemoryMatchSummary::Absent,
+            Some([index]) => MemoryMatchSummary::Single(*index),
+            Some(_) => MemoryMatchSummary::Multiple,
+        })
+    }
+
     fn has_spilled(&self) -> bool {
         self.disk.is_some()
+    }
+
+    fn is_memory_unique(&self) -> bool {
+        self.disk.is_none() && self.memory.values().all(|indices| indices.len() == 1)
     }
 }
 
@@ -373,195 +648,94 @@ fn stable_hash(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Nested-loop implementation for arbitrary join predicates and every SQL
-/// outer-join shape. Predicate evaluation happens against the merged row, so
-/// qualified columns and engine-provided scalar/subquery semantics remain
-/// available through the shared expression evaluator.
-pub struct NestedLoopJoin<'a> {
-    left: Box<dyn PhysicalOperator + 'a>,
-    right: Box<dyn PhysicalOperator + 'a>,
-    kind: JoinKind,
-    predicate: Option<ScalarExpr>,
-    evaluator: SharedExpressionEvaluator<'a>,
-    left_nulls: ResultRow,
-    right_nulls: ResultRow,
-    schema: RowSchema,
-    work_mem_bytes: usize,
-    output: Option<crate::spill::SpillDrain>,
-    output_spilled: bool,
-    right_input_spilled: bool,
-}
-
-impl<'a> NestedLoopJoin<'a> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: JoinKind,
-        predicate: Option<ScalarExpr>,
-        evaluator: SharedExpressionEvaluator<'a>,
-        left_nulls: ResultRow,
-        right_nulls: ResultRow,
-    ) -> Self {
-        Self::new_with_work_mem(
-            left,
-            right,
-            kind,
-            predicate,
-            evaluator,
-            left_nulls,
-            right_nulls,
-            DEFAULT_JOIN_WORK_MEM_BYTES,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_work_mem(
-        left: Box<dyn PhysicalOperator + 'a>,
-        right: Box<dyn PhysicalOperator + 'a>,
-        kind: JoinKind,
-        predicate: Option<ScalarExpr>,
-        evaluator: SharedExpressionEvaluator<'a>,
-        left_nulls: ResultRow,
-        right_nulls: ResultRow,
-        work_mem_bytes: usize,
-    ) -> Self {
-        let schema = output_schema(left.schema(), right.schema(), &left_nulls, &right_nulls);
-        Self {
-            left,
-            right,
-            kind,
-            predicate,
-            evaluator,
-            left_nulls,
-            right_nulls,
-            schema,
-            work_mem_bytes,
-            output: None,
-            output_spilled: false,
-            right_input_spilled: false,
-        }
-    }
-
-    pub fn output_has_spilled(&self) -> bool {
-        self.output_spilled
-    }
-
-    /// The repeatable nested-loop build input is kept in an indexed temporary
-    /// row store, never in a cardinality-sized in-memory vector.
-    pub fn right_input_has_spilled(&self) -> bool {
-        self.right_input_spilled
-    }
-
-    fn matches(&self, row: &ResultRow) -> ExecResult<bool> {
-        match self.predicate.as_ref() {
-            None => Ok(true),
-            Some(predicate) => Ok(truthy(&self.evaluator.evaluate(predicate, row)?)),
-        }
-    }
-}
-
-impl PhysicalOperator for NestedLoopJoin<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
-    }
-
-    fn open(&mut self) -> ExecResult<()> {
-        self.output = None;
-        self.output_spilled = false;
-        self.right_input_spilled = false;
-
-        let mut right = IndexedSpill::new()?;
-        self.right.open()?;
-        while let Some(batch) = self.right.next()? {
-            for row in batch.rows {
-                right.push(&row)?;
-            }
-        }
-        self.right_input_spilled = !right.is_empty();
-        let mut matched_right = MatchFlags::new(right.len())?;
-        let mut output = SpillBuffer::new(self.work_mem_bytes.max(1));
-        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
-
-        self.left.open()?;
-        while let Some(batch) = self.left.next()? {
-            for left_row in batch.rows {
-                let mut matched_left = false;
-                for right_index in 0..right.len() {
-                    let right_row = right.get(right_index)?;
-                    let merged = merge_rows(&left_row, &right_row);
-                    if self.matches(&merged)? {
-                        push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                        matched_left = true;
-                        matched_right.mark(right_index)?;
-                    }
-                }
-                if !matched_left && matches!(self.kind, JoinKind::Left | JoinKind::Full) {
-                    push_output_row(
-                        &mut output,
-                        &mut pending,
-                        &self.schema,
-                        merge_with_nulls(&left_row, &self.right_nulls, true),
-                    )?;
-                }
-            }
-        }
-
-        if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
-            for right_index in 0..right.len() {
-                if !matched_right.is_marked(right_index)? {
-                    let right_row = right.get(right_index)?;
-                    push_output_row(
-                        &mut output,
-                        &mut pending,
-                        &self.schema,
-                        merge_with_nulls(&right_row, &self.left_nulls, false),
-                    )?;
-                }
-            }
-        }
-        if !pending.is_empty() {
-            output.push(Batch::new(self.schema.clone(), pending))?;
-        }
-        self.output_spilled = output.has_spilled();
-        self.output = Some(output.drain()?);
-        Ok(())
-    }
-
-    fn next(&mut self) -> ExecResult<Option<Batch>> {
-        self.output
-            .as_mut()
-            .map_or(Ok(None), |output| output.next().transpose())
-    }
-
-    fn close(&mut self) -> ExecResult<()> {
-        self.output = None;
-        let left = self.left.close();
-        let right = self.right.close();
-        crate::physical::with_cleanup(left, right, "close right nested-loop join input")
-    }
-}
-
 /// Equality join backed by a canonical SQL-key hash table. SQL NULL keys never
 /// match. An optional residual predicate is evaluated on hash candidates
 /// before either side is marked matched, preserving mixed equijoin/non-equality
 /// `ON` semantics for every outer-join shape.
+fn simple_key_positions(schema: &RowSchema, expressions: &[ScalarExpr]) -> Option<Vec<usize>> {
+    expressions
+        .iter()
+        .map(|expression| match expression {
+            ScalarExpr::Column(column) => schema.position(column),
+            ScalarExpr::QualifiedColumn {
+                qualifier,
+                column,
+                key,
+            } => {
+                let resolved = if key.is_empty() {
+                    format!("{qualifier}.{column}")
+                } else {
+                    key.clone()
+                };
+                schema.position(&resolved)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 pub struct HashJoin<'a> {
     left: Box<dyn PhysicalOperator + 'a>,
     right: Box<dyn PhysicalOperator + 'a>,
     kind: JoinKind,
     left_keys: Vec<ScalarExpr>,
     right_keys: Vec<ScalarExpr>,
+    left_key_positions: Option<Vec<usize>>,
+    right_key_positions: Option<Vec<usize>>,
     predicate: Option<ScalarExpr>,
+    prepared_predicate: Option<ProjectedPredicate>,
     evaluator: SharedExpressionEvaluator<'a>,
-    left_nulls: ResultRow,
-    right_nulls: ResultRow,
+    left_nulls: PhysicalRow,
+    right_nulls: PhysicalRow,
     schema: RowSchema,
+    estimated_cardinality: Option<u64>,
+    build_left: bool,
     work_mem_bytes: usize,
     output: Option<crate::spill::SpillDrain>,
-    output_spilled: bool,
-    right_input_spilled: bool,
-    hash_index_spilled: bool,
+    streaming_unique: Option<UniqueHashJoinState>,
+    output_spilled: SpillState,
+    right_input_spilled: SpillState,
+    hash_index_spilled: SpillState,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum SpillState {
+    #[default]
+    InMemory,
+    Spilled,
+}
+
+impl SpillState {
+    fn is_spilled(self) -> bool {
+        matches!(self, Self::Spilled)
+    }
+}
+
+impl From<bool> for SpillState {
+    fn from(spilled: bool) -> Self {
+        if spilled {
+            Self::Spilled
+        } else {
+            Self::InMemory
+        }
+    }
+}
+
+/// State retained while an in-memory unique-key inner join streams its probe
+/// side. At most one output row can be produced per probe row, so the join can
+/// preserve batch backpressure without a cardinality-sized output buffer.
+struct UniqueHashJoinState {
+    build_rows: HybridRowStore,
+    hash_index: UniqueHashIndex,
+    build_left: bool,
+}
+
+enum UniqueHashIndex {
+    /// Simple column keys keep only hashes and row positions. Candidate keys
+    /// are verified against the original build row slots.
+    Direct(DirectHashIndex),
+    /// Evaluated expressions and spill fallback retain canonical byte keys.
+    Encoded(HybridHashIndex),
 }
 
 impl<'a> HashJoin<'a> {
@@ -628,8 +802,79 @@ impl<'a> HashJoin<'a> {
         right_nulls: ResultRow,
         work_mem_bytes: usize,
     ) -> Self {
-        let schema = output_schema(left.schema(), right.schema(), &left_nulls, &right_nulls);
+        let left_key_positions = simple_key_positions(left.row_schema(), &left_keys);
+        let right_key_positions = simple_key_positions(right.row_schema(), &right_keys);
+        let schema = output_schema(
+            left.row_schema(),
+            right.row_schema(),
+            &left_nulls,
+            &right_nulls,
+        );
+        let left_nulls = PhysicalRow::nulls(left.row_schema().physical_width());
+        let right_nulls = PhysicalRow::nulls(right.row_schema().physical_width());
+        let left_cardinality = left.estimated_cardinality();
+        let right_cardinality = right.estimated_cardinality();
+        let build_left = matches!(kind, JoinKind::Inner)
+            && left_cardinality
+                .zip(right_cardinality)
+                .is_some_and(|(left, right)| left < right);
+        let estimated_cardinality = left_cardinality
+            .zip(right_cardinality)
+            .map(|(left, right)| match kind {
+                JoinKind::Inner => left.max(right),
+                JoinKind::Left => left,
+                JoinKind::Right => right,
+                JoinKind::Full => left.saturating_add(right),
+                JoinKind::Cross => left.saturating_mul(right),
+            });
+        let prepared_predicate = predicate.as_ref().and_then(|predicate| {
+            ProjectedPredicate::compile(predicate, schema.columns(), &[])
+                .ok()
+                .flatten()
+        });
         Self {
+            left,
+            right,
+            kind,
+            left_keys,
+            right_keys,
+            left_key_positions,
+            right_key_positions,
+            predicate,
+            prepared_predicate,
+            evaluator,
+            left_nulls,
+            right_nulls,
+            schema,
+            estimated_cardinality,
+            build_left,
+            work_mem_bytes,
+            output: None,
+            streaming_unique: None,
+            output_spilled: SpillState::InMemory,
+            right_input_spilled: SpillState::InMemory,
+            hash_index_spilled: SpillState::InMemory,
+        }
+    }
+
+    /// Construct a hash join while preparing supported residual predicates
+    /// against its composite output schema. Parameters and constant LIKE
+    /// patterns are folded exactly once before any candidate row is probed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_work_mem_and_predicate(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: JoinKind,
+        left_keys: Vec<ScalarExpr>,
+        right_keys: Vec<ScalarExpr>,
+        predicate: Option<ScalarExpr>,
+        evaluator: SharedExpressionEvaluator<'a>,
+        left_nulls: ResultRow,
+        right_nulls: ResultRow,
+        work_mem_bytes: usize,
+        params: &[uqa_sql::SQLParam],
+    ) -> ExecResult<Self> {
+        let mut join = Self::new_with_work_mem_and_predicate(
             left,
             right,
             kind,
@@ -639,75 +884,416 @@ impl<'a> HashJoin<'a> {
             evaluator,
             left_nulls,
             right_nulls,
-            schema,
             work_mem_bytes,
-            output: None,
-            output_spilled: false,
-            right_input_spilled: false,
-            hash_index_spilled: false,
-        }
+        );
+        join.prepared_predicate = join
+            .predicate
+            .as_ref()
+            .map(|predicate| ProjectedPredicate::compile(predicate, join.schema.columns(), params))
+            .transpose()?
+            .flatten();
+        Ok(join)
     }
 
     pub fn output_has_spilled(&self) -> bool {
-        self.output_spilled
+        self.output_spilled.is_spilled()
     }
 
     pub fn right_input_has_spilled(&self) -> bool {
-        self.right_input_spilled
+        self.right_input_spilled.is_spilled()
     }
 
     pub fn hash_index_has_spilled(&self) -> bool {
-        self.hash_index_spilled
+        self.hash_index_spilled.is_spilled()
     }
 
-    fn key(&self, expressions: &[ScalarExpr], row: &ResultRow) -> ExecResult<Option<Vec<u8>>> {
-        let mut values = Vec::with_capacity(expressions.len());
+    pub fn builds_left_input(&self) -> bool {
+        self.build_left
+    }
+
+    fn rebuild_encoded_index(
+        &self,
+        rows: &mut HybridRowStore,
+        expressions: &[ScalarExpr],
+        positions: &[usize],
+        budget_bytes: usize,
+    ) -> ExecResult<HybridHashIndex> {
+        let schema = rows.schema.clone();
+        let mut index = HybridHashIndex::new(budget_bytes);
+        for row_index in 0..rows.len() {
+            let key = rows.with_row(row_index, |row| {
+                self.key(expressions, Some(positions), row, &schema)
+            })?;
+            if let Some(key) = key {
+                index.insert(key, row_index)?;
+            }
+        }
+        Ok(index)
+    }
+
+    fn open_build_left(&mut self, state_budget: usize, output_budget: usize) -> ExecResult<()> {
+        debug_assert!(matches!(self.kind, JoinKind::Inner));
+        let left_budget = state_budget / 2;
+        let hash_budget = state_budget.saturating_sub(left_budget);
+        let left_schema = self.left.row_schema().clone();
+        let mut left = HybridRowStore::new(left_schema, left_budget);
+        let direct_positions = self
+            .predicate
+            .is_none()
+            .then_some(())
+            .and(self.left_key_positions.as_deref())
+            .zip(self.right_key_positions.as_deref());
+        let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
+        let mut encoded_index = direct_index
+            .is_none()
+            .then(|| HybridHashIndex::new(hash_budget));
+        self.left.open()?;
+        while let Some(batch) = self.left.next()? {
+            for row in batch.rows {
+                let index = left.len();
+                if let (Some(direct), Some((positions, _))) =
+                    (direct_index.as_mut(), direct_positions)
+                {
+                    if let Some(hash) =
+                        positional_key_hash(direct.hasher(), &batch.schema, &row, positions)?
+                    {
+                        direct.insert(hash, index)?;
+                    }
+                } else if let Some(key) = self.key(
+                    &self.left_keys,
+                    self.left_key_positions.as_deref(),
+                    &row,
+                    &batch.schema,
+                )? {
+                    encoded_index
+                        .as_mut()
+                        .ok_or_else(|| ExecError::Other("join hash index is missing".into()))?
+                        .insert(key, index)?;
+                }
+                left.push(row)?;
+            }
+        }
+        self.right_input_spilled = SpillState::InMemory;
+
+        let mut output = SpillBuffer::new(output_budget);
+        if left.len() == 0 {
+            self.output = Some(output.drain()?);
+            return Ok(());
+        }
+
+        let direct_is_unique = direct_index.as_ref().is_some_and(|direct| {
+            direct_positions.is_some_and(|(positions, _)| {
+                !left.has_spilled() && direct.keys_are_unique(&left, &left.schema, positions)
+            })
+        });
+        if direct_is_unique {
+            self.right.open()?;
+            self.streaming_unique = Some(UniqueHashJoinState {
+                build_rows: left,
+                hash_index: UniqueHashIndex::Direct(
+                    direct_index
+                        .take()
+                        .ok_or_else(|| ExecError::Other("direct join index is missing".into()))?,
+                ),
+                build_left: true,
+            });
+            return Ok(());
+        }
+
+        let mut left_by_key = match encoded_index {
+            Some(index) => index,
+            None => {
+                let (positions, _) = direct_positions
+                    .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
+                self.rebuild_encoded_index(&mut left, &self.left_keys, positions, hash_budget)?
+            }
+        };
+        self.hash_index_spilled = left_by_key.has_spilled().into();
+        if self.predicate.is_none() && !left.has_spilled() && left_by_key.is_memory_unique() {
+            self.right.open()?;
+            self.streaming_unique = Some(UniqueHashJoinState {
+                build_rows: left,
+                hash_index: UniqueHashIndex::Encoded(left_by_key),
+                build_left: true,
+            });
+            return Ok(());
+        }
+        let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+
+        self.right.open()?;
+        while let Some(batch) = self.right.next()? {
+            for right_row in batch.rows {
+                let Some(key) = self.key(
+                    &self.right_keys,
+                    self.right_key_positions.as_deref(),
+                    &right_row,
+                    &batch.schema,
+                )?
+                else {
+                    continue;
+                };
+                if self.predicate.is_none() {
+                    match left_by_key.memory_match_summary(&key) {
+                        Some(MemoryMatchSummary::Absent) => continue,
+                        Some(MemoryMatchSummary::Single(index)) => {
+                            let merged = left.with_row(index, |left_row| {
+                                Ok(PhysicalRow::concat_right_owned(left_row, right_row))
+                            })?;
+                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
+                            continue;
+                        }
+                        Some(MemoryMatchSummary::Multiple) | None => {}
+                    }
+                }
+                left_by_key.for_each_match(&key, &mut |index| {
+                    left.with_row(index, |left_row| {
+                        let merged = PhysicalRow::concat(left_row, &right_row);
+                        if self.matches(&merged)? {
+                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
+                        }
+                        Ok(())
+                    })
+                })?;
+            }
+        }
+        if !pending.is_empty() {
+            output.push(Batch::from_physical_rows(self.schema.clone(), pending))?;
+        }
+        self.output_spilled = output.has_spilled().into();
+        self.output = Some(output.drain()?);
+        Ok(())
+    }
+
+    fn key(
+        &self,
+        expressions: &[ScalarExpr],
+        positions: Option<&[usize]>,
+        row: &PhysicalRow,
+        schema: &RowSchema,
+    ) -> ExecResult<Option<EncodedKey>> {
+        let view = schema.view(row);
+        if let Some(positions) = positions {
+            return encode_non_null_key(positions.iter().map(|position| view.value_at(*position)));
+        }
+        let mut values = SmallVec::<[Value; 4]>::with_capacity(expressions.len());
         for expression in expressions {
-            let value = self.evaluator.evaluate(expression, row)?;
+            let value = self.evaluator.evaluate(expression, &view)?;
             if matches!(value, Value::Null) {
                 return Ok(None);
             }
             values.push(value);
         }
-        crate::distinct::encode_key(&values).map(Some)
+        encode_non_null_key(values.iter().map(Some))
     }
 
-    fn matches(&self, row: &ResultRow) -> ExecResult<bool> {
+    fn matches(&self, row: &PhysicalRow) -> ExecResult<bool> {
+        if let Some(predicate) = self.prepared_predicate.as_ref() {
+            return Ok(predicate.keep_row(&self.schema.view(row))?);
+        }
         self.predicate.as_ref().map_or(Ok(true), |predicate| {
-            Ok(truthy(&self.evaluator.evaluate(predicate, row)?))
+            Ok(truthy(
+                &self.evaluator.evaluate(predicate, &self.schema.view(row))?,
+            ))
         })
+    }
+
+    fn next_streaming_unique(
+        &mut self,
+        state: &mut UniqueHashJoinState,
+    ) -> ExecResult<Option<Batch>> {
+        loop {
+            let next = if state.build_left {
+                self.right.next()?
+            } else {
+                self.left.next()?
+            };
+            let Some(batch) = next else {
+                return Ok(None);
+            };
+            let mut output = Vec::with_capacity(batch.rows.len());
+            for probe_row in batch.rows {
+                let index = match &state.hash_index {
+                    UniqueHashIndex::Direct(index) => {
+                        let (build_positions, probe_positions) = if state.build_left {
+                            (
+                                self.left_key_positions.as_deref(),
+                                self.right_key_positions.as_deref(),
+                            )
+                        } else {
+                            (
+                                self.right_key_positions.as_deref(),
+                                self.left_key_positions.as_deref(),
+                            )
+                        };
+                        let (Some(build_positions), Some(probe_positions)) =
+                            (build_positions, probe_positions)
+                        else {
+                            return Err(ExecError::Other(
+                                "direct join key positions are missing".into(),
+                            ));
+                        };
+                        direct_unique_match(
+                            index,
+                            &state.build_rows,
+                            build_positions,
+                            &batch.schema,
+                            &probe_row,
+                            probe_positions,
+                        )?
+                    }
+                    UniqueHashIndex::Encoded(index) => {
+                        let expressions = if state.build_left {
+                            &self.right_keys
+                        } else {
+                            &self.left_keys
+                        };
+                        let positions = if state.build_left {
+                            self.right_key_positions.as_deref()
+                        } else {
+                            self.left_key_positions.as_deref()
+                        };
+                        let Some(key) =
+                            self.key(expressions, positions, &probe_row, &batch.schema)?
+                        else {
+                            continue;
+                        };
+                        match index.memory_match_summary(&key) {
+                            Some(MemoryMatchSummary::Single(index)) => Some(index),
+                            _ => None,
+                        }
+                    }
+                };
+                let Some(index) = index else { continue };
+                let merged = if state.build_left {
+                    state.build_rows.with_row(index, |build_row| {
+                        Ok(PhysicalRow::concat_right_owned(build_row, probe_row))
+                    })?
+                } else {
+                    state.build_rows.with_row(index, |build_row| {
+                        Ok(PhysicalRow::concat_left_owned(probe_row, build_row))
+                    })?
+                };
+                output.push(merged);
+            }
+            if !output.is_empty() {
+                return Ok(Some(Batch::from_physical_rows(self.schema.clone(), output)));
+            }
+        }
     }
 }
 
 impl PhysicalOperator for HashJoin<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.estimated_cardinality
     }
 
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
-        self.output_spilled = false;
-        self.right_input_spilled = false;
-        self.hash_index_spilled = false;
+        self.streaming_unique = None;
+        self.output_spilled = SpillState::InMemory;
+        self.right_input_spilled = SpillState::InMemory;
+        self.hash_index_spilled = SpillState::InMemory;
 
-        let state_budget = (self.work_mem_bytes / 2).max(1);
-        let output_budget = self.work_mem_bytes.saturating_sub(state_budget).max(1);
-        let mut right = IndexedSpill::new()?;
-        let mut right_by_key = HybridHashIndex::new(state_budget);
+        let state_budget = self.work_mem_bytes / 2;
+        let output_budget = self.work_mem_bytes.saturating_sub(state_budget);
+        if self.build_left {
+            return self.open_build_left(state_budget, output_budget);
+        }
+        let right_budget = state_budget / 2;
+        let hash_budget = state_budget.saturating_sub(right_budget);
+        let right_schema = self.right.row_schema().clone();
+        let mut right = HybridRowStore::new(right_schema, right_budget);
+        let direct_positions = (matches!(self.kind, JoinKind::Inner) && self.predicate.is_none())
+            .then_some(())
+            .and(self.right_key_positions.as_deref())
+            .zip(self.left_key_positions.as_deref());
+        let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
+        let mut encoded_index = direct_index
+            .is_none()
+            .then(|| HybridHashIndex::new(hash_budget));
         self.right.open()?;
         while let Some(batch) = self.right.next()? {
             for row in batch.rows {
                 let index = right.len();
-                if let Some(key) = self.key(&self.right_keys, &row)? {
-                    right_by_key.insert(key, index)?;
+                if let (Some(direct), Some((positions, _))) =
+                    (direct_index.as_mut(), direct_positions)
+                {
+                    if let Some(hash) =
+                        positional_key_hash(direct.hasher(), &batch.schema, &row, positions)?
+                    {
+                        direct.insert(hash, index)?;
+                    }
+                } else if let Some(key) = self.key(
+                    &self.right_keys,
+                    self.right_key_positions.as_deref(),
+                    &row,
+                    &batch.schema,
+                )? {
+                    encoded_index
+                        .as_mut()
+                        .ok_or_else(|| ExecError::Other("join hash index is missing".into()))?
+                        .insert(key, index)?;
                 }
-                right.push(&row)?;
+                right.push(row)?;
             }
         }
-        self.right_input_spilled = !right.is_empty();
-        self.hash_index_spilled = right_by_key.has_spilled();
+        self.right_input_spilled = right.has_spilled().into();
 
-        let mut matched_right = MatchFlags::new(right.len())?;
+        if right.len() == 0 && matches!(self.kind, JoinKind::Inner) {
+            let mut output = SpillBuffer::new(output_budget);
+            self.output = Some(output.drain()?);
+            return Ok(());
+        }
+
+        let direct_is_unique = direct_index.as_ref().is_some_and(|direct| {
+            direct_positions.is_some_and(|(positions, _)| {
+                !right.has_spilled() && direct.keys_are_unique(&right, &right.schema, positions)
+            })
+        });
+        if direct_is_unique {
+            self.left.open()?;
+            self.streaming_unique = Some(UniqueHashJoinState {
+                build_rows: right,
+                hash_index: UniqueHashIndex::Direct(
+                    direct_index
+                        .take()
+                        .ok_or_else(|| ExecError::Other("direct join index is missing".into()))?,
+                ),
+                build_left: false,
+            });
+            return Ok(());
+        }
+
+        let mut right_by_key = match encoded_index {
+            Some(index) => index,
+            None => {
+                let (positions, _) = direct_positions
+                    .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
+                self.rebuild_encoded_index(&mut right, &self.right_keys, positions, hash_budget)?
+            }
+        };
+        self.hash_index_spilled = right_by_key.has_spilled().into();
+        if matches!(self.kind, JoinKind::Inner)
+            && self.predicate.is_none()
+            && !right.has_spilled()
+            && right_by_key.is_memory_unique()
+        {
+            self.left.open()?;
+            self.streaming_unique = Some(UniqueHashJoinState {
+                build_rows: right,
+                hash_index: UniqueHashIndex::Encoded(right_by_key),
+                build_left: false,
+            });
+            return Ok(());
+        }
+
+        let mut matched_right = matches!(self.kind, JoinKind::Right | JoinKind::Full)
+            .then(|| MatchFlags::new(right.len()))
+            .transpose()?;
         let mut output = SpillBuffer::new(output_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
 
@@ -715,16 +1301,50 @@ impl PhysicalOperator for HashJoin<'_> {
         while let Some(batch) = self.left.next()? {
             for left_row in batch.rows {
                 let mut matched_left = false;
-                if let Some(key) = self.key(&self.left_keys, &left_row)? {
-                    right_by_key.for_each_match(&key, &mut |index| {
-                        let right_row = right.get(index)?;
-                        let merged = merge_rows(&left_row, &right_row);
-                        if self.matches(&merged)? {
-                            push_output_row(&mut output, &mut pending, &self.schema, merged)?;
-                            matched_right.mark(index)?;
-                            matched_left = true;
+                if let Some(key) = self.key(
+                    &self.left_keys,
+                    self.left_key_positions.as_deref(),
+                    &left_row,
+                    &batch.schema,
+                )? {
+                    if self.predicate.is_none() {
+                        match right_by_key.memory_match_summary(&key) {
+                            Some(MemoryMatchSummary::Absent) => {
+                                if matches!(self.kind, JoinKind::Left | JoinKind::Full) {
+                                    push_output_row(
+                                        &mut output,
+                                        &mut pending,
+                                        &self.schema,
+                                        PhysicalRow::concat_left_owned(left_row, &self.right_nulls),
+                                    )?;
+                                }
+                                continue;
+                            }
+                            Some(MemoryMatchSummary::Single(index)) => {
+                                let merged = right.with_row(index, |right_row| {
+                                    Ok(PhysicalRow::concat_left_owned(left_row, right_row))
+                                })?;
+                                push_output_row(&mut output, &mut pending, &self.schema, merged)?;
+                                if let Some(flags) = matched_right.as_mut() {
+                                    flags.mark(index)?;
+                                }
+                                continue;
+                            }
+                            Some(MemoryMatchSummary::Multiple) | None => {}
                         }
-                        Ok(())
+                    }
+                    right_by_key.for_each_match(&key, &mut |index| {
+                        right.with_row(index, |right_row| {
+                            let merged = PhysicalRow::concat(&left_row, right_row);
+                            if self.matches(&merged)? {
+                                push_output_row(&mut output, &mut pending, &self.schema, merged)?;
+                                if let Some(flags) = matched_right.as_mut() {
+                                    flags.mark(index)?;
+                                }
+                                matched_left = true;
+                            }
+                            Ok(())
+                        })
                     })?;
                 }
                 if !matched_left && matches!(self.kind, JoinKind::Left | JoinKind::Full) {
@@ -732,34 +1352,43 @@ impl PhysicalOperator for HashJoin<'_> {
                         &mut output,
                         &mut pending,
                         &self.schema,
-                        merge_with_nulls(&left_row, &self.right_nulls, true),
+                        PhysicalRow::concat_left_owned(left_row, &self.right_nulls),
                     )?;
                 }
             }
         }
 
         if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
+            let matched_right = matched_right.as_mut().ok_or_else(|| {
+                ExecError::Other("right/full hash join has no match flags".into())
+            })?;
             for index in 0..right.len() {
                 if !matched_right.is_marked(index)? {
-                    let right_row = right.get(index)?;
-                    push_output_row(
-                        &mut output,
-                        &mut pending,
-                        &self.schema,
-                        merge_with_nulls(&right_row, &self.left_nulls, false),
-                    )?;
+                    right.with_row(index, |right_row| {
+                        push_output_row(
+                            &mut output,
+                            &mut pending,
+                            &self.schema,
+                            PhysicalRow::concat(&self.left_nulls, right_row),
+                        )
+                    })?;
                 }
             }
         }
         if !pending.is_empty() {
-            output.push(Batch::new(self.schema.clone(), pending))?;
+            output.push(Batch::from_physical_rows(self.schema.clone(), pending))?;
         }
-        self.output_spilled = output.has_spilled();
+        self.output_spilled = output.has_spilled().into();
         self.output = Some(output.drain()?);
         Ok(())
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
+        if let Some(mut state) = self.streaming_unique.take() {
+            let result = self.next_streaming_unique(&mut state);
+            self.streaming_unique = Some(state);
+            return result;
+        }
         self.output
             .as_mut()
             .map_or(Ok(None), |output| output.next().transpose())
@@ -767,6 +1396,7 @@ impl PhysicalOperator for HashJoin<'_> {
 
     fn close(&mut self) -> ExecResult<()> {
         self.output = None;
+        self.streaming_unique = None;
         let left = self.left.close();
         let right = self.right.close();
         crate::physical::with_cleanup(left, right, "close right hash-join input")

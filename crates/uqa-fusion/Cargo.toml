@@ -1,5 +1,7 @@
 [package]
 name = "uqa-fusion"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "Exact Bayesian evidence fusion and robust multi-signal retrieval pooling"
 version.workspace = true
 edition.workspace = true
@@ -18,6 +20,10 @@ uqa-scoring = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "fusion"

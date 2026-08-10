@@ -155,8 +155,8 @@ pub(super) fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 
 impl PhysicalOperator for Sort<'_> {
-    fn schema(&self) -> &[String] {
-        self.inner.schema()
+    fn row_schema(&self) -> &super::RowSchema {
+        self.inner.row_schema()
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {

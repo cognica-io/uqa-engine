@@ -19,7 +19,8 @@ mod binary;
 mod indexed;
 
 pub(super) use binary::{
-    append_batches, decode_batch, encoded_batch_size, encoded_single_row_batch_size,
+    append_batches, decode_batch, encoded_batch_size, encoded_named_single_row_batch_size,
+    encoded_single_row_batch_size,
 };
 pub(super) use indexed::{decode_row, ExactRow};
 

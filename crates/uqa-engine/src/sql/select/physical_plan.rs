@@ -7,13 +7,15 @@
 //! Projection, ordering, filtering, and relational physical-operator assembly.
 
 use super::{
-    collect_query_operator, is_score_provenance_column, prepare_window_plan, projection_columns,
-    resolve_limit_offset_with_ctes, should_defer_distinct_limit, Arc, ComputePlan, CteScope,
-    Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping, PhysicalAggregateExecutor,
-    PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan, QueryBlockPlan, QueryOutput,
-    QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr, SharedExpressionEvaluator,
-    SourcePlan, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
+    collect_exists_key_operator, collect_query_operator, is_score_provenance_column,
+    prepare_correlated_exists_predicate, prepare_window_plan, projection_columns,
+    query_plan_output_columns, resolve_limit_offset_with_ctes, should_defer_distinct_limit, Arc,
+    ComputePlan, CteScope, Engine, EngineExpressionEvaluator, HashSet, OutputColumnMapping,
+    PhysicalAggregateExecutor, PhysicalProjection, PhysicalWindowExecutor, ProjectionPlan,
+    QueryBlockPlan, QueryOutput, QueryOutputMode, ResultRow, SQLError, SQLParam, ScalarExpr,
+    SharedExpressionEvaluator, SourcePlan, Value, DOC_ID_COLUMN, MERGE_ACTION_COLUMN, SCORE_COLUMN,
 };
+use crate::sql::from_rows::table_function_empty_schema;
 
 pub(in crate::sql) fn expand_from_star_columns(
     engine: &Engine,
@@ -53,12 +55,13 @@ pub(in crate::sql) fn from_clause_output_columns(
             column_aliases,
             ..
         } => {
-            let cols = if column_aliases.is_empty() {
-                user_function_output_columns(engine, name).unwrap_or_else(|| vec![name.clone()])
-            } else {
-                column_aliases.clone()
-            };
-            qualify_output_columns(alias.as_deref(), cols)
+            if !column_aliases.is_empty() {
+                return qualify_output_columns(alias.as_deref(), column_aliases.clone());
+            }
+            user_function_output_columns(engine, name).map_or_else(
+                || table_function_empty_schema(name, alias.as_deref(), column_aliases),
+                |columns| qualify_output_columns(alias.as_deref(), columns),
+            )
         }
         SourcePlan::Values {
             rows,
@@ -74,10 +77,17 @@ pub(in crate::sql) fn from_clause_output_columns(
             qualify_output_columns(alias.as_deref(), cols)
         }
         SourcePlan::Subquery {
+            body,
             alias,
             column_aliases,
-            ..
-        } => qualify_output_columns(alias.as_deref(), column_aliases.clone()),
+        } => {
+            let columns = if column_aliases.is_empty() {
+                query_plan_output_columns(body).unwrap_or_default()
+            } else {
+                column_aliases.clone()
+            };
+            qualify_output_columns(alias.as_deref(), columns)
+        }
         SourcePlan::Join { left, right, .. } => {
             let mut cols = from_clause_output_columns(engine, left);
             cols.extend(from_clause_output_columns(engine, right));
@@ -402,6 +412,25 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
     columns: Vec<String>,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    if matches!(output_mode, QueryOutputMode::ExistsKeySet)
+        && matches!(statement.compute, ComputePlan::Project)
+        && statement.order_by.is_empty()
+        && statement.limit.is_none()
+        && statement.offset.is_none()
+        && !statement.distinct
+        && statement.distinct_on.is_empty()
+        && matches!(original.compute, ComputePlan::Project)
+        && original.order_by.is_empty()
+        && original.limit.is_none()
+        && original.offset.is_none()
+        && !original.distinct
+        && original.distinct_on.is_empty()
+    {
+        let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
+        let operator =
+            attach_relational_filter(engine, operator, predicate, params, ctes, &evaluator)?;
+        return collect_exists_key_operator(columns, operator, &statement.projections, evaluator);
+    }
     let operator = build_relational_operator(engine, operator, predicate, statement, params, ctes)?;
     finish_query_block_operator_output(
         engine,
@@ -412,6 +441,29 @@ pub(in crate::sql) fn execute_query_block_operator_output<'a>(
         columns,
         output_mode,
     )
+}
+
+fn attach_relational_filter<'a>(
+    engine: &'a Engine,
+    mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
+    predicate: Option<ScalarExpr>,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope,
+    evaluator: &SharedExpressionEvaluator<'a>,
+) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    use uqa_execution::Filter;
+
+    if let Some(predicate) = predicate {
+        operator = match prepare_correlated_exists_predicate(engine, &predicate, params, ctes)? {
+            Some(prepared) => Box::new(Filter::with_row_predicate(operator, prepared)),
+            None => Box::new(Filter::with_evaluator(
+                operator,
+                predicate,
+                Arc::clone(evaluator),
+            )),
+        };
+    }
+    Ok(operator)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -475,16 +527,10 @@ pub(in crate::sql) fn build_relational_operator<'a>(
     params: &'a [SQLParam],
     ctes: &'a CteScope,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
-    use uqa_execution::{ColumnSelection, Filter, HashAggregate, Project, Window};
+    use uqa_execution::{ColumnSelection, HashAggregate, Project, Window};
 
     let evaluator = EngineExpressionEvaluator::shared(engine, params, ctes);
-    if let Some(predicate) = predicate {
-        operator = Box::new(Filter::with_evaluator(
-            operator,
-            predicate,
-            Arc::clone(&evaluator),
-        ));
-    }
+    operator = attach_relational_filter(engine, operator, predicate, params, ctes, &evaluator)?;
 
     match statement.compute {
         ComputePlan::Project => {
@@ -543,7 +589,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                     ctes,
                     input_schema,
                     work_mem_bytes,
-                )),
+                )?),
             ));
             let output = identity_order_columns(&schema);
             operator = attach_order_limit(

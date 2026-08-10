@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::*;
@@ -41,10 +42,14 @@ fn disk_hash_index_rejects_corrupt_key_length_without_allocating_it() {
 struct TestEvaluator;
 
 impl crate::ExpressionEvaluator for TestEvaluator {
-    fn evaluate(&self, expression: &ScalarExpr, row: &ResultRow) -> ExecResult<Value> {
+    fn evaluate(
+        &self,
+        expression: &ScalarExpr,
+        row: &dyn uqa_sql::expr::RowLookup,
+    ) -> ExecResult<Value> {
         Ok(crate::eval_scalar(
             expression,
-            &crate::ScalarEvalContext::new(Some(row), &[]),
+            &crate::ScalarEvalContext::from_row_lookup(row, &[]),
         )?)
     }
 }
@@ -75,6 +80,8 @@ fn hash_full_join_preserves_unmatched_rows() {
         row(&[("l.id", Value::Null)]),
         row(&[("r.id", Value::Null)]),
     );
+    assert_eq!(join.left_key_positions, Some(vec![0]));
+    assert_eq!(join.right_key_positions, Some(vec![0]));
     let (_, rows) = run_to_rows(&mut join).unwrap();
     assert_eq!(rows.len(), 3);
     assert!(rows
@@ -129,10 +136,64 @@ fn hash_join_applies_residual_predicate_before_marking_matches() {
 }
 
 #[test]
+fn hash_join_prepares_constant_like_residual_once() {
+    struct ResidualEvaluatorMustNotRun;
+
+    impl crate::ExpressionEvaluator for ResidualEvaluatorMustNotRun {
+        fn evaluate(&self, _: &ScalarExpr, _: &dyn uqa_sql::expr::RowLookup) -> ExecResult<Value> {
+            Err(ExecError::Other(
+                "prepared residual fell back to the scalar evaluator".into(),
+            ))
+        }
+    }
+
+    let left = TableScan::from_rows(vec!["c.k".into()], vec![row(&[("c.k", Value::Int(1))])]);
+    let right = TableScan::from_rows(
+        vec!["o.k".into(), "o.comment".into()],
+        vec![
+            row(&[
+                ("o.k", Value::Int(1)),
+                ("o.comment", Value::Str("ordinary order".into())),
+            ]),
+            row(&[
+                ("o.k", Value::Int(1)),
+                ("o.comment", Value::Str("special pending requests".into())),
+            ]),
+        ],
+    );
+    let predicate = ScalarExpr::Not(Box::new(ScalarExpr::Func {
+        name: "like".into(),
+        args: vec![
+            ScalarExpr::qualified_column("o", "comment"),
+            ScalarExpr::Literal(Value::Str("%special%requests%".into())),
+        ],
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    }));
+    let mut join = HashJoin::new_with_work_mem_and_predicate(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("c.k".into())],
+        vec![ScalarExpr::Column("o.k".into())],
+        Some(predicate),
+        Arc::new(ResidualEvaluatorMustNotRun),
+        ResultRow::new(),
+        ResultRow::new(),
+        1024 * 1024,
+    );
+
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["o.comment"], Value::Str("ordinary order".into()));
+}
+
+#[test]
 fn nested_loop_predicate_errors_propagate() {
     struct FailingEvaluator;
     impl crate::ExpressionEvaluator for FailingEvaluator {
-        fn evaluate(&self, _: &ScalarExpr, _: &ResultRow) -> ExecResult<Value> {
+        fn evaluate(&self, _: &ScalarExpr, _: &dyn uqa_sql::expr::RowLookup) -> ExecResult<Value> {
             Err(crate::ExecError::Other("join predicate failed".into()))
         }
     }
@@ -184,6 +245,181 @@ fn high_cardinality_hash_join_spills_output() {
 }
 
 #[test]
+fn hash_join_keeps_fitting_build_state_in_memory() {
+    let left = TableScan::from_rows(
+        vec!["l.k".into()],
+        (0..32)
+            .map(|key| row(&[("l.k", Value::Int(key))]))
+            .collect(),
+    );
+    let right = TableScan::from_rows(
+        vec!["r.k".into()],
+        (0..32)
+            .map(|key| row(&[("r.k", Value::Int(key))]))
+            .collect(),
+    );
+    let mut join = HashJoin::new_with_work_mem(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("l.k".into())],
+        vec![ScalarExpr::Column("r.k".into())],
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+        1024 * 1024,
+    );
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert_eq!(rows.len(), 32);
+    assert!(!join.right_input_has_spilled());
+    assert!(!join.hash_index_has_spilled());
+    assert!(!join.output_has_spilled());
+}
+
+#[test]
+fn unique_inner_hash_join_streams_probe_batches_after_open() {
+    struct CountingProbe {
+        schema: Vec<String>,
+        next: usize,
+        end: usize,
+        batch_calls: Arc<AtomicUsize>,
+    }
+
+    impl crate::RowSource for CountingProbe {
+        fn schema(&self) -> &[String] {
+            &self.schema
+        }
+
+        fn estimated_cardinality(&self) -> Option<u64> {
+            u64::try_from(self.end - self.next).ok()
+        }
+
+        fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
+            panic!("TableScan must use the probe's batch implementation")
+        }
+
+        fn next_batch(&mut self, max_rows: usize) -> ExecResult<Vec<ResultRow>> {
+            self.batch_calls.fetch_add(1, Ordering::Relaxed);
+            let end = self.next.saturating_add(max_rows).min(self.end);
+            let rows = (self.next..end)
+                .map(|id| row(&[("r.k", Value::Int(1)), ("r.id", Value::Int(id as i64))]))
+                .collect();
+            self.next = end;
+            Ok(rows)
+        }
+    }
+
+    let build = TableScan::from_rows(vec!["l.k".into()], vec![row(&[("l.k", Value::Int(1))])]);
+    let batch_calls = Arc::new(AtomicUsize::new(0));
+    let probe = TableScan::new(Box::new(CountingProbe {
+        schema: vec!["r.k".into(), "r.id".into()],
+        next: 0,
+        end: crate::DEFAULT_BATCH_SIZE * 2,
+        batch_calls: batch_calls.clone(),
+    }));
+    let mut join = HashJoin::new(
+        Box::new(build),
+        Box::new(probe),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("l.k".into())],
+        vec![ScalarExpr::Column("r.k".into())],
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+    );
+
+    join.open().unwrap();
+    assert_eq!(batch_calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        join.next().unwrap().unwrap().rows.len(),
+        crate::DEFAULT_BATCH_SIZE
+    );
+    assert_eq!(batch_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        join.next().unwrap().unwrap().rows.len(),
+        crate::DEFAULT_BATCH_SIZE
+    );
+    assert_eq!(batch_calls.load(Ordering::Relaxed), 2);
+    assert!(join.next().unwrap().is_none());
+    assert_eq!(batch_calls.load(Ordering::Relaxed), 3);
+    assert!(!join.output_has_spilled());
+    join.close().unwrap();
+}
+
+#[test]
+fn inner_hash_join_builds_the_smaller_estimated_input() {
+    let left = TableScan::from_rows(
+        vec!["l.k".into(), "l.value".into()],
+        vec![
+            row(&[("l.k", Value::Int(1)), ("l.value", Value::Int(10))]),
+            row(&[("l.k", Value::Int(2)), ("l.value", Value::Int(20))]),
+        ],
+    );
+    let right = TableScan::from_rows(
+        vec!["r.k".into(), "r.value".into()],
+        (0..16)
+            .map(|key| row(&[("r.k", Value::Int(key)), ("r.value", Value::Int(key * 100))]))
+            .collect(),
+    );
+    let mut join = HashJoin::new(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("l.k".into())],
+        vec![ScalarExpr::Column("r.k".into())],
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+    );
+    assert!(join.builds_left_input());
+
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["l.value"], Value::Int(10));
+    assert_eq!(rows[0]["r.value"], Value::Int(100));
+}
+
+#[test]
+fn empty_smaller_inner_build_does_not_read_the_probe_input() {
+    struct NeverRead {
+        schema: Vec<String>,
+    }
+
+    impl crate::RowSource for NeverRead {
+        fn schema(&self) -> &[String] {
+            &self.schema
+        }
+
+        fn estimated_cardinality(&self) -> Option<u64> {
+            Some(10)
+        }
+
+        fn next_row(&mut self) -> ExecResult<Option<ResultRow>> {
+            panic!("empty inner build must short-circuit its probe input")
+        }
+    }
+
+    let left = TableScan::from_rows(vec!["l.k".into()], Vec::new());
+    let right = TableScan::new(Box::new(NeverRead {
+        schema: vec!["r.k".into()],
+    }));
+    let mut join = HashJoin::new(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Inner,
+        vec![ScalarExpr::Column("l.k".into())],
+        vec![ScalarExpr::Column("r.k".into())],
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+    );
+    assert!(join.builds_left_input());
+
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
 fn high_cardinality_nested_loop_join_spills_output() {
     let left = TableScan::from_rows(
         vec!["l.id".into()],
@@ -207,6 +443,32 @@ fn high_cardinality_nested_loop_join_spills_output() {
     assert!(join.output_has_spilled());
     assert!(join.right_input_has_spilled());
     assert_eq!(rows.len(), 48 * 48);
+}
+
+#[test]
+fn nested_loop_join_keeps_fitting_build_state_in_memory() {
+    let left = TableScan::from_rows(
+        vec!["l.id".into()],
+        (0..8).map(|id| row(&[("l.id", Value::Int(id))])).collect(),
+    );
+    let right = TableScan::from_rows(
+        vec!["r.id".into()],
+        (0..8).map(|id| row(&[("r.id", Value::Int(id))])).collect(),
+    );
+    let mut join = NestedLoopJoin::new_with_work_mem(
+        Box::new(left),
+        Box::new(right),
+        JoinKind::Cross,
+        None,
+        evaluator(),
+        ResultRow::new(),
+        ResultRow::new(),
+        1024 * 1024,
+    );
+    let (_, rows) = run_to_rows(&mut join).unwrap();
+    assert_eq!(rows.len(), 8 * 8);
+    assert!(!join.right_input_has_spilled());
+    assert!(!join.output_has_spilled());
 }
 
 struct GeneratedRows {

@@ -15,6 +15,7 @@ pub(super) fn value_to_string(v: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
+        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::List(_) | Value::Map(_) => value_to_json(v).to_string(),
@@ -81,7 +82,7 @@ pub(super) fn to_i64(v: &Value) -> Result<i64> {
             .to_i64_trunc()
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to integer"))),
         Value::Bool(b) => Ok(i64::from(*b)),
-        Value::Str(s) => s
+        Value::Str(s) | Value::FixedChar(s) => s
             .trim()
             .parse()
             .map_err(|_| SQLError::TypeMismatch(format!("cannot parse {s:?} as integer"))),
@@ -115,7 +116,7 @@ pub(crate) fn to_f64(v: &Value) -> Result<f64> {
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         // float8 casts accept PostgreSQL's textual forms, including
         // Infinity / NaN spellings.
-        Value::Str(s) => {
+        Value::Str(s) | Value::FixedChar(s) => {
             let text = s.trim();
             let lowered = text.to_ascii_lowercase();
             match lowered.as_str() {
@@ -141,7 +142,7 @@ pub(super) fn to_decimal(v: &Value) -> Result<DecimalValue> {
         Value::Float(f) => DecimalValue::from_f64_lossy(*f)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to numeric"))),
         Value::Bool(b) => Ok(DecimalValue::from_bool(*b)),
-        Value::Str(s) => DecimalValue::parse(s)
+        Value::Str(s) | Value::FixedChar(s) => DecimalValue::parse(s)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot parse {s:?} as numeric"))),
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
@@ -183,7 +184,7 @@ pub(super) fn coerce_i64(v: &Value) -> Option<i64> {
         Value::Float(f) => float_to_i64_trunc(*f).ok(),
         Value::Decimal(d) => d.to_i64_trunc(),
         Value::Bool(b) => Some(i64::from(*b)),
-        Value::Str(s) => s.parse().ok(),
+        Value::Str(s) | Value::FixedChar(s) => s.parse().ok(),
         _ => None,
     }
 }

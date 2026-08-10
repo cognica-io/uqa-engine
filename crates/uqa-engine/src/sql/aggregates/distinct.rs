@@ -12,7 +12,7 @@ use super::{
 };
 
 pub(in crate::sql) struct DistinctTracker {
-    pub(super) memory: BTreeSet<String>,
+    pub(super) memory: BTreeSet<Value>,
     pub(super) memory_bytes: usize,
     pub(super) max_memory_record_bytes: usize,
     pub(super) budget_bytes: usize,
@@ -38,15 +38,11 @@ impl DistinctTracker {
         }
     }
 
-    pub(super) fn insert(&mut self, key: String) -> Result<bool, SQLError> {
-        if self.memory.contains(&key) || self.disk_contains(&key)? {
+    pub(super) fn insert(&mut self, value: &Value) -> Result<bool, SQLError> {
+        if self.memory.contains(value) || self.disk_contains(value)? {
             return Ok(false);
         }
-        let encoded_bytes = serde_json::to_vec(&key)
-            .map_err(|error| {
-                SQLError::Internal(format!("failed to size aggregate DISTINCT key: {error}"))
-            })?
-            .len()
+        let encoded_bytes = encoded_value_size(value)?
             .checked_add(1)
             .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
         self.memory_bytes = self
@@ -54,14 +50,14 @@ impl DistinctTracker {
             .checked_add(encoded_bytes)
             .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
         self.max_memory_record_bytes = self.max_memory_record_bytes.max(encoded_bytes);
-        self.memory.insert(key);
+        self.memory.insert(value.clone());
         if self.memory_bytes > self.budget_bytes {
             self.spill()?;
         }
         Ok(true)
     }
 
-    pub(super) fn disk_contains(&self, wanted: &str) -> Result<bool, SQLError> {
+    pub(super) fn disk_contains(&self, wanted: &Value) -> Result<bool, SQLError> {
         let Some(file) = self.disk.as_ref() else {
             return Ok(false);
         };
@@ -80,12 +76,12 @@ impl DistinctTracker {
             else {
                 return Ok(false);
             };
-            let key: String = serde_json::from_slice(&record).map_err(|error| {
+            let value: Value = serde_json::from_slice(&record).map_err(|error| {
                 SQLError::Internal(format!(
                     "failed to decode aggregate DISTINCT spill: {error}"
                 ))
             })?;
-            if key == wanted {
+            if &value == wanted {
                 return Ok(true);
             }
         }
@@ -113,8 +109,8 @@ impl DistinctTracker {
         let result = {
             let mut writer = BufWriter::new(file.as_file_mut());
             let result = (|| -> Result<(), SQLError> {
-                for key in &self.memory {
-                    serde_json::to_writer(&mut writer, key).map_err(|error| {
+                for value in &self.memory {
+                    serde_json::to_writer(&mut writer, value).map_err(|error| {
                         SQLError::Internal(format!(
                             "failed to encode aggregate DISTINCT key: {error}"
                         ))
@@ -148,6 +144,31 @@ impl DistinctTracker {
         self.max_disk_record_bytes = next_max_disk_record_bytes;
         Ok(())
     }
+}
+
+fn encoded_value_size(value: &Value) -> Result<usize, SQLError> {
+    #[derive(Default)]
+    struct ByteCounter(usize);
+
+    impl std::io::Write for ByteCounter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_add(bytes.len())
+                .ok_or_else(|| std::io::Error::other("aggregate DISTINCT encoded size overflow"))?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer(&mut counter, value).map_err(|error| {
+        SQLError::Internal(format!("failed to size aggregate DISTINCT value: {error}"))
+    })?;
+    Ok(counter.0)
 }
 
 pub(in crate::sql) fn distinct_key(v: &Value) -> Result<String, SQLError> {

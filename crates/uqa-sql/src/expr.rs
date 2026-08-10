@@ -50,7 +50,7 @@ use binary::{
     values_equal_nullable,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
-pub use binary::{eval_binary_values, truthy};
+pub use binary::{eval_binary_values, eval_comparison_truth, truthy};
 pub use casting::{array_dimensions, cast_value, parse_pg_array_literal};
 pub(crate) use conversion::to_f64;
 use conversion::{
@@ -59,6 +59,7 @@ use conversion::{
 };
 pub use conversion::{value_to_tensor, value_to_vector};
 use scalar_dispatch::{eval_scalar_function, eval_sequence_function};
+pub use scalar_helpers::CompiledLikePattern;
 use scalar_helpers::{
     compile_pg_regex, like_match, point_xy, quote_ident, quote_literal, similar_to_regex,
     trim_chars, typeof_value,
@@ -137,6 +138,20 @@ pub trait RowLookup {
         None
     }
 
+    /// Visit every logical column in schema order. Named rows use their map
+    /// order; positional execution rows override this without materializing a
+    /// map. The default keeps narrow projected lookup implementations source
+    /// compatible when they deliberately do not expose whole-row semantics.
+    fn visit_columns(&self, _visitor: &mut dyn FnMut(&str, &Value)) {}
+
+    /// Visit logical output columns plus hidden lookup aliases. Physical rows
+    /// use this only when a genuinely correlated lateral fallback must cross a
+    /// named-row boundary; ordinary projection/materialization remains limited
+    /// to [`Self::visit_columns`].
+    fn visit_lookup_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
+        self.visit_columns(visitor);
+    }
+
     /// Physical correlated subqueries require the concrete outer row passed
     /// to `ScalarSubqueryRunner`. Projected row views return `None`; planners
     /// only use them for expressions that cannot contain subqueries.
@@ -163,6 +178,12 @@ impl RowLookup for ResultRow {
     fn result_row(&self) -> Option<&ResultRow> {
         Some(self)
     }
+
+    fn visit_columns(&self, visitor: &mut dyn FnMut(&str, &Value)) {
+        for (column, value) in self {
+            visitor(column, value);
+        }
+    }
 }
 
 pub struct EvalContext<'a> {
@@ -184,7 +205,10 @@ impl<'a> EvalContext<'a> {
 
     pub fn from_row_lookup(row: &'a dyn RowLookup, params: &'a [SQLParam]) -> Self {
         Self {
-            row: row.result_row(),
+            // Whole-row materialization is needed only by correlated
+            // subqueries. Ordinary scalar evaluation must remain on the
+            // lookup/slot path.
+            row: None,
             row_lookup: Some(row),
             params,
             engine: None,
@@ -620,6 +644,7 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Int(_) => "integer",
         Value::Float(_) => "double precision",
         Value::Str(_) => "text",
+        Value::FixedChar(_) => "character",
         Value::Bytes(_) => "bytea",
         Value::Temporal(TemporalValue::Interval { .. }) => "interval",
         Value::Temporal(_) => "timestamp",

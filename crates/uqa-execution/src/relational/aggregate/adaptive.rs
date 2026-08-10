@@ -67,7 +67,8 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
 
     pub(super) fn consume(&mut self, batch: Batch) -> ExecResult<()> {
         for row in batch.rows {
-            let context = ScalarEvalContext::new(Some(&row), self.params);
+            let view = batch.schema.view(&row);
+            let context = ScalarEvalContext::from_row_lookup(&view, self.params);
             let key = self
                 .group_keys
                 .iter()
@@ -79,7 +80,7 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
             })?;
             let previous_bytes = state_bytes(state);
             for (fold, aggregate) in state.folds.iter_mut().zip(self.aggregates) {
-                fold::fold_into(fold, aggregate, &row, self.params)?;
+                fold::fold_into(fold, aggregate, &view, self.params)?;
             }
             if self.variable_state {
                 self.retained_bytes = self
@@ -191,7 +192,7 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
     ) -> ExecResult<crate::spill::SpillBuffer> {
         let group_count = self.group_keys.len();
         let scan: Box<dyn PhysicalOperator> = Box::new(crate::spill_scan::SpillScan::new(
-            partial::schema(group_count).columns,
+            partial::schema(group_count).columns().to_vec(),
             partials,
         ));
         let keys = (0..group_count)
@@ -212,7 +213,11 @@ impl<'a> AdaptiveBuiltinAggregate<'a> {
         let execution = (|| -> ExecResult<()> {
             while let Some(batch) = sorted.next()? {
                 for row in batch.rows {
-                    let state = partial::decode_group(row, group_count, self.aggregates)?;
+                    let state = partial::decode_group(
+                        batch.schema.view(&row).to_result_row(),
+                        group_count,
+                        self.aggregates,
+                    )?;
                     if current
                         .as_ref()
                         .is_some_and(|current| current.key_values != state.key_values)
@@ -321,7 +326,7 @@ fn group_entry_bytes(map_key: &[Value], state: &GroupState) -> usize {
 
 fn value_retained_bytes(value: &Value) -> usize {
     std::mem::size_of::<Value>().saturating_add(match value {
-        Value::Str(value) => value.capacity(),
+        Value::Str(value) | Value::FixedChar(value) => value.capacity(),
         Value::Bytes(value) => value.capacity(),
         Value::List(values) => values
             .capacity()

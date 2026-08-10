@@ -81,6 +81,10 @@ fn generalized_entry_orders_lexicographically() {
 fn value_ordering_within_variant() {
     assert!(Value::Int(1) < Value::Int(2));
     assert!(Value::Str("a".into()) < Value::Str("b".into()));
+    assert_eq!(
+        Value::FixedChar("a ".into()),
+        Value::FixedChar("a   ".into())
+    );
 }
 
 #[test]
@@ -110,6 +114,60 @@ fn value_ordering_across_variants_is_stable() {
             assert_eq!(left.cmp(&text), right.cmp(&text));
         }
     }
+}
+
+#[test]
+fn decimal_division_uses_postgresql_display_scale() {
+    let divide = |left: &str, right: &str| {
+        DecimalValue::parse(left)
+            .unwrap()
+            .checked_div_postgres(&DecimalValue::parse(right).unwrap())
+            .unwrap()
+            .to_sql_string()
+    };
+
+    assert_eq!(divide("1", "2"), "0.50000000000000000000");
+    assert_eq!(divide("10.00", "4"), "2.5000000000000000");
+    assert_eq!(divide("37569624.64", "1478"), "25419.231826792963");
+    assert_eq!(divide("75.18", "1478"), "0.05086603518267929635");
+}
+
+#[test]
+fn decimal_metadata_matches_display_and_numeric_equality() {
+    for text in [
+        "0",
+        "0.00",
+        "1",
+        "1.000",
+        "-0.0010",
+        "12345678901234567890.12345678",
+        "-79228162514264337593543950335",
+    ] {
+        let decimal = DecimalValue::parse(text).unwrap();
+        assert_eq!(decimal.sql_string_len(), decimal.to_sql_string().len());
+    }
+
+    assert_eq!(
+        DecimalValue::parse("1").unwrap().canonical_parts(),
+        DecimalValue::parse("1.000").unwrap().canonical_parts()
+    );
+    assert_eq!(
+        DecimalValue::parse("0.00").unwrap().canonical_parts(),
+        (0, 0)
+    );
+}
+
+#[test]
+fn decimal_numeric_conversions_use_internal_parts() {
+    let value = DecimalValue::parse("-1234567890.125").unwrap();
+    assert_eq!(value.to_i64_trunc(), Some(-1_234_567_890));
+    assert_eq!(value.to_f64(), Some(-1_234_567_890.125));
+    assert_eq!(
+        DecimalValue::parse("79228162514264337593543950335")
+            .unwrap()
+            .to_i64_trunc(),
+        None
+    );
 }
 
 #[test]
@@ -264,6 +322,14 @@ fn byte_values_use_an_explicit_tagged_json_encoding() {
         decode(r#"{"$uqa_type":"bytes","hex":"00FF"}"#),
         Value::Bytes(vec![0, 255])
     );
+}
+
+#[test]
+fn fixed_character_values_use_an_explicit_tagged_json_encoding() {
+    let value = Value::FixedChar("x   ".into());
+    let json = serde_json::to_string(&value).unwrap();
+    assert_eq!(json, r#"{"$uqa_type":"fixed_char","value":"x   "}"#);
+    assert_eq!(decode(&json), value);
 }
 
 #[test]
@@ -519,6 +585,7 @@ fn value_json_round_trips_every_variant() {
         Value::Int(-5),
         Value::Float(2.25),
         Value::Str("text".into()),
+        Value::FixedChar("x   ".into()),
         Value::Bytes(vec![0, 1, 255]),
         Value::Temporal(TemporalValue::Interval {
             months: 14,

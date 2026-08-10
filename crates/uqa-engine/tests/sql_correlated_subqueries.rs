@@ -210,6 +210,52 @@ fn exists_with_additional_condition() {
 }
 
 #[test]
+fn decorrelated_exists_preserves_null_equality_semantics() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE outer_keys (id INTEGER, key INTEGER)");
+    exec(
+        &engine,
+        "CREATE TABLE inner_keys (key INTEGER, enabled INTEGER)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO outer_keys (id, key) VALUES (1, 10), (2, NULL), (3, 30)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO inner_keys (key, enabled) VALUES (10, 1), (NULL, 1), (30, 0)",
+    );
+
+    let exists = query(
+        &engine,
+        "SELECT o.id FROM outer_keys o
+         WHERE EXISTS (
+           SELECT 1 FROM inner_keys i
+           WHERE i.key = o.key AND i.enabled = 1
+         ) ORDER BY o.id",
+    );
+    assert_eq!(exists.rows.len(), 1);
+    assert_eq!(exists.rows[0]["id"], Value::Int(1));
+
+    let not_exists = query(
+        &engine,
+        "SELECT o.id FROM outer_keys o
+         WHERE NOT EXISTS (
+           SELECT 1 FROM inner_keys i
+           WHERE i.key = o.key AND i.enabled = 1
+         ) ORDER BY o.id",
+    );
+    assert_eq!(
+        not_exists
+            .rows
+            .iter()
+            .map(|row| row["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![Value::Int(2), Value::Int(3)]
+    );
+}
+
+#[test]
 fn correlated_in() {
     let engine = setup();
     exec(

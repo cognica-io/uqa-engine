@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "workload": "tpch-dbgen-2.14.0-sf0.001-default-queries",
+  "disclaimer": "TPC-H is a trademark of the Transaction Processing Performance Council. This small-scale compatibility workload is not a compliant, audited, or published TPC-H result.",
+  "data": {
+    "generator_repository": "https://github.com/electrum/tpch-dbgen",
+    "generator_commit": "32f1c1b92d1664dba542e927d23d86ffa57aa253",
+    "generator_version": "2.14.0",
+    "scale_factor": 0.001,
+    "official_scale_factor": false,
+    "rows": {
+      "region": 5,
+      "nation": 25,
+      "supplier": 10,
+      "customer": 150,
+      "part": 200,
+      "partsupp": 800,
+      "orders": 1500,
+      "lineitem": 6005
+    }
+  },
+  "queries": {
+    "count": 22,
+    "parameter_set": "TPC-H default substitutions",
+    "source": "DuckDB tpch extension 1.5.3 tpch_queries()",
+    "semantic_reference": "PostgreSQL 17",
+    "expected_results": "expected/pg17.json",
+    "comparison": "Exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values"
+  }
+}

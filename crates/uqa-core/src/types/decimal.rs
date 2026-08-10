@@ -9,6 +9,7 @@
 use super::{
     Decimal, Deserialize, Deserializer, FromStr, Ordering, RoundingStrategy, Serialize, Serializer,
 };
+use rust_decimal::prelude::ToPrimitive;
 
 /// Exact base-10 numeric value for `PostgreSQL` `NUMERIC` / `DECIMAL`.
 ///
@@ -30,6 +31,12 @@ impl DecimalValue {
 
     pub fn from_i64(value: i64) -> Self {
         Self::new(Decimal::from(value))
+    }
+
+    pub fn from_i128(value: i128) -> Option<Self> {
+        Decimal::try_from_i128_with_scale(value, 0)
+            .ok()
+            .map(Self::new)
     }
 
     pub fn from_bool(value: bool) -> Self {
@@ -65,6 +72,24 @@ impl DecimalValue {
 
     pub fn checked_div(&self, rhs: &Self) -> Option<Self> {
         self.inner.checked_div(rhs.inner).map(Self::new)
+    }
+
+    /// Divide using `PostgreSQL`'s `select_div_scale()` rule. `PostgreSQL` keeps
+    /// at least 16 significant decimal digits, never uses less display scale
+    /// than either operand, and rounds half away from zero.
+    pub fn checked_div_postgres(&self, rhs: &Self) -> Option<Self> {
+        if rhs.is_zero() {
+            return None;
+        }
+        // rust_decimal's representation tops out at 28 fractional digits.
+        // Every representable input also has scale <= 28, so this is the only
+        // additional cap needed for PostgreSQL's much wider NUMERIC domain.
+        let result_scale = postgres_div_scale(self, rhs).min(28);
+        let mut quotient = self.inner.checked_div(rhs.inner)?;
+        quotient =
+            quotient.round_dp_with_strategy(result_scale, RoundingStrategy::MidpointAwayFromZero);
+        quotient.rescale(result_scale);
+        (quotient.scale() == result_scale).then(|| Self::new(quotient))
     }
 
     pub fn checked_rem(&self, rhs: &Self) -> Option<Self> {
@@ -150,13 +175,82 @@ impl DecimalValue {
         self.inner.normalize().to_string()
     }
 
+    /// Normalized base-10 coefficient and scale. Equal decimal values return
+    /// identical parts even when their declared display scales differ.
+    pub fn canonical_parts(&self) -> (i128, u32) {
+        let normalized = self.inner.normalize();
+        (normalized.mantissa(), normalized.scale())
+    }
+
+    /// Exact byte length of [`Self::to_sql_string`] without allocating or
+    /// formatting the string.
+    pub fn sql_string_len(&self) -> usize {
+        let coefficient = self.inner.mantissa();
+        let magnitude = coefficient.unsigned_abs();
+        let digits = if magnitude == 0 {
+            1
+        } else {
+            magnitude.ilog10() as usize + 1
+        };
+        let sign = usize::from(coefficient.is_negative());
+        let scale = self.inner.scale() as usize;
+        if scale == 0 {
+            sign + digits
+        } else {
+            sign + digits.saturating_sub(scale).max(1) + 1 + scale
+        }
+    }
+
     pub fn to_i64_trunc(&self) -> Option<i64> {
-        self.inner.trunc().to_string().parse::<i64>().ok()
+        self.inner.to_i64()
     }
 
     pub fn to_f64(&self) -> Option<f64> {
-        self.inner.to_string().parse::<f64>().ok()
+        self.inner.to_f64()
     }
+}
+
+fn postgres_div_scale(dividend: &DecimalValue, divisor: &DecimalValue) -> u32 {
+    const MIN_SIGNIFICANT_DIGITS: i32 = 16;
+    const DECIMAL_DIGITS_PER_GROUP: i32 = 4;
+
+    let (dividend_weight, dividend_first_digit) = numeric_group_head(&dividend.inner);
+    let (divisor_weight, divisor_first_digit) = numeric_group_head(&divisor.inner);
+    let mut quotient_weight = dividend_weight - divisor_weight;
+    if dividend_first_digit <= divisor_first_digit {
+        quotient_weight -= 1;
+    }
+    let selected = MIN_SIGNIFICANT_DIGITS - quotient_weight * DECIMAL_DIGITS_PER_GROUP;
+    selected
+        .max(i32::try_from(dividend.inner.scale()).unwrap_or(i32::MAX))
+        .max(i32::try_from(divisor.inner.scale()).unwrap_or(i32::MAX))
+        .max(0) as u32
+}
+
+/// Return `PostgreSQL` `NumericVar`'s normalized base-10000 weight and first
+/// non-zero digit for a `rust_decimal` value.
+fn numeric_group_head(value: &Decimal) -> (i32, u32) {
+    let coefficient = value.mantissa().unsigned_abs();
+    if coefficient == 0 {
+        return (0, 0);
+    }
+    let digits = coefficient.to_string();
+    let decimal_weight = i32::try_from(digits.len())
+        .unwrap_or(i32::MAX)
+        .saturating_sub(i32::try_from(value.scale()).unwrap_or(i32::MAX))
+        .saturating_sub(1);
+    let group_weight = decimal_weight.div_euclid(4);
+    let leading_width = usize::try_from(decimal_weight - group_weight * 4 + 1).unwrap_or(4);
+    let mut first_digit = digits
+        .chars()
+        .take(leading_width)
+        .fold(0_u32, |number, digit| {
+            number * 10 + digit.to_digit(10).unwrap_or(0)
+        });
+    for _ in digits.len().min(leading_width)..leading_width {
+        first_digit *= 10;
+    }
+    (group_weight, first_digit)
 }
 
 fn decimal_pow10(power: u32) -> Option<Decimal> {

@@ -22,6 +22,9 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Str(String),
+    /// A `PostgreSQL` blank-padded `CHARACTER(n)` value. The stored string
+    /// includes its physical trailing spaces; SQL comparisons ignore them.
+    FixedChar(String),
     Bytes(Vec<u8>),
     Temporal(TemporalValue),
     Decimal(DecimalValue),
@@ -40,6 +43,20 @@ impl Serialize for Value {
             Self::Int(value) => serializer.serialize_i64(*value),
             Self::Float(value) => serializer.serialize_f64(*value),
             Self::Str(value) => serializer.serialize_str(value),
+            Self::FixedChar(value) => {
+                #[derive(Serialize)]
+                struct TaggedFixedChar<'a> {
+                    #[serde(rename = "$uqa_type")]
+                    kind: &'static str,
+                    value: &'a str,
+                }
+
+                TaggedFixedChar {
+                    kind: "fixed_char",
+                    value,
+                }
+                .serialize(serializer)
+            }
             Self::Bytes(value) => {
                 const DIGITS: &[u8; 16] = b"0123456789abcdef";
 
@@ -154,6 +171,12 @@ fn value_from_tagged_map(
                 return Ok(None);
             };
             return Ok(DecimalValue::parse(text).map(Value::Decimal));
+        }
+        "fixed_char" if map.len() == 2 => {
+            let Some(Value::Str(text)) = map.get("value") else {
+                return Ok(None);
+            };
+            return Ok(Some(Value::FixedChar(text.clone())));
         }
         "bytes" if map.len() == 2 => {
             let Some(Value::Str(hex)) = map.get("hex") else {
@@ -429,6 +452,9 @@ impl Ord for Value {
             (Value::Bool(a), Value::Decimal(b)) => DecimalValue::from_bool(*a).cmp(b),
             (Value::Decimal(a), Value::Bool(b)) => a.cmp(&DecimalValue::from_bool(*b)),
             (Value::Str(a), Value::Str(b)) => a.cmp(b),
+            (Value::FixedChar(a), Value::FixedChar(b)) => {
+                fixed_char_text(a).cmp(fixed_char_text(b))
+            }
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
             (Value::List(a), Value::List(b)) => a.cmp(b),
@@ -443,9 +469,14 @@ fn discriminant(v: &Value) -> u8 {
         Value::Null => 0,
         Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 1,
         Value::Str(_) => 2,
-        Value::Bytes(_) => 3,
-        Value::Temporal(_) => 4,
-        Value::List(_) => 5,
-        Value::Map(_) => 6,
+        Value::FixedChar(_) => 3,
+        Value::Bytes(_) => 4,
+        Value::Temporal(_) => 5,
+        Value::List(_) => 6,
+        Value::Map(_) => 7,
     }
+}
+
+fn fixed_char_text(value: &str) -> &str {
+    value.trim_end_matches(' ')
 }

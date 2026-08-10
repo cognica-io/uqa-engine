@@ -1,5 +1,7 @@
 [package]
 name = "uqa-engine"
+# Link by resource domain instead of once per source; CI verifies every source is registered.
+autotests = false
 description = "Engine: schema-aware table store, catalog restore, transactions"
 version.workspace = true
 edition.workspace = true
@@ -25,8 +27,10 @@ uqa-joins = { workspace = true }
 uqa-planner = { workspace = true }
 uqa-execution = { workspace = true }
 uqa-fdw = { workspace = true }
+ahash = { workspace = true }
 parking_lot = { workspace = true }
 regex = { workspace = true }
+smallvec = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3.13"
@@ -51,6 +55,34 @@ duckdb = { workspace = true }
 arrow-array = { workspace = true }
 arrow-ipc = { workspace = true }
 arrow-schema = { workspace = true }
+
+[[test]]
+name = "engine_catalog"
+path = "tests/engine_catalog.rs"
+
+[[test]]
+name = "engine_functions"
+path = "tests/engine_functions.rs"
+
+[[test]]
+name = "engine_graph"
+path = "tests/engine_graph.rs"
+
+[[test]]
+name = "engine_queries"
+path = "tests/engine_queries.rs"
+
+[[test]]
+name = "engine_search"
+path = "tests/engine_search.rs"
+
+[[test]]
+name = "engine_storage"
+path = "tests/engine_storage.rs"
+
+[[test]]
+name = "sql_tpch"
+path = "tests/sql_tpch.rs"
 
 [[bench]]
 name = "sql_e2e"
@@ -94,6 +126,10 @@ harness = false
 
 [[bench]]
 name = "tpch_style"
+harness = false
+
+[[bench]]
+name = "tpch"
 harness = false
 
 [[bench]]

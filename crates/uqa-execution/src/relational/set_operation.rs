@@ -47,8 +47,8 @@ impl<'a> SetOperation<'a> {
 }
 
 impl PhysicalOperator for SetOperation<'_> {
-    fn schema(&self) -> &[String] {
-        self.inner.schema()
+    fn row_schema(&self) -> &super::RowSchema {
+        self.inner.row_schema()
     }
 
     fn open(&mut self) -> ExecResult<()> {

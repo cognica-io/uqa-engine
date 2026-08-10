@@ -34,8 +34,17 @@ fn reorder_query_joins(
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
+            let where_predicates = block
+                .r#where
+                .as_ref()
+                .map(|predicate| {
+                    let mut predicates = Vec::new();
+                    collect_conjuncts(predicate, &mut predicates);
+                    predicates
+                })
+                .unwrap_or_default();
             if let Some(source) = &mut block.from {
-                reorder_source_joins(source, statistics)?;
+                reorder_source_joins(source, &where_predicates, statistics)?;
             }
             for subquery in &mut block.subqueries {
                 reorder_query_joins(subquery, statistics)?;
@@ -75,7 +84,7 @@ fn reorder_command_joins(
                 reorder_query_joins(&mut cte.query, statistics)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, statistics)?;
+                reorder_source_joins(source, &[], statistics)?;
             }
             for subquery in &mut plan.subqueries {
                 reorder_query_joins(subquery, statistics)?;
@@ -86,14 +95,14 @@ fn reorder_command_joins(
                 reorder_query_joins(&mut cte.query, statistics)?;
             }
             if let Some(source) = &mut plan.source {
-                reorder_source_joins(source, statistics)?;
+                reorder_source_joins(source, &[], statistics)?;
             }
             for subquery in &mut plan.subqueries {
                 reorder_query_joins(subquery, statistics)?;
             }
         }
         CommandPlan::Merge(plan) => {
-            reorder_source_joins(&mut plan.source, statistics)?;
+            reorder_source_joins(&mut plan.source, &[], statistics)?;
             for subquery in &mut plan.subqueries {
                 reorder_query_joins(subquery, statistics)?;
             }
@@ -136,18 +145,19 @@ fn reorder_command_joins(
 
 fn reorder_source_joins(
     source: &mut SourcePlan,
+    external_predicates: &[ScalarExpr],
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     match source {
         SourcePlan::Join { left, right, .. } => {
-            reorder_source_joins(left, statistics)?;
-            reorder_source_joins(right, statistics)?;
+            reorder_source_joins(left, &[], statistics)?;
+            reorder_source_joins(right, &[], statistics)?;
         }
         SourcePlan::Subquery { body, .. } => reorder_query_joins(body, statistics)?,
         SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Function { .. } => {}
     }
 
-    if let Some(reordered) = reordered_inner_join_source(source, statistics)? {
+    if let Some(reordered) = reordered_inner_join_source(source, external_predicates, statistics)? {
         *source = reordered;
     }
     Ok(())
@@ -162,6 +172,7 @@ struct JoinPredicateBinding {
 
 fn reordered_inner_join_source(
     source: &SourcePlan,
+    external_predicates: &[ScalarExpr],
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<Option<SourcePlan>> {
     let mut atoms = Vec::new();
@@ -200,13 +211,35 @@ fn reordered_inner_join_source(
             source_id,
         });
     }
+    let column_owners = unique_column_owners(&relations);
+    apply_local_filter_selectivity(
+        &mut relations,
+        external_predicates,
+        &aliases,
+        &column_owners,
+    );
+
+    // SQL's comma-separated FROM form lowers to a tree of cross joins while
+    // its join equalities remain in the query-block WHERE expression. Treat
+    // only top-level conjunctive column equalities as join-graph edges. The
+    // WHERE expression stays in place as a post-join semantic guard; adding
+    // the same equality to the hash join changes evaluation shape, not rows.
+    for expression in external_predicates {
+        for (implied, _) in implied_join_predicates(expression, &aliases, &column_owners) {
+            expressions.push(implied);
+        }
+    }
 
     let mut predicates = Vec::new();
     let mut graph_predicates = Vec::new();
     for expression in expressions {
         let mut qualifiers = BTreeSet::new();
         collect_scalar_qualifiers(&expression, &mut qualifiers);
-        let graph_predicate = join_predicate(&expression, &aliases);
+        let graph_predicate = join_predicate(&expression, &aliases, &column_owners);
+        if let Some(predicate) = &graph_predicate {
+            qualifiers.insert(predicate.left_alias.clone());
+            qualifiers.insert(predicate.right_alias.clone());
+        }
         let pushable = graph_predicate.is_some();
         graph_predicates.extend(graph_predicate);
         predicates.push(JoinPredicateBinding {
@@ -239,7 +272,7 @@ fn flatten_reorderable_inner_join(
         SourcePlan::Join {
             left,
             right,
-            kind: uqa_sql::ast::JoinKind::Inner,
+            kind: uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross,
             on,
             lateral: false,
             strategy: _,
@@ -275,7 +308,121 @@ fn collect_conjuncts(expression: &ScalarExpr, output: &mut Vec<ScalarExpr>) {
     }
 }
 
-fn join_predicate(expression: &ScalarExpr, aliases: &BTreeSet<String>) -> Option<JoinPredicate> {
+type ColumnOwners = BTreeMap<String, Option<(String, String)>>;
+
+fn unique_column_owners(relations: &[JoinRelation]) -> ColumnOwners {
+    let mut owners = ColumnOwners::new();
+    for relation in relations {
+        for column in relation.column_stats.keys() {
+            owners
+                .entry(column.clone())
+                .and_modify(|owner| *owner = None)
+                .or_insert_with(|| Some((relation.alias.clone(), column.clone())));
+        }
+    }
+    owners
+}
+
+fn apply_local_filter_selectivity(
+    relations: &mut [JoinRelation],
+    predicates: &[ScalarExpr],
+    aliases: &BTreeSet<String>,
+    column_owners: &ColumnOwners,
+) {
+    let estimator = crate::CardinalityEstimator::new();
+    for predicate in predicates {
+        let mut referenced = BTreeSet::new();
+        if !collect_resolved_aliases(predicate, aliases, column_owners, &mut referenced)
+            || referenced.len() != 1
+        {
+            continue;
+        }
+        let Some(alias) = referenced.first() else {
+            continue;
+        };
+        let Some(relation) = relations
+            .iter_mut()
+            .find(|relation| relation.alias == *alias)
+        else {
+            continue;
+        };
+        let statistics = crate::RelationStats {
+            row_count: relation.cardinality.round() as u64,
+            columns: relation.column_stats.clone(),
+        };
+        let selectivity = estimator.scalar_selectivity(predicate, &statistics).raw();
+        relation.cardinality = (relation.cardinality * selectivity).max(1.0);
+    }
+}
+
+fn collect_resolved_aliases(
+    expression: &ScalarExpr,
+    aliases: &BTreeSet<String>,
+    column_owners: &ColumnOwners,
+    output: &mut BTreeSet<String>,
+) -> bool {
+    let mut recur = |expression: &ScalarExpr| {
+        collect_resolved_aliases(expression, aliases, column_owners, output)
+    };
+    match expression {
+        ScalarExpr::Column(column) => {
+            let Some(Some((alias, _))) = column_owners.get(column) else {
+                return false;
+            };
+            output.insert(alias.clone());
+            true
+        }
+        ScalarExpr::QualifiedColumn { qualifier, .. } => {
+            if !aliases.contains(qualifier) {
+                return false;
+            }
+            output.insert(qualifier.clone());
+            true
+        }
+        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Func {
+            args,
+            order_by,
+            filter,
+            ..
+        } => {
+            args.iter().all(&mut recur)
+                && order_by.iter().all(|order| recur(&order.expr))
+                && filter.as_deref().is_none_or(recur)
+        }
+        ScalarExpr::Array(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+            items.iter().all(recur)
+        }
+        ScalarExpr::Binary { lhs, rhs, .. } => recur(lhs) && recur(rhs),
+        ScalarExpr::Not(inner)
+        | ScalarExpr::IsNull { expr: inner, .. }
+        | ScalarExpr::Cast { expr: inner, .. } => recur(inner),
+        ScalarExpr::Between { expr, low, high } => recur(expr) && recur(low) && recur(high),
+        ScalarExpr::InList { expr, list, .. } => recur(expr) && list.iter().all(recur),
+        ScalarExpr::Case {
+            base,
+            when,
+            else_branch,
+        } => {
+            base.as_deref().is_none_or(&mut recur)
+                && when
+                    .iter()
+                    .all(|(condition, result)| recur(condition) && recur(result))
+                && else_branch.as_deref().is_none_or(recur)
+        }
+        ScalarExpr::Star
+        | ScalarExpr::WindowCall { .. }
+        | ScalarExpr::ScalarSubquery(_)
+        | ScalarExpr::Exists { .. }
+        | ScalarExpr::InSubquery { .. } => false,
+    }
+}
+
+fn join_predicate(
+    expression: &ScalarExpr,
+    aliases: &BTreeSet<String>,
+    column_owners: &ColumnOwners,
+) -> Option<JoinPredicate> {
     let ScalarExpr::Binary {
         op: BinaryOp::Equal,
         lhs,
@@ -284,31 +431,94 @@ fn join_predicate(expression: &ScalarExpr, aliases: &BTreeSet<String>) -> Option
     else {
         return None;
     };
-    let (
-        ScalarExpr::QualifiedColumn {
-            qualifier: left_alias,
-            column: left_field,
-            ..
-        },
-        ScalarExpr::QualifiedColumn {
-            qualifier: right_alias,
-            column: right_field,
-            ..
-        },
-    ) = (lhs.as_ref(), rhs.as_ref())
-    else {
-        return None;
-    };
-    if left_alias == right_alias || !aliases.contains(left_alias) || !aliases.contains(right_alias)
-    {
+    let (left_alias, left_field) = resolve_join_column(lhs, aliases, column_owners)?;
+    let (right_alias, right_field) = resolve_join_column(rhs, aliases, column_owners)?;
+    if left_alias == right_alias {
         return None;
     }
     Some(JoinPredicate {
-        left_alias: left_alias.clone(),
-        right_alias: right_alias.clone(),
-        left_field: left_field.clone(),
-        right_field: right_field.clone(),
+        left_alias,
+        right_alias,
+        left_field,
+        right_field,
     })
+}
+
+fn resolve_join_column(
+    expression: &ScalarExpr,
+    aliases: &BTreeSet<String>,
+    column_owners: &ColumnOwners,
+) -> Option<(String, String)> {
+    match expression {
+        ScalarExpr::QualifiedColumn {
+            qualifier, column, ..
+        } if aliases.contains(qualifier) => Some((qualifier.clone(), column.clone())),
+        ScalarExpr::Column(column) => column_owners.get(column)?.clone(),
+        _ => None,
+    }
+}
+
+type JoinPredicateKey = ((String, String), (String, String));
+
+fn join_predicate_key(predicate: &JoinPredicate) -> JoinPredicateKey {
+    let left = (predicate.left_alias.clone(), predicate.left_field.clone());
+    let right = (predicate.right_alias.clone(), predicate.right_field.clone());
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    }
+}
+
+/// Return equality predicates that must be true whenever `expression` is true.
+/// Conjunction contributes every implied predicate; disjunction contributes
+/// only predicates implied by every branch. This recognizes TPC-H Q19's
+/// repeated part/lineitem equality without applying an unsafe OR pushdown.
+fn implied_join_predicates(
+    expression: &ScalarExpr,
+    aliases: &BTreeSet<String>,
+    column_owners: &ColumnOwners,
+) -> Vec<(ScalarExpr, JoinPredicate)> {
+    if let Some(predicate) = join_predicate(expression, aliases, column_owners) {
+        return vec![(expression.clone(), predicate)];
+    }
+    match expression {
+        ScalarExpr::And(items) => {
+            let mut implied = BTreeMap::new();
+            for item in items {
+                for (expression, predicate) in implied_join_predicates(item, aliases, column_owners)
+                {
+                    implied
+                        .entry(join_predicate_key(&predicate))
+                        .or_insert((expression, predicate));
+                }
+            }
+            implied.into_values().collect()
+        }
+        ScalarExpr::Or(items) => {
+            let Some((first, rest)) = items.split_first() else {
+                return Vec::new();
+            };
+            let mut common = implied_join_predicates(first, aliases, column_owners)
+                .into_iter()
+                .map(|(expression, predicate)| {
+                    (join_predicate_key(&predicate), (expression, predicate))
+                })
+                .collect::<BTreeMap<_, _>>();
+            for item in rest {
+                let branch = implied_join_predicates(item, aliases, column_owners)
+                    .into_iter()
+                    .map(|(_, predicate)| join_predicate_key(&predicate))
+                    .collect::<BTreeSet<_>>();
+                common.retain(|key, _| branch.contains(key));
+                if common.is_empty() {
+                    break;
+                }
+            }
+            common.into_values().collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn materialize_join_order(

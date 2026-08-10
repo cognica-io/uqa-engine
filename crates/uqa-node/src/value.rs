@@ -60,7 +60,7 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
             }
             Value::Float(value) => f64::to_napi_value(env, value),
             Value::Decimal(value) => String::to_napi_value(env, value.to_sql_string()),
-            Value::Str(value) => String::to_napi_value(env, value),
+            Value::Str(value) | Value::FixedChar(value) => String::to_napi_value(env, value),
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
             Value::Temporal(value) => String::to_napi_value(env, value.to_sql_string()),
             Value::List(values) => {

@@ -7,27 +7,57 @@
 //! Aggregate expression replacement, input extraction, and observation.
 
 use super::{
-    aggregate_value_with_args, distinct_key, eval_scalar, is_aggregate, AggregateAccumulator,
+    eval_scalar, exprs_match, is_aggregate, AggregateAccumulator, AggregateAccumulatorTemplate,
     Engine, SQLError, ScalarEvalContext, ScalarExpr, ScalarOrder, Value,
 };
 
-pub(in crate::sql) fn replace_aggregates_with_values(
+const AGGREGATE_SLOT_PREFIX: &str = "\0uqa.aggregate.";
+
+pub(in crate::sql) fn compile_projection_aggregate_slots(
     engine: &Engine,
     expr: &ScalarExpr,
-    accs: &[AggregateAccumulator],
     cursor: &mut usize,
 ) -> Result<ScalarExpr, SQLError> {
-    if is_aggregate(engine, expr) {
-        let ScalarExpr::Func { name, args, .. } = expr else {
-            return Err(SQLError::Internal("aggregate expr lost".into()));
-        };
-        let Some(acc) = accs.get(*cursor) else {
-            return Err(SQLError::Internal("aggregate accumulator missing".into()));
-        };
+    rewrite_aggregates(engine, expr, &mut |_| {
+        let slot = aggregate_slot(*cursor);
         *cursor += 1;
-        return Ok(ScalarExpr::Literal(aggregate_value_with_args(
-            name, acc, args,
-        )?));
+        Ok(slot)
+    })
+}
+
+pub(in crate::sql) fn compile_having_aggregate_slots(
+    engine: &Engine,
+    expr: &ScalarExpr,
+    aggregate_targets: &[ScalarExpr],
+) -> Result<ScalarExpr, SQLError> {
+    rewrite_aggregates(engine, expr, &mut |aggregate| {
+        aggregate_targets
+            .iter()
+            .position(|target| exprs_match(target, aggregate))
+            .map(aggregate_slot)
+            .ok_or_else(|| {
+                SQLError::Unsupported(
+                    "HAVING references an aggregate that is not in the aggregate plan".into(),
+                )
+            })
+    })
+}
+
+pub(in crate::sql) fn aggregate_slot_index(column: &str) -> Option<usize> {
+    column.strip_prefix(AGGREGATE_SLOT_PREFIX)?.parse().ok()
+}
+
+fn aggregate_slot(index: usize) -> ScalarExpr {
+    ScalarExpr::Column(format!("{AGGREGATE_SLOT_PREFIX}{index}"))
+}
+
+fn rewrite_aggregates(
+    engine: &Engine,
+    expr: &ScalarExpr,
+    replace: &mut impl FnMut(&ScalarExpr) -> Result<ScalarExpr, SQLError>,
+) -> Result<ScalarExpr, SQLError> {
+    if is_aggregate(engine, expr) {
+        return replace(expr);
     }
     match expr {
         ScalarExpr::Func {
@@ -40,61 +70,59 @@ pub(in crate::sql) fn replace_aggregates_with_values(
             name: name.clone(),
             args: args
                 .iter()
-                .map(|arg| replace_aggregates_with_values(engine, arg, accs, cursor))
+                .map(|arg| rewrite_aggregates(engine, arg, replace))
                 .collect::<Result<Vec<_>, _>>()?,
             distinct: *distinct,
             order_by: order_by.clone(),
             filter: filter
                 .as_deref()
-                .map(|filter| {
-                    replace_aggregates_with_values(engine, filter, accs, cursor).map(Box::new)
-                })
+                .map(|filter| rewrite_aggregates(engine, filter, replace).map(Box::new))
                 .transpose()?,
         }),
         ScalarExpr::Array(items) => Ok(ScalarExpr::Array(
             items
                 .iter()
-                .map(|item| replace_aggregates_with_values(engine, item, accs, cursor))
+                .map(|item| rewrite_aggregates(engine, item, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         ScalarExpr::Binary { op, lhs, rhs } => Ok(ScalarExpr::Binary {
             op: *op,
-            lhs: Box::new(replace_aggregates_with_values(engine, lhs, accs, cursor)?),
-            rhs: Box::new(replace_aggregates_with_values(engine, rhs, accs, cursor)?),
+            lhs: Box::new(rewrite_aggregates(engine, lhs, replace)?),
+            rhs: Box::new(rewrite_aggregates(engine, rhs, replace)?),
         }),
-        ScalarExpr::Not(inner) => Ok(ScalarExpr::Not(Box::new(replace_aggregates_with_values(
-            engine, inner, accs, cursor,
+        ScalarExpr::Not(inner) => Ok(ScalarExpr::Not(Box::new(rewrite_aggregates(
+            engine, inner, replace,
         )?))),
         ScalarExpr::And(parts) => Ok(ScalarExpr::And(
             parts
                 .iter()
-                .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
+                .map(|part| rewrite_aggregates(engine, part, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         ScalarExpr::Or(parts) => Ok(ScalarExpr::Or(
             parts
                 .iter()
-                .map(|part| replace_aggregates_with_values(engine, part, accs, cursor))
+                .map(|part| rewrite_aggregates(engine, part, replace))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         ScalarExpr::IsNull { expr, negated } => Ok(ScalarExpr::IsNull {
-            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
+            expr: Box::new(rewrite_aggregates(engine, expr, replace)?),
             negated: *negated,
         }),
         ScalarExpr::Between { expr, low, high } => Ok(ScalarExpr::Between {
-            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
-            low: Box::new(replace_aggregates_with_values(engine, low, accs, cursor)?),
-            high: Box::new(replace_aggregates_with_values(engine, high, accs, cursor)?),
+            expr: Box::new(rewrite_aggregates(engine, expr, replace)?),
+            low: Box::new(rewrite_aggregates(engine, low, replace)?),
+            high: Box::new(rewrite_aggregates(engine, high, replace)?),
         }),
         ScalarExpr::InList {
             expr,
             list,
             negated,
         } => Ok(ScalarExpr::InList {
-            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
+            expr: Box::new(rewrite_aggregates(engine, expr, replace)?),
             list: list
                 .iter()
-                .map(|item| replace_aggregates_with_values(engine, item, accs, cursor))
+                .map(|item| rewrite_aggregates(engine, item, replace))
                 .collect::<Result<Vec<_>, _>>()?,
             negated: *negated,
         }),
@@ -105,28 +133,24 @@ pub(in crate::sql) fn replace_aggregates_with_values(
         } => Ok(ScalarExpr::Case {
             base: base
                 .as_deref()
-                .map(|base| {
-                    replace_aggregates_with_values(engine, base, accs, cursor).map(Box::new)
-                })
+                .map(|base| rewrite_aggregates(engine, base, replace).map(Box::new))
                 .transpose()?,
             when: when
                 .iter()
                 .map(|(condition, result)| {
                     Ok((
-                        replace_aggregates_with_values(engine, condition, accs, cursor)?,
-                        replace_aggregates_with_values(engine, result, accs, cursor)?,
+                        rewrite_aggregates(engine, condition, replace)?,
+                        rewrite_aggregates(engine, result, replace)?,
                     ))
                 })
                 .collect::<Result<Vec<_>, SQLError>>()?,
             else_branch: else_branch
                 .as_deref()
-                .map(|branch| {
-                    replace_aggregates_with_values(engine, branch, accs, cursor).map(Box::new)
-                })
+                .map(|branch| rewrite_aggregates(engine, branch, replace).map(Box::new))
                 .transpose()?,
         }),
         ScalarExpr::Cast { expr, ty } => Ok(ScalarExpr::Cast {
-            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
+            expr: Box::new(rewrite_aggregates(engine, expr, replace)?),
             ty: ty.clone(),
         }),
         ScalarExpr::InSubquery {
@@ -134,7 +158,7 @@ pub(in crate::sql) fn replace_aggregates_with_values(
             subquery,
             negated,
         } => Ok(ScalarExpr::InSubquery {
-            expr: Box::new(replace_aggregates_with_values(engine, expr, accs, cursor)?),
+            expr: Box::new(rewrite_aggregates(engine, expr, replace)?),
             subquery: *subquery,
             negated: *negated,
         }),
@@ -209,17 +233,37 @@ pub(in crate::sql) fn new_aggregate_accumulators_with_budget(
     aggregate_targets: &[ScalarExpr],
     budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
+    Ok(instantiate_aggregate_accumulators(
+        &aggregate_accumulator_templates(engine, aggregate_targets),
+        budget_bytes,
+    ))
+}
+
+pub(in crate::sql) fn aggregate_accumulator_templates(
+    engine: &Engine,
+    aggregate_targets: &[ScalarExpr],
+) -> Vec<AggregateAccumulatorTemplate> {
     aggregate_targets
         .iter()
         .map(|expression| match expression {
             ScalarExpr::Func { name, .. } => {
-                Ok(engine.registered_aggregate_function(name).map_or_else(
-                    || AggregateAccumulator::builtin_with_budget(name, budget_bytes),
-                    |function| AggregateAccumulator::registered_with_budget(function, budget_bytes),
-                ))
+                engine.registered_aggregate_function(name).map_or_else(
+                    || AggregateAccumulatorTemplate::builtin(name),
+                    AggregateAccumulatorTemplate::registered,
+                )
             }
-            _ => Ok(AggregateAccumulator::with_budget(budget_bytes)),
+            _ => AggregateAccumulatorTemplate::generic(),
         })
+        .collect()
+}
+
+pub(in crate::sql) fn instantiate_aggregate_accumulators(
+    templates: &[AggregateAccumulatorTemplate],
+    budget_bytes: usize,
+) -> Vec<AggregateAccumulator> {
+    templates
+        .iter()
+        .map(|template| template.instantiate(budget_bytes))
         .collect()
 }
 
@@ -233,11 +277,8 @@ pub(in crate::sql) fn observe_aggregate(
 ) -> Result<(), SQLError> {
     if acc.registered.is_some() {
         let values = aggregate_input_values(args, ctx)?;
-        if distinct {
-            let key = distinct_key(&Value::List(values.clone()))?;
-            if !acc.distinct.insert(key)? {
-                return Ok(());
-            }
+        if distinct && !acc.distinct.insert(&Value::List(values.clone()))? {
+            return Ok(());
         }
         let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
         for ob in order_by {
@@ -261,11 +302,11 @@ pub(in crate::sql) fn observe_builtin_aggregate_value(
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     let preserves_null_inputs = is_json_array_aggregate(name);
-    if distinct && (preserves_null_inputs || !matches!(value, Value::Null)) {
-        let key = distinct_key(value)?;
-        if !acc.distinct.insert(key)? {
-            return Ok(());
-        }
+    if distinct
+        && (preserves_null_inputs || !matches!(value, Value::Null))
+        && !acc.distinct.insert(value)?
+    {
+        return Ok(());
     }
     let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
     for ob in order_by {

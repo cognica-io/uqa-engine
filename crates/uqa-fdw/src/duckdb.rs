@@ -301,6 +301,7 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
         Value::Float(v) => DuckValue::Double(*v),
         Value::Decimal(v) => DuckValue::Text(v.to_sql_string()),
         Value::Str(v) => DuckValue::Text(v.clone()),
+        Value::FixedChar(v) => DuckValue::Text(v.trim_end_matches(' ').to_string()),
         Value::Bytes(v) => DuckValue::Blob(v.clone()),
         Value::Temporal(TemporalValue::Date { days }) => DuckValue::Date32(*days),
         Value::Temporal(TemporalValue::Time { micros }) => {

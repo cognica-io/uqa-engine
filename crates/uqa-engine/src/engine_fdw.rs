@@ -16,6 +16,7 @@ pub(crate) fn sql_column_type_to_fdw(
             uqa_fdw::ColumnType::Real
         }
         uqa_sql::ast::ColumnType::Text
+        | uqa_sql::ast::ColumnType::Character(_)
         | uqa_sql::ast::ColumnType::Json
         | uqa_sql::ast::ColumnType::JsonB
         | uqa_sql::ast::ColumnType::Date

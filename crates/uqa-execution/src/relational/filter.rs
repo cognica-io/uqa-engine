@@ -43,7 +43,7 @@ impl<'a> Filter<'a> {
         predicate: ScalarExpr,
         evaluator: SharedExpressionEvaluator<'a>,
     ) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
+        let schema = child.row_schema().clone();
         Self {
             child,
             condition: FilterCondition::Expression {
@@ -58,7 +58,7 @@ impl<'a> Filter<'a> {
         child: Box<dyn PhysicalOperator + 'a>,
         predicate: SharedRowPredicate<'a>,
     ) -> Self {
-        let schema = RowSchema::new(child.schema().to_vec());
+        let schema = child.row_schema().clone();
         Self {
             child,
             condition: FilterCondition::Row(predicate),
@@ -68,8 +68,12 @@ impl<'a> Filter<'a> {
 }
 
 impl PhysicalOperator for Filter<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.child.estimated_cardinality()
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {
@@ -87,19 +91,20 @@ impl PhysicalOperator for Filter<'_> {
             };
             let mut kept = Vec::with_capacity(batch.rows.len());
             for row in batch.rows {
+                let view = batch.schema.view(&row);
                 let keep = match &self.condition {
                     FilterCondition::Expression {
                         predicate,
                         evaluator,
-                    } => truthy(&evaluator.evaluate(predicate, &row)?),
-                    FilterCondition::Row(predicate) => predicate.keep(&row)?,
+                    } => truthy(&evaluator.evaluate(predicate, &view)?),
+                    FilterCondition::Row(predicate) => predicate.keep(&view)?,
                 };
                 if keep {
                     kept.push(row);
                 }
             }
             if !kept.is_empty() {
-                return Ok(Some(Batch::new(self.schema.clone(), kept)));
+                return Ok(Some(Batch::from_physical_rows(self.schema.clone(), kept)));
             }
         }
     }

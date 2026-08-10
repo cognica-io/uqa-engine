@@ -446,6 +446,9 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("LIKE takes 2 args".into()));
                 }
+                if args.iter().any(|argument| matches!(argument, Value::Null)) {
+                    return Ok(Value::Null);
+                }
                 Ok(Value::Bool(like_match(
                     &value_to_string(&args[0]),
                     &value_to_string(&args[1]),
@@ -455,6 +458,9 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             "ilike" => {
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("ILIKE takes 2 args".into()));
+                }
+                if args.iter().any(|argument| matches!(argument, Value::Null)) {
+                    return Ok(Value::Null);
                 }
                 Ok(Value::Bool(like_match(
                     &value_to_string(&args[0]),
@@ -545,4 +551,25 @@ pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<V
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::eval_core_functions;
+    use uqa_core::Value;
+
+    #[test]
+    fn like_and_ilike_propagate_null_arguments() {
+        for name in ["like", "ilike"] {
+            for arguments in [
+                vec![Value::Null, Value::Str("%".into())],
+                vec![Value::Str("text".into()), Value::Null],
+            ] {
+                assert_eq!(
+                    eval_core_functions(name, &arguments).unwrap().unwrap(),
+                    Value::Null
+                );
+            }
+        }
+    }
 }

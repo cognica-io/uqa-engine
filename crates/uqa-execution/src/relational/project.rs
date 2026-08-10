@@ -10,6 +10,7 @@ use super::{
     Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, ResultRow, RowSchema,
     SQLParam, ScalarExpr, SharedExpressionEvaluator,
 };
+use crate::PhysicalRow;
 
 /// Per-row scalar projection. Each `(alias, expr)` pair is evaluated
 /// against the input row and written under `alias` in the output. The
@@ -100,13 +101,12 @@ impl<'a> Project<'a> {
             })
             .cloned()
             .collect();
-        let mut cols = child.schema().to_vec();
-        for (name, _) in &projections {
-            if !cols.contains(name) {
-                cols.push(name.clone());
-            }
-        }
-        let schema = RowSchema::new(cols);
+        let appended = projections
+            .iter()
+            .filter(|(_, expression)| !matches!(expression, ScalarExpr::Star))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let schema = RowSchema::append(child.row_schema(), &appended);
         Self {
             child,
             projections,
@@ -119,8 +119,8 @@ impl<'a> Project<'a> {
 }
 
 impl PhysicalOperator for Project<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {
@@ -137,34 +137,41 @@ impl PhysicalOperator for Project<'_> {
         };
         let mut out = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
+            let view = batch.schema.view(&row);
             if self.pass_through {
                 let mut computed = Vec::with_capacity(self.projections.len());
-                for (name, expr) in &self.projections {
-                    if matches!(expr, ScalarExpr::Star) {
-                        computed.extend(self.evaluator.project_star(&row)?);
-                    } else {
-                        computed.push((name.clone(), self.evaluator.evaluate(expr, &row)?));
+                for (_, expr) in &self.projections {
+                    if !matches!(expr, ScalarExpr::Star) {
+                        computed.push(self.evaluator.evaluate(expr, &view)?);
                     }
                 }
-                let mut new_row = row;
-                new_row.extend(computed);
-                out.push(new_row);
+                out.push(row.append_values(computed));
                 continue;
             }
-            let mut new_row = ResultRow::new();
-            for (name, expr) in &self.projections {
-                if matches!(expr, ScalarExpr::Star) {
-                    for (column, value) in self.evaluator.project_star(&row)? {
-                        new_row.insert(column, value);
+            if self
+                .projections
+                .iter()
+                .any(|(_, expression)| matches!(expression, ScalarExpr::Star))
+            {
+                let mut new_row = ResultRow::new();
+                for (name, expr) in &self.projections {
+                    if matches!(expr, ScalarExpr::Star) {
+                        new_row.extend(self.evaluator.project_star(&view)?);
+                    } else {
+                        new_row.insert(name.clone(), self.evaluator.evaluate(expr, &view)?);
                     }
-                } else {
-                    let value = self.evaluator.evaluate(expr, &row)?;
-                    new_row.insert(name.clone(), value);
                 }
+                out.push(PhysicalRow::from_result_row(&self.schema, new_row));
+                continue;
             }
-            out.push(new_row);
+            let values = self
+                .projections
+                .iter()
+                .map(|(_, expression)| self.evaluator.evaluate(expression, &view))
+                .collect::<ExecResult<Vec<_>>>()?;
+            out.push(PhysicalRow::from_values(values));
         }
-        Ok(Some(Batch::new(self.schema.clone(), out)))
+        Ok(Some(Batch::from_physical_rows(self.schema.clone(), out)))
     }
 
     fn close(&mut self) -> ExecResult<()> {

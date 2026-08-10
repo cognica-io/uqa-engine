@@ -85,6 +85,30 @@ fn tiny_work_mem_spills_group_map_distinct_and_ordered_collection_state() {
 }
 
 #[test]
+fn tiny_work_mem_replays_distinct_hash_aggregate_after_budget_exhaustion() {
+    let engine = corpus();
+    let result = engine
+        .sql(
+            "SELECT g, count(DISTINCT v) AS unique_values
+             FROM spill_data
+             GROUP BY g
+             ORDER BY g",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    assert!(result
+        .rows
+        .iter()
+        .enumerate()
+        .all(
+            |(group, row)| row.get("g") == Some(&Value::Int(group as i64))
+                && row.get("unique_values") == Some(&Value::Int(10))
+        ));
+}
+
+#[test]
 fn tiny_work_mem_spills_window_input_sort_and_random_access_partition() {
     let engine = corpus();
     let result = engine

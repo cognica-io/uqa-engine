@@ -58,6 +58,10 @@ pub(super) enum ProjectedExpr {
         list: Vec<Self>,
         negated: bool,
     },
+    Like {
+        expression: Box<Self>,
+        pattern: uqa_sql::expr::CompiledLikePattern,
+    },
     Cast {
         expression: Box<Self>,
         ty: String,
@@ -79,6 +83,13 @@ impl ProjectedPredicate {
 
     pub fn keep(&self, values: &[&Value]) -> Result<bool, SQLError> {
         evaluate::keep(&self.expression, values)
+    }
+
+    /// Evaluate directly against a composite physical row. Column names and
+    /// qualifiers were resolved to logical positions during compilation, so
+    /// the hot path neither builds a named row nor allocates a reference list.
+    pub fn keep_row(&self, row: &crate::PhysicalRowView<'_>) -> Result<bool, SQLError> {
+        evaluate::keep_row(&self.expression, row)
     }
 }
 
@@ -179,6 +190,95 @@ mod tests {
                 &[],
             );
         }
+    }
+
+    #[test]
+    fn projected_like_predicates_match_the_canonical_evaluator() {
+        for (name, pattern) in [
+            ("like", "%"),
+            ("like", "%green%"),
+            ("like", "%special%requests%"),
+            ("like", "a_c"),
+            ("ilike", "%GREEN%"),
+        ] {
+            let expression = ScalarExpr::Func {
+                name: name.into(),
+                args: vec![
+                    ScalarExpr::Column("text".into()),
+                    ScalarExpr::Literal(Value::Str(pattern.into())),
+                ],
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            };
+            let fields = vec!["text".into()];
+            let predicate = ProjectedPredicate::compile(&expression, &fields, &[])
+                .unwrap()
+                .unwrap();
+            for value in [
+                Value::Str("forest green part".into()),
+                Value::FixedChar("GREEN   ".into()),
+                Value::Str("a-c".into()),
+                Value::Str("special pending requests".into()),
+                Value::Null,
+            ] {
+                assert_projected_parity(&expression, &predicate, &fields, &[value], &[]);
+            }
+        }
+    }
+
+    #[test]
+    fn qualified_like_runs_directly_on_a_composite_physical_row() {
+        let expression = ScalarExpr::Not(Box::new(ScalarExpr::Func {
+            name: "like".into(),
+            args: vec![
+                ScalarExpr::qualified_column("o", "comment"),
+                ScalarExpr::Literal(Value::Str("%special%requests%".into())),
+            ],
+            distinct: false,
+            order_by: Vec::new(),
+            filter: None,
+        }));
+        let left_schema = crate::RowSchema::new(vec!["c.id".into()]);
+        let right_schema = crate::RowSchema::new(vec!["o.comment".into()]);
+        let schema = crate::RowSchema::join(&left_schema, &right_schema, std::iter::empty());
+        let predicate = ProjectedPredicate::compile(&expression, schema.columns(), &[])
+            .unwrap()
+            .unwrap();
+
+        let accepted = crate::PhysicalRow::concat(
+            &crate::PhysicalRow::from_values(vec![Value::Int(1)]),
+            &crate::PhysicalRow::from_values(vec![Value::Str("ordinary order".into())]),
+        );
+        let rejected = crate::PhysicalRow::concat(
+            &crate::PhysicalRow::from_values(vec![Value::Int(1)]),
+            &crate::PhysicalRow::from_values(vec![Value::Str("special pending requests".into())]),
+        );
+        assert!(predicate.keep_row(&schema.view(&accepted)).unwrap());
+        assert!(!predicate.keep_row(&schema.view(&rejected)).unwrap());
+    }
+
+    #[test]
+    fn projected_predicate_folds_typed_literals_once() {
+        let expression = ScalarExpr::Binary {
+            op: BinaryOp::Less,
+            lhs: Box::new(ScalarExpr::Column("day".into())),
+            rhs: Box::new(ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Literal(Value::Str("1995-03-15".into()))),
+                ty: "date".into(),
+            }),
+        };
+        let predicate = ProjectedPredicate::compile(&expression, &["day".into()], &[])
+            .unwrap()
+            .unwrap();
+
+        let ProjectedExpr::Binary { rhs, .. } = &predicate.expression else {
+            panic!("expected a compiled comparison");
+        };
+        assert!(matches!(
+            rhs.as_ref(),
+            ProjectedExpr::Literal(Value::Temporal(_))
+        ));
     }
 
     fn assert_projected_parity(

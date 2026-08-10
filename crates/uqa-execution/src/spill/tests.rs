@@ -36,9 +36,15 @@ fn low_budget_creates_file_and_round_trips_in_order() {
     buffer.push(dummy_batch(2, 1)).unwrap();
     let restored = buffer.drain_all().unwrap();
     assert_eq!(restored.len(), 2);
-    assert_eq!(restored[0].schema.columns, vec!["x"]);
-    assert_eq!(restored[0].rows, dummy_batch(0, 2).rows);
-    assert_eq!(restored[1].rows, dummy_batch(2, 1).rows);
+    assert_eq!(restored[0].schema.columns(), ["x"]);
+    assert_eq!(
+        restored[0].clone().into_result_rows(),
+        dummy_batch(0, 2).into_result_rows()
+    );
+    assert_eq!(
+        restored[1].clone().into_result_rows(),
+        dummy_batch(2, 1).into_result_rows()
+    );
     assert!(!path.exists());
     assert_eq!(buffer.rows(), 0);
 }
@@ -54,7 +60,7 @@ fn multiple_spills_preserve_batch_order() {
     let restored = buffer.drain_all().unwrap();
     let values: Vec<i64> = restored
         .into_iter()
-        .flat_map(|batch| batch.rows)
+        .flat_map(Batch::into_result_rows)
         .map(|row| match row.get("x") {
             Some(Value::Int(value)) => *value,
             value => panic!("unexpected restored value: {value:?}"),
@@ -180,6 +186,7 @@ fn exact_value_variants_and_float_bits_round_trip() {
             Value::Float(f64::from_bits(0x7ff8_0000_0000_0042)),
         ),
         ("negative_zero".into(), Value::Float(-0.0)),
+        ("fixed_char".into(), Value::FixedChar("x   ".into())),
         ("decimal".into(), Value::Decimal(decimal)),
         (
             "temporal".into(),
@@ -201,14 +208,21 @@ fn exact_value_variants_and_float_bits_round_trip() {
         RowSchema::new(values.keys().cloned().collect()),
         vec![values],
     );
-    let expected = batch.rows.clone();
+    let expected = batch.clone().into_result_rows();
 
     let mut buffer = SpillBuffer::new(0);
     buffer.push(batch).unwrap();
     let restored = buffer.drain_all().unwrap();
-    let actual = &restored[0].rows;
+    let actual = restored[0].clone().into_result_rows();
 
-    for key in ["bytes", "list", "decimal", "temporal", "tagged_map"] {
+    for key in [
+        "bytes",
+        "list",
+        "fixed_char",
+        "decimal",
+        "temporal",
+        "tagged_map",
+    ] {
         assert_eq!(actual[0].get(key), expected[0].get(key));
     }
     for key in ["nan", "negative_zero"] {
@@ -232,7 +246,10 @@ fn creation_failure_is_returned_without_losing_memory_rows() {
     assert_eq!(buffer.in_memory_rows(), 1);
     assert!(buffer.in_memory_bytes() > 0);
     assert!(!buffer.has_spilled());
-    assert_eq!(buffer.drain_all().unwrap()[0].rows, dummy_batch(0, 1).rows);
+    assert_eq!(
+        buffer.drain_all().unwrap()[0].clone().into_result_rows(),
+        dummy_batch(0, 1).into_result_rows()
+    );
 }
 
 #[test]
@@ -263,7 +280,10 @@ fn corrupted_spill_record_surfaces_decode_error_and_cleans_up() {
         .unwrap();
 
     let mut drain = buffer.drain().unwrap();
-    assert_eq!(drain.next().unwrap().unwrap().rows, dummy_batch(0, 1).rows);
+    assert_eq!(
+        drain.next().unwrap().unwrap().into_result_rows(),
+        dummy_batch(0, 1).into_result_rows()
+    );
     let error = drain.next().unwrap().unwrap_err();
     assert!(error.to_string().contains("truncated schema column count"));
     assert!(drain.next().is_none());
@@ -420,7 +440,7 @@ fn consuming_unique_shared_materialization_moves_memory_batches() {
     ));
     let values = reader
         .by_ref()
-        .flat_map(|batch| batch.unwrap().rows)
+        .flat_map(|batch| batch.unwrap().into_result_rows())
         .map(|row| match row.get("x") {
             Some(Value::Int(value)) => *value,
             value => panic!("unexpected consumed value: {value:?}"),

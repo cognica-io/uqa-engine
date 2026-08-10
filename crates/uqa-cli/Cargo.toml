@@ -1,5 +1,7 @@
 [package]
 name = "uqa-cli"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "usql: interactive REPL for UQA"
 version.workspace = true
 edition.workspace = true
@@ -27,6 +29,10 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.13"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [lints]
 workspace = true

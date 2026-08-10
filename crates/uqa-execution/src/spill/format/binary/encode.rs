@@ -12,7 +12,7 @@ use std::io::{BufWriter, Seek, SeekFrom, Write};
 use uqa_core::{TemporalValue, Value};
 use uqa_sql::ResultRow;
 
-use crate::batch::{Batch, RowSchema};
+use crate::batch::{Batch, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
 use crate::spill::format::{spill_error, RECORD_PREFIX_BYTES};
 
@@ -24,21 +24,29 @@ pub(crate) fn encoded_batch_size(batch: &Batch) -> ExecResult<usize> {
 
 pub(crate) fn encoded_single_row_batch_size(
     schema: &RowSchema,
-    row: &ResultRow,
+    row: &PhysicalRow,
 ) -> ExecResult<usize> {
     encoded_rows_size(schema, std::slice::from_ref(row))
 }
 
-fn encoded_rows_size(schema: &RowSchema, rows: &[ResultRow]) -> ExecResult<usize> {
+pub(crate) fn encoded_named_single_row_batch_size(
+    schema: &RowSchema,
+    row: &ResultRow,
+) -> ExecResult<usize> {
+    let row = PhysicalRow::from_result_row(schema, row.clone());
+    encoded_single_row_batch_size(schema, &row)
+}
+
+fn encoded_rows_size(schema: &RowSchema, rows: &[PhysicalRow]) -> ExecResult<usize> {
     let mut bytes = RECORD_PREFIX_BYTES;
     add_size(&mut bytes, 8, "schema column count")?;
-    for column in &schema.columns {
+    for column in schema.columns() {
         add_string_size(&mut bytes, column, "schema column")?;
     }
     add_size(&mut bytes, 8, "batch row count")?;
     for row in rows {
         add_size(&mut bytes, 8, "row field count")?;
-        for (name, value) in row {
+        for (name, value) in schema.view(row).iter() {
             add_string_size(&mut bytes, name, "row field name")?;
             add_value_size(&mut bytes, value, 0)?;
         }
@@ -68,12 +76,16 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
         Value::Bool(_) => add_size(total, 1, "boolean value"),
         Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
         Value::Str(value) => add_string_size(total, value, "string value"),
+        Value::FixedChar(value) => add_string_size(total, value, "fixed character value"),
         Value::Bytes(value) => {
             add_size(total, 8, "byte value length")?;
             add_size(total, value.len(), "byte value")
         }
         Value::Temporal(value) => add_size(total, temporal_payload_size(value), "temporal value"),
-        Value::Decimal(value) => add_string_size(total, &value.to_sql_string(), "decimal value"),
+        Value::Decimal(value) => {
+            add_size(total, 8, "decimal value length")?;
+            add_size(total, value.sql_string_len(), "decimal value")
+        }
         Value::List(values) => {
             add_size(total, 8, "list length")?;
             for value in values {
@@ -142,14 +154,14 @@ pub(crate) fn append_batches(file: &mut File, batches: &[Batch]) -> ExecResult<(
 }
 
 fn encode_batch(writer: &mut impl Write, batch: &Batch) -> ExecResult<()> {
-    write_u64(writer, batch.schema.columns.len())?;
-    for column in &batch.schema.columns {
+    write_u64(writer, batch.schema.columns().len())?;
+    for column in batch.schema.columns() {
         write_bytes(writer, column.as_bytes())?;
     }
     write_u64(writer, batch.rows.len())?;
     for row in &batch.rows {
-        write_u64(writer, row.len())?;
-        for (name, value) in row {
+        write_u64(writer, batch.schema.len())?;
+        for (name, value) in batch.schema.view(row).iter() {
             write_bytes(writer, name.as_bytes())?;
             encode_value(writer, value, 0)?;
         }
@@ -179,6 +191,10 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
         }
         Value::Str(value) => {
             write_tag(writer, 4)?;
+            write_bytes(writer, value.as_bytes())
+        }
+        Value::FixedChar(value) => {
+            write_tag(writer, 10)?;
             write_bytes(writer, value.as_bytes())
         }
         Value::Bytes(value) => {

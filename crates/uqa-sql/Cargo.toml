@@ -1,5 +1,7 @@
 [package]
 name = "uqa-sql"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "PostgreSQL-compatible SQL compiler built on libpg_query"
 version.workspace = true
 edition.workspace = true
@@ -22,6 +24,10 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [lints]
 workspace = true

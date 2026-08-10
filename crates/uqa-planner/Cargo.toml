@@ -1,5 +1,7 @@
 [package]
 name = "uqa-planner"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "Cost model, cardinality, DPccp join enumeration, optimizer rewrites"
 version.workspace = true
 edition.workspace = true
@@ -30,6 +32,10 @@ rayon = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "planner"

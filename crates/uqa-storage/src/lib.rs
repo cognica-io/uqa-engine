@@ -36,7 +36,7 @@ pub use catalog::{
     GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SequenceRow, TableSchema,
     VectorFieldSchema, ViewRow,
 };
-pub use document_store::{DocumentStore, MemoryDocumentStore};
+pub use document_store::{DocumentStore, MemoryDocumentStore, SharedDocumentRow};
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};

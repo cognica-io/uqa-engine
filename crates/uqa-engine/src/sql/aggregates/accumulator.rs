@@ -44,6 +44,37 @@ pub(in crate::sql) struct AggregateAccumulator {
     pub(super) statistics_has_float: bool,
 }
 
+#[derive(Clone)]
+pub(in crate::sql) enum AggregateAccumulatorTemplate {
+    Builtin(AggregateStatePlan),
+    Registered(Arc<dyn SQLAggregateFunction>),
+}
+
+impl AggregateAccumulatorTemplate {
+    pub(super) fn builtin(name: &str) -> Self {
+        Self::Builtin(AggregateStatePlan::builtin(name))
+    }
+
+    pub(super) fn generic() -> Self {
+        Self::Builtin(AggregateStatePlan::Generic)
+    }
+
+    pub(super) fn registered(function: Arc<dyn SQLAggregateFunction>) -> Self {
+        Self::Registered(function)
+    }
+
+    pub(super) fn instantiate(&self, budget_bytes: usize) -> AggregateAccumulator {
+        match self {
+            Self::Builtin(state_plan) => {
+                AggregateAccumulator::from_plan_with_budget(*state_plan, budget_bytes)
+            }
+            Self::Registered(function) => {
+                AggregateAccumulator::registered_with_budget(Arc::clone(function), budget_bytes)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(in crate::sql) enum NumericInputKind {
     #[default]
@@ -78,6 +109,10 @@ impl NumericInputKind {
 
     pub(super) fn has_decimal(self) -> bool {
         matches!(self, Self::Decimals | Self::DecimalsAndFloats)
+    }
+
+    pub(super) fn has_float(self) -> bool {
+        matches!(self, Self::Floats | Self::DecimalsAndFloats)
     }
 }
 
@@ -149,10 +184,25 @@ impl AggregateAccumulator {
     pub(super) fn with_budget(budget_bytes: usize) -> Self {
         let component_budget = (budget_bytes / 2).max(1);
         Self {
-            distinct: DistinctTracker::new(component_budget),
-            values: AggregateValueBuffer::new(component_budget),
+            registered: None,
+            registered_state: None,
             registered_ordered: RegisteredAggregateBuffer::new(component_budget),
-            ..Self::default()
+            count: 0,
+            sum: 0.0,
+            integer_sum: 0,
+            decimal_sum: None,
+            numeric_inputs: NumericInputKind::default(),
+            min: None,
+            max: None,
+            distinct: DistinctTracker::new(component_budget),
+            state_plan: AggregateStatePlan::Generic,
+            values: AggregateValueBuffer::new(component_budget),
+            bool_and: None,
+            bool_or: None,
+            statistics_count: 0,
+            statistics_mean: 0.0,
+            statistics_m2: 0.0,
+            statistics_has_float: false,
         }
     }
 
@@ -164,10 +214,13 @@ impl AggregateAccumulator {
     }
 
     pub(super) fn builtin_with_budget(name: &str, budget_bytes: usize) -> Self {
-        Self {
-            state_plan: AggregateStatePlan::builtin(name),
-            ..Self::with_budget(budget_bytes)
-        }
+        Self::from_plan_with_budget(AggregateStatePlan::builtin(name), budget_bytes)
+    }
+
+    fn from_plan_with_budget(state_plan: AggregateStatePlan, budget_bytes: usize) -> Self {
+        let mut accumulator = Self::with_budget(budget_bytes);
+        accumulator.state_plan = state_plan;
+        accumulator
     }
 
     pub(super) fn registered_with_budget(
@@ -175,11 +228,10 @@ impl AggregateAccumulator {
         budget_bytes: usize,
     ) -> Self {
         let state = function.create_state();
-        Self {
-            registered: Some(function),
-            registered_state: Some(state),
-            ..Self::with_budget(budget_bytes)
-        }
+        let mut accumulator = Self::with_budget(budget_bytes);
+        accumulator.registered = Some(function);
+        accumulator.registered_state = Some(state);
+        accumulator
     }
 
     pub(in crate::sql) fn observe(&mut self, value: &Value) -> Result<(), SQLError> {
@@ -229,7 +281,7 @@ impl AggregateAccumulator {
                             })?,
                     );
                 }
-                if !self.numeric_inputs.all_integers() {
+                if self.numeric_inputs.has_float() {
                     self.sum += value as f64;
                 }
                 Ok(())
@@ -295,12 +347,6 @@ impl AggregateAccumulator {
                 "SUM/AVG requires a numeric value, got {value:?}"
             )));
         }
-        if !matches!(value, Value::Int(_)) && self.numeric_inputs.all_integers() {
-            // Integer-only SUM/AVG finalizers use `integer_sum` directly.
-            // Seed the floating accumulator once, at the first non-integer,
-            // instead of converting and adding every integer row twice.
-            self.sum = self.integer_sum as f64;
-        }
         match value {
             Value::Int(n) => {
                 self.integer_sum = self
@@ -318,19 +364,46 @@ impl AggregateAccumulator {
                             })?,
                     );
                 }
+                if self.numeric_inputs.has_float() {
+                    self.sum += *n as f64;
+                }
             }
             Value::Decimal(d) => {
                 let next = match &self.decimal_sum {
                     Some(sum) => sum.checked_add(d),
                     None if self.integer_sum == 0 => Some(d.clone()),
-                    None => DecimalValue::parse(&self.integer_sum.to_string())
-                        .and_then(|sum| sum.checked_add(d)),
+                    None => {
+                        DecimalValue::from_i128(self.integer_sum).and_then(|sum| sum.checked_add(d))
+                    }
                 }
                 .ok_or_else(|| SQLError::TypeMismatch("decimal aggregate overflow".into()))?;
                 self.decimal_sum = Some(next);
+                if self.numeric_inputs.has_float() {
+                    self.sum += d.to_f64().ok_or_else(|| {
+                        SQLError::TypeMismatch("decimal aggregate does not fit float".into())
+                    })?;
+                }
                 self.numeric_inputs.observe_decimal();
             }
-            Value::Float(_) => {
+            Value::Float(value) => {
+                if !self.numeric_inputs.has_float() {
+                    // Exact integer/decimal aggregates do not maintain a shadow
+                    // floating total. Convert the accumulated total only if a
+                    // floating input actually makes it necessary.
+                    self.sum = if self.numeric_inputs.has_decimal() {
+                        self.decimal_sum
+                            .as_ref()
+                            .and_then(DecimalValue::to_f64)
+                            .ok_or_else(|| {
+                                SQLError::TypeMismatch(
+                                    "decimal aggregate does not fit float".into(),
+                                )
+                            })?
+                    } else {
+                        self.integer_sum as f64
+                    };
+                }
+                self.sum += *value;
                 self.numeric_inputs.observe_float();
             }
             _ => {
@@ -338,9 +411,6 @@ impl AggregateAccumulator {
                     "SUM/AVG requires a numeric value, got {value:?}"
                 )))
             }
-        }
-        if !self.numeric_inputs.all_integers() {
-            self.sum += value_as_f64(value)?;
         }
         Ok(())
     }

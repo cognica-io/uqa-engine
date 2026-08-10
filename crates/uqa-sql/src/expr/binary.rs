@@ -47,20 +47,32 @@ pub fn eval_binary_values(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
 /// Comparison operators under SQL three-valued logic: any NULL operand
 /// makes the result NULL.
 pub(super) fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
+    Ok(eval_comparison_truth(op, l, r)?
+        .map(Value::Bool)
+        .unwrap_or(Value::Null))
+}
+
+/// Compare two values without allocating an intermediate [`Value::Bool`].
+///
+/// `None` is SQL UNKNOWN (normally caused by NULL). Predicate executors use
+/// this form so comparisons and boolean composition stay in a compact
+/// tri-state representation throughout the row-filtering hot path.
+#[inline]
+pub fn eval_comparison_truth(op: BinaryOp, l: &Value, r: &Value) -> Result<Option<bool>> {
     let out = match op {
-        BinaryOp::Equal => values_equal_nullable(l, r).map(Value::Bool),
-        BinaryOp::NotEqual => values_equal_nullable(l, r).map(|eq| Value::Bool(!eq)),
-        BinaryOp::Less => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_lt())),
-        BinaryOp::LessEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_le())),
-        BinaryOp::Greater => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_gt())),
-        BinaryOp::GreaterEqual => compare_nullable(l, r)?.map(|ord| Value::Bool(ord.is_ge())),
+        BinaryOp::Equal => values_equal_nullable(l, r),
+        BinaryOp::NotEqual => values_equal_nullable(l, r).map(|equal| !equal),
+        BinaryOp::Less => compare_nullable(l, r)?.map(|ord| ord.is_lt()),
+        BinaryOp::LessEqual => compare_nullable(l, r)?.map(|ord| ord.is_le()),
+        BinaryOp::Greater => compare_nullable(l, r)?.map(|ord| ord.is_gt()),
+        BinaryOp::GreaterEqual => compare_nullable(l, r)?.map(|ord| ord.is_ge()),
         _ => {
             return Err(SQLError::Internal(format!(
                 "non-comparison operator {op:?} reached comparison evaluation"
             )))
         }
     };
-    Ok(out.unwrap_or(Value::Null))
+    Ok(out)
 }
 
 pub(super) enum EvalOperand<'a> {
@@ -152,7 +164,7 @@ pub fn truthy(v: &Value) -> bool {
         Value::Int(n) => *n != 0,
         Value::Float(f) => *f != 0.0,
         Value::Decimal(d) => !d.is_zero(),
-        Value::Str(s) => !s.is_empty(),
+        Value::Str(s) | Value::FixedChar(s) => !s.is_empty(),
         _ => true,
     }
 }
@@ -183,6 +195,12 @@ pub(super) fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
             x.parse_same_kind(y)
                 .is_some_and(|parsed| x.cmp(&parsed) == std::cmp::Ordering::Equal),
         ),
+        (Value::FixedChar(x), Value::FixedChar(y)) => {
+            Some(x.trim_end_matches(' ') == y.trim_end_matches(' '))
+        }
+        (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
+            Some(x.trim_end_matches(' ') == y.trim_end_matches(' '))
+        }
         // Row / array equality: any definite mismatch wins, otherwise a
         // NULL element makes the whole comparison unknown (PostgreSQL
         // row comparison semantics).
@@ -225,6 +243,15 @@ pub(super) fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::
         (Value::Bool(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_bool(*x).cmp(y))),
         (Value::Decimal(x), Value::Bool(y)) => Ok(Some(x.cmp(&DecimalValue::from_bool(*y)))),
         (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
+        (Value::FixedChar(x), Value::FixedChar(y)) => {
+            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
+        }
+        (Value::FixedChar(x), Value::Str(y)) => {
+            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
+        }
+        (Value::Str(x), Value::FixedChar(y)) => {
+            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
+        }
         (Value::Temporal(x), Value::Temporal(y)) => Ok(Some(x.cmp(y))),
         (Value::Temporal(x), Value::Str(y)) => x
             .parse_same_kind(y)
@@ -347,7 +374,7 @@ pub(super) fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value>
             if right.is_zero() {
                 return Err(division_by_zero());
             }
-            left.checked_div(&right)
+            left.checked_div_postgres(&right)
         }
         _ => {
             return Err(SQLError::Internal(format!(

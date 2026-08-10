@@ -109,7 +109,7 @@ fn for_each_fields_multi_ref_borrows_memory_values_and_reuses_nulls() {
     let mut s = MemoryDocumentStore::new();
     s.put(2, doc([("value", Value::Str("twenty".into()))]))
         .unwrap();
-    let stored = std::ptr::from_ref(s.documents[&2].get("value").unwrap());
+    let stored = std::ptr::from_ref(s.field(&s.documents[&2], "value").unwrap());
 
     let mut visited = Vec::new();
     s.for_each_fields_multi_ref(&[2, 99], &["value"], &mut |doc_id, values| {
@@ -241,6 +241,79 @@ fn for_each_fields_multi_ref_uses_each_documents_layout() {
     })
     .unwrap();
     assert_eq!(patched, vec![Value::Int(2), Value::Str("patched".into())]);
+}
+
+#[test]
+fn shared_projection_reuses_the_stored_value_vector() {
+    let mut s = MemoryDocumentStore::new();
+    s.put(
+        1,
+        doc([
+            ("alpha", Value::Str("kept".into())),
+            ("zulu", Value::Int(9)),
+        ]),
+    )
+    .unwrap();
+    let stored = Arc::clone(&s.documents[&1].values);
+
+    let mut rows = s
+        .get_shared_fields(&[1], &["zulu", "missing", "alpha"])
+        .unwrap()
+        .unwrap();
+    let shared = rows.pop().unwrap().unwrap();
+    let projected = shared.with_projected(|values| {
+        values
+            .iter()
+            .map(|value| (*value).clone())
+            .collect::<Vec<_>>()
+    });
+    let (values, _) = shared.into_parts();
+
+    assert!(Arc::ptr_eq(&values, &stored));
+    assert_eq!(
+        projected,
+        vec![Value::Int(9), Value::Null, Value::Str("kept".into())]
+    );
+}
+
+#[test]
+fn shared_cursor_combines_id_scan_and_projection() {
+    let mut store = MemoryDocumentStore::new();
+    store
+        .put(1, doc([("alpha", Value::Int(1)), ("zulu", Value::Int(2))]))
+        .unwrap();
+    store
+        .put(3, doc([("alpha", Value::Int(3)), ("zulu", Value::Int(4))]))
+        .unwrap();
+
+    let rows = store
+        .next_shared_fields(Some(1), 1, &["zulu", "alpha"])
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].0, 3);
+    assert_eq!(
+        rows[0].1.with_projected(|values| {
+            values
+                .iter()
+                .map(|value| (*value).clone())
+                .collect::<Vec<_>>()
+        }),
+        vec![Value::Int(4), Value::Int(3)]
+    );
+}
+
+#[test]
+fn shared_snapshot_remains_isolated_after_a_write() {
+    let mut s = MemoryDocumentStore::new();
+    s.put(1, doc([("value", Value::Int(1))])).unwrap();
+    let snapshot = s.snapshot().unwrap();
+
+    s.patch_fields(1, &BTreeMap::from([("value".into(), Value::Int(2))]))
+        .unwrap();
+
+    assert_eq!(snapshot.get_field(1, "value").unwrap(), Some(Value::Int(1)));
+    assert_eq!(s.get_field(1, "value").unwrap(), Some(Value::Int(2)));
 }
 
 #[test]

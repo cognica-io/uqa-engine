@@ -1,5 +1,7 @@
 [package]
 name = "uqa-joins"
+# Keep integration sources in one linked harness; CI verifies every source is registered.
+autotests = false
 description = "Hash, outer, semi, sort-merge, and cross-paradigm joins"
 version.workspace = true
 edition.workspace = true
@@ -16,6 +18,10 @@ uqa-core = { workspace = true }
 uqa-analysis = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-sql = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [lints]
 workspace = true

@@ -6,9 +6,6 @@
 
 //! Schema-only projection used after an expression-producing stage.
 
-use uqa_core::Value;
-use uqa_sql::ResultRow;
-
 use crate::{Batch, ExecResult, PhysicalOperator, PhysicalOrder, RowSchema};
 
 /// Select already-computed columns without evaluating expressions again.
@@ -25,7 +22,6 @@ pub struct ColumnSelection<'a> {
     /// separate lets a preceding projection expose SELECT-list expressions
     /// under collision-free internal names while this final, non-evaluating
     /// operator restores the public SQL column names.
-    columns: Vec<(String, String)>,
     ordering: Vec<PhysicalOrder>,
 }
 
@@ -57,18 +53,22 @@ impl<'a> ColumnSelection<'a> {
                 })
             })
             .collect();
+        let schema = RowSchema::select(child.row_schema(), &columns);
         Self {
             child,
-            schema: RowSchema::new(columns.iter().map(|(output, _)| output.clone()).collect()),
-            columns,
+            schema,
             ordering,
         }
     }
 }
 
 impl PhysicalOperator for ColumnSelection<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.child.estimated_cardinality()
     }
 
     fn output_ordering(&self) -> &[PhysicalOrder] {
@@ -83,21 +83,10 @@ impl PhysicalOperator for ColumnSelection<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
-        let rows = batch
-            .rows
-            .into_iter()
-            .map(|mut input| {
-                let mut output = ResultRow::new();
-                for (output_column, input_column) in &self.columns {
-                    output.insert(
-                        output_column.clone(),
-                        input.remove(input_column).unwrap_or(Value::Null),
-                    );
-                }
-                output
-            })
-            .collect();
-        Ok(Some(Batch::new(self.schema.clone(), rows)))
+        Ok(Some(Batch::from_physical_rows(
+            self.schema.clone(),
+            batch.rows,
+        )))
     }
 
     fn close(&mut self) -> ExecResult<()> {
@@ -108,6 +97,8 @@ impl PhysicalOperator for ColumnSelection<'_> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    use uqa_core::Value;
 
     use super::*;
     use crate::physical::run_to_rows;

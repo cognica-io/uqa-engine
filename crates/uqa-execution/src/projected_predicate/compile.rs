@@ -7,6 +7,7 @@
 //! Projection-slot binding for supported scalar predicates.
 
 use uqa_core::Value;
+use uqa_sql::expr::cast_value;
 use uqa_sql::{SQLError, SQLParam};
 
 use super::ProjectedExpr;
@@ -18,8 +19,18 @@ pub(super) fn compile(
     params: &[SQLParam],
 ) -> Result<Option<ProjectedExpr>, SQLError> {
     let compiled = match expression {
-        ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } => {
-            let Some(index) = fields.iter().position(|field| field == column) else {
+        ScalarExpr::Column(column) => {
+            let Some(index) = resolve_unqualified_field(column, fields) else {
+                return Ok(None);
+            };
+            ProjectedExpr::Field(index)
+        }
+        ScalarExpr::QualifiedColumn {
+            qualifier,
+            column,
+            key,
+        } => {
+            let Some(index) = resolve_qualified_field(qualifier, column, key, fields) else {
                 return Ok(None);
             };
             ProjectedExpr::Field(index)
@@ -54,10 +65,47 @@ pub(super) fn compile(
             list: require_all(list, fields, params)?,
             negated: *negated,
         },
-        ScalarExpr::Cast { expr, ty } => ProjectedExpr::Cast {
-            expression: Box::new(require(expr, fields, params)?),
-            ty: ty.clone(),
-        },
+        ScalarExpr::Func {
+            name,
+            args,
+            distinct,
+            order_by,
+            filter,
+        } if !distinct && order_by.is_empty() && filter.is_none() => {
+            let normalized = name.strip_prefix("pg_catalog.").unwrap_or(name);
+            if !normalized.eq_ignore_ascii_case("like") && !normalized.eq_ignore_ascii_case("ilike")
+            {
+                return Ok(None);
+            }
+            let [expression, pattern] = args.as_slice() else {
+                return Ok(None);
+            };
+            let pattern = match pattern {
+                ScalarExpr::Literal(value) => value.clone(),
+                ScalarExpr::Param(index) => parameter(*index, params)?,
+                _ => return Ok(None),
+            };
+            ProjectedExpr::Like {
+                expression: Box::new(require(expression, fields, params)?),
+                pattern: uqa_sql::expr::CompiledLikePattern::from_value(
+                    &pattern,
+                    normalized.eq_ignore_ascii_case("ilike"),
+                ),
+            }
+        }
+        ScalarExpr::Cast { expr, ty } => {
+            let expression = require(expr, fields, params)?;
+            match expression {
+                // A typed SQL literal is represented as CAST(literal AS type).
+                // Evaluate it once while preparing the predicate instead of
+                // reparsing (notably DATE/TIMESTAMP text) for every input row.
+                ProjectedExpr::Literal(value) => ProjectedExpr::Literal(cast_value(&value, ty)?),
+                expression => ProjectedExpr::Cast {
+                    expression: Box::new(expression),
+                    ty: ty.clone(),
+                },
+            }
+        }
         ScalarExpr::Star
         | ScalarExpr::Func { .. }
         | ScalarExpr::Array(_)
@@ -68,6 +116,41 @@ pub(super) fn compile(
         | ScalarExpr::InSubquery { .. } => return Ok(None),
     };
     Ok(Some(compiled))
+}
+
+fn resolve_unqualified_field(column: &str, fields: &[String]) -> Option<usize> {
+    if let Some(index) = fields.iter().position(|field| field == column) {
+        return Some(index);
+    }
+    let mut matches = fields.iter().enumerate().filter_map(|(index, field)| {
+        field
+            .rsplit_once('.')
+            .filter(|(_, suffix)| *suffix == column)
+            .map(|_| index)
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
+fn resolve_qualified_field(
+    qualifier: &str,
+    column: &str,
+    key: &str,
+    fields: &[String],
+) -> Option<usize> {
+    if !key.is_empty() {
+        if let Some(index) = fields.iter().position(|field| field == key) {
+            return Some(index);
+        }
+    }
+    let qualified = format!("{qualifier}.{column}");
+    fields
+        .iter()
+        .position(|field| field == &qualified)
+        // Storage projections deliberately use unqualified field names. A
+        // qualified expression can bind to one of those only when the exact
+        // qualifier is absent from the positional schema.
+        .or_else(|| fields.iter().position(|field| field == column))
 }
 
 fn compiled_binary(

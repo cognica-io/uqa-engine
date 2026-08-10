@@ -1,0 +1,1278 @@
+{
+  "schema_version": 1,
+  "postgres": {
+    "server_version_num": "170010",
+    "server_version": "17.10 (Debian 17.10-1.pgdg13+1)",
+    "version": "PostgreSQL 17.10 (Debian 17.10-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+  },
+  "workload": "tpch-dbgen-2.14.0-sf0.001-default-queries",
+  "queries": [
+    {
+      "query": 1,
+      "result": {
+        "columns": [
+          "l_returnflag",
+          "l_linestatus",
+          "sum_qty",
+          "sum_base_price",
+          "sum_disc_price",
+          "sum_charge",
+          "avg_qty",
+          "avg_price",
+          "avg_disc",
+          "count_order"
+        ],
+        "rows": [
+          [
+            "A",
+            "F",
+            "37474",
+            "37569624.64",
+            "35676192.097",
+            "37101416.222424",
+            "25.3545331529093369",
+            "25419.231826792963",
+            "0.05086603518267929635",
+            "1478"
+          ],
+          [
+            "N",
+            "F",
+            "1041",
+            "1041301.07",
+            "999060.898",
+            "1036450.80228",
+            "27.3947368421052632",
+            "27402.659736842105",
+            "0.04289473684210526316",
+            "38"
+          ],
+          [
+            "N",
+            "O",
+            "75168",
+            "75384955.37",
+            "71653166.3034",
+            "74498798.133073",
+            "25.5586535192111527",
+            "25632.42277116627",
+            "0.04969738184291057463",
+            "2941"
+          ],
+          [
+            "R",
+            "F",
+            "36511",
+            "36570841.24",
+            "34738472.8758",
+            "36169060.112193",
+            "25.059025394646534",
+            "25100.09693891558",
+            "0.05002745367192862045",
+            "1457"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 2,
+      "result": {
+        "columns": [
+          "s_acctbal",
+          "s_name",
+          "n_name",
+          "p_partkey",
+          "p_mfgr",
+          "s_address",
+          "s_phone",
+          "s_comment"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 3,
+      "result": {
+        "columns": [
+          "l_orderkey",
+          "revenue",
+          "o_orderdate",
+          "o_shippriority"
+        ],
+        "rows": [
+          [
+            "1637",
+            "164224.9253",
+            "1995-02-08",
+            "0"
+          ],
+          [
+            "5191",
+            "49378.3094",
+            "1994-12-11",
+            "0"
+          ],
+          [
+            "742",
+            "43728.048",
+            "1994-12-23",
+            "0"
+          ],
+          [
+            "3492",
+            "43716.0724",
+            "1994-11-24",
+            "0"
+          ],
+          [
+            "2883",
+            "36666.9612",
+            "1995-01-23",
+            "0"
+          ],
+          [
+            "998",
+            "11785.5486",
+            "1994-11-26",
+            "0"
+          ],
+          [
+            "3430",
+            "4726.6775",
+            "1994-12-12",
+            "0"
+          ],
+          [
+            "4423",
+            "3055.9365",
+            "1995-02-17",
+            "0"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 4,
+      "result": {
+        "columns": [
+          "o_orderpriority",
+          "order_count"
+        ],
+        "rows": [
+          [
+            "1-URGENT       ",
+            "9"
+          ],
+          [
+            "2-HIGH         ",
+            "7"
+          ],
+          [
+            "3-MEDIUM       ",
+            "9"
+          ],
+          [
+            "4-NOT SPECIFIED",
+            "8"
+          ],
+          [
+            "5-LOW          ",
+            "12"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 5,
+      "result": {
+        "columns": [
+          "n_name",
+          "revenue"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 6,
+      "result": {
+        "columns": [
+          "revenue"
+        ],
+        "rows": [
+          [
+            "77949.9186"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 7,
+      "result": {
+        "columns": [
+          "supp_nation",
+          "cust_nation",
+          "l_year",
+          "revenue"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 8,
+      "result": {
+        "columns": [
+          "o_year",
+          "mkt_share"
+        ],
+        "rows": [
+          [
+            "1995",
+            "0"
+          ],
+          [
+            "1996",
+            "0"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 9,
+      "result": {
+        "columns": [
+          "nation",
+          "o_year",
+          "sum_profit"
+        ],
+        "rows": [
+          [
+            "ARGENTINA                ",
+            "1998",
+            "17779.0697"
+          ],
+          [
+            "ARGENTINA                ",
+            "1997",
+            "13943.9538"
+          ],
+          [
+            "ARGENTINA                ",
+            "1996",
+            "7641.4227"
+          ],
+          [
+            "ARGENTINA                ",
+            "1995",
+            "20892.7525"
+          ],
+          [
+            "ARGENTINA                ",
+            "1994",
+            "15088.3526"
+          ],
+          [
+            "ARGENTINA                ",
+            "1993",
+            "17586.3446"
+          ],
+          [
+            "ARGENTINA                ",
+            "1992",
+            "28732.4615"
+          ],
+          [
+            "ETHIOPIA                 ",
+            "1998",
+            "28217.16"
+          ],
+          [
+            "ETHIOPIA                 ",
+            "1996",
+            "33970.65"
+          ],
+          [
+            "ETHIOPIA                 ",
+            "1995",
+            "37720.35"
+          ],
+          [
+            "ETHIOPIA                 ",
+            "1994",
+            "37251.01"
+          ],
+          [
+            "ETHIOPIA                 ",
+            "1993",
+            "23782.61"
+          ],
+          [
+            "IRAN                     ",
+            "1997",
+            "23590.008"
+          ],
+          [
+            "IRAN                     ",
+            "1996",
+            "7428.2325"
+          ],
+          [
+            "IRAN                     ",
+            "1995",
+            "21000.9965"
+          ],
+          [
+            "IRAN                     ",
+            "1994",
+            "29408.13"
+          ],
+          [
+            "IRAN                     ",
+            "1993",
+            "49876.415"
+          ],
+          [
+            "IRAN                     ",
+            "1992",
+            "52064.24"
+          ],
+          [
+            "IRAQ                     ",
+            "1998",
+            "11619.9604"
+          ],
+          [
+            "IRAQ                     ",
+            "1997",
+            "47910.246"
+          ],
+          [
+            "IRAQ                     ",
+            "1996",
+            "18459.5675"
+          ],
+          [
+            "IRAQ                     ",
+            "1995",
+            "32782.3701"
+          ],
+          [
+            "IRAQ                     ",
+            "1994",
+            "9041.2317"
+          ],
+          [
+            "IRAQ                     ",
+            "1993",
+            "30687.2625"
+          ],
+          [
+            "IRAQ                     ",
+            "1992",
+            "29098.2557"
+          ],
+          [
+            "KENYA                    ",
+            "1998",
+            "33148.3345"
+          ],
+          [
+            "KENYA                    ",
+            "1997",
+            "54355.0165"
+          ],
+          [
+            "KENYA                    ",
+            "1996",
+            "53607.4854"
+          ],
+          [
+            "KENYA                    ",
+            "1995",
+            "85354.8738"
+          ],
+          [
+            "KENYA                    ",
+            "1994",
+            "102904.2511"
+          ],
+          [
+            "KENYA                    ",
+            "1993",
+            "109310.8084"
+          ],
+          [
+            "KENYA                    ",
+            "1992",
+            "138534.121"
+          ],
+          [
+            "MOROCCO                  ",
+            "1998",
+            "157058.2328"
+          ],
+          [
+            "MOROCCO                  ",
+            "1997",
+            "88669.961"
+          ],
+          [
+            "MOROCCO                  ",
+            "1996",
+            "236833.6672"
+          ],
+          [
+            "MOROCCO                  ",
+            "1995",
+            "381575.8668"
+          ],
+          [
+            "MOROCCO                  ",
+            "1994",
+            "243523.4336"
+          ],
+          [
+            "MOROCCO                  ",
+            "1993",
+            "232196.7803"
+          ],
+          [
+            "MOROCCO                  ",
+            "1992",
+            "347434.1452"
+          ],
+          [
+            "PERU                     ",
+            "1998",
+            "101109.0196"
+          ],
+          [
+            "PERU                     ",
+            "1997",
+            "58073.0866"
+          ],
+          [
+            "PERU                     ",
+            "1996",
+            "30360.5218"
+          ],
+          [
+            "PERU                     ",
+            "1995",
+            "138451.78"
+          ],
+          [
+            "PERU                     ",
+            "1994",
+            "55023.0632"
+          ],
+          [
+            "PERU                     ",
+            "1993",
+            "110409.0863"
+          ],
+          [
+            "PERU                     ",
+            "1992",
+            "70946.1916"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1998",
+            "139685.044"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1997",
+            "183502.0498"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1996",
+            "374085.2884"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1995",
+            "548356.7984"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1994",
+            "266982.768"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1993",
+            "717309.464"
+          ],
+          [
+            "UNITED KINGDOM           ",
+            "1992",
+            "79540.6016"
+          ],
+          [
+            "UNITED STATES            ",
+            "1998",
+            "32847.96"
+          ],
+          [
+            "UNITED STATES            ",
+            "1997",
+            "30849.5"
+          ],
+          [
+            "UNITED STATES            ",
+            "1996",
+            "56125.46"
+          ],
+          [
+            "UNITED STATES            ",
+            "1995",
+            "15961.7977"
+          ],
+          [
+            "UNITED STATES            ",
+            "1994",
+            "31671.2"
+          ],
+          [
+            "UNITED STATES            ",
+            "1993",
+            "55057.469"
+          ],
+          [
+            "UNITED STATES            ",
+            "1992",
+            "51970.23"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 10,
+      "result": {
+        "columns": [
+          "c_custkey",
+          "c_name",
+          "revenue",
+          "c_acctbal",
+          "n_name",
+          "c_address",
+          "c_phone",
+          "c_comment"
+        ],
+        "rows": [
+          [
+            "121",
+            "Customer#000000121",
+            "282635.1719",
+            "6428.32",
+            "PERU                     ",
+            "tv nCR2YKupGN73mQudO",
+            "27-411-990-2959",
+            "uriously stealthy ideas. carefully final courts use carefully"
+          ],
+          [
+            "124",
+            "Customer#000000124",
+            "222182.5188",
+            "1842.49",
+            "CHINA                    ",
+            "aTbyVAW5tCd,v09O",
+            "28-183-750-7809",
+            "le fluffily even dependencies. quietly s"
+          ],
+          [
+            "106",
+            "Customer#000000106",
+            "190241.3334",
+            "3288.42",
+            "ARGENTINA                ",
+            "xGCOEAUjUNG",
+            "11-751-989-4627",
+            "lose slyly. ironic accounts along the evenly regular theodolites wake about the special, final gifts. "
+          ],
+          [
+            "16",
+            "Customer#000000016",
+            "161422.0461",
+            "4681.03",
+            "IRAN                     ",
+            "cYiaeMLZSMAOQ2 d0W,",
+            "20-781-609-3107",
+            "kly silent courts. thinly regular theodolites sleep fluffily after "
+          ],
+          [
+            "44",
+            "Customer#000000044",
+            "149364.5652",
+            "7315.94",
+            "MOZAMBIQUE               ",
+            "Oi,dOSPwDu4jo4x,,P85E0dmhZGvNtBwi",
+            "26-190-260-5375",
+            "r requests around the unusual, bold a"
+          ],
+          [
+            "71",
+            "Customer#000000071",
+            "129481.0245",
+            "-611.19",
+            "GERMANY                  ",
+            "TlGalgdXWBmMV,6agLyWYDyIz9MKzcY8gl,w6t1B",
+            "17-710-812-5403",
+            "g courts across the regular, final pinto beans are blithely pending ac"
+          ],
+          [
+            "89",
+            "Customer#000000089",
+            "121663.1243",
+            "1530.76",
+            "KENYA                    ",
+            "dtR, y9JQWUO6FoJExyp8whOU",
+            "24-394-451-5404",
+            "counts are slyly beyond the slyly final accounts. quickly final ideas wake. r"
+          ],
+          [
+            "112",
+            "Customer#000000112",
+            "111137.7141",
+            "2953.35",
+            "ROMANIA                  ",
+            "RcfgG3bO7QeCnfjqJT1",
+            "29-233-262-8382",
+            "rmanently unusual multipliers. blithely ruthless deposits are furiously along the"
+          ],
+          [
+            "62",
+            "Customer#000000062",
+            "106368.0153",
+            "595.61",
+            "GERMANY                  ",
+            "upJK2Dnw13,",
+            "17-361-978-7059",
+            "kly special dolphins. pinto beans are slyly. quickly regular accounts are furiously a"
+          ],
+          [
+            "146",
+            "Customer#000000146",
+            "103265.9888",
+            "3328.68",
+            "CANADA                   ",
+            "GdxkdXG9u7iyI1,,y5tq4ZyrcEy",
+            "13-835-723-3223",
+            "ffily regular dinos are slyly unusual requests. slyly specia"
+          ],
+          [
+            "19",
+            "Customer#000000019",
+            "99306.0127",
+            "8914.71",
+            "CHINA                    ",
+            "uc,3bHIx84H,wdrmLOjVsiqXCq2tr",
+            "28-396-526-5053",
+            " nag. furiously careful packages are slyly at the accounts. furiously regular in"
+          ],
+          [
+            "145",
+            "Customer#000000145",
+            "99256.9018",
+            "9748.93",
+            "JORDAN                   ",
+            "kQjHmt2kcec cy3hfMh969u",
+            "23-562-444-8454",
+            "ests? express, express instructions use. blithely fina"
+          ],
+          [
+            "103",
+            "Customer#000000103",
+            "97311.7724",
+            "2757.45",
+            "INDONESIA                ",
+            "8KIsQX4LJ7QMsj6DrtFtXu0nUEdV,8a",
+            "19-216-107-2107",
+            "furiously pending notornis boost slyly around the blithely ironic ideas? final, even instructions cajole fl"
+          ],
+          [
+            "136",
+            "Customer#000000136",
+            "95855.398",
+            "-842.39",
+            "GERMANY                  ",
+            "QoLsJ0v5C1IQbh,DS1",
+            "17-501-210-4726",
+            "ackages sleep ironic, final courts. even requests above the blithely bold requests g"
+          ],
+          [
+            "53",
+            "Customer#000000053",
+            "92568.9124",
+            "4113.64",
+            "MOROCCO                  ",
+            "HnaxHzTfFTZs8MuCpJyTbZ47Cm4wFOOgib",
+            "25-168-852-5363",
+            "ar accounts are. even foxes are blithely. fluffily pending deposits boost"
+          ],
+          [
+            "49",
+            "Customer#000000049",
+            "90965.7262",
+            "4573.94",
+            "IRAN                     ",
+            "cNgAeX7Fqrdf7HQN9EwjUa4nxT,68L FKAxzl",
+            "20-908-631-4424",
+            "nusual foxes! fluffily pending packages maintain to the regular "
+          ],
+          [
+            "37",
+            "Customer#000000037",
+            "88065.7458",
+            "-917.75",
+            "INDIA                    ",
+            "7EV4Pwh,3SboctTWt",
+            "18-385-235-7162",
+            "ilent packages are carefully among the deposits. furiousl"
+          ],
+          [
+            "82",
+            "Customer#000000082",
+            "86998.9644",
+            "9468.34",
+            "CHINA                    ",
+            "zhG3EZbap4c992Gj3bK,3Ne,Xn",
+            "28-159-442-5305",
+            "s wake. bravely regular accounts are furiously. regula"
+          ],
+          [
+            "125",
+            "Customer#000000125",
+            "84808.068",
+            "-234.12",
+            "ROMANIA                  ",
+            ",wSZXdVR xxIIfm9s8ITyLl3kgjT6UC07GY0Y",
+            "29-261-996-3120",
+            "x-ray finally after the packages? regular requests c"
+          ],
+          [
+            "59",
+            "Customer#000000059",
+            "84655.5711",
+            "3458.6",
+            "ARGENTINA                ",
+            "zLOCP0wh92OtBihgspOGl4",
+            "11-355-584-3112",
+            "ously final packages haggle blithely after the express deposits. furiou"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 11,
+      "result": {
+        "columns": [
+          "ps_partkey",
+          "value"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 12,
+      "result": {
+        "columns": [
+          "l_shipmode",
+          "high_line_count",
+          "low_line_count"
+        ],
+        "rows": [
+          [
+            "MAIL      ",
+            "5",
+            "5"
+          ],
+          [
+            "SHIP      ",
+            "5",
+            "10"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 13,
+      "result": {
+        "columns": [
+          "c_count",
+          "custdist"
+        ],
+        "rows": [
+          [
+            "0",
+            "50"
+          ],
+          [
+            "16",
+            "8"
+          ],
+          [
+            "17",
+            "7"
+          ],
+          [
+            "20",
+            "6"
+          ],
+          [
+            "13",
+            "6"
+          ],
+          [
+            "12",
+            "6"
+          ],
+          [
+            "9",
+            "6"
+          ],
+          [
+            "23",
+            "5"
+          ],
+          [
+            "14",
+            "5"
+          ],
+          [
+            "10",
+            "5"
+          ],
+          [
+            "21",
+            "4"
+          ],
+          [
+            "18",
+            "4"
+          ],
+          [
+            "11",
+            "4"
+          ],
+          [
+            "8",
+            "4"
+          ],
+          [
+            "7",
+            "4"
+          ],
+          [
+            "26",
+            "3"
+          ],
+          [
+            "22",
+            "3"
+          ],
+          [
+            "6",
+            "3"
+          ],
+          [
+            "5",
+            "3"
+          ],
+          [
+            "4",
+            "3"
+          ],
+          [
+            "29",
+            "2"
+          ],
+          [
+            "24",
+            "2"
+          ],
+          [
+            "19",
+            "2"
+          ],
+          [
+            "15",
+            "2"
+          ],
+          [
+            "28",
+            "1"
+          ],
+          [
+            "25",
+            "1"
+          ],
+          [
+            "3",
+            "1"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 14,
+      "result": {
+        "columns": [
+          "promo_revenue"
+        ],
+        "rows": [
+          [
+            "15.2302126115972488"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 15,
+      "result": {
+        "columns": [
+          "s_suppkey",
+          "s_name",
+          "s_address",
+          "s_phone",
+          "total_revenue"
+        ],
+        "rows": [
+          [
+            "10",
+            "Supplier#000000010       ",
+            "Saygah3gYWMp72i PY",
+            "34-852-489-8585",
+            "797313.3838"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 16,
+      "result": {
+        "columns": [
+          "p_brand",
+          "p_type",
+          "p_size",
+          "supplier_cnt"
+        ],
+        "rows": [
+          [
+            "Brand#11  ",
+            "PROMO ANODIZED TIN",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#11  ",
+            "SMALL PLATED COPPER",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#11  ",
+            "STANDARD POLISHED TIN",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#13  ",
+            "MEDIUM ANODIZED STEEL",
+            "36",
+            "4"
+          ],
+          [
+            "Brand#14  ",
+            "SMALL ANODIZED NICKEL",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#15  ",
+            "LARGE ANODIZED BRASS",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#21  ",
+            "LARGE BURNISHED COPPER",
+            "19",
+            "4"
+          ],
+          [
+            "Brand#23  ",
+            "ECONOMY BRUSHED COPPER",
+            "9",
+            "4"
+          ],
+          [
+            "Brand#25  ",
+            "MEDIUM PLATED BRASS",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#31  ",
+            "ECONOMY PLATED STEEL",
+            "23",
+            "4"
+          ],
+          [
+            "Brand#31  ",
+            "PROMO POLISHED TIN",
+            "23",
+            "4"
+          ],
+          [
+            "Brand#32  ",
+            "MEDIUM BURNISHED BRASS",
+            "49",
+            "4"
+          ],
+          [
+            "Brand#33  ",
+            "LARGE BRUSHED TIN",
+            "36",
+            "4"
+          ],
+          [
+            "Brand#33  ",
+            "SMALL BURNISHED NICKEL",
+            "3",
+            "4"
+          ],
+          [
+            "Brand#34  ",
+            "LARGE PLATED BRASS",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#34  ",
+            "MEDIUM BRUSHED COPPER",
+            "9",
+            "4"
+          ],
+          [
+            "Brand#34  ",
+            "SMALL PLATED BRASS",
+            "14",
+            "4"
+          ],
+          [
+            "Brand#35  ",
+            "STANDARD ANODIZED STEEL",
+            "23",
+            "4"
+          ],
+          [
+            "Brand#43  ",
+            "PROMO POLISHED BRASS",
+            "19",
+            "4"
+          ],
+          [
+            "Brand#43  ",
+            "SMALL BRUSHED NICKEL",
+            "9",
+            "4"
+          ],
+          [
+            "Brand#44  ",
+            "SMALL PLATED COPPER",
+            "19",
+            "4"
+          ],
+          [
+            "Brand#52  ",
+            "MEDIUM BURNISHED TIN",
+            "45",
+            "4"
+          ],
+          [
+            "Brand#52  ",
+            "SMALL BURNISHED NICKEL",
+            "14",
+            "4"
+          ],
+          [
+            "Brand#53  ",
+            "MEDIUM BRUSHED COPPER",
+            "3",
+            "4"
+          ],
+          [
+            "Brand#55  ",
+            "STANDARD ANODIZED BRASS",
+            "36",
+            "4"
+          ],
+          [
+            "Brand#55  ",
+            "STANDARD BRUSHED COPPER",
+            "3",
+            "4"
+          ],
+          [
+            "Brand#13  ",
+            "SMALL BRUSHED NICKEL",
+            "19",
+            "2"
+          ],
+          [
+            "Brand#25  ",
+            "SMALL BURNISHED COPPER",
+            "3",
+            "2"
+          ],
+          [
+            "Brand#43  ",
+            "MEDIUM ANODIZED BRASS",
+            "14",
+            "2"
+          ],
+          [
+            "Brand#53  ",
+            "STANDARD PLATED STEEL",
+            "45",
+            "2"
+          ],
+          [
+            "Brand#24  ",
+            "MEDIUM PLATED STEEL",
+            "19",
+            "1"
+          ],
+          [
+            "Brand#51  ",
+            "ECONOMY POLISHED STEEL",
+            "49",
+            "1"
+          ],
+          [
+            "Brand#53  ",
+            "LARGE BURNISHED NICKEL",
+            "23",
+            "1"
+          ],
+          [
+            "Brand#54  ",
+            "ECONOMY ANODIZED BRASS",
+            "9",
+            "1"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 17,
+      "result": {
+        "columns": [
+          "avg_yearly"
+        ],
+        "rows": [
+          [
+            "<NULL>"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 18,
+      "result": {
+        "columns": [
+          "c_name",
+          "c_custkey",
+          "o_orderkey",
+          "o_orderdate",
+          "o_totalprice",
+          "sum"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 19,
+      "result": {
+        "columns": [
+          "revenue"
+        ],
+        "rows": [
+          [
+            "<NULL>"
+          ]
+        ]
+      }
+    },
+    {
+      "query": 20,
+      "result": {
+        "columns": [
+          "s_name",
+          "s_address"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 21,
+      "result": {
+        "columns": [
+          "s_name",
+          "numwait"
+        ],
+        "rows": []
+      }
+    },
+    {
+      "query": 22,
+      "result": {
+        "columns": [
+          "cntrycode",
+          "numcust",
+          "totacctbal"
+        ],
+        "rows": [
+          [
+            "13",
+            "1",
+            "5679.84"
+          ],
+          [
+            "17",
+            "1",
+            "9127.27"
+          ],
+          [
+            "18",
+            "2",
+            "14647.99"
+          ],
+          [
+            "23",
+            "1",
+            "9255.67"
+          ],
+          [
+            "29",
+            "2",
+            "17195.08"
+          ],
+          [
+            "30",
+            "1",
+            "7638.57"
+          ],
+          [
+            "31",
+            "1",
+            "9331.13"
+          ]
+        ]
+      }
+    }
+  ]
+}

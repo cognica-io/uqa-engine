@@ -6,158 +6,7 @@
 
 //! HAVING resolution, aggregate discovery, and group-row context.
 
-use super::{
-    aggregate_value_with_args, AggregateAccumulator, Engine, ProjectionPlan, QueryBlockPlan,
-    ResultRow, SQLError, SQLParam, ScalarExpr, Value,
-};
-
-pub(in crate::sql) fn resolve_having(
-    engine: &Engine,
-    expression: &ScalarExpr,
-    _projected_row: &ResultRow,
-    statement: &QueryBlockPlan,
-    accumulators: &[AggregateAccumulator],
-    _group_values: &[Value],
-    _params: &[SQLParam],
-) -> Result<ScalarExpr, SQLError> {
-    fn walk(
-        engine: &Engine,
-        expression: &ScalarExpr,
-        statement: &QueryBlockPlan,
-        accumulators: &[AggregateAccumulator],
-    ) -> Result<ScalarExpr, SQLError> {
-        if is_aggregate(engine, expression) {
-            for (index, aggregate) in aggregate_exprs(engine, &statement.projections)
-                .into_iter()
-                .enumerate()
-            {
-                if exprs_match(aggregate, expression) {
-                    let ScalarExpr::Func { name, args, .. } = aggregate else {
-                        return Err(SQLError::Internal(
-                            "aggregate classifier returned a non-function expression".into(),
-                        ));
-                    };
-                    let accumulator = accumulators.get(index).ok_or_else(|| {
-                        SQLError::Internal("HAVING aggregate accumulator missing".into())
-                    })?;
-                    return Ok(ScalarExpr::Literal(aggregate_value_with_args(
-                        name,
-                        accumulator,
-                        args,
-                    )?));
-                }
-            }
-            return Err(SQLError::Unsupported(
-                "HAVING references an aggregate that is not in the SELECT list".into(),
-            ));
-        }
-
-        Ok(match expression {
-            ScalarExpr::Func {
-                name,
-                args,
-                distinct,
-                order_by,
-                filter,
-            } => ScalarExpr::Func {
-                name: name.clone(),
-                args: args
-                    .iter()
-                    .map(|argument| walk(engine, argument, statement, accumulators))
-                    .collect::<Result<Vec<_>, _>>()?,
-                distinct: *distinct,
-                order_by: order_by.clone(),
-                filter: filter.clone(),
-            },
-            ScalarExpr::Array(items) => ScalarExpr::Array(
-                items
-                    .iter()
-                    .map(|item| walk(engine, item, statement, accumulators))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-                op: *op,
-                lhs: Box::new(walk(engine, lhs, statement, accumulators)?),
-                rhs: Box::new(walk(engine, rhs, statement, accumulators)?),
-            },
-            ScalarExpr::Not(inner) => {
-                ScalarExpr::Not(Box::new(walk(engine, inner, statement, accumulators)?))
-            }
-            ScalarExpr::And(items) => ScalarExpr::And(
-                items
-                    .iter()
-                    .map(|item| walk(engine, item, statement, accumulators))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            ScalarExpr::Or(items) => ScalarExpr::Or(
-                items
-                    .iter()
-                    .map(|item| walk(engine, item, statement, accumulators))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-                expr: Box::new(walk(engine, expr, statement, accumulators)?),
-                negated: *negated,
-            },
-            ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-                expr: Box::new(walk(engine, expr, statement, accumulators)?),
-                low: Box::new(walk(engine, low, statement, accumulators)?),
-                high: Box::new(walk(engine, high, statement, accumulators)?),
-            },
-            ScalarExpr::InList {
-                expr,
-                list,
-                negated,
-            } => ScalarExpr::InList {
-                expr: Box::new(walk(engine, expr, statement, accumulators)?),
-                list: list
-                    .iter()
-                    .map(|item| walk(engine, item, statement, accumulators))
-                    .collect::<Result<Vec<_>, _>>()?,
-                negated: *negated,
-            },
-            ScalarExpr::Case {
-                base,
-                when,
-                else_branch,
-            } => ScalarExpr::Case {
-                base: base
-                    .as_deref()
-                    .map(|expr| walk(engine, expr, statement, accumulators).map(Box::new))
-                    .transpose()?,
-                when: when
-                    .iter()
-                    .map(|(condition, result)| {
-                        Ok((
-                            walk(engine, condition, statement, accumulators)?,
-                            walk(engine, result, statement, accumulators)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()?,
-                else_branch: else_branch
-                    .as_deref()
-                    .map(|expr| walk(engine, expr, statement, accumulators).map(Box::new))
-                    .transpose()?,
-            },
-            ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
-                expr: Box::new(walk(engine, expr, statement, accumulators)?),
-                ty: ty.clone(),
-            },
-            ScalarExpr::InSubquery {
-                expr,
-                subquery,
-                negated,
-            } => ScalarExpr::InSubquery {
-                expr: Box::new(walk(engine, expr, statement, accumulators)?),
-                subquery: *subquery,
-                negated: *negated,
-            },
-            other => other.clone(),
-        })
-    }
-
-    walk(engine, expression, statement, accumulators)
-}
+use super::{Engine, ProjectionPlan, QueryBlockPlan, ResultRow, ScalarExpr, Value};
 
 pub(in crate::sql) fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
@@ -290,6 +139,32 @@ pub(in crate::sql) fn aggregate_exprs<'a>(
         collect_aggregate_exprs(engine, &projection.expr, &mut out);
     }
     out
+}
+
+/// Aggregate states needed by a query block, in accumulator order.
+///
+/// Projection aggregates remain first (including repeated expressions) because
+/// projection rewriting consumes them positionally. Aggregates referenced only
+/// by HAVING are appended once as hidden targets, matching `PostgreSQL`'s rule
+/// that HAVING need not expose an aggregate in the SELECT list.
+pub(in crate::sql) fn aggregate_targets<'a>(
+    engine: &Engine,
+    statement: &'a QueryBlockPlan,
+) -> Vec<&'a ScalarExpr> {
+    let mut targets = aggregate_exprs(engine, &statement.projections);
+    if let Some(having) = statement.having.as_ref() {
+        let mut hidden = Vec::new();
+        collect_aggregate_exprs(engine, having, &mut hidden);
+        for aggregate in hidden {
+            if !targets
+                .iter()
+                .any(|existing| exprs_match(existing, aggregate))
+            {
+                targets.push(aggregate);
+            }
+        }
+    }
+    targets
 }
 
 pub(in crate::sql) fn collect_aggregate_exprs<'a>(

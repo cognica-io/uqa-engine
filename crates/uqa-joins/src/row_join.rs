@@ -89,6 +89,10 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
             2_u8.hash(state);
             value.hash(state);
         }
+        Value::FixedChar(value) => {
+            7_u8.hash(state);
+            value.trim_end_matches(' ').hash(state);
+        }
         Value::Bytes(value) => {
             3_u8.hash(state);
             value.hash(state);

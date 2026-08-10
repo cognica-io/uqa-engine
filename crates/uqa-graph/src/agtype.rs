@@ -174,7 +174,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
         Some(EntityKind::Path) => 8,
         None => match value {
             Value::Null => 0,
-            Value::Str(_) => 1,
+            Value::Str(_) | Value::FixedChar(_) => 1,
             Value::Decimal(_) => 2,
             Value::Int(_) => 3,
             Value::Float(_) => 4,
@@ -199,7 +199,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Int(_) => "integer",
             Value::Float(_) => "float",
             Value::Decimal(_) => "numeric",
-            Value::Str(_) => "string",
+            Value::Str(_) | Value::FixedChar(_) => "string",
             Value::List(_) => "list",
             Value::Map(_) => "map",
             Value::Bytes(_) => "bytea",
@@ -325,6 +325,7 @@ fn render_into(value: &Value, out: &mut String) {
                 out.push_str("::numeric");
             }
             Value::Str(s) => render_json_string(s, out),
+            Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
             Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
             Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
             Value::List(items) => {
@@ -415,7 +416,7 @@ fn sort_priority(value: &Value) -> u8 {
         None => match value {
             Value::Map(_) => 3,
             Value::List(_) => 4,
-            Value::Str(_) | Value::Bytes(_) | Value::Temporal(_) => 5,
+            Value::Str(_) | Value::FixedChar(_) | Value::Bytes(_) | Value::Temporal(_) => 5,
             Value::Bool(_) => 6,
             Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 7,
             Value::Null => 8,

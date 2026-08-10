@@ -67,14 +67,14 @@ impl<'a> ProjectSet<'a> {
             let Some(batch) = self.child.next()? else {
                 return Ok(None);
             };
-            self.input = batch.rows.into_iter();
+            self.input = batch.into_result_rows().into_iter();
         }
     }
 }
 
 impl PhysicalOperator for ProjectSet<'_> {
-    fn schema(&self) -> &[String] {
-        &self.schema.columns
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
     }
 
     fn open(&mut self) -> ExecResult<()> {

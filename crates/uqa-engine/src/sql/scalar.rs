@@ -11,7 +11,7 @@ use uqa_execution::{
     eval_scalar, ScalarEvalContext, ScalarExpr, ScalarSubqueryRunner, SubqueryId, SubqueryResult,
 };
 use uqa_planner::{ExpressionPlan, QueryPlan};
-use uqa_sql::expr::{EngineHook, NAMED_ARG_FUNCTION};
+use uqa_sql::expr::{EngineHook, RowLookup, NAMED_ARG_FUNCTION};
 use uqa_sql::{ResultRow, SQLError, SQLParam};
 
 use super::{CteScope, Engine, ScopedEngineHook};
@@ -21,7 +21,7 @@ pub(super) trait PhysicalSubqueryRunner {
         &self,
         subquery: SubqueryId,
         plan: &QueryPlan,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
 
@@ -29,7 +29,7 @@ pub(super) trait PhysicalSubqueryRunner {
         &self,
         subquery: SubqueryId,
         plan: &QueryPlan,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         self.execute_subquery(subquery, plan, outer_row, params)?
@@ -40,7 +40,7 @@ pub(super) trait PhysicalSubqueryRunner {
         &self,
         subquery: SubqueryId,
         plan: &QueryPlan,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         self.execute_subquery(subquery, plan, outer_row, params)?
@@ -52,9 +52,9 @@ pub(super) trait PhysicalSubqueryRunner {
         subquery: SubqueryId,
         plan: &QueryPlan,
         needle: &Value,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
-    ) -> Result<bool, SQLError> {
+    ) -> Result<Option<bool>, SQLError> {
         self.execute_subquery(subquery, plan, outer_row, params)?
             .contains(needle)
     }
@@ -62,6 +62,7 @@ pub(super) trait PhysicalSubqueryRunner {
 
 pub(super) struct PhysicalEvalContext<'a> {
     row: Option<&'a ResultRow>,
+    row_lookup: Option<&'a dyn RowLookup>,
     params: &'a [SQLParam],
     function_hook: Option<&'a dyn EngineHook>,
     subquery_runner: Option<&'a dyn PhysicalSubqueryRunner>,
@@ -71,6 +72,17 @@ impl<'a> PhysicalEvalContext<'a> {
     pub(super) fn new(row: Option<&'a ResultRow>, params: &'a [SQLParam]) -> Self {
         Self {
             row,
+            row_lookup: row.map(|row| row as &dyn RowLookup),
+            params,
+            function_hook: None,
+            subquery_runner: None,
+        }
+    }
+
+    pub(super) fn from_row_lookup(row: &'a dyn RowLookup, params: &'a [SQLParam]) -> Self {
+        Self {
+            row: None,
+            row_lookup: Some(row),
             params,
             function_hook: None,
             subquery_runner: None,
@@ -148,7 +160,10 @@ pub(super) fn eval_physical_scalar(
     context: &PhysicalEvalContext<'_>,
 ) -> Result<Value, SQLError> {
     let subqueries = PlanSubqueryArena::new(subqueries, context.subquery_runner);
-    let mut scalar_context = ScalarEvalContext::new(context.row, context.params);
+    let mut scalar_context = context.row_lookup.map_or_else(
+        || ScalarEvalContext::new(context.row, context.params),
+        |row| ScalarEvalContext::from_row_lookup(row, context.params),
+    );
     if let Some(hook) = context.function_hook {
         scalar_context = scalar_context.with_function_hook(hook);
     }
@@ -176,7 +191,7 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
     fn execute_subquery(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError> {
         let plan = self.plans.get(subquery).ok_or_else(|| {
@@ -194,7 +209,7 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
     fn scalar_subquery_value(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         let plan = self.plan(subquery)?;
@@ -205,7 +220,7 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
     fn subquery_exists(
         &self,
         subquery: SubqueryId,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         let plan = self.plan(subquery)?;
@@ -217,9 +232,9 @@ impl ScalarSubqueryRunner for PlanSubqueryArena<'_> {
         &self,
         subquery: SubqueryId,
         needle: &Value,
-        outer_row: Option<&ResultRow>,
+        outer_row: Option<&dyn RowLookup>,
         params: &[SQLParam],
-    ) -> Result<bool, SQLError> {
+    ) -> Result<Option<bool>, SQLError> {
         let plan = self.plan(subquery)?;
         self.runner()?
             .subquery_contains(subquery, plan, needle, outer_row, params)

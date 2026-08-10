@@ -6,17 +6,20 @@
 
 //! Engine adapter selecting adaptive or sort aggregation per grouping set.
 
-use super::{projection_columns, CteScope, Engine, QueryBlockPlan, SQLParam, SpillBuffer};
+use super::{
+    projection_columns, CteScope, Engine, QueryBlockPlan, SQLError, SQLParam, SpillBuffer,
+};
 use uqa_execution::{AggregateExecutor, Batch, ExecResult, RowSchema};
 use uqa_sql::expr::RowLookup;
 
 enum AggregateSet {
-    Adaptive(super::adaptive::AdaptiveAggregateSet),
+    Adaptive(Box<super::adaptive::AdaptiveAggregateSet>),
     Sorted {
-        statement: QueryBlockPlan,
+        statement: Box<QueryBlockPlan>,
         relaxed: bool,
         input: SpillBuffer,
         phase_budget: usize,
+        optimistic: Option<Box<super::adaptive::AdaptiveAggregateSet>>,
     },
 }
 
@@ -38,32 +41,53 @@ impl<'a> PhysicalAggregateExecutor<'a> {
         ctes: &'a CteScope,
         input_schema: Vec<String>,
         work_mem_bytes: usize,
-    ) -> Self {
+    ) -> Result<Self, SQLError> {
         let statements = grouping_set_statements(statement);
         let set_budget = (work_mem_bytes / statements.len().max(1)).max(1);
         let sets = statements
             .into_iter()
             .map(|(statement, relaxed)| {
                 if super::adaptive::supports_adaptive_grouping(engine, &statement) {
-                    AggregateSet::Adaptive(super::adaptive::AdaptiveAggregateSet::new(
+                    return super::adaptive::AdaptiveAggregateSet::new(
                         engine,
                         statement,
                         relaxed,
                         set_budget,
                         &input_schema,
-                    ))
-                } else {
-                    let phase_budget = (set_budget / 3).max(1);
-                    AggregateSet::Sorted {
-                        statement,
-                        relaxed,
-                        input: SpillBuffer::new(phase_budget),
-                        phase_budget,
-                    }
+                    )
+                    .map(|set| AggregateSet::Adaptive(Box::new(set)));
                 }
+                let phase_budget = (set_budget / 3).max(1);
+                let optimistic =
+                    if super::adaptive::supports_optimistic_grouping(engine, &statement) {
+                        Some(Box::new(
+                            super::adaptive::AdaptiveAggregateSet::new_optimistic(
+                                engine,
+                                statement.clone(),
+                                relaxed,
+                                (set_budget / 2).max(1),
+                                phase_budget,
+                                &input_schema,
+                            )?,
+                        ))
+                    } else {
+                        None
+                    };
+                let input_budget = if optimistic.is_some() {
+                    (set_budget / 2).max(1)
+                } else {
+                    phase_budget
+                };
+                Ok(AggregateSet::Sorted {
+                    statement: Box::new(statement),
+                    relaxed,
+                    input: SpillBuffer::new(input_budget),
+                    phase_budget,
+                    optimistic,
+                })
             })
-            .collect();
-        Self {
+            .collect::<Result<Vec<_>, SQLError>>()?;
+        Ok(Self {
             engine,
             params,
             ctes,
@@ -71,6 +95,43 @@ impl<'a> PhysicalAggregateExecutor<'a> {
             output_schema: RowSchema::new(projection_columns(&statement.projections)),
             output_budget: (work_mem_bytes / 3).max(1),
             sets,
+        })
+    }
+
+    fn finish_set(&self, set: AggregateSet) -> Result<SpillBuffer, SQLError> {
+        match set {
+            AggregateSet::Adaptive(set) => {
+                (*set).finish(self.engine, &self.output_schema, self.params, self.ctes)
+            }
+            AggregateSet::Sorted {
+                statement,
+                relaxed,
+                input,
+                phase_budget,
+                optimistic,
+            } => {
+                if let Some(optimistic) = optimistic {
+                    debug_assert!(!optimistic.is_abandoned());
+                    drop(input);
+                    return (*optimistic).finish(
+                        self.engine,
+                        &self.output_schema,
+                        self.params,
+                        self.ctes,
+                    );
+                }
+                super::sort_fallback::aggregate_sorted_input(
+                    self.engine,
+                    &statement,
+                    input,
+                    &self.input_schema,
+                    &self.output_schema,
+                    self.params,
+                    self.ctes,
+                    phase_budget,
+                    relaxed,
+                )
+            }
         }
     }
 }
@@ -82,8 +143,16 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
                 AggregateSet::Adaptive(set) => {
                     set.consume(self.engine, &batch, self.params, self.ctes)?;
                 }
-                AggregateSet::Sorted { input, .. } => {
+                AggregateSet::Sorted {
+                    input, optimistic, ..
+                } => {
                     input.push(batch.clone())?;
+                    if let Some(candidate) = optimistic.as_mut() {
+                        candidate.consume(self.engine, &batch, self.params, self.ctes)?;
+                        if candidate.is_abandoned() {
+                            *optimistic = None;
+                        }
+                    }
                 }
             }
         }
@@ -109,30 +178,18 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
     }
 
     fn finish(&mut self) -> ExecResult<SpillBuffer> {
+        let mut sets = std::mem::take(&mut self.sets);
+        if sets.len() == 1 {
+            let set = sets.pop().ok_or_else(|| {
+                uqa_execution::ExecError::Other("aggregate grouping set disappeared".into())
+            })?;
+            return self.finish_set(set).map_err(Into::into);
+        }
+
         let mut output = SpillBuffer::new(self.output_budget);
         let mut expected_output_rows = 0usize;
-        for set in std::mem::take(&mut self.sets) {
-            let mut set_output = match set {
-                AggregateSet::Adaptive(set) => {
-                    set.finish(self.engine, &self.output_schema, self.params, self.ctes)?
-                }
-                AggregateSet::Sorted {
-                    statement,
-                    relaxed,
-                    input,
-                    phase_budget,
-                } => super::sort_fallback::aggregate_sorted_input(
-                    self.engine,
-                    &statement,
-                    input,
-                    &self.input_schema,
-                    &self.output_schema,
-                    self.params,
-                    self.ctes,
-                    phase_budget,
-                    relaxed,
-                )?,
-            };
+        for set in sets {
+            let mut set_output = self.finish_set(set)?;
             expected_output_rows = expected_output_rows
                 .checked_add(set_output.rows())
                 .ok_or_else(|| {
