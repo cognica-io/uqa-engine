@@ -96,16 +96,17 @@ pub(super) unsafe extern "C" fn vfs_delete(
         Err(_) => return ffi::SQLITE_IOERR_DELETE,
     };
     let remove = |path: &Path| match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     };
     let file_result = remove(&normalized);
     let lock_result = remove(&lock_path(&normalized));
-    if file_result.is_err() || lock_result.is_err() {
-        return ffi::SQLITE_IOERR_DELETE;
-    }
-    if sync_dir != 0 && sync_parent_directory(&normalized).is_err() {
+    let namespace_changed = match (file_result, lock_result) {
+        (Ok(file_removed), Ok(lock_removed)) => file_removed || lock_removed,
+        _ => return ffi::SQLITE_IOERR_DELETE,
+    };
+    if sync_dir != 0 && namespace_changed && sync_parent_directory(&normalized).is_err() {
         return ffi::SQLITE_IOERR_DIR_FSYNC;
     }
     ffi::SQLITE_OK
