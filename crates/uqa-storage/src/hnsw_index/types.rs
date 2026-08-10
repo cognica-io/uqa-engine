@@ -21,6 +21,7 @@ pub(super) struct HNSWNode {
     pub(super) doc_id: DocId,
     pub(super) vector_ordinal: u32,
     pub(super) raw_vector: Vec<f32>,
+    pub(super) norm: f32,
     pub(super) normalized_vector: Vec<f32>,
     pub(super) level: usize,
     pub(super) deleted: bool,

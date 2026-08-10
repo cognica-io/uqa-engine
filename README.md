@@ -206,6 +206,8 @@ target/release/examples/tpch_runner --iterations 201
 
 In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](docs/design/performance.md).
 
+The same 2026-08-09 workstation pass measured release-profile search hot paths with 30 Criterion samples: persisted Block-Max WAND improved from 4.7080 ms to 3.8584 ms, trained IVF top-10 over 10,000 32-dimensional vectors improved from 333.46 us to 188.80 us, and HNSW top-10 improved from 212.63 us to 148.31 us. These are same-machine regression baselines with deterministic fixtures, not portable latency claims; commands, CPU state, full tables, correctness gates, and limitations are recorded in the [performance design document](docs/design/performance.md#search-hot-path-pass-2026-08-09).
+
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation

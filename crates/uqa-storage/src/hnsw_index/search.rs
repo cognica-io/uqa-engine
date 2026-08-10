@@ -7,7 +7,7 @@
 //! Greedy hierarchy traversal and bounded layer search.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::{BinaryHeap, HashSet};
 
 use super::metric::distance;
 use super::types::{HNSWIndex, NodeId};
@@ -51,13 +51,14 @@ impl HNSWIndex {
         };
         loop {
             let mut improved = false;
-            let neighbors = self
+            let Some(neighbors) = self
                 .nodes
                 .get(&best.node_id)
                 .and_then(|node| node.neighbors.get(layer))
-                .cloned()
-                .unwrap_or_default();
-            for neighbor_id in neighbors {
+            else {
+                return best.node_id;
+            };
+            for &neighbor_id in neighbors {
                 let Some(neighbor) = self.nodes.get(&neighbor_id) else {
                     continue;
                 };
@@ -84,7 +85,7 @@ impl HNSWIndex {
         layer: usize,
     ) -> Vec<Candidate> {
         let ef = ef.max(1);
-        let mut visited = BTreeSet::new();
+        let mut visited = HashSet::with_capacity(ef.saturating_mul(2).min(self.nodes.len()));
         let mut candidates = BinaryHeap::<Reverse<Candidate>>::new();
         let mut nearest = BinaryHeap::<Candidate>::new();
         for entry in entries {
@@ -105,13 +106,14 @@ impl HNSWIndex {
             if nearest.len() >= ef && nearest.peek().is_some_and(|worst| current > *worst) {
                 break;
             }
-            let neighbors = self
+            let Some(neighbors) = self
                 .nodes
                 .get(&current.node_id)
                 .and_then(|node| node.neighbors.get(layer))
-                .cloned()
-                .unwrap_or_default();
-            for neighbor_id in neighbors {
+            else {
+                continue;
+            };
+            for &neighbor_id in neighbors {
                 if !visited.insert(neighbor_id) {
                     continue;
                 }

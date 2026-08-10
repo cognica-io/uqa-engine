@@ -8,7 +8,7 @@
 
 use uqa_core::DocId;
 
-use super::metric::{deterministic_level, normalize};
+use super::metric::{deterministic_level, normalize_with_norm};
 use super::search::Candidate;
 use super::types::{HNSWIndex, HNSWNode};
 use crate::{StorageBackendError, StorageBackendResult};
@@ -26,7 +26,7 @@ impl HNSWIndex {
             .checked_add(1)
             .ok_or_else(|| StorageBackendError::Other("HNSW node id space exhausted".into()))?;
         let level = deterministic_level(self.params.seed, node_id, self.params.m);
-        let normalized_vector = normalize(&raw_vector);
+        let (normalized_vector, norm) = normalize_with_norm(&raw_vector);
         let previous_entry = self.entry_point;
         let previous_max_level = self.max_level;
         self.nodes.insert(
@@ -36,6 +36,7 @@ impl HNSWIndex {
                 doc_id,
                 vector_ordinal,
                 raw_vector,
+                norm,
                 normalized_vector: normalized_vector.clone(),
                 level,
                 deleted: false,

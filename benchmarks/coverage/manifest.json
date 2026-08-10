@@ -289,7 +289,9 @@
         "vector_index_build_500",
         "vector_index_delete",
         "vector_index_knn_brute_force",
+        "vector_index_knn_hnsw",
         "vector_index_knn_trained",
+        "vector_index_hnsw_build_1k",
         "vector_index_persistence_roundtrip",
         "vector_index_threshold_search",
         "vector_index_train"

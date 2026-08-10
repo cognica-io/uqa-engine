@@ -28,7 +28,7 @@ impl IVFIndex {
         for (ordinal, mut vector) in input_vectors.into_iter().enumerate() {
             let vector_ordinal = encode_vector_ordinal(ordinal)?;
             let raw_vector = vector.clone();
-            l2_normalize(&mut vector);
+            let norm = l2_normalize(&mut vector);
             let centroid = (!centroids.is_empty()).then(|| nearest_centroid(&vector, &centroids));
             let key = (doc_id, vector_ordinal);
             staged.push(StoredVector {
@@ -36,6 +36,7 @@ impl IVFIndex {
                 doc_id,
                 vector_ordinal,
                 raw_vector,
+                norm,
                 vector,
                 centroid,
             });

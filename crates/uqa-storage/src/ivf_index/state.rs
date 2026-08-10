@@ -40,6 +40,7 @@ pub(super) struct StoredVector {
     pub(super) doc_id: DocId,
     pub(super) vector_ordinal: u32,
     pub(super) raw_vector: Vec<f32>,
+    pub(super) norm: f32,
     pub(super) vector: Vec<f32>,
     pub(super) centroid: Option<usize>,
 }

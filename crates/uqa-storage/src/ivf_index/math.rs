@@ -6,13 +6,16 @@
 
 //! Normalization, centroid assignment, and deterministic k-means.
 
-pub(super) fn l2_normalize(vector: &mut [f32]) {
-    let magnitude = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+use crate::vector_index::vector_norm;
+
+pub(super) fn l2_normalize(vector: &mut [f32]) -> f32 {
+    let magnitude = vector_norm(vector);
     if magnitude > 1e-12 {
         for value in vector {
             *value /= magnitude;
         }
     }
+    magnitude
 }
 
 pub(super) fn dot(left: &[f32], right: &[f32]) -> f32 {

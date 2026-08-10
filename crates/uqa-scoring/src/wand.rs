@@ -12,7 +12,7 @@
 //! tighter per-block max stored in [`BlockMaxIndex`]. The output top-k
 //! is identical to exhaustive scoring.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
@@ -91,6 +91,7 @@ fn update_top_k(
 struct TermCursor<'a> {
     entries: &'a [PostingEntry],
     position: usize,
+    doc_freq: u64,
     upper_bound: f64,
 }
 
@@ -206,8 +207,8 @@ impl<'a> WANDScorer<'a> {
     pub fn score_top_k(&self) -> StorageBackendResult<WANDResult> {
         validate_query(self.query)?;
         let mut cursors = build_cursors(self.query)?;
-        run_pivot_loop(self.query, &mut cursors, self.inverted_index, |_, _| {
-            Ok(None)
+        run_pivot_loop(self.query, &mut cursors, self.inverted_index, |_, _, _| {
+            Ok(false)
         })
     }
 }
@@ -263,8 +264,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
             q,
             &mut cursors,
             self.inverted_index,
-            |sorted_terms, cursors| {
-                let mut bounds: Vec<f64> = Vec::with_capacity(sorted_terms.len());
+            |sorted_terms, cursors, bounds| {
                 for &(doc_val, ti) in sorted_terms {
                     if doc_val == INF_DOC {
                         bounds.push(0.0);
@@ -288,7 +288,7 @@ impl<'a> BlockMaxWANDScorer<'a> {
                     };
                     bounds.push(bound);
                 }
-                Ok(Some(bounds))
+                Ok(true)
             },
         )
     }
@@ -305,6 +305,7 @@ fn build_cursors(query: &WANDQuery) -> StorageBackendResult<Vec<TermCursor<'_>>>
         cursors.push(TermCursor {
             entries,
             position: 0,
+            doc_freq: df,
             upper_bound,
         });
     }
@@ -342,10 +343,26 @@ fn require_nonnegative_finite(value: f64, name: &str) -> StorageBackendResult<()
     }
 }
 
-/// Core pivot loop shared by WAND and BMW. `bound_provider` returns a
-/// per-term bound vector aligned with the *current* `sorted_terms`
-/// order; `None` means "use each cursor's pre-computed `upper_bound`"
-/// (plain WAND). BMW returns `Some` with the per-block bounds.
+fn build_field_slots(fields: &[FieldName]) -> (Vec<usize>, usize) {
+    let mut unique_fields = Vec::<&str>::with_capacity(fields.len());
+    let slots = fields
+        .iter()
+        .map(|field| {
+            if let Some(slot) = unique_fields.iter().position(|known| *known == field) {
+                slot
+            } else {
+                let slot = unique_fields.len();
+                unique_fields.push(field);
+                slot
+            }
+        })
+        .collect();
+    (slots, unique_fields.len())
+}
+
+/// Core pivot loop shared by WAND and BMW. `bound_provider` fills a reusable
+/// per-term bound vector aligned with the current `sorted_terms` order and
+/// returns `true`; `false` selects each cursor's precomputed upper bound.
 fn run_pivot_loop<F>(
     query: &WANDQuery,
     cursors: &mut [TermCursor<'_>],
@@ -353,7 +370,7 @@ fn run_pivot_loop<F>(
     mut bound_provider: F,
 ) -> StorageBackendResult<WANDResult>
 where
-    F: FnMut(&[(u64, usize)], &[TermCursor<'_>]) -> StorageBackendResult<Option<Vec<f64>>>,
+    F: FnMut(&[(u64, usize)], &[TermCursor<'_>], &mut Vec<f64>) -> StorageBackendResult<bool>,
 {
     let num_terms = query.posting_lists.len();
     let total_candidates = candidate_union(&query.posting_lists)?;
@@ -379,24 +396,26 @@ where
         .map(|i| (cursors[i].current_doc(), i))
         .collect();
     sorted_terms.sort_unstable();
+    let mut bounds = Vec::with_capacity(num_terms);
+    let mut term_scores = Vec::with_capacity(num_terms);
+    let (field_slots, field_count) = build_field_slots(&query.fields);
+    let mut doc_lengths = vec![None; field_count];
 
     while !sorted_terms.is_empty() {
         if sorted_terms[0].0 == INF_DOC {
             break;
         }
 
-        let bounds = bound_provider(&sorted_terms, cursors)?.unwrap_or_else(|| {
-            sorted_terms
-                .iter()
-                .map(|&(doc_val, ti)| {
-                    if doc_val == INF_DOC {
-                        0.0
-                    } else {
-                        cursors[ti].upper_bound
-                    }
-                })
-                .collect()
-        });
+        bounds.clear();
+        if !bound_provider(&sorted_terms, cursors, &mut bounds)? {
+            bounds.extend(sorted_terms.iter().map(|&(doc_val, ti)| {
+                if doc_val == INF_DOC {
+                    0.0
+                } else {
+                    cursors[ti].upper_bound
+                }
+            }));
+        }
         let Some(pivot_idx) = select_pivot(query, &sorted_terms, &bounds, threshold)? else {
             break;
         };
@@ -405,7 +424,15 @@ where
         let first_doc = sorted_terms[0].0;
 
         if first_doc == pivot_doc {
-            let actual_score = score_document(query, cursors, inverted_index, pivot_doc as DocId)?;
+            let actual_score = score_document(
+                query,
+                cursors,
+                inverted_index,
+                pivot_doc as DocId,
+                &field_slots,
+                &mut doc_lengths,
+                &mut term_scores,
+            )?;
             stats.scored = stats
                 .scored
                 .checked_add(1)
@@ -470,13 +497,11 @@ fn select_pivot(
     for bound in bounds {
         require_nonnegative_finite(*bound, "WAND pruning bound")?;
     }
-    let mut cumulative_bounds = Vec::with_capacity(bounds.len());
     for (index, &(doc_id, _)) in sorted_terms.iter().enumerate() {
         if doc_id == INF_DOC {
             break;
         }
-        cumulative_bounds.push(bounds[index]);
-        let cumulative = query.scorers[0].finalize_upper_bound(&cumulative_bounds);
+        let cumulative = query.scorers[0].finalize_upper_bound(&bounds[..=index]);
         require_nonnegative_finite(cumulative, "WAND cumulative upper bound")?;
         if cumulative >= threshold {
             return Ok(Some(index));
@@ -486,14 +511,35 @@ fn select_pivot(
 }
 
 fn candidate_union(posting_lists: &[PostingList]) -> StorageBackendResult<u64> {
-    let mut ids: std::collections::BTreeSet<DocId> = std::collections::BTreeSet::default();
-    for pl in posting_lists {
-        for entry in pl {
-            ids.insert(entry.doc_id);
+    let mut positions = vec![0_usize; posting_lists.len()];
+    let mut next = BinaryHeap::<Reverse<(DocId, usize)>>::with_capacity(posting_lists.len());
+    for (list_index, posting) in posting_lists.iter().enumerate() {
+        if let Some(entry) = posting.entries().first() {
+            next.push(Reverse((entry.doc_id, list_index)));
         }
     }
-    u64::try_from(ids.len())
-        .map_err(|_| invalid_wand_input("candidate union length does not fit in u64"))
+    let mut count = 0_u64;
+    let mut previous = None;
+    while let Some(Reverse((doc_id, list_index))) = next.pop() {
+        if previous != Some(doc_id) {
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| invalid_wand_input("candidate union length does not fit in u64"))?;
+            previous = Some(doc_id);
+        }
+        let entries = posting_lists[list_index].entries();
+        let position = &mut positions[list_index];
+        while entries
+            .get(*position)
+            .is_some_and(|entry| entry.doc_id == doc_id)
+        {
+            *position += 1;
+        }
+        if let Some(entry) = entries.get(*position) {
+            next.push(Reverse((entry.doc_id, list_index)));
+        }
+    }
+    Ok(count)
 }
 
 /// Score a single document against every term cursor. Cursors that
@@ -505,8 +551,12 @@ fn score_document(
     cursors: &[TermCursor<'_>],
     inverted_index: Option<&dyn InvertedIndex>,
     target: DocId,
+    field_slots: &[usize],
+    doc_lengths: &mut [Option<u64>],
+    term_scores: &mut Vec<f64>,
 ) -> StorageBackendResult<f64> {
-    let mut term_scores = Vec::with_capacity(cursors.len());
+    doc_lengths.fill(None);
+    term_scores.clear();
     for (i, cursor) in cursors.iter().enumerate() {
         let Some(entry) = cursor.current() else {
             continue;
@@ -520,17 +570,26 @@ fn score_document(
             u64::try_from(entry.payload.positions.len())
                 .map_err(|_| invalid_wand_input("term frequency does not fit in u64"))?
         };
-        let df = u64::try_from(query.posting_lists[i].len())
-            .map_err(|_| invalid_wand_input("document frequency does not fit in u64"))?;
+        let df = cursor.doc_freq;
         let doc_length = match inverted_index {
-            Some(idx) => idx.get_doc_length(target, &query.fields[i])?.max(tf),
+            Some(idx) => {
+                let slot = field_slots[i];
+                let length = if let Some(length) = doc_lengths[slot] {
+                    length
+                } else {
+                    let length = idx.get_doc_length(target, &query.fields[i])?;
+                    doc_lengths[slot] = Some(length);
+                    length
+                };
+                length.max(tf)
+            }
             None => tf,
         };
         let term_score = query.scorers[i].term_score(tf, doc_length, df);
         require_nonnegative_finite(term_score, "WAND term score")?;
         term_scores.push(term_score);
     }
-    let score = query.scorers[0].finalize_score(&term_scores);
+    let score = query.scorers[0].finalize_score(term_scores);
     require_nonnegative_finite(score, "WAND finalized score")?;
     Ok(score)
 }
@@ -816,6 +875,17 @@ mod tests {
             .unwrap()
             .top_k
             .is_empty());
+    }
+
+    #[test]
+    fn candidate_union_merges_sorted_postings_without_materializing_ids() {
+        let postings = vec![
+            pl_from_tfs(&[(1, 1), (4, 1), (9, 1)]),
+            pl_from_tfs(&[(2, 1), (4, 1), (7, 1)]),
+            pl_from_tfs(&[(1, 1), (8, 1), (9, 1)]),
+        ];
+        assert_eq!(candidate_union(&postings).unwrap(), 6);
+        assert_eq!(candidate_union(&[]).unwrap(), 0);
     }
 
     #[test]

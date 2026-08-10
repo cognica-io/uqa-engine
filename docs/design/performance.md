@@ -302,16 +302,36 @@ The carrier split exposed a separate top-k optimization. A borrowed `RankedView:
 
 The small full-width difference is not claimed as a regression. The k = 10 through 1,000 deltas are far outside the measured drift band and come from the O(N log N) to O(N) algorithm change. An earlier sequential run of the unchanged full-sort algorithm appeared to show a roughly 50% regression, but rerunning the HEAD binary after the CPU entered the same sustained-load state reproduced the slower absolute time; that apparent delta was thermal/frequency drift. The k = 0 and k = N cases are now permanent benchmark inputs so boundary fast paths cannot silently regress into a full score sort.
 
-## Engine text top-k physical path (2026-07-31)
+## Search hot-path pass (2026-08-09)
 
-`text_top_k` benchmarks the public profiled engine path on a persisted 5,000-document SQLite corpus. The query is `plan rust crate` with `k = 10`. A scorer fingerprint mismatch selects WAND; matching bounds built with `Engine::rebuild_text_block_max` select BMW. Benchmark IDs include candidate, fully-scored, and skip counts, while Criterion records end-to-end latency. Reproduce the full sample with `cargo bench -p uqa-engine --bench text_top_k`; `-- --quick` was used for the integration smoke measurement below on Darwin 25.5.0 arm64.
+This pass measured the public persisted text path and the in-memory physical vector-index path in optimized `bench` binaries on the same local arm64 workstation. The machine exposes 20 logical CPUs; the second pre-baseline `top` sample reported 86.10% idle CPU with load averages 4.40, 3.97, and 3.60, while the second pre-final sample reported 85.43% idle after release linking. Each before/after Criterion run used 30 samples, a two-second warmup, a five-second target measurement, `--noplot`, the same deterministic fixture, and one `CRITERION_HOME`; absolute latency remains machine-specific.
 
-| Physical path | Candidates | Fully scored | Skip rate | Quick interval |
+`text_top_k` uses a persisted 5,000-document SQLite corpus, query `plan rust crate`, and `k = 10`. The implementation now counts the sorted posting union by multiway merge instead of materializing a `BTreeSet`, reuses pivot-bound and term-score buffers, and reads one document length per scored `(document, field)` rather than once per matching term. Candidate counts, fully scored counts, skip rates, and result exactness did not change.
+
+| Text path | Candidates | Fully scored | Skip rate | Before | Current | Change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Block-Max WAND | 4,674 | 208 | 95.55% | 4.7080 ms | 3.8584 ms | -18.0% |
+| WAND | 4,674 | 272 | 94.18% | 4.9115 ms | 3.9801 ms | -19.0% |
+
+The vector cases use 10,000 deterministic 32-dimensional vectors and report `k = 10` and `k = 50` from the single `uqa-storage` `storage` benchmark executable. IVF and HNSW now cache each raw vector norm, compute the query norm once, and retain raw cosine score bits while removing per-candidate norm reductions and square roots; tensor-score collapse compacts one vector in place. HNSW also borrows adjacency slices instead of cloning them and uses a hash set for visited nodes.
+
+| Vector path | k | Before | Current | Change |
 | --- | ---: | ---: | ---: | ---: |
-| Block-Max WAND | 4,674 | 208 | 95.55% | 4.740–4.767 ms |
-| WAND | 4,674 | 272 | 94.18% | 5.185–5.207 ms |
+| Trained IVF | 10 | 333.46 us | 188.80 us | -43.4% |
+| Trained IVF | 50 | 335.43 us | 198.79 us | -40.7% |
+| HNSW | 10 | 212.63 us | 148.31 us | -30.2% |
+| HNSW | 50 | 214.41 us | 145.17 us | -32.3% |
 
-This short run verifies instrumentation and shows the expected reduction in scoring work; it is not a statistical release gate. A benchmark gate must use the normal Criterion sample count on the target deployment class and compare its saved baseline. The exactness gate is separate: randomized engine differential tests compare both physical paths with exhaustive BM25/Bayesian BM25, including duplicate query terms and field-scoped statistics.
+A 2026-08-10 completion audit rebuilt the current source and wrote fresh Criterion artifacts while unrelated sustained jobs drove idle CPU as low as 47.5%. Under that contention, Block-Max WAND measured 4.0084 ms (-14.9% from the original baseline), WAND 4.0781 ms (-17.0%), trained IVF 205.39 us and 204.98 us for k = 10 and k = 50 (-38.4% and -38.9%), and HNSW 159.72 us and 159.92 us (-24.9% and -25.4%); the unchanged brute-force controls simultaneously slowed 4.5% and 2.9%. This audit confirms that the final source retains the optimization and exact candidate/scoring counts, but the lower-load table above remains the representative latency comparison.
+
+Reproduce the measured release benchmarks with the following commands. A saved baseline directory may be supplied through `CRITERION_HOME` to obtain Criterion's distribution comparison in the same run.
+
+```sh
+cargo bench -p uqa-engine --bench text_top_k --locked -- --warm-up-time 2 --measurement-time 5 --sample-size 30 --noplot
+cargo bench -p uqa-storage --bench storage --locked -- vector_index_knn --warm-up-time 2 --measurement-time 5 --sample-size 30 --noplot
+```
+
+Release verification ran all 257 `uqa-storage` library tests and 129 storage integration tests, all 217 `uqa-scoring` unit and integration tests, and all 157 enabled tests in the consolidated `uqa-engine` `engine_search` harness; its two explicit profiling probes remained ignored because Criterion supplied the measurements. The vector suite includes graph invariants, recall floors, tensor collapse, persistence, SQLite and Key/Value restore, and transactional mutation; text exactness tests compare WAND and BMW with exhaustive scoring. These local measurements establish a same-machine regression baseline, not cross-machine or competitive performance claims.
 
 ## Reference numbers (post-optimization)
 
@@ -325,6 +345,8 @@ This short run verifies instrumentation and shows the expected reduction in scor
 | SQL text match (10k docs) | same bench | ~121 us |
 | SQL inner join (10k x 1k) | `cargo bench -p uqa-engine --bench join` | ~1.55 ms |
 | k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~274 us |
+| Trained IVF top-10 (10k docs, dim 32) | `cargo bench -p uqa-storage --bench storage` | ~189 us |
+| HNSW top-10 (10k docs, dim 32) | same bench | ~148 us |
 | SQL text match (1M docs, top 10) | `cargo bench -p uqa-engine --bench sql_1m` | ~41.7 ms |
 | TPC-H-style Q1 aggregate (100k rows) | `cargo bench -p uqa-engine --bench tpch_style` | ~20.1 ms |
 | TPC-H-style Q6 indexed aggregate (100k rows) | same bench | ~6.54 ms |

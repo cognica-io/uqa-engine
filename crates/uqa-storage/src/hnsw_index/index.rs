@@ -6,15 +6,15 @@
 
 //! Vector-index contract implementation over the HNSW graph.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
-use super::metric::normalize;
+use super::metric::normalize_with_norm;
 use super::types::HNSWIndex;
 use crate::vector_index::{
-    cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
+    cosine_similarity_with_norms, deduplicate_scored_by_doc, select_top_k_scored,
+    validate_vector_values, vector_norm, VectorIndex,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -57,11 +57,11 @@ impl VectorIndex for HNSWIndex {
         if k == 0 || self.active.is_empty() {
             return Ok(PostingList::new());
         }
-        let normalized_query = normalize(query);
+        let (normalized_query, query_norm) = normalize_with_norm(query);
         let mut ef = self.params.ef_search.max(k).min(self.nodes.len());
-        let mut best_by_doc = BTreeMap::<DocId, f32>::new();
+        let mut scored = Vec::<(DocId, f32)>::with_capacity(ef);
         loop {
-            best_by_doc.clear();
+            scored.clear();
             for candidate in self.query_candidates(&normalized_query, ef) {
                 let Some(node) = self.nodes.get(&candidate.node_id) else {
                     continue;
@@ -69,17 +69,12 @@ impl VectorIndex for HNSWIndex {
                 if node.deleted {
                     continue;
                 }
-                let score = cosine_similarity(query, &node.raw_vector);
-                best_by_doc
-                    .entry(node.doc_id)
-                    .and_modify(|best| {
-                        if score > *best {
-                            *best = score;
-                        }
-                    })
-                    .or_insert(score);
+                let score =
+                    cosine_similarity_with_norms(query, &node.raw_vector, query_norm, node.norm);
+                scored.push((node.doc_id, score));
             }
-            if best_by_doc.len() >= k || ef >= self.nodes.len() {
+            deduplicate_scored_by_doc(&mut scored);
+            if scored.len() >= k || ef >= self.nodes.len() {
                 break;
             }
             ef = ef
@@ -87,7 +82,6 @@ impl VectorIndex for HNSWIndex {
                 .unwrap_or(self.nodes.len())
                 .min(self.nodes.len());
         }
-        let mut scored = best_by_doc.into_iter().collect::<Vec<_>>();
         select_top_k_scored(&mut scored, k);
         scored.sort_by_key(|(doc_id, _)| *doc_id);
         Ok(PostingList::from_sorted_unchecked(
@@ -107,27 +101,23 @@ impl VectorIndex for HNSWIndex {
                 "vector similarity threshold must be finite, got {threshold}"
             )));
         }
-        let mut best_by_doc = BTreeMap::<DocId, f32>::new();
+        let query_norm = vector_norm(query);
+        let mut scored = Vec::<(DocId, f32)>::new();
         for node_id in self.active.values() {
             let node = self.nodes.get(node_id).ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "HNSW active map references missing node {node_id}"
                 ))
             })?;
-            let score = cosine_similarity(query, &node.raw_vector);
+            let score =
+                cosine_similarity_with_norms(query, &node.raw_vector, query_norm, node.norm);
             if score >= threshold {
-                best_by_doc
-                    .entry(node.doc_id)
-                    .and_modify(|best| {
-                        if score > *best {
-                            *best = score;
-                        }
-                    })
-                    .or_insert(score);
+                scored.push((node.doc_id, score));
             }
         }
+        deduplicate_scored_by_doc(&mut scored);
         Ok(PostingList::from_sorted_unchecked(
-            best_by_doc
+            scored
                 .into_iter()
                 .map(|(doc_id, score)| {
                     PostingEntry::new(doc_id, Payload::with_score(f64::from(score)))

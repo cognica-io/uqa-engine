@@ -6,21 +6,19 @@
 
 //! Cosine-space normalization and deterministic level selection.
 
+use crate::vector_index::vector_norm;
+
 pub(crate) const MAX_HNSW_LEVEL: usize = 32;
 
-pub(super) fn normalize(vector: &[f32]) -> Vec<f32> {
+pub(super) fn normalize_with_norm(vector: &[f32]) -> (Vec<f32>, f32) {
     let mut normalized = vector.to_vec();
-    let magnitude = normalized
-        .iter()
-        .map(|value| value * value)
-        .sum::<f32>()
-        .sqrt();
+    let magnitude = vector_norm(&normalized);
     if magnitude > 1.0e-12 {
         for value in &mut normalized {
             *value /= magnitude;
         }
     }
-    normalized
+    (normalized, magnitude)
 }
 
 pub(super) fn distance(left: &[f32], right: &[f32]) -> f32 {

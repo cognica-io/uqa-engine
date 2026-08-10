@@ -74,13 +74,14 @@ impl IVFIndex {
                 )));
             }
             let mut vector = raw_vector.clone();
-            l2_normalize(&mut vector);
+            let norm = l2_normalize(&mut vector);
             persisted.insert(
                 (doc_id, ordinal),
                 StoredVector {
                     key: (doc_id, ordinal),
                     doc_id,
                     vector_ordinal: ordinal,
+                    norm,
                     raw_vector,
                     vector,
                     centroid,

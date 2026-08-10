@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::metric::{normalize, MAX_HNSW_LEVEL};
+use super::metric::{normalize_with_norm, MAX_HNSW_LEVEL};
 use super::types::{HNSWGraphMeta, HNSWIndex, HNSWNode, HNSWNodeSnapshot};
 use crate::vector_index::{validate_vector_values, HNSWIndexParams};
 use crate::{StorageBackendError, StorageBackendResult};
@@ -46,11 +46,13 @@ impl HNSWIndex {
                     snapshot.neighbors.len()
                 )));
             }
+            let (normalized_vector, norm) = normalize_with_norm(&snapshot.raw_vector);
             let node = HNSWNode {
                 id: snapshot.node_id,
                 doc_id: snapshot.doc_id,
                 vector_ordinal: snapshot.vector_ordinal,
-                normalized_vector: normalize(&snapshot.raw_vector),
+                norm,
+                normalized_vector,
                 raw_vector: snapshot.raw_vector,
                 level: snapshot.level,
                 deleted: snapshot.deleted,

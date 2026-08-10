@@ -71,6 +71,49 @@ pub(crate) fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
     }
 }
 
+/// Collapse tensor-vector scores to the best score for each document without
+/// allocating one tree node per candidate. The final sort performed by each
+/// caller restores the posting-list invariant after top-k selection.
+pub(crate) fn deduplicate_scored_by_doc(scored: &mut Vec<(DocId, f32)>) {
+    if scored.len() < 2 {
+        return;
+    }
+    scored.sort_unstable_by_key(|(doc_id, _)| *doc_id);
+    let mut write = 1;
+    for read in 1..scored.len() {
+        let (doc_id, score) = scored[read];
+        if scored[write - 1].0 == doc_id {
+            scored[write - 1].1 = scored[write - 1].1.max(score);
+        } else {
+            scored[write] = (doc_id, score);
+            write += 1;
+        }
+    }
+    scored.truncate(write);
+}
+
+pub(crate) fn vector_norm(vector: &[f32]) -> f32 {
+    let mut squared_norm = 0.0_f32;
+    for value in vector {
+        squared_norm += value * value;
+    }
+    squared_norm.sqrt()
+}
+
+/// Cosine similarity when both vector norms were computed once outside the
+/// candidate loop. This preserves the raw-vector score while avoiding two
+/// norm reductions and two square roots for every candidate.
+pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, norm_b: f32) -> f32 {
+    if a.len() != b.len() || a.is_empty() || norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    let mut dot = 0.0_f32;
+    for (x, y) in a.iter().zip(b) {
+        dot += x * y;
+    }
+    dot / (norm_a * norm_b)
+}
+
 /// Cosine similarity between two equal-length vectors. Returns `0.0` when
 /// either vector has zero norm or the dimensions differ.
 ///
@@ -313,6 +356,22 @@ mod tests {
         select_top_k_scored(&mut scored, 2);
         scored.sort_by_key(|(doc_id, _)| *doc_id);
         assert_eq!(scored, vec![(1, 0.9), (3, 0.9)]);
+    }
+
+    #[test]
+    fn precomputed_norm_cosine_matches_reference_bits() {
+        let a = [0.25, -3.0, 1.5, 8.0];
+        let b = [2.0, 0.75, -4.0, 0.5];
+        let expected = cosine_similarity(&a, &b);
+        let actual = cosine_similarity_with_norms(&a, &b, vector_norm(&a), vector_norm(&b));
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+
+    #[test]
+    fn score_deduplication_keeps_best_tensor_vector() {
+        let mut scored = vec![(7, 0.3), (2, 0.8), (7, 0.9), (2, 0.4), (9, -0.2)];
+        deduplicate_scored_by_doc(&mut scored);
+        assert_eq!(scored, vec![(2, 0.8), (7, 0.9), (9, -0.2)]);
     }
 
     #[test]
