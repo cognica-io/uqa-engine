@@ -33,6 +33,21 @@ fn vfs_delete_nonexistent_file_with_dir_sync_returns_ok() {
 }
 
 #[test]
+fn vfs_delete_nonexistent_file_with_missing_parent_skips_dir_sync() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("missing-parent")
+        .join("missing-with-dir-sync.sqlite3");
+    let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+
+    // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
+    let result = unsafe { vfs_delete(ptr::null_mut(), name.as_ptr(), 1) };
+
+    assert_eq!(result, ffi::SQLITE_OK);
+}
+
+#[test]
 fn parent_dir_sync_succeeds_for_real_temp_directory() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("directory-entry");
