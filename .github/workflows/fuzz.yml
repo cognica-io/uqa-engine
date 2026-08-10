@@ -48,9 +48,9 @@ jobs:
           cache-bin: false
           cache-targets: false
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
       - name: Run ${{ matrix.target }} fuzzer
-        run: cargo fuzz run ${{ matrix.target }} --fuzz-dir fuzz -- -max_total_time=${{ inputs.max_total_time || 300 }}
+        run: cargo +nightly fuzz run ${{ matrix.target }} --fuzz-dir fuzz -- -max_total_time=${{ inputs.max_total_time || 300 }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
