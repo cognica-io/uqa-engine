@@ -6,7 +6,9 @@
 
 //! Parent-directory synchronization for filesystem namespace changes.
 
-use super::{File, Path};
+#[cfg(unix)]
+use super::File;
+use super::Path;
 
 // Test-only fault injection: the compaction regression test arms this flag
 // to prove that a directory-sync failure cannot desynchronize container
