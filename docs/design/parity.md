@@ -120,7 +120,7 @@ cargo bench -p uqa-scoring --bench calibration
 cargo bench -p uqa-storage --bench spatial
 cargo bench -p uqa-engine  --bench sql_e2e
 cargo bench -p uqa-engine  --bench sql_1m
-cargo bench -p uqa-engine  --bench knn
+bash scripts/run-vector-search-benchmark.sh
 cargo bench -p uqa-engine  --bench join
 cargo bench -p uqa-engine  --bench relevance
 cargo bench -p uqa-graph   --bench rpq

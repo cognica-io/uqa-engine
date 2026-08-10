@@ -84,6 +84,14 @@ cargo build --release -p uqa-engine --example tpch_runner --locked
 target/release/examples/tpch_runner --iterations 201
 ```
 
+For vector-index performance or quality changes, run the consolidated persistent-SQL exact-ground-truth suite. Its default `standard` profile uses 100,000 128-dimensional rows; use `smoke` only for implementation checks and `large` for the explicit one-million-row scale run:
+
+```sh
+bash scripts/run-vector-search-benchmark.sh
+```
+
+The vector reporter requires a persistent SQLite identity, database reopen before every phase, `Engine::sql` queries, and SQL index lifecycle statements; it then gates recall, top-1 accuracy, result completeness, and shared cosine-score accuracy before accepting Criterion latency, throughput, and one-shot SQL construction measurements. Update [`benchmarks/vector-search/manifest.json`](benchmarks/vector-search/manifest.json), its [methodology](benchmarks/vector-search/README.md), and [`docs/design/performance.md`](docs/design/performance.md) whenever the workload identity, index parameters, metric definitions, estimator, or measured boundary changes.
+
 Record the statistic, iteration count, hardware class, toolchain, fixture identity, and whether compared runs were interleaved. Do not present a debug build, a `--quick` estimate, a sum of medians, or a non-interleaved cross-engine ratio as a regression gate. Update [`benchmarks/tpch/README.md`](benchmarks/tpch/README.md) and [`docs/design/performance.md`](docs/design/performance.md) when a measured execution boundary changes.
 
 `prop_assert_eq!`'s format string does not support captured-variable syntax (`{var:?}`) — pass values as positional arguments. `Strategy::new_tree(...).current()` from inside a `proptest!` block bypasses proptest's case generator and shrinker; use `prop_flat_map` to tie multiple strategies together at the strategy level.

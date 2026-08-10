@@ -1,0 +1,153 @@
+{
+  "schema_version": 2,
+  "description": "Persistent SQLite vector-search benchmark covering SQL load, SQL index DDL, SQL planning and SQL query execution.",
+  "default_profile": "standard",
+  "storage": {
+    "backend": "sqlite",
+    "persistent": true,
+    "reopened_before_each_query_phase": true
+  },
+  "execution": {
+    "api": "Engine::sql",
+    "query": "SELECT ... WHERE knn_match(...) ORDER BY _score DESC, id ASC LIMIT k",
+    "index_lifecycle": "SQL CREATE INDEX / DROP INDEX"
+  },
+  "ground_truth": "exact",
+  "profiles": [
+    {
+      "name": "smoke",
+      "workload": {
+        "corpus_size": 10000,
+        "dimensions": 32,
+        "quality_query_count": 100,
+        "performance_query_count": 25,
+        "top_k": 10,
+        "generator": "lcg-uniform-signed-f32-v1",
+        "corpus_seed_start": 1,
+        "query_seed_start": 1000001
+      },
+      "algorithms": [
+        {
+          "name": "exact",
+          "parameters": {"access_method": "sqlite-bruteforce"},
+          "criterion_benchmark": "sql_vector_search_query_batch/smoke/exact",
+          "minimum_quality": {"recall_at_k": 1.0, "top_1_accuracy": 1.0, "mrr_at_k": 1.0, "exact_set_rate": 1.0, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.0, "max_shared_score_abs_error": 0.0}
+        },
+        {
+          "name": "ivf",
+          "parameters": {"access_method": "sqlite-ivf", "nlist": 64, "nprobe": 8, "train_threshold": 256},
+          "criterion_benchmark": "sql_vector_search_query_batch/smoke/ivf",
+          "minimum_quality": {"recall_at_k": 0.6, "top_1_accuracy": 0.7, "mrr_at_k": 0.7, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.2, "max_shared_score_abs_error": 0.000001}
+        },
+        {
+          "name": "hnsw",
+          "parameters": {"access_method": "sqlite-hnsw", "m": 16, "ef_construction": 64, "ef_search": 64, "rebuild_threshold": 1024, "seed": 7},
+          "criterion_benchmark": "sql_vector_search_query_batch/smoke/hnsw",
+          "minimum_quality": {"recall_at_k": 0.98, "top_1_accuracy": 0.99, "mrr_at_k": 0.99, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.1, "max_shared_score_abs_error": 0.000001}
+        }
+      ],
+      "construction_stages": [
+        {"name": "sql_load", "statement": "CREATE TABLE + parameterized batched INSERT"},
+        {"name": "sql_create_ivf", "statement": "CREATE INDEX vector_bench_embedding_ivf ON vector_bench USING ivf (embedding) WITH (lists = 64, probes = 8, train_threshold = 256)"},
+        {"name": "sql_create_hnsw", "statement": "CREATE INDEX vector_bench_embedding_hnsw ON vector_bench USING hnsw (embedding) WITH (m = 16, ef_construction = 64, ef_search = 64, rebuild_threshold = 1024, seed = 7)"}
+      ],
+      "measurement": {"criterion_point_estimator": "mean", "sample_size": 10, "warm_up_seconds": 1, "measurement_seconds": 3, "query_throughput_unit": "queries_per_second"}
+    },
+    {
+      "name": "standard",
+      "workload": {
+        "corpus_size": 100000,
+        "dimensions": 128,
+        "quality_query_count": 1000,
+        "performance_query_count": 25,
+        "top_k": 10,
+        "generator": "lcg-uniform-signed-f32-v1",
+        "corpus_seed_start": 1,
+        "query_seed_start": 10000001
+      },
+      "algorithms": [
+        {
+          "name": "exact",
+          "parameters": {"access_method": "sqlite-bruteforce"},
+          "criterion_benchmark": "sql_vector_search_query_batch/standard/exact",
+          "minimum_quality": {"recall_at_k": 1.0, "top_1_accuracy": 1.0, "mrr_at_k": 1.0, "exact_set_rate": 1.0, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.0, "max_shared_score_abs_error": 0.0}
+        },
+        {
+          "name": "ivf",
+          "parameters": {"access_method": "sqlite-ivf", "nlist": 256, "nprobe": 32, "train_threshold": 1024},
+          "criterion_benchmark": "sql_vector_search_query_batch/standard/ivf",
+          "minimum_quality": {"recall_at_k": 0.45, "top_1_accuracy": 0.45, "mrr_at_k": 0.45, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.2, "max_shared_score_abs_error": 0.000001}
+        },
+        {
+          "name": "hnsw",
+          "parameters": {"access_method": "sqlite-hnsw", "m": 16, "ef_construction": 128, "ef_search": 4096, "rebuild_threshold": 10000, "seed": 7},
+          "criterion_benchmark": "sql_vector_search_query_batch/standard/hnsw",
+          "minimum_quality": {"recall_at_k": 0.99, "top_1_accuracy": 0.99, "mrr_at_k": 0.99, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.1, "max_shared_score_abs_error": 0.000001}
+        }
+      ],
+      "construction_stages": [
+        {"name": "sql_load", "statement": "CREATE TABLE + parameterized batched INSERT"},
+        {"name": "sql_create_ivf", "statement": "CREATE INDEX vector_bench_embedding_ivf ON vector_bench USING ivf (embedding) WITH (lists = 256, probes = 32, train_threshold = 1024)"},
+        {"name": "sql_create_hnsw", "statement": "CREATE INDEX vector_bench_embedding_hnsw ON vector_bench USING hnsw (embedding) WITH (m = 16, ef_construction = 128, ef_search = 4096, rebuild_threshold = 10000, seed = 7)"}
+      ],
+      "measurement": {"criterion_point_estimator": "mean", "sample_size": 20, "warm_up_seconds": 2, "measurement_seconds": 5, "query_throughput_unit": "queries_per_second"}
+    },
+    {
+      "name": "large",
+      "workload": {
+        "corpus_size": 1000000,
+        "dimensions": 128,
+        "quality_query_count": 1000,
+        "performance_query_count": 10,
+        "top_k": 10,
+        "generator": "lcg-uniform-signed-f32-v1",
+        "corpus_seed_start": 1,
+        "query_seed_start": 100000001
+      },
+      "algorithms": [
+        {
+          "name": "exact",
+          "parameters": {"access_method": "sqlite-bruteforce"},
+          "criterion_benchmark": "sql_vector_search_query_batch/large/exact",
+          "minimum_quality": {"recall_at_k": 1.0, "top_1_accuracy": 1.0, "mrr_at_k": 1.0, "exact_set_rate": 1.0, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.0, "max_shared_score_abs_error": 0.0}
+        },
+        {
+          "name": "ivf",
+          "parameters": {"access_method": "sqlite-ivf", "nlist": 1024, "nprobe": 64, "train_threshold": 4096},
+          "criterion_benchmark": "sql_vector_search_query_batch/large/ivf",
+          "minimum_quality": {"recall_at_k": 0.25, "top_1_accuracy": 0.25, "mrr_at_k": 0.25, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.25, "max_shared_score_abs_error": 0.000001}
+        },
+        {
+          "name": "hnsw",
+          "parameters": {"access_method": "sqlite-hnsw", "m": 16, "ef_construction": 128, "ef_search": 8192, "rebuild_threshold": 100000, "seed": 7},
+          "criterion_benchmark": "sql_vector_search_query_batch/large/hnsw",
+          "minimum_quality": {"recall_at_k": 0.85, "top_1_accuracy": 0.85, "mrr_at_k": 0.85, "result_count_rate": 1.0},
+          "maximum_quality": {"mean_top_1_similarity_loss": 0.1, "max_shared_score_abs_error": 0.000001}
+        }
+      ],
+      "construction_stages": [
+        {"name": "sql_load", "statement": "CREATE TABLE + parameterized batched INSERT"},
+        {"name": "sql_create_ivf", "statement": "CREATE INDEX vector_bench_embedding_ivf ON vector_bench USING ivf (embedding) WITH (lists = 1024, probes = 64, train_threshold = 4096)"},
+        {"name": "sql_create_hnsw", "statement": "CREATE INDEX vector_bench_embedding_hnsw ON vector_bench USING hnsw (embedding) WITH (m = 16, ef_construction = 128, ef_search = 8192, rebuild_threshold = 100000, seed = 7)"}
+      ],
+      "measurement": {"criterion_point_estimator": "mean", "sample_size": 10, "warm_up_seconds": 2, "measurement_seconds": 5, "query_throughput_unit": "queries_per_second"}
+    }
+  ],
+  "metrics": {
+    "recall_at_k": "Mean fraction of exact SQL top-k row IDs returned by the candidate SQL query.",
+    "top_1_accuracy": "Fraction of SQL queries whose highest-ranked row matches exact SQL search.",
+    "mrr_at_k": "Mean reciprocal rank of the exact nearest row in the candidate SQL top-k.",
+    "exact_set_rate": "Fraction of SQL queries whose complete top-k row set matches exact SQL search.",
+    "result_count_rate": "Returned row count divided by quality_query_count times k.",
+    "mean_top_1_similarity_loss": "Mean exact-best SQL score minus candidate-best SQL score.",
+    "max_shared_score_abs_error": "Maximum SQL _score error for a row returned by both exact and candidate search."
+  }
+}

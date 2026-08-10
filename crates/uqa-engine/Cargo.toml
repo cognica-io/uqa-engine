@@ -93,10 +93,6 @@ name = "sql_sqlite_e2e"
 harness = false
 
 [[bench]]
-name = "knn"
-harness = false
-
-[[bench]]
 name = "join"
 harness = false
 

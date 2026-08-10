@@ -182,6 +182,14 @@ Run the test suite:
 cargo test --workspace --locked
 ```
 
+Run the optimized persistent SQL vector-search performance and exact-ground-truth quality benchmark. The default profile loads 100,000 128-dimensional vectors into a real SQLite file, reopens it for each exact, IVF, and HNSW phase, and drives every query through `Engine::sql`:
+
+```sh
+bash scripts/run-vector-search-benchmark.sh
+```
+
+The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](benchmarks/vector-search/README.md).
+
 Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
 ```sh
@@ -218,6 +226,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
 | [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
+| [Vector-search benchmark](benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
 | [Engine state ownership](docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
 | [Key/Value storage](docs/design/kv-storage-backends.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
 | [Compressed VFS security](docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |

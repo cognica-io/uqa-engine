@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Unified index-build and warm-search benchmark for text, vector, graph, and hybrid retrieval. Every timed search returns the shared posting-list-backed engine result, while each index-build case starts from an equivalent unindexed fixture.
+//! Unified index-build and warm-search benchmark for text, vector, graph, and hybrid retrieval, including persistent end-to-end SQL vector quality and performance cases.
 
 use std::time::Duration;
 
@@ -14,6 +14,9 @@ use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::{Engine, HybridSearchParams};
 use uqa_graph::{GraphStore, MemoryGraphStore, PathIndex, VertexMatch};
 use uqa_sql::SQLParam;
+
+#[path = "retrieval_workloads/sql_vector_search.rs"]
+mod sql_vector_search;
 
 const INDEX_ROWS: usize = 2_000;
 const SEARCH_ROWS: usize = 4_000;
@@ -269,6 +272,7 @@ fn bench_search(c: &mut Criterion) {
 fn benches(c: &mut Criterion) {
     bench_index_build(c);
     bench_search(c);
+    sql_vector_search::bench_sql_vector_search(c);
 }
 
 criterion_group!(retrieval_benches, benches);

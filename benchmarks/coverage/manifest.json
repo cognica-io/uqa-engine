@@ -70,10 +70,6 @@
       "tokens": ["sql_inner_join_10k_x_1k"]
     },
     {
-      "path": "crates/uqa-engine/benches/knn.rs",
-      "tokens": ["knn_top10_10k_dim32"]
-    },
-    {
       "path": "crates/uqa-engine/benches/query_matrix.rs",
       "tokens": ["unified_read", "unified_retrieval", "unified_mutation"]
     },
@@ -83,7 +79,11 @@
     },
     {
       "path": "crates/uqa-engine/benches/retrieval_workloads.rs",
-      "tokens": ["retrieval_index_build", "retrieval_search"]
+      "tokens": [
+        "retrieval_index_build",
+        "retrieval_search",
+        "sql_vector_search::bench_sql_vector_search"
+      ]
     },
     {
       "path": "crates/uqa-engine/benches/sql_1m.rs",

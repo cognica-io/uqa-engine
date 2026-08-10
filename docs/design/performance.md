@@ -132,7 +132,7 @@ Retrieval loop, 3 queries (`cargo bench -p uqa-engine --bench relevance`):
 | BM25 | 51.2 us | 24.1 us | -52.9% |
 | BayesianBM25 | 36.2 us | 24.1 us | -33.6% |
 
-Unchanged paths (interleaved A/B verified, same-minute alternating binaries): `sql_inner_join_10k_x_1k` ~1.52 vs ~1.55 ms (+2%, p > 0.05, code-layout level), `knn_top10_10k_dim32` ~763 vs ~769 us (no change), posting merge paths unchanged.
+Unchanged paths (interleaved A/B verified, same-minute alternating binaries): `sql_inner_join_10k_x_1k` ~1.52 vs ~1.55 ms (+2%, p > 0.05, code-layout level), the then-current exact KNN 10k-by-32 engine case ~763 vs ~769 us (no change), and posting merge paths unchanged.
 
 One deliberate semantic change rode along with the serde rewrite: serde's sequence form for internally-tagged enums no longer turns arrays like `[1, -1]` into `Temporal` / `Decimal` values - arrays that are not byte arrays now always decode as lists, which is the only round-trip-stable reading. `value_json_decoding_keeps_arrays_as_lists` documents it.
 
@@ -331,6 +331,30 @@ cargo bench -p uqa-engine --bench text_top_k --locked -- --warm-up-time 2 --meas
 cargo bench -p uqa-storage --bench storage --locked -- vector_index_knn --warm-up-time 2 --measurement-time 5 --sample-size 30 --noplot
 ```
 
+### Vector quality and throughput suite
+
+The checked vector runner is a module of the existing `uqa-engine` `retrieval_workloads` benchmark executable. It opens a real SQLite file, creates and loads one vector table through parameterized SQL, closes and reopens the engine for the exact phase, creates IVF through timed SQL DDL and reopens for the IVF phase, drops IVF through SQL, creates HNSW through timed SQL DDL, and reopens for the HNSW phase. Every quality and timed query calls `Engine::sql`, so statement-cache handling, persistent snapshot synchronization, SQL lowering and optimization, physical-index selection, execution, scoring, ordering, and result-row materialization remain inside the query boundary; no direct `VectorIndex` or `Engine::knn_search` call supplies benchmark results.
+
+```sh
+bash scripts/run-vector-search-benchmark.sh
+```
+
+The default `standard` profile contains 100,000 persistent 128-dimensional rows, 1,000 held-out quality queries, and 25 held-out queries per timed batch; `smoke` uses 10,000 rows by 32 dimensions and 100 quality queries, while `large` uses 1,000,000 rows by 128 dimensions and 1,000 quality queries. Exact SQL supplies top-10 ground truth, and the reporter combines Criterion performance with recall@10, top-1 accuracy, MRR@10, exact-set rate, result completeness, top-1 cosine loss, and shared-result score error for IVF and HNSW. The manifest selects Criterion's mean because an expensive fixed batch may use flat sampling; the report divides that batch estimate by the profile's declared timed-query count and reports the one-shot SQL load and index DDL elapsed times separately. Raw ranks and validated reports use profile-suffixed paths below `target/benchmark-runs`; workload identities, SQL and storage boundaries, parameters, quality floors, metric definitions, and synthetic-fixture limitations are versioned in the [vector-search benchmark](../../benchmarks/vector-search/README.md).
+
+The 2026-08-10 `standard` run below used rustc 1.90.0 on the local 20-CPU arm64 workstation. The first pre-run sample reported load averages 5.60, 6.34, and 6.09 with 34% idle CPU, while the final pre-run sample reported 7.07, 6.58, and 5.83 with 70% idle CPU, so these absolute values establish a functional local baseline rather than an interleaved low-noise regression claim. An initial HNSW run with `ef_search = 128` correctly failed the first 100-query quality gate at recall@10 0.382; the final 1,000-query run with the declared search width of 4,096 reached recall@10 0.9993 and 2.02x the exact SQL query throughput.
+
+| Persistent SQL query path, 100k × 128, k = 10 | Recall@10 | Top-1 | Exact-set rate | Mean/query | Queries/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Exact `sqlite-bruteforce` | 1.0000 | 1.000 | 1.000 | 61.79 ms | 16.2 |
+| IVF (`nlist=256`, `nprobe=32`) | 0.4596 | 0.496 | 0.000 | 38.01 ms | 26.3 |
+| HNSW (`m=16`, `ef_search=4096`) | 0.9993 | 1.000 | 0.993 | 30.59 ms | 32.7 |
+
+| Persistent SQL construction stage, 100k × 128 | Elapsed | Rows/s |
+| --- | ---: | ---: |
+| SQL table creation and parameterized batched load | 6.69 s | 14,953 |
+| SQL `CREATE INDEX ... USING ivf` | 57.84 s | 1,729 |
+| SQL `CREATE INDEX ... USING hnsw` | 284.26 s | 352 |
+
 Release verification ran all 257 `uqa-storage` library tests and 129 storage integration tests, all 217 `uqa-scoring` unit and integration tests, and all 157 enabled tests in the consolidated `uqa-engine` `engine_search` harness; its two explicit profiling probes remained ignored because Criterion supplied the measurements. The vector suite includes graph invariants, recall floors, tensor collapse, persistence, SQLite and Key/Value restore, and transactional mutation; text exactness tests compare WAND and BMW with exhaustive scoring. These local measurements establish a same-machine regression baseline, not cross-machine or competitive performance claims.
 
 ## Reference numbers (post-optimization)
@@ -344,7 +368,6 @@ Release verification ran all 257 `uqa-storage` library tests and 129 storage int
 | SQL filter (10k rows) | `cargo bench -p uqa-engine --bench sql_e2e` | ~1.70 ms |
 | SQL text match (10k docs) | same bench | ~121 us |
 | SQL inner join (10k x 1k) | `cargo bench -p uqa-engine --bench join` | ~1.55 ms |
-| k-NN top-10 (10k docs, dim 32) | `cargo bench -p uqa-engine --bench knn` | ~274 us |
 | Trained IVF top-10 (10k docs, dim 32) | `cargo bench -p uqa-storage --bench storage` | ~189 us |
 | HNSW top-10 (10k docs, dim 32) | same bench | ~148 us |
 | SQL text match (1M docs, top 10) | `cargo bench -p uqa-engine --bench sql_1m` | ~41.7 ms |
